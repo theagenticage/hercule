@@ -32,8 +32,9 @@ const SHOP: Project = { ...WEBSHOP!, id: "01a06d02-7000-7000-8000-0000000000aa",
 
 const REMOTE = "git@github.com:rogier/shop.git";
 
-const REPOSITORY: FolderPickOutcome = {
+const REPOSITORY: Extract<FolderPickOutcome, { _tag: "Repository" }> = {
   _tag: "Repository",
+  path: "/Users/fixture/shop",
   name: "shop",
   remote: REMOTE,
   branch: "main",
@@ -64,7 +65,33 @@ const pickFolder = async ({
 }) => {
   let projects = SIDEBAR_FIXTURE.projects;
   const calls = stubApi({
-    ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+    ...buildSidebarHandlers({
+      ...SIDEBAR_FIXTURE,
+      runners: SIDEBAR_FIXTURE.runners.map((runner) => ({
+        ...runner,
+        facts: {
+          os: "darwin",
+          arch: "arm64",
+          totalMemoryBytes: 1024,
+          docker: false,
+          toolchains: [],
+          providers: [],
+          adapters: [],
+          identityPort: 4939,
+        },
+      })),
+    }),
+    "GET /api/v1/resources": { body: { items: [] } },
+    "POST /api/v1/workspaces/attach": {
+      body: {
+        ...SIDEBAR_FIXTURE.workspaces[0]!,
+        id: "01a06d02-7300-7000-8000-0000000000aa",
+        sessionIds: [],
+        path: "/Users/fixture/shop",
+        ownership: "adopted",
+        status: "ready",
+      },
+    },
     "GET /api/v1/connections": { body: { items: connections } },
     "GET /api/v1/projects": () => ({ body: { items: projects } }),
     "POST /api/v1/projects": () => {
@@ -77,6 +104,7 @@ const pickFolder = async ({
   const fake = createFakeBridge({
     controllerUrl: CONTROLLER_URL,
     token: "bearer",
+    runnerIdentities: { 4939: SIDEBAR_FIXTURE.runners[0]!.id },
     pickFolder: () => Promise.resolve(folder),
   });
   const app = await renderApp(fake, { path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
@@ -161,7 +189,7 @@ describe("the New project dialog", () => {
 
   it("asks for the remote of a repository with none, and refuses one runners cannot clone before sending", async () => {
     const { calls, view, router } = await pickFolder({
-      folder: { _tag: "NoRemote", name: "shop", branch: "main" },
+      folder: { _tag: "NoRemote", path: "/Users/fixture/shop", name: "shop", branch: "main" },
     });
 
     expect(view.getByText("git · main · no remote")).toBeTruthy();

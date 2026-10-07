@@ -103,7 +103,7 @@ export const openWorkspace = (
     const workspace = yield* writers.workspaces.insert({
       runnerId: input.runnerId,
       kind: input.kind,
-      ownership: input.attachment === undefined ? "managed" : "existing",
+      ownership: input.attachment === undefined ? "managed" : "adopted",
       designatedConnectionId: input.designatedConnectionId,
       at: input.at,
     });

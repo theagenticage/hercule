@@ -1,12 +1,13 @@
 import type { JSX } from "react";
 import type { BranchField } from "@hercule/client-core";
+import type { StartingRevision } from "@hercule/contract";
 import { MenuFoot, MenuHeader, MenuRow } from "./menu";
 import { Phrases } from "./phrases";
 import { SelectorShell } from "./selector-shell";
 
 /**
- * Renders the lip's second selector: the branch a main workspace switches to,
- * or the ref a new worktree starts from. Which of the two applies depends on
+ * Renders the lip's second selector: the observed branch of shared files,
+ * or the source a new worktree starts from. Which of the two applies depends on
  * the picked workspace and is decided in `buildBranchField`; this component
  * only renders the field.
  *
@@ -26,7 +27,7 @@ export function BranchSelector({
   readonly room: number;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly onPick: (branch: string) => void;
+  readonly onPick: (startingRevision: StartingRevision) => void;
 }): JSX.Element {
   return (
     <SelectorShell
@@ -52,16 +53,16 @@ export function BranchSelector({
       <MenuHeader label={field.header} note={field.note} />
       {field.rows.map((row) => (
         <MenuRow
-          key={row.branch}
-          name={<span className="font-mono">{row.branch}</span>}
+          key={row.key}
+          name={<span className="font-mono">{row.label}</span>}
           note={row.badge}
           dimmed={row.dimmed}
           // The branch name is what the user picks, so it is never truncated;
           // the note beside it is truncated instead.
           clipNote
-          current={row.branch === field.value}
+          current={row.key === field.value}
           onPick={() => {
-            onPick(row.branch);
+            onPick(row.startingRevision);
             onOpenChange(false);
           }}
         />

@@ -352,14 +352,14 @@ describe("Settings > Threads: the workspace a thread opens in", () => {
   it("says in its fine print that a project with no source runs without a workspace", async () => {
     await openApp();
 
-    const fine = await screen.findByText(/repos/);
-    expect(fine.textContent).toContain("A project with no source always runs without a workspace.");
+    const fine = await screen.findByText(/When unset, coding threads/);
+    expect(fine.textContent).toContain("A project with no source runs without a workspace.");
   });
 
   it("says in its fine print that a project with several repos opens in a New workspace", async () => {
     await openApp();
 
-    const fine = await screen.findByText(/repos/);
+    const fine = await screen.findByText(/When unset, coding threads/);
     expect(fine.textContent).toContain("New workspace");
   });
 });

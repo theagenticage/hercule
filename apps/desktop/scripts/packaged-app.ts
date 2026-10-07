@@ -191,7 +191,10 @@ export const MOCK_KEYCHAIN_SWITCH = "--use-mock-keychain";
  * load its own startup script into main, so the app starts as it does for a
  * user.
  */
-export function launchTestPackage(userDataDir: string): Promise<ElectronApplication> {
+export function launchTestPackage(
+  userDataDir: string,
+  recordVideo?: NonNullable<Parameters<typeof _electron.launch>[0]>["recordVideo"],
+): Promise<ElectronApplication> {
   return _electron.launch({
     executablePath: findExecutable("test"),
     args: [
@@ -204,6 +207,7 @@ export function launchTestPackage(userDataDir: string): Promise<ElectronApplicat
     // light`, whatever the macOS appearance, and the page's theme follows
     // that media query.
     colorScheme: null,
+    ...(recordVideo === undefined ? {} : { recordVideo }),
   });
 }
 

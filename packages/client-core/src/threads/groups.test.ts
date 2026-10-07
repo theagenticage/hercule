@@ -88,7 +88,7 @@ const listLaneLabels = (
 describe("decideDraftPlace", () => {
   const resources = [WEBSHOP];
 
-  it("puts a draft with no workspace under the project's main workspace on its runner", () => {
+  it("gives a draft its own lane when it defaults to separate files", () => {
     expect(
       decideDraftPlace({
         projectId: WEBSHOP_PROJECT.id,
@@ -97,7 +97,7 @@ describe("decideDraftPlace", () => {
         workspaces: [PRIMARY, THREAD_3F1],
         runnerId: MOSS.id,
       }),
-    ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id, createsWorkspace: false });
+    ).toEqual({ projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true });
   });
 
   it("gives the draft a group of its own while its runner has not cloned the repo", () => {
@@ -216,7 +216,11 @@ describe("buildThreadGroups", () => {
       draft: null,
     });
 
-    expect(listLaneLabels(groups[0])).toEqual(["hercule/thread-3f1", "no workspace"]);
+    expect(listLaneLabels(groups[0])).toEqual([
+      "hercule/thread-3f1",
+      "webshop · moss",
+      "no workspace",
+    ]);
     expect(groups.map((group) => group.name)).toEqual(["webshop", "ops"]);
   });
 

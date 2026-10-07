@@ -17,7 +17,7 @@ export default Effect.gen(function* () {
       last_used_at TEXT,
       disposed_at TEXT,
       provision_frame TEXT CHECK (provision_frame IS NULL OR json_valid(provision_frame)),
-      ownership TEXT NOT NULL DEFAULT 'managed' CHECK (ownership IN ('managed', 'existing')),
+      ownership TEXT NOT NULL DEFAULT 'managed' CHECK (ownership IN ('managed', 'adopted')),
       path TEXT,
       observed_at TEXT,
       available INTEGER CHECK (available IN (0, 1)),

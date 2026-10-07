@@ -243,3 +243,18 @@ button.pick:not([aria-disabled="true"]):hover,
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Started workspaces keep their labels and open details instead of changing
+   the thread's workspace. The trigger stays quiet until hover or focus. */
+.workspace-details-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: inherit;
+  font: inherit;
+  border-radius: var(--r-sm);
+}
+.workspace-details-trigger:hover,
+.workspace-details-trigger:focus-visible {
+  color: var(--ink);
+}

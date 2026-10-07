@@ -60,12 +60,12 @@ const readLabels = (...args: Parameters<typeof buildDraftView>) => {
 };
 
 describe("buildDraftView", () => {
-  it("works in the main workspace of a one-repo project before any pick, and sits in its group", () => {
+  it("uses a new workspace before any pick", () => {
     expect(readLabels(READS, { projectId: WEBSHOP_PROJECT.id, workspaceId: null }, {})).toEqual({
-      workspaceLabel: "Main workspace",
+      workspaceLabel: "New workspace",
       machineLabel: "moss",
-      rowMeta: "Main workspace · moss",
-      place: { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id, createsWorkspace: false },
+      rowMeta: "New workspace · moss",
+      place: { projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true },
     });
   });
 

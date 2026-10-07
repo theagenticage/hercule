@@ -14,7 +14,7 @@ import type { Resource, Runner, Session, Workspace } from "@hercule/contract";
 import {
   buildPickKey,
   listProjectWorkspaces,
-  findReadyPrimary,
+  findPrimaryWorkspace,
   formatRepoName,
   formatWorkspaceLabel,
   formatWorkspaceName,
@@ -86,9 +86,7 @@ export const buildWorkspaceMenu = ({
   const current = buildPickKey(pick);
   const rows: WorkspaceMenuRow[] = [];
 
-  // A project with several repos opens a worktree of each by default, so the
-  // new-workspace row comes first. With one repo the main workspace comes
-  // first, as in t3 code.
+  // New work gets separate files by default. Sharing is an explicit choice.
   const fresh: WorkspaceMenuRow | null =
     repos.length === 0
       ? null
@@ -106,27 +104,30 @@ export const buildWorkspaceMenu = ({
         };
 
   const shared = repos.map((repo): WorkspaceMenuRow => {
-    const primary = findReadyPrimary(workspaces, repo.id, runnerId);
+    const primary = findPrimaryWorkspace(workspaces, repo.id, runnerId);
     const branch = primary?.checkouts[0]?.branch ?? null;
     const sharedPick: WorkspacePick = { kind: "primary", resourceId: repo.id };
     return {
       key: buildPickKey(sharedPick),
       pick: sharedPick,
-      name: repos.length === 1 ? "Main workspace" : `Main workspace of ${formatRepoName(repo)}`,
+      name:
+        repos.length === 1 ? "Use main workspace" : `Use main workspace of ${formatRepoName(repo)}`,
       mono: false,
       // Every row that is on a runner shows the runner's name on the right,
       // including the main workspace: it is on a runner just like a worktree.
       note: runnerId === null ? null : machine,
       sub:
-        branch === null
-          ? `not cloned on ${machine} · clones on first use`
-          : `on ${branch} · you and the agent share the files`,
+        primary !== undefined && primary.status !== "ready"
+          ? (primary.message ??
+            `The source on ${machine} is ${primary.status}; restore it before sharing files`)
+          : branch === null
+            ? `shares the main working files on ${machine} · prepares on first use`
+            : `on ${branch} · you and the agent share the files`,
       current: current === buildPickKey(sharedPick),
     };
   });
 
-  if (repos.length > 1 && fresh !== null) rows.push(fresh, ...shared);
-  else if (fresh !== null) rows.push(...shared, fresh);
+  if (fresh !== null) rows.push(fresh, ...shared);
 
   for (const workspace of listProjectWorkspaces(workspaces, repos)) {
     const joinPick: WorkspacePick = { kind: "existing", workspaceId: workspace.id };

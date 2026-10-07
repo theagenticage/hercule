@@ -5,7 +5,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* sql`ALTER TABLE workspaces ADD COLUMN ownership TEXT NOT NULL DEFAULT 'managed'
-            CHECK (ownership IN ('managed', 'existing'))`;
+            CHECK (ownership IN ('managed', 'adopted'))`;
   yield* sql`ALTER TABLE workspaces ADD COLUMN path TEXT`;
   yield* sql`
     CREATE TABLE workspace_repositories (

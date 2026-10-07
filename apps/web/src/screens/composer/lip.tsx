@@ -1,4 +1,5 @@
 import { useRef, useState, type JSX, type RefObject } from "react";
+import type { StartingRevision } from "@hercule/contract";
 import type {
   BranchField,
   ComposerFields,
@@ -48,7 +49,7 @@ export function Lip({
   readonly open: Key | null;
   readonly onOpenChange: (key: Key, open: boolean) => void;
   readonly onPickWorkspace: (pick: WorkspacePick) => void;
-  readonly onPickBranch: (branch: string) => void;
+  readonly onPickBranch: (startingRevision: StartingRevision) => void;
   readonly onPickRunner: (runnerId: string) => void;
 }): JSX.Element {
   const branchTrigger = useRef<HTMLSpanElement>(null);

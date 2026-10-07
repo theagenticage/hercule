@@ -1,3 +1,4 @@
+import type { Workspace } from "@hercule/contract";
 /**
  * Verifies the expiry sweep through public session operations and runner reports.
  * Agent-backed workspaces retain lease-based expiry. Human Threads make their
@@ -34,7 +35,6 @@ import {
   createRepo,
   spawnThread,
   withFleet,
-  type WorkspaceRecord,
 } from "./testing";
 
 /** A sweep interval short enough for a test to wait for, instead of the shipped ten minutes. */
@@ -135,7 +135,7 @@ const waitForDisposed = async (
   arranged: Arranged,
   id: string,
   wire: Wire = arranged.wire,
-): Promise<WorkspaceRecord> => {
+): Promise<Workspace> => {
   const frame = await waitUntil(
     "reserved disposal before runner I/O",
     () =>

@@ -9,7 +9,7 @@ import {
   buildPendingModelNote,
   listProjectRepos,
   queryKeys,
-  withBranch,
+  setWorkspaceStartingRevision,
   buildWorkspaceMenu,
   buildWorkspacePicks,
   type Thread,
@@ -202,7 +202,7 @@ export function Composer({
           model.pick(...buildWorkspacePicks(picked, workspaces));
         }}
         onPickBranch={(picked) => {
-          model.pick({ kind: "workspace", value: withBranch(pick, picked) });
+          model.pick({ kind: "workspace", value: setWorkspaceStartingRevision(pick, picked) });
         }}
         onPickRunner={(runnerId) => {
           model.pick({ kind: "runnerId", value: runnerId });

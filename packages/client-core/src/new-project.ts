@@ -4,12 +4,26 @@
  * `createProjectWithRepositories`, so the order of the writes and the rule for
  * sending a form again are written once.
  */
+import {
+  canonicalizeRemote,
+  type Runner,
+  type Workspace,
+  type RepositoryMode,
+} from "@hercule/contract";
+import { readEveryPage } from "./read-every-page";
 import type { HerculeClient } from "./client";
 import { readErrorMessage } from "./errors";
 import { describeRemoteRefusal } from "./remote";
 
 /** The error for a project with no name. */
 export const PROJECT_NAME_REFUSAL = "Name the project";
+
+/** The runner and repository mode selected before project creation. */
+export interface ProjectWorkspaceSelection {
+  readonly mode: RepositoryMode;
+  readonly runnerId: string;
+  readonly path: string;
+}
 
 /**
  * One repository in a New project form, as the form sends it and as a
@@ -26,6 +40,10 @@ export interface RepositorySubmission {
   readonly createdId: string | null;
   /** Why the repository was not created: the form's own check or the controller's error. */
   readonly message: string | null;
+  /** An explicit checkout choice. Omitted by clients that only register a Resource. */
+  readonly workspaceSelection?: ProjectWorkspaceSelection;
+  /** The last preparation result, retained so retries keep the same workspace intent. */
+  readonly workspace?: Workspace | null;
 }
 
 /**
@@ -54,10 +72,11 @@ export interface NewProjectSubmission<
  * as `message` for a repository.
  *
  * - A blank name sends nothing and returns `PROJECT_NAME_REFUSAL` as the failure.
- * - Every remote is checked before anything is sent. A remote git would not
- *   accept is a typo the user can fix without a round trip, so any refused
- *   remote sends nothing.
- * - The project is created first, because each repository names it.
+ * - Checks remotes before any write and reads the Resource catalogue to reuse
+ *   existing canonical identities. Refuses unsupported remotes for new Resources.
+ * - Creates the project before registering repositories or preparing workspaces.
+ * - Preserves the connection and setup command of a reused Resource. Only its
+ *   project association changes.
  *
  * A write that succeeded is not undone when a later one fails. Instead the
  * returned submission records what exists (`projectId`, each `createdId`),
@@ -71,12 +90,54 @@ export const createProjectWithRepositories = async <Repository extends Repositor
   const name = form.name.trim();
   if (name === "") return { ...form, failure: PROJECT_NAME_REFUSAL };
 
-  const checked = form.repositories.map((repository) => ({
+  let checked = form.repositories.map((repository): Repository => ({
     ...repository,
-    message: repository.createdId !== null ? null : describeRemoteRefusal(repository.remote),
+    message: null,
   }));
-  if (checked.some((repository) => repository.message !== null)) {
-    return { ...form, failure: null, repositories: checked };
+  let resources: Awaited<ReturnType<typeof client.resource.query>>["items"] = [];
+  const unresolved = checked.filter((repository) => repository.createdId === null);
+  if (unresolved.length > 0) {
+    checked = checked.map((repository) => {
+      const refusal = describeRemoteRefusal(repository.remote);
+      const url = URL.canParse(repository.remote.trim()) ? new URL(repository.remote.trim()) : null;
+      // An SSH URL can identify an existing Resource without changing the remote Git uses.
+      const canReuse =
+        url?.protocol === "ssh:" &&
+        url.password === "" &&
+        canonicalizeRemote(repository.remote) !== undefined;
+      return repository.createdId === null && refusal !== null && !canReuse
+        ? { ...repository, message: refusal }
+        : repository;
+    });
+    if (checked.some((repository) => repository.message !== null))
+      return { ...form, failure: null, repositories: checked };
+    try {
+      resources = await readEveryPage((page) => client.resource.query({ query: page }));
+    } catch (error) {
+      return {
+        ...form,
+        failure: null,
+        repositories: checked.map((repository) =>
+          repository.createdId === null
+            ? { ...repository, message: readErrorMessage(error) }
+            : repository,
+        ),
+      };
+    }
+    checked = checked.map((repository) => {
+      const canonical = canonicalizeRemote(repository.remote);
+      return repository.createdId === null &&
+        !resources.some(
+          (resource) =>
+            resource.kind === "repo" &&
+            canonical !== undefined &&
+            resource.canonicalRemote === canonical,
+        )
+        ? { ...repository, message: describeRemoteRefusal(repository.remote) }
+        : repository;
+    });
+    if (checked.some((repository) => repository.message !== null))
+      return { ...form, failure: null, repositories: checked };
   }
 
   let projectId = form.projectId;
@@ -90,25 +151,62 @@ export const createProjectWithRepositories = async <Repository extends Repositor
 
   const repositories: Repository[] = [];
   for (const repository of checked) {
-    if (repository.createdId !== null) {
-      repositories.push(repository);
-      continue;
-    }
-    const setupCommand = repository.setupCommand.trim();
+    let next: Repository = repository;
     try {
-      const resource = await client.resource.create({
-        payload: {
-          kind: "repo",
-          remote: repository.remote.trim(),
-          ...(repository.connectionId === null ? {} : { connectionId: repository.connectionId }),
-          ...(setupCommand === "" ? {} : { setupCommand }),
-          projectIds: [projectId],
-        },
-      });
-      repositories.push({ ...repository, createdId: resource.id });
+      if (next.createdId === null) {
+        const canonical = canonicalizeRemote(next.remote);
+        const existing = resources.find(
+          (resource) =>
+            resource.kind === "repo" &&
+            canonical !== undefined &&
+            resource.canonicalRemote === canonical,
+        );
+        const setupCommand = next.setupCommand.trim();
+        const resource =
+          existing === undefined
+            ? await client.resource.create({
+                payload: {
+                  kind: "repo",
+                  remote: next.remote.trim(),
+                  ...(next.connectionId === null ? {} : { connectionId: next.connectionId }),
+                  ...(setupCommand === "" ? {} : { setupCommand }),
+                  projectIds: [projectId],
+                },
+              })
+            : existing.projectIds.includes(projectId)
+              ? existing
+              : await client.resource.update({
+                  params: { id: existing.id },
+                  payload: { projectIds: [...existing.projectIds, projectId] },
+                });
+        resources = [...resources.filter((record) => record.id !== resource.id), resource];
+        next = { ...next, createdId: resource.id };
+      }
+      const selection = next.workspaceSelection;
+      if (
+        selection !== undefined &&
+        next.workspace?.status !== "ready" &&
+        next.workspace?.status !== "provisioning"
+      ) {
+        const payload = { resourceId: next.createdId!, runnerId: selection.runnerId };
+        const workspace =
+          selection.mode === "existing"
+            ? await client.workspace.attach({ payload: { ...payload, path: selection.path } })
+            : await client.workspace.provision({ payload });
+        next = {
+          ...next,
+          workspace,
+          message:
+            workspace.status === "failed"
+              ? (workspace.message ??
+                "Workspace preparation failed. Retry the same checkout choice.")
+              : null,
+        };
+      }
     } catch (error) {
-      repositories.push({ ...repository, message: readErrorMessage(error) });
+      next = { ...next, message: readErrorMessage(error) };
     }
+    repositories.push(next);
   }
   return { ...form, projectId, failure: null, repositories };
 };
@@ -122,4 +220,58 @@ export const isNewProjectCreated = <Submission extends NewProjectSubmission>(
   submission: Submission,
 ): submission is Submission & { readonly projectId: string } =>
   submission.projectId !== null &&
-  submission.repositories.every((repository) => repository.createdId !== null);
+  submission.repositories.every(
+    (repository) =>
+      repository.createdId !== null &&
+      (repository.workspaceSelection === undefined || repository.workspace?.status === "ready"),
+  );
+
+/** Refreshes preparation results from the live Workspace records without replacing the selected intent. */
+export const reconcileProjectWorkspaces = <Repository extends RepositorySubmission>(
+  submission: NewProjectSubmission<Repository>,
+  workspaces: ReadonlyArray<Workspace>,
+): NewProjectSubmission<Repository> => ({
+  ...submission,
+  repositories: submission.repositories.map((repository) => {
+    const workspace =
+      repository.workspace === undefined || repository.workspace === null
+        ? undefined
+        : workspaces.find((record) => record.id === repository.workspace!.id);
+    return workspace === undefined
+      ? repository
+      : {
+          ...repository,
+          workspace,
+          message:
+            workspace.status === "failed"
+              ? (workspace.message ??
+                "Workspace preparation failed. Retry the same checkout choice.")
+              : null,
+        };
+  }),
+});
+
+/** Checks whether a submitted checkout is still being prepared by its runner. */
+export const isProjectWorkspacePending = (submission: NewProjectSubmission): boolean =>
+  submission.repositories.some(
+    (repository) =>
+      repository.workspaceSelection !== undefined &&
+      repository.workspace?.status === "provisioning",
+  );
+
+/** Returns the currently identified online runner, or null until identity evidence is current. */
+export const findProjectLocalRunner = (
+  runners: ReadonlyArray<Runner>,
+  localRunnerId: string | null | undefined,
+  current: boolean,
+  selection?: ProjectWorkspaceSelection,
+): Runner | null =>
+  current
+    ? (runners.find(
+        (runner) =>
+          (selection === undefined || selection.runnerId === localRunnerId) &&
+          runner.id === localRunnerId &&
+          runner.connectivity === "online" &&
+          runner.lifecycle === "active",
+      ) ?? null)
+    : null;

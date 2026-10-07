@@ -201,7 +201,7 @@ export const makeWorkspaces = (options: {
         const report = await observeWorkspace(entry, substrate.gitEnv);
         const available =
           isStillOnDisk(entry) && hasExpectedCheckoutIdentity(entry, substrate.gitEnv);
-        if (entry.ownership === "existing" && entry.available !== available)
+        if (entry.ownership === "adopted" && entry.available !== available)
           await substrate.registry.update((entries) =>
             entries.map((held) =>
               held.workspaceId === workspaceId ? { ...held, available } : held,
@@ -311,7 +311,7 @@ export const makeWorkspaces = (options: {
             return await coordinateRepositorySelection(resources, () =>
               attachWorkspace(substrate, frame),
             );
-          if (entry?.ownership === "existing")
+          if (entry?.ownership === "adopted")
             throw new Error(
               "This workspace already has an existing checkout selected. Repeat the original attachment request.",
             );
@@ -328,7 +328,7 @@ export const makeWorkspaces = (options: {
             /* Recovery errors remain failed reports. */
           }
           if (
-            held?.ownership === "existing" &&
+            held?.ownership === "adopted" &&
             !hasExpectedCheckoutIdentity(held, substrate.gitEnv)
           ) {
             await substrate.registry.update((entries) =>

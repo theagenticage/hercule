@@ -2,7 +2,7 @@ import type { JSX, ReactNode, Ref } from "react";
 import {
   buildWorkspacePicks,
   formatAccessMode,
-  withBranch,
+  setWorkspaceStartingRevision,
   type ComposerPick,
   type DraftView,
   type RecentModel,
@@ -39,6 +39,7 @@ function DraftPick({
   align,
   width,
   children,
+  onOpen,
 }: {
   readonly className: "pick" | "lip-pick";
   readonly label: string;
@@ -48,6 +49,7 @@ function DraftPick({
   readonly align: "start" | "end";
   readonly width: "narrow" | "widest";
   readonly children: (close: () => void) => ReactNode;
+  readonly onOpen?: () => void;
 }): JSX.Element {
   if (locked !== null) {
     return (
@@ -70,6 +72,7 @@ function DraftPick({
           {label}
         </>
       }
+      onOpen={onOpen}
     >
       {children}
     </ComposerMenu>
@@ -84,8 +87,8 @@ function DraftPick({
  * workspace, the branch when there is one to pick, and the machine.
  *
  * Every pick is passed to `onPick`, which the caller applies to the draft.
- * Picking a workspace that exists also picks the machine it is on, and
- * picking a branch changes the picked workspace's branch.
+ * Picking an existing workspace also picks its machine. A starting revision
+ * applies only to a new workspace and never switches an existing checkout.
  *
  * ⏎ in the field calls `onSubmit`, and ⇧⏎ starts a new line. Send, and ⏎,
  * do nothing while `canSend` is false. Attach and Dictate are drawn but do
@@ -102,6 +105,7 @@ export function DraftComposer({
   onTextChange,
   onPick,
   onSubmit,
+  onOpenWorkspaceMenu,
 }: {
   readonly view: DraftView;
   readonly text: string;
@@ -115,6 +119,7 @@ export function DraftComposer({
   readonly onTextChange: (text: string) => void;
   readonly onPick: (steps: readonly ComposerPick[]) => void;
   readonly onSubmit: () => void;
+  readonly onOpenWorkspaceMenu: () => void;
 }): JSX.Element {
   const { catalogs, config, fields, workspaceMenu, branch, workspaceLabel, machineLabel } = view;
   const { pill } = fields.model;
@@ -193,6 +198,7 @@ export function DraftComposer({
           // The workspace's and the machine's rows carry a second line; the
           // branch menu's rows are short.
           width="widest"
+          onOpen={onOpenWorkspaceMenu}
         >
           {(close) => (
             <WorkspaceMenuContent
@@ -213,12 +219,15 @@ export function DraftComposer({
             menuLabel="Branch"
             align="start"
             width="narrow"
+            onOpen={onOpenWorkspaceMenu}
           >
             {(close) => (
               <BranchMenuContent
                 field={branch}
                 onPick={(picked) => {
-                  onPick([{ kind: "workspace", value: withBranch(workspace, picked) }]);
+                  onPick([
+                    { kind: "workspace", value: setWorkspaceStartingRevision(workspace, picked) },
+                  ]);
                   close();
                 }}
               />

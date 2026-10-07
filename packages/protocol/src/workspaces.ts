@@ -40,9 +40,14 @@ export const GitRemoteName = Schema.String.check(
   Schema.isPattern(/^(?!-)[^\u0000-\u0020\u007f]+$/, { title: "Git remote name" }),
 );
 
-export const WorkspaceOwnership = Schema.Literals(["managed", "existing"]);
+export const WorkspaceOwnership = Schema.Literals(["managed", "adopted"]);
 
 export type WorkspaceOwnership = Schema.Schema.Type<typeof WorkspaceOwnership>;
+
+/** Chooses the Git repository that supplies worktrees on one runner. */
+export const RepositoryMode = Schema.Literals(["managed", "existing"]);
+
+export type RepositoryMode = Schema.Schema.Type<typeof RepositoryMode>;
 
 export const WorkspaceAttachment = Schema.Struct({
   path: WorkspacePath,

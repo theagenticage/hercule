@@ -1,11 +1,21 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import { describeFolder, pickFolder } from "./folder-pick";
-import { runProgram } from "./run-program";
 import { makeFakeMainWindow } from "./testing";
+import { runProgram } from "./run-program";
 
 let folder: string;
 let home: string;
@@ -67,12 +77,106 @@ const createRepository = async (name: string): Promise<string> => {
 /** Runs `describeFolder` on `path` and returns its outcome. */
 const runDescribeFolder = (path: string) => Effect.runPromise(describeFolder(path));
 
+/** Records every path and byte so folder discovery cannot mutate the user's repository. */
+const readPaths = (root: string) =>
+  Object.fromEntries(
+    readdirSync(root, { recursive: true, encoding: "utf8" })
+      .sort()
+      .map((path) => {
+        const full = join(root, path);
+        const stat = lstatSync(full);
+        return [
+          path,
+          [
+            stat.mode,
+            stat.isSymbolicLink()
+              ? readlinkSync(full)
+              : stat.isFile()
+                ? readFileSync(full).toString("base64")
+                : null,
+          ],
+        ];
+      }),
+  );
+
+describe("workspace onboarding folder discovery", () => {
+  it("returns the normalized repository root for a selected nested folder and preserves all files", async () => {
+    const root = await createRepository("source with spaces");
+    await runGit(root, ["remote", "add", "origin", "https://example.com/ada/api.git"]);
+    mkdirSync(join(root, "nested"));
+    writeFileSync(join(root, "unfinished.txt"), "human work");
+    const before = readPaths(root);
+    expect(await runDescribeFolder(join(root, "nested"))).toMatchObject({
+      _tag: "Repository",
+      path: realpathSync(root),
+      remote: "https://example.com/ada/api.git",
+      branch: "main",
+    });
+    expect(readPaths(root)).toEqual(before);
+  });
+
+  it("returns the selected linked worktree root rather than its common repository", async () => {
+    const source = await createRepository("source");
+    await runGit(source, ["remote", "add", "origin", "https://example.com/ada/api.git"]);
+    await runGit(source, ["commit", "--allow-empty", "-m", "Initial commit"]);
+    const linked = join(folder, "linked checkout");
+    await runGit(source, ["worktree", "add", "-b", "linked-work", linked]);
+    mkdirSync(join(linked, "nested"));
+    const sourceBefore = readPaths(source);
+    const linkedBefore = readPaths(linked);
+    expect(await runDescribeFolder(join(linked, "nested"))).toMatchObject({
+      _tag: "Repository",
+      path: realpathSync(linked),
+      remote: "https://example.com/ada/api.git",
+      branch: "linked-work",
+    });
+    expect(readPaths(source)).toEqual(sourceBefore);
+    expect(readPaths(linked)).toEqual(linkedBefore);
+  });
+
+  it("keeps the configured portable remote identity when transport rewrites point to another host", async () => {
+    writeFileSync(
+      join(home, ".gitconfig"),
+      '[url "https://transport.invalid/replacement/"]\n\tinsteadOf = https://example.com/\n',
+    );
+    const root = await createRepository("portable");
+    await runGit(root, ["remote", "add", "origin", "https://example.com/ada/api.git"]);
+    const before = readPaths(root);
+    expect(await runDescribeFolder(root)).toMatchObject({
+      _tag: "Repository",
+      path: realpathSync(root),
+      remote: "https://example.com/ada/api.git",
+    });
+    expect(readPaths(root)).toEqual(before);
+  });
+
+  it("removes credentials from the configured remote before sending it to the renderer", async () => {
+    const root = await createRepository("credentialed");
+    await runGit(root, [
+      "remote",
+      "add",
+      "origin",
+      "https://fixture-user:fixture-token@example.com/ada/api.git",
+    ]);
+    const before = readPaths(root);
+    const outcome = await runDescribeFolder(root);
+    expect(outcome).toMatchObject({
+      _tag: "Repository",
+      path: realpathSync(root),
+      remote: "https://example.com/ada/api.git",
+    });
+    expect(JSON.stringify(outcome)).not.toMatch(/fixture-user|fixture-token/);
+    expect(readPaths(root)).toEqual(before);
+  });
+});
+
 describe("describeFolder", () => {
   it("describes a repository with an origin remote, before its first commit", async () => {
     const path = await createRepository("api");
     await runGit(path, ["remote", "add", "origin", "https://example.com/ada/api.git"]);
     expect(await runDescribeFolder(path)).toEqual({
       _tag: "Repository",
+      path: realpathSync(path),
       name: "api",
       remote: "https://example.com/ada/api.git",
       branch: "main",
@@ -88,6 +192,7 @@ describe("describeFolder", () => {
     await runGit(path, ["remote", "add", "origin", "https://example.com/ada/api.git"]);
     expect(await runDescribeFolder(path)).toEqual({
       _tag: "Repository",
+      path: realpathSync(path),
       name: "api",
       remote: "https://example.com/ada/api.git",
       branch: "main",
@@ -113,6 +218,7 @@ describe("describeFolder", () => {
     await runGit(path, ["remote", "add", "upstream", "https://example.com/notes.git"]);
     expect(await runDescribeFolder(path)).toEqual({
       _tag: "NoRemote",
+      path: realpathSync(path),
       name: "notes",
       branch: "main",
     });
@@ -123,6 +229,7 @@ describe("describeFolder", () => {
     mkdirSync(join(path, "web"));
     expect(await runDescribeFolder(join(path, "web"))).toEqual({
       _tag: "NoRemote",
+      path: realpathSync(path),
       name: "web",
       branch: "main",
     });
@@ -134,6 +241,7 @@ describe("describeFolder", () => {
     await runGit(path, ["checkout", "--quiet", "--detach"]);
     expect(await runDescribeFolder(path)).toEqual({
       _tag: "NoRemote",
+      path: realpathSync(path),
       name: "detached",
       branch: null,
     });

@@ -847,6 +847,21 @@ const make = Effect.gen(function* () {
         if (spawnedFrom === undefined && user === undefined) {
           return yield* Effect.fail(createForbiddenError("session.spawn", THREAD_IS_THE_USERS));
         }
+        if (
+          spawnedFrom === undefined &&
+          decoded.workspace?.kind === "primary" &&
+          decoded.workspace.branch !== undefined
+        ) {
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: ["workspace", "branch"],
+                message:
+                  "Threads leave the existing checkout's branch unchanged. Omit branch to share its files, or choose an ephemeral workspace with startingRevision for separate work.",
+              },
+            ]),
+          );
+        }
         if (spawnedFrom !== undefined) {
           if (!mayRunAs(actor, spawnedFrom.profile)) {
             return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_GRANTS));

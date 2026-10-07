@@ -59,7 +59,7 @@ export const observeWorkspace = async (
   const recorded = entry.preparation?.phase === "terminal" ? entry.preparation.report : undefined;
   const available = isStillOnDisk(entry) && hasExpectedCheckoutIdentity(entry, env);
   const incomplete =
-    entry.ownership !== "existing" &&
+    entry.ownership !== "adopted" &&
     entry.preparation !== undefined &&
     entry.preparation.phase !== "terminal";
   const status = available && !incomplete && recorded?.status !== "failed" ? "ready" : "failed";
@@ -75,7 +75,7 @@ export const observeWorkspace = async (
     observedAt: new Date().toISOString(),
     available,
     ownership: entry.ownership ?? "managed",
-    ...(entry.ownership === "existing" ? { path: entry.root } : {}),
+    ...(entry.ownership === "adopted" ? { path: entry.root } : {}),
     checkouts: available
       ? await Promise.all(entry.checkouts.map((checkout) => inspectCheckout(checkout, env)))
       : [],

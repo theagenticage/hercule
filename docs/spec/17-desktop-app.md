@@ -988,6 +988,26 @@ Settings does not open a live topic the shell does not already need, except whil
 
 *(Amended 2026-10-07, [#459](https://github.com/theagenticage/hercule/issues/459).)* **Workspace lifecycle performance gates this change.** Before UI implementation, the expected cost is zero additional persistent processes, zero Git/inspection work while idle and zero Git/inspection work per streamed token. Inspection is bounded and coalesced per workspace on decision-menu open, explicit refresh, completed turns/exit and start/resume. Measure comparable before/after fixtures with the existing desktop scripts: total/per-process memory, idle CPU/wakeups, streaming work and bundle-byte delta. Record actual readings in this section when implemented. A new budget miss requires correction before #459 acceptance; previously accepted unrelated misses stay identified separately. The historical first-milestone guide below does not waive this issue's gate.
 
+**Workspace lifecycle, issue #459**, measured 2026-10-07 against `cbb9719a` with the unchanged `apps/desktop/scripts/perf.ts` fixture: two 40-Thread launches, Profile, 500 Threads, a 501-row transcript, streaming and subagents. Both builds use the compiled controller and disposable Homes. The final run used `caffeinate -di` only for the measurement's lifetime after macOS idle sleep invalidated an earlier attempt.
+
+Footprint readings in MB and launch in ms. Each cell is Before / After, using the same fixture and sampling method:
+
+| Fixture | Browser | GPU | Network | Renderer | Summed | Window shown |
+|---|---|---|---|---|---|---|
+| 40 threads, run 1 | 51.3 / 53.4 | 180.5 / 590.1 | 7.9 / 7.7 | 48.5 / 48.3 | 288.2 / 699.5 | 352 / 396 |
+| 40 threads, run 2 | 51.6 / 53.3 | 584.1 / 591.5 | 7.8 / 7.9 | 49.6 / 48.7 | 693.0 / 701.5 | 354 / 376 |
+| 40 threads, Settings › Profile open | 51.8 / 53.7 | 106.8 / 112.0 | 7.7 / 7.8 | 54.9 / 55.0 | 221.2 / 228.4 | 362 / 377 |
+| 500 threads, run 1 | 51.3 / 52.9 | 585.6 / 590.2 | 7.8 / 7.8 | 55.7 / 56.0 | 700.5 / 706.8 | 366 / 389 |
+| 500 threads, a thread of 501 transcript rows open | 52.4 / 53.9 | 254.2 / 275.7 | 8.0 / 8.1 | 67.4 / 67.9 | 382.1 / 405.6 | 408 / 417 |
+
+- The process count remains four. No persistent process, idle inspection or per-token Git work is added. Source-menu opening, explicit Refresh and session/turn completion initiate bounded, coalesced observations; the workspace live topic replaces polling. The source/renderer regression tests exercise these boundaries.
+- Hidden renderer CPU is 0.0% with one wakeup/s in all five ordinary launches. Visible renderer CPU ranges from 0.7% to 1.3%; wakeups are one or five/s in both builds. GPU wakeups are zero or approximately 64/s in both builds. The age clock retains zero hidden fires and the expected visible count.
+- At 500 Threads, renderer main-thread work per nudge is 13.7 / 14.6 ms for the list and 11.6 / 10.5 ms with the transcript open, within the 16 ms budget. Both builds perform 20 Thread-list reads for 20 nudges.
+- The longest streaming task is 15.1 / 13.5 ms, with zero tasks over 50 ms. Paragraph writes are 1,173 in 2,435 frames / 1,191 in 2,437 frames, below one write per frame.
+- With 20 subagents, renderer footprint is 69.6 / 68.1 MB with the pane closed and 86.0 / 84.5 MB open. Both builds use four processes and stop running-row work while hidden.
+- Main's startup file is 157.5 / 158.5 kB, below 160 kB. The first screen is 313.6 / 315.5 kB gzip, an increase of 1.9 kB. The pre-existing 250 kB renderer guide overage remains separate from this change.
+- Summed footprint already exceeds 220 MB in every baseline fixture, with large GPU variation; the baseline range is 221.2-700.5 MB and the final range is 228.4-706.8 MB. Visible GPU/renderer wakeup guide misses also occur in the baseline. These measurements identify the existing guide misses; they do not attribute variable GPU footprint to this feature. Renderer footprint stays below 100 MB throughout, and the measured launch, transcript, nudge and streaming budgets pass.
+
 **The budgets guide the first milestone; they do not gate it.** *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* Slices 1 to 4 were each measured against the budgets before they merged, and a slice that missed one did not merge. From slice 5 on, the milestone's functionality comes first, and performance passes follow it:
 
 - **A slice is not measured against the budgets,** and a reading over one does not stop it. The perf script and the size checks in `pnpm build:desktop` report such a reading and pass.

@@ -147,10 +147,7 @@ const makeRunner = (
       }),
     );
     expect(report.status).toBe("ready");
-    const dir =
-      kind === "ephemeral"
-        ? join(storageDir, "workspaces", workspaceId)
-        : join(storageDir, "primaries", resourceId);
+    const dir = workspaces.resolve(workspaceId)!.cwd;
     const writePreCommitHook = (script: string) => {
       const hooksPath = runGitOrThrow(dir, "rev-parse", "--git-path", "hooks");
       const hooks = isAbsolute(hooksPath) ? hooksPath : join(dir, hooksPath);

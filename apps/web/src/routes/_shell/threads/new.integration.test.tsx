@@ -1544,7 +1544,7 @@ const buildWorldRoutes = (
 /** Opens a draft at `path`, with the project and workspace routes stubbed. */
 const openDraftAt = async (
   path: string,
-  user: Record<string, unknown> = {},
+  user: Record<string, unknown> = { "thread.workspace": "primary" },
   extra: Readonly<Record<string, Handler>> = {},
 ) => {
   const api = stubApi(buildController([INSTANCE_A], user, buildWorldRoutes(extra)));
@@ -1732,7 +1732,7 @@ describe("Composer: the workspace selector", () => {
     expect(readPageText(menu)).toContain("locks when the thread starts");
   });
 
-  // The primary workspace is shown as "Main workspace". None is not offered
+  // The primary workspace is shown as "Use main workspace". None is not offered
   // when the project has a repo.
   it("offers the main workspace, a new worktree and the live workspaces", async () => {
     const user = userEvent.setup();
@@ -1741,7 +1741,7 @@ describe("Composer: the workspace selector", () => {
     const menu = await openWorkspaceMenu(user);
     const text = readPageText(menu);
 
-    expect(text).toContain("Main workspace");
+    expect(text).toContain("Use main workspace");
     expect(text).toContain("on main · you and the agent share the files");
     expect(text).toContain("New workspace");
     expect(text).toContain("a fresh worktree of webshop on a new branch");
@@ -1762,9 +1762,9 @@ describe("Composer: the workspace selector", () => {
     const text = readPageText(menu);
 
     expect(text).toContain("a worktree of each repo, side by side, each on a new branch");
-    expect(text).toContain("Main workspace of ops-infra");
-    expect(text).toContain("Main workspace of ops-runbooks");
-    expect(text.indexOf("New workspace")).toBeLessThan(text.indexOf("Main workspace of"));
+    expect(text).toContain("Use main workspace of ops-infra");
+    expect(text).toContain("Use main workspace of ops-runbooks");
+    expect(text.indexOf("New workspace")).toBeLessThan(text.indexOf("Use main workspace of"));
   });
 
   it("checks the clone on the machine the draft would be placed on, not on the picked one", async () => {
@@ -1793,7 +1793,9 @@ describe("Composer: the workspace selector", () => {
 
     const menu = await openWorkspaceMenu(user);
 
-    expect(readPageText(menu)).toContain("not cloned on moss · clones on first use");
+    expect(readPageText(menu)).toContain(
+      "shares the main working files on moss · prepares on first use",
+    );
   });
 
   // A project with no source works in no workspace, and the tooltip explains
@@ -1810,12 +1812,12 @@ describe("Composer: the workspace selector", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("defaults to the main workspace in a one-repo project and to a worktree in a multi-repo one", async () => {
-    const one = await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
-    expect(await screen.findByRole("button", { name: /^workspace Main workspace$/ })).toBeDefined();
+  it("defaults coding projects to new workspaces regardless of repository count", async () => {
+    const one = await openDraftAt(buildProjectDraftPath(WEBSHOP.id), {});
+    expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
     one.unmount();
 
-    await openDraftAt(buildProjectDraftPath(OPS.id));
+    await openDraftAt(buildProjectDraftPath(OPS.id), {});
     expect(await screen.findByRole("button", { name: /^workspace New workspace$/ })).toBeDefined();
   });
 
@@ -1838,7 +1840,7 @@ describe("Composer: the workspace selector", () => {
     await pickRow(user, /New workspace/);
     await waitFor(() => {
       expect(readPageText()).toContain(
-        "It gets its own worktree of webshop, on a new branch from main.",
+        "It gets its own worktree of webshop, on a new branch from remote default.",
       );
     });
 
@@ -1867,7 +1869,7 @@ describe("Composer: the workspace selector", () => {
     const user = userEvent.setup();
     const { api, router } = await openDraftAt(
       buildProjectDraftPath(WEBSHOP.id),
-      {},
+      { "thread.workspace": "primary" },
       { "POST /api/v1/sessions": { body: NEW_SESSION } },
     );
 
@@ -1959,107 +1961,39 @@ describe("Composer: the workspace selector", () => {
 });
 
 describe("Composer: the branch selector", () => {
-  it("lists the main workspace's branches, badges the current one and dims one held by another workspace", async () => {
-    const user = userEvent.setup();
+  it("shows the actual main branch without offering to switch shared files", async () => {
     await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
-
-    const menu = await openBranchMenu(user, /main/);
-    const text = readPageText(menu);
-
-    expect(text).toContain("Branch");
-    expect(text).toContain("the checkout switches to it");
-    expect(text).toContain("release/2.4");
-    expect(text).toContain("current");
-    // `hercule/thread-3f1` is a branch of the primary workspace, but a ready
-    // ephemeral workspace on the same machine has it checked out. The row is
-    // dimmed and shows which workspace holds it.
-    expect(text).toContain("in workspace hercule/thread-3f1");
-    expect(within(menu).queryByRole("button", { name: /hercule\/thread-3f1/ })).toBeNull();
+    const branch = await screen.findByText("main", { selector: "span.truncate" });
+    expect(branch.closest("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: /release\/2\.4/ })).toBeNull();
   });
 
-  // The branch name is what the user picks, so it is never truncated. The
-  // note about which workspace holds it is secondary, so the note is
-  // truncated when the row runs out of room.
-  it("never truncates a held branch, truncates its note instead, and keeps the note right-aligned", async () => {
+  it("offers explicit starting sources and updates the lead for a local branch", async () => {
     const user = userEvent.setup();
-    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
-
-    const menu = await openBranchMenu(user, /main/);
-
-    // The note is the truncated cell, and its title holds the full text so
-    // the cut-off part can still be read.
-    const note = within(menu).getByTitle("in workspace hercule/thread-3f1");
-    expect(note.className).toContain("truncate");
-
-    // The branch cell takes the width it needs and is never truncated.
-    const branch = within(menu).getByText("hercule/thread-3f1", { selector: "span.font-mono" });
-    expect(branch.parentElement?.className).not.toContain("truncate");
-
-    // The note stays at the row's right edge: its column is the wide one and
-    // its content is aligned to the end, like every other row's badge.
-    const cell = note.parentElement;
-    expect(cell?.className).toContain("justify-end");
-    expect(cell?.parentElement?.className).toContain("grid-cols-[auto_auto_minmax(0,1fr)]");
+    await openDraftAt(buildProjectDraftPath(WEBSHOP.id), {});
+    const menu = await openBranchMenu(user, /^remote default$/);
+    expect(readPageText(menu)).toContain("Starting revision");
+    expect(readPageText(menu)).toContain("Current working copy");
+    expect(readPageText(menu)).toContain("Remote sources fetch before creating the new branch");
+    await pickRow(user, /^Local branch: release\/2\.4/);
+    expect(
+      await screen.findByRole("button", { name: /^local branch release\/2\.4$/ }),
+    ).toBeDefined();
+    expect(readPageText()).toContain("on a new branch from local branch release/2.4.");
   });
 
-  it("updates the branch selector and the lead sentence to the picked branch", async () => {
-    const user = userEvent.setup();
-    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
-
-    await openBranchMenu(user, /main/);
-    await pickRow(user, /release\/2\.4/);
-
-    await waitFor(() => {
-      expect(readPageText()).toContain(
-        "It works in the main workspace of webshop on moss, on release/2.4. You and the agent share the files.",
-      );
-    });
-    expect(await screen.findByRole("button", { name: /release\/2\.4/ })).toBeDefined();
+  it("shows one starting revision per repository without a combined picker", async () => {
+    await openDraftAt(buildProjectDraftPath(OPS.id), {});
+    const label = await screen.findByText("remote default · remote default");
+    expect(label.closest("button")).toBeNull();
   });
 
-  it("asks for a base branch on a new workspace, badges the default and explains where the branch starts", async () => {
+  it("allows managed remote creation while local sources are unavailable", async () => {
     const user = userEvent.setup();
-    await openDraftAt(buildProjectDraftPath(WEBSHOP.id));
-
-    await openWorkspaceMenu(user);
-    await pickRow(user, /New workspace/);
-
-    const lip = await screen.findByRole("button", { name: /^from main$/ });
-    expect(lip).toBeDefined();
-
-    await user.click(lip);
-    const menu = await screen.findByRole("dialog");
-    const text = readPageText(menu);
-
-    expect(text).toContain("Base branch");
-    expect(text).toContain("the new branch starts from it");
-    expect(text).toContain("default");
-    expect(text).toContain(
-      "The new branch is hercule/thread-…, named after the thread, and starts from origin/main when the remote has it.",
-    );
-  });
-
-  it("shows the base branches side by side, with nothing to pick, in a multi-repo project", async () => {
-    const user = userEvent.setup();
-    await openDraftAt(buildProjectDraftPath(OPS.id));
-
-    const lip = await screen.findByText("from master · main");
-    expect(lip.closest("button")).toBeNull();
-
-    // Clicking it opens nothing, because v1 has no per-repo base branch pick.
-    await user.click(lip);
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("shows default, with nothing to pick, for a repo no machine has cloned", async () => {
-    const user = userEvent.setup();
-    await openDraftAt(buildProjectDraftPath(EDGE.id));
-
-    const lip = await screen.findByText("default");
-    expect(lip.closest("button")).toBeNull();
-
-    await user.click(lip);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    await openDraftAt(buildProjectDraftPath(EDGE.id), {});
+    const menu = await openBranchMenu(user, /^remote default$/);
+    expect(within(menu).getByRole("button", { name: /^Remote default/ })).toBeDefined();
+    expect(within(menu).queryByRole("button", { name: /^Current working copy/ })).toBeNull();
   });
 
   it("is absent on a joined workspace, and on a draft with no workspace at all", async () => {
@@ -2104,7 +2038,9 @@ describe("Composer: the machine selector follows the workspace", () => {
     await user.click(await screen.findByRole("button", { name: /^machine moss/ }));
     const menu = await screen.findByRole("dialog");
 
-    expect(readPageText(menu)).toContain("edge-api is not cloned there · clones on first use");
+    expect(readPageText(menu)).toContain(
+      "edge-api has no main workspace there · prepares on first use",
+    );
     // "not cloned" only means a wait, not a blocker, so the row stays a
     // button. The test checks moss, not cove: in this fixture cove is dimmed
     // for another reason (no provider instance was ever probed there), and a
@@ -2232,7 +2168,7 @@ describe("The New project dialog", () => {
     await user.click(within(dialog).getByRole("button", { name: "+ Git repository" }));
     await user.type(
       await within(dialog).findByLabelText("Remote URL"),
-      "git@github.com:acme/webshop.git",
+      "git@github.com:acme/new-error.git",
     );
     await user.click(within(dialog).getByRole("button", { name: "Create project" }));
 

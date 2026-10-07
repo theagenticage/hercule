@@ -15,7 +15,7 @@ import {
 import { decideDraftPlaceForPick, type DraftPlace } from "./groups";
 import { buildDraftConfig } from "./thread-defaults";
 import { buildWorkspaceMenu, type WorkspaceMenu } from "./workspace-menu";
-import { listProjectRepos } from "./workspaces";
+import { findWorkspaceInspectionIds, listProjectRepos } from "./workspaces";
 
 /**
  * The records a Draft Thread is built from, as the app's queries return them:
@@ -50,6 +50,8 @@ export interface DraftView {
   readonly machineLabel: string;
   /** The branch menu, or `null` when the draft joins a workspace or has no checkout. */
   readonly branch: BranchField | null;
+  /** The selected source workspaces to inspect when a decision menu opens. */
+  readonly workspaceInspectionIds: readonly string[];
   /** The sidebar group the draft will belong to once it starts, which the sidebar draws it in. */
   readonly place: DraftPlace;
   /** Where the draft will work and on which machine, as its sidebar row says: "New workspace · studio-mac". */
@@ -116,6 +118,7 @@ export const buildDraftView = (
     // says why it cannot change.
     machineLabel: joined === undefined ? fields.machine.label : machine,
     branch: buildBranchField(pick, { workspaces, runnerId }),
+    workspaceInspectionIds: findWorkspaceInspectionIds(pick, workspaces, runnerId),
     // The group follows the workspace the lip shows, so a pick moves the row.
     place:
       address.projectId === null

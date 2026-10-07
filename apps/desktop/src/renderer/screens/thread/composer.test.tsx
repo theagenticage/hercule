@@ -131,7 +131,7 @@ const readField = (): HTMLTextAreaElement =>
 const readLip = (): readonly (readonly [string | null, string | null])[] =>
   [...document.querySelector(".lip")!.children].map((part) => [
     part.textContent,
-    part.getAttribute("title"),
+    part.getAttribute("title") ?? part.querySelector("[title]")?.getAttribute("title") ?? null,
   ]);
 
 /**
@@ -517,7 +517,7 @@ describe("the composer", () => {
 
     const workspaceLocked = "Create a new thread to change the workspace";
     expect(readLip()).toEqual([
-      ["Main workspace", workspaceLocked],
+      ["Main workspace", "Workspace details"],
       ["main", workspaceLocked],
       ["", null],
       ["moss", "Create a new thread to change the machine"],
@@ -527,12 +527,12 @@ describe("the composer", () => {
     expect(document.querySelector(".lip .faint")).toBeNull();
   });
 
-  it("draws an ephemeral workspace in the lip once, by its branch in the UI face, with the branch it started from", async () => {
+  it("draws an ephemeral workspace's actual branch without inferring an unrecorded starting revision", async () => {
     await renderComposer(BUSY);
 
-    expect(readLip().map(([text]) => text)).toEqual(["hercule/thread-3f1 from main", "", "moss"]);
+    expect(readLip().map(([text]) => text)).toEqual(["hercule/thread-3f1", "", "moss"]);
     expect(document.querySelector(".lip code")).toBeNull();
-    expect(document.querySelector(".lip .faint")?.textContent).toBe("from main");
+    expect(document.querySelector(".lip .faint")).toBeNull();
   });
 
   it("says in the lip that a thread with no project has no workspace", async () => {

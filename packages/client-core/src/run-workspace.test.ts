@@ -30,7 +30,11 @@ const FAILED: Run = {
 
 const COMPLETED: Run = { ...RUNNING, status: "completed", finishedAt: "2026-09-25T10:01:00Z" };
 
-const EPHEMERAL = buildWorkspace({ id: WORKSPACE_ID, kind: "ephemeral" });
+const EPHEMERAL = buildWorkspace({
+  id: WORKSPACE_ID,
+  kind: "ephemeral",
+  retentionPolicy: "automatic",
+});
 
 /** Kept for inspection until 23:30 UTC on 8 Oct: 9 Oct in Amsterdam. */
 const KEPT = { ...EPHEMERAL, keptUntil: "2026-10-08T23:30:00Z" };
@@ -89,15 +93,15 @@ describe("describeRunWorkspace", () => {
     }
   });
 
-  it("says a workspace kept no later than the run's end, or not yet released, will be deleted shortly", () => {
+  it("says a workspace kept no later than the run's end, or not yet released, awaits confirmed automatic removal", () => {
     const cancelled: Run = { ...COMPLETED, status: "cancelled" };
     const keptToTheEnd = { ...EPHEMERAL, keptUntil: "2026-09-25T10:01:00Z" };
     for (const run of [COMPLETED, cancelled]) {
       for (const workspace of [keptToTheEnd, EPHEMERAL]) {
         assert.deepStrictEqual(describeRunWorkspace(run, workspace, ZONE), {
           asksOnCancel: false,
-          note: "Workspace will be deleted shortly",
-          offersDelete: false,
+          note: "Automatic cleanup is due; workspace remains until removal succeeds",
+          offersDelete: true,
         });
       }
     }

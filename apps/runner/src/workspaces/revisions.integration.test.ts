@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
-import type { ProvisionCheckout, WorkspaceReport } from "@hercule/protocol";
+import type { ProvisionCheckout, StartingRevision, WorkspaceReport } from "@hercule/protocol";
 import { makeWorkspaces } from "./index";
 import {
   addBranch,
@@ -26,15 +26,7 @@ import {
 
 afterAll(cleanTemporaries);
 
-type StartingRevision =
-  | { readonly kind: "current" }
-  | { readonly kind: "local"; readonly branch: string }
-  | { readonly kind: "remote"; readonly branch?: string };
-type ReportedCheckout = NonNullable<WorkspaceReport["checkouts"]>[number] & {
-  readonly headCommit?: string | null;
-  readonly baseCommit?: string | null;
-  readonly startingRevision?: StartingRevision | null;
-};
+type ReportedCheckout = NonNullable<WorkspaceReport["checkouts"]>[number];
 const checkoutReport = (report: WorkspaceReport): ReportedCheckout => {
   expect(report.status, report.message).toBe("ready");
   expect(report.checkouts).toHaveLength(1);
@@ -585,7 +577,7 @@ describe("repository coordination", () => {
     expect(commonDirectory(manager.resolve(a.workspaceId)!.cwd)).toBe(
       commonDirectory(manager.resolve(aliasA.workspaceId)!.cwd),
     );
-  });
+  }, 15_000);
 });
 
 describe("revision and coordination recovery boundaries", () => {
@@ -764,4 +756,122 @@ describe("revision and coordination recovery boundaries", () => {
     );
     expect(runGitOrThrow(linked, "diff", "--cached", "--name-only")).toContain("alias-index-1.txt");
   });
+});
+
+describe(".workspaceinclude preserves tracked files", () => {
+  it("skips an included symlink to dirty tracked source files", async () => {
+    const { manager, source, resourceId, remoteUrl, attachment } = await createExisting();
+    writeFileSync(join(source, "README.md"), "dirty tracked source\n");
+    symlinkSync("README.md", join(source, "local-settings"));
+    writeFileSync(join(source, ".workspaceinclude"), "local-settings\n");
+    const frame = buildProvisionFrame({
+      kind: "ephemeral",
+      checkouts: [
+        {
+          ...revisionCheckout(resourceId, remoteUrl, { kind: "current" }, attachment.workspaceId),
+          workspaceInclude: true,
+        },
+      ],
+    });
+    const report = await manager.provision(frame);
+    expect(report.status, report.message).toBe("ready");
+    expect(report.warnings?.join(" ")).toContain("skipped tracked files");
+    expect(existsSync(join(manager.resolve(frame.workspaceId)!.cwd, "local-settings"))).toBe(false);
+    expect(readFileSync(join(source, "README.md"), "utf8")).toBe("dirty tracked source\n");
+  });
+
+  it.each([
+    ["managed", "current"],
+    ["managed", "local"],
+    ["existing", "current"],
+    ["existing", "local"],
+  ] as const)(
+    "copies only listed untracked files from %s main with a %s starting revision",
+    async (mode, revisionKind) => {
+      const attached = mode === "existing" ? await createExisting() : undefined;
+      const remote = attached?.remote ?? makeRemote();
+      const resourceId = attached?.resourceId ?? createId();
+      const remoteUrl = attached?.remoteUrl ?? remote.url;
+      const manager =
+        attached?.manager ??
+        makeWorkspaces({ storageDir: createTemporaryDir("hercule-include-home-") });
+      const primary =
+        attached?.attachment ??
+        buildProvisionFrame({
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remoteUrl })],
+        });
+      if (attached === undefined) expect((await manager.provision(primary)).status).toBe("ready");
+      const source = manager.resolve(primary.workspaceId)!.cwd;
+      const sourceBranch = `include-source-${createId()}`;
+      runGitOrThrow(source, "checkout", "-b", sourceBranch);
+      mkdirSync(join(source, "mixed"));
+      writeFileSync(join(source, "mixed", "tracked.txt"), "committed nested file\n");
+      writeFileSync(join(source, ".gitignore"), ".env\n");
+      runGitOrThrow(source, "add", "mixed/tracked.txt", ".gitignore");
+      runGitOrThrow(source, "commit", "-m", "Track files beside included local files");
+      const baseCommit = runGitOrThrow(source, "rev-parse", "HEAD");
+      const committedReadme = readFileSync(join(source, "README.md"), "utf8");
+      writeFileSync(join(source, "README.md"), "dirty tracked readme stays in main\n");
+      writeFileSync(join(source, "mixed", "tracked.txt"), "staged tracked changes stay in main\n");
+      runGitOrThrow(source, "add", "mixed/tracked.txt");
+      writeFileSync(
+        join(source, "mixed", "tracked.txt"),
+        "unstaged tracked changes stay in main\n",
+      );
+      writeFileSync(join(source, "mixed", "untracked.txt"), "explicit local file\n");
+      writeFileSync(join(source, ".env"), "EXPLICIT_IGNORED=local\n");
+      writeFileSync(join(source, "unlisted.txt"), "not included\n");
+      writeFileSync(join(source, ".workspaceinclude"), "README.md\nmixed\n.env\n");
+      const sourceStatus = runGitOrThrow(source, "status", "--porcelain=v1");
+      const sourceIndex = runGitOrThrow(source, "write-tree");
+      const sourceFiles = [
+        "README.md",
+        "mixed/tracked.txt",
+        "mixed/untracked.txt",
+        ".env",
+        "unlisted.txt",
+        ".workspaceinclude",
+        ".gitignore",
+      ];
+      const sourceContents = sourceFiles.map((path) => readFileSync(join(source, path)));
+      const startingRevision: StartingRevision =
+        revisionKind === "current" ? { kind: "current" } : { kind: "local", branch: sourceBranch };
+      const work = buildProvisionFrame({
+        kind: "ephemeral",
+        checkouts: [
+          {
+            ...revisionCheckout(resourceId, remoteUrl, startingRevision, primary.workspaceId),
+            workspaceInclude: true,
+          },
+        ],
+      });
+
+      const report = checkoutReport(await manager.provision(work));
+      const destination = manager.resolve(work.workspaceId)!.cwd;
+      expect.soft(report.baseCommit).toBe(baseCommit);
+      expect.soft(report.headCommit).toBe(baseCommit);
+      expect.soft(readFileSync(join(destination, "README.md"), "utf8")).toBe(committedReadme);
+      expect
+        .soft(readFileSync(join(destination, "mixed", "tracked.txt"), "utf8"))
+        .toBe("committed nested file\n");
+      expect
+        .soft(readFileSync(join(destination, "mixed", "untracked.txt"), "utf8"))
+        .toBe("explicit local file\n");
+      expect.soft(readFileSync(join(destination, ".env"), "utf8")).toBe("EXPLICIT_IGNORED=local\n");
+      expect.soft(existsSync(join(destination, "unlisted.txt"))).toBe(false);
+      expect
+        .soft(readFileSync(join(source, "README.md"), "utf8"))
+        .toBe("dirty tracked readme stays in main\n");
+      expect
+        .soft(readFileSync(join(source, "mixed", "tracked.txt"), "utf8"))
+        .toBe("unstaged tracked changes stay in main\n");
+      expect.soft(runGitOrThrow(source, "rev-parse", "HEAD")).toBe(baseCommit);
+      expect.soft(runGitOrThrow(source, "write-tree")).toBe(sourceIndex);
+      expect.soft(runGitOrThrow(source, "status", "--porcelain=v1")).toBe(sourceStatus);
+      expect
+        .soft(sourceFiles.map((path) => readFileSync(join(source, path))))
+        .toEqual(sourceContents);
+    },
+  );
 });

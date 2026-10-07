@@ -324,7 +324,7 @@ const removeWorkspace = async (
   let report: WorkspaceReport;
   try {
     if (instruction._tag === "workspaceDetach") {
-      if (entry !== undefined && (entry.ownership !== "existing" || entry.kind !== "primary"))
+      if (entry !== undefined && (entry.ownership !== "adopted" || entry.kind !== "primary"))
         throw new Error(
           "Only an attached main workspace can be detached. Use dispose for managed working files.",
         );
@@ -338,7 +338,7 @@ const removeWorkspace = async (
           "Workspace files remain without a registry ownership record. Preserve them and restore the registry before disposal.",
         );
     } else {
-      if (entry.ownership === "existing")
+      if (entry.ownership === "adopted")
         throw new Error(
           "This is an attached, user-owned checkout. Use detach to forget its registration without deleting files.",
         );

@@ -40,9 +40,10 @@ const registerWorkspace = (substrate: Substrate, entry: RegisteredWorkspace): Pr
   ]);
 
 /**
- * Copies the files listed in the primary's `.workspaceinclude` into `dir`.
- * These are untracked files an agent needs to run the project. Does nothing if
- * the primary has no `.workspaceinclude`.
+ * Copies listed untracked files from the primary's `.workspaceinclude` into
+ * `dir`. Returns warnings for tracked files or Git metadata that were skipped.
+ * Fails when Git cannot inspect tracked files. Does nothing if the primary has
+ * no `.workspaceinclude`.
  *
  * - The file has one relative path per line, and lines starting with `#` are
  *   comments.
@@ -50,24 +51,80 @@ const registerWorkspace = (substrate: Substrate, entry: RegisteredWorkspace): Pr
  * - Symlinks are followed and their targets copied, because a link into the
  *   primary would let an agent edit the primary's files.
  */
-const copyIncludedFiles = (primaryRoot: string, dir: string): void => {
+const copyIncludedFiles = async (
+  primaryRoot: string,
+  dir: string,
+  env: GitEnv,
+): Promise<ReadonlyArray<string>> => {
   let listed: string;
   try {
     listed = readFileSync(joinPath(primaryRoot, ".workspaceinclude"), "utf8");
   } catch {
-    return;
+    return [];
   }
+  const readGitPaths = async (directory: string, args: ReadonlyArray<string>) => {
+    const child = Bun.spawn(["git", "-C", directory, ...args], {
+      env: { ...env },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    if ((await child.exited) !== 0)
+      throw new Error(
+        `Git could not inspect tracked files for .workspaceinclude: ${stderr.trim()}`,
+      );
+    return stdout.split("\0").filter((path) => path !== "");
+  };
+  // Index changes and a different starting revision must not turn tracked source files into copy candidates.
+  const tracked = new Set(
+    (
+      await Promise.all([
+        readGitPaths(primaryRoot, ["ls-files", "-z"]),
+        readGitPaths(primaryRoot, ["ls-tree", "-r", "--name-only", "-z", "HEAD"]),
+        readGitPaths(dir, ["ls-files", "-z"]),
+      ])
+    ).flat(),
+  );
+  let skippedTrackedFiles = false;
+  const sourceRoot = realpathSync(primaryRoot);
   for (const line of listed.split("\n")) {
     const relative = line.trim();
     if (relative.length === 0 || relative.startsWith("#")) continue;
     const from = resolvePath(primaryRoot, relative);
     if (!from.startsWith(primaryRoot + sep)) continue;
     try {
-      cpSync(from, joinPath(dir, relative), { recursive: true, dereference: true });
+      cpSync(from, joinPath(dir, relative), {
+        recursive: true,
+        dereference: true,
+        filter: (path) => {
+          const name = relativePath(primaryRoot, path).split(sep).join("/");
+          const target = relativePath(sourceRoot, realpathSync(path)).split(sep).join("/");
+          if (
+            name === ".git" ||
+            name.startsWith(".git/") ||
+            tracked.has(name) ||
+            target === ".git" ||
+            target.startsWith(".git/") ||
+            tracked.has(target)
+          ) {
+            skippedTrackedFiles = true;
+            return false;
+          }
+          return true;
+        },
+      });
     } catch {
       // A path the user listed and then removed is not worth failing a workspace over.
     }
   }
+  return skippedTrackedFiles
+    ? [
+        ".workspaceinclude skipped tracked files or Git metadata. The new workspace keeps its committed files; only listed untracked files are copied.",
+      ]
+    : [];
 };
 
 /**
@@ -242,7 +299,7 @@ const makeWorkingCopies = async (
         warnings.push(
           `.workspaceinclude skipped: no main workspace is available on this runner for resource ${requested.resourceId}; the copy source is missing.`,
         );
-      else copyIncludedFiles(primary.root, directory);
+      else warnings.push(...(await copyIncludedFiles(primary.root, directory, env)));
     }
     if (requested.setupCommand !== null) {
       const wrong = await runSetup(requested.setupCommand, directory, substrate);

@@ -65,6 +65,8 @@ import type {
   SessionStart,
   TurnState,
   Usage,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
+  WorkspaceReport,
 } from "../../../packages/protocol/src/index";
 
 /** The most sessions a runner may list in one report, as the protocol allows. */
@@ -386,6 +388,7 @@ export async function enlistScriptedRunner(
   const { runnerId, credential } = (await joined.json()) as JoinAnswer;
 
   const sessions = new Map<string, HostedSession>();
+  const workspaces = new Map<string, WorkspaceReport>();
   let socket: WebSocket;
   /** The code and reason of the last close, so a send on a closed connection can say why. */
   let lastClose: string | undefined;
@@ -934,8 +937,8 @@ export async function enlistScriptedRunner(
           instanceId: frame.instanceId,
           result: PROBE_RESULT,
         });
-      case "workspaceProvision":
-        return send({
+      case "workspaceProvision": {
+        const report: WorkspaceReport = {
           _tag: "workspaceReport",
           workspaceId: frame.workspaceId,
           status: "ready",
@@ -944,10 +947,29 @@ export async function enlistScriptedRunner(
             branch: checkout.branch ?? "main",
             branches: checkout.branch === null ? ["main"] : ["main", checkout.branch],
             defaultBranch: "main",
+            form: "worktree",
           })),
+        };
+        workspaces.set(frame.workspaceId, report);
+        return send(report);
+      }
+      case "workspaceInspect":
+        return send({
+          _tag: "workspaceInspection",
+          requestId: frame.requestId,
+          report: workspaces.get(frame.workspaceId)!,
         });
       case "workspaceDispose":
-        return send({ _tag: "workspaceReport", workspaceId: frame.workspaceId, status: "deleted" });
+      case "workspaceDetach": {
+        const report: WorkspaceReport = {
+          _tag: "workspaceReport",
+          workspaceId: frame.workspaceId,
+          status: "deleted",
+          ...(frame.requestId === undefined ? {} : { requestId: frame.requestId }),
+        };
+        workspaces.set(frame.workspaceId, report);
+        return send(report);
+      }
       case "sessionStart": {
         const session: HostedSession = {
           sessionId: frame.sessionId,
@@ -1046,7 +1068,7 @@ export async function enlistScriptedRunner(
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
             protocolVersion: 4 satisfies typeof PROTOCOL_VERSION,
-            capabilities: [],
+            capabilities: ["workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),
             facts: { ...FACTS, identityPort },

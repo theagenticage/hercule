@@ -4,6 +4,7 @@ import {
   canonicalizeRemote,
   type ProvisionCheckout,
   type StartingRevision,
+  type RepositoryMode,
 } from "@hercule/protocol";
 import { hasExpectedCheckoutIdentity, inspectCheckoutIdentity } from "./identity";
 import { buildCacheDir, ensureCache, fetchRemote, resolveCommit, runGit, type GitEnv } from "./git";
@@ -16,7 +17,7 @@ export interface SelectedRepository {
   readonly sourceRoot: string;
   readonly workingRoot: string | undefined;
   readonly remoteName: string;
-  readonly mode: "managed" | "existing";
+  readonly mode: RepositoryMode;
 }
 
 /** Establishes managed storage or validates the selected source, serializing first bootstrap per Resource. */

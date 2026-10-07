@@ -75,7 +75,7 @@ export const attachWorkspace = async (
     );
   if (
     held !== undefined &&
-    held.ownership === "existing" &&
+    held.ownership === "adopted" &&
     (held.checkouts[0]?.commonDirectory !== identity.commonDirectory ||
       held.checkouts[0]?.commonDirectoryIdentity !== identity.commonDirectoryIdentity)
   )
@@ -96,7 +96,7 @@ export const attachWorkspace = async (
     workspaceId: frame.workspaceId,
     kind: "primary",
     root: identity.root,
-    ownership: "existing",
+    ownership: "adopted",
     checkouts: [
       {
         checkoutId: checkout.checkoutId,
@@ -125,7 +125,7 @@ export const attachWorkspace = async (
   }
   const report: WorkspaceReport = {
     ...(await observeWorkspace(entry, substrate.gitEnv)),
-    ownership: "existing",
+    ownership: "adopted",
     path: identity.root,
   };
   await substrate.registry.update((entries) => [
@@ -171,7 +171,7 @@ export const reserveManagedRepositories = async (
         );
         await substrate.registry.selectRepository({
           resourceId: checkout.resourceId,
-          mode: source.ownership === "existing" ? "existing" : "managed",
+          mode: source.ownership === "adopted" ? "existing" : "managed",
           commonDirectory: identity.commonDirectory,
           commonDirectoryIdentity: identity.commonDirectoryIdentity,
           sourceRoot: identity.root,

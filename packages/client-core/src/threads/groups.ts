@@ -75,6 +75,8 @@ export interface WorkspaceGroup {
    * Always `false` for a group with no workspace.
    */
   readonly joinable: boolean;
+  /** Keeps an empty retained workspace reachable for inspection and explicit removal. */
+  readonly showWhenEmpty?: boolean;
   /** Whether the draft being written joins this group. */
   readonly draft: boolean;
   readonly rows: readonly ThreadRow[];
@@ -282,6 +284,35 @@ export const buildThreadGroups = ({
   if (draftPlace !== null && !byProject.has(draftPlace.projectId))
     byProject.set(draftPlace.projectId, []);
 
+  const occupiedWorkspaceIds = new Set(threads.map((thread) => thread.workspaceId));
+  const retainedWorkspaces = workspaces.filter(
+    (workspace) =>
+      !occupiedWorkspaceIds.has(workspace.id) &&
+      workspace.status !== "deleted" &&
+      workspace.status !== "lost" &&
+      (workspace.retentionPolicy === "manual" ||
+        workspace.status === "failed" ||
+        workspace.status === "disposing" ||
+        workspace.message !== null),
+  );
+  const projectIdsByWorkspace = new Map(
+    retainedWorkspaces.map((workspace) => [
+      workspace.id,
+      new Set(
+        workspace.checkouts.flatMap(
+          (checkout) =>
+            resources.find((resource) => resource.id === checkout.resourceId)?.projectIds ?? [],
+        ),
+      ),
+    ]),
+  );
+  for (const projectIds of projectIdsByWorkspace.values()) {
+    for (const projectId of projectIds) {
+      if (listedProjectIds.has(projectId) && !byProject.has(projectId))
+        byProject.set(projectId, []);
+    }
+  }
+
   const groups = [...byProject].map(([projectId, held]): ProjectGroup => {
     const joins = draftPlace !== null && draftPlace.projectId === projectId;
     const header = {
@@ -314,6 +345,10 @@ export const buildThreadGroups = ({
     const createsWorkspace = joins && draftPlace.createsWorkspace;
     if (joins && !createsWorkspace && !byWorkspace.has(draftPlace.workspaceId))
       byWorkspace.set(draftPlace.workspaceId, []);
+    for (const workspace of retainedWorkspaces) {
+      if (projectIdsByWorkspace.get(workspace.id)?.has(projectId) && !byWorkspace.has(workspace.id))
+        byWorkspace.set(workspace.id, []);
+    }
 
     // A draft whose workspace does not exist yet has a group of its own, with
     // no label, directly under the project's header, because that is where
@@ -335,6 +370,9 @@ export const buildThreadGroups = ({
               : { clip: "no workspace", keep: "" }
             : buildWorkspaceLabelParts(workspace, resources, runners),
         joinable: isJoinable(workspace),
+        ...(workspace !== undefined && rowsIn.length === 0 && retainedWorkspaces.includes(workspace)
+          ? { showWhenEmpty: true }
+          : {}),
         draft: holdsDraft(draftPlace, joins, workspaceId),
         rows: rowsIn,
       };

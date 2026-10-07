@@ -109,7 +109,7 @@ const WITH_ADA = {
 /**
  * Starts the app signed in, at `path`, with the sidebar fixture and
  * `handlers` on top, and waits until the live connection holds the shell's
- * six subscriptions and every read has settled, including the reads the
+ * seven subscriptions and every read has settled, including the reads the
  * first connection makes.
  */
 const startShell = async ({
@@ -123,7 +123,7 @@ const startShell = async ({
   return { calls, fake, ...app };
 };
 
-/** Waits until the live connection holds the shell's six subscriptions and no read is running. */
+/** Waits until the live connection holds the shell's seven subscriptions and no read is running. */
 const waitForShellLive = async (live: LiveStub, queryClient: QueryClient): Promise<void> => {
   await waitFor(() => {
     expect([...live.readTopics()].sort()).toEqual([
@@ -133,6 +133,7 @@ const waitForShellLive = async (live: LiveStub, queryClient: QueryClient): Promi
       "runner",
       "session",
       "task",
+      "workspace",
     ]);
     expect(queryClient.isFetching()).toBe(0);
   });
@@ -350,9 +351,9 @@ describe("the shell's live connection", () => {
 
   it("reads the projects, workspaces and resources again after a reconnect, and has the age clock read the time", async () => {
     const { calls, live } = await startShell();
-    // The first connection does not read them: the loader just did.
+    // Workspace subscriptions cover changes since the loader read. Projects and resources have no topic yet.
     for (const path of ["/api/v1/projects", "/api/v1/workspaces", "/api/v1/resources"]) {
-      expect(countReads(calls, path), path).toBe(1);
+      expect(countReads(calls, path), path).toBe(path === "/api/v1/workspaces" ? 2 : 1);
     }
     const refresh = vi.spyOn(ageClock, "refresh");
 
@@ -360,7 +361,7 @@ describe("the shell's live connection", () => {
     await waitFor(
       () => {
         for (const path of ["/api/v1/projects", "/api/v1/workspaces", "/api/v1/resources"]) {
-          expect(countReads(calls, path), path).toBe(2);
+          expect(countReads(calls, path), path).toBe(path === "/api/v1/workspaces" ? 3 : 2);
         }
       },
       { timeout: 5000 },

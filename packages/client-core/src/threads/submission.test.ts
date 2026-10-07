@@ -165,7 +165,7 @@ describe("buildSubmission: the project and the workspace", () => {
     });
   });
 
-  it("sends the branch the main workspace should switch to", () => {
+  it("leaves the actual shared branch unchanged despite an old saved branch pick", () => {
     const input = buildSubmission(
       {
         kind: "draft",
@@ -180,9 +180,10 @@ describe("buildSubmission: the project and the workspace", () => {
 
     expect(input).toMatchObject({
       input: {
-        workspace: { kind: "primary", resourceId: "res-webshop", branch: "release/2.4" },
+        workspace: { kind: "primary", resourceId: "res-webshop" },
       },
     });
+    expect(input.kind === "spawn" && input.input.workspace).not.toHaveProperty("branch");
   });
 
   it("sends one checkout per repo, with each one's base branch", () => {

@@ -18,6 +18,7 @@ import {
   GitRemoteName,
   WorkspaceKind,
   WorkspaceOwnership,
+  RepositoryMode,
   WorkspacePath,
   StartingRevision,
 } from "@hercule/protocol";
@@ -43,6 +44,7 @@ export {
   GitRemoteName,
   WorkspaceKind,
   WorkspaceOwnership,
+  RepositoryMode,
   WorkspacePath,
   StartingRevision,
 };

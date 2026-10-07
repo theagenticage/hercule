@@ -1238,6 +1238,7 @@ describe("A run's page > its runner and workspace", () => {
 describe("A run's page > what happens to its workspace", () => {
   const WORKSPACE_ID = "0199c0ff-4444-7000-8000-000000000002";
   const WORKSPACE = buildWorkspace({
+    retentionPolicy: "automatic",
     id: WORKSPACE_ID,
     runnerId: "0199c0ff-3333-7000-8000-000000000002",
     kind: "ephemeral",
@@ -1326,7 +1327,7 @@ describe("A run's page > what happens to its workspace", () => {
     });
   });
 
-  it("deletes the workspace on cancel when the box stays ticked, and says it will be deleted shortly", async () => {
+  it("requests automatic cleanup on cancel and keeps files visible until removal succeeds", async () => {
     const user = userEvent.setup();
     const { api } = await openWithWorkspace(IN_WORKSPACE);
 
@@ -1339,11 +1340,13 @@ describe("A run's page > what happens to its workspace", () => {
         { keepWorkspace: false },
       ]);
     });
-    // The workspace exists until the controller's next sweep deletes it.
+    // Cancellation requests cleanup; only a successful removal confirms deletion.
     await waitFor(() => {
-      expect(readPageText(header)).toContain("Workspace will be deleted shortly");
+      expect(readPageText(header)).toContain(
+        "Automatic cleanup is due; workspace remains until removal succeeds",
+      );
     });
-    expect(within(header).queryByRole("button", { name: "Delete workspace" })).toBeNull();
+    expect(within(header).getByRole("button", { name: "Delete workspace" })).toBeDefined();
   });
 
   it("does not ask about a workspace when the run has none", async () => {

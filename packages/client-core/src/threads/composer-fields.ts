@@ -159,7 +159,7 @@ const findBlocker = (
   snapshot: CapabilitySnapshot | undefined,
 ): ComposerBlocked | null => {
   if (joined !== undefined && joined.status !== "ready")
-    return { reason: UNREADY_WORKSPACE_REASONS[joined.status], login: null };
+    return { reason: joined.message ?? UNREADY_WORKSPACE_REASONS[joined.status], login: null };
   if (instance === undefined) return { reason: "No provider instance is set up", login: null };
   if (runner === undefined) return { reason: "No machine is connected", login: null };
   if (runner.lifecycle === "retired") return { reason: `${runner.name} is retired`, login: null };
@@ -231,7 +231,7 @@ export const buildComposerFields = (
       notCloned:
         pick.kind === "primary" &&
         findReadyPrimary(workspaces, pick.resourceId, row.runnerId) === undefined
-          ? `${formatRepoName(resources.find((each) => each.id === pick.resourceId))} is not cloned there · clones on first use`
+          ? `${formatRepoName(resources.find((each) => each.id === pick.resourceId))} has no main workspace there · prepares on first use`
           : null,
     })) ?? [];
   // Read from the runner rather than from its row, because the menu has no

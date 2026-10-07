@@ -75,7 +75,7 @@ import {
   type WorkspaceStatus,
   type WorkspaceAttachInput,
 } from "@hercule/contract";
-import { currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
+import { CurrentActor, currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import {
   nowIso,
   mintUuid,
@@ -549,7 +549,18 @@ const make = Effect.gen(function* () {
             ]),
           );
         }
-        if (row.value.status !== "ready") {
+        const actor = yield* CurrentActor;
+        // A run queues its first agent session while its own workspace is prepared.
+        // Dispatch still waits for readiness; a public join cannot use this path.
+        const queuedRunSession =
+          row.value.status === "provisioning" &&
+          wish === undefined &&
+          input.holder.kind === "session" &&
+          actor._tag === "run" &&
+          ((yield* workspaces.listActiveHolders([joined])).get(joined) ?? []).some(
+            (holder) => holder.kind === "run" && holder.id === actor.runId,
+          );
+        if (row.value.status !== "ready" && !queuedRunSession) {
           return yield* Effect.fail(
             createValidationError([
               { path: ["workspace", "workspaceId"], message: WORKSPACE_NOT_READY },
@@ -558,7 +569,7 @@ const make = Effect.gen(function* () {
         }
         const instruction = yield* workspaces.readProvisionFrame(joined);
         if (
-          row.value.ownership === "existing" ||
+          row.value.ownership === "adopted" ||
           (Option.isSome(instruction) &&
             instruction.value.checkouts.some(
               (checkout) =>
@@ -1048,7 +1059,7 @@ const make = Effect.gen(function* () {
     disposable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
         const workspace = yield* readStoredWorkspaceOrFail(id);
-        if (workspace.ownership === "existing")
+        if (workspace.ownership === "adopted")
           return yield* Effect.fail(createInvalidStateError(EXISTING_DISPOSAL));
         if (workspace.status === "deleted" || workspace.status === "lost") {
           return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
@@ -1065,7 +1076,7 @@ const make = Effect.gen(function* () {
     detachable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
         const workspace = yield* readStoredWorkspaceOrFail(id);
-        if (workspace.ownership !== "existing" || workspace.kind !== "primary")
+        if (workspace.ownership !== "adopted" || workspace.kind !== "primary")
           return yield* Effect.fail(
             createInvalidStateError(
               "Only an attached main workspace may be detached. Dispose of managed workspaces instead.",

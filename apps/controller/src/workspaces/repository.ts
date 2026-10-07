@@ -23,6 +23,9 @@ import type {
   CheckoutForm,
   SortDirection,
   WorkspaceKind,
+  WorkspaceOwnership,
+  WorkspaceRetentionPolicy,
+  RepositoryMode,
   WorkspaceStatus,
 } from "@hercule/contract";
 import { buildOnlineClause } from "../runners";
@@ -45,8 +48,8 @@ export interface StoredWorkspace {
   readonly runnerId: string;
   readonly kind: WorkspaceKind;
   readonly status: WorkspaceStatus;
-  readonly ownership: "managed" | "existing";
-  readonly retentionPolicy: "manual" | "automatic";
+  readonly ownership: WorkspaceOwnership;
+  readonly retentionPolicy: WorkspaceRetentionPolicy;
   readonly path: string | null;
   readonly observedAt: string | null;
   readonly available: boolean | null;
@@ -116,7 +119,8 @@ export interface WorkspaceHolder {
  * - `inspection`: the inspection window. A failed run, or a run cancelled
  *   with its workspace kept, leaves its workspace for the user to look at.
  */
-export type Retention = "none" | "orphan" | "idle" | "inspection";
+const Retention = Schema.Literals(["none", "orphan", "idle", "inspection"]);
+export type Retention = Schema.Schema.Type<typeof Retention>;
 
 /**
  * The lease that kept a workspace longest, once every lease on it has run
@@ -168,7 +172,7 @@ const NO_RETENTION_CLAUSE =
 const PRIMARY_STANDING = "('provisioning', 'ready', 'disposing')";
 
 export interface RepositorySelection {
-  readonly mode: "managed" | "existing";
+  readonly mode: RepositoryMode;
   readonly path: string | null;
   readonly remoteName: string | null;
   readonly primaryWorkspaceId: string | null;
@@ -179,7 +183,7 @@ interface WorkspaceRow {
   readonly runner_id: Uint8Array;
   readonly kind: string;
   readonly status: string;
-  readonly ownership: "managed" | "existing";
+  readonly ownership: WorkspaceOwnership;
   readonly path: string | null;
   readonly observed_at: string | null;
   readonly available: number | null;
@@ -190,7 +194,7 @@ interface WorkspaceRow {
   readonly provisioned_at: string | null;
   readonly last_used_at: string | null;
   readonly disposed_at: string | null;
-  readonly retention_policy: "manual" | "automatic";
+  readonly retention_policy: WorkspaceRetentionPolicy;
 }
 
 interface CheckoutRow {
@@ -265,7 +269,7 @@ const buildCursorScope = (direction: SortDirection): CursorScope => ({
 
 const RemovalAudit = Schema.Struct({
   actor: Schema.String,
-  reason: Schema.optionalKey(Schema.Literals(["none", "orphan", "idle", "inspection"])),
+  reason: Schema.optionalKey(Retention),
   holder: Schema.optionalKey(Schema.String),
   refusalMessage: Schema.optionalKey(Schema.String),
 });
@@ -434,7 +438,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Option.Option<RepositorySelection>, SqlError> =>
       Effect.map(
         sql<{
-          readonly mode: "managed" | "existing";
+          readonly mode: RepositoryMode;
           readonly path: string | null;
           readonly remote_name: string | null;
           readonly primary_workspace_id: Uint8Array | null;
@@ -457,7 +461,7 @@ const make = Effect.gen(function* () {
       resourceId: string,
       runnerId: string,
       selection: {
-        readonly mode: "managed" | "existing";
+        readonly mode: RepositoryMode;
         readonly path?: string;
         readonly remoteName?: string;
       },
@@ -483,7 +487,7 @@ const make = Effect.gen(function* () {
         sql<{
           readonly id: Uint8Array;
         }>`UPDATE workspaces SET status = 'provisioning', message = NULL
-        WHERE id = ${uuidFromString(id)} AND ownership = 'existing' AND status = 'failed'
+        WHERE id = ${uuidFromString(id)} AND ownership = 'adopted' AND status = 'failed'
         RETURNING id`,
         (rows) => rows.length > 0,
       ).pipe(Effect.tap((changed) => (changed ? announceChange(id) : Effect.void))),
@@ -493,7 +497,7 @@ const make = Effect.gen(function* () {
       Effect.asVoid(
         sql`UPDATE workspaces SET path = ${path},
         provision_frame = json_set(provision_frame, '$.attachment.path', ${path})
-        WHERE id = ${uuidFromString(id)} AND ownership = 'existing' AND status = 'ready'`,
+        WHERE id = ${uuidFromString(id)} AND ownership = 'adopted' AND status = 'ready'`,
       ).pipe(Effect.andThen(announceChange(id))),
 
     /** Records the first creation instruction and returns the instruction that won the write. */
@@ -529,7 +533,7 @@ const make = Effect.gen(function* () {
     insert: (workspace: {
       readonly runnerId: string;
       readonly kind: WorkspaceKind;
-      readonly ownership?: "managed" | "existing";
+      readonly ownership?: WorkspaceOwnership;
       readonly path?: string;
       readonly designatedConnectionId: string | null;
       readonly at: string;
@@ -619,7 +623,7 @@ const make = Effect.gen(function* () {
           FROM workspaces w JOIN checkouts c ON c.workspace_id = w.id
           WHERE w.runner_id = ${uuidFromString(runnerId)} AND w.kind = 'primary'
             AND c.resource_id = ${uuidFromString(resourceId)}
-            AND (w.status IN ${sql.literal(PRIMARY_STANDING)} OR (w.status = 'failed' AND (w.ownership = 'existing' OR w.provisioned_at IS NOT NULL)))
+            AND (w.status IN ${sql.literal(PRIMARY_STANDING)} OR (w.status = 'failed' AND (w.ownership = 'adopted' OR w.provisioned_at IS NOT NULL)))
           LIMIT 1
         `,
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toWorkspace),
@@ -747,7 +751,7 @@ const make = Effect.gen(function* () {
           UPDATE workspaces SET status = 'failed', message = ${message}, last_used_at = ${at}
           WHERE id = ${uuidFromString(id)} AND (
             status = 'provisioning' OR (status = 'ready' AND (
-              ${allowReadinessLoss} OR ownership = 'existing' OR EXISTS (
+              ${allowReadinessLoss} OR ownership = 'adopted' OR EXISTS (
                 SELECT 1 FROM json_each(provision_frame, '$.checkouts')
                 WHERE json_extract(value, '$.repositoryWorkspaceId') IS NOT NULL
               )

@@ -14,7 +14,7 @@ import { expect } from "vitest";
 import { Effect, Schema } from "effect";
 import type * as Duration from "effect/Duration";
 import type { ModelDescriptor, RunnerFacts, SessionStart } from "@hercule/protocol";
-import type { Session, WorkspaceRetentionPolicy } from "@hercule/contract";
+import type { Session, Workspace } from "@hercule/contract";
 import {
   ConnectionValidationFailed,
   HOST_API,
@@ -155,24 +155,6 @@ export interface CheckoutRecord {
   readonly defaultBranch?: string | null;
 }
 
-/** A workspace as the API hands it back; only the fields these tests read are named. */
-export interface WorkspaceRecord {
-  readonly id: string;
-  readonly runnerId: string;
-  readonly kind: string;
-  readonly status: string;
-  readonly observedAt: string | null;
-  readonly retentionPolicy: WorkspaceRetentionPolicy;
-  readonly checkouts: ReadonlyArray<CheckoutRecord>;
-  readonly designatedConnectionId: string | null;
-  readonly provisionedAt: string | null;
-  readonly lastUsedAt: string | null;
-  readonly disposedAt: string | null;
-  readonly sessionIds: ReadonlyArray<string>;
-  readonly keptUntil: string | null;
-  readonly message?: string | null;
-}
-
 /** Reads the error code from an error response. */
 export const readErrorCode = async (response: Response): Promise<string> =>
   ((await response.json()) as { error: { code: string } }).error.code;
@@ -203,16 +185,16 @@ export const createRepo = async (
 export const provisionWorkspaceOrFail = async (
   arranged: Arranged,
   body: unknown,
-): Promise<WorkspaceRecord> => {
+): Promise<Workspace> => {
   const response = await post(arranged.harness.base, "/api/v1/workspaces", body, arranged.token);
   expect([200, 201], await response.clone().text()).toContain(response.status);
-  return (await response.json()) as WorkspaceRecord;
+  return (await response.json()) as Workspace;
 };
 
-export const readWorkspace = async (arranged: Arranged, id: string): Promise<WorkspaceRecord> => {
+export const readWorkspace = async (arranged: Arranged, id: string): Promise<Workspace> => {
   const response = await get(arranged.harness.base, `/api/v1/workspaces/${id}`, arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as WorkspaceRecord;
+  return (await response.json()) as Workspace;
 };
 
 /**
@@ -220,10 +202,7 @@ export const readWorkspace = async (arranged: Arranged, id: string): Promise<Wor
  * `main`, as a runner does once it has provisioned it. Returns the workspace
  * once the controller has recorded it as ready.
  */
-export const reportWorkspaceReady = async (
-  arranged: Arranged,
-  id: string,
-): Promise<WorkspaceRecord> => {
+export const reportWorkspaceReady = async (arranged: Arranged, id: string): Promise<Workspace> => {
   const workspace = await readWorkspace(arranged, id);
   arranged.wire.send({
     _tag: "workspaceReport",

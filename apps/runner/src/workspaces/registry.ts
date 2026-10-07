@@ -16,6 +16,8 @@ import {
   StartingRevision,
   CheckoutForm,
   WorkspaceRemoval,
+  WorkspaceOwnership,
+  RepositoryMode,
 } from "@hercule/protocol";
 
 const RegisteredCheckout = Schema.Struct({
@@ -55,7 +57,7 @@ const RegisteredWorkspace = Schema.Struct({
   root: Schema.String,
   checkouts: Schema.Array(RegisteredCheckout),
   preparation: Schema.optionalKey(Preparation),
-  ownership: Schema.optionalKey(Schema.Literals(["managed", "existing"])),
+  ownership: Schema.optionalKey(WorkspaceOwnership),
   /** Availability is observed separately from the immutable preparation result. */
   available: Schema.optionalKey(Schema.Boolean),
 });
@@ -64,7 +66,7 @@ export type RegisteredWorkspace = Schema.Schema.Type<typeof RegisteredWorkspace>
 
 const RepositorySelection = Schema.Struct({
   resourceId: StorageId,
-  mode: Schema.Literals(["managed", "existing"]),
+  mode: RepositoryMode,
   commonDirectory: Schema.NullOr(Schema.String),
   commonDirectoryIdentity: Schema.optionalKey(Schema.String),
   sourceRoot: Schema.NullOr(Schema.String),

@@ -25,6 +25,7 @@ import { Mark } from "../marks";
 import { AgeLabel } from "../screens/age-label";
 import { ProjectTile, type ProjectTint } from "../screens/project-tile";
 import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
+import { WorkspaceDetailsTrigger } from "../screens/workspace/details-trigger";
 import { ITEM_HEIGHTS, type RowEnd, type SectionKey } from "./sidebar-items";
 
 /** What every item takes from the list: its key in the list, and the space above it. */
@@ -235,11 +236,13 @@ export const WorkspaceLabel = memo(function WorkspaceLabel({
   itemKey,
   leading,
   projectId,
+  workspaceId,
   joinableWorkspaceId,
   clip,
   keep,
 }: Placement & {
   readonly projectId: string;
+  readonly workspaceId: string | null;
   readonly joinableWorkspaceId: string | null;
   readonly clip: string;
   readonly keep: string;
@@ -251,10 +254,21 @@ export const WorkspaceLabel = memo(function WorkspaceLabel({
       tabIndex={-1}
       style={{ marginTop: leading, height: ITEM_HEIGHTS["workspace-label"] }}
     >
-      <span className="side-ws-name">
-        <span className="side-ws-clip">{clip}</span>
-        {keep === "" ? null : <span className="side-ws-keep">{keep}</span>}
-      </span>
+      {workspaceId === null ? (
+        <span className="side-ws-name">
+          <span className="side-ws-clip">{clip}</span>
+          {keep === "" ? null : <span className="side-ws-keep">{keep}</span>}
+        </span>
+      ) : (
+        <WorkspaceDetailsTrigger
+          workspaceId={workspaceId}
+          label={`Inspect workspace ${clip}`}
+          className="side-ws-name workspace-details-trigger"
+        >
+          <span className="side-ws-clip">{clip}</span>
+          {keep === "" ? null : <span className="side-ws-keep">{keep}</span>}
+        </WorkspaceDetailsTrigger>
+      )}
       {joinableWorkspaceId === null ? null : (
         <Link
           to="/"

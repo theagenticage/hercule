@@ -45,15 +45,15 @@ describe("buildThreadWorkspaceLabel", () => {
     const ephemeral = buildEphemeral({ baseBranch: "release/2.4", defaultBranch: "main" });
 
     expect(buildLabel(ephemeral.id, [PRIMARY, ephemeral])).toEqual([
-      { kind: "branch", text: "hercule/thread-3f1", startedFrom: "from release/2.4" },
+      { kind: "branch", text: "hercule/thread-3f1", startedFrom: "from remote branch release/2.4" },
     ]);
   });
 
-  it("starts an ephemeral workspace from its repo's default branch when the caller named no base", () => {
+  it("does not infer a historical base from a later observed default branch", () => {
     const ephemeral = buildEphemeral({ baseBranch: null, defaultBranch: "trunk" });
 
     expect(buildLabel(ephemeral.id, [ephemeral])).toEqual([
-      { kind: "branch", text: "hercule/thread-3f1", startedFrom: "from trunk" },
+      { kind: "branch", text: "hercule/thread-3f1", startedFrom: null },
     ]);
   });
 

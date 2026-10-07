@@ -35,10 +35,10 @@ const buildMenu = (over: Partial<Parameters<typeof buildWorkspaceMenu>[0]> = {})
 
 describe("buildWorkspaceMenu", () => {
   // A project with a repo never offers None.
-  it("puts the main workspace first in a project with one repo", () => {
+  it("offers separate files before explicit sharing", () => {
     expect(buildMenu().rows.map((row) => row.name)).toEqual([
-      "Main workspace",
       "New workspace",
+      "Use main workspace",
       "hercule/thread-3f1",
     ]);
   });
@@ -48,16 +48,16 @@ describe("buildWorkspaceMenu", () => {
 
     expect(rows.map((row) => row.name)).toEqual([
       "New workspace",
-      "Main workspace of ops-infra",
-      "Main workspace of ops-runbooks",
+      "Use main workspace of ops-infra",
+      "Use main workspace of ops-runbooks",
     ]);
     expect(rows[0]?.sub).toBe("a worktree of each repo, side by side, each on a new branch");
   });
 
   it("shows a main workspace's branch, or that it is not cloned on the runner yet", () => {
-    expect(buildMenu().rows[0]?.sub).toBe("on main · you and the agent share the files");
-    expect(buildMenu({ runnerId: COVE.id }).rows[0]?.sub).toBe(
-      "not cloned on cove · clones on first use",
+    expect(buildMenu().rows[1]?.sub).toBe("on main · you and the agent share the files");
+    expect(buildMenu({ runnerId: COVE.id }).rows[1]?.sub).toBe(
+      "shares the main working files on cove · prepares on first use",
     );
   });
 
@@ -77,7 +77,7 @@ describe("buildWorkspaceMenu", () => {
   });
 
   it("uses the current row's name as the selector's label", () => {
-    expect(buildMenu().label).toBe("Main workspace");
+    expect(buildMenu().label).toBe("Use main workspace");
     expect(buildMenu({ pick: { kind: "existing", workspaceId: THREAD_3F1.id } }).label).toBe(
       "hercule/thread-3f1",
     );

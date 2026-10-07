@@ -1,7 +1,7 @@
 /**
  * Tests resources, workspaces and checkouts through the shipped program: a repo
- * recorded, its main workspace cloned on the machine the controller runs for
- * itself, and a thread's own worktree made from the cache that clone filled.
+ * recorded, its main workspace created on the controller's runner, and a
+ * thread's worktree made from the same managed repository.
  *
  * Nothing here contacts GitHub. The repository is a bare one in a temporary
  * directory, and the resource refers to it the way a user would - `https://` -
@@ -9,25 +9,24 @@
  * in `apps/controller/src/resources/remote.ts` takes `https://` and git's
  * `user@host:owner/repo` and nothing else).
  *
- * Both cases need the machine to reach that remote - `ensureCache` fetches it
- * every time, and a failed fetch fails the workspace - so git's own
+ * Both cases start from the fetched remote, so git's own
  * `url.<base>.insteadOf` is written into the machine's `HOME` first, which
- * makes the https URL resolve to the bare repository next to it. Hercule never
- * adopts a folder the user already has, so it never reads one; the checkout
- * next to the bare repository is here to prove that.
+ * makes the https URL resolve to the bare repository next to it. Managed
+ * storage is selected explicitly here, so the user's own checkout stays
+ * untouched. Existing-checkout attachment is tested separately.
  *
  * The worktree case is the only one that needs a session, and no fake provider
  * ships, so it runs a real one and is opt-in under `HERCULE_LIVE_SESSION_TEST`
  * like `e2e/session.test.ts`. The rest run everywhere.
  *
  * The suite is in vitest's `binary` project, so `pnpm test:binary` runs it and
- * `pnpm test` does not. It runs the release binary if one has been built, and
- * the dispatcher's source otherwise: it tests the controller itself, which
- * behaves the same either way.
+ * `pnpm test` does not. It requires the built release binary, so the checks
+ * cover the program a user installs.
  */
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { Workspace } from "../packages/contract/src/index";
 import {
   PASSWORD,
   USERNAME,
@@ -102,25 +101,6 @@ interface Resource {
   readonly kind: string;
   readonly remote: string | null;
   readonly canonicalRemote: string | null;
-}
-
-interface Checkout {
-  readonly resourceId: string;
-  readonly form: string;
-  readonly branch: string | null;
-  readonly branches: ReadonlyArray<string>;
-  readonly defaultBranch: string | null;
-}
-
-interface Workspace {
-  readonly id: string;
-  readonly runnerId: string;
-  readonly kind: string;
-  readonly status: string;
-  readonly message: string | null;
-  readonly checkouts: ReadonlyArray<Checkout>;
-  /** The sessions in it that have not exited. */
-  readonly sessionIds: ReadonlyArray<string>;
 }
 
 interface Session {
@@ -254,7 +234,7 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
     resourceId = resource.id;
   }, 30_000);
 
-  it("clones the repo as its main workspace, without touching the user's own checkout", async () => {
+  it("creates a separate main worktree without touching the user's own checkout", async () => {
     const before = runGit(["status", "--porcelain=v1", "--untracked-files=all"], checkout);
     const head = runGit(["rev-parse", "HEAD"], checkout);
 
@@ -280,9 +260,12 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
     expect(workspace.checkouts).toHaveLength(1);
     const [only] = workspace.checkouts;
     expect(only!.resourceId).toBe(resourceId);
-    expect(only!.form).toBe("clone");
-    expect(only!.branch).toBe("main");
+    expect(only!.form).toBe("worktree");
+    expect(only!.branch).not.toBe("main");
+    expect(only!.branches).toContain(only!.branch);
     expect(only!.branches).toContain("main");
+    expect(only!.headCommit).toBe(head);
+    expect(only!.baseCommit).toBe(head);
 
     // The user's own checkout of this repository does not belong to Hercule
     // and is never read or written: it is exactly as it was, on the same

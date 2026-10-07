@@ -308,7 +308,7 @@ export type SpawnCheckout = Schema.Schema.Type<typeof SpawnCheckout>;
 export const PrimarySpawnWorkspace = Schema.Struct({
   kind: Schema.Literal("primary"),
   resourceId: Id,
-  /** The branch the main workspace is switched to before the harness starts. */
+  /** An Agent or workflow branch policy. Threads omit this field to preserve the shared checkout. */
   branch: Schema.optionalKey(Branch),
 });
 

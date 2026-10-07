@@ -1296,7 +1296,7 @@
           }[st];
           var perks =
             '<ul class="perks">' +
-            '<li><span class="ico">' + icon("worktree") + "</span><span><b>A workspace for every thread</b>Each agent works on its own branch. Your checkout stays exactly as you left it.</span></li>" +
+            '<li><span class="ico">' + icon("worktree") + "</span><span><b>A workspace for every thread</b>Each agent works where you let it. Your own checkout, or a separate copy on its own branch.</span></li>" +
             '<li><span class="ico">' + icon("intake") + "</span><span><b>Work arrives prepared</b>Triage reads what GitHub sends and brings you Proposals, not notifications.</span></li>" +
             '<li><span class="ico">' + Crew.mark("waiting", 16) + "</span><span><b>You keep the decisions</b>When an agent needs you, it raises its hand and waits.</span></li>" +
             "</ul>";
@@ -1540,14 +1540,14 @@
             '<h1 class="st-h">Add your first project</h1>' +
             (noRepo
               ? '<p class="st-sub">A project is a set of repositories your agents work in. Pick one on this Mac to name the project; its repository joins it once GitHub is connected.</p>'
-              : '<p class="st-sub">A project is a set of repositories your agents work in. Pick one on this Mac; Hercule reads where it is hosted and clones it from there.</p>');
+              : '<p class="st-sub">A project is a set of repositories your agents work in. Adopt an existing folder or let Hercule manage its own checkout.</p>');
           if (st === "empty") {
             return (
               head +
               '<button class="pick-folder" data-act="pick"><span class="ico">' + icon("worktree", 20) + "</span><b>Choose a folder…</b><span>or drop one here</span></button>" +
               (noRepo
                 ? '<p class="st-note">' + icon("worktree", 14) + "<span>Until the repository joins, threads work without a checkout. <b>The folder you pick stays as it is.</b></span></p>"
-                : '<p class="st-note">' + icon("branch", 14) + "<span>Threads work in their own workspaces, cloned from the remote. <b>The folder you pick stays as it is.</b></span></p>")
+                : '<p class="st-note">' + icon("branch", 14) + "<span>Threads can work directly in your checkout, or in their own separate copies. The choice is yours.</span></p>")
             );
           }
           var card = function (sub, badge) {

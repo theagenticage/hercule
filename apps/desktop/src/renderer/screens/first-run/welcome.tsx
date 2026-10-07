@@ -145,7 +145,8 @@ export function Welcome({
           </p>
           <ul className="perks">
             <Perk icon={<WorkspaceIcon />} title="A workspace for every thread">
-              Each agent works on its own branch. Your checkout stays exactly as you left it.
+              Each agent works where you let it. Your own checkout, or a separate copy on its own
+              branch.
             </Perk>
             <Perk icon={<IntakeIcon />} title="Work arrives prepared">
               Triage reads what GitHub sends and brings you Proposals, not notifications.

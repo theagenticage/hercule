@@ -131,6 +131,7 @@ const renderItem = (
           itemKey={item.key}
           leading={item.leading}
           projectId={item.projectId}
+          workspaceId={item.workspaceId}
           joinableWorkspaceId={item.joinableWorkspaceId}
           clip={item.clip}
           keep={item.keep}

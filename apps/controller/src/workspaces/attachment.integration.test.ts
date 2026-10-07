@@ -41,15 +41,6 @@ import {
 
 afterAll(cleanTemporaries);
 
-type AttachmentFrame = WorkspaceProvision & {
-  readonly attachment?: { readonly path: string; readonly remoteName: string };
-};
-
-type AttachedWorkspace = Workspace & {
-  readonly path: string | null;
-  readonly ownership: "existing" | "managed";
-};
-
 const createCheckout = () => {
   const remote = makeRemote();
   const world = createTemporaryDir("hercule-controller-attachment-");
@@ -103,19 +94,10 @@ const createResource = async (arranged: Arranged, remote: string): Promise<strin
 const attach = (arranged: Arranged, body: unknown, token = arranged.token): Promise<Response> =>
   post(arranged.harness.base, "/api/v1/workspaces/attach", body, token);
 
-const attachOrFail = async (arranged: Arranged, body: unknown): Promise<AttachedWorkspace> => {
+const attachOrFail = async (arranged: Arranged, body: unknown): Promise<Workspace> => {
   const response = await attach(arranged, body);
   expect([200, 201], await response.clone().text()).toContain(response.status);
-  return (await response.json()) as AttachedWorkspace;
-};
-
-const readAttachedWorkspace = async (
-  arranged: Arranged,
-  id: string,
-): Promise<AttachedWorkspace> => {
-  const response = await get(arranged.harness.base, `/api/v1/workspaces/${id}`, arranged.token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as AttachedWorkspace;
+  return (await response.json()) as Workspace;
 };
 
 describe("workspace.attach", () => {
@@ -171,7 +153,11 @@ describe("workspace.attach", () => {
       const resourceId = await createResource(arranged, fixture.remoteUrl);
       const body = { resourceId, runnerId: arranged.runnerId, path: fixture.path };
       const workspace = await attachOrFail(arranged, body);
-      const [frame] = await waitForFrames<AttachmentFrame>(arranged.wire, "workspaceProvision", 1);
+      const [frame] = await waitForFrames<WorkspaceProvision>(
+        arranged.wire,
+        "workspaceProvision",
+        1,
+      );
       const manager = makeWorkspaces({
         storageDir: createTemporaryDir("hercule-attachment-retry-"),
         gitEnv: fixture.gitEnv,
@@ -191,7 +177,7 @@ describe("workspace.attach", () => {
       const retried = await attachOrFail(arranged, body);
 
       expect(retried.id).toBe(workspace.id);
-      const retries = await waitForFrames<AttachmentFrame>(
+      const retries = await waitForFrames<WorkspaceProvision>(
         arranged.wire,
         "workspaceProvision",
         sentBeforeRetry + 1,
@@ -202,7 +188,7 @@ describe("workspace.attach", () => {
       await waitUntil("recovered the same attachment", async () =>
         (await readWorkspace(arranged, workspace.id)).status === "ready" ? true : undefined,
       );
-      expect((await readAttachedWorkspace(arranged, workspace.id)).path).toBe(fixture.path);
+      expect((await readWorkspace(arranged, workspace.id)).path).toBe(fixture.path);
       expect(hashContents(fixture.world)).toBe(before);
       expect(existsSync(join(fixture.path, "attachment-setup-ran"))).toBe(false);
     });
@@ -267,7 +253,7 @@ describe("workspace.attach", () => {
               mode === "existing"
                 ? await attachOrFail(arranged, { resourceId, runnerId, path })
                 : await provisionWorkspaceOrFail(arranged, { resourceId, runnerId });
-            const [frame] = await waitForFrames<AttachmentFrame>(wire, "workspaceProvision", 1);
+            const [frame] = await waitForFrames<WorkspaceProvision>(wire, "workspaceProvision", 1);
             if (mode === "existing")
               expect(frame!.attachment).toEqual({ path, remoteName: "origin" });
             else expect(frame!.attachment).toBeUndefined();
@@ -279,12 +265,12 @@ describe("workspace.attach", () => {
             expect(report.status, report.message).toBe("ready");
             wire.send(report);
             const ready = await waitUntil("recorded parity readiness", async () => {
-              const current = await readAttachedWorkspace(arranged, workspace.id);
+              const current = await readWorkspace(arranged, workspace.id);
               return current.status === "ready" ? current : undefined;
             });
             expect(ready.runnerId).toBe(runnerId);
             expect(ready.checkouts[0]!.resourceId).toBe(resourceId);
-            expect(ready.ownership).toBe(mode);
+            expect(ready.ownership).toBe(mode === "existing" ? "adopted" : "managed");
             if (mode === "existing") expect(manager.resolve(workspace.id)?.cwd).toBe(path);
             else expect(manager.resolve(workspace.id)?.cwd).not.toBe(path);
           }
@@ -316,7 +302,11 @@ describe("workspace.attach", () => {
         path: join(fixture.path, "nested"),
       });
       expect(workspace.status).toBe("provisioning");
-      const [frame] = await waitForFrames<AttachmentFrame>(arranged.wire, "workspaceProvision", 1);
+      const [frame] = await waitForFrames<WorkspaceProvision>(
+        arranged.wire,
+        "workspaceProvision",
+        1,
+      );
       expect(frame!.workspaceId).toBe(workspace.id);
       expect(frame!.attachment).toEqual({
         path: join(fixture.path, "nested"),
@@ -329,11 +319,11 @@ describe("workspace.attach", () => {
       arranged.wire.send(await manager.provision(frame!));
 
       const ready = await waitUntil("validated the existing checkout", async () => {
-        const current = await readAttachedWorkspace(arranged, workspace.id);
+        const current = await readWorkspace(arranged, workspace.id);
         return current.status === "ready" ? current : undefined;
       });
       expect(ready.path).toBe(fixture.path);
-      expect(ready.ownership).toBe("existing");
+      expect(ready.ownership).toBe("adopted");
       expect(ready.runnerId).toBe(arranged.runnerId);
       expect(manager.resolve(workspace.id)?.cwd).toBe(fixture.path);
       expect(hashContents(fixture.world)).toBe(before);
@@ -359,7 +349,7 @@ describe("workspace.attach", () => {
       expect(duplicate.id).toBe(first.id);
 
       const reconnected = await arranged.reconnect();
-      const [frame] = await waitForFrames<AttachmentFrame>(reconnected, "workspaceProvision", 1);
+      const [frame] = await waitForFrames<WorkspaceProvision>(reconnected, "workspaceProvision", 1);
       expect(frame!.workspaceId).toBe(first.id);
       expect(frame!.attachment).toEqual({ path: fixture.path, remoteName: "origin" });
       const storageDir = createTemporaryDir("hercule-runner-storage-");
@@ -397,7 +387,11 @@ describe("workspace.attach", () => {
           .filter((status) => status >= 200 && status < 300),
       ).toHaveLength(1);
       expect(responses.map((response) => response.status)).toContain(409);
-      const [frame] = await waitForFrames<AttachmentFrame>(arranged.wire, "workspaceProvision", 1);
+      const [frame] = await waitForFrames<WorkspaceProvision>(
+        arranged.wire,
+        "workspaceProvision",
+        1,
+      );
       expect([fixture.path, other]).toContain(frame!.attachment?.path);
       expect(listFramesTagged(arranged.wire, "workspaceProvision")).toHaveLength(1);
       expect(hashContents(fixture.world)).toBe(before);
@@ -466,7 +460,11 @@ describe("workspace.attach", () => {
         runnerId: arranged.runnerId,
         path: fixture.path,
       });
-      const [frame] = await waitForFrames<AttachmentFrame>(arranged.wire, "workspaceProvision", 1);
+      const [frame] = await waitForFrames<WorkspaceProvision>(
+        arranged.wire,
+        "workspaceProvision",
+        1,
+      );
       const storageDir = createTemporaryDir("hercule-runner-storage-");
       const manager = makeWorkspaces({ storageDir, gitEnv: fixture.gitEnv });
       arranged.wire.send(await manager.provision(frame!));
@@ -493,7 +491,7 @@ describe("workspace.attach", () => {
         runnerId: arranged.runnerId,
         path: fixture.path,
       });
-      const [attachment] = await waitForFrames<AttachmentFrame>(
+      const [attachment] = await waitForFrames<WorkspaceProvision>(
         arranged.wire,
         "workspaceProvision",
         1,
@@ -511,7 +509,7 @@ describe("workspace.attach", () => {
         resourceId,
         runnerId: second.runnerId,
       });
-      const [instructionB] = await waitForFrames<AttachmentFrame>(
+      const [instructionB] = await waitForFrames<WorkspaceProvision>(
         second.wire,
         "workspaceProvision",
         1,
@@ -545,7 +543,7 @@ describe("reattaching a normalized checkout root", () => {
         runnerId: arranged.runnerId,
         path: join(fixture.path, "nested"),
       });
-      const [original] = await waitForFrames<AttachmentFrame>(
+      const [original] = await waitForFrames<WorkspaceProvision>(
         arranged.wire,
         "workspaceProvision",
         1,
@@ -554,7 +552,7 @@ describe("reattaching a normalized checkout root", () => {
       const manager = makeWorkspaces({ storageDir, gitEnv: fixture.gitEnv });
       arranged.wire.send(await manager.provision(original!));
       await waitUntil("recorded normalized checkout root", async () => {
-        const current = await readAttachedWorkspace(arranged, workspace.id);
+        const current = await readWorkspace(arranged, workspace.id);
         return current.status === "ready" && current.path === fixture.path ? true : undefined;
       });
       rmdirSync(join(fixture.path, "nested"));
@@ -576,7 +574,11 @@ describe("reattaching a normalized checkout root", () => {
         path: fixture.path,
       });
       expect(repeated.id).toBe(workspace.id);
-      const frames = await waitForFrames<AttachmentFrame>(arranged.wire, "workspaceProvision", 2);
+      const frames = await waitForFrames<WorkspaceProvision>(
+        arranged.wire,
+        "workspaceProvision",
+        2,
+      );
       const replay = frames[1]!;
       expect(replay.attachment).toEqual({ path: fixture.path, remoteName: "origin" });
       expect(replay.checkouts).toEqual(original!.checkouts);

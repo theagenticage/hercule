@@ -4,6 +4,7 @@
  * workspace menu instead, see `buildWorkspaceMenu`.
  */
 import type { Session, Workspace } from "@hercule/contract";
+import { describeStartingRevision } from "../starting-revision";
 
 /** One piece of the label that names the workspace a started thread works in. */
 export type ThreadWorkspaceLabelPiece =
@@ -55,6 +56,13 @@ export const buildThreadWorkspaceLabel = (
       ? [MAIN_WORKSPACE]
       : [MAIN_WORKSPACE, { kind: "branch", text: branch, startedFrom: null }];
   if (checkout === undefined || branch === null) return [{ kind: "workspace", text: "Workspace" }];
-  const base = checkout.baseBranch ?? checkout.defaultBranch;
-  return [{ kind: "branch", text: branch, startedFrom: base === null ? null : `from ${base}` }];
+  const source =
+    checkout.startingRevision === null
+      ? checkout.baseBranch !== null
+        ? `remote branch ${checkout.baseBranch}`
+        : checkout.baseCommit !== null
+          ? `commit ${checkout.baseCommit.slice(0, 8)}`
+          : null
+      : describeStartingRevision(checkout.startingRevision);
+  return [{ kind: "branch", text: branch, startedFrom: source === null ? null : `from ${source}` }];
 };

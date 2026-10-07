@@ -2657,7 +2657,7 @@ export const CLI = {
       },
       workspace: {
         flag: "workspace",
-        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>","branch":"<branch>"} for the repo\'s main workspace, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that already exists. Leave it off for a thread with no checkout.',
+        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>"} to share the repo\'s main workspace without switching its branch, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that already exists. Leave it off for a thread with no checkout. A primary branch may be specified only when spawning from an Agent.',
       },
     },
     errors: {

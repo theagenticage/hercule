@@ -23,7 +23,7 @@
 import { describe, expect, it } from "vitest";
 import { Duration } from "effect";
 import type { WorkspaceDispose } from "@hercule/protocol";
-import type { Run } from "@hercule/contract";
+import type { Run, Workspace } from "@hercule/contract";
 import { del, post } from "../../http/testing";
 import { readRun, startSentWorkflow, waitForRunTo } from "../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS, type Arranged } from "../../sessions/testing";
@@ -37,7 +37,6 @@ import {
   reportWorkspaceReady,
   spawnThread,
   withFleet,
-  type WorkspaceRecord,
 } from "../../workspaces/testing";
 
 const SWEEP = Duration.millis(50);
@@ -108,7 +107,7 @@ const cancelRun = async (arranged: Arranged, runId: string, body: unknown): Prom
   return (await response.json()) as Run;
 };
 
-const waitForDeleted = async (arranged: Arranged, id: string): Promise<WorkspaceRecord> => {
+const waitForDeleted = async (arranged: Arranged, id: string): Promise<Workspace> => {
   const frame = await waitUntil(
     "reserved removal before runner confirmation",
     () =>

@@ -85,6 +85,7 @@ export type SidebarItemContent =
       readonly key: string;
       /** The project the workspace is in, which a new thread joining it starts in. */
       readonly projectId: string;
+      readonly workspaceId: string | null;
       /**
        * The workspace a new thread started from the label joins. `null` for
        * the threads that work without a checkout, and for a workspace that is
@@ -338,6 +339,7 @@ const buildProjectContents = (
         kind: "workspace-label",
         key: `workspace:${section}:${lane.key}`,
         projectId: project.projectId,
+        workspaceId: lane.workspaceId,
         joinableWorkspaceId: lane.joinable ? lane.workspaceId : null,
         clip: lane.label.clip,
         keep: lane.label.keep,

@@ -89,11 +89,9 @@ describe("the new-thread screen", () => {
       "What should the agent do in webshop?",
     );
     expect(
-      screen.getByText(
-        "It works in the main workspace of webshop on moss, on main. You and the agent share the files.",
-      ),
+      screen.getByText("It gets its own worktree of webshop, on a new branch from remote default."),
     ).toBeTruthy();
-    expect(readLip()).toBe("Main workspace" + "main" + "moss");
+    expect(readLip()).toBe("New workspace" + "remote default" + "moss");
     expect(document.activeElement).toBe(field);
   });
 
@@ -205,7 +203,10 @@ describe("the new-thread screen", () => {
         accessMode: "approval-required",
         runnerId: SIDEBAR_FIXTURE.runners[0]!.id,
         projectId: WEBSHOP.id,
-        workspace: { kind: "primary", resourceId: SIDEBAR_FIXTURE.resources[0]!.id },
+        workspace: {
+          kind: "ephemeral",
+          checkouts: [{ resourceId: SIDEBAR_FIXTURE.resources[0]!.id }],
+        },
       },
     ]);
 
@@ -457,7 +458,7 @@ describe("the new-thread screen", () => {
       screen.getByText("It gets its own worktree of webshop, on a new branch from", {
         exact: false,
       }).textContent,
-    ).toBe("It gets its own worktree of webshop, on a new branch from main.");
+    ).toBe("It gets its own worktree of webshop, on a new branch from remote default.");
     expect(screen.getByRole("button", { name: "Full access" }).getAttribute("aria-haspopup")).toBe(
       "dialog",
     );

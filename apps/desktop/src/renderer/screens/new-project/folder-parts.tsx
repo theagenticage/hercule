@@ -26,12 +26,14 @@ export function ChooseFolder({
   pending,
   error,
   hasGitHub,
+  localRunnerUnavailable = false,
   onPick,
 }: {
   readonly pending: boolean;
   /** The folder dialog's error message, or `null`. */
   readonly error: string | null;
   readonly hasGitHub: boolean;
+  readonly localRunnerUnavailable?: boolean;
   readonly onPick: () => void;
 }): JSX.Element {
   return (
@@ -47,12 +49,14 @@ export function ChooseFolder({
           The folder dialog did not open: {error}
         </p>
       )}
-      {hasGitHub ? (
+      {localRunnerUnavailable ? (
+        <p className="st-note">Connect the local runner before choosing a folder on this Mac.</p>
+      ) : hasGitHub ? (
         <p className="st-note">
           <BranchIcon size={14} />
           <span>
-            Threads work in their own workspaces, cloned from the remote.{" "}
-            <b>The folder you pick stays as it is.</b>
+            Threads can work directly in your checkout, or in their own separate copies. The choice
+            is yours.
           </span>
         </p>
       ) : (

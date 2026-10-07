@@ -183,15 +183,15 @@ describe("buildSidebar", () => {
       ],
     });
 
-    // A project with threads in two places labels both, including the
-    // threads that work without a checkout. A project whose threads all
-    // work in one place, and the threads in no project, have no label.
+    // Workspace labels keep retained records accessible even without threads.
+    // A group of threads without a checkout is labelled beside those records.
     expect(
       items.flatMap((item) =>
         item.kind === "workspace-label" ? [[item.joinableWorkspaceId, item.clip, item.keep]] : [],
       ),
     ).toEqual([
       [THREAD_3F1.id, "hercule/thread-3f1", ""],
+      [PRIMARY.id, "webshop", " · moss"],
       [null, "no workspace", ""],
     ]);
   });
@@ -211,6 +211,7 @@ describe("buildSidebar", () => {
       ),
     ).toEqual([
       [null, "hercule/thread-3f1"],
+      [PRIMARY.id, "webshop"],
       [null, "no workspace"],
     ]);
   });
@@ -270,7 +271,7 @@ describe("buildSidebar", () => {
   });
 
   it(`heads the threads in no project "No project", with no tint and no project to start a thread in`, () => {
-    const items = buildItems({ threads: [thread("s-a", 2), thread("s-b", 1)] });
+    const items = buildItems({ threads: [thread("s-a", 2), thread("s-b", 1)], workspaces: [] });
 
     expect(items).toEqual([
       {
@@ -368,7 +369,11 @@ describe("buildSidebar", () => {
   });
 
   it("draws Waiting on you for a waiting assistant when no thread waits", () => {
-    const items = buildItems({ threads: [], assistantRows: [waitingAssistant("ada", 3)] });
+    const items = buildItems({
+      threads: [],
+      workspaces: [],
+      assistantRows: [waitingAssistant("ada", 3)],
+    });
 
     expect(listKeys(items)).toEqual(["header:waiting", "waiting:assistant:ada"]);
   });
@@ -409,8 +414,16 @@ describe("buildSidebar", () => {
     expect(listKeys(items)).not.toContain("more:project:none");
   });
 
-  it("returns no items when there are no threads", () => {
-    expect(buildItems({ threads: [] })).toEqual([]);
+  it("keeps retained workspaces accessible when there are no threads", () => {
+    expect(
+      buildItems({ threads: [] }).flatMap((item) =>
+        item.kind === "workspace-label" ? [item.workspaceId] : [],
+      ),
+    ).toEqual([THREAD_3F1.id, PRIMARY.id]);
+  });
+
+  it("returns no items when there are no threads or workspaces", () => {
+    expect(buildItems({ threads: [], workspaces: [] })).toEqual([]);
   });
 
   it("counts the threads working, waiting on the user and idle, from the poses their rows show", () => {
@@ -527,8 +540,8 @@ describe("pickFocusFallback", () => {
 
   it("picks the item that now sits in the gone item's place when its section is gone", () => {
     const threads = [thread("s-ops", 2, { projectId: OPS_PROJECT.id }), thread("s-last", 1)];
-    const before = buildItems({ threads });
-    const after = buildItems({ threads: [threads[1]!] });
+    const before = buildItems({ threads, workspaces: [] });
+    const after = buildItems({ threads: [threads[1]!], workspaces: [] });
 
     // The ops project held only the gone thread, so its header left with it.
     expect(listKeys(before)).toEqual([

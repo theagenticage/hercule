@@ -184,8 +184,13 @@ export type SetupTokenReadOutcome = typeof SetupTokenReadOutcome.Type;
  */
 export const FolderPickOutcome = Schema.TaggedUnion({
   Cancelled: {},
-  Repository: { name: Schema.String, remote: Schema.String, branch: Schema.NullOr(Schema.String) },
-  NoRemote: { name: Schema.String, branch: Schema.NullOr(Schema.String) },
+  Repository: {
+    name: Schema.String,
+    path: Schema.String,
+    remote: Schema.String,
+    branch: Schema.NullOr(Schema.String),
+  },
+  NoRemote: { name: Schema.String, path: Schema.String, branch: Schema.NullOr(Schema.String) },
   NotGit: { name: Schema.String },
   GitFailed: { name: Schema.String, line: Schema.String },
 });

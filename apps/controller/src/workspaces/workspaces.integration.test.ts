@@ -1,3 +1,4 @@
+import type { Workspace } from "@hercule/contract";
 /**
  * Workspaces over the real API and the real runner socket: what provisioning a
  * primary writes and sends to the runner, how a runner's report changes it,
@@ -19,7 +20,6 @@ import {
   withFleet as withWorkspaces,
   type CheckoutRecord,
   type Frame,
-  type WorkspaceRecord,
 } from "./testing";
 
 const waitForFrameTagged = (wire: Wire, tag: string, index = 0): Promise<Frame> =>
@@ -48,8 +48,8 @@ const provisionWorkspace = (arranged: Arranged, body: unknown): Promise<Response
 const waitForWorkspace = (
   arranged: Arranged,
   id: string,
-  ready: (record: WorkspaceRecord) => boolean,
-): Promise<WorkspaceRecord> =>
+  ready: (record: Workspace) => boolean,
+): Promise<Workspace> =>
   waitUntil("moved the workspace", async () => {
     const record = await readWorkspace(arranged, id);
     return ready(record) ? record : undefined;
@@ -58,10 +58,10 @@ const waitForWorkspace = (
 const queryWorkspaces = async (
   arranged: Arranged,
   search = "",
-): Promise<ReadonlyArray<WorkspaceRecord>> => {
+): Promise<ReadonlyArray<Workspace>> => {
   const response = await get(arranged.harness.base, `/api/v1/workspaces${search}`, arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
-  return ((await response.json()) as { items: ReadonlyArray<WorkspaceRecord> }).items;
+  return ((await response.json()) as { items: ReadonlyArray<Workspace> }).items;
 };
 
 const readCheckoutId = (checkout: CheckoutRecord): string => {

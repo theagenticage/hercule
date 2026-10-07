@@ -43,20 +43,16 @@ import { ageLeases, createRepo, endResumable, listFramesTagged, withFleet } from
 
 afterAll(cleanTemporaries);
 const SWEEP = Duration.millis(50);
-type LifecycleWorkspace = Omit<Workspace, "status"> & {
-  readonly status: Workspace["status"] | "disposing";
-  readonly retentionPolicy: "manual" | "automatic";
-};
-const readWorkspace = async (arranged: Arranged, id: string): Promise<LifecycleWorkspace> => {
+const readWorkspace = async (arranged: Arranged, id: string): Promise<Workspace> => {
   const response = await get(arranged.harness.base, `/api/v1/workspaces/${id}`, arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as LifecycleWorkspace;
+  return (await response.json()) as Workspace;
 };
 const readSession = async (arranged: Arranged, id: string): Promise<Session> =>
   (await (
     await get(arranged.harness.base, `/api/v1/sessions/${id}`, arranged.token)
   ).json()) as Session;
-const waitStatus = (arranged: Arranged, id: string, status: LifecycleWorkspace["status"]) =>
+const waitStatus = (arranged: Arranged, id: string, status: Workspace["status"]) =>
   waitUntil(`workspace became ${status}`, async () => {
     const workspace = await readWorkspace(arranged, id);
     return workspace.status === status ? workspace : undefined;

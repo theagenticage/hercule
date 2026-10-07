@@ -135,8 +135,9 @@ export interface LaunchedApp {
 export async function launchForTest(
   userDataDir = createUserDataDirForTest(),
   prepareFirstWindow?: (app: ElectronApplication, page: Page) => Promise<void>,
+  recordVideo?: Parameters<typeof launchTestPackage>[1],
 ): Promise<LaunchedApp> {
-  const app = await launchTestPackage(userDataDir);
+  const app = await launchTestPackage(userDataDir, recordVideo);
   let closing: Promise<void> | undefined;
   const close = () => (closing ??= quitApp(app));
   onTestFinished(close);
