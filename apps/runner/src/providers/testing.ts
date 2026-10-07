@@ -82,16 +82,18 @@ export const WAIT_MS = 2_000;
 /**
  * Waits until `ready` returns true. Fails the test with a message built from
  * `what` when `budgetMs` runs out. A test that drives a real harness over a
- * network passes a longer budget.
+ * network passes a longer budget. `what` may be a function, so the message can
+ * describe the state at the timeout rather than at the start of the wait.
  */
 export const waitUntil = async (
-  what: string,
+  what: string | (() => string),
   ready: () => boolean,
   budgetMs: number = WAIT_MS,
 ): Promise<void> => {
   const deadline = Date.now() + budgetMs;
   while (!ready() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 1));
-  expect(ready(), `the adapter never ${what}`).toBe(true);
+  if (ready()) return;
+  expect(ready(), `the adapter never ${typeof what === "string" ? what : what()}`).toBe(true);
 };
 
 /**

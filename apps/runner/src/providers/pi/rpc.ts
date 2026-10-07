@@ -53,7 +53,8 @@ export interface PiRpc {
  */
 export const RPC_DEADLINE: Duration.Duration = Duration.seconds(5);
 
-const GONE = "pi exited or closed its output";
+/** The error `send` fails with when pi exited, or closed its output, before it responded. */
+export const PI_GONE = "pi exited or closed its output";
 
 const describeError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -111,14 +112,14 @@ export const makeRpc = (
     gone = true;
     for (const [id, waiting] of pending) {
       pending.delete(id);
-      Deferred.doneUnsafe(waiting, Effect.fail(GONE));
+      Deferred.doneUnsafe(waiting, Effect.fail(PI_GONE));
     }
   };
 
   return {
     send: (command) =>
       Effect.suspend(() => {
-        if (gone) return Effect.fail(GONE);
+        if (gone) return Effect.fail(PI_GONE);
         const id = `hercule-${next++}`;
         const settled = Deferred.makeUnsafe<Record<string, unknown>, string>();
         // Register the waiter before writing, because pi can respond before

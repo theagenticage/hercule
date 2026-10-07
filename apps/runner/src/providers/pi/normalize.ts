@@ -20,6 +20,7 @@ import type {
   ProviderEvent,
   StreamKind,
   StructuredResult,
+  SubagentId,
   TurnState,
   Usage,
 } from "@hercule/protocol";
@@ -27,7 +28,7 @@ import { clampCount, buildEnvelope, buildRaw, type Envelope } from "../normalize
 import { ensureId } from "../events";
 import { judgeAnswer } from "../structured-result";
 import { truncateFact, truncateMessage } from "../text";
-import { SUBMIT_RESULT_TOOL } from "./extension";
+import { SUBAGENT_TOOL, SUBMIT_RESULT_TOOL } from "./extension";
 
 /** The channel name every raw payload from this adapter is reported under. */
 const PI_EVENT = "pi.rpc.event";
@@ -44,6 +45,7 @@ interface PiUsage {
 /** The fields of an assistant message that this module reads. */
 interface PiMessage {
   readonly role?: unknown;
+  readonly content?: ReadonlyArray<{ readonly type?: unknown; readonly text?: unknown }>;
   readonly usage?: PiUsage;
   readonly stopReason?: unknown;
   readonly errorMessage?: unknown;
@@ -93,6 +95,11 @@ export interface RunningTool extends Running {
   readonly toolName: string;
   readonly args: Record<string, unknown> | undefined;
   seen: string;
+  /**
+   * The subagent a `subagent` call started, once the adapter started it. The
+   * call's `item.completed` lists it in `detail.subagentIds`.
+   */
+  subagentId?: SubagentId;
 }
 
 interface Totals {
@@ -105,6 +112,11 @@ interface Totals {
 
 export interface Normalizing {
   readonly sessionId: string;
+  /**
+   * The subagent this state normalizes the pi process of, or undefined for the
+   * session's own agent. Every event the state produces is attributed to it.
+   */
+  readonly subagentId: SubagentId | undefined;
   /** The native session id, put on every event so a surface can link the two sessions. */
   readonly nativeSessionId: string;
   /**
@@ -127,9 +139,20 @@ export interface Normalizing {
    * be shown back to them as a failure.
    */
   readonly declined: Set<string>;
-  /** Usage summed over the pi turns of the current Hercule turn, and of the whole session. */
+  /**
+   * Usage summed three ways: over the pi runs of the current turn, over this
+   * agent's whole process, and over the whole session. Every agent of a
+   * session shares one `sessionTotals` object, so the session's total counts
+   * each subagent too, also after the subagent has ended.
+   */
   readonly turnTotals: Totals;
+  readonly agentTotals: Totals;
   readonly sessionTotals: Totals;
+  /**
+   * The text of the last assistant message of the current turn, or "" when it
+   * has written none yet. A subagent's reply to its parent is this text.
+   */
+  lastAssistantText: string;
   /**
    * How the last assistant message stopped, which decides how the turn ends:
    * pi reports an abort or a failure on the message, not on the settle.
@@ -187,6 +210,7 @@ export const buildNormalizingState = (
   outputSchema: OutputSchema | undefined,
 ): Normalizing => ({
   sessionId,
+  subagentId: undefined,
   nativeSessionId,
   model: undefined,
   turnId: undefined,
@@ -194,7 +218,9 @@ export const buildNormalizingState = (
   tools: new Map(),
   declined: new Set(),
   turnTotals: createZeroTotals(),
+  agentTotals: createZeroTotals(),
   sessionTotals: createZeroTotals(),
+  lastAssistantText: "",
   stopped: { state: "completed" },
   endedBySystem: undefined,
   announced: false,
@@ -205,6 +231,28 @@ export const buildNormalizingState = (
   refusedAnswers: 0,
 });
 
+/**
+ * Returns the state for a subagent's pi process in the session `session`
+ * normalizes. The subagent runs on the session's current model and adds its
+ * usage to the session's total. It has no output schema: only the session's
+ * own agent answers with one.
+ */
+export const buildSubagentState = (session: Normalizing, subagentId: SubagentId): Normalizing => ({
+  ...buildNormalizingState(session.sessionId, session.nativeSessionId, undefined),
+  subagentId,
+  model: session.model,
+  sessionTotals: session.sessionTotals,
+});
+
+/** Returns the fields every event of this agent starts with: the session's envelope and the agent's attribution. */
+const buildAgentEnvelope = (
+  state: Normalizing,
+): Envelope & { readonly subagentId?: SubagentId } => ({
+  ...buildSessionEnvelope(state),
+  ...(state.subagentId === undefined ? {} : { subagentId: state.subagentId }),
+});
+
+/** Returns the session's envelope with no attribution, for an event about the whole session. */
 const buildSessionEnvelope = (state: Normalizing): Envelope =>
   buildEnvelope(state.sessionId, { nativeSessionId: state.nativeSessionId });
 
@@ -254,6 +302,12 @@ const findLastAssistant = (event: PiEvent): PiMessage | undefined => {
   return event.message;
 };
 
+/** Returns the text parts of an assistant message joined into one string, or "" when it has none. */
+const readMessageText = (message: PiMessage | undefined): string =>
+  (message?.content ?? [])
+    .map((part) => (part.type === "text" && typeof part.text === "string" ? part.text : ""))
+    .join("");
+
 /**
  * Returns how a turn ends, based on the stop reason of its last message:
  * interrupted for an abort, failed with pi's error message for an error, and
@@ -277,7 +331,7 @@ const classifyStop = (message: PiMessage | undefined): Normalizing["stopped"] =>
  */
 const buildRuntimeError = (state: Normalizing, name: string, message: string): ProviderEvent => ({
   _tag: "runtime.error",
-  ...buildSessionEnvelope(state),
+  ...buildAgentEnvelope(state),
   ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
   class: truncateFact(name),
   ...(message === "" ? {} : { message: truncateMessage(message) }),
@@ -326,7 +380,7 @@ const warnIfCutOff = (
 
 const buildRuntimeWarning = (state: Normalizing, message: string): ProviderEvent => ({
   _tag: "runtime.warning",
-  ...buildSessionEnvelope(state),
+  ...buildAgentEnvelope(state),
   ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
   message: truncateMessage(message),
 });
@@ -339,8 +393,12 @@ const BLOCKS: Readonly<
   thinking: { kind: "reasoning", streamKind: "reasoning_text" },
 };
 
-/** The item kinds of pi's built-in tools. Any other tool is a `tool_call`. */
+/**
+ * The item kinds of pi's built-in tools and of the runner's `subagent` tool.
+ * Any other tool is a `tool_call`.
+ */
 const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
+  [SUBAGENT_TOOL]: "subagent",
   bash: "command_execution",
   powershell: "command_execution",
   edit: "file_change",
@@ -348,13 +406,18 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
 };
 
 /**
- * Builds the one detail field a row shows for a tool item: the command, the
- * file path, or else the tool name. The full arguments are in `raw`.
+ * Builds the one detail field a row shows for a tool item: the task a
+ * subagent was given, the command, the file path, or else the tool name. The
+ * full arguments are in `raw`.
  */
 const buildToolDetail = (
   toolName: string,
   args: Record<string, unknown> | undefined,
 ): Schema.Json => {
+  const description = args?.["description"];
+  if (toolName === SUBAGENT_TOOL && typeof description === "string") {
+    return { name: truncateFact(toolName), description: truncateMessage(description) };
+  }
   const command = args?.["command"];
   if (typeof command === "string") return { command: truncateMessage(command) };
   const path = args?.["path"];
@@ -381,7 +444,7 @@ const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
     const itemId = crypto.randomUUID();
     state.blocks.set(index, { itemId, kind: block.kind });
     return [
-      { _tag: "item.started", ...buildSessionEnvelope(state), turnId, itemId, kind: block.kind },
+      { _tag: "item.started", ...buildAgentEnvelope(state), turnId, itemId, kind: block.kind },
     ];
   }
   const running = state.blocks.get(index);
@@ -391,7 +454,7 @@ const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
     return [
       {
         _tag: "item.completed",
-        ...buildSessionEnvelope(state),
+        ...buildAgentEnvelope(state),
         turnId,
         itemId: running.itemId,
         kind: running.kind,
@@ -403,7 +466,7 @@ const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
     ? [
         {
           _tag: "content.delta",
-          ...buildSessionEnvelope(state),
+          ...buildAgentEnvelope(state),
           turnId,
           itemId: running.itemId,
           streamKind: block.streamKind,
@@ -433,7 +496,7 @@ const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<Provider
   return [
     {
       _tag: "item.started",
-      ...buildSessionEnvelope(state),
+      ...buildAgentEnvelope(state),
       ...buildLineRaw(event),
       turnId: ensureTurnId(state),
       itemId: item.itemId,
@@ -458,7 +521,7 @@ const onToolUpdate = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
     : [
         {
           _tag: "content.delta",
-          ...buildSessionEnvelope(state),
+          ...buildAgentEnvelope(state),
           turnId: ensureTurnId(state),
           itemId: item.itemId,
           streamKind: "command_output",
@@ -486,15 +549,26 @@ const onToolEnd = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEv
   return [
     {
       _tag: "item.completed",
-      ...buildSessionEnvelope(state),
+      ...buildAgentEnvelope(state),
       ...buildLineRaw(event),
       turnId: ensureTurnId(state),
       itemId: item.itemId,
       kind: item.kind,
       status: refused ? "declined" : event.isError === true ? "failed" : "completed",
-      ...(item.detail === undefined ? {} : { detail: item.detail }),
+      ...buildCompletedDetail(item),
     },
   ];
+};
+
+/**
+ * Returns the detail an item's `item.completed` carries: its own detail, plus
+ * the subagent it started when it is a `subagent` call that started one.
+ */
+const buildCompletedDetail = (item: Running & { readonly subagentId?: SubagentId }) => {
+  if (item.subagentId === undefined)
+    return item.detail === undefined ? {} : { detail: item.detail };
+  const detail = typeof item.detail === "object" && item.detail !== null ? item.detail : {};
+  return { detail: { ...detail, subagentIds: [item.subagentId] } };
 };
 
 /**
@@ -511,12 +585,12 @@ const failOpenItems = (state: Normalizing, turnId: string): ReadonlyArray<Provid
   state.declined.clear();
   return open.map((item) => ({
     _tag: "item.completed",
-    ...buildSessionEnvelope(state),
+    ...buildAgentEnvelope(state),
     turnId,
     itemId: item.itemId,
     kind: item.kind,
     status: "failed",
-    ...(item.detail === undefined ? {} : { detail: item.detail }),
+    ...buildCompletedDetail(item),
   }));
 };
 
@@ -537,6 +611,30 @@ const judgeTurn = (state: Normalizing, ended: TurnState): StructuredResult | und
       : { value: state.answer },
   );
 };
+
+/**
+ * Builds the usage events an agent's state reports: the session's total, and
+ * before it, for a subagent, the subagent's own count. The session total
+ * includes every agent of the session, so it is reported whichever agent
+ * changed it. Exported because the adapter also reports a subagent's count
+ * when the session ends while the subagent runs.
+ */
+export const buildUsageEvents = (state: Normalizing): ReadonlyArray<ProviderEvent> => [
+  ...(state.subagentId === undefined
+    ? []
+    : [
+        {
+          _tag: "session.usage.updated" as const,
+          ...buildAgentEnvelope(state),
+          usage: buildUsage(state.agentTotals),
+        },
+      ]),
+  {
+    _tag: "session.usage.updated",
+    ...buildSessionEnvelope(state),
+    usage: buildUsage(state.sessionTotals),
+  },
+];
 
 /**
  * Ends the turn in flight and every item still running in it, and resets the
@@ -567,17 +665,13 @@ export const endTurn = (
   state.refusedAnswers = 0;
   return [
     ...closing,
-    {
-      _tag: "session.usage.updated",
-      ...buildSessionEnvelope(state),
-      usage: buildUsage(state.sessionTotals),
-    },
+    ...buildUsageEvents(state),
     {
       _tag: "turn.completed",
-      ...buildSessionEnvelope(state),
+      ...buildAgentEnvelope(state),
       turnId,
       state: stopped.state,
-      usage: buildUsage(state.sessionTotals),
+      usage: buildUsage(state.agentTotals),
       costUsd: cost,
       ...(stopped.error === undefined ? {} : { error: truncateMessage(stopped.error) }),
       ...(structuredResult === undefined ? {} : { structuredResult }),
@@ -623,23 +717,30 @@ export const normalize = (
       if (state.announced) return [];
       state.announced = true;
       resetTotals(state.turnTotals);
+      state.lastAssistantText = "";
       const turnId = ensureTurnId(state);
       return [
         {
           _tag: "turn.started",
-          ...buildSessionEnvelope(state),
+          ...buildAgentEnvelope(state),
           turnId,
           ...(state.model === undefined ? {} : { model: truncateFact(state.model) }),
         },
       ];
     }
-    case "turn_end":
+    case "turn_end": {
       // pi reports usage per assistant message and its tool calls, so both the
       // turn's cost and the session's are summed here.
       addUsage(state.turnTotals, event.message?.usage);
+      addUsage(state.agentTotals, event.message?.usage);
       addUsage(state.sessionTotals, event.message?.usage);
+      // A message that only calls tools has no text, and the reply is the
+      // last message that says something.
+      const text = readMessageText(event.message);
+      if (text !== "") state.lastAssistantText = text;
       recordStop(state, event.message);
       return warnIfCutOff(state, event.message);
+    }
     case "agent_end":
       // pi is about to run again in the same turn, so ending the turn here
       // would report it as over while it is still going.

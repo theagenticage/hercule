@@ -27,6 +27,11 @@ export const requiresApproval = (mode: AccessMode, toolName: string): boolean =>
   // every unattended session that has an output schema, with nobody there to
   // answer.
   if (toolName === "submit_result") return false;
+  // The runner's own tool for starting a subagent, written out for the same
+  // reason. Starting one changes nothing on the machine by itself, and the
+  // subagent runs under the same access mode, so each of its own calls is
+  // asked about like any other.
+  if (toolName === "subagent") return false;
   // pi's read-only built-in tools: reading the workspace changes nothing.
   const reading = ["read", "grep", "find", "ls"];
   // The tools each mode runs without asking. Full access has no row, because

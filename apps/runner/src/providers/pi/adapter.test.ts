@@ -12,7 +12,7 @@ import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
 import { NO_USER_MATERIAL_PATHS } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
-import { OUTPUT_SCHEMA_VARIABLE, SUBMIT_RESULT_TOOL } from "./extension";
+import { AGENT_FILE_VARIABLE, OUTPUT_SCHEMA_VARIABLE, SUBMIT_RESULT_TOOL } from "./extension";
 import {
   buildFakePiSeam,
   startBusySession,
@@ -47,7 +47,7 @@ const buildFlags = (home: string): ReadonlyArray<string> => [
   "--no-approve",
   "--offline",
   "-e",
-  join(home, "hercule-extension.ts"),
+  join(home, `extension-${SESSION}.ts`),
   "--session-dir",
   join(home, "sessions"),
   "--session-id",
@@ -129,13 +129,23 @@ describe("launching pi for a session", () => {
   it("writes the extension pi loads, with the approval dialog tied to the abort signal", async () => {
     const run = await startTestSession();
 
-    const path = join(run.ctx.home, "hercule-extension.ts");
-    expect(existsSync(path)).toBe(true);
+    const path = join(run.ctx.home, `extension-${SESSION}.ts`);
+    expect(run.child.env[AGENT_FILE_VARIABLE]).toBe(path);
     const source = readFileSync(path, "utf8");
     expect(source).not.toBe("");
     // Without the signal, an abort leaves the dialog waiting forever, and the
     // session stuck with it.
     expect(source).toContain("signal: ctx.signal");
+  });
+
+  it("kills what the session's bash calls left running once its pi exits, then deletes its extension", async () => {
+    const run = await startTestSession();
+    const path = join(run.ctx.home, `extension-${SESSION}.ts`);
+
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+
+    await waitUntil("deleted the session's extension", () => !existsSync(path));
+    expect(run.cleanedFiles).toEqual([path]);
   });
 
   it("resumes a native session by its transcript file, never by its id", async () => {
@@ -429,10 +439,11 @@ describe("how a turn ends after the user stops it", () => {
     expect(filterByTag(run.seen, "runtime.error")).toEqual([]);
   });
 
-  it("is not stopped by an interrupt that names a subagent, because the adapter reports no subagents yet", async () => {
+  it("is not stopped by an interrupt that names a subagent that is not running", async () => {
     const run = await startBusySession();
 
-    // The user asked to stop one subagent, not the session's own turn.
+    // The user asked to stop one subagent, not the session's own turn, and
+    // stopping a subagent that already ended does nothing.
     await Effect.runPromise(run.adapter.interrupt(SESSION, "child-1"));
     expect(listSentCommands(run.sent, "abort")).toEqual([]);
 

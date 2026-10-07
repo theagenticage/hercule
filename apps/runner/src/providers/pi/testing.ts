@@ -171,6 +171,8 @@ export interface Spawn {
   readonly cwd: string | null;
   /** Pushes an event to pi's stdout, as pi does with everything but responses. */
   readonly push: (event: unknown) => void;
+  /** The commands the adapter wrote to this pi alone, in the order written. */
+  readonly sent: ReadonlyArray<Sent>;
   readonly stdinClosed: () => boolean;
   readonly kills: () => number;
   /**
@@ -262,10 +264,12 @@ export const buildFakePiSeam = (
   readonly spawns: Array<Spawn>;
   readonly sent: Array<Sent>;
   readonly runs: Array<RunCall>;
+  readonly cleanedFiles: Array<string>;
 } => {
   const spawns: Array<Spawn> = [];
   const sent: Array<Sent> = [];
   const runs: Array<RunCall> = [];
+  const cleanedFiles: Array<string> = [];
   const replies: Answers = { ...DEFAULT_ANSWERS, ...behaviour.answers };
   const spawn = (
     command: ReadonlyArray<string>,
@@ -274,6 +278,7 @@ export const buildFakePiSeam = (
   ) => {
     const out = createLines();
     const err = createLines();
+    const sentToThisPi: Array<Sent> = [];
     let kills = 0;
     let closed = false;
     let resolveExited: (code: number) => void = () => undefined;
@@ -291,6 +296,7 @@ export const buildFakePiSeam = (
       const type = frame["type"];
       if (typeof type !== "string") return;
       sent.push({ type, command: frame });
+      sentToThisPi.push({ type, command: frame });
       // An extension UI response is not a command, so pi never responds to it.
       if (type === "extension_ui_response") return;
       const reply = replies[type]?.(frame);
@@ -333,6 +339,7 @@ export const buildFakePiSeam = (
       env,
       cwd,
       push: (event) => out.push(JSON.stringify(event)),
+      sent: sentToThisPi,
       stdinClosed: () => closed,
       kills: () => kills,
       crash: (...complaints) => {
@@ -356,8 +363,11 @@ export const buildFakePiSeam = (
       if (args === "auth check --provider zai --json") return Effect.succeed(answerAuthCheck(env));
       return Effect.succeed({ code: 1, stdout: "", stderr: `unknown command: ${args}` });
     },
+    // A fake pi starts no bash call, so no process holds its file. The file is
+    // recorded, so a test can check that an agent's leftovers were killed.
+    killProcessesHolding: (file) => Effect.sync(() => void cleanedFiles.push(file)),
   };
-  return { seam, spawns, sent, runs };
+  return { seam, spawns, sent, runs, cleanedFiles };
 };
 
 /** Creates an adapter on a fake pi, and collects every event it emits. */
@@ -370,15 +380,24 @@ export const createDriving = (
   readonly spawns: Array<Spawn>;
   readonly sent: Array<Sent>;
   readonly runs: Array<RunCall>;
+  readonly cleanedFiles: Array<string>;
   readonly seen: Array<ProviderEvent>;
 } => {
-  const { seam, spawns, sent, runs } = buildFakePiSeam(behaviour);
+  const { seam, spawns, sent, runs, cleanedFiles } = buildFakePiSeam(behaviour);
   const adapter = makePiAdapter(seam);
   const seen: Array<ProviderEvent> = [];
   Effect.runFork(
     Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
   );
-  return { adapter, ctx: buildContext(createPiHome(), cwd), spawns, sent, runs, seen };
+  return {
+    adapter,
+    ctx: buildContext(createPiHome(), cwd),
+    spawns,
+    sent,
+    runs,
+    cleanedFiles,
+    seen,
+  };
 };
 
 export const listSentCommands = (
@@ -387,12 +406,18 @@ export const listSentCommands = (
 ): ReadonlyArray<Record<string, unknown>> =>
   sent.filter((one) => one.type === type).map((one) => one.command);
 
-/** Starts a session on a fake pi. Returns the adapter setup and the pi hosting the session. */
+/**
+ * Starts a session on a fake pi. `runnerEnv` holds variables added to the
+ * runner's own environment, which the adapter passes on to pi. Returns the
+ * adapter setup and the pi hosting the session.
+ */
 export const startTestSession = async (
   behaviour: FakePiBehaviour = {},
   spec: SessionSpec = SPEC,
+  runnerEnv: Readonly<Record<string, string>> = {},
 ): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
-  const run = createDriving(behaviour);
+  const driving = createDriving(behaviour);
+  const run = { ...driving, ctx: { ...driving.ctx, env: { ...driving.ctx.env, ...runnerEnv } } };
   await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
   await waitUntil("spawned a pi", () => run.spawns.length === 1);
   return { ...run, child: run.spawns[0]! };
@@ -401,8 +426,10 @@ export const startTestSession = async (
 /** Starts a session with a turn running, so the next input steers that turn. */
 export const startBusySession = async (
   behaviour: FakePiBehaviour = {},
+  spec: SessionSpec = SPEC,
+  runnerEnv: Readonly<Record<string, string>> = {},
 ): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
-  const run = await startTestSession(behaviour);
+  const run = await startTestSession(behaviour, spec, runnerEnv);
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
   run.child.push({ type: "agent_start" });
   await waitUntil(

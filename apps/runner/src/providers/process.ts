@@ -3,6 +3,7 @@
  * so a test can check what an adapter would run (above all, the vendor
  * installer) without running it.
  */
+import { readdirSync, readlinkSync, realpathSync } from "node:fs";
 import * as Effect from "effect/Effect";
 import type { AppServerSpawn } from "./codex";
 import type { LoginChild, LoginSpawn } from "./login";
@@ -48,6 +49,72 @@ export const runProcess: Run = (command, env) =>
     },
     catch: (error) => (error instanceof Error ? error.message : String(error)),
   }).pipe(Effect.catch((message) => Effect.succeed({ code: 1, stdout: "", stderr: message })));
+
+/**
+ * Returns the ids of the processes that hold `file` open: from `lsof` on
+ * macOS, and from each process's open files under `/proc` on Linux. A process
+ * whose open files cannot be read, such as one of another user, is left out,
+ * and a file that does not exist is held by none.
+ */
+const listProcessesHolding = (file: string): Effect.Effect<ReadonlyArray<number>> => {
+  if (process.platform === "darwin") {
+    // lsof exits with 1 when no process holds the file, which is not an error
+    // here. Its full path is used because a runner's PATH may leave out
+    // /usr/sbin, where macOS keeps it.
+    return runProcess(["/usr/sbin/lsof", "-t", file], process.env).pipe(
+      Effect.map((ran) =>
+        ran.stdout
+          .split("\n")
+          .filter((line) => line !== "")
+          .map(Number),
+      ),
+    );
+  }
+  return Effect.sync(() => {
+    let target: string;
+    try {
+      target = realpathSync(file);
+    } catch {
+      // A file that does not exist is held by no process.
+      return [];
+    }
+    return readdirSync("/proc")
+      .filter((entry) => /^\d+$/.test(entry))
+      .filter((pid) => {
+        try {
+          const dir = `/proc/${pid}/fd`;
+          return readdirSync(dir).some((fd) => readlinkSync(`${dir}/${fd}`) === target);
+        } catch {
+          return false;
+        }
+      })
+      .map(Number);
+  });
+};
+
+/**
+ * Kills, with SIGKILL, every process that holds `file` open. Does nothing when
+ * the file does not exist. The pi adapter uses this to end what an agent's
+ * bash calls left running once the agent's pi has exited, because each of
+ * those processes holds the agent's file open.
+ */
+export const killProcessesHolding = (file: string): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    // A holder can start another process between the listing and the kill, and
+    // the new one holds the file too. So list again after each round of kills,
+    // until no process holds it. Three rounds end any ordinary process tree.
+    for (let round = 0; round < 3; round += 1) {
+      const holders = yield* listProcessesHolding(file);
+      if (holders.length === 0) return;
+      for (const pid of holders) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // The process has already exited.
+        }
+      }
+    }
+  });
 
 const decodeStream = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> => {
   const decoder = new TextDecoder();

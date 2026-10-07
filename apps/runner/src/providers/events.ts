@@ -3,7 +3,7 @@
  * than events it reads from the harness's output. Also the helper that makes an
  * id valid for the protocol.
  */
-import type { ProviderEvent } from "@hercule/protocol";
+import type { ProviderEvent, SubagentId } from "@hercule/protocol";
 import { now } from "../report";
 import { truncateFact } from "./text";
 
@@ -25,6 +25,8 @@ export const ensureId = (given: string): string =>
  */
 export const buildUserMessage = (input: {
   readonly sessionId: string;
+  /** The subagent the message is for, or undefined for the session's own agent. */
+  readonly subagentId?: SubagentId | undefined;
   readonly turnId: string;
   readonly text: string;
   readonly steered: boolean;
@@ -34,6 +36,7 @@ export const buildUserMessage = (input: {
   const item = {
     sessionId: input.sessionId,
     at: now(),
+    ...(input.subagentId === undefined ? {} : { subagentId: input.subagentId }),
     turnId: input.turnId,
     itemId: crypto.randomUUID(),
     kind: "user_message",
