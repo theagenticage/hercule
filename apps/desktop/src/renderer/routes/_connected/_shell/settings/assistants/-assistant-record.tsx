@@ -14,7 +14,7 @@ import { useSavedAssistantField } from "./-saved-assistant-field";
 /**
  * Renders the settings of one assistant, in its hue: its face and name, how
  * it works, its heartbeat, its rotation, and Delete. `onDeleted` is called
- * once the assistant is deleted, to pick another one.
+ * with the assistant's id once it is deleted.
  */
 export function AssistantRecord({
   assistant,
@@ -23,7 +23,7 @@ export function AssistantRecord({
 }: {
   readonly assistant: Assistant;
   readonly pose: Pose;
-  readonly onDeleted: () => void;
+  readonly onDeleted: (id: string) => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const settings = useSuspenseQuery(settingsQuery(client)).data;

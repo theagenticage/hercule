@@ -127,8 +127,10 @@ function Assistants(): JSX.Element {
             key={assistant.id}
             assistant={assistant}
             pose={picked.pose}
-            onDeleted={() => {
-              void navigate({ search: {} });
+            onDeleted={(id) => {
+              // The delete can answer after another assistant was picked, and
+              // that pick stays.
+              void navigate({ search: (prev) => (prev.assistant === id ? {} : prev) });
             }}
           />
         </div>

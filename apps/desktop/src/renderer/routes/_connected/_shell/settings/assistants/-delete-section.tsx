@@ -10,15 +10,15 @@ import { SettingRow } from "../../../../../screens/settings/setting-row";
 /**
  * Renders the Delete section of an assistant: a row whose button asks for a
  * confirmation in a dialog, which says what goes and what stays before
- * anything is deleted. `onDeleted` is called once the controller has
- * deleted the assistant and it is gone from the cached list.
+ * anything is deleted. `onDeleted` is called with the assistant's id once
+ * the controller has deleted it and it is gone from the cached list.
  */
 export function DeleteSection({
   assistant,
   onDeleted,
 }: {
   readonly assistant: Assistant;
-  readonly onDeleted: () => void;
+  readonly onDeleted: (id: string) => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
@@ -30,7 +30,7 @@ export function DeleteSection({
       dialogRef.current?.close();
       const { queryKey } = assistantsQuery(client);
       queryClient.setQueryData(queryKey, (list) => list?.filter(({ id }) => id !== assistant.id));
-      onDeleted();
+      onDeleted(assistant.id);
       // Read again, so a read that started before the delete cannot bring
       // the assistant back.
       await queryClient.invalidateQueries({ queryKey });

@@ -296,6 +296,41 @@ describe("Settings > Assistants", () => {
     expect(within(tabs).queryByRole("link", { name: "Ada" })).toBeNull();
   });
 
+  it("keeps the assistant picked while a delete was still running", async () => {
+    const store = storeAssistants();
+    const remove = `DELETE /api/v1/assistants/${ADA.id}`;
+    const deleteFromStore = store[remove]!;
+    const held = holdAnswer();
+    await openAssistants({
+      ...store,
+      [remove]: async (call) => {
+        await held.handler();
+        return deleteFromStore(call);
+      },
+    });
+    // Hercule sorts before Milo, so it is the one picked once Ada is gone,
+    // unless the pick of Milo stays.
+    await userEvent.click(screen.getByRole("button", { name: "New assistant" }));
+    await screen.findByRole("heading", { level: 2, name: "Hercule" });
+    const tabs = screen.getByRole("navigation", { name: "Choose an assistant" });
+    await userEvent.click(within(tabs).getByRole("link", { name: "Ada" }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Delete assistant" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete Ada?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(tabs).getByRole("link", { name: "Milo" }));
+    await screen.findByRole("heading", { level: 2, name: "Milo" });
+    held.answer({ body: {} });
+
+    await waitFor(() => {
+      expect(within(tabs).queryByRole("link", { name: "Ada" })).toBeNull();
+    });
+    // The reset would come after the cache drops Ada, in the same answer.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.getByRole("heading", { level: 2, name: "Milo" })).toBeTruthy();
+  });
+
   it("puts a field back and shows why under its row when the save fails", async () => {
     await openAssistants({
       [`PATCH /api/v1/assistants/${ADA.id}`]: {
