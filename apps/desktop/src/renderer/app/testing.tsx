@@ -1090,6 +1090,7 @@ export const buildFixtureMessage = (
     senderLabel: senderRole === "owner" ? "rogier" : assistant.name,
     sessionId: null,
     turnId: null,
+    itemId: null,
     actor: senderRole === "owner" ? "user" : "system",
     createdAt: new Date(FIRST_MESSAGE_AT + over.position * 60_000).toISOString(),
     ...over,

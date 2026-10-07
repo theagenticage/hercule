@@ -41,6 +41,15 @@ import {
 } from "./notices";
 
 /**
+ * The text of one reply, and the assistant text it holds: the item id of that
+ * text in the transcript, or null when the reply joins several texts.
+ */
+interface ReplyText {
+  readonly itemId: string | null;
+  readonly text: string;
+}
+
+/**
  * Builds the assistants domain's observer. It is exported so boot can combine
  * it with the other domains' observers (see `combineSessionObservers`).
  */
@@ -50,7 +59,8 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
 
   /**
    * Returns the texts the reply mode turns into replies for one report, in
-   * the order they are written:
+   * the order they are written, each with the item id of the assistant text
+   * it holds:
    *
    * - `turn-end`, when the turn completes: the turn's last assistant text.
    *   The texts before it are the narration between tool calls, and the
@@ -59,7 +69,8 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
    *   of the turn, in order, as one reply with a blank line between texts.
    *   A turn cut short has no answer, so its last text is just the fragment
    *   that happened to follow the last tool call. Showing all of it shows
-   *   the owner everything the assistant said.
+   *   the owner everything the assistant said. The reply holds several
+   *   texts, so its item id is null.
    * - `segments`: when an assistant message is completed, its text.
    *
    * A report of anything else, or with no assistant text, gives none. The
@@ -69,16 +80,19 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
     session: StoredSession,
     event: ProviderEvent,
     reply: AssistantReply,
-  ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+  ): Effect.Effect<ReadonlyArray<ReplyText>, SqlError> =>
     Effect.gen(function* () {
       if (reply === "turn-end" && event._tag === "turn.completed") {
-        const texts = (yield* readAssistantTexts(sql, {
+        const texts = yield* readAssistantTexts(sql, {
           sessionId: session.id,
           turnId: event.turnId,
-        })).map((item) => item.text);
+        });
         if (event.state === "completed") return texts.slice(-1);
-        const partialReply = texts.filter((text) => text !== "").join("\n\n");
-        return partialReply === "" ? [] : [partialReply];
+        const partialReply = texts
+          .map((item) => item.text)
+          .filter((text) => text !== "")
+          .join("\n\n");
+        return partialReply === "" ? [] : [{ itemId: null, text: partialReply }];
       }
       if (
         reply === "segments" &&
@@ -86,12 +100,11 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         event.kind === "assistant_message" &&
         event.status === "completed"
       ) {
-        const texts = yield* readAssistantTexts(sql, {
+        return yield* readAssistantTexts(sql, {
           sessionId: session.id,
           turnId: event.turnId,
           itemId: event.itemId,
         });
-        return texts.map((item) => item.text);
       }
       return [];
     });
@@ -107,7 +120,11 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         if (!mayProduceReplies) return;
         const answered = yield* readAnsweredConversation(session);
         if (Option.isNone(answered)) return;
-        for (const text of yield* readReplyTexts(session, event, answered.value.reply)) {
+        for (const { itemId, text } of yield* readReplyTexts(
+          session,
+          event,
+          answered.value.reply,
+        )) {
           if (text === "") continue;
           yield* conversationMessages.append({
             conversationId: answered.value.conversationId,
@@ -116,6 +133,7 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
             text,
             sessionId: session.id,
             turnId: event.turnId,
+            ...(itemId === null ? {} : { itemId }),
             actor: buildSessionStamp(session.id),
           });
         }

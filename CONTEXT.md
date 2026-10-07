@@ -174,7 +174,7 @@ One continuous exchange with an assistant inside one platform container: a Disco
 _Avoid_: chat, thread (reserved for provider-native objects)
 
 **Conversation Message**:
-One line of a conversation, stored in order with its sender's role and label: what the owner said, the assistant's reply, or a notice. A reply or a notice links to the session that wrote it. The owner's words reach the assistant only as a conversation message, so the conversation is the record of what was said; channels add third-party and bot lines. Input to an assistant, never an event.
+One line of a conversation, stored in order with its sender's role and label: what the owner said, the assistant's reply, or a notice. A reply or a notice links to the session that wrote it, and a reply names the turn that wrote it and the assistant text it holds. The owner's words reach the assistant only as a conversation message, so the conversation is the record of what was said; channels add third-party and bot lines. Input to an assistant, never an event.
 _Avoid_: chat message, event, input (bare; a Queued Input is the session-side delivery of an owner's message)
 
 **Notice**:

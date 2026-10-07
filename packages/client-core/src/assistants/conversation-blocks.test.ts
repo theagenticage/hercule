@@ -119,6 +119,7 @@ const buildMessage = (
     text: `message ${String(messagePosition)}`,
     sessionId: senderRole === "owner" ? null : "s1",
     turnId: null,
+    itemId: null,
     actor: senderRole === "owner" ? "user" : "session:s1",
     createdAt: TODAY,
     ...over,

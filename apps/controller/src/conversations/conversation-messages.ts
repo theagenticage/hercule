@@ -36,6 +36,12 @@ interface NewConversationMessage {
    */
   readonly turnId?: string;
   /**
+   * The assistant text a reply holds, by its item id in the transcript.
+   * Absent on an owner's message, on a notice, and on a reply that joins
+   * several texts.
+   */
+  readonly itemId?: string;
+  /**
    * The actor stamp to store on the message. When absent, the message is
    * stamped with the actor the caller runs as, or with the system when the
    * caller runs as no actor.
@@ -67,6 +73,7 @@ const make = Effect.gen(function* () {
           text: message.text,
           sessionId: message.sessionId ?? null,
           turnId: message.turnId ?? null,
+          itemId: message.itemId ?? null,
           actor: message.actor ?? (yield* currentStampOrSystem),
           at: yield* nowIso,
         });

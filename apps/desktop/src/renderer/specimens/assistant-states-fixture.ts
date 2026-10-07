@@ -150,7 +150,8 @@ export interface MessageStep {
 /**
  * Returns the messages of `assistant`'s main conversation built from `steps`,
  * oldest first, with positions from 1. A reply and a notice come from the
- * assistant's current session, and a reply from its turn `turnId`.
+ * assistant's current session, and a reply holds the one text `itemId` of
+ * its turn `turnId`.
  */
 export const buildConversationMessages = (
   assistant: Assistant,
@@ -169,6 +170,7 @@ export const buildConversationMessages = (
       text,
       sessionId: owner ? null : `s-${assistant.id}`,
       turnId: senderRole === "assistant" ? `turn-${String(position)}` : null,
+      itemId: senderRole === "assistant" ? `item-${String(position)}` : null,
       actor: owner ? "user" : `session:s-${assistant.id}`,
       createdAt,
     };

@@ -55,7 +55,7 @@ const updateAssistant = async (
 };
 
 describe("the replies of an assistant in turn-end mode", () => {
-  it("stores the turn's last assistant text as one reply when the turn completes", async () => {
+  it("stores the turn's last assistant text as one reply, with its item id, when the turn completes", async () => {
     await withAgentFleet(async (arranged) => {
       const { assistant, conversation } = await readDefaultConversation(arranged);
       expect(assistant.reply).toBe("turn-end");
@@ -72,6 +72,7 @@ describe("the replies of an assistant in turn-end mode", () => {
         text: "b",
         sessionId: session.id,
         turnId: "t1",
+        itemId: "t1-item-2",
         actor: `session:${session.id}`,
       });
     });
@@ -112,7 +113,7 @@ describe("the replies of an assistant in turn-end mode", () => {
 });
 
 describe("the replies of an assistant in segments mode", () => {
-  it("stores each completed assistant message as its own reply, in order, with the turn's id", async () => {
+  it("stores each completed assistant message as its own reply, in order, with the turn's and the item's id", async () => {
     await withAgentFleet(async (arranged) => {
       const { assistant, conversation } = await readDefaultConversation(arranged);
       await updateAssistant(arranged, assistant.id, { reply: "segments" });
@@ -122,10 +123,10 @@ describe("the replies of an assistant in segments mode", () => {
 
       const replies = (await listMessages(arranged, conversation.id, "sort=position:asc")).items
         .filter((one) => one.senderRole === "assistant")
-        .map((one) => [one.text, one.turnId, one.sessionId]);
+        .map((one) => [one.text, one.turnId, one.itemId, one.sessionId]);
       expect(replies).toEqual([
-        ["a", "t1", session.id],
-        ["b", "t1", session.id],
+        ["a", "t1", "t1-item-1", session.id],
+        ["b", "t1", "t1-item-2", session.id],
       ]);
     });
   });

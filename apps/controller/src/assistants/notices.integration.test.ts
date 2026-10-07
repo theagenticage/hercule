@@ -293,9 +293,9 @@ describe("a turn that is stopped while the session lives", () => {
       await runTurn(arranged, session.id, 2, "t1", ["a"], { state: "interrupted" });
 
       const answers = await listAnswers(arranged, conversation.id);
-      expect(answers.map((one) => [one.senderRole, one.text])).toEqual([
-        ["assistant", "a"],
-        ["notice", TURN_STOPPED],
+      expect(answers.map((one) => [one.senderRole, one.text, one.itemId])).toEqual([
+        ["assistant", "a", "t1-item-1"],
+        ["notice", TURN_STOPPED, null],
       ]);
     });
   });
@@ -303,7 +303,7 @@ describe("a turn that is stopped while the session lives", () => {
   // A turn is split into several texts by its tool calls. A completed turn's
   // reply is its last text (AC-15), but an interrupted one has no answer, so
   // its reply is all it said, not the fragment after the last tool call.
-  it("in turn-end mode, writes every text of the turn as one reply, then the notice", async () => {
+  it("in turn-end mode, writes every text of the turn as one reply with no item id, then the notice", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged, "turn-end");
 
@@ -312,9 +312,9 @@ describe("a turn that is stopped while the session lives", () => {
       });
 
       const answers = await listAnswers(arranged, conversation.id);
-      expect(answers.map((one) => [one.senderRole, one.text])).toEqual([
-        ["assistant", "1 2 3\n\n4 5 6\n\n7 8"],
-        ["notice", TURN_STOPPED],
+      expect(answers.map((one) => [one.senderRole, one.text, one.itemId])).toEqual([
+        ["assistant", "1 2 3\n\n4 5 6\n\n7 8", null],
+        ["notice", TURN_STOPPED, null],
       ]);
     });
   });

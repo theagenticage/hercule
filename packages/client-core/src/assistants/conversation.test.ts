@@ -48,6 +48,7 @@ const buildMessage = (position: number): ConversationMessage => ({
   text: `message ${String(position)}`,
   sessionId: null,
   turnId: null,
+  itemId: null,
   actor: "user",
   createdAt: `2026-09-25T09:0${String(position)}:00.000Z`,
 });
