@@ -15,7 +15,7 @@
  *
  * Skips without `pi` on PATH, like the other integration tests here.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
@@ -147,13 +147,13 @@ interface Live {
 }
 
 /**
- * Builds a shell call that writes `started` at once and `late` after a second,
- * both from a background process. The call itself returns at once, leaving the
- * background process running after the call has completed.
+ * Builds a shell call that starts a long `sleep` in the background and writes
+ * its process ID to `pidFile`. The call itself returns at once, leaving the
+ * sleep running after the call has completed.
  */
-const callBashInBackground = (started: string, late: string): FakeToolCall => ({
+const callBashInBackground = (pidFile: string): FakeToolCall => ({
   name: "bash",
-  args: { command: `(echo started > ${started}; sleep 1; echo late > ${late}) >/dev/null 2>&1 &` },
+  args: { command: `sh -c 'echo $$ > ${pidFile}; exec sleep 300' >/dev/null 2>&1 &` },
 });
 
 /**
@@ -594,18 +594,33 @@ describe.skipIf(binary === undefined)("a real pi session with subagents", () => 
  * outlives a stopped agent unless the runner ends it.
  */
 describe.skipIf(binary === undefined)("a real pi agent's background processes", () => {
-  /** Waits past the point where a background process left running would have written `late`. */
-  const LATE_MS = 2_500;
+  /** Background processes the tests started, so a failed test still kills its own. */
+  const started = new Set<number>();
+
+  afterAll(() => {
+    for (const pid of started) if (isRunning(pid)) process.kill(pid, "SIGKILL");
+  });
+
+  /** Checks whether the process with `pid` still runs. */
+  const isRunning = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   /**
    * Allows the agent's background command, then waits for its second command
-   * to park on an approval, so the agent is still running.
+   * to park on an approval, so the agent is still running. Returns the
+   * process ID of the background process.
    */
   const runInBackgroundThenPark = async (
     live: Live,
     subagentId: string | undefined,
-    started: string,
-  ): Promise<void> => {
+    pidFile: string,
+  ): Promise<number> => {
     await waitReportingEvents(
       live,
       "asked to run the background command",
@@ -615,19 +630,26 @@ describe.skipIf(binary === undefined)("a real pi agent's background processes", 
     await Effect.runPromise(
       pi.respondToApprovalRequest(live.sessionId, background.request.requestId, "allow"),
     );
-    await waitReportingEvents(live, "started the background process", () => existsSync(started));
+    await waitReportingEvents(
+      live,
+      "started the background process",
+      () => existsSync(pidFile) && readFileSync(pidFile, "utf8").endsWith("\n"),
+    );
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    started.add(pid);
     await waitReportingEvents(
       live,
       "parked on the second command",
       () => listOpenedRequests(live, subagentId).length === 2,
     );
+    expect(isRunning(pid)).toBe(true);
+    return pid;
   };
 
   it(
     "ends a stopped subagent's background process",
     async () => {
       const dir = createScratchDir();
-      const [started, late] = [join(dir, "started"), join(dir, "late")];
       const mainInput = "Start one subagent that works in the background.";
       const brief = "You are the child. Start a background job, then run one more command.";
       const live = await startLiveSession([
@@ -639,7 +661,7 @@ describe.skipIf(binary === undefined)("a real pi agent's background processes", 
         },
         {
           input: brief,
-          act: [callBashInBackground(started, late)],
+          act: [callBashInBackground(join(dir, "pid"))],
           actAgain: [callBash(join(dir, "never"))],
           finish: "The child is done.",
           promptTokens: 10,
@@ -651,17 +673,15 @@ describe.skipIf(binary === undefined)("a real pi agent's background processes", 
         () => findSubagent(live, "child") !== undefined,
       );
       const child = findSubagent(live, "child")!;
-      await runInBackgroundThenPark(live, child.subagentId, started);
+      const pid = await runInBackgroundThenPark(live, child.subagentId, join(dir, "pid"));
 
       await Effect.runPromise(pi.interrupt(live.sessionId, child.subagentId));
 
       await waitReportingEvents(
         live,
-        "ended the child",
-        () => findTurnEnd(live, child.subagentId) !== undefined,
+        "ended the child's background process",
+        () => !isRunning(pid),
       );
-      await new Promise((resolve) => setTimeout(resolve, LATE_MS));
-      expect(existsSync(late), "the child's background process outlived the child").toBe(false);
       expect(live.requestLog.unscripted).toEqual([]);
       await live.stop();
     },
@@ -672,22 +692,24 @@ describe.skipIf(binary === undefined)("a real pi agent's background processes", 
     "ends the background process of the session's own agent when the session is stopped",
     async () => {
       const dir = createScratchDir();
-      const [started, late] = [join(dir, "started"), join(dir, "late")];
       const live = await startLiveSession([
         {
           input: "Start a background job, then run one more command.",
-          act: [callBashInBackground(started, late)],
+          act: [callBashInBackground(join(dir, "pid"))],
           actAgain: [callBash(join(dir, "never"))],
           finish: "Done.",
           promptTokens: 100,
         },
       ]);
-      await runInBackgroundThenPark(live, undefined, started);
+      const pid = await runInBackgroundThenPark(live, undefined, join(dir, "pid"));
 
       await live.stop();
 
-      await new Promise((resolve) => setTimeout(resolve, LATE_MS));
-      expect(existsSync(late), "the agent's background process outlived the session").toBe(false);
+      await waitReportingEvents(
+        live,
+        "ended the agent's background process",
+        () => !isRunning(pid),
+      );
     },
     BUDGET_MS,
   );
