@@ -79,7 +79,9 @@ export const ConversationMessage = Schema.Struct({
    *
    * Null on an owner message, on a notice, and on a reply that joins several
    * texts: the reply a `turn-end` turn stores when it fails or is stopped,
-   * which holds every text of the turn. Replies stored before the field
+   * which holds every text of the turn that no reply held before it, such as
+   * texts stored one by one before the reply mode changed to `turn-end`.
+   * Replies stored before the field
    * existed are null too, and so read as holding every text of their turn.
    */
   itemId: Schema.NullOr(Schema.String),

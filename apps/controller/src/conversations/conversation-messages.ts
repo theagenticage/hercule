@@ -1,7 +1,9 @@
 /**
  * The service that appends a message to a conversation. Every writer of a
  * message goes through it: the owner's send, an assistant's reply, and a
- * notice that an assistant was interrupted or can't be reached.
+ * notice that an assistant was interrupted or can't be reached. It also
+ * lists which assistant texts a turn's replies already hold, so the writer of
+ * replies never stores one text twice.
  *
  * This is a service of its own, apart from `ConversationService`, because
  * the writers of replies and notices sit below the conversation service in
@@ -85,6 +87,13 @@ const make = Effect.gen(function* () {
         });
         return stored;
       }),
+
+    /**
+     * Returns the item ids of the assistant texts that one session's turn has
+     * already stored as replies in the conversation. A reply that joins
+     * several texts has no item id and is not listed.
+     */
+    listReplyItemIds: messages.listReplyItemIds,
   };
 });
 

@@ -160,6 +160,27 @@ const make = Effect.gen(function* () {
         );
       }),
 
+    /**
+     * Returns the item ids of the replies one session's turn has stored in the
+     * conversation, read in one query. A reply with no item id is left out.
+     */
+    listReplyItemIds: (turn: {
+      readonly conversationId: string;
+      readonly sessionId: string;
+      readonly turnId: string;
+    }): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly item_id: string }>`
+          SELECT item_id FROM conversation_messages
+          WHERE conversation_id = ${uuidFromString(turn.conversationId)}
+            AND session_id = ${uuidFromString(turn.sessionId)}
+            AND turn_id = ${turn.turnId}
+            AND sender_role = 'assistant'
+            AND item_id IS NOT NULL
+        `,
+        (rows) => rows.map((row) => row.item_id),
+      ),
+
     /** Deletes every message of the conversation. */
     deleteForConversation: (conversationId: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(

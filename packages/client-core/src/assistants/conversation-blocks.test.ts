@@ -435,6 +435,44 @@ describe("decideOpenReply in turn-end mode", () => {
     expect(decide({ runningTurnRows: rows, messages, session: IDLE })).toBeNull();
   });
 
+  it("hides a segment stored before the mode changed, and the rest once the stopped turn's joined reply is stored", () => {
+    // a1 was stored as a segment; the mode then changed to turn-end, and the
+    // turn was stopped while a2 was written. The controller joins only a2.
+    const rows = [
+      buildTurnStarted("t1"),
+      ...buildAssistantText("t1", "a1", "First."),
+      buildItemStarted("t1", "a2"),
+      buildText("t1", "a2", "Half"),
+      buildTurnCompleted("t1", "interrupted"),
+    ];
+    const segment = buildReply("t1", "a1", "First.");
+
+    const beforeJoined = decide({ runningTurnRows: rows, messages: [segment], session: IDLE });
+    expect(describeItems(beforeJoined?.items ?? [])).toEqual(["a2:Half"]);
+
+    const joined = buildReply("t1", null, "Half");
+    expect(
+      decide({ runningTurnRows: rows, messages: [segment, joined], session: IDLE }),
+    ).toBeNull();
+  });
+
+  it("shows nothing for a stopped turn whose every text was stored before the mode changed", () => {
+    // The controller stores no joined reply then, because no text is left.
+    const rows = [
+      buildTurnStarted("t1"),
+      ...buildAssistantText("t1", "a1", "First."),
+      buildTurnCompleted("t1", "interrupted"),
+    ];
+
+    expect(
+      decide({
+        runningTurnRows: rows,
+        messages: [buildReply("t1", "a1", "First.")],
+        session: IDLE,
+      }),
+    ).toBeNull();
+  });
+
   it("ends the turn at its joined reply, even before the turn's end arrives", () => {
     const rows = [
       buildTurnStarted("t1"),

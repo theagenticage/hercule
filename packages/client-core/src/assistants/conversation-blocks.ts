@@ -16,8 +16,8 @@
  * stores depends on the assistant's reply mode, so the open reply follows the
  * same rules (see `decideOpenReply`). Text is never compared: a stored reply
  * names the assistant text it holds by its `itemId`, the id the text's
- * transcript rows carry, or holds every text of its turn when its `itemId` is
- * null.
+ * transcript rows carry. A reply with a null `itemId` joins every text of its
+ * turn that no reply held before it.
  */
 import type { Assistant, ConversationMessage, Session, TranscriptRow } from "@hercule/contract";
 import { formatMessageTime } from "../threads/message-time";
@@ -247,7 +247,8 @@ const readRunningTurn = (
  *   controller stores that one when the turn completes. A later text that
  *   completed empty has no text row, so it never hides the one before it.
  * - When the turn failed or was stopped, every text that holds text, because
- *   the controller then stores them all, joined.
+ *   the controller then stores them joined, leaving out those a reply already
+ *   holds.
  * - None when the turn was cut short: the controller stores no reply then.
  */
 const listTurnEndTexts = (turn: RunningTurn): readonly AssistantText[] => {
@@ -332,8 +333,9 @@ const isOwnerMessageAfterTurnEnd = (
  * reply never shows text that will not be stored (see `readRunningTurn`).
  * A text is hidden once a stored reply of the turn holds it: a reply with the
  * turn's `turnId` and the text's `itemId`. A reply with the turn's `turnId`
- * and a null `itemId` is a joined reply: it holds every text of the turn, so
- * nothing of the turn is shown once it is stored. Both rules apply in either
+ * and a null `itemId` is a joined reply: it holds every text of the turn that
+ * no reply held before it, so with the first rule, nothing of the turn is
+ * shown once it is stored. Both rules apply in either
  * mode, because a change of mode applies at once, also to a running turn.
  *
  * While the session is `busy`, an open reply with no text, the caret alone,
