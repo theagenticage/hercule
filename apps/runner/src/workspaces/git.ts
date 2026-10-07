@@ -71,12 +71,21 @@ export const listLocalBranches = async (
 };
 
 /** Returns the branch `origin/HEAD` points at, or null if it is not set. */
-export const readDefaultBranch = async (dir: string, env: GitEnv): Promise<string | null> => {
-  const head = await runGit(["-C", dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], {
-    env,
-  });
+export const readDefaultBranch = async (
+  dir: string,
+  env: GitEnv,
+  remoteName = "origin",
+): Promise<string | null> => {
+  const head = await runGit(
+    ["-C", dir, "symbolic-ref", "--short", `refs/remotes/${remoteName}/HEAD`],
+    {
+      env,
+    },
+  );
   if (!head.ok) return null;
-  const target = head.stdout.replace(/^origin\//, "");
+  const target = head.stdout.startsWith(`${remoteName}/`)
+    ? head.stdout.slice(remoteName.length + 1)
+    : head.stdout;
   return target.length === 0 ? null : target;
 };
 
@@ -85,80 +94,87 @@ export const buildCacheDir = (storageDir: string, resourceId: string): string =>
 
 export const buildCacheRoot = (storageDir: string): string => joinPath(storageDir, "cache");
 
-/**
- * Makes sure the cache for a resource exists and is up to date, and returns its
- * path. The cache is a bare repository that every working copy of the resource
- * is created from. Returns `failure`, with git's error output, if the clone or
- * the fetch fails.
- *
- * The cache is cloned bare from the remote once and fetched on every later
- * call, so a worktree created from it pushes to the remote, not to this
- * runner. Fetches write to `refs/remotes/origin/*`, never to `refs/heads/*`.
- * The agents' branches live in `refs/heads`, checked out by worktrees, and git
- * refuses to fetch over a branch that is checked out. That would happen as
- * soon as an agent pushed its own branch upstream.
- */
+/** Establishes bare storage once, without fetching when it already exists. */
 export const ensureCache = async (options: {
   readonly storageDir: string;
   readonly resourceId: string;
-  /** Where git clones from, fetches from, and points `origin` at. */
   readonly remote: string;
   readonly env: GitEnv;
-}): Promise<{
-  readonly path: string;
-  readonly failure?: string;
-  /** The repository's default branch, returned so callers do not ask git again. */
-  readonly defaultBranch?: string;
-}> => {
+}): Promise<{ readonly path: string; readonly failure?: string }> => {
   const path = buildCacheDir(options.storageDir, options.resourceId);
-  const { env, remote } = options;
-  const known = await runGit(["-C", path, "rev-parse", "--git-dir"], { env });
+  const known = await runGit(["-C", path, "rev-parse", "--git-dir"], { env: options.env });
   if (!known.ok) {
-    const cloned = await runGit(["clone", "--bare", "--", remote, path], { env });
+    const cloned = await runGit(["clone", "--bare", "--", options.remote, path], {
+      env: options.env,
+    });
     if (!cloned.ok) return { path, failure: cloned.stderr };
   }
+  return { path };
+};
+
+/** Fetches remote refs and refreshes that remote's default without changing local branches. */
+export const fetchRemote = async (
+  directory: string,
+  remoteName: string,
+  remote: string,
+  env: GitEnv,
+): Promise<string | null> => {
   const fetched = await runGit(
-    ["-C", path, "fetch", "--no-tags", "--", remote, "+refs/heads/*:refs/remotes/origin/*"],
+    [
+      "-C",
+      directory,
+      "fetch",
+      "--no-tags",
+      "--prune",
+      "--",
+      remote,
+      `+refs/heads/*:refs/remotes/${remoteName}/*`,
+    ],
     { env },
   );
-  if (!fetched.ok) return { path, failure: fetched.stderr };
-  // Read the default branch from the cache's own HEAD instead of asking the
-  // remote: the answer is the same and needs no network. Setting `origin/HEAD`
-  // from it lets later code, such as a worktree with no base branch or a
-  // report, find the repository's default branch.
-  const own = await runGit(["-C", path, "symbolic-ref", "--short", "HEAD"], { env });
-  const head = own.stdout;
-  if (head.length === 0) return { path };
-  await runGit(["-C", path, "remote", "set-head", "origin", head], { env });
-  // Return the default branch instead of letting callers read it from the cache
-  // again: this is the only place it is worked out, and a second git call could
-  // give a different answer.
-  return { path, defaultBranch: head };
+  if (!fetched.ok)
+    throw new Error(
+      `The remote fetch failed. Check the repository Connection and try a fresh workspace: ${fetched.stderr}`,
+    );
+  const head = await runGit(["-C", directory, "ls-remote", "--symref", "--", remote, "HEAD"], {
+    env,
+  });
+  if (!head.ok) throw new Error(`The remote default could not be read: ${head.stderr}`);
+  const branch = /^ref: refs\/heads\/(.+)\tHEAD$/m.exec(head.stdout)?.[1];
+  if (branch === undefined) return null;
+  const updated = await runGit(
+    [
+      "-C",
+      directory,
+      "symbolic-ref",
+      `refs/remotes/${remoteName}/HEAD`,
+      `refs/remotes/${remoteName}/${branch}`,
+    ],
+    { env },
+  );
+  if (!updated.ok) throw new Error(`The remote default could not be recorded: ${updated.stderr}`);
+  return branch;
 };
 
-/**
- * Returns the ref a new branch starts from, or undefined if the base branch
- * does not exist. It prefers the remote's copy of the base branch, which the
- * cache fetches. For a repository whose remote was never reachable, it falls
- * back to the base branch in the cache's own `refs/heads`.
- */
-export const findStartPoint = async (
-  cache: string,
-  base: string,
+/** Resolves one fully qualified ref to its committed revision, without falling back to another ref. */
+export const resolveCommit = async (
+  directory: string,
+  ref: string,
   env: GitEnv,
-): Promise<string | undefined> => {
-  for (const ref of [`refs/remotes/origin/${base}`, `refs/heads/${base}`]) {
-    if ((await runGit(["-C", cache, "rev-parse", "--verify", "--quiet", ref], { env })).ok) {
-      return ref;
-    }
-  }
-  return undefined;
+): Promise<string> => {
+  const resolved = await runGit(
+    ["-C", directory, "rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+    { env },
+  );
+  if (!resolved.ok)
+    throw new Error(
+      `The requested revision ${ref} is unavailable in the selected repository. Choose an existing local or fetched remote branch.`,
+    );
+  return resolved.stdout;
 };
-
-/** Removes a worktree and its directory. Idempotent: a worktree that is already gone counts as removed. */
-export const removeWorktree = async (cache: string, dir: string, env: GitEnv): Promise<void> => {
-  await runGit(["-C", cache, "worktree", "remove", "--force", dir], { env });
-};
+/** Removes a clean worktree, returning Git's refusal when local files would be lost. */
+export const removeWorktree = (cache: string, dir: string, env: GitEnv): Promise<GitOutcome> =>
+  runGit(["-C", cache, "worktree", "remove", "--", dir], { env });
 
 /**
  * Makes the cache forget worktrees whose directories are gone. Call it after

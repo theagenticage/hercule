@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { TranscriptRow } from "@hercule/contract";
-import { PROTOCOL_VERSION, type ControllerToRunner, type JoinAnswer } from "@hercule/protocol";
+import {
+  PROTOCOL_VERSION,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
+  type ControllerToRunner,
+  type JoinAnswer,
+} from "@hercule/protocol";
 import {
   cleanTemporaries,
   createTemporaryDir,
@@ -61,7 +66,7 @@ const bootstrapRunner = async (
         JSON.stringify({
           _tag: "runnerHello",
           protocolVersion: PROTOCOL_VERSION,
-          capabilities: [],
+          capabilities: [WORKSPACE_LIFECYCLE_CAPABILITY],
           binaryVersion: "0.1.0",
           nonce: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64"),
           facts: FACTS,

@@ -366,6 +366,7 @@ export {
   WORKSPACE_STATUSES,
   Workspace,
   WorkspaceAttachInput,
+  StartingRevision,
   WorkspaceFilter,
   WorkspaceKind,
   WorkspaceOwnership,

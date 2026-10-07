@@ -81,6 +81,7 @@ function ThreadLayout(): JSX.Element {
   const { sessionId } = Route.useParams();
   const { openRequests } = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   useLiveInvalidation(live, queryClient, "session");
+  useLiveInvalidation(live, queryClient, "workspace");
   useLiveInvalidation(live, queryClient, "subagent");
 
   // The subagent whose page is open, so the side pane can mark its row.

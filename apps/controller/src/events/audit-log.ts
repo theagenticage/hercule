@@ -48,6 +48,7 @@ export const AUDIT_KINDS = [
   "resource.updated",
   "resource.deleted",
   "workspace.created",
+  "workspace.observed",
   "workspace.attachmentRetried",
   "workspace.deleted",
   "runner.updated",

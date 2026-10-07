@@ -1354,6 +1354,10 @@ const buildCheckout = (
   branch,
   branches,
   defaultBranch,
+  remoteBranches: [],
+  headCommit: null,
+  baseCommit: null,
+  startingRevision: null,
   baseBranch: null,
 });
 
@@ -1370,6 +1374,8 @@ const buildWorkspace = (
   status: "ready",
   ownership: "managed",
   path: null,
+  observedAt: null,
+  warnings: [],
   checkouts,
   designatedConnectionId: "01a06d02-7500-7000-8000-000000000001",
   message: null,

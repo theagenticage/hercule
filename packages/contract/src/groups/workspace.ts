@@ -18,6 +18,7 @@ import {
   WorkspaceKind,
   WorkspaceOwnership,
   WorkspacePath,
+  StartingRevision,
 } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
@@ -36,7 +37,14 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 
 /** The kinds and forms come from the runner protocol; the API returns them unchanged. */
-export { CheckoutForm, GitRemoteName, WorkspaceKind, WorkspaceOwnership, WorkspacePath };
+export {
+  CheckoutForm,
+  GitRemoteName,
+  WorkspaceKind,
+  WorkspaceOwnership,
+  WorkspacePath,
+  StartingRevision,
+};
 
 /** The longest branch name; git's own limit is the filesystem's. */
 export const MAX_BRANCH_LENGTH = 255;
@@ -94,6 +102,10 @@ export const Checkout = Schema.Struct({
   /** Every local branch the machine found, in its order. */
   branches: Schema.Array(Schema.String),
   defaultBranch: Schema.NullOr(Schema.String),
+  remoteBranches: Schema.Array(Schema.String),
+  headCommit: Schema.NullOr(Schema.String),
+  baseCommit: Schema.NullOr(Schema.String),
+  startingRevision: Schema.NullOr(StartingRevision),
   /**
    * The branch this checkout's own branch was started from, as the caller
    * named it. Null when the caller named none, and the machine started it
@@ -114,6 +126,8 @@ export const Workspace = Schema.Struct({
   ownership: WorkspaceOwnership,
   /** The normalized attached root on the selected runner; null for managed storage. */
   path: Schema.NullOr(WorkspacePath),
+  observedAt: Schema.NullOr(Timestamp),
+  warnings: Schema.Array(Schema.String),
   checkouts: Schema.Array(Checkout),
   /** The Connection of its first checkout's resource; null on a scratch workspace. */
   designatedConnectionId: Schema.NullOr(Id),
@@ -191,6 +205,11 @@ export const workspace = HttpApiGroup.make("workspace")
       payload: WorkspaceAttachInput,
       success: Workspace,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("inspect", "/workspaces/:id/inspect", {
+      params: { id: Id },
+      success: Workspace,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.delete("dispose", "/workspaces/:id", {
       params: { id: Id },

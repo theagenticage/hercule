@@ -41,7 +41,6 @@ export const queryKeys = {
    * shows up on the next read.
    */
   resources: (): LiveQueryKey => ["resources"],
-  /** No live topic yet either: the app polls a workspace while it is being created. */
   workspaces: (): LiveQueryKey => ["workspaces"],
   workspace: (id?: string): LiveQueryKey => (id === undefined ? ["workspace"] : ["workspace", id]),
   connections: (): LiveQueryKey => ["connections"],
@@ -205,6 +204,11 @@ export const buildQueryKeys = (
     return ids.length === 0
       ? [queryKeys.runners(), queryKeys.runner()]
       : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id))];
+  }
+  if (topic === "workspace") {
+    return ids.length === 0
+      ? [queryKeys.workspaces(), queryKeys.workspace()]
+      : [queryKeys.workspaces(), ...ids.map((id) => queryKeys.workspace(id))];
   }
   // Any session change refetches the list that the sidebar and All sessions
   // read. A session's thread page and its queued-input list are refetched

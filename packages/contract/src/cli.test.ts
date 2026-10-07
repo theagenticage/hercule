@@ -110,6 +110,7 @@ const COMMANDS: Record<string, string> = {
   "workspace.read": "workspace read",
   "workspace.provision": "workspace provision",
   "workspace.attach": "workspace attach",
+  "workspace.inspect": "workspace inspect",
   "workspace.dispose": "workspace dispose",
 
   "event.query": "event list",
@@ -278,6 +279,11 @@ const RESOLVES: Record<string, string> = {
   "resource.delete id": "resource.query",
 
   "workspace.read id": "workspace.query",
+  "workspace.inspect id": "workspace.query",
+  "workspace.provision resourceId": "resource.query",
+  "workspace.provision runnerId": "runner.query",
+  "workspace.attach resourceId": "resource.query",
+  "workspace.attach runnerId": "runner.query",
   "workspace.dispose id": "workspace.query",
 
   "workflow.read id": "workflow.query",

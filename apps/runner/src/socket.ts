@@ -356,6 +356,7 @@ export const connect = (
     // this machine resolved and the workspace steps. The sessions themselves
     // belong to the process, not to this connection.
     const supervisor = options.sessions.forConnection({
+      scope: connection,
       send: (frame) => write(encodeFrameText(frame)),
       workspaceSteps: options.workspaceSteps,
       machine: {
@@ -691,6 +692,38 @@ export const connect = (
               ),
             );
           }
+          case "workspaceInspect":
+            return yield* Effect.asVoid(
+              Effect.forkIn(
+                Effect.promise(() => options.workspaces.inspect(message.workspaceId)).pipe(
+                  Effect.flatMap((report) =>
+                    write(
+                      encodeFrameText({
+                        _tag: "workspaceInspection",
+                        requestId: message.requestId,
+                        report,
+                      }),
+                    ),
+                  ),
+                  Effect.catchCause((cause) =>
+                    write(
+                      encodeFrameText({
+                        _tag: "workspaceInspection",
+                        requestId: message.requestId,
+                        report: {
+                          _tag: "workspaceReport",
+                          workspaceId: message.workspaceId,
+                          status: "failed",
+                          observedAt: new Date().toISOString(),
+                          message: describeCause(cause, MAX_MESSAGE_LENGTH),
+                        },
+                      }),
+                    ).pipe(Effect.ignore),
+                  ),
+                ),
+                connection,
+              ),
+            );
           case "workspaceDispose":
             return yield* Effect.asVoid(
               Effect.forkIn(

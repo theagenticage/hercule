@@ -19,6 +19,7 @@ import {
   SubagentId,
   Usage,
   UsageReport,
+  StartingRevision,
 } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
@@ -279,12 +280,27 @@ const SessionInterruptWithoutBody = Schema.Null.pipe(
 /** The most repos one thread's workspace may hold. */
 export const MAX_SPAWN_CHECKOUTS = 32;
 
+/** Refuses ambiguous revision choices and names Git cannot use as branches. */
+export const refuseInvalidCheckoutRevision = Schema.makeFilter(
+  (checkout: { readonly baseBranch?: string; readonly startingRevision?: StartingRevision }) => {
+    if (checkout.baseBranch !== undefined && checkout.startingRevision !== undefined)
+      return "Choose startingRevision or the deprecated baseBranch, never both.";
+    const revision = checkout.startingRevision;
+    if (revision !== undefined && revision.kind !== "current" && revision.branch !== undefined)
+      return Schema.is(Branch)(revision.branch)
+        ? undefined
+        : "startingRevision.branch must be a valid Git branch name.";
+    return undefined;
+  },
+);
+
 /** One repo a fresh workspace gets a worktree of, and where that worktree starts. */
 export const SpawnCheckout = Schema.Struct({
   resourceId: Id,
-  /** The branch the thread's own branch starts from; the default branch when absent. */
+  /** Deprecated remote-branch choice; use startingRevision for explicit local or remote state. */
   baseBranch: Schema.optionalKey(Branch),
-});
+  startingRevision: Schema.optionalKey(StartingRevision),
+}).check(refuseInvalidCheckoutRevision);
 
 export type SpawnCheckout = Schema.Schema.Type<typeof SpawnCheckout>;
 

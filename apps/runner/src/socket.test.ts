@@ -10,7 +10,7 @@
  * This package must not import controller code, so the stub is `Bun.serve`
  * with an Ed25519 key pair generated here.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -55,6 +55,7 @@ import { makeLogins, type Logins } from "./providers/login";
 import { makeSupervising } from "./sessions/supervisor";
 import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
 import { makeWorkspaces } from "./workspaces";
+import * as workspaceFixtures from "./workspaces/testing";
 
 /** This machine's facts. These tests are not about the probe. */
 const FACTS: RunnerFacts = {
@@ -1535,5 +1536,105 @@ describe("session frames on one connection", () => {
     await waitUntil(() => listInputResults(stub).length === 1);
     stub.hangUp();
     await pending;
+  });
+});
+
+describe("concurrent real-Git workspace requests on the runner socket", () => {
+  it("dispatches concurrent first-use and duplicate requests into one repository bootstrap", async () => {
+    const remote = workspaceFixtures.makeRemote();
+    const storageDir = workspaceFixtures.createTemporaryDir("hercule-socket-concurrent-home-");
+    const bin = joinPath(storageDir, "bin");
+    mkdirSync(bin);
+    const entered = joinPath(storageDir, "bootstrap-entered");
+    const release = joinPath(storageDir, "release-bootstrap");
+    const calls = joinPath(storageDir, "clone-calls");
+    const git = Bun.which("git")!;
+    const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+    writeFileSync(
+      joinPath(bin, "git"),
+      `#!/bin/sh\ncase " $* " in\n*' clone '*)\nprintf 'clone\\n' >> ${quote(calls)}\nprintf '%s\\n' "$$" > ${quote(entered)}\nwhile [ ! -f ${quote(release)} ]; do sleep 0.01; done\n;;\nesac\nexec ${quote(git)} "$@"\n`,
+      { mode: 0o700 },
+    );
+    const manager = makeWorkspaces({
+      storageDir,
+      gitEnv: { PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}` },
+    });
+    const resourceId = workspaceFixtures.createId();
+    const first = workspaceFixtures.buildProvisionFrame({
+      kind: "ephemeral",
+      checkouts: [
+        workspaceFixtures.buildCheckout({
+          resourceId,
+          remote: remote.url,
+          branch: "test/socket-first",
+        }),
+      ],
+    });
+    const second = workspaceFixtures.buildProvisionFrame({
+      kind: "ephemeral",
+      checkouts: [
+        workspaceFixtures.buildCheckout({
+          resourceId,
+          remote: remote.url,
+          branch: "test/socket-second",
+        }),
+      ],
+    });
+    const stub = await stubController((hello) => ({
+      ...hello,
+      capabilities: ["workspaceLifecycle"],
+    }));
+    const pending = runConnection(buildPin(stub), { workspaces: manager });
+    try {
+      await waitUntilProven(stub);
+      stub.say(first);
+      await waitUntil(() => existsSync(entered));
+      stub.say(second);
+      stub.say(first);
+      const beforePongs = stub.received.filter((frame) => frame._tag === "pong").length;
+      stub.say({ _tag: "ping" });
+      await waitUntil(
+        () => stub.received.filter((frame) => frame._tag === "pong").length > beforePongs,
+      );
+      writeFileSync(release, "release\n");
+      await waitUntil(
+        () => stub.received.filter((frame) => frame._tag === "workspaceReport").length === 3,
+      );
+      const reports = stub.received.filter((frame) => frame._tag === "workspaceReport");
+      expect(reports.every((report) => report.status === "ready")).toBe(true);
+      expect(reports.map((report) => report.workspaceId).sort()).toEqual(
+        [first.workspaceId, first.workspaceId, second.workspaceId].sort(),
+      );
+      expect(readFileSync(calls, "utf8").trim().split("\n")).toHaveLength(1);
+      const path = manager.resolve(first.workspaceId)!.cwd;
+      expect(
+        workspaceFixtures
+          .runGitOrThrow(path, "worktree", "list", "--porcelain")
+          .match(/^worktree /gm),
+      ).toHaveLength(3);
+    } finally {
+      writeFileSync(release, "release\n");
+      await Promise.all([
+        manager.waitForProvisioning(first.workspaceId),
+        manager.waitForProvisioning(second.workspaceId),
+      ]);
+      stub.hangUp();
+      await pending;
+      const capturedGitPid = existsSync(entered)
+        ? Number(readFileSync(entered, "utf8").trim())
+        : undefined;
+      rmSync(storageDir, { recursive: true, force: true });
+      rmSync(joinPath(remote.work, ".."), { recursive: true, force: true });
+      if (capturedGitPid !== undefined) {
+        await waitUntil(() => {
+          try {
+            process.kill(capturedGitPid, 0);
+            return false;
+          } catch {
+            return true;
+          }
+        });
+      }
+    }
   });
 });

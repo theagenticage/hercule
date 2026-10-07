@@ -13,6 +13,7 @@ import { Effect, Result } from "effect";
 import type { SessionStart, WorkspaceProvision, WorkspaceReport } from "@hercule/protocol";
 import { resolveSessionContext, type Machine } from "../sessions/context";
 import { makeWorkspaces } from "./index";
+import { makeRegistry } from "./registry";
 import {
   buildCheckout,
   buildProvisionFrame,
@@ -424,4 +425,60 @@ describe("normalized attachment recovery", () => {
     expect(hashContents(fixture.world)).toBe(before);
     expect(existsSync(fixture.setupMarker)).toBe(false);
   });
+});
+
+it("recovers an inspected unavailable attachment after restart while preserving its original preparation receipt", async () => {
+  const fixture = createAttachment();
+  const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+  const prepared = await manager.provision(fixture.frame);
+  expect(prepared.status).toBe("ready");
+  const saved = `${fixture.path}.saved`;
+  renameSync(fixture.path, saved);
+  const unavailable = await manager.inspect(fixture.frame.workspaceId);
+  expect(unavailable.status).toBe("failed");
+  renameSync(saved, fixture.path);
+  await Bun.sleep(2);
+  const restarted = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+
+  const restored = await restarted.provision(fixture.frame);
+
+  expect(restored.status, restored.message).toBe("ready");
+  expect(Date.parse(restored.observedAt!)).toBeGreaterThan(Date.parse(unavailable.observedAt!));
+  expect(restored.checkouts).toEqual(prepared.checkouts);
+  expect(existsSync(fixture.setupMarker)).toBe(false);
+  const receipt = makeRegistry(fixture.storageDir).held(fixture.frame.workspaceId)?.preparation;
+  expect(receipt?.phase).toBe("terminal");
+  if (receipt?.phase === "terminal") expect(receipt.report).toEqual(prepared);
+  expect(await restarted.provision(fixture.frame)).toEqual(prepared);
+});
+
+it("timestamps genuine attachment loss while refusing wrong intent without an availability observation", async () => {
+  const fixture = createAttachment();
+  const manager = makeWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
+  const prepared = await manager.provision(fixture.frame);
+  expect(prepared.status).toBe("ready");
+  const wrong = await manager.provision({
+    ...fixture.frame,
+    attachment: { path: join(fixture.world, "wrong missing path"), remoteName: "origin" },
+  });
+  expect(wrong.status).toBe("failed");
+  expect(wrong.observedAt).toBeUndefined();
+  expect(await manager.provision(fixture.frame)).toEqual(prepared);
+  const saved = `${fixture.path}.saved`;
+  renameSync(fixture.path, saved);
+  await Bun.sleep(2);
+
+  const unavailable = await manager.provision(fixture.frame);
+
+  expect(unavailable.status).toBe("failed");
+  expect(Date.parse(unavailable.observedAt!)).toBeGreaterThan(Date.parse(prepared.observedAt!));
+  renameSync(saved, fixture.path);
+  await Bun.sleep(2);
+  const restored = await makeWorkspaces({
+    storageDir: fixture.storageDir,
+    gitEnv: fixture.gitEnv,
+  }).provision(fixture.frame);
+  expect(restored.status, restored.message).toBe("ready");
+  expect(Date.parse(restored.observedAt!)).toBeGreaterThan(Date.parse(unavailable.observedAt!));
+  expect(existsSync(fixture.setupMarker)).toBe(false);
 });

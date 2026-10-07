@@ -3,6 +3,7 @@
  * canonical form of an identifier for a thing outside Hercule.
  */
 import { Schema } from "effect";
+export { Timestamp } from "@hercule/protocol";
 
 /**
  * A canonical lowercase UUIDv7 string: what every Hercule id looks like on the
@@ -20,16 +21,6 @@ export const Id = Schema.String.check(
 export type Id = Schema.Schema.Type<typeof Id>;
 
 export const isId = Schema.is(Id);
-
-/** An instant on the wire: ISO-8601 UTC with milliseconds. */
-export const Timestamp = Schema.String.check(
-  Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, {
-    title: "timestamp",
-    description: "an ISO-8601 UTC instant with milliseconds",
-  }),
-);
-
-export type Timestamp = Schema.Schema.Type<typeof Timestamp>;
 
 /**
  * Who performed an operation. The controller derives it from the credential;

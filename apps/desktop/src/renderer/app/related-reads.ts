@@ -2,10 +2,10 @@
  * Reads the projects, workspaces and resources again when a change in the
  * thread list shows that the cache no longer holds them all.
  *
- * Those three lists have no live topic, so the thread list, which does, is
- * the only sign that one of them changed. `decideRelatedReads` in client-core
- * holds the rules; this module compares each thread list with the one before.
- * Both go away once the three lists have live topics (#279).
+ * Projects and resources have no live topic yet. A new workspace can name a
+ * resource the cache has not read, so that demand still refreshes both lists.
+ * Known workspaces update through their own topic. `decideRelatedReads` in
+ * client-core holds the rules; this module compares each list with the one before.
  */
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";

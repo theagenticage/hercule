@@ -19,12 +19,14 @@
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   createDecodeValidationError,
+  createInvalidStateError,
   createForbiddenError,
   WorkspaceAttachInput,
   Id,
@@ -37,8 +39,8 @@ import {
   type Validation,
   type Workspace,
 } from "@hercule/contract";
-import { CurrentActor, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../../actor";
-import { withTransaction } from "../../db";
+import { CurrentActor, currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../../actor";
+import { withTransaction, mintUuid, uuidToString } from "../../db";
 import { RunnerConnections } from "../../runners";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures } from "../absorbing";
@@ -84,6 +86,44 @@ const make = Effect.gen(function* () {
   });
 
   return {
+    /** Refreshes current Git facts through the runner, without fetching or rerunning setup. */
+    inspectWorkspace: (id: Id): Effect.Effect<Workspace, Exclude<WorkspaceError, Validation>> =>
+      Effect.gen(function* () {
+        yield* requireGrant("workspace.inspect");
+        const stored = yield* workspaces.readStoredWorkspace(id);
+        if (!(yield* workspaces.supportsInspection(stored.runnerId)))
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "This runner does not support workspace inspection. Upgrade and reconnect it before inspecting the workspace.",
+            ),
+          );
+        const answer = yield* connections.asked(
+          stored.runnerId,
+          {
+            _tag: "workspaceInspect",
+            requestId: uuidToString(mintUuid()),
+            workspaceId: id,
+          },
+          Duration.seconds(10),
+        );
+        if (
+          Option.isNone(answer) ||
+          answer.value._tag !== "workspaceInspection" ||
+          answer.value.report.workspaceId !== id ||
+          answer.value.report.observedAt === undefined
+        )
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "The runner is offline or unavailable and did not return a current workspace observation. Reconnect it and inspect again.",
+            ),
+          );
+        yield* withTransaction(
+          sql,
+          workspaces.recordObservation(stored.runnerId, answer.value.report, yield* currentStamp),
+        );
+        return yield* workspaces.read(id);
+      }),
+
     /** Persists a user-authorized attachment before asking its runner to validate the checkout. */
     attachWorkspace: (
       input: WorkspaceAttachInput,
@@ -109,8 +149,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Provisions the main workspace of a repo resource on one runner: a fresh
-     * clone under the runner's own storage. Returns the workspace row, before
-     * the runner has finished the clone.
+     * worktree under the runner's own storage. Returns the workspace row before
+     * preparation finishes.
      */
     provisionWorkspace: (
       input: WorkspaceProvisionInput,

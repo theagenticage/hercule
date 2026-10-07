@@ -10,7 +10,7 @@
  */
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { Branch, Checkout } from "./workspace";
+import { Branch, Checkout, StartingRevision } from "./workspace";
 
 const isAccepted = (schema: Schema.Codec<string>, value: string): boolean =>
   Schema.decodeUnknownExit(schema)(value)._tag === "Success";
@@ -75,6 +75,10 @@ describe("a checkout as the API returns it", () => {
       branches: [],
       defaultBranch: null,
       baseBranch: null,
+      remoteBranches: [],
+      headCommit: null,
+      baseCommit: null,
+      startingRevision: null,
     } as const;
     expect(Schema.encodeSync(Checkout)(checkout)).toMatchObject({ branch: null, branches: [] });
   });
@@ -95,7 +99,36 @@ describe("a checkout as the API returns it", () => {
         branches: [".hidden"],
         defaultBranch: null,
         baseBranch: null,
+        remoteBranches: [],
+        headCommit: null,
+        baseCommit: null,
+        startingRevision: null,
       }),
     ).toMatchObject({ branch: ".hidden" });
+  });
+});
+
+describe("a starting revision", () => {
+  it("preserves all four explicit choices without inventing a remote branch", () => {
+    for (const revision of [
+      { kind: "current" },
+      { kind: "local", branch: "main" },
+      { kind: "remote", branch: "main" },
+      { kind: "remote" },
+    ]) {
+      expect(Schema.decodeUnknownSync(StartingRevision)(revision)).toEqual(revision);
+    }
+  });
+
+  it("refuses missing local names, non-string branch values and unknown kinds", () => {
+    for (const revision of [
+      { kind: "local" },
+      { kind: "local", branch: 12 },
+      { kind: "remote", branch: 12 },
+      { kind: "commit", commit: "123" },
+      { kind: "anything" },
+    ]) {
+      expect(Schema.decodeUnknownExit(StartingRevision)(revision)._tag).toBe("Failure");
+    }
   });
 });

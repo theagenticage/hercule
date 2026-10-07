@@ -1,32 +1,27 @@
 /**
- * Provisions workspaces on this runner. A primary is a fresh clone in the
- * runner's storage directory, and an ephemeral workspace is one worktree per
- * repository.
- *
- * Nothing here touches a directory the user already has. A primary is
- * Hercule's own clone, in a directory Hercule created, so nothing outside the
- * storage directory is read or written.
+ * Creates managed working copies in the selected Git repository and records
+ * their preparation outcomes before reporting them. Existing checkout
+ * registration is handled separately without running setup.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, join as joinPath, resolve as resolvePath, sep } from "node:path";
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmdirSync } from "node:fs";
+import {
+  dirname,
+  join as joinPath,
+  relative as relativePath,
+  resolve as resolvePath,
+  sep,
+} from "node:path";
 import {
   MAX_MESSAGE_LENGTH,
-  type CheckoutReport,
-  type ProvisionCheckout,
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hercule/protocol";
 import { RUNNER_SOCKET_VARIABLE, RUNNER_WORKSPACE_VARIABLE } from "../credentials";
-import { tearDown } from "./dispose";
-import {
-  readCurrentBranch,
-  readDefaultBranch,
-  ensureCache,
-  listLocalBranches,
-  runGit,
-  findStartPoint,
-  type GitEnv,
-} from "./git";
+import { runGit, type GitEnv } from "./git";
+import { hasExpectedCheckoutIdentity } from "./identity";
+import { observeWorkspace } from "./inspection";
+export { observeWorkspace } from "./inspection";
+import { ensureSelectedRepository, resolveStartingRevision } from "./repositories";
 import { buildTailMessage, drainTail } from "./output";
 import { isStillOnDisk, type RegisteredCheckout, type RegisteredWorkspace } from "./registry";
 import type { Substrate } from "./substrate";
@@ -38,79 +33,11 @@ const buildFailedReport = (workspaceId: string, message: string): WorkspaceRepor
   message: message.slice(0, MAX_MESSAGE_LENGTH),
 });
 
-const buildCheckoutReport = async (
-  checkoutId: string,
-  dir: string,
-  env: GitEnv,
-): Promise<CheckoutReport> => ({
-  checkoutId,
-  branch: await readCurrentBranch(dir, env),
-  branches: await listLocalBranches(dir, env),
-  defaultBranch: await readDefaultBranch(dir, env),
-});
-
-export const observeWorkspace = async (
-  entry: RegisteredWorkspace,
-  env: GitEnv,
-): Promise<WorkspaceReport> => ({
-  _tag: "workspaceReport",
-  workspaceId: entry.workspaceId,
-  status: "ready",
-  checkouts: await Promise.all(
-    entry.checkouts.map((one) => buildCheckoutReport(one.checkoutId, one.path, env)),
-  ),
-});
-
 const registerWorkspace = (substrate: Substrate, entry: RegisteredWorkspace): Promise<void> =>
   substrate.registry.update((entries) => [
     ...entries.filter((held) => held.workspaceId !== entry.workspaceId),
     entry,
   ]);
-
-/**
- * Creates a primary: a clone of the cache that shares its objects through
- * hardlinks, with `origin` pointed at the real remote. Returns a ready report,
- * or a failed report with git's error output.
- */
-const cloneFresh = async (
-  substrate: Substrate,
-  entry: RegisteredWorkspace,
-  one: ProvisionCheckout,
-  env: GitEnv,
-): Promise<WorkspaceReport> => {
-  const workspaceId = entry.workspaceId;
-  const cache = await ensureCache({
-    storageDir: substrate.storageDir,
-    resourceId: one.resourceId,
-    remote: one.remote,
-    env,
-  });
-  if (cache.failure !== undefined) return buildFailedReport(workspaceId, cache.failure);
-  const dir = entry.root;
-  mkdirSync(dirname(dir), { recursive: true, mode: 0o700 });
-  const cloned = await runGit(["clone", "--local", "--", cache.path, dir], { env });
-  if (!cloned.ok) return buildFailedReport(workspaceId, cloned.stderr);
-  // Fetching and pushing have to reach the real remote, not this runner's cache.
-  const pointed = await runGit(["-C", dir, "remote", "set-url", "origin", one.remote], { env });
-  if (!pointed.ok) return buildFailedReport(workspaceId, pointed.stderr);
-  // The clone's branches come from the cache's own branches, which are only as
-  // new as the cache's first clone. The remote's branches are current, and the
-  // clone is seconds old, so resetting it to them loses nothing. A clone that
-  // is on no branch (an empty repository) has nothing to update.
-  const branch = await readCurrentBranch(dir, env);
-  if (branch !== null && (await runGit(["-C", dir, "fetch", "--no-tags", "origin"], { env })).ok) {
-    await runGit(["-C", dir, "reset", "--hard", `refs/remotes/origin/${branch}`], { env });
-  }
-  await registerWorkspace(substrate, {
-    ...entry,
-    preparation: { phase: "preparing", instruction: entry.preparation!.instruction },
-  });
-  if (one.setupCommand !== null) {
-    const wrong = await runSetup(one.setupCommand, dir, substrate);
-    if (wrong !== undefined) return buildFailedReport(workspaceId, wrong);
-  }
-  return observeWorkspace(entry, env);
-};
 
 /**
  * Copies the files listed in the primary's `.workspaceinclude` into `dir`.
@@ -213,97 +140,132 @@ const runSetup = async (
   return buildTailMessage(why, held.text);
 };
 
-const makeEphemeral = async (
+/** Removes only clean working copies created by the current attempt, preserving any refusal. */
+const rollBackWorkingCopies = async (
+  substrate: Substrate,
+  root: string,
+  made: ReadonlyArray<RegisteredCheckout>,
+  env: GitEnv,
+): Promise<boolean> => {
+  let removed = true;
+  for (const checkout of made) {
+    const directory = checkout.commonDirectory!;
+    const result = await substrate.coordinateRepository(`git:${directory}`, () =>
+      runGit(["-C", directory, "worktree", "remove", "--", checkout.path], { env }),
+    );
+    if (!result.ok && existsSync(checkout.path)) removed = false;
+  }
+  if (existsSync(root)) {
+    try {
+      rmdirSync(root);
+    } catch {
+      removed = false;
+    }
+  }
+  return removed;
+};
+
+/** Creates all generated checkouts from stable commits before running any setup command. */
+const makeWorkingCopies = async (
   substrate: Substrate,
   frame: WorkspaceProvision,
-  entry: RegisteredWorkspace,
+  original: RegisteredWorkspace,
   env: GitEnv,
 ): Promise<WorkspaceReport> => {
-  const workspaceId = frame.workspaceId;
-  const root = entry.root;
-  mkdirSync(root, { recursive: true, mode: 0o700 });
-  const held: Array<RegisteredCheckout> = [];
-  const checkouts: Array<CheckoutReport> = [];
+  let entry = original;
   const warnings: Array<string> = [];
-  /**
-   * Fails the provisioning and removes what it created: every worktree added
-   * so far, the workspace directory, and the caches' records of those
-   * worktrees. A failed setup command is the exception the spec names: it does
-   * not call this, so its files stay for the user to inspect.
-   */
-  const giveUp = async (message: string): Promise<WorkspaceReport> => {
-    await tearDown(substrate.storageDir, root, held, env);
-    return buildFailedReport(workspaceId, message);
-  };
-
-  // Create every checkout first, so the workspace is complete before any setup
-  // command runs in it.
-  for (const one of frame.checkouts) {
-    const dir = one.subdirectory === null ? root : joinPath(root, one.subdirectory);
-    if (one.branch === null) {
-      return await giveUp(`no branch was given for the worktree of ${one.remote}`);
-    }
-    const cache = await ensureCache({
-      storageDir: substrate.storageDir,
-      resourceId: one.resourceId,
-      remote: one.remote,
-      env,
-    });
-    if (cache.failure !== undefined) return await giveUp(cache.failure);
-    // Use the default branch `ensureCache` returned: asking git again could
-    // give a different answer.
-    const base = one.baseBranch ?? cache.defaultBranch ?? "";
-    const start = await findStartPoint(cache.path, base, env);
-    if (start === undefined) return await giveUp(`${one.remote} has no branch ${base}`);
-    const added = await runGit(
-      ["-C", cache.path, "worktree", "add", "-b", one.branch, dir, start],
-      {
-        env,
-      },
-    );
-    if (!added.ok) return await giveUp(added.stderr);
-    held.push({
-      checkoutId: one.checkoutId,
-      resourceId: one.resourceId,
-      remote: one.remote,
-      path: dir,
-    });
-  }
-  await registerWorkspace(substrate, {
-    ...entry,
-    preparation: { phase: "preparing", instruction: frame },
-  });
-
-  for (const [at, one] of frame.checkouts.entries()) {
-    const dir = held[at]!.path;
-    if (one.workspaceInclude) {
-      const primary = substrate.registry.primaryOf(one.resourceId);
-      // Copy before the setup command runs, because it may need the copied files.
-      if (primary === undefined) {
-        warnings.push(
-          `.workspaceinclude skipped: this runner has no main workspace for resource ${one.resourceId} to copy the files from`,
+  const made: Array<RegisteredCheckout> = [];
+  try {
+    for (const [at, requested] of frame.checkouts.entries()) {
+      const branch =
+        frame.kind === "primary" ? `hercule/main-${frame.workspaceId}` : requested.branch;
+      if (branch === null)
+        throw new Error(`No branch was given for the new worktree of ${requested.remote}.`);
+      const repository = await ensureSelectedRepository(substrate, requested, env);
+      await substrate.coordinateRepository(`git:${repository.commonDirectory}`, async () => {
+        const resolved = await resolveStartingRevision(repository, requested, env);
+        if (resolved.warning !== undefined) warnings.push(resolved.warning);
+        const checkout: RegisteredCheckout = {
+          ...entry.checkouts[at]!,
+          sourceRoot: repository.sourceRoot,
+          canonicalRoot: joinPath(
+            realpathSync(substrate.storageDir),
+            relativePath(substrate.storageDir, entry.checkouts[at]!.path),
+          ),
+          commonDirectory: repository.commonDirectory,
+          commonDirectoryIdentity: repository.commonDirectoryIdentity,
+          remoteName: repository.remoteName,
+          form: "worktree",
+          startingRevision: resolved.startingRevision,
+          baseCommit: resolved.baseCommit,
+        };
+        entry = {
+          ...entry,
+          checkouts: entry.checkouts.map((held, index) => (index === at ? checkout : held)),
+        };
+        await registerWorkspace(substrate, entry);
+        mkdirSync(dirname(checkout.path), { recursive: true, mode: 0o700 });
+        const added = await runGit(
+          [
+            "-C",
+            repository.commonDirectory,
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            checkout.path,
+            resolved.baseCommit,
+          ],
+          { env },
         );
-      } else copyIncludedFiles(primary.root, dir);
+        if (!added.ok) throw new Error(added.stderr);
+        made.push(checkout);
+      });
     }
-    if (one.setupCommand !== null) {
-      const wrong = await runSetup(one.setupCommand, dir, substrate);
-      // The workspace and its worktrees are left in place: the user decides
-      // whether to throw away a half-finished install.
+  } catch (error) {
+    const removed = await rollBackWorkingCopies(substrate, entry.root, made, env);
+    if (!removed)
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)} Some created files were retained because clean removal was refused. Inspect the failed workspace before discarding it.`,
+        { cause: error },
+      );
+    throw error;
+  }
+  if (frame.checkouts.length === 0) mkdirSync(entry.root, { recursive: true, mode: 0o700 });
+  entry = { ...entry, preparation: { phase: "preparing", instruction: frame } };
+  await registerWorkspace(substrate, entry);
+  for (const [at, requested] of frame.checkouts.entries()) {
+    const directory = entry.checkouts[at]!.path;
+    if (requested.workspaceInclude && frame.kind !== "primary") {
+      const primary = substrate.registry.primaryOf(requested.resourceId);
+      if (primary === undefined)
+        warnings.push(
+          `.workspaceinclude skipped: no main workspace is available on this runner for resource ${requested.resourceId}; the copy source is missing.`,
+        );
+      else copyIncludedFiles(primary.root, directory);
+    }
+    if (requested.setupCommand !== null) {
+      const wrong = await runSetup(requested.setupCommand, directory, substrate);
       if (wrong !== undefined)
         return {
-          ...buildFailedReport(workspaceId, wrong),
+          ...buildFailedReport(frame.workspaceId, wrong),
           ...(warnings.length === 0 ? {} : { warnings }),
         };
     }
-    checkouts.push(await buildCheckoutReport(one.checkoutId, dir, env));
   }
-  return {
-    _tag: "workspaceReport",
-    workspaceId,
-    status: "ready",
-    checkouts,
-    ...(warnings.length === 0 ? {} : { warnings }),
-  };
+  // Inspection retains preparation failure states. Creation itself supplies the
+  // successful result only after all setup commands have completed.
+  const report = await observeWorkspace(
+    {
+      workspaceId: entry.workspaceId,
+      kind: entry.kind,
+      root: entry.root,
+      checkouts: entry.checkouts,
+      ownership: "managed",
+    },
+    env,
+  );
+  return { ...report, ...(warnings.length === 0 ? {} : { warnings }) };
 };
 
 /**
@@ -329,11 +291,15 @@ export const reprovision = async (
       return report;
     }
     if (preparation.report.status === "failed") return preparation.report;
-    if (isStillOnDisk(entry)) return preparation.report;
-  } else if (isStillOnDisk(entry)) {
+    if (isStillOnDisk(entry) && hasExpectedCheckoutIdentity(entry, substrate.gitEnv))
+      return preparation.report;
+  } else if (isStillOnDisk(entry) && hasExpectedCheckoutIdentity(entry, substrate.gitEnv)) {
     return observeWorkspace(entry, substrate.gitEnv);
   }
-  return buildFailedReport(entry.workspaceId, `the workspace directory is gone: ${entry.root}`);
+  return buildFailedReport(
+    entry.workspaceId,
+    `The workspace directory is gone or its recorded Git repository is unavailable: ${entry.root}. Restore the original files before continuing.`,
+  );
 };
 
 /**
@@ -344,7 +310,6 @@ export const provisionWorkspace = async (
   substrate: Substrate,
   frame: WorkspaceProvision,
 ): Promise<WorkspaceReport> => {
-  const one = frame.checkouts[0];
   if (frame.kind === "primary" && frame.checkouts.length !== 1) {
     return buildFailedReport(frame.workspaceId, "a main workspace needs exactly one checkout");
   }
@@ -363,6 +328,7 @@ export const provisionWorkspace = async (
       path: checkout.subdirectory === null ? root : joinPath(root, checkout.subdirectory),
     })),
     preparation: { phase: "creating", instruction: frame },
+    ownership: "managed",
   };
   await registerWorkspace(substrate, entry);
   const env = { ...substrate.gitEnv, [RUNNER_WORKSPACE_VARIABLE]: frame.workspaceId };
@@ -374,10 +340,7 @@ export const provisionWorkspace = async (
         "The workspace directory already exists without a completed preparation record. Preserve its files and create a fresh workspace.",
       );
     } else {
-      report =
-        frame.kind === "ephemeral"
-          ? await makeEphemeral(substrate, frame, entry, env)
-          : await cloneFresh(substrate, entry, one!, env);
+      report = await makeWorkingCopies(substrate, frame, entry, env);
     }
   } catch (error) {
     report = buildFailedReport(
@@ -386,7 +349,7 @@ export const provisionWorkspace = async (
     );
   }
   await registerWorkspace(substrate, {
-    ...entry,
+    ...(substrate.registry.held(frame.workspaceId) ?? entry),
     preparation: { phase: "terminal", instruction: frame, report },
   });
   return report;

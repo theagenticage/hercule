@@ -15,7 +15,7 @@
  */
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { WorkspaceProvision } from "@hercule/protocol";
+import type { WorkspaceProvision, StartingRevision } from "@hercule/protocol";
 import type { Actor, CheckoutForm, WorkspaceKind } from "@hercule/contract";
 import type { AuditLog } from "../events";
 import type { StoredRepo } from "../resources";
@@ -49,6 +49,9 @@ export const buildProvisionFrame = (
     baseBranch: plan.checkout.baseBranch,
     setupCommand: plan.resource.setupCommand,
     workspaceInclude: plan.resource.workspaceInclude,
+    ...(plan.checkout.startingRevision === null || plan.checkout.baseBranch !== null
+      ? {}
+      : { startingRevision: plan.checkout.startingRevision }),
     ...(plan.repositoryWorkspaceId === undefined
       ? {}
       : { repositoryWorkspaceId: plan.repositoryWorkspaceId }),
@@ -63,6 +66,7 @@ export interface OpeningCheckout {
   readonly branch: string | null;
   /** The branch a new branch starts from; absent means the resource's default. */
   readonly baseBranch?: string;
+  readonly startingRevision?: StartingRevision;
   readonly repositoryWorkspaceId?: string;
 }
 
@@ -111,6 +115,15 @@ export const openWorkspace = (
         subdirectory: checkout.subdirectory,
         branch: checkout.branch,
         baseBranch: checkout.baseBranch ?? null,
+        ...(input.attachment === undefined
+          ? {
+              startingRevision:
+                checkout.startingRevision ??
+                (checkout.baseBranch === undefined
+                  ? { kind: "remote" }
+                  : { kind: "remote", branch: checkout.baseBranch }),
+            }
+          : {}),
       })),
       input.at,
     );
@@ -184,9 +197,7 @@ export const openPrimary = (
       runnerId: input.runnerId,
       kind: "primary",
       designatedConnectionId: input.resource.connectionId,
-      // The main workspace is a clone of the whole repo, on whatever branch it
-      // comes up on.
-      checkouts: [{ resource: input.resource, form: "clone", subdirectory: null, branch: null }],
+      checkouts: [{ resource: input.resource, form: "worktree", subdirectory: null, branch: null }],
       actor: input.actor,
       at: input.at,
     });

@@ -5,7 +5,7 @@
  * "no adapter in this build".
  */
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Effect, Exit, Scope } from "effect";
 import type { RunnerToController } from "@hercule/protocol";
 import type { Machine } from "../sessions/context";
 import { makeWorkspaces } from "../workspaces";
@@ -43,7 +43,9 @@ describe("the adapters in this runner build", () => {
       workspaces: makeWorkspaces({ storageDir: "/var/hercule/runner" }),
       socketPath: "/var/hercule/runner/daemon.sock",
     };
+    const scope = Effect.runSync(Scope.make());
     const supervisor = makeSupervising(adapters).forConnection({
+      scope,
       machine,
       send: (frame) => Effect.sync(() => void sent.push(frame)),
       // No session runs, so no agent step begins.
@@ -55,7 +57,7 @@ describe("the adapters in this runner build", () => {
     });
 
     // The report asks every adapter in the array, Codex included, for its sessions.
-    await Effect.runPromise(supervisor.report);
+    await Effect.runPromise(supervisor.report.pipe(Effect.ensuring(Scope.close(scope, Exit.void))));
     expect(sent).toHaveLength(1);
   });
 });

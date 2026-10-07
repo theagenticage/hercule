@@ -189,6 +189,34 @@ const WATERMARK: RunnerWatermark = {
 /** A connection these tests never write to: they test the row, not the socket. */
 const HELD = { close: () => undefined, askForFacts: Effect.void, ask: () => Effect.void };
 
+it("refuses inspection immediately on the current unsupported connection", async () => {
+  const written: Array<ControllerToRunner> = [];
+  const answer = await Effect.runPromise(
+    Effect.gen(function* () {
+      const connections = yield* RunnerConnections;
+      const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+      yield* connections.greeted(
+        runner!.id,
+        mintConnection(),
+        { ...HELD, ask: (frame) => Effect.sync(() => written.push(frame)) },
+        {
+          binaryVersion: "0.1.0",
+          protocolVersion: PROTOCOL_VERSION,
+          negotiatedCapabilities: [],
+          facts: FACTS,
+        },
+      );
+      return yield* connections.asked(
+        runner!.id,
+        { _tag: "workspaceInspect", requestId: "inspect-request", workspaceId: "workspace" },
+        Duration.infinity,
+      );
+    }).pipe(Effect.provide(layer)),
+  );
+  expect(written).toEqual([]);
+  expect(Option.isNone(answer)).toBe(true);
+});
+
 it("refuses attachment frames when a capable runner reconnects with an older binary", async () => {
   const written: Array<ControllerToRunner> = [];
   const result = await Effect.runPromise(

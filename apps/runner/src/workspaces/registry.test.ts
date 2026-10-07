@@ -5,7 +5,7 @@
  * workspace's directory. A runner that lost it would strand the user's work on
  * its own disk.
  */
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { makeWorkspaces } from "./index";
@@ -52,8 +52,25 @@ describe("resolving a workspace", () => {
     expect(resolved?.root).toBe(directory);
     // A single-repo ephemeral workspace runs in the checkout itself, not above it.
     expect(resolved?.cwd).toBe(directory);
+    const commonDirectory = realpathSync(
+      runGitOrThrow(directory, "rev-parse", "--path-format=absolute", "--git-common-dir"),
+    );
+    const physical = statSync(commonDirectory);
     expect(resolved?.checkouts).toEqual([
-      { checkoutId, resourceId, remote: remote.url, path: directory },
+      {
+        checkoutId,
+        resourceId,
+        remote: remote.url,
+        path: directory,
+        canonicalRoot: realpathSync(directory),
+        commonDirectory,
+        commonDirectoryIdentity: `${String(physical.dev)}:${String(physical.ino)}`,
+        sourceRoot: commonDirectory,
+        remoteName: "origin",
+        startingRevision: { kind: "remote" },
+        baseCommit: runGitOrThrow(remote.work, "rev-parse", "HEAD"),
+        form: "worktree",
+      },
     ]);
   });
 
@@ -272,6 +289,7 @@ describe("reporting a primary after a session ran in it", () => {
     expect(report?.checkouts?.[0]?.branch).toBe("feature/what-the-agent-did");
     expect([...(report?.checkouts?.[0]?.branches ?? [])].sort()).toEqual([
       "feature/what-the-agent-did",
+      `hercule/main-${workspaceId}`,
       "main",
     ]);
   });

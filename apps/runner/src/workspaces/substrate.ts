@@ -18,6 +18,7 @@ export const SETUP_DEADLINE_MS = 10 * 60 * 1000;
 export interface Substrate {
   readonly storageDir: string;
   readonly registry: Registry;
+  readonly coordinateRepository: <A>(key: string, work: () => Promise<A>) => Promise<A>;
   /**
    * The environment for the runner's own git, and the base of a repository's
    * setup command's environment. While provisioning, the runner adds the

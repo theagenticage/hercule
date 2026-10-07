@@ -6,6 +6,7 @@
  * The controller sends workspace ids and the runner works out the paths. The
  * registry on this runner, not the controller, records where each workspace is.
  */
+import { realpathSync } from "node:fs";
 import * as Effect from "effect/Effect";
 import * as Semaphore from "effect/Semaphore";
 import {
@@ -14,7 +15,8 @@ import {
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hercule/protocol";
-import { attachWorkspace, matchesAttachedCheckout, reserveManagedRepositories } from "./attachment";
+import { attachWorkspace, reserveManagedRepositories } from "./attachment";
+import { hasExpectedCheckoutIdentity } from "./identity";
 import { disposeWorkspace } from "./dispose";
 import { observeWorkspace, provisionWorkspace, reprovision } from "./provision";
 import {
@@ -57,14 +59,16 @@ export interface Workspaces {
    */
   readonly hasFailedProvisioning: (workspaceId: string) => boolean;
   /**
-   * Reads a primary's current branch and its branches again, after a session
-   * ran in it. Returns undefined for an ephemeral workspace or an unknown id.
+   * Reads current checkout facts, coalesced per workspace. Returns a failed
+   * recovery report when this runner cannot read a valid workspace record.
    */
+  readonly inspect: (workspaceId: string) => Promise<WorkspaceReport>;
+  /** Reads checkout facts after a turn or exit; returns undefined for an unknown workspace. */
   readonly reportAfterSession: (workspaceId: string) => Promise<WorkspaceReport | undefined>;
   /**
-   * Runs `work` once no other work given here for the same workspace is
-   * running, and returns its result. Work for different workspaces runs side
-   * by side. Wrap every git command that writes to a workspace's checkouts:
+   * Runs `work` while holding the checkout and common Git directory locks.
+   * Aliases of the same checkout share the locks. Independent repositories
+   * run side by side. Wrap every Git command that writes to a checkout:
    * two git processes that write to one checkout at the same time collide on
    * its `index.lock`, and one of them fails. A primary workspace is shared by
    * every session and run that uses its repository on this runner, so a
@@ -91,9 +95,34 @@ export const makeWorkspaces = (options: {
   /** How long a setup command may run. Defaults to `SETUP_DEADLINE_MS`; tests set a shorter one. */
   readonly setupDeadlineMs?: number;
 }): Workspaces => {
+  const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>();
+  const withRepositoryLock = <A, E, R>(
+    key: string,
+    work: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E, R> =>
+    Effect.suspend(() => {
+      const entry = locks.get(key) ?? { lock: Semaphore.makeUnsafe(1), users: 0 };
+      locks.set(key, entry);
+      entry.users += 1;
+      return entry.lock
+        .withPermits(1)(work)
+        .pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              entry.users -= 1;
+              if (entry.users === 0) locks.delete(key);
+            }),
+          ),
+        );
+    });
+  const coordinateRepository = <A>(key: string, work: () => Promise<A>): Promise<A> =>
+    Effect.runPromise(
+      withRepositoryLock(key, Effect.tryPromise({ try: work, catch: (error) => error })),
+    );
   const substrate: Substrate = {
     storageDir: options.storageDir,
     registry: makeRegistry(options.storageDir),
+    coordinateRepository,
     gitEnv: buildSubstrateEnv(process.env, options.gitEnv),
     setupDeadlineMs: options.setupDeadlineMs ?? SETUP_DEADLINE_MS,
   };
@@ -132,15 +161,6 @@ export const makeWorkspaces = (options: {
   };
 
   /**
-   * The lock of each workspace that has work running or waiting in
-   * `runExclusively`, with the number of callers holding or waiting for it.
-   * A lock is removed when its last caller is done, so the map does not grow
-   * with every workspace this runner has ever had. The count makes that safe:
-   * a lock is never removed while a caller still waits for it, which would
-   * let the next caller make a second lock and run beside the first.
-   */
-  const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>();
-  /**
    * Returns the registered workspace, or undefined if this runner does not have
    * it or its directories were removed from disk. A session cannot be placed in
    * a directory that no longer exists, so such a workspace counts as unknown.
@@ -157,9 +177,51 @@ export const makeWorkspaces = (options: {
       (entry.preparation === undefined ||
         (entry.preparation.phase === "terminal" && entry.preparation.report.status === "ready")) &&
       isStillOnDisk(entry) &&
-      matchesAttachedCheckout(entry, substrate.gitEnv)
+      hasExpectedCheckoutIdentity(entry, substrate.gitEnv)
       ? entry
       : undefined;
+  };
+
+  const observations = new Map<string, Promise<WorkspaceReport>>();
+  const inspect = async (workspaceId: string): Promise<WorkspaceReport> => {
+    const running = observations.get(workspaceId);
+    if (running !== undefined) return running;
+    const observation = (async (): Promise<WorkspaceReport> => {
+      try {
+        const entry = substrate.registry.held(workspaceId);
+        if (entry === undefined)
+          throw new Error(
+            "This runner has no record of the workspace. Restore its registry before continuing.",
+          );
+        const report = await observeWorkspace(entry, substrate.gitEnv);
+        const available =
+          isStillOnDisk(entry) && hasExpectedCheckoutIdentity(entry, substrate.gitEnv);
+        if (entry.ownership === "existing" && entry.available !== available)
+          await substrate.registry.update((entries) =>
+            entries.map((held) =>
+              held.workspaceId === workspaceId ? { ...held, available } : held,
+            ),
+          );
+        return report;
+      } catch (error) {
+        return {
+          _tag: "workspaceReport",
+          workspaceId,
+          status: "failed",
+          observedAt: new Date().toISOString(),
+          message: (error instanceof Error ? error.message : String(error)).slice(
+            0,
+            MAX_MESSAGE_LENGTH,
+          ),
+        };
+      }
+    })();
+    observations.set(workspaceId, observation);
+    try {
+      return await observation;
+    } finally {
+      observations.delete(workspaceId);
+    }
   };
 
   return {
@@ -201,6 +263,23 @@ export const makeWorkspaces = (options: {
             ? provisionWorkspace(substrate, frame)
             : reprovision(substrate, entry));
         } catch (error) {
+          let held: RegisteredWorkspace | undefined;
+          try {
+            held = substrate.registry.held(frame.workspaceId);
+          } catch {
+            /* Recovery errors remain failed reports. */
+          }
+          if (
+            held?.ownership === "existing" &&
+            !hasExpectedCheckoutIdentity(held, substrate.gitEnv)
+          ) {
+            await substrate.registry.update((entries) =>
+              entries.map((entry) =>
+                entry.workspaceId === frame.workspaceId ? { ...entry, available: false } : entry,
+              ),
+            );
+            return observeWorkspace(held, substrate.gitEnv);
+          }
           return {
             _tag: "workspaceReport",
             workspaceId: frame.workspaceId,
@@ -251,27 +330,38 @@ export const makeWorkspaces = (options: {
         return false;
       }
     },
+    inspect,
     reportAfterSession: async (workspaceId) => {
-      const entry = findStandingWorkspace(workspaceId);
-      return entry === undefined || entry.kind !== "primary"
-        ? undefined
-        : observeWorkspace(entry, substrate.gitEnv);
+      if (substrate.registry.held(workspaceId) === undefined) return undefined;
+      return inspect(workspaceId);
     },
     runExclusively: (workspaceId, work) =>
       Effect.suspend(() => {
-        const entry = locks.get(workspaceId) ?? { lock: Semaphore.makeUnsafe(1), users: 0 };
-        locks.set(workspaceId, entry);
-        entry.users += 1;
-        return entry.lock
-          .withPermits(1)(work)
-          .pipe(
-            Effect.ensuring(
-              Effect.sync(() => {
-                entry.users -= 1;
-                if (entry.users === 0) locks.delete(workspaceId);
-              }),
-            ),
-          );
+        const entry = substrate.registry.held(workspaceId);
+        const keys = new Set<string>([`workspace:${workspaceId}`]);
+        for (const checkout of entry?.checkouts ?? []) {
+          try {
+            keys.add(`index:${realpathSync(checkout.path)}`);
+            const discovered = Bun.spawnSync(
+              [
+                "git",
+                "-C",
+                checkout.path,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+              ],
+              { env: { ...substrate.gitEnv }, stdout: "pipe", stderr: "pipe" },
+            );
+            const common =
+              checkout.commonDirectory ??
+              (discovered.exitCode === 0 ? discovered.stdout.toString().trim() : undefined);
+            if (common !== undefined) keys.add(`git:${realpathSync(common)}`);
+          } catch {
+            // An unavailable checkout cannot supply a physical lock identity.
+          }
+        }
+        return [...keys].sort().reduceRight((held, key) => withRepositoryLock(key, held), work);
       }),
   };
 };

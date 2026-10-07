@@ -12,7 +12,7 @@
  */
 import { Schema } from "effect";
 
-import { Fact, StorageId, Subdirectory } from "./primitives";
+import { Fact, StorageId, Subdirectory, Timestamp } from "./primitives";
 import { MAX_MESSAGE_LENGTH } from "./sessions";
 
 const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
@@ -51,6 +51,15 @@ export const WorkspaceAttachment = Schema.Struct({
 
 export type WorkspaceAttachment = Schema.Schema.Type<typeof WorkspaceAttachment>;
 
+/** Chooses committed state in the selected local repository without an implicit local fallback. */
+export const StartingRevision = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("current") }),
+  Schema.Struct({ kind: Schema.Literal("local"), branch: Fact }),
+  Schema.Struct({ kind: Schema.Literal("remote"), branch: Schema.optionalKey(Fact) }),
+]);
+
+export type StartingRevision = Schema.Schema.Type<typeof StartingRevision>;
+
 /** How a working copy was made: cloned in full, or a worktree off the cache. */
 export const CheckoutForm = Schema.Literals(["clone", "worktree"]);
 
@@ -82,6 +91,7 @@ export const ProvisionCheckout = Schema.Struct({
   workspaceInclude: Schema.Boolean,
   /** The selected existing main workspace on this runner; absence never transfers another runner's path. */
   repositoryWorkspaceId: Schema.optionalKey(StorageId),
+  startingRevision: Schema.optionalKey(StartingRevision),
 });
 
 export type ProvisionCheckout = Schema.Schema.Type<typeof ProvisionCheckout>;
@@ -96,6 +106,16 @@ export const WorkspaceProvision = Schema.Struct({
 });
 
 export type WorkspaceProvision = Schema.Schema.Type<typeof WorkspaceProvision>;
+
+/** Checks whether provisioning requires the runner's selected-repository lifecycle support. */
+export const requiresWorkspaceLifecycle = (frame: WorkspaceProvision): boolean =>
+  frame.attachment !== undefined ||
+  frame.checkouts.some(
+    (checkout) =>
+      checkout.repositoryWorkspaceId !== undefined ||
+      checkout.startingRevision !== undefined ||
+      checkout.baseBranch !== null,
+  );
 
 export const WorkspaceDispose = Schema.Struct({
   _tag: Schema.Literal("workspaceDispose"),
@@ -117,6 +137,11 @@ export const CheckoutReport = Schema.Struct({
   branches: Schema.Array(Fact).check(Schema.isMaxLength(MAX_BRANCHES)),
   /** What `origin/HEAD` points to, or null when the machine could not read it. */
   defaultBranch: Schema.NullOr(Fact),
+  form: Schema.optionalKey(CheckoutForm),
+  remoteBranches: Schema.optionalKey(Schema.Array(Fact).check(Schema.isMaxLength(MAX_BRANCHES))),
+  headCommit: Schema.optionalKey(Schema.NullOr(Fact)),
+  baseCommit: Schema.optionalKey(Schema.NullOr(Fact)),
+  startingRevision: Schema.optionalKey(Schema.NullOr(StartingRevision)),
 });
 
 export type CheckoutReport = Schema.Schema.Type<typeof CheckoutReport>;
@@ -132,6 +157,10 @@ export const WorkspaceReport = Schema.Struct({
   /** The normalized attached root, never an ordinary managed directory. */
   path: Schema.optionalKey(WorkspacePath),
   ownership: Schema.optionalKey(WorkspaceOwnership),
+  /** The actual observation time; replay keeps the original receipt's time. */
+  observedAt: Schema.optionalKey(Timestamp),
+  /** Whether the recorded working files and Git binding exist, independent of preparation success. */
+  available: Schema.optionalKey(Schema.Boolean),
   checkouts: Schema.optionalKey(
     Schema.Array(CheckoutReport).check(Schema.isMaxLength(MAX_CHECKOUTS)),
   ),
@@ -142,6 +171,24 @@ export const WorkspaceReport = Schema.Struct({
 });
 
 export type WorkspaceReport = Schema.Schema.Type<typeof WorkspaceReport>;
+
+/** Requests current facts without fetching, running setup or changing the working files. */
+export const WorkspaceInspect = Schema.Struct({
+  _tag: Schema.Literal("workspaceInspect"),
+  requestId: Fact,
+  workspaceId: StorageId,
+});
+
+export type WorkspaceInspect = Schema.Schema.Type<typeof WorkspaceInspect>;
+
+/** Correlates an inspection result with the request that produced it. */
+export const WorkspaceInspection = Schema.Struct({
+  _tag: Schema.Literal("workspaceInspection"),
+  requestId: Fact,
+  report: WorkspaceReport,
+});
+
+export type WorkspaceInspection = Schema.Schema.Type<typeof WorkspaceInspection>;
 
 /**
  * A machine's request for the credential git is about to need, with the remote

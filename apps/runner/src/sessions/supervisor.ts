@@ -18,6 +18,7 @@ import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import {
@@ -220,6 +221,7 @@ const isWatched = (held: Live): boolean =>
 
 /** What a connection gives the supervisor while the connection is up. */
 export interface Connection {
+  readonly scope: Scope.Scope;
   readonly machine: Machine;
   /**
    * The workspace steps of this process. The supervisor tells them when an
@@ -528,9 +530,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       });
 
     /**
-     * Reads a primary workspace's branches again and sends the result to the
-     * controller. A session in a primary workspace may switch branches, and
-     * this report is how the controller learns about it.
+     * Reads the workspace after a completed turn or exit and sends the current
+     * facts to the controller. Inspection runs outside event sequencing.
      */
     const reportWorkspace = (workspaceId: string): Effect.Effect<void> =>
       Effect.ignoreCause(
@@ -675,19 +676,21 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       );
 
     /**
-     * Sends an event. After a `session.exited` of a session with a workspace,
-     * it also reports the workspace. The report runs outside the sequence lock,
-     * because reading a checkout calls git and every other session's events
-     * would wait behind it. The workspace id is read before the exit is sent,
-     * because sending the exit removes the entry.
+     * Sends an event and schedules observation after starts, completed turns and exits.
+     * The workspace id is captured before exit removes the live session entry.
+     * Observation is scoped to the connection and cannot delay later events.
      */
     const forwardEvent = (event: ProviderEvent): Effect.Effect<void> => {
       const workspaceId =
-        event._tag === "session.exited" ? live.get(event.sessionId)?.workspaceId : undefined;
+        event._tag === "session.started" ||
+        event._tag === "session.exited" ||
+        event._tag === "turn.completed"
+          ? live.get(event.sessionId)?.workspaceId
+          : undefined;
       return Effect.flatMap(sendSequenced(event), () =>
         workspaceId === undefined || workspaceId === null
           ? Effect.void
-          : reportWorkspace(workspaceId),
+          : Effect.asVoid(Effect.forkIn(reportWorkspace(workspaceId), connection.scope)),
       );
     };
 

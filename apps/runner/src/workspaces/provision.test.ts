@@ -47,8 +47,8 @@ const isGoneWithin = async (pid: number, within: number): Promise<boolean> => {
   return false;
 };
 
-describe("a primary cloned fresh", () => {
-  it("clones from the cache into the runner's own directory and points origin at the remote", async () => {
+describe("a fresh managed primary worktree", () => {
+  it("shares the managed repository and keeps origin pointed at the remote", async () => {
     const remote = makeRemote();
     const head = runGitOrThrow(remote.work, "rev-parse", "HEAD");
     const storageDir = createStorageDir();
@@ -66,17 +66,24 @@ describe("a primary cloned fresh", () => {
     expect(report.status).toBe("ready");
     const directory = join(storageDir, "primaries", workspaceId);
     expect(runGitOrThrow(directory, "rev-parse", "HEAD")).toBe(head);
-    expect(runGitOrThrow(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+    expect(runGitOrThrow(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe(
+      `hercule/main-${workspaceId}`,
+    );
     // Fetching and pushing must reach the real remote, not the local cache.
     expect(runGitOrThrow(directory, "remote", "get-url", "origin")).toBe(remote.url);
-    expect(report.checkouts?.[0]?.branch).toBe("main");
+    expect(report.checkouts?.[0]?.branch).toBe(`hercule/main-${workspaceId}`);
     expect(report.checkouts?.[0]?.defaultBranch).toBe("main");
-    // Hardlinked objects: one copy on disk however many primaries there are.
-    const objects = join(directory, ".git", "objects");
-    const shared = readdirSync(objects, { recursive: true, encoding: "utf8" })
-      .map((entry) => statSync(join(objects, entry)))
-      .some((stat) => stat.isFile() && stat.nlink > 1);
-    expect(shared).toBe(true);
+    expect(statSync(join(directory, ".git")).isFile()).toBe(true);
+    expect(
+      runGitOrThrow(directory, "rev-parse", "--path-format=absolute", "--git-common-dir"),
+    ).toBe(
+      runGitOrThrow(
+        buildCacheDir(storageDir, resourceId),
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+      ),
+    );
   });
 
   /**
@@ -104,8 +111,7 @@ describe("a primary cloned fresh", () => {
     );
 
     expect(report.status).toBe("ready");
-    // Hercule's own clone, somewhere else entirely.
-    expect(report.checkouts?.[0]?.branch).toBe("main");
+    expect(report.checkouts?.[0]?.branch).toBe(`hercule/main-${workspaceId}`);
     expect(existsSync(join(storageDir, "primaries", workspaceId))).toBe(true);
     expect(hashContents(mine)).toBe(before);
     expect(runGitOrThrow(mine, "rev-parse", "HEAD")).toBe(head);

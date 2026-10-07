@@ -61,6 +61,8 @@ import replyItemId from "./0050-reply-item-id";
 import workspacePreparationInstructions from "./0051-workspace-preparation-instructions";
 import workspaceRepositorySelection from "./0052-workspace-repository-selection";
 
+import workspaceObservations from "./0053-workspace-observations";
+
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
   [2, "users-and-credentials", Effect.succeed(usersAndCredentials)],
@@ -114,6 +116,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [50, "reply-item-id", Effect.succeed(replyItemId)],
   [51, "workspace-preparation-instructions", Effect.succeed(workspacePreparationInstructions)],
   [52, "workspace-repository-selection", Effect.succeed(workspaceRepositorySelection)],
+  [53, "workspace-observations", Effect.succeed(workspaceObservations)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

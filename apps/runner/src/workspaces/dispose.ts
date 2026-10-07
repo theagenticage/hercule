@@ -4,38 +4,42 @@
  * primary is never torn down: it is the long-lived main workspace that
  * sessions share.
  */
-import { readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, rmdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import type { WorkspaceDispose, WorkspaceReport } from "@hercule/protocol";
 import { buildCacheDir, buildCacheRoot, pruneWorktrees, removeWorktree } from "./git";
-import type { GitEnv } from "./git";
 import type { RegisteredCheckout } from "./registry";
 import type { Substrate } from "./substrate";
 
-/**
- * Removes a workspace from disk, in this order:
- *
- * 1. Removes each checkout's worktree.
- * 2. Deletes the workspace directory.
- * 3. Prunes each checkout's cache, so git forgets the worktrees.
- *
- * The order matters: a prune only forgets worktrees whose directories are
- * already gone, so pruning earlier would leave git with records of
- * directories deleted afterwards. Disposing a workspace and cleaning up after
- * a failed provisioning both call this, so the order is written only once.
- */
+/** Removes recorded clean worktrees and then removes only an empty workspace root. */
 export const tearDown = async (
-  storageDir: string,
+  substrate: Substrate,
   root: string,
   checkouts: ReadonlyArray<RegisteredCheckout>,
-  env: GitEnv,
 ): Promise<void> => {
-  for (const one of checkouts) {
-    await removeWorktree(buildCacheDir(storageDir, one.resourceId), one.path, env);
+  for (const checkout of checkouts) {
+    const common =
+      checkout.commonDirectory ?? buildCacheDir(substrate.storageDir, checkout.resourceId);
+    await substrate.coordinateRepository(`git:${realpathSync(common)}`, async () => {
+      if (existsSync(checkout.path)) {
+        const result = await removeWorktree(common, checkout.path, substrate.gitEnv);
+        if (!result.ok)
+          throw new Error(
+            `Git refused to remove the checkout. Preserve its files and inspect it before disposal: ${result.stderr}`,
+          );
+      }
+      await pruneWorktrees(common, substrate.gitEnv);
+    });
   }
-  rmSync(root, { recursive: true, force: true });
-  for (const one of checkouts) {
-    await pruneWorktrees(buildCacheDir(storageDir, one.resourceId), env);
+  if (existsSync(root)) {
+    try {
+      rmdirSync(root);
+    } catch (error) {
+      throw new Error(
+        "Workspace files remain outside its recorded checkouts. Inspect and preserve those files before disposal.",
+        { cause: error },
+      );
+    }
   }
 };
 
@@ -65,7 +69,10 @@ const pruneEveryCache = async (substrate: Substrate): Promise<void> => {
     return;
   }
   for (const cache of caches) {
-    await pruneWorktrees(joinPath(buildCacheRoot(substrate.storageDir), cache), substrate.gitEnv);
+    const common = realpathSync(joinPath(buildCacheRoot(substrate.storageDir), cache));
+    await substrate.coordinateRepository(`git:${common}`, () =>
+      pruneWorktrees(common, substrate.gitEnv),
+    );
   }
 };
 
@@ -83,15 +90,20 @@ export const disposeWorkspace = async (
       message: "a main workspace is never torn down",
     };
   }
-  await tearDown(
-    substrate.storageDir,
-    // The path is built from the id, not read from the entry: a failed
-    // provisioning can leave a directory behind with no entry, and this call
-    // must still remove it.
-    joinPath(substrate.storageDir, "workspaces", workspaceId),
-    entry?.checkouts ?? [],
-    substrate.gitEnv,
-  );
+  try {
+    await tearDown(
+      substrate,
+      entry?.root ?? joinPath(substrate.storageDir, "workspaces", workspaceId),
+      entry?.checkouts ?? [],
+    );
+  } catch (error) {
+    return {
+      _tag: "workspaceReport",
+      workspaceId,
+      status: "failed",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
   // With no entry we do not know which caches the workspace used, so prune all
   // of them. This runs after the directories are gone, like the prunes inside
   // `tearDown`.

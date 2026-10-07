@@ -44,6 +44,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   Subdirectory,
   WORKSPACE_LIFECYCLE_CAPABILITY,
+  requiresWorkspaceLifecycle,
   type CredentialAnswer,
   type CredentialRequest,
   type GitIdentity,
@@ -310,6 +311,10 @@ const make = Effect.gen(function* () {
     branches: checkout.branches,
     defaultBranch: checkout.defaultBranch,
     baseBranch: checkout.baseBranch,
+    startingRevision: checkout.startingRevision,
+    headCommit: checkout.headCommit,
+    baseCommit: checkout.baseCommit,
+    remoteBranches: checkout.remoteBranches,
   });
 
   /**
@@ -351,6 +356,8 @@ const make = Effect.gen(function* () {
         status: row.status,
         ownership: row.ownership,
         path: row.path,
+        observedAt: row.observedAt,
+        warnings: row.warnings,
         checkouts: (checkouts.get(row.id) ?? []).map(toCheckoutRecord),
         designatedConnectionId: row.designatedConnectionId,
         message: row.message,
@@ -467,6 +474,24 @@ const make = Effect.gen(function* () {
       return source.value;
     });
 
+  const requireLifecycleRunner = (runnerId: string): Effect.Effect<void, Validation | SqlError> =>
+    Effect.gen(function* () {
+      const runner = yield* runners.read(runnerId);
+      if (
+        Option.isNone(runner) ||
+        !(runner.value.negotiatedCapabilities ?? []).includes(WORKSPACE_LIFECYCLE_CAPABILITY)
+      )
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["runnerId"],
+              message:
+                "This runner does not support the workspace lifecycle. Upgrade and reconnect it before creating a Git workspace.",
+            },
+          ]),
+        );
+    });
+
   /**
    * Returns the workspace's frozen creation instruction. Legacy workspaces
    * lack that snapshot, so their first resend records the instruction rebuilt
@@ -530,7 +555,10 @@ const make = Effect.gen(function* () {
           row.value.ownership === "existing" ||
           (Option.isSome(instruction) &&
             instruction.value.checkouts.some(
-              (checkout) => checkout.repositoryWorkspaceId !== undefined,
+              (checkout) =>
+                checkout.repositoryWorkspaceId !== undefined ||
+                checkout.startingRevision !== undefined ||
+                checkout.baseBranch !== null,
             ))
         ) {
           const runner = yield* runners.read(row.value.runnerId);
@@ -575,12 +603,23 @@ const make = Effect.gen(function* () {
         }
         const standing = yield* workspaces.primaryOn(resource.id, input.runnerId);
         if (Option.isSome(standing)) {
+          if (standing.value.status === "failed")
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["workspace"],
+                  message:
+                    "The selected main workspace is unavailable. Restore its files and inspect it before starting work.",
+                },
+              ]),
+            );
           return {
             workspaceId: standing.value.id,
             checkoutBranch: wish.branch,
             designatedConnectionId: standing.value.designatedConnectionId,
           };
         }
+        yield* requireLifecycleRunner(input.runnerId);
         const opened = yield* openPrimary(
           { workspaces, audit },
           { resource, runnerId: input.runnerId, actor: yield* currentStamp, at: input.at },
@@ -597,7 +636,33 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const resource = yield* readCheckoutableRepoOrFail(checkout.resourceId, input.projectId);
           const selected = yield* readSelectedExistingWorkspace(resource.id, input.runnerId);
-          return { resource, baseBranch: checkout.baseBranch, repositoryWorkspaceId: selected?.id };
+          const standing =
+            selected === undefined
+              ? yield* workspaces.primaryOn(resource.id, input.runnerId)
+              : Option.some(selected);
+          if (Option.isSome(standing) && standing.value.status === "failed")
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["workspace"],
+                  message:
+                    "The selected repository is unavailable. Restore its main workspace and inspect it before creating a worktree.",
+                },
+              ]),
+            );
+          return {
+            resource,
+            baseBranch: checkout.baseBranch,
+            startingRevision:
+              checkout.startingRevision ??
+              (checkout.baseBranch === undefined
+                ? ({ kind: selected === undefined ? "remote" : "current" } as const)
+                : ({ kind: "remote", branch: checkout.baseBranch } as const)),
+            repositoryWorkspaceId:
+              Option.isSome(standing) && standing.value.status === "ready"
+                ? standing.value.id
+                : selected?.id,
+          };
         }),
       );
       // Each checkout gets its own directory, named after the repo. So a
@@ -634,10 +699,12 @@ const make = Effect.gen(function* () {
         subdirectory: repos.length > 1 ? (names[index] ?? null) : null,
         branch: input.branch,
         ...(repo.baseBranch === undefined ? {} : { baseBranch: repo.baseBranch }),
+        startingRevision: repo.startingRevision,
         ...(repo.repositoryWorkspaceId === undefined
           ? {}
           : { repositoryWorkspaceId: repo.repositoryWorkspaceId }),
       }));
+      if (checkouts.length > 0) yield* requireLifecycleRunner(input.runnerId);
       const opened = yield* openWorkspace(
         { workspaces, audit },
         {
@@ -727,7 +794,7 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Opens a repo's main workspace on one runner, cloned fresh under that
+     * Opens a repo's main workspace as a managed worktree under that
      * runner's own storage, and writes the rows in the caller's transaction.
      * Returns the workspace record and the frame to send. Fails with:
      *
@@ -754,6 +821,12 @@ const make = Effect.gen(function* () {
         const resource = yield* readRepoOrFail(input.resourceId);
         const runner = yield* runners.read(input.runnerId);
         if (Option.isNone(runner)) return yield* Effect.fail(createNotFoundError(NO_SUCH_RUNNER));
+        if (!(runner.value.negotiatedCapabilities ?? []).includes(WORKSPACE_LIFECYCLE_CAPABILITY))
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "This runner does not support the workspace lifecycle. Upgrade and reconnect it before provisioning a Git workspace.",
+            ),
+          );
         const selection = yield* workspaces.readRepositorySelection(resource.id, input.runnerId);
         if (Option.isSome(selection) && selection.value.mode === "existing") {
           return yield* Effect.fail(
@@ -1018,11 +1091,7 @@ const make = Effect.gen(function* () {
       frame: WorkspaceProvision,
     ): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
-        if (
-          frame.attachment === undefined &&
-          frame.checkouts.every((checkout) => checkout.repositoryWorkspaceId === undefined)
-        )
-          return true;
+        if (!requiresWorkspaceLifecycle(frame)) return true;
         const runner = yield* runners.read(runnerId);
         return (
           Option.isSome(runner) &&
@@ -1080,33 +1149,124 @@ const make = Effect.gen(function* () {
       runnerId: string,
       report: WorkspaceReport,
     ): Effect.Effect<Settled | undefined, SqlError> =>
-      Effect.gen(function* () {
-        const found = yield* workspaces.one(report.workspaceId);
-        if (Option.isNone(found) || found.value.runnerId !== runnerId) return undefined;
-        const moved = yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const at = yield* nowIso;
-            switch (report.status) {
-              case "ready": {
-                const changed = yield* workspaces.markReady(
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const current = yield* workspaces.one(report.workspaceId);
+          if (Option.isNone(current) || current.value.runnerId !== runnerId) return undefined;
+          const fresh =
+            current.value.observedAt === null ||
+            (report.observedAt !== undefined && report.observedAt >= current.value.observedAt);
+          const at = yield* nowIso;
+          yield* workspaces.recordCreationFacts(report.workspaceId, report.checkouts ?? []);
+          if (report.warnings !== undefined && (fresh || current.value.status === "provisioning"))
+            yield* workspaces.recordWarnings(report.workspaceId, report.warnings);
+          let changed = false;
+          switch (report.status) {
+            case "ready":
+              changed = yield* workspaces.markReady(
+                report.workspaceId,
+                fresh ? (report.checkouts ?? []) : [],
+                at,
+              );
+              break;
+            case "failed":
+              if (
+                current.value.status === "provisioning" ||
+                (fresh && report.observedAt !== undefined)
+              ) {
+                changed = yield* workspaces.markFailed(
                   report.workspaceId,
-                  report.checkouts ?? [],
+                  report.message ?? null,
                   at,
                 );
-                if (report.path !== undefined)
-                  yield* workspaces.recordAttachmentPath(report.workspaceId, report.path);
-                return changed;
+              } else if (current.value.status === "ready" && report.observedAt === undefined) {
+                const runner = yield* runners.read(runnerId);
+                const frame = yield* workspaces.readProvisionFrame(report.workspaceId);
+                const lifecycle = Option.isSome(frame) && requiresWorkspaceLifecycle(frame.value);
+                if (
+                  lifecycle &&
+                  Option.isSome(runner) &&
+                  !(runner.value.negotiatedCapabilities ?? []).includes(
+                    WORKSPACE_LIFECYCLE_CAPABILITY,
+                  )
+                )
+                  changed = yield* workspaces.markFailed(
+                    report.workspaceId,
+                    report.message ?? null,
+                    at,
+                    true,
+                  );
               }
-              case "failed":
-                return yield* workspaces.markFailed(report.workspaceId, report.message ?? null, at);
-              case "deleted":
-                return yield* workspaces.markDisposed(report.workspaceId, at);
+              break;
+            case "deleted":
+              changed = yield* workspaces.markDisposed(report.workspaceId, at);
+              break;
+          }
+          if (fresh && report.observedAt !== undefined && report.status !== "deleted") {
+            const observed = yield* workspaces.recordObservation(report.workspaceId, report);
+            if (observed) {
+              yield* audit.append({
+                kind: "workspace.observed",
+                actor: SYSTEM_ACTOR,
+                payload: {
+                  workspaceId: report.workspaceId,
+                  runnerId,
+                  observedAt: report.observedAt,
+                },
+                at,
+              });
+              if (report.status === "failed" && current.value.status === "ready") changed = true;
+              if (
+                report.status === "ready" &&
+                current.value.status === "failed" &&
+                current.value.provisionedAt !== null
+              )
+                changed = true;
             }
-          }),
-        );
-        return moved ? { workspaceId: report.workspaceId, moved: report.status } : undefined;
+          }
+          if (fresh && report.status === "ready" && report.path !== undefined)
+            yield* workspaces.recordAttachmentPath(report.workspaceId, report.path);
+          if (!changed) return undefined;
+          const settled = yield* workspaces.one(report.workspaceId);
+          return Option.isSome(settled) &&
+            (settled.value.status === "ready" ||
+              settled.value.status === "failed" ||
+              settled.value.status === "deleted")
+            ? { workspaceId: report.workspaceId, moved: settled.value.status }
+            : undefined;
+        }),
+      ),
+
+    /** Returns the workspace whose runner should be asked for a current observation. */
+    readStoredWorkspace: readStoredWorkspaceOrFail,
+
+    /** Applies an inspection without treating readable files as successful preparation. */
+    recordObservation: (
+      runnerId: string,
+      report: WorkspaceReport,
+      actor: string = SYSTEM_ACTOR,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const found = yield* workspaces.one(report.workspaceId);
+        if (Option.isNone(found) || found.value.runnerId !== runnerId) return;
+        if (yield* workspaces.recordObservation(report.workspaceId, report))
+          yield* audit.append({
+            kind: "workspace.observed",
+            actor,
+            payload: { workspaceId: report.workspaceId, runnerId, observedAt: report.observedAt! },
+            at: yield* nowIso,
+          });
       }),
+
+    /** Checks the negotiated lifecycle capability before asking a runner for current facts. */
+    supportsInspection: (runnerId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        runners.read(runnerId),
+        (runner) =>
+          Option.isSome(runner) &&
+          (runner.value.negotiatedCapabilities ?? []).includes(WORKSPACE_LIFECYCLE_CAPABILITY),
+      ),
 
     /**
      * Marks every live workspace on a retired runner as `lost`. The workspaces

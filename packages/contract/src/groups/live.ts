@@ -62,6 +62,7 @@ export const MUTABLE_LIVE_TOPICS = [
   "connection",
   "notification",
   "runner",
+  "workspace",
   "plugin",
   "provider",
   "assistant",

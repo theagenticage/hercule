@@ -8,7 +8,14 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join as joinPath } from "node:path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { StorageId, WorkspaceKind, WorkspaceProvision, WorkspaceReport } from "@hercule/protocol";
+import {
+  StorageId,
+  WorkspaceKind,
+  WorkspaceProvision,
+  WorkspaceReport,
+  StartingRevision,
+  CheckoutForm,
+} from "@hercule/protocol";
 
 const RegisteredCheckout = Schema.Struct({
   checkoutId: StorageId,
@@ -18,6 +25,11 @@ const RegisteredCheckout = Schema.Struct({
   commonDirectory: Schema.optionalKey(Schema.String),
   commonDirectoryIdentity: Schema.optionalKey(Schema.String),
   remoteName: Schema.optionalKey(Schema.String),
+  sourceRoot: Schema.optionalKey(Schema.String),
+  canonicalRoot: Schema.optionalKey(Schema.String),
+  startingRevision: Schema.optionalKey(Schema.NullOr(StartingRevision)),
+  baseCommit: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  form: Schema.optionalKey(CheckoutForm),
 });
 
 /** One checkout, as the registry records it. */
@@ -43,6 +55,8 @@ const RegisteredWorkspace = Schema.Struct({
   checkouts: Schema.Array(RegisteredCheckout),
   preparation: Schema.optionalKey(Preparation),
   ownership: Schema.optionalKey(Schema.Literals(["managed", "existing"])),
+  /** Availability is observed separately from the immutable preparation result. */
+  available: Schema.optionalKey(Schema.Boolean),
 });
 
 export type RegisteredWorkspace = Schema.Schema.Type<typeof RegisteredWorkspace>;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type JSX } from "react";
+import type { JSX } from "react";
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
@@ -6,8 +6,6 @@ import {
   describeRunWorkspace,
   formatWorkspaceLabel,
   isNotFound,
-  isRunLive,
-  queryKeys,
   resolveDisplayTimezone,
 } from "@hercule/client-core";
 import { EmptyState } from "@hercule/ui";
@@ -85,9 +83,7 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
  * them. The loader has read them for a run that already was; a run pinned
  * while the page is open reads them then, and shows them when they arrive.
  *
- * No topic carries workspaces yet, so the page reads the workspace again when
- * the run ends: the run releases its lease on the workspace as it ends, and
- * that fixes until when the workspace is kept.
+ * Workspace observations and lease changes update through their own topic.
  */
 function RunScreen(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
@@ -99,16 +95,9 @@ function RunScreen(): JSX.Element {
   useLiveInvalidation(live, queryClient, "runner");
   useLiveInvalidation(live, queryClient, "workflow");
   useLiveInvalidation(live, queryClient, "session");
+  useLiveInvalidation(live, queryClient, "workspace");
 
   const run = useSuspenseQuery(runQuery(client, runId)).data;
-  const isLive = isRunLive(run.status);
-  const wasLive = useRef(isLive);
-  useEffect(() => {
-    if (wasLive.current && !isLive && run.workspaceId !== undefined) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.workspace(run.workspaceId) });
-    }
-    wasLive.current = isLive;
-  }, [isLive, run.workspaceId, queryClient]);
   const timezone = resolveDisplayTimezone(
     useSuspenseQuery(settingsQuery(client)).data.user.timezone,
   );

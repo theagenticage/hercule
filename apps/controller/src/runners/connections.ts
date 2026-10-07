@@ -28,6 +28,9 @@ import {
   RETIRED_CLOSE_CODE,
   RETIRED_CLOSE_REASON,
   WORKSPACE_LIFECYCLE_CAPABILITY,
+  requiresWorkspaceLifecycle,
+  type WorkspaceInspect,
+  type WorkspaceInspection,
   type InstallRequest,
   type InstallResult,
   type LoginCode,
@@ -77,7 +80,7 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
  * carries an input. Those go through `sendFrameCarryingInput`, whose answer
  * is always a `SessionInputResult`.
  */
-export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode;
+export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode | WorkspaceInspect;
 
 /**
  * What came of sending a frame the runner answers:
@@ -146,7 +149,13 @@ export type FleetTraffic =
 
 /** A runner's answer to a `Request`, matched to it by the request's id. */
 export type Answer =
-  ProbeReport | InstallResult | LoginUrl | LoginFailed | LoginResult | SessionInputResult;
+  | ProbeReport
+  | InstallResult
+  | LoginUrl
+  | LoginFailed
+  | LoginResult
+  | SessionInputResult
+  | WorkspaceInspection;
 
 /**
  * The key callers of `refreshedFacts` wait under. The facts report has no
@@ -281,10 +290,15 @@ const make = Effect.gen(function* () {
     key: string,
     send: (held: Reachable) => Effect.Effect<void>,
     deadline: Duration.Duration,
+    requiresWorkspaceLifecycle = false,
   ): Effect.Effect<SendOutcome<Reported>> =>
     Effect.suspend(() => {
       const held = reachable.get(id);
-      if (held === undefined) return Effect.succeed(NOT_SENT);
+      if (
+        held === undefined ||
+        (requiresWorkspaceLifecycle && !held.capabilities.includes(WORKSPACE_LIFECYCLE_CAPABILITY))
+      )
+        return Effect.succeed(NOT_SENT);
       // Registered and removed as a resource: the removal runs however the
       // send or the wait ends, including an interruption between the two.
       // Nothing else removes a caller's entry, and a leftover entry would
@@ -327,9 +341,11 @@ const make = Effect.gen(function* () {
     key: string,
     send: (held: Reachable) => Effect.Effect<void>,
     deadline: Duration.Duration,
+    requiresWorkspaceLifecycle = false,
   ): Effect.Effect<Option.Option<Reported>> =>
-    Effect.map(sendAndAwaitReport(id, key, send, deadline), (outcome) =>
-      outcome._tag === "sent" ? outcome.answer : Option.none(),
+    Effect.map(
+      sendAndAwaitReport(id, key, send, deadline, requiresWorkspaceLifecycle),
+      (outcome) => (outcome._tag === "sent" ? outcome.answer : Option.none()),
     );
 
   /**
@@ -457,7 +473,13 @@ const make = Effect.gen(function* () {
       deadline: Duration.Duration,
     ): Effect.Effect<Option.Option<Answer>> =>
       Effect.map(
-        askAndAwaitReport(id, request.requestId, (held) => held.ask(request), deadline),
+        askAndAwaitReport(
+          id,
+          request.requestId,
+          (held) => held.ask(request),
+          deadline,
+          request._tag === "workspaceInspect",
+        ),
         // The facts report uses its own key, never a request id, so only an
         // answer can arrive under this key.
         Option.filter((reported): reported is Answer => reported._tag !== "factsReported"),
@@ -528,8 +550,7 @@ const make = Effect.gen(function* () {
         if (held === undefined) return Effect.succeed(false);
         if (
           frame._tag === "workspaceProvision" &&
-          (frame.attachment !== undefined ||
-            frame.checkouts.some((checkout) => checkout.repositoryWorkspaceId !== undefined)) &&
+          requiresWorkspaceLifecycle(frame) &&
           !held.capabilities.includes(WORKSPACE_LIFECYCLE_CAPABILITY)
         )
           return Effect.as(
@@ -541,7 +562,7 @@ const make = Effect.gen(function* () {
                 workspaceId: frame.workspaceId,
                 status: "failed",
                 message:
-                  "This runner does not support the selected local repository. Upgrade the runner before preparing this workspace.",
+                  "This runner does not support the selected repository and starting revision. Upgrade the runner before preparing this workspace.",
               },
             }),
             false,

@@ -873,14 +873,15 @@ export const CLI = {
   },
   "workspace.provision": {
     command: "workspace provision",
-    help: "Makes a repo's main workspace on one machine, which is the long-lived working copy threads share. Hercule clones it fresh under that machine's own storage; a folder you already have is never taken over. It returns at once with the workspace in provisioning, and the machine reports when it is ready; read it with `hercule workspace read`.",
+    help: "Makes a repo's main workspace on one runner, as a managed worktree of its selected repository. Threads can share these working files. An existing folder is registered only through workspace attach. Provision returns at once and the runner reports when preparation is ready; read it with `hercule workspace read`.",
     examples: [{ args: ["--resource", "1f3a9c2e", "--runner", "7b41d0a5"] }],
     fields: {
       resourceId: {
         flag: "resource",
         help: "The repo to check out; a folder or a mailbox is not allowed.",
+        resolves: "resource.query",
       },
-      runnerId: { flag: "runner", help: "The machine to make it on." },
+      runnerId: { flag: "runner", help: "The machine to make it on.", resolves: "runner.query" },
     },
     errors: {
       conflict: "that repo already has a main workspace on that machine",
@@ -911,10 +912,12 @@ export const CLI = {
       resourceId: {
         flag: "resource",
         help: "The repository Resource whose canonical remote must match the checkout.",
+        resolves: "resource.query",
       },
       runnerId: {
         flag: "runner",
         help: "The runner on which this path exists. The path is never used on another runner.",
+        resolves: "runner.query",
       },
       path: {
         flag: "path",
@@ -929,6 +932,22 @@ export const CLI = {
       conflict:
         "that repository already has a different path or storage mode selected on this runner",
       invalid_state: "the runner must support workspace attachment; upgrade it before attaching",
+    },
+  },
+  "workspace.inspect": {
+    command: "workspace inspect",
+    help: "Refreshes actual branch, HEAD and availability from the workspace's runner. Fetches nothing and runs no setup. The response includes the observation time; an offline or unsupported runner returns an actionable error and leaves the last observation unchanged.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The workspace's id, or a tail of eight or more characters.",
+        resolves: "workspace.query",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the runner is unavailable or needs an upgrade before it can inspect this workspace",
     },
   },
   "workspace.dispose": {

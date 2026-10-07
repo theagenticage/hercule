@@ -65,7 +65,7 @@ const stopSession = async (arranged: Arranged, id: string): Promise<void> => {
 const ABSENT = "0198e4b0-0000-7000-8000-0000000000ff";
 
 describe("workspace.provision", () => {
-  it("writes a provisioning primary with one clone checkout, and sends the runner a provision frame", async () => {
+  it("writes a provisioning primary with one managed worktree checkout, and sends the runner a provision frame", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
 
@@ -79,7 +79,7 @@ describe("workspace.provision", () => {
       expect(workspace.checkouts).toHaveLength(1);
       expect(workspace.checkouts[0]).toMatchObject({
         resourceId: web,
-        form: "clone",
+        form: "worktree",
         subdirectory: null,
         branch: null,
       });

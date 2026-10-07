@@ -2,8 +2,9 @@
  * Tests the walk along a workflow's edges that the controller and the run
  * graph both use to find the steps a set of steps can lead to.
  */
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { collectReachableSteps } from "./workflow-definition";
+import { collectReachableSteps, WorkspacePolicy } from "./workflow-definition";
 
 describe("collecting the steps reachable from some steps", () => {
   it("includes the starting steps and every step a path of edges leads to", () => {
@@ -41,5 +42,61 @@ describe("collecting the steps reachable from some steps", () => {
 
   it("returns an empty set when it starts from no step", () => {
     expect(collectReachableSteps([{ from: "a", to: "b" }], []).size).toBe(0);
+  });
+});
+
+describe("starting revisions in workflow workspace policies", () => {
+  const resourceId = "0199e0e7-1111-7000-8000-000000000002";
+  const policy = (checkout: object) => ({
+    kind: "ephemeral",
+    checkouts: [{ resourceId, ...checkout }],
+  });
+
+  it("preserves explicit current, local and remote choices and existing omitted/deprecated policies", () => {
+    for (const checkout of [
+      {},
+      { baseBranch: "release/2.1" },
+      { startingRevision: { kind: "current" } },
+      { startingRevision: { kind: "local", branch: "feature/local-only" } },
+      { startingRevision: { kind: "remote", branch: "release/2.1" } },
+      { startingRevision: { kind: "remote" } },
+    ]) {
+      const input = policy(checkout);
+      expect(Schema.decodeUnknownSync(WorkspacePolicy)(input)).toEqual(input);
+    }
+  });
+
+  it("refuses invalid and option-like branches for local and remote choices", () => {
+    for (const kind of ["local", "remote"]) {
+      for (const branch of [
+        "",
+        "--upload-pack=id",
+        "feature..other",
+        "feature\nother",
+        "feature\u0000other",
+        "feature@{1}",
+        "feature.lock",
+      ]) {
+        expect(
+          Schema.decodeUnknownExit(WorkspacePolicy)(policy({ startingRevision: { kind, branch } }))
+            ._tag,
+          `${kind}: ${JSON.stringify(branch)}`,
+        ).toBe("Failure");
+      }
+    }
+  });
+
+  it("refuses both fields instead of choosing between incompatible revision instructions", () => {
+    for (const startingRevision of [
+      { kind: "current" },
+      { kind: "local", branch: "main" },
+      { kind: "remote", branch: "main" },
+      { kind: "remote" },
+    ]) {
+      expect(
+        Schema.decodeUnknownExit(WorkspacePolicy)(policy({ baseBranch: "main", startingRevision }))
+          ._tag,
+      ).toBe("Failure");
+    }
   });
 });
