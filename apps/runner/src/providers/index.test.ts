@@ -1,3 +1,4 @@
+import { makeWorkspaces } from "../workspaces";
 /**
  * Tests which adapters this runner build includes, and which the session
  * supervisor receives. The registry is the only place a provider id becomes an
@@ -5,10 +6,10 @@
  * "no adapter in this build".
  */
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Effect, Exit, Scope } from "effect";
 import type { RunnerToController } from "@hercule/protocol";
 import type { Machine } from "../sessions/context";
-import { makeWorkspaces } from "../workspaces";
+
 import { makeSupervising } from "../sessions/supervisor";
 import { ADAPTER_IDS, findAdapter, adapters } from "./index";
 
@@ -32,6 +33,7 @@ describe("the adapters in this runner build", () => {
 
     const sent: Array<RunnerToController> = [];
     // Nothing is started, so none of these paths are created.
+    const scope = Effect.runSync(Scope.make());
     const machine: Machine = {
       providersDir: "/var/hercule/runner/providers",
       scratchDir: "/var/hercule/runner/scratch",
@@ -40,10 +42,13 @@ describe("the adapters in this runner build", () => {
       controllerUrl: "https://controller.example:4938",
       baseEnv: { PATH: "/usr/bin" },
       findBinary: () => undefined,
-      workspaces: makeWorkspaces({ storageDir: "/var/hercule/runner" }),
+      workspaces: Effect.runSync(
+        makeWorkspaces({ storageDir: "/var/hercule/runner" }).pipe(Scope.provide(scope)),
+      ),
       socketPath: "/var/hercule/runner/daemon.sock",
     };
     const supervisor = makeSupervising(adapters).forConnection({
+      scope,
       machine,
       send: (frame) => Effect.sync(() => void sent.push(frame)),
       // No session runs, so no agent step begins.
@@ -55,7 +60,7 @@ describe("the adapters in this runner build", () => {
     });
 
     // The report asks every adapter in the array, Codex included, for its sessions.
-    await Effect.runPromise(supervisor.report);
+    await Effect.runPromise(supervisor.report.pipe(Effect.ensuring(Scope.close(scope, Exit.void))));
     expect(sent).toHaveLength(1);
   });
 });

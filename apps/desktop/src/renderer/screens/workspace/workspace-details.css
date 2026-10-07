@@ -1,0 +1,51 @@
+/* Workspace facts use Bureau's glass dialog and ordinary UI face. Only
+   immutable Git identifiers use monospace; source paths wrap on narrow panes. */
+.workspace-details-dialog {
+  width: 460px;
+}
+.workspace-details-body {
+  padding: 14px;
+  overflow-y: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.workspace-details-facts {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+}
+.workspace-details-facts dt {
+  color: var(--muted);
+}
+.workspace-details-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.workspace-details-checkout {
+  margin-top: 14px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 14px;
+}
+.workspace-details-note {
+  color: var(--muted);
+}
+.workspace-details-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-top: 18px;
+}
+.workspace-details-error {
+  color: var(--fail-ink);
+}
+.workspace-details-derived {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.workspace-details-derived small {
+  display: block;
+  color: var(--muted);
+}

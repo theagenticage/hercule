@@ -135,8 +135,9 @@ export interface LaunchedApp {
 export async function launchForTest(
   userDataDir = createUserDataDirForTest(),
   prepareFirstWindow?: (app: ElectronApplication, page: Page) => Promise<void>,
+  recordVideo?: Parameters<typeof launchTestPackage>[1],
 ): Promise<LaunchedApp> {
-  const app = await launchTestPackage(userDataDir);
+  const app = await launchTestPackage(userDataDir, recordVideo);
   let closing: Promise<void> | undefined;
   const close = () => (closing ??= quitApp(app));
   onTestFinished(close);
@@ -659,12 +660,17 @@ export async function startIdentityServerForTest(readRunnerId: () => string): Pr
   });
   const listen = (port: number): Promise<boolean> =>
     new Promise((resolve) => {
-      const refuse = (): void => resolve(false);
-      server.once("error", refuse);
-      server.listen(port, "127.0.0.1", () => {
+      const refuse = (): void => {
+        server.off("listening", ready);
+        resolve(false);
+      };
+      const ready = (): void => {
         server.off("error", refuse);
         resolve(true);
-      });
+      };
+      server.once("error", refuse);
+      server.once("listening", ready);
+      server.listen(port, "127.0.0.1");
     });
   const listenOnFreePort = async (): Promise<number | undefined> => {
     for (let port = IDENTITY_PORT; port < IDENTITY_PORT + IDENTITY_PORT_COUNT; port += 1) {

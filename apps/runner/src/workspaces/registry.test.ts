@@ -1,3 +1,5 @@
+import { makeTestWorkspaces } from "./testing";
+import * as Effect from "effect/Effect";
 /**
  * Tests that the runner still knows where its workspaces are after it restarts.
  *
@@ -5,10 +7,10 @@
  * workspace's directory. A runner that lost it would strand the user's work on
  * its own disk.
  */
-import { rmSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { makeWorkspaces } from "./index";
+
 import {
   buildCheckout,
   cleanTemporaries,
@@ -30,30 +32,49 @@ describe("resolving a workspace", () => {
     const workspaceId = createId();
     const resourceId = createId();
     const checkoutId = createId();
-    await makeWorkspaces({ storageDir }).provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({
-            checkoutId,
-            resourceId,
-            remote: remote.url,
-            branch: "hercule/run-1a1a1a1a",
-          }),
-        ],
-      }),
+    await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              checkoutId,
+              resourceId,
+              remote: remote.url,
+              branch: "hercule/run-1a1a1a1a",
+            }),
+          ],
+        }),
+      ),
     );
 
     // A second instance over the same storage: the daemon after a restart.
-    const resolved = makeWorkspaces({ storageDir }).resolve(workspaceId);
+    const resolved = Effect.runSync(makeTestWorkspaces({ storageDir }).resolve(workspaceId));
 
     const directory = join(storageDir, "workspaces", workspaceId);
     expect(resolved?.root).toBe(directory);
     // A single-repo ephemeral workspace runs in the checkout itself, not above it.
     expect(resolved?.cwd).toBe(directory);
+    const commonDirectory = realpathSync(
+      runGitOrThrow(directory, "rev-parse", "--path-format=absolute", "--git-common-dir"),
+    );
+    const physical = statSync(commonDirectory);
     expect(resolved?.checkouts).toEqual([
-      { checkoutId, resourceId, remote: remote.url, path: directory },
+      {
+        checkoutId,
+        resourceId,
+        remote: remote.url,
+        path: directory,
+        canonicalRoot: realpathSync(directory),
+        commonDirectory,
+        commonDirectoryIdentity: `${String(physical.dev)}:${String(physical.ino)}`,
+        sourceRoot: commonDirectory,
+        remoteName: "origin",
+        startingRevision: { kind: "remote" },
+        baseCommit: runGitOrThrow(remote.work, "rev-parse", "HEAD"),
+        form: "worktree",
+      },
     ]);
   });
 
@@ -62,28 +83,30 @@ describe("resolving a workspace", () => {
     const api = makeRemote();
     const storageDir = createStorageDir();
     const workspaceId = createId();
-    await makeWorkspaces({ storageDir }).provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({
-            resourceId: createId(),
-            remote: web.url,
-            subdirectory: "web",
-            branch: "hercule/run-2b2b2b2b",
-          }),
-          buildCheckout({
-            resourceId: createId(),
-            remote: api.url,
-            subdirectory: "api",
-            branch: "hercule/run-2b2b2b2b",
-          }),
-        ],
-      }),
+    await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              resourceId: createId(),
+              remote: web.url,
+              subdirectory: "web",
+              branch: "hercule/run-2b2b2b2b",
+            }),
+            buildCheckout({
+              resourceId: createId(),
+              remote: api.url,
+              subdirectory: "api",
+              branch: "hercule/run-2b2b2b2b",
+            }),
+          ],
+        }),
+      ),
     );
 
-    const resolved = makeWorkspaces({ storageDir }).resolve(workspaceId);
+    const resolved = Effect.runSync(makeTestWorkspaces({ storageDir }).resolve(workspaceId));
 
     const root = join(storageDir, "workspaces", workspaceId);
     expect(resolved?.cwd).toBe(root);
@@ -99,27 +122,64 @@ describe("resolving a workspace", () => {
     const storageDir = createStorageDir();
     const workspaceId = createId();
     const resourceId = createId();
-    await makeWorkspaces({ storageDir }).provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
-      }),
+    await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remote.url })],
+        }),
+      ),
     );
 
-    const resolved = makeWorkspaces({ storageDir }).resolve(workspaceId);
+    const resolved = Effect.runSync(makeTestWorkspaces({ storageDir }).resolve(workspaceId));
 
-    const directory = join(storageDir, "primaries", resourceId);
+    const directory = join(storageDir, "primaries", workspaceId);
     expect(resolved?.cwd).toBe(directory);
     expect(resolved?.root).toBe(directory);
   });
 
   it("returns undefined for a workspace the runner does not have", () => {
-    expect(makeWorkspaces({ storageDir: createStorageDir() }).resolve(createId())).toBeUndefined();
+    expect(
+      Effect.runSync(makeTestWorkspaces({ storageDir: createStorageDir() }).resolve(createId())),
+    ).toBeUndefined();
   });
 });
 
 describe("provisioning a workspace this runner already has", () => {
+  it("keeps a legacy ready working copy without running a new setup instruction", async () => {
+    const remote = makeRemote();
+    const storageDir = createStorageDir();
+    const frame = buildProvisionFrame({
+      kind: "primary",
+      checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
+    });
+    const manager = makeTestWorkspaces({ storageDir });
+    await Effect.runPromise(manager.provision(frame));
+    const root = Effect.runSync(manager.resolve(frame.workspaceId))!.root;
+    writeFileSync(join(root, "unfinished.txt"), "keep my work");
+    const registryPath = join(storageDir, "workspaces.json");
+    const entries = (
+      JSON.parse(readFileSync(registryPath, "utf8")) as {
+        workspaces: Array<{ preparation?: unknown }>;
+      }
+    ).workspaces;
+    for (const entry of entries) delete entry.preparation;
+    writeFileSync(registryPath, JSON.stringify(entries));
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision({
+        ...frame,
+        checkouts: frame.checkouts.map((checkout) => ({
+          ...checkout,
+          setupCommand: "echo should-not-run > setup-reran; exit 7",
+        })),
+      }),
+    );
+    expect(report.status, report.message).toBe("ready");
+    expect(readFileSync(join(root, "unfinished.txt"), "utf8")).toBe("keep my work");
+    expect(runGitOrThrow(root, "status", "--porcelain")).toBe("?? unfinished.txt");
+  });
+
   it("reports it again instead of creating it again", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
@@ -132,12 +192,12 @@ describe("provisioning a workspace this runner already has", () => {
         buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-3c3c3c3c" }),
       ],
     });
-    const workspaces = makeWorkspaces({ storageDir });
-    const first = await workspaces.provision(frame);
+    const workspaces = makeTestWorkspaces({ storageDir });
+    const first = await Effect.runPromise(workspaces.provision(frame));
     const directory = join(storageDir, "workspaces", workspaceId);
     writeFileSync(join(directory, "work-in-progress.txt"), "the agent's work\n");
 
-    const again = await makeWorkspaces({ storageDir }).provision(frame);
+    const again = await Effect.runPromise(makeTestWorkspaces({ storageDir }).provision(frame));
 
     expect(again.status).toBe("ready");
     expect(again.checkouts?.[0]?.branch).toBe(first.checkouts?.[0]?.branch);
@@ -167,12 +227,12 @@ describe("provisioning a workspace this runner already has", () => {
         }),
       ],
     });
-    const workspaces = makeWorkspaces({ storageDir });
+    const workspaces = makeTestWorkspaces({ storageDir });
 
     // Both calls start before either returns, like a frame resent to the same runner.
     const [first, second] = await Promise.all([
-      workspaces.provision(frame),
-      workspaces.provision(frame),
+      Effect.runPromise(workspaces.provision(frame)),
+      Effect.runPromise(workspaces.provision(frame)),
     ]);
 
     expect(first.status, first.message ?? "").toBe("ready");
@@ -200,19 +260,19 @@ describe("a workspace whose directory is gone", () => {
         }),
       ],
     });
-    await makeWorkspaces({ storageDir }).provision(frame);
+    await Effect.runPromise(makeTestWorkspaces({ storageDir }).provision(frame));
     // Somebody cleaned up their disk, or a temporary directory was swept.
     rmSync(join(storageDir, "workspaces", workspaceId), { recursive: true, force: true });
 
     // A session placed here would start in a directory that does not exist.
-    expect(makeWorkspaces({ storageDir }).resolve(workspaceId)).toBeUndefined();
+    expect(Effect.runSync(makeTestWorkspaces({ storageDir }).resolve(workspaceId))).toBeUndefined();
 
-    const again = await makeWorkspaces({ storageDir }).provision(frame);
+    const again = await Effect.runPromise(makeTestWorkspaces({ storageDir }).provision(frame));
 
     expect(again.status).toBe("failed");
     expect(again.message ?? "").toContain("gone");
     // Its entry is removed, so the next frame for it creates the workspace from scratch.
-    expect(makeWorkspaces({ storageDir }).resolve(workspaceId)).toBeUndefined();
+    expect(Effect.runSync(makeTestWorkspaces({ storageDir }).resolve(workspaceId))).toBeUndefined();
   });
 });
 
@@ -222,32 +282,37 @@ describe("reporting a primary after a session ran in it", () => {
     const storageDir = createStorageDir();
     const workspaceId = createId();
     const resourceId = createId();
-    const workspaces = makeWorkspaces({ storageDir });
-    await workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
-      }),
+    const workspaces = makeTestWorkspaces({ storageDir });
+    await Effect.runPromise(
+      workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remote.url })],
+        }),
+      ),
     );
-    const folder = join(storageDir, "primaries", resourceId);
+    const folder = join(storageDir, "primaries", workspaceId);
     // What a session does: it works on a branch of its own.
     runGitOrThrow(folder, "checkout", "-b", "feature/what-the-agent-did");
 
-    const report = await workspaces.reportAfterSession(workspaceId);
+    const report = await Effect.runPromise(workspaces.reportAfterSession(workspaceId));
 
     expect(report?.status).toBe("ready");
     expect(report?.workspaceId).toBe(workspaceId);
     expect(report?.checkouts?.[0]?.branch).toBe("feature/what-the-agent-did");
     expect([...(report?.checkouts?.[0]?.branches ?? [])].sort()).toEqual([
       "feature/what-the-agent-did",
+      `hercule/main-${workspaceId}`,
       "main",
     ]);
   });
 
   it("returns undefined for a workspace the runner does not have", async () => {
     expect(
-      await makeWorkspaces({ storageDir: createStorageDir() }).reportAfterSession(createId()),
+      await Effect.runPromise(
+        makeTestWorkspaces({ storageDir: createStorageDir() }).reportAfterSession(createId()),
+      ),
     ).toBeUndefined();
   });
 });

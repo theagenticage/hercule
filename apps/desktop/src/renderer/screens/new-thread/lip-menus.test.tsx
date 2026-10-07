@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { BranchField, MachineRow, WorkspaceMenu, WorkspacePick } from "@hercule/client-core";
+import type { StartingRevision } from "@hercule/contract";
 import { readMenuLines } from "../thread/testing";
 import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
 
@@ -64,16 +65,34 @@ describe("the workspace menu", () => {
 
 describe("the branch menu", () => {
   const FIELD: BranchField = {
-    header: "Branch",
-    note: "the checkout switches to it",
-    label: "main",
-    value: "main",
+    header: "Starting revision",
+    note: "the new workspace starts from it",
+    label: "Remote: main",
+    value: "remote:main",
     glyph: true,
     locked: null,
     rows: [
-      { branch: "main", badge: "current", dimmed: null },
-      { branch: "fix/cart", badge: null, dimmed: null },
-      { branch: "feat/coupons", badge: null, dimmed: "in workspace hercule/thread-3f1" },
+      {
+        key: "remote:main",
+        label: "Remote: main",
+        startingRevision: { kind: "remote", branch: "main" },
+        badge: "default",
+        dimmed: null,
+      },
+      {
+        key: "local:fix/cart",
+        label: "Local: fix/cart",
+        startingRevision: { kind: "local", branch: "fix/cart" },
+        badge: null,
+        dimmed: null,
+      },
+      {
+        key: "remote:feat/coupons",
+        label: "Remote: feat/coupons",
+        startingRevision: { kind: "remote", branch: "feat/coupons" },
+        badge: null,
+        dimmed: "Unavailable on this machine",
+      },
     ],
     foot: [{ text: "Uncommitted changes in " }, { text: "main", mono: true }, { text: " stay." }],
   };
@@ -82,12 +101,12 @@ describe("the branch menu", () => {
     render(<BranchMenuContent field={FIELD} onPick={vi.fn()} />);
 
     expect(document.querySelector(".pop-h")?.textContent).toBe(
-      "Branch" + "the checkout switches to it",
+      "Starting revision" + "the new workspace starts from it",
     );
     expect(readMenuLines()).toEqual([
-      ["main" + "current", true],
-      ["fix/cart", false],
-      ["feat/coupons" + "in workspace hercule/thread-3f1", false],
+      ["Remote: main" + "default", true],
+      ["Local: fix/cart", false],
+      ["Remote: feat/coupons" + "Unavailable on this machine", false],
     ]);
     expect(screen.queryByRole("button", { name: /feat\/coupons/ })).toBeNull();
     expect(document.querySelector(".pop-foot")?.textContent).toBe(
@@ -96,12 +115,12 @@ describe("the branch menu", () => {
   });
 
   it("picks the branch that is clicked", async () => {
-    const onPick = vi.fn<(branch: string) => void>();
+    const onPick = vi.fn<(revision: StartingRevision) => void>();
     render(<BranchMenuContent field={FIELD} onPick={onPick} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "fix/cart" }));
+    await userEvent.click(screen.getByRole("button", { name: "Local: fix/cart" }));
 
-    expect(onPick.mock.calls).toEqual([["fix/cart"]]);
+    expect(onPick.mock.calls).toEqual([[{ kind: "local", branch: "fix/cart" }]]);
   });
 });
 

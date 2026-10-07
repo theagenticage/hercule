@@ -2,6 +2,23 @@ import { assert, describe, it } from "vitest";
 import { MUTABLE_LIVE_TOPICS } from "@hercule/contract";
 import { buildQueryKeys, queryKeys, type LiveQueryKey } from "./keys";
 
+describe("workspace pushes", () => {
+  it("invalidates the list and the changed records", () => {
+    assert.deepStrictEqual(buildQueryKeys("workspace", ["first", "second"]), [
+      queryKeys.workspaces(),
+      queryKeys.workspace("first"),
+      queryKeys.workspace("second"),
+    ]);
+  });
+
+  it("invalidates every workspace after reconnect", () => {
+    assert.deepStrictEqual(buildQueryKeys("workspace", []), [
+      queryKeys.workspaces(),
+      queryKeys.workspace(),
+    ]);
+  });
+});
+
 /**
  * Returns only the keys of conversations' current sessions among the keys a
  * `session` push invalidates.

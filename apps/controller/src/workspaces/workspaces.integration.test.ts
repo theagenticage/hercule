@@ -1,3 +1,4 @@
+import type { Workspace } from "@hercule/contract";
 /**
  * Workspaces over the real API and the real runner socket: what provisioning a
  * primary writes and sends to the runner, how a runner's report changes it,
@@ -19,11 +20,27 @@ import {
   withFleet as withWorkspaces,
   type CheckoutRecord,
   type Frame,
-  type WorkspaceRecord,
 } from "./testing";
 
 const waitForFrameTagged = (wire: Wire, tag: string, index = 0): Promise<Frame> =>
   waitUntil(`sent ${String(index + 1)} ${tag} frames`, () => listFramesTagged(wire, tag)[index]);
+
+/** Confirms the recorded removal instruction after the runner finishes it. */
+const confirmWorkspaceRemoval = async (arranged: Arranged, workspaceId: string): Promise<void> => {
+  const instruction = await waitUntil("received the workspace removal instruction", () =>
+    listFramesTagged(arranged.wire, "workspaceDispose").find(
+      (frame) => frame["workspaceId"] === workspaceId,
+    ),
+  );
+  expect(instruction["requestId"]).toBeTypeOf("string");
+  arranged.wire.send({
+    _tag: "workspaceReport",
+    workspaceId,
+    requestId: String(instruction["requestId"]),
+    status: "deleted",
+  });
+  await waitForWorkspace(arranged, workspaceId, (one) => one.status === "deleted");
+};
 
 const provisionWorkspace = (arranged: Arranged, body: unknown): Promise<Response> =>
   post(arranged.harness.base, "/api/v1/workspaces", body, arranged.token);
@@ -31,8 +48,8 @@ const provisionWorkspace = (arranged: Arranged, body: unknown): Promise<Response
 const waitForWorkspace = (
   arranged: Arranged,
   id: string,
-  ready: (record: WorkspaceRecord) => boolean,
-): Promise<WorkspaceRecord> =>
+  ready: (record: Workspace) => boolean,
+): Promise<Workspace> =>
   waitUntil("moved the workspace", async () => {
     const record = await readWorkspace(arranged, id);
     return ready(record) ? record : undefined;
@@ -41,10 +58,10 @@ const waitForWorkspace = (
 const queryWorkspaces = async (
   arranged: Arranged,
   search = "",
-): Promise<ReadonlyArray<WorkspaceRecord>> => {
+): Promise<ReadonlyArray<Workspace>> => {
   const response = await get(arranged.harness.base, `/api/v1/workspaces${search}`, arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
-  return ((await response.json()) as { items: ReadonlyArray<WorkspaceRecord> }).items;
+  return ((await response.json()) as { items: ReadonlyArray<Workspace> }).items;
 };
 
 const readCheckoutId = (checkout: CheckoutRecord): string => {
@@ -65,7 +82,7 @@ const stopSession = async (arranged: Arranged, id: string): Promise<void> => {
 const ABSENT = "0198e4b0-0000-7000-8000-0000000000ff";
 
 describe("workspace.provision", () => {
-  it("writes a provisioning primary with one clone checkout, and sends the runner a provision frame", async () => {
+  it("writes a provisioning primary with one managed worktree checkout, and sends the runner a provision frame", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
 
@@ -79,7 +96,7 @@ describe("workspace.provision", () => {
       expect(workspace.checkouts).toHaveLength(1);
       expect(workspace.checkouts[0]).toMatchObject({
         resourceId: web,
-        form: "clone",
+        form: "worktree",
         subdirectory: null,
         branch: null,
       });
@@ -94,14 +111,13 @@ describe("workspace.provision", () => {
         resourceId: web,
         remote: "https://github.com/acme/web",
       });
-      // No path is sent at all. The runner decides where the clone goes.
+      // Managed paths are resolved by the selected runner.
       expect(checkouts[0]?.["path"] ?? null).toBeNull();
     });
   });
 
-  // Adopting an existing folder is not supported, so the request has no path
-  // field, and a request with one is rejected rather than silently ignored.
-  it("rejects a path, because a main workspace is always Hercule's own clone", async () => {
+  // An existing checkout is registered through attach rather than managed provisioning.
+  it("rejects an attachment path in managed provisioning", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const refused = await provisionWorkspace(arranged, {
@@ -154,7 +170,7 @@ describe("workspace.provision", () => {
 });
 
 describe("a primary the runner failed to provision", () => {
-  it("is marked deleted and replaced by the next provision, rather than blocking it", async () => {
+  it("keeps a failed attempt while the next provision opens a fresh main workspace", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const first = await provisionWorkspaceOrFail(arranged, {
@@ -178,17 +194,87 @@ describe("a primary the runner failed to provision", () => {
       expect(second.status).toBe("provisioning");
       await waitForFrameTagged(arranged.wire, "workspaceProvision", 1);
 
-      // The failed primary is kept as a record of the attempt, not as a
-      // workspace: it is deleted, and no longer blocks a new primary.
+      // The failed attempt stays visible because no runner confirmed removal.
       const stood = await readWorkspace(arranged, first.id);
-      expect(stood.status).toBe("deleted");
-      expect(stood.disposedAt).not.toBeNull();
+      expect(stood.status).toBe("failed");
+      expect(stood.disposedAt).toBeNull();
       expect(stood.message).toBe("fatal: could not read from remote repository");
     });
   });
 });
 
 describe("the runner's workspace report", () => {
+  it("persists observed derived workspace IDs and their updates in public workspace reads", async () => {
+    await withWorkspaces(async (arranged) => {
+      const web = await createRepo(arranged, "https://github.com/acme/derived-observation");
+      const primary = await provisionWorkspaceOrFail(arranged, {
+        resourceId: web,
+        runnerId: arranged.runnerId,
+      });
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: primary.id,
+        status: "ready",
+        checkouts: [],
+      });
+      await waitForWorkspace(arranged, primary.id, (record) => record.status === "ready");
+      const derived = await spawnSessionOrFail(arranged, {
+        prompt: "prepare derived work",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      const observedAt = new Date().toISOString();
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: primary.id,
+        status: "ready",
+        observedAt,
+        derivedWorkspaceIds: [String(derived.workspaceId)],
+      } as never);
+      const observed = await waitForWorkspace(
+        arranged,
+        primary.id,
+        (record) => record.observedAt === observedAt,
+      );
+      expect(observed).toMatchObject({ derivedWorkspaceIds: [derived.workspaceId] });
+      const refreshedAt = new Date(Date.parse(observedAt) + 1).toISOString();
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: primary.id,
+        status: "ready",
+        observedAt: refreshedAt,
+        derivedWorkspaceIds: [],
+      } as never);
+      const refreshed = await waitForWorkspace(
+        arranged,
+        primary.id,
+        (record) => record.observedAt === refreshedAt,
+      );
+      expect(refreshed).toMatchObject({ derivedWorkspaceIds: [] });
+      const knownAt = new Date(Date.parse(refreshedAt) + 1).toISOString();
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: primary.id,
+        status: "ready",
+        observedAt: knownAt,
+        derivedWorkspaceIds: [String(derived.workspaceId)],
+      });
+      await waitForWorkspace(arranged, primary.id, (record) => record.observedAt === knownAt);
+      const olderRunnerObservedAt = new Date(Date.parse(knownAt) + 1).toISOString();
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId: primary.id,
+        status: "ready",
+        observedAt: olderRunnerObservedAt,
+      });
+      const unknown = await waitForWorkspace(
+        arranged,
+        primary.id,
+        (record) => record.observedAt === olderRunnerObservedAt,
+      );
+      expect(unknown).toMatchObject({ derivedWorkspaceIds: null });
+    });
+  });
+
   /**
    * A primary is reported again after every session that runs in it, and that
    * report is the only way to learn which branch the agent left the checkout
@@ -255,12 +341,14 @@ describe("the runner's workspace report", () => {
       const workspaceId = String(session.workspaceId);
       const opened = (await readWorkspace(arranged, workspaceId)).checkouts[0]!;
       const checkoutId = readCheckoutId(opened);
-      arranged.wire.send({
-        _tag: "workspaceReport",
-        workspaceId,
-        status: "deleted",
-      } as never);
-      await waitForWorkspace(arranged, workspaceId, (one) => one.status === "deleted");
+      await stopSession(arranged, session.id);
+      const removed = await del(
+        arranged.harness.base,
+        `/api/v1/workspaces/${workspaceId}`,
+        arranged.token,
+      );
+      expect(removed.status, await removed.clone().text()).toBe(200);
+      await confirmWorkspaceRemoval(arranged, workspaceId);
 
       // A second workspace whose report is sent after the stale one. Frames
       // are handled in the order they arrive, so once the second workspace is
@@ -510,7 +598,7 @@ describe("a runner that was not connected", () => {
 });
 
 describe("workspace.dispose", () => {
-  it("sends the runner a dispose frame for an ephemeral workspace, and marks it deleted", async () => {
+  it("reserves disposal before marking an ephemeral workspace deleted after the runner confirms", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const session = await spawnSessionOrFail(arranged, {
@@ -531,6 +619,11 @@ describe("workspace.dispose", () => {
 
       const frame = await waitForFrameTagged(arranged.wire, "workspaceDispose");
       expect(frame["workspaceId"]).toBe(workspaceId);
+
+      const pending = await readWorkspace(arranged, workspaceId);
+      expect(pending.status).toBe("disposing");
+      expect(pending.disposedAt).toBeNull();
+      await confirmWorkspaceRemoval(arranged, workspaceId);
 
       const gone = await readWorkspace(arranged, workspaceId);
       expect(gone.status).toBe("deleted");
@@ -584,7 +677,7 @@ describe("workspace.dispose", () => {
     });
   });
 
-  it("never tears a primary down", async () => {
+  it("reserves explicit discard of a managed main workspace and waits for its removal result", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const primary = await provisionWorkspaceOrFail(arranged, {
@@ -592,14 +685,18 @@ describe("workspace.dispose", () => {
         runnerId: arranged.runnerId,
       });
 
-      const refused = await del(
+      const requested = await send(
+        "DELETE",
         arranged.harness.base,
         `/api/v1/workspaces/${primary.id}`,
-        arranged.token,
+        { token: arranged.token, body: { discardChanges: true } },
       );
-      expect(await readErrorCode(refused)).toBe("invalid_state");
-      expect((await readWorkspace(arranged, primary.id)).status).toBe("provisioning");
-      expect(listFramesTagged(arranged.wire, "workspaceDispose")).toEqual([]);
+      expect(requested.status, await requested.clone().text()).toBe(200);
+      expect((await readWorkspace(arranged, primary.id)).status).toBe("disposing");
+      const instruction = await waitForFrameTagged(arranged.wire, "workspaceDispose");
+      expect(instruction["discardChanges"]).toBe(true);
+      await confirmWorkspaceRemoval(arranged, primary.id);
+      expect((await readWorkspace(arranged, primary.id)).disposedAt).not.toBeNull();
     });
   });
 });
@@ -625,6 +722,7 @@ describe("runner.retire", () => {
         arranged.token,
       );
       expect([200, 204], await disposed.clone().text()).toContain(disposed.status);
+      await confirmWorkspaceRemoval(arranged, ephemeral);
 
       const retired = await send(
         "POST",

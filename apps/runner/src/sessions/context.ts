@@ -1,8 +1,9 @@
 /**
  * Resolves what one session needs on this machine from its start frame. The
  * frame holds ids, and this file turns them into paths and an environment.
- * Only this file knows where an instance's home or a workspace lives on the
- * runner. The controller never sees a path (spec 06 section 4).
+ * Only this file resolves the runner's provider homes and working directories.
+ * Managed workspace paths stay on the runner; an attached checkout's path is
+ * explicitly registered on the controller.
  */
 import { mkdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
@@ -152,7 +153,7 @@ const placeSession = (
         return { cwd: scratch, scratch };
       });
     }
-    const workspace = machine.workspaces.resolve(workspaceId);
+    const workspace = yield* machine.workspaces.resolve(workspaceId);
     if (workspace === undefined) {
       // Never a silent fallback to a scratch directory: the session would run
       // somewhere the user did not choose.
@@ -165,12 +166,12 @@ const placeSession = (
       // session. The switch waits for any other git work in this workspace:
       // two sessions that start in one primary at once, or a workspace step
       // running there, would otherwise collide on git's `index.lock`.
-      const switched = yield* machine.workspaces.runExclusively(
-        workspaceId,
-        Effect.promise(() =>
+      const switched = yield* machine.workspaces
+        .runExclusively(
+          workspaceId,
           switchBranch(workspace.cwd, branch, buildSubstrateEnv(machine.baseEnv)),
-        ),
-      );
+        )
+        .pipe(Effect.mapError((error) => error.message));
       if (!switched.ok) return yield* Effect.fail(switched.stderr);
     }
     return { cwd: workspace.cwd, scratch: undefined };

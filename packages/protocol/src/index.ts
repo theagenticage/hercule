@@ -21,6 +21,7 @@ import {
   Sequenced,
   StorageId,
   Subdirectory,
+  Timestamp,
   WorkspaceStepKey,
 } from "./primitives";
 import {
@@ -38,8 +39,11 @@ import {
   CredentialAnswer,
   CredentialRequest,
   WorkspaceDispose,
+  WorkspaceDetach,
   WorkspaceProvision,
   WorkspaceReport,
+  WorkspaceInspect,
+  WorkspaceInspection,
 } from "./workspaces";
 import {
   WorkspaceStepResult,
@@ -61,6 +65,7 @@ export {
   Sequenced,
   StorageId,
   Subdirectory,
+  Timestamp,
   WorkspaceStepKey,
 };
 
@@ -548,6 +553,7 @@ export const RunnerToController = Schema.Union([
   SessionInputResult,
   SessionsReport,
   WorkspaceReport,
+  WorkspaceInspection,
   CredentialRequest,
   WorkspaceStepResult,
   WorkspaceStepsReport,
@@ -631,6 +637,8 @@ export const ControllerToRunner = Schema.Union([
   SessionRespondToQuestion,
   WorkspaceProvision,
   WorkspaceDispose,
+  WorkspaceDetach,
+  WorkspaceInspect,
   CredentialAnswer,
   WorkspaceStepStart,
   WorkspaceStepSettle,

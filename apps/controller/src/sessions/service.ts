@@ -652,7 +652,7 @@ const make = Effect.gen(function* () {
     buildSpec: (session: StoredSession) => Effect.Effect<string, E>,
     at: string,
     announceTheMove: boolean,
-  ): Effect.Effect<boolean, E | SqlError> =>
+  ): Effect.Effect<boolean, E | SqlError | InvalidState> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
@@ -1461,6 +1461,8 @@ const make = Effect.gen(function* () {
           parentSessionId: open.parentSessionId,
           at: open.at,
         });
+        if (open.spec.workspaceId !== null)
+          yield* workspaces.retainForThread(open.id, open.spec.workspaceId);
         // The prompt is stored as an ordinary input, waiting with the
         // session. The frame that starts the session carries it, and a
         // controller that restarts in between still has it.
@@ -1958,7 +1960,9 @@ const make = Effect.gen(function* () {
      * transaction, so when the caller fails, for example on an invalid model
      * option, neither the new selection nor the input is stored.
      */
-    takeInput: <E = never>(taking: TakeInputRequest<E>): Effect.Effect<StoredInput, E | SqlError> =>
+    takeInput: <E = never>(
+      taking: TakeInputRequest<E>,
+    ): Effect.Effect<StoredInput, E | SqlError | InvalidState> =>
       Effect.gen(function* () {
         yield* sessions.setModelSelection(taking.sessionId, taking.modelSelection);
         const claimed =

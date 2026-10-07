@@ -11,6 +11,8 @@ export const API_VERSION = 1;
 
 export { api } from "./api";
 
+export { canonicalizeRemote } from "@hercule/protocol";
+
 export {
   ALL_OPERATIONS,
   API_PREFIX,
@@ -360,12 +362,20 @@ export {
   Branch,
   Checkout,
   CheckoutForm,
+  GitRemoteName,
   MAX_BRANCH_LENGTH,
   WORKSPACE_SORT_FIELDS,
   WORKSPACE_STATUSES,
   Workspace,
+  WorkspaceAttachInput,
+  WorkspaceDisposeInput,
+  WorkspaceRetentionPolicy,
+  StartingRevision,
   WorkspaceFilter,
   WorkspaceKind,
+  WorkspaceOwnership,
+  RepositoryMode,
+  WorkspacePath,
   WorkspaceProvisionInput,
   WorkspaceStatus,
 } from "./groups/workspace";

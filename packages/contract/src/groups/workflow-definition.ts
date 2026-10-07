@@ -35,6 +35,7 @@ import {
   MAX_SPAWN_CHECKOUTS,
   PrimarySpawnWorkspace,
   SpawnCheckout,
+  refuseInvalidCheckoutRevision,
 } from "./session";
 
 /**
@@ -478,7 +479,10 @@ export const WorkspacePolicy = Schema.Union([
   closedStruct(PrimarySpawnWorkspace.fields),
   closedStruct({
     ...EphemeralSpawnWorkspace.fields,
-    checkouts: atMost(closedStruct(SpawnCheckout.fields), MAX_SPAWN_CHECKOUTS),
+    checkouts: atMost(
+      closedStruct(SpawnCheckout.fields).check(refuseInvalidCheckoutRevision),
+      MAX_SPAWN_CHECKOUTS,
+    ),
   }),
 ]);
 

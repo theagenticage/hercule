@@ -9,6 +9,7 @@
  * agent. The runner's own `HERCULE_*` variables are dropped too, so a session
  * or a setup command never gets the runner's Home or settings.
  */
+import type * as Effect from "effect/Effect";
 import type { Registry } from "./registry";
 import type { GitEnv } from "./git";
 
@@ -18,6 +19,10 @@ export const SETUP_DEADLINE_MS = 10 * 60 * 1000;
 export interface Substrate {
   readonly storageDir: string;
   readonly registry: Registry;
+  readonly coordinateRepository: <A, E, R>(
+    key: string,
+    work: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>;
   /**
    * The environment for the runner's own git, and the base of a repository's
    * setup command's environment. While provisioning, the runner adds the

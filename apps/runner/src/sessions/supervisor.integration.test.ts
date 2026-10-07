@@ -1,10 +1,11 @@
+import { makeTestWorkspaces } from "../workspaces/testing";
 /**
  * Tests the supervisor the way a connection uses it: the controller's frames go
  * in, and the runner's frames come out. The adapter is a fake, because the
  * tests are about the runner's own bookkeeping (the sequence numbers, the
  * `live` table, the scratch directory), not about any harness.
  */
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -24,11 +25,12 @@ import type {
   TurnInput,
   WorkspaceStepKey,
   WorkspaceStepResult,
+  WorkspaceReport,
 } from "@hercule/protocol";
 import { FIXTURE_SCHEMA } from "@hercule/protocol/testing";
 import type { ProviderAdapter, ProviderRunnerContext } from "../providers";
 import type { Machine } from "./context";
-import { makeWorkspaces } from "../workspaces";
+
 import { makeWorkspaceSteps } from "../workspace-steps";
 import {
   addBranch,
@@ -47,8 +49,8 @@ const attachments: Array<Scope.Closeable> = [];
 
 afterAll(async () => {
   for (const scope of attachments.splice(0)) await Effect.runPromise(Scope.close(scope, Exit.void));
+  await cleanTemporaries();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-  cleanTemporaries();
 });
 
 const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
@@ -263,7 +265,7 @@ const buildConnection = (fake: Fake) => {
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin" },
     findBinary: (name) => `/usr/local/bin/${name}`,
-    workspaces: makeWorkspaces({ storageDir: join(under, "storage") }),
+    workspaces: makeTestWorkspaces({ storageDir: join(under, "storage") }),
     socketPath: join(under, "daemon.sock"),
   };
   const send = (frame: RunnerToController) => Effect.sync(() => void sent.push(frame));
@@ -283,8 +285,8 @@ const buildConnection = (fake: Fake) => {
   // supervisor is built from it with `forConnection`. Sessions outlive the
   // socket that started them, and so does the shutdown that stops them all.
   const runner = makeSupervising([fake.adapter]);
-  const supervisor = runner.forConnection({ machine, send, workspaceSteps: steps });
-  return { supervisor, runner, sent, machine, under, steps };
+  const supervisor = runner.forConnection({ scope, machine, send, workspaceSteps: steps });
+  return { supervisor, runner, sent, machine, under, steps, scope };
 };
 
 /**
@@ -2137,18 +2139,20 @@ describe("a stop that arrives while a session is still starting", () => {
 
   it("spawns no harness when it arrives while the start switches the workspace's branch", async () => {
     const fake = createFake();
-    const { runner, machine, steps } = buildConnection(fake);
+    const { runner, machine, steps, scope } = buildConnection(fake);
     const remote = makeRemote();
     addBranch(remote, "release");
     const workspaceId = createId();
-    await machine.workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
-      }),
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
+        }),
+      ),
     );
-    const folder = machine.workspaces.resolve(workspaceId)!.cwd;
+    const folder = Effect.runSync(machine.workspaces.resolve(workspaceId))!.cwd;
 
     // Other git work holds the workspace, so the start's branch switch waits
     // for it. `switchAsked` is set once the start asks for the workspace,
@@ -2156,6 +2160,7 @@ describe("a stop that arrives while a session is still starting", () => {
     let switchAsked = false;
     const sent: Array<RunnerToController> = [];
     const supervisor = runner.forConnection({
+      scope,
       machine: {
         ...machine,
         workspaces: {
@@ -2260,7 +2265,7 @@ describe("a start that follows a stop of the same id", () => {
 
   it("keeps its entry when the old exit is handled after the adapter dropped the old session", async () => {
     const fake = createFake();
-    const { runner, machine, steps } = buildConnection(fake);
+    const { runner, machine, steps, scope } = buildConnection(fake);
     // The relay holds this event until the test lets it go, so the old exit,
     // published after it, is handled only then.
     const HOLD: ProviderEvent = { ...MARKER, eventId: "e-hold" };
@@ -2270,6 +2275,7 @@ describe("a start that follows a stop of the same id", () => {
     });
     const sent: Array<RunnerToController> = [];
     const supervisor = runner.forConnection({
+      scope,
       machine,
       workspaceSteps: steps,
       send: (frame) =>
@@ -3064,4 +3070,76 @@ describe("an agent step's turn", () => {
     ]);
     expect(steps.listInFlight()).toEqual([]);
   });
+});
+
+it("reports current checkout facts after start and resume before any turn ends, without repeating setup", async () => {
+  const fake = createFake();
+  const { supervisor, sent, machine, under } = buildConnection(fake);
+  const remote = makeRemote();
+  addBranch(remote, "release");
+  const setupMarker = join(under, "setup-count");
+  const frame = buildProvisionFrame({
+    kind: "primary",
+    checkouts: [
+      buildCheckout({
+        resourceId: createId(),
+        remote: remote.url,
+        setupCommand: `printf 'setup\\n' >> '${setupMarker}'`,
+      }),
+    ],
+  });
+  expect((await Effect.runPromise(machine.workspaces.provision(frame))).status).toBe("ready");
+  const cwd = Effect.runSync(machine.workspaces.resolve(frame.workspaceId))!.cwd;
+  const reports = (): ReadonlyArray<WorkspaceReport> =>
+    sent.filter((message): message is WorkspaceReport => message._tag === "workspaceReport");
+
+  await runWithRelay(
+    fake,
+    supervisor,
+    Effect.gen(function* () {
+      yield* supervisor.start({
+        ...START,
+        spec: { ...SPEC, workspaceId: frame.workspaceId },
+        checkoutBranch: "release",
+      });
+      yield* waitUntil("reported the branch selected at start", () =>
+        reports().some((report) => report.checkouts?.[0]?.branch === "release"),
+      );
+      expect(reports()[0]?.checkouts?.[0]?.headCommit).toBe(
+        runGitOrThrow(cwd, "rev-parse", "HEAD"),
+      );
+      expect(listSessionEvents(sent).map((event) => event.event._tag)).toEqual(["session.started"]);
+      yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+      yield* waitUntil("reported the stopped checkout", () => reports().length >= 2);
+      const beforeResume = reports().length;
+      yield* supervisor.start({
+        ...START,
+        requestId: REQUEST,
+        spec: {
+          ...SPEC,
+          workspaceId: frame.workspaceId,
+          continue: { nativeSessionId: NATIVE, mode: "resume" },
+        },
+        checkoutBranch: "main",
+      });
+      yield* waitUntil(
+        "reported the branch selected at resume",
+        () =>
+          reports().length > beforeResume && reports().at(-1)?.checkouts?.[0]?.branch === "main",
+      );
+      expect(reports().at(-1)?.checkouts?.[0]?.headCommit).toBe(
+        runGitOrThrow(cwd, "rev-parse", "HEAD"),
+      );
+      expect(listSessionEvents(sent).map((event) => event.event._tag)).toEqual([
+        "session.started",
+        "session.exited",
+        "session.started",
+      ]);
+      yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+      yield* waitUntil("ended the resumed session", () => listSessionEvents(sent).length === 4);
+    }),
+  );
+  expect(readFileSync(setupMarker, "utf8")).toBe("setup\n");
+  expect(fake.contexts).toHaveLength(2);
+  expect(fake.contexts.map((context) => context.cwd)).toEqual([cwd, cwd]);
 });

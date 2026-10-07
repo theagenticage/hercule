@@ -276,6 +276,8 @@ export interface LiveReader {
 
 /** What a test receives: the running controller, and helpers to inspect it. */
 export interface ServerHarness {
+  /** The temporary Home whose master key belongs to this test database. */
+  readonly home: string;
   /** An address a fetch can use. */
   readonly base: string;
   readonly audit: AuditReader;
@@ -456,6 +458,7 @@ export const withServer = (
           );
         yield* Effect.promise(() =>
           body({
+            home,
             base,
             audit,
             platformEvents,

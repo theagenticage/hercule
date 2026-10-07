@@ -78,19 +78,19 @@ describe("decideRelatedReads", () => {
     });
   });
 
-  it("reads the workspaces when a thread in a provisioning workspace changed status", () => {
+  it("uses workspace pushes when a thread in a known provisioning workspace changed status", () => {
     const next = [IN_PRIMARY, { ...IN_PROVISIONING, status: "idle" as const }];
 
     expect(decideRelatedReads(THREADS, next, PROJECTS, WORKSPACES)).toEqual({
       projects: false,
-      workspaces: true,
+      workspaces: false,
     });
   });
 
-  it("reads the workspaces when a new thread appears in a provisioning workspace", () => {
+  it("uses workspace pushes when a new thread appears in a known provisioning workspace", () => {
     const next = [...THREADS, { ...IN_PROVISIONING, id: "s-joined" }];
 
-    expect(decideRelatedReads(THREADS, next, PROJECTS, WORKSPACES).workspaces).toBe(true);
+    expect(decideRelatedReads(THREADS, next, PROJECTS, WORKSPACES).workspaces).toBe(false);
   });
 
   it("does not read the workspaces when a thread in a ready workspace changed status", () => {

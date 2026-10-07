@@ -1,3 +1,5 @@
+import { makeTestWorkspaces } from "./testing";
+import * as Effect from "effect/Effect";
 /**
  * Tests for provisioning workspaces.
  *
@@ -9,7 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { makeWorkspaces } from "./index";
+
 import {
   addBranch,
   cloneUserCheckout,
@@ -47,34 +49,45 @@ const isGoneWithin = async (pid: number, within: number): Promise<boolean> => {
   return false;
 };
 
-describe("a primary cloned fresh", () => {
-  it("clones from the cache into the runner's own directory and points origin at the remote", async () => {
+describe("a fresh managed primary worktree", () => {
+  it("shares the managed repository and keeps origin pointed at the remote", async () => {
     const remote = makeRemote();
     const head = runGitOrThrow(remote.work, "rev-parse", "HEAD");
     const storageDir = createStorageDir();
     const resourceId = createId();
+    const workspaceId = createId();
 
-    const report = await makeWorkspaces({ storageDir }).provision(
-      buildProvisionFrame({
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
-      }),
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remote.url })],
+        }),
+      ),
     );
 
     expect(report.status).toBe("ready");
-    const directory = join(storageDir, "primaries", resourceId);
+    const directory = join(storageDir, "primaries", workspaceId);
     expect(runGitOrThrow(directory, "rev-parse", "HEAD")).toBe(head);
-    expect(runGitOrThrow(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+    expect(runGitOrThrow(directory, "rev-parse", "--abbrev-ref", "HEAD")).toBe(
+      `hercule/main-${workspaceId}`,
+    );
     // Fetching and pushing must reach the real remote, not the local cache.
     expect(runGitOrThrow(directory, "remote", "get-url", "origin")).toBe(remote.url);
-    expect(report.checkouts?.[0]?.branch).toBe("main");
+    expect(report.checkouts?.[0]?.branch).toBe(`hercule/main-${workspaceId}`);
     expect(report.checkouts?.[0]?.defaultBranch).toBe("main");
-    // Hardlinked objects: one copy on disk however many primaries there are.
-    const objects = join(directory, ".git", "objects");
-    const shared = readdirSync(objects, { recursive: true, encoding: "utf8" })
-      .map((entry) => statSync(join(objects, entry)))
-      .some((stat) => stat.isFile() && stat.nlink > 1);
-    expect(shared).toBe(true);
+    expect(statSync(join(directory, ".git")).isFile()).toBe(true);
+    expect(
+      runGitOrThrow(directory, "rev-parse", "--path-format=absolute", "--git-common-dir"),
+    ).toBe(
+      runGitOrThrow(
+        buildCacheDir(storageDir, resourceId),
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+      ),
+    );
   });
 
   /**
@@ -91,18 +104,21 @@ describe("a primary cloned fresh", () => {
     const head = runGitOrThrow(mine, "rev-parse", "HEAD");
     const storageDir = createStorageDir();
     const resourceId = createId();
+    const workspaceId = createId();
 
-    const report = await makeWorkspaces({ storageDir }).provision(
-      buildProvisionFrame({
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
-      }),
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remote.url })],
+        }),
+      ),
     );
 
     expect(report.status).toBe("ready");
-    // Hercule's own clone, somewhere else entirely.
-    expect(report.checkouts?.[0]?.branch).toBe("main");
-    expect(existsSync(join(storageDir, "primaries", resourceId))).toBe(true);
+    expect(report.checkouts?.[0]?.branch).toBe(`hercule/main-${workspaceId}`);
+    expect(existsSync(join(storageDir, "primaries", workspaceId))).toBe(true);
     expect(hashContents(mine)).toBe(before);
     expect(runGitOrThrow(mine, "rev-parse", "HEAD")).toBe(head);
     expect(runGitOrThrow(mine, "rev-parse", "--abbrev-ref", "HEAD")).toBe("local-only");
@@ -116,19 +132,21 @@ describe("an ephemeral workspace", () => {
     const storageDir = createStorageDir();
     const workspaceId = createId();
 
-    const report = await makeWorkspaces({ storageDir }).provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({
-            resourceId: createId(),
-            remote: remote.url,
-            branch: "hercule/run-3f1a2b4c",
-            baseBranch: "release",
-          }),
-        ],
-      }),
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              resourceId: createId(),
+              remote: remote.url,
+              branch: "hercule/run-3f1a2b4c",
+              baseBranch: "release",
+            }),
+          ],
+        }),
+      ),
     );
 
     expect(report.status).toBe("ready");
@@ -146,25 +164,27 @@ describe("an ephemeral workspace", () => {
     const storageDir = createStorageDir();
     const workspaceId = createId();
 
-    const report = await makeWorkspaces({ storageDir }).provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({
-            resourceId: createId(),
-            remote: web.url,
-            subdirectory: "web",
-            branch: "hercule/run-00000001",
-          }),
-          buildCheckout({
-            resourceId: createId(),
-            remote: api.url,
-            subdirectory: "api",
-            branch: "hercule/run-00000001",
-          }),
-        ],
-      }),
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              resourceId: createId(),
+              remote: web.url,
+              subdirectory: "web",
+              branch: "hercule/run-00000001",
+            }),
+            buildCheckout({
+              resourceId: createId(),
+              remote: api.url,
+              subdirectory: "api",
+              branch: "hercule/run-00000001",
+            }),
+          ],
+        }),
+      ),
     );
 
     expect(report.status).toBe("ready");
@@ -185,8 +205,10 @@ describe("an ephemeral workspace", () => {
     const storageDir = createStorageDir();
     const workspaceId = createId();
 
-    const report = await makeWorkspaces({ storageDir }).provision(
-      buildProvisionFrame({ workspaceId, kind: "ephemeral", checkouts: [] }),
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision(
+        buildProvisionFrame({ workspaceId, kind: "ephemeral", checkouts: [] }),
+      ),
     );
 
     expect(report.status).toBe("ready");
@@ -201,16 +223,18 @@ describe("provisioning from a shared cache", () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const resourceId = createId();
-    const workspaces = makeWorkspaces({ storageDir });
+    const workspaces = makeTestWorkspaces({ storageDir });
     const first = createId();
-    await workspaces.provision(
-      buildProvisionFrame({
-        workspaceId: first,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-aaaaaaaa" }),
-        ],
-      }),
+    await Effect.runPromise(
+      workspaces.provision(
+        buildProvisionFrame({
+          workspaceId: first,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-aaaaaaaa" }),
+          ],
+        }),
+      ),
     );
     // What an agent does in its worktree: it commits and pushes the branch.
     const directory = join(storageDir, "workspaces", first);
@@ -219,13 +243,15 @@ describe("provisioning from a shared cache", () => {
     runGitOrThrow(directory, "commit", "-m", "the agent's work");
     runGitOrThrow(directory, "push", remote.path, "hercule/run-aaaaaaaa");
 
-    const second = await workspaces.provision(
-      buildProvisionFrame({
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-bbbbbbbb" }),
-        ],
-      }),
+    const second = await Effect.runPromise(
+      workspaces.provision(
+        buildProvisionFrame({
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-bbbbbbbb" }),
+          ],
+        }),
+      ),
     );
 
     // The agent's branch is checked out in a worktree and now also exists on
@@ -239,23 +265,27 @@ describe("provisioning from a shared cache", () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const resourceId = createId();
-    const workspaces = makeWorkspaces({ storageDir });
-    await workspaces.provision(
-      buildProvisionFrame({
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
-      }),
+    const workspaces = makeTestWorkspaces({ storageDir });
+    await Effect.runPromise(
+      workspaces.provision(
+        buildProvisionFrame({
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remote.url })],
+        }),
+      ),
     );
     const workspaceId = createId();
 
-    const report = await workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-cccccccc" }),
-        ],
-      }),
+    const report = await Effect.runPromise(
+      workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({ resourceId, remote: remote.url, branch: "hercule/run-cccccccc" }),
+          ],
+        }),
+      ),
     );
 
     expect(report.status).toBe("ready");
@@ -275,26 +305,28 @@ describe("provisioning from a shared cache", () => {
     const workspaceId = createId();
     const webResource = createId();
 
-    const report = await makeWorkspaces({ storageDir }).provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({
-            resourceId: webResource,
-            remote: web.url,
-            subdirectory: "web",
-            branch: "hercule/run-dddddddd",
-          }),
-          buildCheckout({
-            resourceId: createId(),
-            remote: api.url,
-            subdirectory: "api",
-            branch: "hercule/run-dddddddd",
-            baseBranch: "no-such-base",
-          }),
-        ],
-      }),
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              resourceId: webResource,
+              remote: web.url,
+              subdirectory: "web",
+              branch: "hercule/run-dddddddd",
+            }),
+            buildCheckout({
+              resourceId: createId(),
+              remote: api.url,
+              subdirectory: "api",
+              branch: "hercule/run-dddddddd",
+              baseBranch: "no-such-base",
+            }),
+          ],
+        }),
+      ),
     );
 
     expect(report.status).toBe("failed");
@@ -316,22 +348,24 @@ describe("the setup command", () => {
     vi.stubEnv("HERCULE_HOME", "/tmp/not-the-live-home");
     try {
       expect(process.env["HERCULE_HOME"]).toBe("/tmp/not-the-live-home");
-      const report = await makeWorkspaces({
-        storageDir,
-        gitEnv: { HERCULE_RUNNER_SOCKET: "/tmp/hercule-test.sock" },
-      }).provision(
-        buildProvisionFrame({
-          workspaceId,
-          kind: "ephemeral",
-          checkouts: [
-            buildCheckout({
-              resourceId: createId(),
-              remote: remote.url,
-              branch: "hercule/run-5e5e5e5e",
-              setupCommand: "env > setup-env.txt",
-            }),
-          ],
-        }),
+      const report = await Effect.runPromise(
+        makeTestWorkspaces({
+          storageDir,
+          gitEnv: { HERCULE_RUNNER_SOCKET: "/tmp/hercule-test.sock" },
+        }).provision(
+          buildProvisionFrame({
+            workspaceId,
+            kind: "ephemeral",
+            checkouts: [
+              buildCheckout({
+                resourceId: createId(),
+                remote: remote.url,
+                branch: "hercule/run-5e5e5e5e",
+                setupCommand: "env > setup-env.txt",
+              }),
+            ],
+          }),
+        ),
       );
 
       expect(report.status).toBe("ready");
@@ -355,19 +389,21 @@ describe("the setup command", () => {
     const storageDir = createStorageDir();
     const workspaceId = createId();
 
-    const report = await makeWorkspaces({ storageDir }).provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({
-            resourceId: createId(),
-            remote: remote.url,
-            branch: "hercule/run-6f6f6f6f",
-            setupCommand: "for i in $(seq 1 30); do echo line$i; done; exit 3",
-          }),
-        ],
-      }),
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              resourceId: createId(),
+              remote: remote.url,
+              branch: "hercule/run-6f6f6f6f",
+              setupCommand: "for i in $(seq 1 30); do echo line$i; done; exit 3",
+            }),
+          ],
+        }),
+      ),
     );
 
     expect(report.status).toBe("failed");
@@ -386,19 +422,21 @@ describe("a setup command that will not finish", () => {
     const storageDir = createStorageDir();
     const workspaceId = createId();
 
-    const report = await makeWorkspaces({ storageDir, setupDeadlineMs: 250 }).provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({
-            resourceId: createId(),
-            remote: remote.url,
-            branch: "hercule/run-9d9d9d9d",
-            setupCommand: "echo installing; sleep 60",
-          }),
-        ],
-      }),
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir, setupDeadlineMs: 250 }).provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              resourceId: createId(),
+              remote: remote.url,
+              branch: "hercule/run-9d9d9d9d",
+              setupCommand: "echo installing; sleep 60",
+            }),
+          ],
+        }),
+      ),
     );
 
     expect(report.status).toBe("failed");
@@ -410,6 +448,46 @@ describe("a setup command that will not finish", () => {
 });
 
 describe("a workspace whose setup command failed", () => {
+  it("leaves a failed main attempt's files unchanged when a fresh main is created", async () => {
+    const remote = makeRemote();
+    const storageDir = createStorageDir();
+    const resourceId = createId();
+    const failedId = createId();
+    const failed = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision(
+        buildProvisionFrame({
+          workspaceId: failedId,
+          kind: "primary",
+          checkouts: [
+            buildCheckout({
+              resourceId,
+              remote: remote.url,
+              setupCommand: "echo partial-install > unfinished.txt; exit 7",
+            }),
+          ],
+        }),
+      ),
+    );
+    expect(failed.status).toBe("failed");
+    const failedRoot = join(storageDir, "primaries", failedId);
+    const before = hashContents(failedRoot);
+    const freshId = createId();
+    const manager = makeTestWorkspaces({ storageDir });
+    const ready = await Effect.runPromise(
+      manager.provision(
+        buildProvisionFrame({
+          workspaceId: freshId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remote.url })],
+        }),
+      ),
+    );
+    expect(ready.status, ready.message).toBe("ready");
+    expect(Effect.runSync(manager.resolve(freshId))?.root).not.toBe(failedRoot);
+    expect(hashContents(failedRoot)).toBe(before);
+    expect(Effect.runSync(manager.resolve(failedId))).toBeUndefined();
+  });
+
   it("is reported again when the frame is resent, instead of created a second time", async () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
@@ -426,19 +504,18 @@ describe("a workspace whose setup command failed", () => {
         }),
       ],
     });
-    const first = await makeWorkspaces({ storageDir }).provision(frame);
+    const first = await Effect.runPromise(makeTestWorkspaces({ storageDir }).provision(frame));
     expect(first.status).toBe("failed");
     const directory = join(storageDir, "workspaces", workspaceId);
     writeFileSync(join(directory, "half-done.txt"), "what the install got through\n");
 
     // The controller resends a frame it got no report for, and resends frames
     // to a runner that reconnects.
-    const again = await makeWorkspaces({ storageDir }).provision(frame);
+    const again = await Effect.runPromise(makeTestWorkspaces({ storageDir }).provision(frame));
 
     // Creating it again would fail on the branch that already exists, and would
     // remove the directory the user was told they could inspect.
-    expect(again.status).toBe("ready");
-    expect(again.checkouts?.[0]?.branch).toBe("hercule/run-7c7c7c7c");
+    expect(again).toEqual(first);
     expect(readFileSync(join(directory, "half-done.txt"), "utf8")).toBe(
       "what the install got through\n",
     );
@@ -448,20 +525,22 @@ describe("a workspace whose setup command failed", () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
 
-    const report = await makeWorkspaces({ storageDir, setupDeadlineMs: 250 }).provision(
-      buildProvisionFrame({
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({
-            resourceId: createId(),
-            remote: remote.url,
-            branch: "hercule/run-8e8e8e8e",
-            // A background process, like an install that hangs: the shell
-            // waits on a child that holds the pipes open.
-            setupCommand: "sleep 60 & echo grandchild=$!; wait",
-          }),
-        ],
-      }),
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir, setupDeadlineMs: 250 }).provision(
+        buildProvisionFrame({
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              resourceId: createId(),
+              remote: remote.url,
+              branch: "hercule/run-8e8e8e8e",
+              // A background process, like an install that hangs: the shell
+              // waits on a child that holds the pipes open.
+              setupCommand: "sleep 60 & echo grandchild=$!; wait",
+            }),
+          ],
+        }),
+      ),
     );
 
     expect(report.status).toBe("failed");
@@ -485,33 +564,39 @@ describe(".workspaceinclude", () => {
     const remote = makeRemote();
     const storageDir = createStorageDir();
     const resourceId = createId();
-    const workspaces = makeWorkspaces({ storageDir });
-    await workspaces.provision(
-      buildProvisionFrame({
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
-      }),
+    const workspaces = makeTestWorkspaces({ storageDir });
+    const primaryId = createId();
+    await Effect.runPromise(
+      workspaces.provision(
+        buildProvisionFrame({
+          workspaceId: primaryId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remote.url })],
+        }),
+      ),
     );
     // The primary is Hercule's own clone, so the test writes the list and files there.
     writeWorkspaceInclude(
-      join(storageDir, "primaries", resourceId),
+      join(storageDir, "primaries", primaryId),
       "# what the agent needs\n\n.env\nconfig/local.json\n",
     );
     const workspaceId = createId();
 
-    const report = await workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({
-            resourceId,
-            remote: remote.url,
-            branch: "hercule/run-7a7a7a7a",
-            workspaceInclude: true,
-          }),
-        ],
-      }),
+    const report = await Effect.runPromise(
+      workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              resourceId,
+              remote: remote.url,
+              branch: "hercule/run-7a7a7a7a",
+              workspaceInclude: true,
+            }),
+          ],
+        }),
+      ),
     );
 
     expect(report.status).toBe("ready");
@@ -528,19 +613,21 @@ describe(".workspaceinclude", () => {
     const storageDir = createStorageDir();
     const workspaceId = createId();
 
-    const report = await makeWorkspaces({ storageDir }).provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({
-            resourceId: createId(),
-            remote: remote.url,
-            branch: "hercule/run-8b8b8b8b",
-            workspaceInclude: true,
-          }),
-        ],
-      }),
+    const report = await Effect.runPromise(
+      makeTestWorkspaces({ storageDir }).provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              resourceId: createId(),
+              remote: remote.url,
+              branch: "hercule/run-8b8b8b8b",
+              workspaceInclude: true,
+            }),
+          ],
+        }),
+      ),
     );
 
     // The workspace is usable; the user is told what it does not have.

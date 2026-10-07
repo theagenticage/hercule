@@ -24,7 +24,7 @@ import {
   type LoginTarget,
   type ThreadPicks,
 } from "@hercule/client-core";
-import type { SessionSpawnInput } from "@hercule/contract";
+import type { SessionSpawnInput, Workspace } from "@hercule/contract";
 import { useDraftThread } from "../../app/draft-thread";
 import { buildDraftKey } from "../../app/pending-submissions";
 import { threadsQuery } from "../../app/queries";
@@ -107,6 +107,14 @@ export function DraftScreen({
   }
   const { fields, catalogs, joinedWorkspace } = view;
   const { projects, workspaces } = catalogs;
+  const inspection = useMutation({
+    mutationFn: (id: string) => client.workspace.inspect({ params: { id } }),
+    onSuccess: (current) => {
+      queryClient.setQueryData<readonly Workspace[]>(queryKeys.workspaces(), (records) =>
+        records?.map((each) => (each.id === current.id ? current : each)),
+      );
+    },
+  });
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   // The start is keyed by the draft's place, so a screen mounted again while
   // its start is still on the way, after the user left and came back, finds
@@ -237,7 +245,10 @@ export function DraftScreen({
               workspaces,
             })}
             canSend={canSend}
-            error={pending.failure ?? null}
+            error={
+              pending.failure ??
+              (inspection.error === null ? null : readErrorMessage(inspection.error))
+            }
             readRecent={() => readRecentModels(controller.url)}
             fieldRef={fieldRef}
             onTextChange={(text) => {
@@ -245,6 +256,10 @@ export function DraftScreen({
             }}
             onPick={pick}
             onSubmit={submit}
+            onOpenWorkspaceMenu={() => {
+              if (inspection.isPending) return;
+              for (const id of view.workspaceInspectionIds) inspection.mutate(id);
+            }}
           />
           {project === undefined ? null : (
             <StartCards

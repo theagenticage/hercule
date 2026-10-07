@@ -3,14 +3,15 @@
  * still owes it, rebuilt from the rows, because anything sent while it was
  * away was lost. In order:
  *
- * 1. the provision of every workspace on it that is still provisioning and
+ * 1. every pending workspace disposal or detachment;
+ * 2. the provision of every workspace on it that is still provisioning and
  *    has no step running in it;
- * 2. every workspace step still running on it: a workspace action again,
+ * 3. every workspace step still running on it: a workspace action again,
  *    after the provision of its workspace when that workspace is still
  *    provisioning, and for an agent step whose prompt is `sent` or
  *    `delivered`, a request for the step's result;
- * 3. a stop for every session on it whose run ended while it was away;
- * 4. then the runs waiting for a runner are woken, because this one may be
+ * 4. a stop for every session on it whose run ended while it was away;
+ * 5. then the runs waiting for a runner are woken, because this one may be
  *    able to take them.
  *
  * Each delivery is idempotent by its key, so a runner that already has the
@@ -20,6 +21,9 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { withTransaction } from "../../db";
+import { SessionService } from "../../sessions";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { RunnerConnections } from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
@@ -27,6 +31,8 @@ import { WorkspaceService } from "../../workspaces";
 import { forkAndAbsorbFailures } from "../absorbing";
 
 const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const sessions = yield* SessionService;
   const connections = yield* RunnerConnections;
   const workspaces = yield* WorkspaceService;
   const runs = yield* RunService;
@@ -35,6 +41,8 @@ const make = Effect.gen(function* () {
   /** Sends a runner that has just connected the work owed to it, and wakes the runs waiting for one. */
   const sendOwedWork = (runnerId: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
+      for (const frame of yield* workspaces.listOwedDisposals(runnerId))
+        yield* connections.tell(runnerId, frame);
       const steps = yield* runs.listOwedWorkspaceSteps(runnerId);
       // Starting an action step sends its workspace's provision first, so
       // those workspaces are left out here rather than provisioned twice. A
@@ -42,10 +50,35 @@ const make = Effect.gen(function* () {
       const startedWorkspaceIds = new Set(
         steps.flatMap((step) => (step.kind === "action" ? [step.workspaceId] : [])),
       );
+      const rejectedWorkspaceIds = new Set<string>();
       for (const frame of yield* workspaces.listOwedProvisioning(runnerId)) {
+        if (!(yield* workspaces.supportsPreparationInstruction(runnerId, frame))) {
+          const message =
+            "This runner does not support the recorded existing checkout instruction. Upgrade and reconnect the runner, then reattach the same checkout.";
+          yield* withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const settled = yield* workspaces.reported(runnerId, {
+                _tag: "workspaceReport",
+                workspaceId: frame.workspaceId,
+                status: "failed",
+                message,
+              });
+              if (settled?.moved === "failed") {
+                yield* sessions.endForWorkspace(frame.workspaceId, message);
+                yield* runs.failRunsInWorkspace(frame.workspaceId, message);
+              }
+            }),
+          );
+          rejectedWorkspaceIds.add(frame.workspaceId);
+          continue;
+        }
         if (!startedWorkspaceIds.has(frame.workspaceId)) yield* connections.tell(runnerId, frame);
       }
-      for (const step of steps) yield* workspaceSteps.start(step);
+      for (const step of steps) {
+        if (step.kind === "action" && rejectedWorkspaceIds.has(step.workspaceId)) continue;
+        yield* workspaceSteps.start(step);
+      }
       yield* runs.stopSessionsOfEndedRuns(runnerId);
       yield* runs.wakeRunsWaitingForRunner();
     });
@@ -68,5 +101,10 @@ export class Arrival extends Context.Service<Arrival, Effect.Success<typeof make
 export const ArrivalLayer: Layer.Layer<
   Arrival,
   never,
-  RunnerConnections | WorkspaceService | RunService | WorkspaceSteps
+  | SqlClient.SqlClient
+  | SessionService
+  | RunnerConnections
+  | WorkspaceService
+  | RunService
+  | WorkspaceSteps
 > = Layer.effect(Arrival)(make);

@@ -1,3 +1,4 @@
+import { makeTestWorkspaces } from "./workspaces/testing";
 /**
  * Tests the runner's end of the socket, mainly which controller it accepts.
  *
@@ -10,10 +11,10 @@
  * This package must not import controller code, so the stub is `Bun.serve`
  * with an Ed25519 key pair generated here.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Logger, PubSub, Schema, Stream } from "effect";
 import {
   AGENT_STEPS_CAPABILITY,
@@ -54,7 +55,8 @@ import type { ProviderAdapter } from "./providers";
 import { makeLogins, type Logins } from "./providers/login";
 import { makeSupervising } from "./sessions/supervisor";
 import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
-import { makeWorkspaces } from "./workspaces";
+
+import * as workspaceFixtures from "./workspaces/testing";
 
 /** This machine's facts. These tests are not about the probe. */
 const FACTS: RunnerFacts = {
@@ -290,7 +292,7 @@ const HERCULE_TOOL = {
   claudePluginDir: "/nonexistent/hercule-runner-claude-plugin",
 };
 
-const workspaces = makeWorkspaces({ storageDir: STORAGE_DIR });
+const workspaces = makeTestWorkspaces({ storageDir: STORAGE_DIR });
 
 /** The workspace steps of a runner that holds none. */
 const IDLE_STEPS = makeWorkspaceSteps({
@@ -1537,3 +1539,191 @@ describe("session frames on one connection", () => {
     await pending;
   });
 });
+
+describe("concurrent real-Git workspace requests on the runner socket", () => {
+  it("dispatches concurrent first-use and duplicate requests into one repository bootstrap", async () => {
+    const remote = workspaceFixtures.makeRemote();
+    const storageDir = workspaceFixtures.createTemporaryDir("hercule-socket-concurrent-home-");
+    const bin = joinPath(storageDir, "bin");
+    mkdirSync(bin);
+    const entered = joinPath(storageDir, "bootstrap-entered");
+    const release = joinPath(storageDir, "release-bootstrap");
+    const calls = joinPath(storageDir, "clone-calls");
+    const git = Bun.which("git")!;
+    const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+    writeFileSync(
+      joinPath(bin, "git"),
+      `#!/bin/sh\ncase " $* " in\n*' clone '*)\nprintf 'clone\\n' >> ${quote(calls)}\nprintf '%s\\n' "$$" > ${quote(entered)}\nwhile [ ! -f ${quote(release)} ]; do sleep 0.01; done\n;;\nesac\nexec ${quote(git)} "$@"\n`,
+      { mode: 0o700 },
+    );
+    const manager = makeTestWorkspaces({
+      storageDir,
+      gitEnv: { PATH: `${bin}:${process.env["PATH"] ?? "/usr/bin:/bin"}` },
+    });
+    const resourceId = workspaceFixtures.createId();
+    const first = workspaceFixtures.buildProvisionFrame({
+      kind: "ephemeral",
+      checkouts: [
+        workspaceFixtures.buildCheckout({
+          resourceId,
+          remote: remote.url,
+          branch: "test/socket-first",
+        }),
+      ],
+    });
+    const second = workspaceFixtures.buildProvisionFrame({
+      kind: "ephemeral",
+      checkouts: [
+        workspaceFixtures.buildCheckout({
+          resourceId,
+          remote: remote.url,
+          branch: "test/socket-second",
+        }),
+      ],
+    });
+    const stub = await stubController((hello) => ({
+      ...hello,
+      capabilities: ["workspaceLifecycle"],
+    }));
+    const pending = runConnection(buildPin(stub), { workspaces: manager });
+    try {
+      await waitUntilProven(stub);
+      stub.say(first);
+      await waitUntil(() => existsSync(entered));
+      stub.say(second);
+      stub.say(first);
+      const beforePongs = stub.received.filter((frame) => frame._tag === "pong").length;
+      stub.say({ _tag: "ping" });
+      await waitUntil(
+        () => stub.received.filter((frame) => frame._tag === "pong").length > beforePongs,
+      );
+      writeFileSync(release, "release\n");
+      await waitUntil(
+        () => stub.received.filter((frame) => frame._tag === "workspaceReport").length === 3,
+      );
+      const reports = stub.received.filter((frame) => frame._tag === "workspaceReport");
+      expect(reports.every((report) => report.status === "ready")).toBe(true);
+      expect(reports.map((report) => report.workspaceId).sort()).toEqual(
+        [first.workspaceId, first.workspaceId, second.workspaceId].sort(),
+      );
+      expect(readFileSync(calls, "utf8").trim().split("\n")).toHaveLength(1);
+      const path = Effect.runSync(manager.resolve(first.workspaceId))!.cwd;
+      expect(
+        workspaceFixtures
+          .runGitOrThrow(path, "worktree", "list", "--porcelain")
+          .match(/^worktree /gm),
+      ).toHaveLength(3);
+    } finally {
+      writeFileSync(release, "release\n");
+      await Promise.all([
+        Effect.runPromise(manager.waitForProvisioning(first.workspaceId)),
+        Effect.runPromise(manager.waitForProvisioning(second.workspaceId)),
+      ]);
+      stub.hangUp();
+      await pending;
+      const capturedGitPid = existsSync(entered)
+        ? Number(readFileSync(entered, "utf8").trim())
+        : undefined;
+      rmSync(storageDir, { recursive: true, force: true });
+      rmSync(joinPath(remote.work, ".."), { recursive: true, force: true });
+      if (capturedGitPid !== undefined) {
+        await waitUntil(() => {
+          try {
+            process.kill(capturedGitPid, 0);
+            return false;
+          } catch {
+            return true;
+          }
+        });
+      }
+    }
+  });
+});
+
+it("echoes durable disposal and detach receipts through the socket while preserving an attached source", async () => {
+  const remote = workspaceFixtures.makeRemote();
+  const world = workspaceFixtures.createTemporaryDir("hercule-socket-detach-source-");
+  const source = joinPath(world, "user checkout");
+  workspaceFixtures.runGitOrThrow(world, "clone", remote.url, source);
+  const storageDir = workspaceFixtures.createTemporaryDir("hercule-socket-removal-home-");
+  const manager = makeTestWorkspaces({ storageDir });
+  const resourceId = workspaceFixtures.createId();
+  const attached = {
+    ...workspaceFixtures.buildProvisionFrame({
+      kind: "primary",
+      checkouts: [workspaceFixtures.buildCheckout({ resourceId, remote: remote.url })],
+    }),
+    attachment: { path: source, remoteName: "origin" },
+  };
+  expect((await Effect.runPromise(manager.provision(attached))).status).toBe("ready");
+  const derived = workspaceFixtures.buildProvisionFrame({
+    kind: "ephemeral",
+    checkouts: [
+      {
+        ...workspaceFixtures.buildCheckout({
+          resourceId,
+          remote: remote.url,
+          branch: "test/socket-derived",
+        }),
+        repositoryWorkspaceId: attached.workspaceId,
+        startingRevision: { kind: "current" },
+      },
+    ],
+  });
+  expect((await Effect.runPromise(manager.provision(derived))).status).toBe("ready");
+  const cwd = Effect.runSync(manager.resolve(derived.workspaceId))!.cwd;
+  const sourceBefore = workspaceFixtures.hashContents(source);
+  const stub = await stubController((hello) => ({
+    ...hello,
+    capabilities: ["workspaceLifecycle"],
+  }));
+  const pending = runConnection(buildPin(stub), { workspaces: manager });
+  try {
+    await waitUntilProven(stub);
+    stub.say({
+      _tag: "workspaceDetach",
+      workspaceId: attached.workspaceId,
+      requestId: "socket-detach-intent",
+    });
+    await waitUntil(() =>
+      stub.received.some(
+        (frame) => frame._tag === "workspaceReport" && frame.requestId === "socket-detach-intent",
+      ),
+    );
+    expect(
+      stub.received.find(
+        (frame) => frame._tag === "workspaceReport" && frame.requestId === "socket-detach-intent",
+      ),
+    ).toMatchObject({ status: "deleted", workspaceId: attached.workspaceId });
+    expect(workspaceFixtures.hashContents(source)).toBe(sourceBefore);
+    expect(Effect.runSync(manager.resolve(derived.workspaceId))?.cwd).toBe(cwd);
+    writeFileSync(joinPath(cwd, "README.md"), "remaining derived changes\n");
+    stub.say({
+      _tag: "workspaceDispose",
+      workspaceId: derived.workspaceId,
+      requestId: "socket-discard-intent",
+      discardChanges: true,
+    });
+    await waitUntil(() =>
+      stub.received.some(
+        (frame) => frame._tag === "workspaceReport" && frame.requestId === "socket-discard-intent",
+      ),
+    );
+    expect(
+      stub.received.find(
+        (frame) => frame._tag === "workspaceReport" && frame.requestId === "socket-discard-intent",
+      ),
+    ).toMatchObject({ status: "deleted", workspaceId: derived.workspaceId });
+    expect(existsSync(cwd)).toBe(false);
+    expect(existsSync(joinPath(source, ".git", "objects"))).toBe(true);
+    expect(
+      workspaceFixtures.runGitOrThrow(source, "rev-parse", "refs/heads/test/socket-derived"),
+    ).toMatch(/^[a-f0-9]{40}$/);
+  } finally {
+    stub.hangUp();
+    await pending;
+    await workspaceFixtures.cleanTemporaries();
+  }
+});
+
+afterAll(workspaceFixtures.cleanTemporaries);

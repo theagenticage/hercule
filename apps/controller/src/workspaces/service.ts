@@ -16,13 +16,11 @@
  * what it asked for and the branch this module named for it, and gets back
  * where the session works.
  *
- * A primary is provisioned by name and never torn down: it is the repo's main
- * workspace on that runner, shared by every session that runs in it. An
- * ephemeral workspace is created by the spawn that asked for it, and is
- * disposed of by hand or by the expiry sweep. The sweep reads only the
- * workspace's leases. Each session and run that used the workspace released
- * its lease with a retention, and the workspace is kept until the latest
- * kept-until time among them.
+ * A primary is the repo's main workspace on that runner. Managed files may
+ * be removed explicitly; an existing primary may only be detached. Workspaces
+ * used by human threads are retained until explicit disposal. Automatic
+ * ephemeral workspaces are eligible for the sweep after every holder releases
+ * its lease and the latest retention deadline expires.
  *
  * Nothing here sends anything to a runner. A frame is returned as a value -
  * what to provision, what to dispose, the answer to a credential request - and
@@ -43,10 +41,12 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   Subdirectory,
+  supportsWorkspaceLifecycle,
+  requiresWorkspaceLifecycle,
   type CredentialAnswer,
   type CredentialRequest,
   type GitIdentity,
-  type WorkspaceDispose,
+  type WorkspaceRemoval,
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hercule/protocol";
@@ -71,10 +71,13 @@ import {
   type Validation,
   type Workspace,
   type WorkspaceStatus,
+  type WorkspaceAttachInput,
 } from "@hercule/contract";
-import { currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
+import { CurrentActor, currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import {
   nowIso,
+  mintUuid,
+  uuidToString,
   buildPageInputFields,
   refuseCursor,
   resolveSortDirection,
@@ -142,7 +145,8 @@ const NO_SUCH_WORKSPACE = "no such workspace";
 
 const NO_SUCH_RESOURCE = "no such resource";
 
-const PRIMARY_STANDS = "a main workspace is never torn down";
+const EXISTING_DISPOSAL =
+  "Attached checkout files belong to the user and cannot be discarded. Detach the workspace registration instead.";
 
 const NOT_IN_PROJECT = "that repo is not filed under that project";
 
@@ -288,9 +292,7 @@ const make = Effect.gen(function* () {
   const settings = yield* Settings;
   const audit = yield* AuditLog;
 
-  const readStoredWorkspaceOrFail = (
-    id: string,
-  ): Effect.Effect<StoredWorkspace, NotFound | SqlError> =>
+  const readStoredWorkspace = (id: string): Effect.Effect<StoredWorkspace, NotFound | SqlError> =>
     Effect.flatMap(
       workspaces.one(id),
       Option.match({
@@ -308,6 +310,10 @@ const make = Effect.gen(function* () {
     branches: checkout.branches,
     defaultBranch: checkout.defaultBranch,
     baseBranch: checkout.baseBranch,
+    startingRevision: checkout.startingRevision,
+    headCommit: checkout.headCommit,
+    baseCommit: checkout.baseCommit,
+    remoteBranches: checkout.remoteBranches,
   });
 
   /**
@@ -333,12 +339,14 @@ const make = Effect.gen(function* () {
       const ids = rows.map((row) => row.id);
       const checkouts = yield* workspaces.listCheckouts(ids);
       const active = yield* workspaces.listActiveHolders(ids);
-      // Only an ephemeral workspace that is not gone can still be deleted by
-      // the sweep, so only such a workspace has a kept-until time to show.
+      // Manual retention and pending removal have no automatic deadline.
       const keptUntil = yield* workspaces.listKeptUntil(
         rows
           .filter(
-            (row) => row.kind === "ephemeral" && row.status !== "deleted" && row.status !== "lost",
+            (row) =>
+              row.kind === "ephemeral" &&
+              row.retentionPolicy === "automatic" &&
+              (row.status === "ready" || row.status === "failed"),
           )
           .map((row) => row.id),
       );
@@ -347,6 +355,12 @@ const make = Effect.gen(function* () {
         runnerId: row.runnerId,
         kind: row.kind,
         status: row.status,
+        ownership: row.ownership,
+        path: row.path,
+        retentionPolicy: row.retentionPolicy,
+        observedAt: row.observedAt,
+        derivedWorkspaceIds: row.derivedWorkspaceIds,
+        warnings: row.warnings,
         checkouts: (checkouts.get(row.id) ?? []).map(toCheckoutRecord),
         designatedConnectionId: row.designatedConnectionId,
         message: row.message,
@@ -422,16 +436,76 @@ const make = Effect.gen(function* () {
       }
     });
 
+  /** Returns the attached main workspace that new work must use, refusing unavailable sources. */
+  const readSelectedExistingWorkspace = (
+    resourceId: string,
+    runnerId: string,
+  ): Effect.Effect<StoredWorkspace | undefined, Validation | SqlError> =>
+    Effect.gen(function* () {
+      const selection = yield* workspaces.readRepositorySelection(resourceId, runnerId);
+      if (Option.isNone(selection) || selection.value.mode === "managed") return undefined;
+      const source =
+        selection.value.primaryWorkspaceId === null
+          ? Option.none()
+          : yield* workspaces.one(selection.value.primaryWorkspaceId);
+      if (Option.isNone(source) || source.value.status !== "ready") {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["workspace"],
+              message:
+                "The selected existing checkout is unavailable or still being validated. Reattach the same checkout and wait until it is ready.",
+            },
+          ]),
+        );
+      }
+      const runner = yield* runners.read(runnerId);
+      if (
+        Option.isNone(runner) ||
+        !supportsWorkspaceLifecycle(runner.value.negotiatedCapabilities ?? [])
+      ) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["runnerId"],
+              message:
+                "This runner does not support existing checkout attachment. Upgrade and reconnect the runner before starting work.",
+            },
+          ]),
+        );
+      }
+      return source.value;
+    });
+
+  const requireLifecycleRunner = (runnerId: string): Effect.Effect<void, Validation | SqlError> =>
+    Effect.gen(function* () {
+      const runner = yield* runners.read(runnerId);
+      if (
+        Option.isNone(runner) ||
+        !supportsWorkspaceLifecycle(runner.value.negotiatedCapabilities ?? [])
+      )
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["runnerId"],
+              message:
+                "This runner does not support the workspace lifecycle. Upgrade and reconnect it before creating a Git workspace.",
+            },
+          ]),
+        );
+    });
+
   /**
-   * Rebuilds the provision frame of a workspace from its rows and the repos
-   * behind its checkouts. The rows hold everything provisioning needs, so the
-   * rebuilt frame is the same as the frame that was first sent, and asks for
-   * the same clone or worktree.
+   * Returns the workspace's frozen creation instruction. Legacy workspaces
+   * lack that snapshot, so their first resend records the instruction rebuilt
+   * from their existing rows and Resources.
    */
-  const rebuildProvisionFrame = (
+  const rebuildPreparationInstruction = (
     workspace: StoredWorkspace,
   ): Effect.Effect<WorkspaceProvision, SqlError> =>
     Effect.gen(function* () {
+      const frozen = yield* workspaces.readPreparationInstruction(workspace.id);
+      if (Option.isSome(frozen)) return frozen.value;
       const checkouts = (yield* workspaces.listCheckouts([workspace.id])).get(workspace.id) ?? [];
       const named = yield* resources.byIds(checkouts.map((checkout) => checkout.resourceId));
       const plans: Array<{ checkout: StoredCheckout; resource: StoredRepo }> = [];
@@ -442,7 +516,8 @@ const make = Effect.gen(function* () {
         if (resource === undefined || resource.kind !== "repo") continue;
         plans.push({ checkout, resource });
       }
-      return buildProvisionFrame(workspace, plans);
+      const frame = buildProvisionFrame(workspace, plans);
+      return yield* workspaces.freezePreparationInstruction(workspace.id, frame);
     });
 
   /**
@@ -471,6 +546,45 @@ const make = Effect.gen(function* () {
             ]),
           );
         }
+        const actor = yield* CurrentActor;
+        // A run queues its first agent session while its own workspace is prepared.
+        // Dispatch still waits for readiness; a public join cannot use this path.
+        const queuedRunSession =
+          row.value.status === "provisioning" &&
+          wish === undefined &&
+          input.holder.kind === "session" &&
+          actor._tag === "run" &&
+          ((yield* workspaces.listActiveHolders([joined])).get(joined) ?? []).some(
+            (holder) => holder.kind === "run" && holder.id === actor.runId,
+          );
+        if (row.value.status !== "ready" && !queuedRunSession) {
+          return yield* Effect.fail(
+            createValidationError([
+              { path: ["workspace", "workspaceId"], message: WORKSPACE_NOT_READY },
+            ]),
+          );
+        }
+        const instruction = yield* workspaces.readPreparationInstruction(joined);
+        if (
+          row.value.ownership === "adopted" ||
+          (Option.isSome(instruction) && requiresWorkspaceLifecycle(instruction.value))
+        ) {
+          const runner = yield* runners.read(row.value.runnerId);
+          if (
+            Option.isNone(runner) ||
+            !supportsWorkspaceLifecycle(runner.value.negotiatedCapabilities ?? [])
+          ) {
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["runnerId"],
+                  message:
+                    "This runner does not support this workspace's existing repository. Upgrade and reconnect it before starting work.",
+                },
+              ]),
+            );
+          }
+        }
         const held = (yield* workspaces.listCheckouts([joined])).get(joined) ?? [];
         // An existing workspace's repos must still belong to this project, so
         // joining a workspace is not a way around project filing.
@@ -487,14 +601,33 @@ const make = Effect.gen(function* () {
 
       if (wish.kind === "primary") {
         const resource = yield* readCheckoutableRepoOrFail(wish.resourceId, input.projectId);
+        const selected = yield* readSelectedExistingWorkspace(resource.id, input.runnerId);
+        if (selected !== undefined) {
+          return {
+            workspaceId: selected.id,
+            checkoutBranch: wish.branch,
+            designatedConnectionId: selected.designatedConnectionId,
+          };
+        }
         const standing = yield* workspaces.primaryOn(resource.id, input.runnerId);
         if (Option.isSome(standing)) {
+          if (standing.value.status === "failed" || standing.value.status === "disposing")
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["workspace"],
+                  message:
+                    "The selected main workspace is unavailable. Restore its files and inspect it before starting work.",
+                },
+              ]),
+            );
           return {
             workspaceId: standing.value.id,
             checkoutBranch: wish.branch,
             designatedConnectionId: standing.value.designatedConnectionId,
           };
         }
+        yield* requireLifecycleRunner(input.runnerId);
         const opened = yield* openPrimary(
           { workspaces, audit },
           { resource, runnerId: input.runnerId, actor: yield* currentStamp, at: input.at },
@@ -508,13 +641,40 @@ const make = Effect.gen(function* () {
       }
 
       const repos = yield* Effect.forEach(wish.checkouts, (checkout) =>
-        Effect.map(
-          readCheckoutableRepoOrFail(checkout.resourceId, input.projectId),
-          (resource) => ({
+        Effect.gen(function* () {
+          const resource = yield* readCheckoutableRepoOrFail(checkout.resourceId, input.projectId);
+          const selected = yield* readSelectedExistingWorkspace(resource.id, input.runnerId);
+          const standing =
+            selected === undefined
+              ? yield* workspaces.primaryOn(resource.id, input.runnerId)
+              : Option.some(selected);
+          if (
+            Option.isSome(standing) &&
+            (standing.value.status === "failed" || standing.value.status === "disposing")
+          )
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["workspace"],
+                  message:
+                    "The selected repository is unavailable. Restore its main workspace and inspect it before creating a worktree.",
+                },
+              ]),
+            );
+          return {
             resource,
             baseBranch: checkout.baseBranch,
-          }),
-        ),
+            startingRevision:
+              checkout.startingRevision ??
+              (checkout.baseBranch === undefined
+                ? ({ kind: selected === undefined ? "remote" : "current" } as const)
+                : ({ kind: "remote", branch: checkout.baseBranch } as const)),
+            repositoryWorkspaceId:
+              Option.isSome(standing) && standing.value.status === "ready"
+                ? standing.value.id
+                : selected?.id,
+          };
+        }),
       );
       // Each checkout gets its own directory, named after the repo. So a
       // workspace with one repo twice, or with two repos of the same name,
@@ -550,7 +710,12 @@ const make = Effect.gen(function* () {
         subdirectory: repos.length > 1 ? (names[index] ?? null) : null,
         branch: input.branch,
         ...(repo.baseBranch === undefined ? {} : { baseBranch: repo.baseBranch }),
+        startingRevision: repo.startingRevision,
+        ...(repo.repositoryWorkspaceId === undefined
+          ? {}
+          : { repositoryWorkspaceId: repo.repositoryWorkspaceId }),
       }));
+      if (checkouts.length > 0) yield* requireLifecycleRunner(input.runnerId);
       const opened = yield* openWorkspace(
         { workspaces, audit },
         {
@@ -593,18 +758,161 @@ const make = Effect.gen(function* () {
    * branch is named after whatever the workspace is for: a thread
    * (`buildThreadBranch`) or a run (`buildRunBranch`).
    *
-   * For an `existing` workspace, this does not check again whether it is
-   * ready: `machineFor` checked that before the session was placed, because
-   * the workspace decides which runner the session runs on. This only checks
-   * what `machineFor` does not: whether the repos in it belong to this project.
+   * Existing workspaces are checked again while acquiring the lease in the
+   * caller's transaction. A removal reserved after initial placement therefore
+   * cannot admit a new holder. The repository must also belong to this project.
    */
   const openFor = (input: OpenInput): Effect.Effect<Opened, Validation | SqlError> =>
     Effect.gen(function* () {
       const opened = yield* openWithoutLease(input);
       if (opened.workspaceId !== null) {
-        yield* workspaces.acquireLease(opened.workspaceId, input.holder, input.at);
+        if (!(yield* workspaces.acquireLease(opened.workspaceId, input.holder, input.at, true)))
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: ["workspace"],
+                message:
+                  "The workspace is being disposed of or is unavailable. Wait for its removal outcome before starting work.",
+              },
+            ]),
+          );
       }
       return opened;
+    });
+
+  const reserveRemoval = (
+    workspace: StoredWorkspace,
+    tag: "workspaceDispose" | "workspaceDetach",
+    actor: string,
+    {
+      discardChanges = false,
+      expired,
+    }: { readonly discardChanges?: boolean; readonly expired?: ExpiredLease } = {},
+  ): Effect.Effect<WorkspaceRemoval, SqlError | InvalidState> =>
+    Effect.gen(function* () {
+      const previous = yield* workspaces.readRemoval(workspace.id);
+      if (workspace.status === "disposing") {
+        if (
+          Option.isSome(previous) &&
+          previous.value.frame._tag === tag &&
+          (tag === "workspaceDetach" ||
+            (previous.value.frame._tag === "workspaceDispose" &&
+              (previous.value.frame.discardChanges ?? false) === discardChanges))
+        )
+          return previous.value.frame;
+        return yield* Effect.fail(
+          createInvalidStateError(
+            "A different workspace removal is still pending. Wait for its outcome before changing the removal policy or discarding changes.",
+          ),
+        );
+      }
+      const requestId = uuidToString(mintUuid());
+      const frame: WorkspaceRemoval =
+        tag === "workspaceDetach"
+          ? { _tag: "workspaceDetach", workspaceId: workspace.id, requestId }
+          : {
+              _tag: "workspaceDispose",
+              workspaceId: workspace.id,
+              requestId,
+              ...(discardChanges ? { discardChanges: true } : {}),
+            };
+      yield* workspaces.reserveRemoval(workspace.id, frame, {
+        actor,
+        ...(expired === undefined
+          ? {}
+          : { reason: expired.retention, holder: formatHolder(expired.holder) }),
+      });
+      yield* audit.append({
+        kind: "workspace.disposalRequested",
+        actor,
+        payload: {
+          workspaceId: workspace.id,
+          runnerId: workspace.runnerId,
+          requestId,
+          operation: tag,
+          discardChanges,
+        },
+        at: yield* nowIso,
+      });
+      return frame;
+    });
+
+  const requireRemovalSupport = (runnerId: string): Effect.Effect<void, InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      const runner = yield* runners.read(runnerId);
+      if (
+        Option.isNone(runner) ||
+        !supportsWorkspaceLifecycle(runner.value.negotiatedCapabilities ?? [])
+      )
+        return yield* Effect.fail(
+          createInvalidStateError(
+            "This runner does not support safe workspace removal. Upgrade and reconnect it before disposing or detaching a workspace.",
+          ),
+        );
+    });
+
+  /** Records a removal receipt or preserves preparation facts while removal is still pending. */
+  const recordRemovalOutcome = (
+    runnerId: string,
+    report: WorkspaceReport,
+    { fresh, at }: { readonly fresh: boolean; readonly at: string },
+  ): Effect.Effect<Settled | undefined, SqlError> =>
+    Effect.gen(function* () {
+      const removal = yield* workspaces.readRemoval(report.workspaceId);
+      if (
+        Option.isNone(removal) ||
+        report.requestId === undefined ||
+        report.requestId !== removal.value.frame.requestId
+      ) {
+        yield* workspaces.recordCreationFacts(report.workspaceId, report.checkouts ?? []);
+        if (report.requestId === undefined && report.status !== "deleted")
+          yield* workspaces.recordPreparationDuringRemoval(report.workspaceId, report.status, at);
+        if (fresh && report.observedAt !== undefined && report.status !== "deleted")
+          yield* workspaces.recordObservation(report.workspaceId, report);
+        return undefined;
+      }
+      if (report.status === "deleted") {
+        yield* workspaces.markDisposed(report.workspaceId, at);
+        yield* audit.append({
+          kind:
+            removal.value.frame._tag === "workspaceDetach"
+              ? "workspace.detached"
+              : "workspace.deleted",
+          actor: removal.value.audit.actor,
+          payload: {
+            workspaceId: report.workspaceId,
+            runnerId,
+            requestId: report.requestId,
+            ...(removal.value.audit.reason === undefined
+              ? {}
+              : { reason: removal.value.audit.reason, holder: removal.value.audit.holder }),
+          },
+          at,
+        });
+        return { workspaceId: report.workspaceId, moved: "deleted" };
+      }
+      if (report.status !== "failed") return undefined;
+      if (fresh && report.observedAt !== undefined)
+        yield* workspaces.recordObservation(report.workspaceId, report);
+      const actual = yield* workspaces.one(report.workspaceId);
+      const restored =
+        (Option.isSome(actual) ? actual.value.available : null) === false
+          ? "failed"
+          : removal.value.previousStatus;
+      const message = `${report.message ?? "The runner refused safe removal."} The workspace is retained. Automatic cleanup will not retry this removal. Inspect it, resolve the refusal, and explicitly retry removal.`;
+      yield* workspaces.refuseRemoval(report.workspaceId, restored, message);
+      yield* audit.append({
+        kind: "workspace.disposalRefused",
+        actor: removal.value.audit.actor,
+        payload: {
+          workspaceId: report.workspaceId,
+          runnerId,
+          requestId: report.requestId,
+          message,
+        },
+        at,
+      });
+      return restored === "ready" ? { workspaceId: report.workspaceId, moved: "ready" } : undefined;
     });
 
   return {
@@ -636,11 +944,11 @@ const make = Effect.gen(function* () {
     read: (id: Id): Effect.Effect<Workspace, Exclude<ReadError | NotFound, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("workspace.read");
-        return yield* Effect.flatMap(readStoredWorkspaceOrFail(id), readWorkspaceRecord);
+        return yield* Effect.flatMap(readStoredWorkspace(id), readWorkspaceRecord);
       }),
 
     /**
-     * Opens a repo's main workspace on one runner, cloned fresh under that
+     * Opens a repo's main workspace as a managed worktree under that
      * runner's own storage, and writes the rows in the caller's transaction.
      * Returns the workspace record and the frame to send. Fails with:
      *
@@ -667,6 +975,20 @@ const make = Effect.gen(function* () {
         const resource = yield* readRepoOrFail(input.resourceId);
         const runner = yield* runners.read(input.runnerId);
         if (Option.isNone(runner)) return yield* Effect.fail(createNotFoundError(NO_SUCH_RUNNER));
+        if (!supportsWorkspaceLifecycle(runner.value.negotiatedCapabilities ?? []))
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "This runner does not support the workspace lifecycle. Upgrade and reconnect it before provisioning a Git workspace.",
+            ),
+          );
+        const selection = yield* workspaces.readRepositorySelection(resource.id, input.runnerId);
+        if (Option.isSome(selection) && selection.value.mode === "existing") {
+          return yield* Effect.fail(
+            createConflictError(
+              "This repository already uses an existing checkout on this runner. Reattach that checkout instead of selecting managed storage.",
+            ),
+          );
+        }
         const held = yield* workspaces.primaryOn(resource.id, input.runnerId);
         if (Option.isSome(held)) {
           return yield* Effect.fail(
@@ -683,11 +1005,104 @@ const make = Effect.gen(function* () {
         return { workspace: yield* readWorkspaceRecord(opened.workspace), frame: opened.frame };
       }),
 
+    /** Opens or revalidates the user's fixed existing checkout on its selected runner. */
+    openAttachmentFor: (
+      input: WorkspaceAttachInput,
+    ): Effect.Effect<
+      { readonly workspace: Workspace; readonly frame: WorkspaceProvision },
+      Conflict | NotFound | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        const resource = yield* readRepoOrFail(input.resourceId);
+        const runner = yield* runners.read(input.runnerId);
+        if (Option.isNone(runner)) return yield* Effect.fail(createNotFoundError(NO_SUCH_RUNNER));
+        if (runner.value.lifecycle === "retired") {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "This runner is retired and cannot validate an attachment. Join it as a new runner before attaching a checkout.",
+            ),
+          );
+        }
+        if (!supportsWorkspaceLifecycle(runner.value.negotiatedCapabilities ?? [])) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "This runner does not support existing checkout attachment. Upgrade and reconnect it before attaching a checkout.",
+            ),
+          );
+        }
+        const remoteName = input.remoteName ?? "origin";
+        const selection = yield* workspaces.readRepositorySelection(resource.id, input.runnerId);
+        if (Option.isSome(selection)) {
+          const held = selection.value;
+          const primary =
+            held.primaryWorkspaceId === null
+              ? Option.none()
+              : yield* workspaces.one(held.primaryWorkspaceId);
+          if (
+            held.mode !== "existing" ||
+            held.remoteName !== remoteName ||
+            (held.path !== input.path &&
+              (Option.isNone(primary) || primary.value.path !== input.path))
+          ) {
+            return yield* Effect.fail(
+              createConflictError(
+                "This repository already has a different storage choice on this runner. Use its selected checkout; replacement is not supported.",
+              ),
+            );
+          }
+          if (
+            Option.isSome(primary) &&
+            primary.value.status !== "deleted" &&
+            primary.value.status !== "lost"
+          ) {
+            if (primary.value.status === "disposing")
+              return yield* Effect.fail(
+                createInvalidStateError(
+                  "This checkout is being detached. Wait for detachment before reattaching the selected checkout.",
+                ),
+              );
+            if (yield* workspaces.retryAttachment(primary.value.id)) {
+              yield* audit.append({
+                kind: "workspace.attachmentRetried",
+                actor: USER_ACTOR,
+                payload: { workspaceId: primary.value.id, runnerId: input.runnerId },
+                at: yield* nowIso,
+              });
+            }
+            const updated = yield* readStoredWorkspace(primary.value.id);
+            return {
+              workspace: yield* readWorkspaceRecord(updated),
+              frame: yield* rebuildPreparationInstruction(updated),
+            };
+          }
+          // The fixed checkout survives detachment. A new registration may
+          // point only at that same selected path and remote.
+        }
+        yield* workspaces.reserveRepositorySelection(resource.id, input.runnerId, {
+          mode: "existing",
+          path: input.path,
+          remoteName,
+        });
+        const opened = yield* openWorkspace(
+          { workspaces, audit },
+          {
+            runnerId: input.runnerId,
+            kind: "primary",
+            attachment: { path: input.path, remoteName },
+            designatedConnectionId: resource.connectionId,
+            checkouts: [{ resource, form: "clone", subdirectory: null, branch: null }],
+            actor: USER_ACTOR,
+            at: yield* nowIso,
+          },
+        );
+        return { workspace: yield* readWorkspaceRecord(opened.workspace), frame: opened.frame };
+      }),
+
     /**
      * Returns the workspace if a user may dispose of it. Fails with
      * `NotFound` if there is no such workspace, and with `InvalidState` if:
      *
-     * - it is a primary, which is never torn down
+     * - it is an existing checkout, whose files are never removed
      * - it is already deleted or lost
      * - a holder's lease on it is active:
      *   - a run that has not finished, because the run's next steps work in
@@ -700,9 +1115,9 @@ const make = Effect.gen(function* () {
      */
     disposable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
-        const workspace = yield* readStoredWorkspaceOrFail(id);
-        if (workspace.kind === "primary")
-          return yield* Effect.fail(createInvalidStateError(PRIMARY_STANDS));
+        const workspace = yield* readStoredWorkspace(id);
+        if (workspace.ownership === "adopted")
+          return yield* Effect.fail(createInvalidStateError(EXISTING_DISPOSAL));
         if (workspace.status === "deleted" || workspace.status === "lost") {
           return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
         }
@@ -710,6 +1125,26 @@ const make = Effect.gen(function* () {
         if (active.length > 0) {
           return yield* Effect.fail(createInvalidStateError(describeActiveHolders(active)));
         }
+        yield* requireRemovalSupport(workspace.runnerId);
+        return workspace;
+      }),
+
+    /** Returns an attached main whose registration may be forgotten without removing its files. */
+    detachable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
+      Effect.gen(function* () {
+        const workspace = yield* readStoredWorkspace(id);
+        if (workspace.ownership !== "adopted" || workspace.kind !== "primary")
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "Only an attached main workspace may be detached. Dispose of managed workspaces instead.",
+            ),
+          );
+        if (workspace.status === "deleted" || workspace.status === "lost")
+          return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
+        const active = (yield* workspaces.listActiveHolders([id])).get(id) ?? [];
+        if (active.length > 0)
+          return yield* Effect.fail(createInvalidStateError(describeActiveHolders(active)));
+        yield* requireRemovalSupport(workspace.runnerId);
         return workspace;
       }),
 
@@ -725,8 +1160,9 @@ const make = Effect.gen(function* () {
     /**
      * Returns the workspace and the lease that kept it longest, if the sweep
      * may still dispose of it now. Returns `undefined` if its files are gone,
-     * if a lease on it is active again, or if a lease keeps it for longer
-     * now. Runs in the caller's transaction, which also disposes of it.
+     * if a lease on it is active again, if a lease keeps it for longer now,
+     * or if its runner cannot remove it safely. Runs in the caller's
+     * transaction, which also reserves its disposal.
      *
      * A sweep lists its candidates up front, and the leases can change before
      * a candidate's turn comes: a session can be resumed in it, or a released
@@ -744,10 +1180,20 @@ const make = Effect.gen(function* () {
         const found = yield* workspaces.one(id);
         if (
           Option.isNone(found) ||
+          found.value.retentionPolicy !== "automatic" ||
+          found.value.ownership !== "managed" ||
           (found.value.status !== "ready" && found.value.status !== "failed")
         ) {
           return undefined;
         }
+        if (Option.isSome(yield* workspaces.readRemoval(id))) return undefined;
+        const runner = yield* runners.read(found.value.runnerId);
+        // Reserving unsupported removal would permanently stop automatic cleanup after an upgrade.
+        if (
+          Option.isNone(runner) ||
+          !supportsWorkspaceLifecycle(runner.value.negotiatedCapabilities ?? [])
+        )
+          return undefined;
         const expired = yield* workspaces.findExpiredLease(id, yield* nowIso);
         return Option.isNone(expired)
           ? undefined
@@ -764,7 +1210,22 @@ const make = Effect.gen(function* () {
       holder: WorkspaceHolder,
       workspaceId: string,
       at: string,
-    ): Effect.Effect<void, SqlError> => workspaces.acquireLease(workspaceId, holder, at),
+    ): Effect.Effect<void, SqlError | InvalidState> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          if (!(yield* workspaces.acquireLease(workspaceId, holder, at)))
+            return yield* Effect.fail(
+              createInvalidStateError(
+                "The workspace is being disposed of or is unavailable, so the session cannot resume there. Wait for a ready workspace before resuming.",
+              ),
+            );
+          if (holder.kind === "session") yield* workspaces.retainForThread(holder.id, workspaceId);
+        }),
+      ),
+
+    /** Applies manual retention using the actual stored session's Thread classification. */
+    retainForThread: workspaces.retainForThread,
 
     /**
      * Releases every lease the holder has, with this retention, in the
@@ -789,42 +1250,43 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Marks a workspace as `deleted`, records the audit entry, and returns the
-     * frame that removes it from disk. The row is written first: if the runner
-     * never receives the frame, a directory is left behind, which the user can
-     * remove. A row left `ready` for a workspace nobody uses would never be
-     * cleaned up.
-     *
-     * The sweep passes the lease that kept the workspace longest. The audit
-     * entry records its retention as the reason, and its holder, so a reader
-     * can tell which rule let the workspace go.
+     * Reserves a durable removal and returns its frozen runner instruction.
+     * Keeps the workspace disposing until that request's outcome arrives.
+     * Refuses a different policy while removal is pending. A sweep records
+     * the expired lease's rule and holder as the reason for requesting removal.
      */
-    markGone: (
+    reserveDisposal: (
       workspace: StoredWorkspace,
-      actor: typeof USER_ACTOR | typeof SYSTEM_ACTOR,
-      expired?: ExpiredLease,
-    ): Effect.Effect<WorkspaceDispose, SqlError> =>
+      actor: string,
+      options: { readonly expired?: ExpiredLease; readonly discardChanges?: boolean } = {},
+    ): Effect.Effect<WorkspaceRemoval, SqlError | InvalidState> =>
+      reserveRemoval(workspace, "workspaceDispose", actor, options),
+
+    /** Records a registration-only removal before asking its runner to forget the attachment. */
+    reserveDetachment: (
+      workspace: StoredWorkspace,
+      actor: string,
+    ): Effect.Effect<WorkspaceRemoval, SqlError | InvalidState> =>
+      reserveRemoval(workspace, "workspaceDetach", actor),
+
+    /** Returns persisted removal instructions, including detachment, until their matching outcome arrives. */
+    listOwedDisposals: (
+      runnerId: string,
+    ): Effect.Effect<ReadonlyArray<WorkspaceRemoval>, SqlError> =>
+      workspaces.listOwedDisposals(runnerId),
+
+    /** Returns whether this runner can execute the workspace's recorded attachment semantics. */
+    supportsPreparationInstruction: (
+      runnerId: string,
+      frame: WorkspaceProvision,
+    ): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
-        yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const at = yield* nowIso;
-            yield* workspaces.markDisposed(workspace.id, at);
-            yield* audit.append({
-              kind: "workspace.deleted",
-              actor,
-              payload: {
-                workspaceId: workspace.id,
-                runnerId: workspace.runnerId,
-                ...(expired === undefined
-                  ? {}
-                  : { reason: expired.retention, holder: formatHolder(expired.holder) }),
-              },
-              at,
-            });
-          }),
+        if (!requiresWorkspaceLifecycle(frame)) return true;
+        const runner = yield* runners.read(runnerId);
+        return (
+          Option.isSome(runner) &&
+          supportsWorkspaceLifecycle(runner.value.negotiatedCapabilities ?? [])
         );
-        return { _tag: "workspaceDispose", workspaceId: workspace.id };
       }),
 
     /**
@@ -843,7 +1305,7 @@ const make = Effect.gen(function* () {
       runnerId: string,
     ): Effect.Effect<ReadonlyArray<WorkspaceProvision>, SqlError> =>
       Effect.flatMap(workspaces.provisioningOn(runnerId), (owed) =>
-        Effect.forEach(owed, rebuildProvisionFrame),
+        Effect.forEach(owed, rebuildPreparationInstruction),
       ),
 
     /**
@@ -859,7 +1321,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const found = yield* workspaces.one(workspaceId);
         if (Option.isNone(found) || found.value.status !== "provisioning") return Option.none();
-        return Option.some(yield* rebuildProvisionFrame(found.value));
+        return Option.some(yield* rebuildPreparationInstruction(found.value));
       }),
 
     /**
@@ -877,25 +1339,124 @@ const make = Effect.gen(function* () {
       runnerId: string,
       report: WorkspaceReport,
     ): Effect.Effect<Settled | undefined, SqlError> =>
-      Effect.gen(function* () {
-        const found = yield* workspaces.one(report.workspaceId);
-        if (Option.isNone(found) || found.value.runnerId !== runnerId) return undefined;
-        const moved = yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const at = yield* nowIso;
-            switch (report.status) {
-              case "ready":
-                return yield* workspaces.markReady(report.workspaceId, report.checkouts ?? [], at);
-              case "failed":
-                return yield* workspaces.markFailed(report.workspaceId, report.message ?? null, at);
-              case "deleted":
-                return yield* workspaces.markDisposed(report.workspaceId, at);
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const current = yield* workspaces.one(report.workspaceId);
+          if (Option.isNone(current) || current.value.runnerId !== runnerId) return undefined;
+          const fresh =
+            current.value.observedAt === null ||
+            (report.observedAt !== undefined && report.observedAt >= current.value.observedAt);
+          const at = yield* nowIso;
+          if (current.value.status === "disposing")
+            return yield* recordRemovalOutcome(runnerId, report, { fresh, at });
+          if (report.requestId !== undefined || report.status === "deleted") return undefined;
+          yield* workspaces.recordCreationFacts(report.workspaceId, report.checkouts ?? []);
+          if (report.warnings !== undefined && (fresh || current.value.status === "provisioning"))
+            yield* workspaces.recordWarnings(report.workspaceId, report.warnings);
+          let changed = false;
+          switch (report.status) {
+            case "ready":
+              changed = yield* workspaces.markReady(
+                report.workspaceId,
+                fresh ? (report.checkouts ?? []) : [],
+                at,
+              );
+              break;
+            case "failed":
+              if (
+                current.value.status === "provisioning" ||
+                (fresh && report.observedAt !== undefined)
+              ) {
+                changed = yield* workspaces.markFailed(
+                  report.workspaceId,
+                  report.message ?? null,
+                  at,
+                );
+              } else if (current.value.status === "ready" && report.observedAt === undefined) {
+                const runner = yield* runners.read(runnerId);
+                const frame = yield* workspaces.readPreparationInstruction(report.workspaceId);
+                const lifecycle = Option.isSome(frame) && requiresWorkspaceLifecycle(frame.value);
+                if (
+                  lifecycle &&
+                  Option.isSome(runner) &&
+                  !supportsWorkspaceLifecycle(runner.value.negotiatedCapabilities ?? [])
+                )
+                  changed = yield* workspaces.markFailed(
+                    report.workspaceId,
+                    report.message ?? null,
+                    at,
+                    { invalidateReadiness: true },
+                  );
+              }
+              break;
+          }
+          if (fresh && report.observedAt !== undefined) {
+            const observed = yield* workspaces.recordObservation(report.workspaceId, report);
+            if (observed) {
+              yield* audit.append({
+                kind: "workspace.observed",
+                actor: SYSTEM_ACTOR,
+                payload: {
+                  workspaceId: report.workspaceId,
+                  runnerId,
+                  observedAt: report.observedAt,
+                },
+                at,
+              });
+              if (report.status === "failed" && current.value.status === "ready") changed = true;
+              if (
+                report.status === "ready" &&
+                current.value.status === "failed" &&
+                current.value.provisionedAt !== null
+              )
+                changed = true;
             }
-          }),
-        );
-        return moved ? { workspaceId: report.workspaceId, moved: report.status } : undefined;
+          }
+          if (fresh && report.status === "ready" && report.path !== undefined)
+            yield* workspaces.recordAttachmentPath(report.workspaceId, report.path);
+          if (!changed) return undefined;
+          const settled = yield* workspaces.one(report.workspaceId);
+          return Option.isSome(settled) &&
+            (settled.value.status === "ready" ||
+              settled.value.status === "failed" ||
+              settled.value.status === "deleted")
+            ? { workspaceId: report.workspaceId, moved: settled.value.status }
+            : undefined;
+        }),
+      ),
+
+    /** Returns the workspace whose runner should be asked for a current observation. */
+    readStoredWorkspace,
+
+    /** Applies an inspection without treating readable files as successful preparation. */
+    recordObservation: (
+      runnerId: string,
+      report: WorkspaceReport,
+      actor: string = SYSTEM_ACTOR,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const observedAt = report.observedAt;
+        if (observedAt === undefined) return;
+        const found = yield* workspaces.one(report.workspaceId);
+        if (Option.isNone(found) || found.value.runnerId !== runnerId) return;
+        if (yield* workspaces.recordObservation(report.workspaceId, report))
+          yield* audit.append({
+            kind: "workspace.observed",
+            actor,
+            payload: { workspaceId: report.workspaceId, runnerId, observedAt },
+            at: yield* nowIso,
+          });
       }),
+
+    /** Checks the negotiated lifecycle capability before asking a runner for current facts. */
+    supportsInspection: (runnerId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        runners.read(runnerId),
+        (runner) =>
+          Option.isSome(runner) &&
+          supportsWorkspaceLifecycle(runner.value.negotiatedCapabilities ?? []),
+      ),
 
     /**
      * Marks every live workspace on a retired runner as `lost`. The workspaces

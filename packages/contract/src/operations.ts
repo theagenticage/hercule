@@ -149,10 +149,25 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/workspaces",
   },
+  "workspace.attach": {
+    requires: "workspace.write",
+    method: "POST",
+    path: "/api/v1/workspaces/attach",
+  },
+  "workspace.inspect": {
+    requires: "workspace.read",
+    method: "POST",
+    path: "/api/v1/workspaces/:id/inspect",
+  },
   "workspace.dispose": {
     requires: "workspace.write",
     method: "DELETE",
     path: "/api/v1/workspaces/:id",
+  },
+  "workspace.detach": {
+    requires: "workspace.write",
+    method: "POST",
+    path: "/api/v1/workspaces/:id/detach",
   },
 
   "event.query": { requires: "event.read", method: "GET", path: "/api/v1/events" },

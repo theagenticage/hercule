@@ -268,9 +268,9 @@ export const makeWorkspaceSteps = (options: {
     Effect.gen(function* () {
       // The controller sends a step right after its workspace's provisioning
       // frame, and the provisioning may still be cloning.
-      yield* Effect.promise(() => workspaces.waitForProvisioning(frame.workspaceId));
-      if (workspaces.hasFailedProvisioning(frame.workspaceId)) return undefined;
-      const workspace = workspaces.resolve(frame.workspaceId);
+      yield* workspaces.waitForProvisioning(frame.workspaceId);
+      if (yield* workspaces.hasFailedProvisioning(frame.workspaceId)) return undefined;
+      const workspace = yield* workspaces.resolve(frame.workspaceId);
       // Never had, lost or disposed: no workspace report ends the step then,
       // so its result must, or the run would wait for it forever.
       if (workspace === undefined) {

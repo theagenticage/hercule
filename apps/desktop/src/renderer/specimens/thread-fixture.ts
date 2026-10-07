@@ -55,6 +55,7 @@ const FIX_WORKSPACE: Workspace = buildWorkspace({
     {
       ...buildCheckout("r-webshop", "fix/3ds-eu-cards", ["main", "fix/3ds-eu-cards"]),
       form: "worktree",
+      startingRevision: { kind: "remote", branch: "main" },
     },
   ],
   sessionIds: [FIX_THREAD_ID, READ_THREAD_ID],

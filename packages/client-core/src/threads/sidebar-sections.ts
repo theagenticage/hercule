@@ -111,7 +111,7 @@ const buildProjectSection = (
     }))
     // A group that holds the draft being written stays, because the draft is
     // drawn in it even though it is not a thread yet.
-    .filter((lane) => lane.rows.length > 0 || lane.draft);
+    .filter((lane) => lane.rows.length > 0 || lane.draft || lane.showWhenEmpty);
   const shownCount = workspaces.reduce((sum, lane) => sum + lane.rows.length, 0);
   return { ...group, workspaces, hiddenCount: rows.length - shownCount };
 };

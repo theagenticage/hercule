@@ -19,7 +19,7 @@ import {
   findReadyPrimary,
   formatRepoName,
   findRunnerForPick,
-  withBranch,
+  setWorkspaceStartingRevision,
   joinLabelText,
   formatWorkspaceLabel,
   buildWorkspaceLabelParts,
@@ -156,21 +156,27 @@ describe("buildPickKey", () => {
   });
 });
 
-describe("withBranch", () => {
-  it("sets the branch the main workspace switches to", () => {
-    expect(withBranch({ kind: "primary", resourceId: WEBSHOP.id }, "release/2.4")).toEqual({
+describe("setWorkspaceStartingRevision", () => {
+  it("keeps a shared main workspace unchanged", () => {
+    expect(
+      setWorkspaceStartingRevision({ kind: "primary", resourceId: WEBSHOP.id }, "release/2.4"),
+    ).toEqual({
       kind: "primary",
       resourceId: WEBSHOP.id,
-      branch: "release/2.4",
     });
   });
 
   it("sets the base branch of a single-repo worktree, keeping its repo", () => {
     expect(
-      withBranch({ kind: "ephemeral", checkouts: [{ resourceId: WEBSHOP.id }] }, "release/2.4"),
+      setWorkspaceStartingRevision(
+        { kind: "ephemeral", checkouts: [{ resourceId: WEBSHOP.id }] },
+        "release/2.4",
+      ),
     ).toEqual({
       kind: "ephemeral",
-      checkouts: [{ resourceId: WEBSHOP.id, baseBranch: "release/2.4" }],
+      checkouts: [
+        { resourceId: WEBSHOP.id, startingRevision: { kind: "remote", branch: "release/2.4" } },
+      ],
     });
   });
 
@@ -180,15 +186,17 @@ describe("withBranch", () => {
       checkouts: [{ resourceId: WEBSHOP.id }, { resourceId: INFRA.id }],
     };
 
-    expect(withBranch(many, "main")).toEqual(many);
+    expect(setWorkspaceStartingRevision(many, "main")).toEqual(many);
   });
 
   it("leaves a joined workspace and a pick with no checkout unchanged", () => {
-    expect(withBranch({ kind: "existing", workspaceId: THREAD_3F1.id }, "main")).toEqual({
+    expect(
+      setWorkspaceStartingRevision({ kind: "existing", workspaceId: THREAD_3F1.id }, "main"),
+    ).toEqual({
       kind: "existing",
       workspaceId: THREAD_3F1.id,
     });
-    expect(withBranch({ kind: "none" }, "main")).toEqual({ kind: "none" });
+    expect(setWorkspaceStartingRevision({ kind: "none" }, "main")).toEqual({ kind: "none" });
   });
 });
 
@@ -262,8 +270,8 @@ describe("decideDefaultWorkspacePick", () => {
     expect(parsePreferredWorkspace("primary")).toBe("primary");
     expect(parsePreferredWorkspace("ephemeral")).toBe("ephemeral");
     expect(decideDefaultWorkspacePick([WEBSHOP], parsePreferredWorkspace("none"))).toEqual({
-      kind: "primary",
-      resourceId: WEBSHOP.id,
+      kind: "ephemeral",
+      checkouts: [{ resourceId: WEBSHOP.id }],
     });
   });
 });
@@ -331,7 +339,7 @@ describe("buildWorkspaceLead", () => {
         { kind: "ephemeral", checkouts: [{ resourceId: INFRA.id }] },
         { ...reading, runnerId: MOSS.id },
       ),
-    ).toBe("It gets its own worktree of ops-infra, on a new branch from its default branch.");
+    ).toBe("It gets its own worktree of ops-infra, on a new branch from remote default.");
   });
 
   it("describes all repos together for a worktree of several repos", () => {

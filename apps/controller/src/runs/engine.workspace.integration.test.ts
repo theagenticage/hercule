@@ -18,7 +18,7 @@ import type { Run, StepRecord, Validation } from "@hercule/contract";
 import { CurrentActor } from "../actor";
 import { AfterCommit, mintUuid, uuidToString, withTransaction } from "../db";
 import { EventKindsLayer, PlatformEventsLayer } from "../events";
-import { buildWorkspaceActionCapability } from "@hercule/protocol";
+import { buildWorkspaceActionCapability, WORKSPACE_LIFECYCLE_CAPABILITY } from "@hercule/protocol";
 import { SessionTokensLayer } from "../permissions";
 import { EventKindCatalogLayer, PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
 import { buildPluginStack, USER } from "../plugins/testing";
@@ -151,9 +151,10 @@ const runTest = <A, E>(
  * The capabilities a runner of this build negotiates at hello: every
  * workspace action in the catalog.
  */
-const CURRENT_CAPABILITIES = JSON.stringify(
-  [...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
-);
+const CURRENT_CAPABILITIES = JSON.stringify([
+  WORKSPACE_LIFECYCLE_CAPABILITY,
+  ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
+]);
 
 /**
  * Inserts an active runner of this build, online unless `connectivity` says
@@ -430,9 +431,15 @@ describe("a workspace step", () => {
         });
         const starts = yield* waitForStarts(recorded, 2);
         const childRunId = starts.find((start) => start.runId !== runId)!.runId;
-
-        yield* runs.cancel(runId, { keepWorkspace: true });
         const workspaces = yield* WorkspaceService;
+        for (const start of starts) {
+          yield* workspaces.reported(runnerId, {
+            _tag: "workspaceReport",
+            workspaceId: start.workspaceId!,
+            status: "ready",
+          });
+        }
+        yield* runs.cancel(runId, { keepWorkspace: true });
         for (const id of [runId, childRunId]) {
           const cancelled = yield* readRun(id);
           expect(cancelled).toMatchObject({ status: "cancelled", runnerId });

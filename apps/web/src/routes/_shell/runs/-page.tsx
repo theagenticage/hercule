@@ -130,9 +130,7 @@ export function RunPage({
   });
 
   const deleteWorkspace = useMutation({
-    mutationFn: (id: string) => client.workspace.dispose({ params: { id } }),
-    // The controller marks the workspace deleted before it answers, so the
-    // refetch already reads when it was deleted.
+    mutationFn: (id: string) => client.workspace.dispose({ params: { id }, payload: {} }),
     onSuccess: (_, id) => queryClient.invalidateQueries({ queryKey: queryKeys.workspace(id) }),
   });
 

@@ -1,29 +1,56 @@
 /**
- * `workspaces.json`: the record of where this runner's workspaces are on disk.
- *
- * The controller stores no paths, so this file is the only record of where a
- * workspace lives. A runner that lost it would strand the user's work. The
- * file is read again on every use instead of being cached, so a restart needs
- * no warm-up and two readers never disagree. Each entry is decoded with a
- * schema, not cast: an entry that a hand edit or an older build made
- * unreadable is dropped, and the runner's other workspaces are kept.
+ * Records runner-local workspace paths and durable preparation outcomes.
+ * Legacy entries retain their paths without repeating setup. Invalid registry
+ * state requires recovery rather than permitting recreation of existing files.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join as joinPath } from "node:path";
+import * as Effect from "effect/Effect";
+import * as Semaphore from "effect/Semaphore";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { StorageId, WorkspaceKind } from "@hercule/protocol";
+import {
+  StorageId,
+  WorkspaceKind,
+  WorkspaceProvision,
+  WorkspaceReport,
+  StartingRevision,
+  CheckoutForm,
+  WorkspaceRemoval,
+  WorkspaceOwnership,
+  RepositoryMode,
+} from "@hercule/protocol";
 
 const RegisteredCheckout = Schema.Struct({
   checkoutId: StorageId,
   resourceId: StorageId,
   remote: Schema.String,
   path: Schema.String,
+  commonDirectory: Schema.optionalKey(Schema.String),
+  commonDirectoryIdentity: Schema.optionalKey(Schema.String),
+  remoteName: Schema.optionalKey(Schema.String),
+  sourceRoot: Schema.optionalKey(Schema.String),
+  canonicalRoot: Schema.optionalKey(Schema.String),
+  startingRevision: Schema.optionalKey(Schema.NullOr(StartingRevision)),
+  baseCommit: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  form: Schema.optionalKey(CheckoutForm),
 });
 
 /** One checkout, as the registry records it. */
 export type RegisteredCheckout = Schema.Schema.Type<typeof RegisteredCheckout>;
+
+const Preparation = Schema.Union([
+  Schema.Struct({
+    phase: Schema.Literals(["creating", "preparing"]),
+    instruction: WorkspaceProvision,
+  }),
+  Schema.Struct({
+    phase: Schema.Literal("terminal"),
+    instruction: WorkspaceProvision,
+    report: WorkspaceReport,
+  }),
+]);
 
 const RegisteredWorkspace = Schema.Struct({
   workspaceId: StorageId,
@@ -31,11 +58,46 @@ const RegisteredWorkspace = Schema.Struct({
   /** The workspace's directory. For a primary this is the checkout's own directory. */
   root: Schema.String,
   checkouts: Schema.Array(RegisteredCheckout),
+  preparation: Schema.optionalKey(Preparation),
+  ownership: Schema.optionalKey(WorkspaceOwnership),
+  /** Availability is observed separately from the immutable preparation result. */
+  available: Schema.optionalKey(Schema.Boolean),
 });
 
 export type RegisteredWorkspace = Schema.Schema.Type<typeof RegisteredWorkspace>;
 
-const decodeEntry = Schema.decodeUnknownResult(RegisteredWorkspace);
+const RepositorySelection = Schema.Struct({
+  resourceId: StorageId,
+  mode: RepositoryMode,
+  commonDirectory: Schema.NullOr(Schema.String),
+  commonDirectoryIdentity: Schema.optionalKey(Schema.String),
+  sourceRoot: Schema.NullOr(Schema.String),
+  primaryWorkspaceId: Schema.NullOr(StorageId),
+  remoteName: Schema.String,
+});
+
+export type RepositorySelection = Schema.Schema.Type<typeof RepositorySelection>;
+
+const Removal = Schema.Struct({
+  workspaceId: StorageId,
+  instruction: WorkspaceRemoval,
+  phase: Schema.Literals(["pending", "terminal"]),
+  workspace: Schema.optionalKey(RegisteredWorkspace),
+  report: Schema.optionalKey(WorkspaceReport),
+});
+
+export type Removal = Schema.Schema.Type<typeof Removal>;
+
+const RegistryState = Schema.Struct({
+  version: Schema.Literal(1),
+  workspaces: Schema.Array(RegisteredWorkspace),
+  repositories: Schema.Array(RepositorySelection),
+  removals: Schema.optionalKey(Schema.Array(Removal)),
+});
+
+type RegistryState = Schema.Schema.Type<typeof RegistryState>;
+
+const decodeRegistry = Schema.decodeUnknownResult(RegistryState);
 
 /**
  * Checks that the workspace root and every checkout directory in the entry
@@ -49,23 +111,40 @@ export const isStillOnDisk = (entry: RegisteredWorkspace): boolean =>
 const buildRegistryPath = (storageDir: string): string => joinPath(storageDir, "workspaces.json");
 
 /**
- * Reads the registry and returns its valid entries. A missing file, or one that
- * something outside Hercule made unreadable, reads as an empty registry. A
- * runner with no workspaces is a state the controller already handles: it
- * provisions the workspaces again.
+ * Reads valid registry entries. Only a missing file represents an empty
+ * registry. Fails on unreadable content so no existing files can be recreated
+ * from an incomplete account of the runner's workspaces.
  */
-const readRegistry = (storageDir: string): ReadonlyArray<RegisteredWorkspace> => {
+const readRegistry = (storageDir: string): RegistryState => {
+  let content: string;
+  try {
+    content = readFileSync(buildRegistryPath(storageDir), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      return { version: 1, workspaces: [], repositories: [] };
+    throw new Error(
+      "Cannot read the workspace registry. Restore its readable contents before provisioning.",
+      { cause: error },
+    );
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(buildRegistryPath(storageDir), "utf8"));
-  } catch {
-    return [];
+    parsed = JSON.parse(content);
+  } catch (error) {
+    throw new Error(
+      "The workspace registry is invalid. Restore a valid registry before provisioning.",
+      { cause: error },
+    );
   }
-  if (!Array.isArray(parsed)) return [];
-  return parsed
-    .map((entry) => decodeEntry(entry))
-    .filter((decoded) => Result.isSuccess(decoded))
-    .map((decoded) => decoded.success);
+  const decoded = decodeRegistry(
+    Array.isArray(parsed) ? { version: 1, workspaces: parsed, repositories: [] } : parsed,
+  );
+  if (Result.isFailure(decoded))
+    throw new Error(
+      "The workspace registry contains invalid state. Restore a valid registry before provisioning.",
+      { cause: decoded.failure },
+    );
+  return decoded.success;
 };
 
 /**
@@ -73,12 +152,12 @@ const readRegistry = (storageDir: string): ReadonlyArray<RegisteredWorkspace> =>
  * the same way `runner.json` is written. A half-written registry would lose
  * every workspace on the runner at once.
  */
-const writeRegistry = (storageDir: string, entries: ReadonlyArray<RegisteredWorkspace>): void => {
+const writeRegistry = (storageDir: string, state: RegistryState): void => {
   const path = buildRegistryPath(storageDir);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(temporary, `${JSON.stringify(entries, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600, flag: "wx" });
     renameSync(temporary, path);
   } catch (error) {
     rmSync(temporary, { force: true });
@@ -87,41 +166,91 @@ const writeRegistry = (storageDir: string, entries: ReadonlyArray<RegisteredWork
 };
 
 export interface Registry {
-  readonly all: () => ReadonlyArray<RegisteredWorkspace>;
-  readonly held: (workspaceId: string) => RegisteredWorkspace | undefined;
-  /**
-   * Returns this runner's primary for a resource, or undefined if it has none.
-   * `.workspaceinclude` and the files it lists are read from the primary.
-   */
-  readonly primaryOf: (resourceId: string) => RegisteredWorkspace | undefined;
+  readonly all: () => Effect.Effect<ReadonlyArray<RegisteredWorkspace>, Error>;
+  readonly readRemoval: (workspaceId: string) => Effect.Effect<Removal | undefined, Error>;
+  /** Records removal intent or its terminal result before acknowledging it. */
+  readonly recordRemoval: (removal: Removal) => Effect.Effect<void, Error>;
+  readonly selectedRepository: (
+    resourceId: string,
+  ) => Effect.Effect<RepositorySelection | undefined, Error>;
+  readonly selectRepository: (selection: RepositorySelection) => Effect.Effect<void, Error>;
+  readonly held: (workspaceId: string) => Effect.Effect<RegisteredWorkspace | undefined, Error>;
+  /** Returns this runner's primary for a resource, used as the .workspaceinclude source. */
+  readonly primaryOf: (resourceId: string) => Effect.Effect<RegisteredWorkspace | undefined, Error>;
   readonly update: (
     change: (entries: ReadonlyArray<RegisteredWorkspace>) => ReadonlyArray<RegisteredWorkspace>,
-  ) => Promise<void>;
+  ) => Effect.Effect<void, Error>;
 }
 
 export const makeRegistry = (storageDir: string): Registry => {
-  /**
-   * Runs updates one at a time, so each read, change and write finishes before
-   * the next starts. Otherwise two workspaces provisioned at once could each
-   * write back the registry they had read, and one change would be lost.
-   */
-  let pending: Promise<void> = Promise.resolve();
+  // The read, change and atomic write finish under one permit, so concurrent updates cannot lose receipts.
+  const writes = Semaphore.makeUnsafe(1);
+  const readState = Effect.try({
+    try: () => readRegistry(storageDir),
+    catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+  });
+  const updateState = (
+    change: (state: RegistryState) => RegistryState,
+  ): Effect.Effect<void, Error> =>
+    writes.withPermits(1)(
+      Effect.try({
+        try: () => writeRegistry(storageDir, change(readRegistry(storageDir))),
+        catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+      }),
+    );
   return {
-    all: () => readRegistry(storageDir),
-    held: (workspaceId) =>
-      readRegistry(storageDir).find((entry) => entry.workspaceId === workspaceId),
-    primaryOf: (resourceId) =>
-      readRegistry(storageDir).find(
-        (entry) =>
-          entry.kind === "primary" && entry.checkouts.some((one) => one.resourceId === resourceId),
+    all: () => Effect.map(readState, (state) => state.workspaces),
+    readRemoval: (workspaceId) =>
+      Effect.map(readState, (state) =>
+        state.removals?.find((held) => held.workspaceId === workspaceId),
       ),
-    update: (change) => {
-      const done = pending.then(() => {
-        writeRegistry(storageDir, change(readRegistry(storageDir)));
-      });
-      // Even a failed write leaves the queue usable for the next caller.
-      pending = done.catch(() => undefined);
-      return done;
-    },
+    recordRemoval: (removal) =>
+      updateState((state) => ({
+        ...state,
+        removals: [
+          ...(state.removals ?? []).filter((held) => held.workspaceId !== removal.workspaceId),
+          removal,
+        ],
+        workspaces:
+          removal.report?.status === "deleted"
+            ? state.workspaces.filter((held) => held.workspaceId !== removal.workspaceId)
+            : state.workspaces,
+      })),
+    selectedRepository: (resourceId) =>
+      Effect.map(readState, (state) =>
+        state.repositories.find((selection) => selection.resourceId === resourceId),
+      ),
+    selectRepository: (selection) =>
+      updateState((state) => ({
+        ...state,
+        repositories: [
+          ...state.repositories.filter((held) => held.resourceId !== selection.resourceId),
+          selection,
+        ],
+      })),
+    held: (workspaceId) =>
+      Effect.map(readState, (state) => {
+        const removal = state.removals?.find((held) => held.workspaceId === workspaceId);
+        return removal?.phase === "pending" || removal?.report?.status === "deleted"
+          ? undefined
+          : state.workspaces.find((entry) => entry.workspaceId === workspaceId);
+      }),
+    primaryOf: (resourceId) =>
+      Effect.map(readState, (state) =>
+        state.workspaces.find(
+          (entry) =>
+            entry.kind === "primary" &&
+            !state.removals?.some(
+              (removal) => removal.workspaceId === entry.workspaceId && removal.phase === "pending",
+            ) &&
+            (entry.preparation === undefined ||
+              (entry.preparation.phase === "terminal" &&
+                entry.preparation.report.status === "ready")) &&
+            isStillOnDisk(entry) &&
+            entry.checkouts.some((checkout) => checkout.resourceId === resourceId),
+        ),
+      ),
+    update: (change) =>
+      updateState((state) => ({ ...state, workspaces: change(state.workspaces) })),
   };
 };

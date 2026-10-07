@@ -47,6 +47,7 @@ import { useStopAgent } from "../use-stop-agent";
 import { AgentRequestDock } from "./agent-request-dock";
 import { ModelPick, OptionsPick } from "./composer-picks";
 import { QueuedInputs } from "./queued-inputs";
+import { WorkspaceDetailsTrigger } from "../workspace/details-trigger";
 
 /** What one send carried: the request, and the picks it was built from. */
 interface SentSubmission {
@@ -261,28 +262,41 @@ export function ThreadComposer({
       below={
         <div className="fold">
           <div className="lip">
-            {workspaceLabel.map((piece) => (
+            {workspaceLabel.map((piece, index) => {
               // A label holds at most one piece of each kind.
-              <span key={piece.kind} title={fields.workspace.locked ?? undefined}>
-                {piece.kind === "branch" ? (
-                  <>
-                    <BranchIcon size={13} />
-                    <span>{piece.text}</span>
-                    {piece.startedFrom === null ? null : (
-                      <>
-                        {" "}
-                        <span className="faint">{piece.startedFrom}</span>
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <WorkspaceIcon size={13} />
-                    {piece.text}
-                  </>
-                )}
-              </span>
-            ))}
+              const content = (
+                <>
+                  {piece.kind === "branch" ? (
+                    <>
+                      <BranchIcon size={13} />
+                      <span>{piece.text}</span>
+                      {piece.startedFrom === null ? null : (
+                        <>
+                          {" "}
+                          <span className="faint">{piece.startedFrom}</span>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <WorkspaceIcon size={13} />
+                      {piece.text}
+                    </>
+                  )}
+                </>
+              );
+              return index === 0 && session.workspaceId !== null ? (
+                <span key={index}>
+                  <WorkspaceDetailsTrigger workspaceId={session.workspaceId}>
+                    {content}
+                  </WorkspaceDetailsTrigger>
+                </span>
+              ) : (
+                <span key={index} title={fields.workspace.locked ?? undefined}>
+                  {content}
+                </span>
+              );
+            })}
             <span className="spacer" />
             <span title={fields.machine.locked ?? undefined}>
               <LaptopIcon size={13} />

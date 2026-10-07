@@ -74,6 +74,10 @@ export const buildCheckout = (
   branch,
   branches,
   defaultBranch,
+  remoteBranches: [],
+  headCommit: null,
+  baseCommit: null,
+  startingRevision: null,
   // Started from the repo's default branch, as a checkout is when the caller
   // names no base. A main workspace's clone has no base either.
   baseBranch: null,
@@ -83,6 +87,11 @@ export const buildWorkspace = (over: Partial<Workspace> & { id: string }): Works
   runnerId: SLOTS.moss,
   kind: "primary",
   status: "ready",
+  ownership: "managed",
+  retentionPolicy: "manual",
+  path: null,
+  observedAt: null,
+  warnings: [],
   checkouts: [],
   designatedConnectionId: null,
   message: null,

@@ -30,6 +30,7 @@ import * as Socket from "effect/unstable/socket/Socket";
 import { createInternalError, createUnauthenticatedError } from "@hercule/contract";
 import {
   AGENT_STEPS_CAPABILITY,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
   ControllerToRunner,
   GOING_AWAY_CLOSE_CODE,
   PeerVersion,
@@ -99,6 +100,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
   LOGIN_ENDED_CAPABILITY,
   AGENT_STEPS_CAPABILITY,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
 ];
 
 const UNREADABLE = "that is not a message this controller can read";
@@ -239,6 +241,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           case "watermarkReport":
             if (!greeted) return;
             return yield* connections.reportedWatermark(runnerId, mine, message.watermark);
+          case "workspaceInspection":
           case "probeReport":
           case "installResult":
           case "loginUrl":

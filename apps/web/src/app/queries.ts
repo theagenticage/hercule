@@ -114,22 +114,13 @@ export const workspacesQuery = (client: HerculeClient) =>
     queryFn: () => client.workspace.query({ query: { limit: MAX_PAGE_LIMIT } }),
   });
 
-/**
- * Reads one workspace, and polls it while it is provisioning. Provisioning
- * runs on the machine and no push reports when it ends, so the query refetches
- * until the workspace is no longer provisioning.
- */
+/** Reads one workspace; its live topic invalidates the query after changes. */
 export const workspaceQuery = (client: HerculeClient, id: string) =>
   queryOptions({
     queryKey: queryKeys.workspace(id),
     queryFn: () => client.workspace.read({ params: { id } }),
-    refetchInterval: (query) =>
-      query.state.data?.status === "provisioning" ? WORKSPACE_POLL_MS : false,
     retry: false,
   });
-
-/** How often a provisioning workspace is fetched again. */
-const WORKSPACE_POLL_MS = 400;
 
 /**
  * Reads the fleet in a single page. A fleet is a handful of machines and the

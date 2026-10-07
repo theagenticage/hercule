@@ -72,3 +72,33 @@
 .new-project-body > :first-child {
   margin-top: 0;
 }
+
+.new-project-source {
+  overflow-wrap: anywhere;
+}
+.new-project-choices {
+  display: grid;
+  gap: 10px;
+  border: 0;
+  margin: 16px 0;
+  padding: 0;
+}
+.new-project-choices legend {
+  font-weight: var(--w-bold);
+  margin-bottom: 10px;
+}
+.new-project-choices label {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  column-gap: 8px;
+  align-items: center;
+}
+.new-project-choices input {
+  grid-row: span 2;
+  margin: 0;
+}
+.new-project-choices span {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: var(--t-12);
+}

@@ -20,6 +20,16 @@ export const MAX_FACT_ITEMS = 64;
 /** A name, a version or a path a peer reports about itself, and never a document. */
 export const Fact = Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH));
 
+/** An instant on the wire: ISO-8601 UTC with milliseconds. */
+export const Timestamp = Schema.String.check(
+  Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, {
+    title: "timestamp",
+    description: "an ISO-8601 UTC instant with milliseconds",
+  }),
+);
+
+export type Timestamp = Schema.Schema.Type<typeof Timestamp>;
+
 /**
  * A provider instance's id. Stricter than a fact, because the runner uses it as
  * a directory name: the credential a login writes, and the provider home a

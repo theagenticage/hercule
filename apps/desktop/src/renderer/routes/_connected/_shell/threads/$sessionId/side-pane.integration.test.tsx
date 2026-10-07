@@ -342,6 +342,8 @@ describe("the thread's side pane", () => {
 
   it("counts a running subagent's duration, and stops counting while the window is hidden", async () => {
     vi.useFakeTimers({ now: new Date("2026-09-10T09:05:00.000Z"), toFake: ["Date"] });
+    // Loading still uses real timers; keep the age clock from ticking before its timer is faked.
+    setVisibility("hidden");
     await openApp(`/threads/${SESSION_ID}`);
     await screen.findByRole("textbox");
     openPane();
@@ -354,10 +356,10 @@ describe("the thread's side pane", () => {
         .closest(".subagent-row")
         ?.querySelector(".subagent-row-end")?.textContent;
 
+    fakeClockTimers();
+    setVisibility("visible");
     expect(readDuration("Find the flaky webhook test")).toBe("working ·1m 20s");
     expect(readDuration("List the webhook tests")).toBe("done ·30s");
-
-    fakeClockTimers();
     act(() => {
       vi.advanceTimersByTime(10_000);
     });
@@ -377,18 +379,21 @@ describe("the thread's side pane", () => {
 
   it("stops counting a running subagent's duration while its row is scrolled out of view", async () => {
     vi.useFakeTimers({ now: new Date("2026-09-10T09:05:00.000Z"), toFake: ["Date"] });
+    // Loading still uses real timers; keep the age clock from ticking before its timer is faked.
+    setVisibility("hidden");
     await openApp(`/threads/${SESSION_ID}`);
     await screen.findByRole("textbox");
     openPane();
     const pane = await findPane();
     const readDuration = (subagentId: string) =>
       pane.querySelector(`[data-subagent-duration="${subagentId}"]`)?.textContent;
+    const row = await findRow("Find the flaky webhook test");
+    fakeClockTimers();
+    setVisibility("visible");
     expect(readDuration(FIXTURE_SUBAGENT.id)).toBe("1m 20s");
     expect(readDuration(NESTED_SUBAGENT.id)).toBe("1m 0s");
 
-    const row = await findRow("Find the flaky webhook test");
     reportOnScreen(row, false);
-    fakeClockTimers();
     act(() => {
       vi.advanceTimersByTime(10_000);
     });

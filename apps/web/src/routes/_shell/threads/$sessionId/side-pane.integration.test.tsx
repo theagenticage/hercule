@@ -300,6 +300,11 @@ const WORKSPACE: Workspace = {
   runnerId: SESSION.runnerId,
   kind: "ephemeral",
   status: "ready",
+  ownership: "managed",
+  retentionPolicy: "manual",
+  path: null,
+  observedAt: null,
+  warnings: [],
   checkouts: [
     {
       checkoutId: "01a06d02-7300-7000-8000-000000000002",
@@ -309,6 +314,10 @@ const WORKSPACE: Workspace = {
       branch: "hercule/thread-3f1",
       branches: ["hercule/thread-3f1"],
       defaultBranch: "main",
+      remoteBranches: [],
+      headCommit: null,
+      baseCommit: null,
+      startingRevision: null,
       baseBranch: null,
     },
   ],

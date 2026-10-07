@@ -1,179 +1,132 @@
-/**
- * Builds the composer's branch selector, which is two different fields in the
- * same place:
- *
- * - for a main workspace, it picks the branch the checkout switches to;
- * - for a new worktree, it picks the base the thread's new branch starts
- *   from. The new branch's name is generated.
- *
- * Returns `null` for an existing worktree the thread joins (the worktree is
- * named after its branch already), and for a thread with no checkout. Spec 14
- * §The composer owns the Branch selector.
- */
-import type { Workspace } from "@hercule/contract";
-import {
-  findBaseBranch,
-  findReadyPrimary,
-  formatWorkspaceName,
-  type Phrase,
-  type WorkspacePick,
-} from "./workspaces";
+/** Builds choices for a new workspace's Git source and shows existing files' observed branch. */
+import type { StartingRevision, Workspace } from "@hercule/contract";
+import { buildStartingRevisionKey, describeStartingRevision } from "../starting-revision";
+import { findPrimaryWorkspace, type Phrase, type WorkspacePick } from "./workspaces";
 
 export interface BranchRow {
-  readonly branch: string;
+  readonly key: string;
+  readonly label: string;
+  readonly startingRevision: StartingRevision;
   readonly badge: "current" | "default" | null;
-  /** The worktree that has the branch checked out, if a live one does. */
+  /** Why this source cannot currently be used. */
   readonly dimmed: string | null;
 }
 
 export interface BranchField {
   readonly header: string;
   readonly note: string;
-  /** The selector's text. For a main workspace, the branch glyph is drawn beside it. */
   readonly label: string;
-  /** The branch that currently applies, which is the row the menu marks. */
+  /** The key of the selected source row. */
   readonly value: string;
   readonly glyph: boolean;
-  /** Why there is nothing to choose. When set, the field is shown as text, not a menu. */
+  /** Why the field is shown as text rather than a menu. */
   readonly locked: string | null;
   readonly rows: readonly BranchRow[];
-  /** The fine print under the rows; the git names in it are set in mono. */
   readonly foot: readonly Phrase[] | null;
 }
 
-/** The branch label shown before any runner has cloned the repo. */
-const UNKNOWN = "default";
+/** Returns the explicit revision or the selected source's default without using another runner's refs. */
+const readStartingRevision = (
+  checkout: Extract<WorkspacePick, { kind: "ephemeral" }>["checkouts"][number],
+  source: Workspace | undefined,
+): StartingRevision =>
+  checkout.startingRevision ??
+  (checkout.baseBranch === undefined
+    ? source?.ownership === "adopted"
+      ? { kind: "current" }
+      : { kind: "remote" }
+    : { kind: "remote", branch: checkout.baseBranch });
 
-/** Why the field is locked. */
-const NOT_CLONED = "Nothing is cloned on this machine yet: it lands on the default branch";
-const NO_BRANCH = "This machine could not read the checkout's branch";
-const PER_REPO = "A base branch per repo is not built yet";
+/** Returns a row whose identity preserves the selected source kind. */
+const buildRevisionRow = (
+  startingRevision: StartingRevision,
+  label: string,
+  badge: BranchRow["badge"],
+  dimmed: string | null,
+): BranchRow => ({
+  key: buildStartingRevisionKey(startingRevision),
+  label,
+  startingRevision,
+  badge,
+  dimmed,
+});
 
-/**
- * Returns the branches that live worktrees of the repo on the same runner
- * have checked out, mapped to the worktree's name.
- */
-const findBranchesHeldNearby = (
-  workspaces: readonly Workspace[],
-  resourceId: string,
-  runnerId: string | null,
-): ReadonlyMap<string, string> => {
-  const held = new Map<string, string>();
-  for (const workspace of workspaces) {
-    if (workspace.kind !== "ephemeral" || workspace.status !== "ready") continue;
-    if (workspace.runnerId !== runnerId) continue;
-    for (const checkout of workspace.checkouts) {
-      if (checkout.resourceId !== resourceId || checkout.branch === null) continue;
-      held.set(checkout.branch, formatWorkspaceName(workspace));
-    }
-  }
-  return held;
-};
-
+/** Returns the revision menu for new files, or a locked observed branch for shared main files. */
 export const buildBranchField = (
   pick: WorkspacePick,
   {
     workspaces,
     runnerId,
-  }: {
-    readonly workspaces: readonly Workspace[];
-    readonly runnerId: string | null;
-  },
+  }: { readonly workspaces: readonly Workspace[]; readonly runnerId: string | null },
 ): BranchField | null => {
   if (pick.kind === "none" || pick.kind === "existing") return null;
-
   if (pick.kind === "primary") {
-    const primary = findReadyPrimary(workspaces, pick.resourceId, runnerId);
-    const checkout = primary?.checkouts[0];
-    // Nothing is cloned on the runner yet, so there is no branch list, and the
-    // clone will check out the remote's default branch. A checkout whose
-    // branch the runner could not read is just as unknown, and switching away
-    // from a branch nobody can name is not something to offer.
-    if (checkout === undefined || checkout.branch === null) {
-      return {
-        header: "Branch",
-        note: "the checkout switches to it",
-        label: UNKNOWN,
-        value: UNKNOWN,
-        glyph: false,
-        locked: checkout === undefined ? NOT_CLONED : NO_BRANCH,
-        rows: [],
-        foot: null,
-      };
-    }
-    const held = findBranchesHeldNearby(workspaces, pick.resourceId, runnerId);
-    // The main checkout's own branches, plus the branches that live worktrees
-    // of the same repo on the same runner have checked out. Those are dimmed,
-    // because git does not allow the same branch to be checked out twice.
-    const names = [...new Set([...checkout.branches, ...held.keys()])];
+    const source = findPrimaryWorkspace(workspaces, pick.resourceId, runnerId);
+    const branch = source?.checkouts.find(
+      (checkout) => checkout.resourceId === pick.resourceId,
+    )?.branch;
     return {
       header: "Branch",
-      note: "the checkout switches to it",
-      label: pick.branch ?? checkout.branch,
-      value: pick.branch ?? checkout.branch,
-      glyph: true,
-      locked: null,
-      rows: names.map((branch) => {
-        const holder = held.get(branch);
-        return {
-          branch,
-          badge: branch === checkout.branch ? ("current" as const) : null,
-          dimmed: holder === undefined ? null : `in workspace ${holder}`,
-        };
-      }),
-      foot: null,
-    };
-  }
-
-  const findPickedOrBaseBranch = (resourceId: string, picked?: string): string | null =>
-    picked ?? findBaseBranch(workspaces, resourceId, runnerId);
-
-  // Choosing a base per repo comes after v1, so a multi-repo worktree lists
-  // the bases it will use and allows no pick. A repo that no runner has cloned
-  // has no known base, and showing the placeholder as if it were a branch
-  // would be wrong, so the label then only says "from default branches".
-  if (pick.checkouts.length !== 1) {
-    const bases = pick.checkouts.map((each) =>
-      findPickedOrBaseBranch(each.resourceId, each.baseBranch),
-    );
-    return {
-      header: "Base branch",
-      note: "the new branch starts from it",
-      label: bases.includes(null) ? "from default branches" : `from ${bases.join(" · ")}`,
+      note: "existing files keep their branch",
+      label: branch ?? "Not observed",
       value: "",
-      glyph: false,
-      locked: PER_REPO,
+      glyph: branch != null,
+      locked: source?.message ?? "Starting a Thread here leaves the branch unchanged",
       rows: [],
       foot: null,
     };
   }
-
+  if (pick.checkouts.length !== 1) {
+    const revisions = pick.checkouts.map((checkout) =>
+      readStartingRevision(
+        checkout,
+        findPrimaryWorkspace(workspaces, checkout.resourceId, runnerId),
+      ),
+    );
+    return {
+      header: "Starting revision",
+      note: "each new branch starts from its selected source",
+      label: revisions.map(describeStartingRevision).join(" · "),
+      value: "",
+      glyph: false,
+      locked: "Each repository uses the starting revision shown here",
+      rows: [],
+      foot: null,
+    };
+  }
   const only = pick.checkouts[0]!;
-  const base = findPickedOrBaseBranch(only.resourceId, only.baseBranch);
-  const checkout = findReadyPrimary(workspaces, only.resourceId, runnerId)?.checkouts[0];
-  const defaultBranch = findBaseBranch(workspaces, only.resourceId, runnerId);
-  const names = checkout?.branches ?? [];
+  const source = findPrimaryWorkspace(workspaces, only.resourceId, runnerId);
+  const checkout = source?.checkouts.find((each) => each.resourceId === only.resourceId);
+  const revision = readStartingRevision(only, source);
+  const unavailable =
+    source !== undefined && source.status !== "ready"
+      ? (source.message ?? "Restore the selected source workspace before starting new work")
+      : null;
+  const noLocalSource =
+    unavailable ??
+    (source === undefined ? "Create or attach a local source on this machine first" : null);
+  const rows = [
+    buildRevisionRow({ kind: "current" }, "Current working copy", "current", noLocalSource),
+    buildRevisionRow({ kind: "remote" }, "Remote default", "default", unavailable),
+    ...(checkout?.branches ?? []).map((branch) =>
+      buildRevisionRow({ kind: "local", branch }, `Local branch: ${branch}`, null, noLocalSource),
+    ),
+    ...(checkout?.remoteBranches ?? []).map((branch) =>
+      buildRevisionRow({ kind: "remote", branch }, `Remote branch: ${branch}`, null, unavailable),
+    ),
+  ];
   return {
-    header: "Base branch",
-    note: "the new branch starts from it",
-    label: base === null ? UNKNOWN : `from ${base}`,
-    value: base ?? UNKNOWN,
+    header: "Starting revision",
+    note: "the new branch starts from this source",
+    label: describeStartingRevision(revision),
+    value: buildStartingRevisionKey(revision),
     glyph: false,
-    locked: names.length === 0 ? NOT_CLONED : null,
-    rows: names.map((branch) => ({
-      branch,
-      badge: branch === defaultBranch ? "default" : branch === checkout?.branch ? "current" : null,
-      dimmed: null,
-    })),
-    foot:
-      base === null
-        ? null
-        : [
-            { text: "The new branch is " },
-            { text: "hercule/thread-…", mono: true },
-            { text: ", named after the thread, and starts from " },
-            { text: `origin/${base}`, mono: true },
-            { text: " when the remote has it." },
-          ],
+    locked: null,
+    rows,
+    foot: [
+      {
+        text: "Current and local sources use this machine's committed Git state. Remote sources fetch before creating the new branch. Uncommitted edits stay in the original files.",
+      },
+    ],
   };
 };

@@ -400,6 +400,11 @@ const PRIMARY: Workspace = {
   runnerId: LOCAL.id,
   kind: "primary",
   status: "ready",
+  ownership: "managed",
+  retentionPolicy: "manual",
+  path: null,
+  observedAt: null,
+  warnings: [],
   checkouts: [
     {
       checkoutId: "co-primary",
@@ -409,6 +414,10 @@ const PRIMARY: Workspace = {
       branch: "main",
       branches: ["main", "release/2.4"],
       defaultBranch: "main",
+      remoteBranches: [],
+      headCommit: null,
+      baseCommit: null,
+      startingRevision: null,
       baseBranch: null,
     },
   ],
@@ -436,6 +445,10 @@ const THREAD_3F1: Workspace = {
       branch: "hercule/thread-3f1",
       branches: ["hercule/thread-3f1"],
       defaultBranch: "main",
+      remoteBranches: [],
+      headCommit: null,
+      baseCommit: null,
+      startingRevision: null,
       baseBranch: null,
     },
   ],
@@ -499,14 +512,17 @@ const buildDraftConfig = (overrides: Record<string, unknown> = {}) =>
   buildConfig({ projectId: null, workspace: null, preferredWorkspace: null, ...overrides });
 
 describe("buildComposerFields: the workspace a draft defaults to", () => {
-  it("uses the main workspace in a project with one repo", () => {
+  it("uses separate files in a project with one repo", () => {
     const fields = buildComposerFields(
       FULL,
       buildDraftConfig({ projectId: WEBSHOP_PROJECT.id }),
       "draft",
     );
 
-    expect(fields.workspace.value).toEqual({ kind: "primary", resourceId: WEBSHOP.id });
+    expect(fields.workspace.value).toEqual({
+      kind: "ephemeral",
+      checkouts: [{ resourceId: WEBSHOP.id }],
+    });
   });
 
   it("uses a worktree of each repo in a project with several repos", () => {
@@ -543,7 +559,10 @@ describe("buildComposerFields: the workspace a draft defaults to", () => {
       "draft",
     );
 
-    expect(fields.workspace.value).toEqual({ kind: "primary", resourceId: WEBSHOP.id });
+    expect(fields.workspace.value).toEqual({
+      kind: "ephemeral",
+      checkouts: [{ resourceId: WEBSHOP.id }],
+    });
   });
 
   it("works without a checkout when the stored setting is none and there is no repo", () => {
@@ -616,7 +635,7 @@ describe("buildComposerFields: every field uses the same runner", () => {
     // The lead uses the main workspace on that same runner, rather than
     // showing nothing because no runner was picked.
     expect(joinPhraseText(fields.lead ?? [])).toBe(
-      "It works in the main workspace of webshop on moss, on main. You and the agent share the files.",
+      "It gets its own worktree of webshop, on a new branch from remote default.",
     );
   });
 });
@@ -681,7 +700,7 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe(
-      "It works in the main workspace of webshop on moss, on release/2.4. You and the agent share the files.",
+      "It works in the main workspace of webshop on moss, on main. You and the agent share the files.",
     );
   });
 
@@ -714,7 +733,7 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe(
-      "It gets its own worktree of webshop, on a new branch from release/2.4.",
+      "It gets its own worktree of webshop, on a new branch from remote branch release/2.4.",
     );
   });
 
@@ -729,7 +748,7 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe(
-      "It gets its own worktree of webshop, on a new branch from main.",
+      "It gets its own worktree of webshop, on a new branch from remote default.",
     );
   });
 

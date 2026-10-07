@@ -3,6 +3,7 @@
  * passed separately, so a shell never interprets a remote or a branch name.
  */
 import { join as joinPath } from "node:path";
+import * as Effect from "effect/Effect";
 
 export interface GitOutcome {
   readonly ok: boolean;
@@ -13,23 +14,54 @@ export interface GitOutcome {
 
 export type GitEnv = Readonly<Record<string, string | undefined>>;
 
-export const runGit = async (
+export const runGit = (
   args: ReadonlyArray<string>,
   options: { readonly cwd?: string; readonly env: GitEnv },
-): Promise<GitOutcome> => {
-  const child = Bun.spawn(["git", ...args], {
-    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-    env: { ...options.env },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-  const code = await child.exited;
-  return { ok: code === 0, stdout: stdout.trim(), stderr: stderr.trim() };
-};
+): Effect.Effect<GitOutcome, Error> =>
+  Effect.acquireUseRelease(
+    Effect.try({
+      try: () =>
+        Bun.spawn(["git", ...args], {
+          ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+          env: { ...options.env },
+          detached: true,
+          stdout: "pipe",
+          stderr: "pipe",
+        }),
+      catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+    }),
+    (child) =>
+      Effect.gen(function* () {
+        const [stdout, stderr] = yield* Effect.all(
+          [
+            Effect.tryPromise({
+              try: () => new Response(child.stdout).text(),
+              catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+            }),
+            Effect.tryPromise({
+              try: () => new Response(child.stderr).text(),
+              catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+            }),
+          ],
+          { concurrency: "unbounded" },
+        );
+        const code = yield* Effect.promise(() => child.exited);
+        return { ok: code === 0, stdout: stdout.trim(), stderr: stderr.trim() };
+      }),
+    (child) =>
+      Effect.gen(function* () {
+        yield* Effect.ignore(
+          Effect.try(() => {
+            try {
+              process.kill(-child.pid, "SIGKILL");
+            } catch {
+              if (child.exitCode === null) child.kill("SIGKILL");
+            }
+          }),
+        );
+        yield* Effect.promise(() => child.exited);
+      }),
+  );
 
 /**
  * Switches a working copy to the branch a session was asked to start on,
@@ -42,8 +74,11 @@ export const runGit = async (
  * same name is an unknown branch, the switch fails, and the session does not
  * start.
  */
-export const switchBranch = (dir: string, branch: string, env: GitEnv): Promise<GitOutcome> =>
-  runGit(["-C", dir, "checkout", branch, "--"], { env });
+export const switchBranch = (
+  dir: string,
+  branch: string,
+  env: GitEnv,
+): Effect.Effect<GitOutcome, Error> => runGit(["-C", dir, "checkout", branch, "--"], { env });
 
 /**
  * Returns the branch a working copy is on, or null if there is none: on a
@@ -52,119 +87,157 @@ export const switchBranch = (dir: string, branch: string, env: GitEnv): Promise<
  * checkout's branch, and text stored there would look like a branch name
  * nobody can use.
  */
-export const readCurrentBranch = async (dir: string, env: GitEnv): Promise<string | null> => {
-  const shown = await runGit(["-C", dir, "branch", "--show-current"], { env });
-  if (!shown.ok || shown.stdout.length === 0) return null;
-  return shown.stdout;
-};
+export const readCurrentBranch = (dir: string, env: GitEnv): Effect.Effect<string | null, Error> =>
+  Effect.gen(function* () {
+    const shown = yield* runGit(["-C", dir, "branch", "--show-current"], { env });
+    if (!shown.ok || shown.stdout.length === 0) return null;
+    return shown.stdout;
+  });
 
 /** Returns the local branches of a working copy: the branches the user can switch to. */
-export const listLocalBranches = async (
+export const listLocalBranches = (
   dir: string,
   env: GitEnv,
-): Promise<ReadonlyArray<string>> => {
-  const listed = await runGit(
-    ["-C", dir, "for-each-ref", "--format=%(refname:short)", "refs/heads"],
-    { env },
-  );
-  return listed.stdout.split("\n").filter((line) => line.length > 0);
-};
+): Effect.Effect<ReadonlyArray<string>, Error> =>
+  Effect.gen(function* () {
+    const listed = yield* runGit(
+      ["-C", dir, "for-each-ref", "--format=%(refname:short)", "refs/heads"],
+      { env },
+    );
+    return listed.stdout.split("\n").filter((line) => line.length > 0);
+  });
 
 /** Returns the branch `origin/HEAD` points at, or null if it is not set. */
-export const readDefaultBranch = async (dir: string, env: GitEnv): Promise<string | null> => {
-  const head = await runGit(["-C", dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], {
-    env,
+export const readDefaultBranch = (
+  dir: string,
+  env: GitEnv,
+  remoteName = "origin",
+): Effect.Effect<string | null, Error> =>
+  Effect.gen(function* () {
+    const head = yield* runGit(
+      ["-C", dir, "symbolic-ref", "--short", `refs/remotes/${remoteName}/HEAD`],
+      {
+        env,
+      },
+    );
+    if (!head.ok) return null;
+    const target = head.stdout.startsWith(`${remoteName}/`)
+      ? head.stdout.slice(remoteName.length + 1)
+      : head.stdout;
+    return target.length === 0 ? null : target;
   });
-  if (!head.ok) return null;
-  const target = head.stdout.replace(/^origin\//, "");
-  return target.length === 0 ? null : target;
-};
 
 export const buildCacheDir = (storageDir: string, resourceId: string): string =>
   joinPath(storageDir, "cache", `${resourceId}.git`);
 
 export const buildCacheRoot = (storageDir: string): string => joinPath(storageDir, "cache");
 
-/**
- * Makes sure the cache for a resource exists and is up to date, and returns its
- * path. The cache is a bare repository that every working copy of the resource
- * is created from. Returns `failure`, with git's error output, if the clone or
- * the fetch fails.
- *
- * The cache is cloned bare from the remote once and fetched on every later
- * call, so a worktree created from it pushes to the remote, not to this
- * runner. Fetches write to `refs/remotes/origin/*`, never to `refs/heads/*`.
- * The agents' branches live in `refs/heads`, checked out by worktrees, and git
- * refuses to fetch over a branch that is checked out. That would happen as
- * soon as an agent pushed its own branch upstream.
- */
-export const ensureCache = async (options: {
+/** Establishes bare storage once, without fetching when it already exists. */
+export const ensureCache = (options: {
   readonly storageDir: string;
   readonly resourceId: string;
-  /** Where git clones from, fetches from, and points `origin` at. */
   readonly remote: string;
   readonly env: GitEnv;
-}): Promise<{
-  readonly path: string;
-  readonly failure?: string;
-  /** The repository's default branch, returned so callers do not ask git again. */
-  readonly defaultBranch?: string;
-}> => {
-  const path = buildCacheDir(options.storageDir, options.resourceId);
-  const { env, remote } = options;
-  const known = await runGit(["-C", path, "rev-parse", "--git-dir"], { env });
-  if (!known.ok) {
-    const cloned = await runGit(["clone", "--bare", "--", remote, path], { env });
-    if (!cloned.ok) return { path, failure: cloned.stderr };
-  }
-  const fetched = await runGit(
-    ["-C", path, "fetch", "--no-tags", "--", remote, "+refs/heads/*:refs/remotes/origin/*"],
-    { env },
-  );
-  if (!fetched.ok) return { path, failure: fetched.stderr };
-  // Read the default branch from the cache's own HEAD instead of asking the
-  // remote: the answer is the same and needs no network. Setting `origin/HEAD`
-  // from it lets later code, such as a worktree with no base branch or a
-  // report, find the repository's default branch.
-  const own = await runGit(["-C", path, "symbolic-ref", "--short", "HEAD"], { env });
-  const head = own.stdout;
-  if (head.length === 0) return { path };
-  await runGit(["-C", path, "remote", "set-head", "origin", head], { env });
-  // Return the default branch instead of letting callers read it from the cache
-  // again: this is the only place it is worked out, and a second git call could
-  // give a different answer.
-  return { path, defaultBranch: head };
-};
-
-/**
- * Returns the ref a new branch starts from, or undefined if the base branch
- * does not exist. It prefers the remote's copy of the base branch, which the
- * cache fetches. For a repository whose remote was never reachable, it falls
- * back to the base branch in the cache's own `refs/heads`.
- */
-export const findStartPoint = async (
-  cache: string,
-  base: string,
-  env: GitEnv,
-): Promise<string | undefined> => {
-  for (const ref of [`refs/remotes/origin/${base}`, `refs/heads/${base}`]) {
-    if ((await runGit(["-C", cache, "rev-parse", "--verify", "--quiet", ref], { env })).ok) {
-      return ref;
+}): Effect.Effect<{ readonly path: string; readonly failure?: string }, Error> =>
+  Effect.gen(function* () {
+    const path = buildCacheDir(options.storageDir, options.resourceId);
+    const known = yield* runGit(["-C", path, "rev-parse", "--git-dir"], { env: options.env });
+    if (!known.ok) {
+      const cloned = yield* runGit(["clone", "--bare", "--", options.remote, path], {
+        env: options.env,
+      });
+      if (!cloned.ok) return { path, failure: cloned.stderr };
     }
-  }
-  return undefined;
-};
+    return { path };
+  });
 
-/** Removes a worktree and its directory. Idempotent: a worktree that is already gone counts as removed. */
-export const removeWorktree = async (cache: string, dir: string, env: GitEnv): Promise<void> => {
-  await runGit(["-C", cache, "worktree", "remove", "--force", dir], { env });
-};
+/** Fetches remote refs and refreshes that remote's default without changing local branches. */
+export const fetchRemote = (
+  directory: string,
+  remoteName: string,
+  remote: string,
+  env: GitEnv,
+): Effect.Effect<string | null, Error> =>
+  Effect.gen(function* () {
+    const fetched = yield* runGit(
+      [
+        "-C",
+        directory,
+        "fetch",
+        "--no-tags",
+        "--prune",
+        "--",
+        remote,
+        `+refs/heads/*:refs/remotes/${remoteName}/*`,
+      ],
+      { env },
+    );
+    if (!fetched.ok)
+      return yield* Effect.fail(
+        new Error(
+          `The remote fetch failed. Check the repository Connection and try a fresh workspace: ${fetched.stderr}`,
+        ),
+      );
+    const head = yield* runGit(["-C", directory, "ls-remote", "--symref", "--", remote, "HEAD"], {
+      env,
+    });
+    if (!head.ok)
+      return yield* Effect.fail(new Error(`The remote default could not be read: ${head.stderr}`));
+    const branch = /^ref: refs\/heads\/(.+)\tHEAD$/m.exec(head.stdout)?.[1];
+    if (branch === undefined) return null;
+    const updated = yield* runGit(
+      [
+        "-C",
+        directory,
+        "symbolic-ref",
+        `refs/remotes/${remoteName}/HEAD`,
+        `refs/remotes/${remoteName}/${branch}`,
+      ],
+      { env },
+    );
+    if (!updated.ok)
+      return yield* Effect.fail(
+        new Error(`The remote default could not be recorded: ${updated.stderr}`),
+      );
+    return branch;
+  });
+
+/** Resolves one fully qualified ref to its committed revision, without falling back to another ref. */
+export const resolveCommit = (
+  directory: string,
+  ref: string,
+  env: GitEnv,
+): Effect.Effect<string, Error> =>
+  Effect.gen(function* () {
+    const resolved = yield* runGit(
+      ["-C", directory, "rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+      { env },
+    );
+    if (!resolved.ok)
+      return yield* Effect.fail(
+        new Error(
+          `The requested revision ${ref} is unavailable in the selected repository. Choose an existing local or fetched remote branch.`,
+        ),
+      );
+    return resolved.stdout;
+  });
+/** Removes a worktree through Git, forcing removal only after explicit discard authorization. */
+export const removeWorktree = (
+  cache: string,
+  dir: string,
+  env: GitEnv,
+  discardChanges = false,
+): Effect.Effect<GitOutcome, Error> =>
+  runGit(["-C", cache, "worktree", "remove", ...(discardChanges ? ["--force"] : []), "--", dir], {
+    env,
+  });
 
 /**
  * Makes the cache forget worktrees whose directories are gone. Call it after
  * the directories are deleted, never before: a prune only forgets directories
  * that are already gone.
  */
-export const pruneWorktrees = async (cache: string, env: GitEnv): Promise<void> => {
-  await runGit(["-C", cache, "worktree", "prune"], { env });
-};
+export const pruneWorktrees = (cache: string, env: GitEnv): Effect.Effect<void, Error> =>
+  Effect.gen(function* () {
+    yield* runGit(["-C", cache, "worktree", "prune"], { env });
+  });

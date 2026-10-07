@@ -89,7 +89,14 @@ export function buildSubmission(
       ...(config.projectId === null || config.projectId === undefined
         ? {}
         : { projectId: config.projectId }),
-      ...(workspace === null || workspace.kind === "none" ? {} : { workspace }),
+      ...(workspace === null || workspace.kind === "none"
+        ? {}
+        : {
+            workspace:
+              workspace.kind === "primary"
+                ? { kind: "primary", resourceId: workspace.resourceId }
+                : workspace,
+          }),
     },
   };
 }

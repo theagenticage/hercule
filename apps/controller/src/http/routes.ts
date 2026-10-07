@@ -322,7 +322,12 @@ const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
       .handle("query", ({ query }) => withApiErrors(workspaces.query(query)))
       .handle("read", ({ params }) => withApiErrors(workspaces.read(params.id)))
       .handle("provision", ({ payload }) => withApiErrors(provisioning.provisionWorkspace(payload)))
-      .handle("dispose", ({ params }) => withApiErrors(provisioning.disposeWorkspace(params.id)));
+      .handle("attach", ({ payload }) => withApiErrors(provisioning.attachWorkspace(payload)))
+      .handle("inspect", ({ params }) => withApiErrors(provisioning.inspectWorkspace(params.id)))
+      .handle("dispose", ({ params, payload }) =>
+        withApiErrors(provisioning.disposeWorkspace(params.id, payload)),
+      )
+      .handle("detach", ({ params }) => withApiErrors(provisioning.detachWorkspace(params.id)));
   }),
 );
 

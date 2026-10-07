@@ -62,6 +62,7 @@ export function ThreadsFace({
   readonly live: Live;
 }): JSX.Element {
   useLiveInvalidation(live, queryClient, "session");
+  useLiveInvalidation(live, queryClient, "workspace");
   useLiveInvalidation(live, queryClient, "assistant");
   // A row on a runner that goes offline ends in "offline" instead of its age.
   useLiveInvalidation(live, queryClient, "runner");

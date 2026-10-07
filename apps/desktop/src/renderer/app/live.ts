@@ -2,7 +2,7 @@
  * Runs the live connection while the shell is mounted, and keeps the
  * sidebar's reads current through it.
  *
- * The shell subscribes to six topics:
+ * The shell subscribes to these topics:
  *
  * - `session`, for the thread list, the current session of each assistant's
  *   main conversation (and an open thread's own reads). An assistant's
@@ -10,6 +10,7 @@
  *   conversation, so a push about a thread or a workflow run's session reads
  *   no assistant's session;
  * - `runner`, for the runners, whose connectivity draws a thread as away;
+ * - `workspace`, for working files, observations and retained work;
  * - `provider`, for the providers, whose catalogs name each thread's model;
  * - `task`, for the open tasks a Draft Thread offers to start from;
  * - `connection`, for the GitHub Connection the New project form clones
@@ -19,7 +20,7 @@
  * Each push invalidates the query keys it lists. The screens never deal with
  * the socket.
  *
- * Projects, workspaces and resources have no live topic yet (#279 adds
+ * Projects and resources have no live topic yet (#279 adds
  * them). After a reconnect, pushes may have been lost while the connection
  * was down, so they are read again then (the topics' own reads are read again
  * on the controller's first push on each subscription). A change made elsewhere, such as a project
@@ -37,6 +38,7 @@ import { ageClock } from "./age-clock";
 const SHELL_TOPICS: readonly MutableLiveTopic[] = [
   "session",
   "runner",
+  "workspace",
   "provider",
   "task",
   "connection",
@@ -60,7 +62,7 @@ const SHELL_TOPICS: readonly MutableLiveTopic[] = [
  *   go unnoticed until the user's next navigation. Once the sign-in screen
  *   shows, the router empties the caches (see `createAppRouter`).
  * - When the connection comes back after a drop, it reads the projects,
- *   workspaces and resources again, and has the age clock read the time. A
+ *   resources again, and has the age clock read the time. A
  *   drop often follows a Mac's sleep, which a timer may not have counted.
  *   The first connection does neither: the loader has just read the lists.
  */
@@ -79,11 +81,7 @@ export const useLiveConnection = (live: Live, queryClient: QueryClient): void =>
       if (status === "unauthenticated") void router.invalidate();
       if (status !== "connected") return;
       if (connectedBefore) {
-        for (const queryKey of [
-          queryKeys.projects(),
-          queryKeys.workspaces(),
-          queryKeys.resources(),
-        ]) {
+        for (const queryKey of [queryKeys.projects(), queryKeys.resources()]) {
           invalidateWithoutCancelling(queryClient, queryKey);
         }
         ageClock.refresh();

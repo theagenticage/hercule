@@ -31,6 +31,7 @@ export function ComposerMenu({
   triggerClassName,
   trigger,
   children,
+  onOpen,
 }: {
   readonly label: string;
   readonly align: "start" | "end";
@@ -39,6 +40,7 @@ export function ComposerMenu({
   readonly triggerClassName: string;
   readonly trigger: ReactNode;
   readonly children: (close: () => void) => ReactNode;
+  readonly onOpen?: (() => void) | undefined;
 }): JSX.Element {
   const id = useId();
   const [menu, setMenu] = useState<HTMLDivElement | null>(null);
@@ -70,6 +72,7 @@ export function ComposerMenu({
         className={`pop menu menu--${align} menu--${width}`}
         onToggle={(event) => {
           setOpen(event.newState === "open");
+          if (event.newState === "open") onOpen?.();
         }}
       >
         {open ? children(close) : null}

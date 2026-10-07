@@ -1,3 +1,4 @@
+import { makeTestWorkspaces } from "../workspaces/testing";
 /**
  * Tests what a session gets on this machine. Each assertion guards against a
  * leak the spec names:
@@ -25,7 +26,7 @@ import { Effect } from "effect";
 import type { SessionStart } from "@hercule/protocol";
 import { resolveSessionContext, type Machine } from "./context";
 import { NO_USER_MATERIAL_PATHS } from "../providers/testing";
-import { makeWorkspaces } from "../workspaces";
+
 import {
   addBranch,
   buildCheckout,
@@ -38,9 +39,9 @@ import {
 
 const roots: Array<string> = [];
 
-afterAll(() => {
+afterAll(async () => {
+  await cleanTemporaries();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-  cleanTemporaries();
 });
 
 const createRoot = (): string => {
@@ -62,7 +63,7 @@ const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin", HOME: "/home/somebody" },
     findBinary: (name) => `/usr/local/bin/${name}`,
-    workspaces: makeWorkspaces({ storageDir: join(under, "storage") }),
+    workspaces: makeTestWorkspaces({ storageDir: join(under, "storage") }),
     socketPath: join(under, "daemon.sock"),
     ...overrides,
   };
@@ -307,18 +308,20 @@ describe("a session that has a workspace", () => {
     const remote = makeRemote();
     const machine = buildMachine();
     const workspaceId = createId();
-    await machine.workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "ephemeral",
-        checkouts: [
-          buildCheckout({
-            resourceId: createId(),
-            remote: remote.url,
-            branch: "hercule/run-9c9c9c9c",
-          }),
-        ],
-      }),
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              resourceId: createId(),
+              remote: remote.url,
+              branch: "hercule/run-9c9c9c9c",
+            }),
+          ],
+        }),
+      ),
     );
 
     const outcome = await resolveAsync(
@@ -328,7 +331,7 @@ describe("a session that has a workspace", () => {
 
     expect(outcome._tag).toBe("Success");
     const resolved = outcome._tag === "Success" ? outcome.success : undefined;
-    expect(resolved?.ctx.cwd).toBe(machine.workspaces.resolve(workspaceId)?.cwd);
+    expect(resolved?.ctx.cwd).toBe(Effect.runSync(machine.workspaces.resolve(workspaceId))?.cwd);
     // Nothing to remove on exit: the workspace outlives the session.
     expect(resolved?.scratch).toBeUndefined();
   });
@@ -339,14 +342,16 @@ describe("a session that has a workspace", () => {
     const machine = buildMachine();
     const workspaceId = createId();
     const resourceId = createId();
-    await machine.workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
-      }),
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remote.url })],
+        }),
+      ),
     );
-    const folder = machine.workspaces.resolve(workspaceId)!.cwd;
+    const folder = Effect.runSync(machine.workspaces.resolve(workspaceId))!.cwd;
 
     const outcome = await resolveAsync(
       buildSessionStart({
@@ -366,12 +371,14 @@ describe("a session that has a workspace", () => {
     addBranch(remote, "hotfix");
     const machine = buildMachine();
     const workspaceId = createId();
-    await machine.workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
-      }),
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
+        }),
+      ),
     );
     const spec = { ...buildSessionStart().spec, workspaceId };
 
@@ -393,14 +400,17 @@ describe("a session that has a workspace", () => {
     const machine = buildMachine();
     const workspaceId = createId();
     const resourceId = createId();
-    await machine.workspaces.provision(
-      buildProvisionFrame({
-        workspaceId,
-        kind: "primary",
-        checkouts: [buildCheckout({ resourceId, remote: remote.url })],
-      }),
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remote.url })],
+        }),
+      ),
     );
-    const folder = machine.workspaces.resolve(workspaceId)!.cwd;
+    const folder = Effect.runSync(machine.workspaces.resolve(workspaceId))!.cwd;
+    const branchBefore = runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD");
 
     const outcome = await resolveAsync(
       buildSessionStart({
@@ -414,7 +424,7 @@ describe("a session that has a workspace", () => {
     // failure the user reads, not something the runner works around.
     expect(outcome._tag).toBe("Failure");
     expect(outcome._tag === "Failure" ? outcome.failure : "").toContain("no-such-branch");
-    expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+    expect(runGitOrThrow(folder, "rev-parse", "--abbrev-ref", "HEAD")).toBe(branchBefore);
   });
 });
 

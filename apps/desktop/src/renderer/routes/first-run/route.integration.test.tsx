@@ -639,6 +639,26 @@ describe("the first run's steps", () => {
     let projects: readonly Project[] = [];
     const calls = stubApi({
       ...FIRST_RUN_HANDLERS,
+      "GET /api/v1/runners": {
+        body: {
+          items: [
+            {
+              ...MOSS!,
+              facts: {
+                os: "darwin",
+                arch: "arm64",
+                totalMemoryBytes: 1024,
+                docker: false,
+                toolchains: [],
+                providers: [],
+                adapters: [],
+                identityPort: 4939,
+              },
+            },
+          ],
+        },
+      },
+      "GET /api/v1/workspaces": { body: { items: [] } },
       "GET /api/v1/projects": () => ({ body: { items: projects } }),
       "POST /api/v1/projects": () => {
         projects = [SHOP];
@@ -649,8 +669,15 @@ describe("the first run's steps", () => {
       controllerUrl: CONTROLLER_URL,
       token: "bearer",
       firstRun: { putOff: ["providers", "github"] },
+      runnerIdentities: { 4939: MOSS!.id },
       pickFolder: () =>
-        Promise.resolve({ _tag: "Repository", name: "shop", remote: REMOTE, branch: "main" }),
+        Promise.resolve({
+          _tag: "Repository",
+          path: "/Users/fixture/shop",
+          name: "shop",
+          remote: REMOTE,
+          branch: "main",
+        }),
     });
     await renderApp(fake);
     expect(readHeading()).toBe("Add your first project");

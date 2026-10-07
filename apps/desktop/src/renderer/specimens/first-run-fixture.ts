@@ -229,6 +229,7 @@ const buildSignedInHandlers = (records: ControllerRecords): Record<string, Handl
   "GET /api/v1/connections": () => ({ body: { items: records.connections } }),
   "GET /api/v1/projects": () => ({ body: { items: records.projects } }),
   "GET /api/v1/resources": () => ({ body: { items: records.resources } }),
+  "GET /api/v1/workspaces": { body: { items: [] } },
   "GET /api/v1/assistants": { body: { items: [HERCULE] } },
   "GET /api/v1/user": { body: { username: "rogier" } },
   "GET /api/v1/settings": { body: { controller: {}, user: { timezone: "Europe/Amsterdam" } } },
@@ -270,7 +271,9 @@ const createScriptedBridge = ({
       save: (url) => Promise.resolve({ _tag: "Saved", origin: url }),
     },
     token: { read: () => Promise.resolve(token), write: done },
-    runnerIdentity: { read: () => Promise.resolve(null) },
+    runnerIdentity: {
+      read: ({ port }) => Promise.resolve(port === STUDIO.facts?.identityPort ? STUDIO.id : null),
+    },
     firstScreen: { report: done },
     goMenu: { set: done },
     waiting: { set: done },
@@ -702,17 +705,24 @@ export const FIRST_RUN_SCENES: { readonly [Name in FirstRunStateName]: () => Fir
   "project-picked": () =>
     buildPickedScene({
       _tag: "Repository",
+      path: "/Users/fixture/webshop",
       name: "webshop",
       remote: "git@github.com:rogier/webshop.git",
       branch: "main",
     }),
   "project-no-remote": () =>
-    buildPickedScene({ _tag: "NoRemote", name: "webshop", branch: "main" }),
+    buildPickedScene({
+      _tag: "NoRemote",
+      path: "/Users/fixture/webshop",
+      name: "webshop",
+      branch: "main",
+    }),
   "project-not-git": () => buildPickedScene({ _tag: "NotGit", name: "webshop" }),
   "project-picked-without-github": () =>
     buildPickedScene(
       {
         _tag: "Repository",
+        path: "/Users/fixture/webshop",
         name: "webshop",
         remote: "git@github.com:rogier/webshop.git",
         branch: "main",

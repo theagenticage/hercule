@@ -6,6 +6,8 @@
  * repository on disk reached over `file://`, which needs no credential, so a
  * provisioning test covers the git code and never the credential path.
  */
+import { Effect, Exit, Scope } from "effect";
+import { makeWorkspaces, type Workspaces } from "./index";
 import { createHash } from "node:crypto";
 import {
   lstatSync,
@@ -47,6 +49,20 @@ export const runGitOrThrow = (cwd: string, ...args: ReadonlyArray<string>): stri
 };
 
 const roots: Array<string> = [];
+const workspaceScopes: Array<Scope.Closeable> = [];
+
+/** Constructs a manager whose workers remain alive until the test fixtures are cleaned up. */
+export const makeTestWorkspaces = (options: Parameters<typeof makeWorkspaces>[0]): Workspaces => {
+  const scope = Effect.runSync(Scope.make());
+  workspaceScopes.push(scope);
+  return Effect.runSync(makeWorkspaces(options).pipe(Scope.provide(scope)));
+};
+
+/** Stops test-owned workspace workers before their directories are removed. */
+export const closeWorkspaceScopes = async (): Promise<void> => {
+  for (const scope of workspaceScopes.splice(0))
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+};
 
 export const createTemporaryDir = (prefix: string): string => {
   const made = mkdtempSync(join(tmpdir(), prefix));
@@ -55,7 +71,8 @@ export const createTemporaryDir = (prefix: string): string => {
 };
 
 /** Deletes every temporary directory created so far. Called from each suite's `afterAll`. */
-export const cleanTemporaries = (): void => {
+export const cleanTemporaries = async (): Promise<void> => {
+  await closeWorkspaceScopes();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 };
 

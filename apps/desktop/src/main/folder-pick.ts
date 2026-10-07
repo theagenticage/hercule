@@ -4,6 +4,7 @@
  * project and its repository. Main only reads the folder; it never changes
  * it.
  */
+import { realpathSync } from "node:fs";
 import { basename } from "node:path";
 import * as Effect from "effect/Effect";
 import type { FolderPickOutcome } from "../ipc/contract";
@@ -18,8 +19,8 @@ import { describeFailedExit, removeVariablesWithPrefix, runProgram } from "./run
  */
 const GIT = "/usr/bin/git";
 
-/** The exit code of `git remote get-url` when the remote does not exist. */
-const NO_SUCH_REMOTE_EXIT_CODE = 2;
+/** The exit code of `git config --get` when the remote does not exist. */
+const NO_SUCH_REMOTE_EXIT_CODE = 1;
 
 /**
  * Returns main's environment for git: without any `GIT_*` variable, which
@@ -63,16 +64,26 @@ const removeRemoteCredentials = (remote: string): string => {
  * - `NotGit` when it is in no git repository;
  * - `GitFailed` when git cannot read it otherwise, with git's last line.
  *
- * `remote` is the URL git fetches `origin` from, after the `insteadOf`
- * rules of the user's git config, with no user name or password in it.
+ * `path` is the normalized checkout root. `remote` is the configured origin URL,
+ * before transport rewriting, with no user name or password in it.
  * `branch` is the branch checked out, also
  * in a repository with no commit yet, or null when HEAD is detached. Runs
- * git twice. Never fails.
+ * git three times. Never fails.
  */
 export const describeFolder = (folder: string): Effect.Effect<FolderPickOutcome> =>
   Effect.gen(function* () {
     const name = basename(folder);
-    const remote = yield* runGit(folder, ["remote", "get-url", "origin"]);
+    const root = yield* runGit(folder, ["rev-parse", "--show-toplevel"]);
+    if (root.exitCode !== 0)
+      return root.stderr.includes("not a git repository")
+        ? ({ _tag: "NotGit", name } as const)
+        : ({ _tag: "GitFailed", name, line: describeFailedExit(root, "Git") } as const);
+    const path = yield* Effect.try({
+      try: () => realpathSync(root.stdout.trim()),
+      catch: (cause) =>
+        new Error("The selected checkout could not be read. Choose its folder again.", { cause }),
+    });
+    const remote = yield* runGit(path, ["config", "--get", "remote.origin.url"]);
     if (remote.exitCode !== 0 && remote.exitCode !== NO_SUCH_REMOTE_EXIT_CODE) {
       return remote.stderr.includes("not a git repository")
         ? ({ _tag: "NotGit", name } as const)
@@ -88,16 +99,17 @@ export const describeFolder = (folder: string): Effect.Effect<FolderPickOutcome>
       ? ({
           _tag: "Repository",
           name,
+          path,
           remote: removeRemoteCredentials(remote.stdout.trim()),
           branch,
         } as const)
-      : ({ _tag: "NoRemote", name, branch } as const);
+      : ({ _tag: "NoRemote", name, path, branch } as const);
   }).pipe(
     Effect.catch((error) =>
       Effect.succeed({
         _tag: "GitFailed",
         name: basename(folder),
-        line: `Git could not be started: ${error.message}`,
+        line: `The selected folder could not be read: ${error.message}`,
       } as const),
     ),
   );

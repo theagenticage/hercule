@@ -199,9 +199,13 @@ export { describeReadOnlySecret, WRITABLE_OWNER_KINDS } from "./secret-owners";
 export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
 export {
   createProjectWithRepositories,
+  findProjectLocalRunner,
   isNewProjectCreated,
+  isProjectWorkspacePending,
+  reconcileProjectWorkspaces,
   type NewProjectForm,
   type NewProjectSubmission,
+  type ProjectWorkspaceSelection,
   type RepositorySubmission,
 } from "./new-project";
 export { completeSetup, validatePasswordLength } from "./setup";
@@ -438,6 +442,7 @@ export { pickProjectHue, type ProjectTone } from "./threads/tone";
 export { buildBranchField, type BranchField } from "./threads/branch-menu";
 export { buildWorkspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
 export { buildThreadWorkspaceLabel } from "./threads/thread-workspace";
+export { buildWorkspaceDetails, type WorkspaceDetails } from "./workspace-details";
 export { describeWorkStretch, summarizeWork } from "./threads/work-summary";
 export {
   describeRemoteRefusal,
@@ -455,7 +460,7 @@ export {
   joinLabelText,
   joinPhraseText,
   listProjectRepos,
-  withBranch,
+  setWorkspaceStartingRevision,
   formatWorkspaceLabel,
   type Phrase,
   type WorkspacePick,

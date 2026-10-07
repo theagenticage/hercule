@@ -58,6 +58,10 @@ import inputSentStatus from "./0047-input-sent-status";
 import subagents from "./0048-subagents";
 import subagentUsageReports from "./0049-subagent-usage-reports";
 import replyItemId from "./0050-reply-item-id";
+import workspacePreparationInstructions from "./0051-workspace-preparation-instructions";
+import workspaceRepositorySelection from "./0052-workspace-repository-selection";
+import workspaceObservations from "./0053-workspace-observations";
+import workspaceDisposalAndRetention from "./0054-workspace-disposal-and-retention";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -110,6 +114,10 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [48, "subagents", Effect.succeed(subagents)],
   [49, "subagent-usage-reports", Effect.succeed(subagentUsageReports)],
   [50, "reply-item-id", Effect.succeed(replyItemId)],
+  [51, "workspace-preparation-instructions", Effect.succeed(workspacePreparationInstructions)],
+  [52, "workspace-repository-selection", Effect.succeed(workspaceRepositorySelection)],
+  [53, "workspace-observations", Effect.succeed(workspaceObservations)],
+  [54, "workspace-disposal-and-retention", Effect.succeed(workspaceDisposalAndRetention)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

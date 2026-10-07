@@ -31,6 +31,7 @@ import * as Socket from "effect/unstable/socket/Socket";
 import { VERSION } from "@hercule/home/version";
 import {
   AGENT_STEPS_CAPABILITY,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
   ControllerToRunner,
   PeerVersion,
   PROTOCOL_VERSION,
@@ -87,6 +88,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
   LOGIN_ENDED_CAPABILITY,
   AGENT_STEPS_CAPABILITY,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;
@@ -354,6 +356,7 @@ export const connect = (
     // this machine resolved and the workspace steps. The sessions themselves
     // belong to the process, not to this connection.
     const supervisor = options.sessions.forConnection({
+      scope: connection,
       send: (frame) => write(encodeFrameText(frame)),
       workspaceSteps: options.workspaceSteps,
       machine: {
@@ -382,9 +385,10 @@ export const connect = (
      */
     const answerWorkspace = (
       workspaceId: string,
-      making: () => Promise<WorkspaceReport>,
+      making: Effect.Effect<WorkspaceReport>,
+      requestId?: string,
     ): Effect.Effect<void> =>
-      Effect.promise(making).pipe(
+      making.pipe(
         Effect.flatMap((report) => write(encodeFrameText(report))),
         Effect.catchCause((cause) =>
           Effect.ignore(
@@ -393,6 +397,7 @@ export const connect = (
                 _tag: "workspaceReport",
                 workspaceId,
                 status: "failed",
+                ...(requestId === undefined ? {} : { requestId }),
                 message: describeCause(cause, MAX_MESSAGE_LENGTH),
               }),
             ),
@@ -677,22 +682,67 @@ export const connect = (
             // Acks are for replayable events, which nothing sends yet.
             return;
           case "workspaceProvision": {
-            // Started here, before the next frame is handled, and not in the
-            // forked fiber: a workspace step sent right after this frame must
-            // find the provisioning in progress and wait for it, instead of
-            // finding no workspace at all.
+            // Start the fiber immediately so preparation is registered before
+            // the next frame. A workspace step sent right after this frame must
+            // wait for that preparation before looking for the working files.
             const provisioning = options.workspaces.provision(message);
             return yield* Effect.asVoid(
+              Effect.forkIn(answerWorkspace(message.workspaceId, provisioning), connection, {
+                startImmediately: true,
+              }),
+            );
+          }
+          case "workspaceInspect":
+            return yield* Effect.asVoid(
               Effect.forkIn(
-                answerWorkspace(message.workspaceId, () => provisioning),
+                options.workspaces.inspect(message.workspaceId).pipe(
+                  Effect.flatMap((report) =>
+                    write(
+                      encodeFrameText({
+                        _tag: "workspaceInspection",
+                        requestId: message.requestId,
+                        report,
+                      }),
+                    ),
+                  ),
+                  Effect.catchCause((cause) =>
+                    write(
+                      encodeFrameText({
+                        _tag: "workspaceInspection",
+                        requestId: message.requestId,
+                        report: {
+                          _tag: "workspaceReport",
+                          workspaceId: message.workspaceId,
+                          status: "failed",
+                          observedAt: new Date().toISOString(),
+                          message: describeCause(cause, MAX_MESSAGE_LENGTH),
+                        },
+                      }),
+                    ).pipe(Effect.ignore),
+                  ),
+                ),
                 connection,
               ),
             );
-          }
           case "workspaceDispose":
             return yield* Effect.asVoid(
               Effect.forkIn(
-                answerWorkspace(message.workspaceId, () => options.workspaces.dispose(message)),
+                answerWorkspace(
+                  message.workspaceId,
+                  options.workspaces.dispose(message),
+                  message.requestId,
+                ),
+                connection,
+              ),
+            );
+          case "workspaceDetach":
+            return yield* Effect.asVoid(
+              Effect.forkIn(
+                answerWorkspace(
+                  message.workspaceId,
+                  options.workspaces.detach(message),
+                  message.requestId,
+                ),
                 connection,
               ),
             );

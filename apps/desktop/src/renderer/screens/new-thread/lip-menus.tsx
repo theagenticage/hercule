@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+import type { StartingRevision } from "@hercule/contract";
 import {
   describeMachineRow,
   joinPhraseText,
@@ -50,20 +51,15 @@ export function WorkspaceMenuContent({
 }
 
 /**
- * Renders the content of the branch menu. For a main workspace it picks the
- * branch the checkout switches to; for a new workspace, the branch the
- * thread's new branch starts from. `field` says which, in its header.
- *
- * A branch another live workspace on the machine has checked out cannot be
- * picked, because git lets one branch be checked out in one place only; its
- * row names that workspace.
+ * Renders the starting revisions a new workspace can use. Each row keeps
+ * current, local and remote revisions distinct when their branch names match.
  */
 export function BranchMenuContent({
   field,
   onPick,
 }: {
   readonly field: BranchField;
-  readonly onPick: (branch: string) => void;
+  readonly onPick: (revision: StartingRevision) => void;
 }): JSX.Element {
   return (
     <>
@@ -74,13 +70,13 @@ export function BranchMenuContent({
       <div className="pop-sec">
         {field.rows.map((row) => (
           <MenuLine
-            key={row.branch}
-            name={row.branch}
+            key={row.key}
+            name={row.label}
             note={[row.badge, row.dimmed].filter((each) => each !== null).join(" · ") || null}
-            current={row.branch === field.value}
+            current={row.key === field.value}
             inert={row.dimmed !== null}
             onPick={() => {
-              onPick(row.branch);
+              onPick(row.startingRevision);
             }}
           />
         ))}

@@ -873,14 +873,15 @@ export const CLI = {
   },
   "workspace.provision": {
     command: "workspace provision",
-    help: "Makes a repo's main workspace on one machine, which is the long-lived working copy threads share. Hercule clones it fresh under that machine's own storage; a folder you already have is never taken over. It returns at once with the workspace in provisioning, and the machine reports when it is ready; read it with `hercule workspace read`.",
+    help: "Makes a repo's main workspace on one runner, as a managed worktree of its selected repository. Threads can share these working files. An existing folder is registered only through workspace attach. Provision returns at once and the runner reports when preparation is ready; read it with `hercule workspace read`.",
     examples: [{ args: ["--resource", "1f3a9c2e", "--runner", "7b41d0a5"] }],
     fields: {
       resourceId: {
         flag: "resource",
         help: "The repo to check out; a folder or a mailbox is not allowed.",
+        resolves: "resource.query",
       },
-      runnerId: { flag: "runner", help: "The machine to make it on." },
+      runnerId: { flag: "runner", help: "The machine to make it on.", resolves: "runner.query" },
     },
     errors: {
       conflict: "that repo already has a main workspace on that machine",
@@ -889,9 +890,53 @@ export const CLI = {
       invalid_state: "only a repo is checked out; a folder and a mailbox are records",
     },
   },
-  "workspace.dispose": {
-    command: "workspace dispose",
-    help: "Tears down an ephemeral workspace. The machine removes its worktrees and its directory, the branches stay in the repo's cache, and a main workspace is never torn down. Use it to delete the workspace a failed or cancelled run kept for inspection before its window ends.",
+  "workspace.attach": {
+    command: "workspace attach",
+    help: "Registers an existing Git checkout as the main workspace on one runner. Only the user may attach. The runner validates the selected remote and normalizes the path without changing files, branches or configuration, cloning, fetching, or running setup. An offline runner validates the recorded instruction when it returns. Read the workspace to see its result.",
+    examples: [
+      { args: ["--resource", "1f3a9c2e", "--runner", "7b41d0a5", "--path", "/Users/me/Code/repo"] },
+      {
+        args: [
+          "--resource",
+          "1f3a9c2e",
+          "--runner",
+          "7b41d0a5",
+          "--path",
+          "/srv/code/repo",
+          "--remote",
+          "upstream",
+        ],
+      },
+    ],
+    fields: {
+      resourceId: {
+        flag: "resource",
+        help: "The repository Resource whose canonical remote must match the checkout.",
+        resolves: "resource.query",
+      },
+      runnerId: {
+        flag: "runner",
+        help: "The runner on which this path exists. The path is never used on another runner.",
+        resolves: "runner.query",
+      },
+      path: {
+        flag: "path",
+        help: "An absolute checkout path on that runner. A subdirectory is normalized to its repository root.",
+      },
+      remoteName: {
+        flag: "remote",
+        help: "The checkout's configured remote to validate; defaults to origin.",
+      },
+    },
+    errors: {
+      conflict:
+        "that repository already has a different path or storage mode selected on this runner",
+      invalid_state: "the runner must support workspace attachment; upgrade it before attaching",
+    },
+  },
+  "workspace.inspect": {
+    command: "workspace inspect",
+    help: "Refreshes actual branch, HEAD and availability from the workspace's runner. Fetches nothing and runs no setup. The response includes the observation time; an offline or unsupported runner returns an actionable error and leaves the last observation unchanged.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -902,7 +947,43 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "a main workspace is never torn down, a workspace that is already gone has nothing left to tear down, and a workspace still in use stays: stop the sessions in it that have not exited, or cancel the run that has not finished",
+        "the runner is unavailable or needs an upgrade before it can inspect this workspace",
+    },
+  },
+  "workspace.dispose": {
+    command: "workspace dispose",
+    help: "Removes a managed workspace after its holders stop. Ordinary removal preserves tracked changes, untracked files, ignored files and files outside checkouts. Choose --discard-changes true to discard those managed files explicitly. Committed branches and the source Git repository remain. A managed main workspace requires --discard-changes true even when clean. A standalone main clone contains its source repository and cannot be discarded. An attached checkout must be detached instead.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--discard-changes", "true"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The workspace's id, or a tail of eight or more characters.",
+        resolves: "workspace.query",
+      },
+      discardChanges: {
+        flag: "discard-changes",
+        help: "true explicitly discards remaining changes in known managed paths. Only the user may authorize this; automated cleanup always preserves remaining files.",
+      },
+    },
+    errors: {
+      invalid_state:
+        "stop active sessions and runs first; use detach for an attached checkout, and upgrade an unsupported runner before disposal",
+    },
+  },
+  "workspace.detach": {
+    command: "workspace detach",
+    help: "Forgets an attached main workspace registration after its holders stop. All checkout files, Git configuration and the shared repository remain. Existing generated worktrees retain their source binding; new work requires reattaching the same selected checkout.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The attached workspace's id, or a tail of eight or more characters.",
+        resolves: "workspace.query",
+      },
+    },
+    errors: {
+      invalid_state:
+        "detach requires an attached main workspace with no active holders and a supported runner",
     },
   },
 
@@ -2576,7 +2657,7 @@ export const CLI = {
       },
       workspace: {
         flag: "workspace",
-        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>","branch":"<branch>"} for the repo\'s main workspace, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that already exists. Leave it off for a thread with no checkout.',
+        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>"} to share the repo\'s main workspace without switching its branch, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that already exists. Leave it off for a thread with no checkout. A primary branch may be specified only when spawning from an Agent.',
       },
     },
     errors: {

@@ -5362,7 +5362,23 @@ describe("session.spawn into a workspace", () => {
     });
   });
 
-  it("clones a primary workspace when the runner has none, and reuses the one it has", async () => {
+  it("refuses a Thread branch switch before creating a workspace or starting a session", async () => {
+    await withFleet(async (arranged) => {
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+      const response = await post(
+        arranged.harness.base,
+        "/api/v1/sessions",
+        { prompt: "hello", workspace: { kind: "primary", resourceId: web, branch: "feature/x" } },
+        arranged.token,
+      );
+      expect(response.status).toBe(400);
+      expect(await response.text()).toMatch(/branch.*unchanged/i);
+      expect(listFramesTagged(arranged.wire, "workspaceProvision")).toHaveLength(0);
+      expect(listFramesTagged(arranged.wire, "sessionStart")).toHaveLength(0);
+    });
+  });
+
+  it("creates a primary workspace when the runner has none, and reuses the one it has", async () => {
     await withFleet(async (arranged) => {
       const web = await makeRepo(arranged, "https://github.com/acme/web");
 
@@ -5386,7 +5402,7 @@ describe("session.spawn into a workspace", () => {
       // sends the runner no new provision request.
       const second = await spawnSessionOrFail(arranged, {
         prompt: "again",
-        workspace: { kind: "primary", resourceId: web, branch: "feature/x" },
+        workspace: { kind: "primary", resourceId: web },
       });
       expect(second.workspaceId).toBe(workspace.id);
 
@@ -5395,30 +5411,22 @@ describe("session.spawn into a workspace", () => {
       // Counted after the second start frame arrived: any frame the second
       // spawn sent to the runner would have arrived before it.
       expect(listFramesTagged(arranged.wire, "workspaceProvision")).toHaveLength(1);
-      // The branch belongs to the checkout. It is sent on the start frame, so
-      // the runner switches branch before the harness sees the folder.
-      expect((start as unknown as WorkspaceFrame)["checkoutBranch"]).toBe("feature/x");
+      expect(start.checkoutBranch).toBeUndefined();
     });
   });
 
-  /**
-   * The chosen branch is used only once. The runner switches the main
-   * workspace to that branch before this thread first runs. If a resume sent
-   * it again, it would switch the branch under whatever the user has done in
-   * that checkout since the thread last ran.
-   */
-  it("sends the chosen branch once, and not again when the thread is resumed", async () => {
+  it("preserves a shared checkout's branch on both Thread start and resume", async () => {
     await withFleet(async (arranged) => {
       const web = await makeRepo(arranged, "https://github.com/acme/web");
       const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
-        workspace: { kind: "primary", resourceId: web, branch: "feature/x" },
+        workspace: { kind: "primary", resourceId: web },
       });
       const workspace = await readWorkspace(arranged, String(session.workspaceId));
       reportWorkspaceReady(arranged, workspace);
 
       const first = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
-      expect((first as unknown as WorkspaceFrame)["checkoutBranch"]).toBe("feature/x");
+      expect(first.checkoutBranch).toBeUndefined();
 
       reportEvent(arranged.wire, 1, {
         eventId: crypto.randomUUID(),
@@ -5435,9 +5443,7 @@ describe("session.spawn into a workspace", () => {
       const again = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 2))[1]!;
       expect(again.sessionId).toBe(session.id);
       expect(again.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "resume" });
-      // The row still records the branch the thread started on, as history,
-      // but the runner is not told to switch again.
-      expect((again as unknown as WorkspaceFrame)["checkoutBranch"] ?? null).toBeNull();
+      expect(again.checkoutBranch).toBeUndefined();
     });
   });
 

@@ -1238,6 +1238,7 @@ describe("A run's page > its runner and workspace", () => {
 describe("A run's page > what happens to its workspace", () => {
   const WORKSPACE_ID = "0199c0ff-4444-7000-8000-000000000002";
   const WORKSPACE = buildWorkspace({
+    retentionPolicy: "automatic",
     id: WORKSPACE_ID,
     runnerId: "0199c0ff-3333-7000-8000-000000000002",
     kind: "ephemeral",
@@ -1268,25 +1269,35 @@ describe("A run's page > what happens to its workspace", () => {
    */
   const openWithWorkspace = async (run: Run, initial: Workspace = WORKSPACE) => {
     let workspace = initial;
+    let publishWorkspaceChange = (): void => undefined;
     const opened = await openRunPage(run, {
       overrides: {
         [`GET /api/v1/workspaces/${WORKSPACE_ID}`]: () => ({ body: workspace }),
         [`DELETE /api/v1/workspaces/${WORKSPACE_ID}`]: () => {
           workspace = { ...WORKSPACE, status: "deleted", disposedAt: "2026-10-03T08:00:00.000Z" };
+          publishWorkspaceChange();
           return { body: {} };
         },
         "GET /api/v1/resources": { body: { items: [] } },
         [`POST /api/v1/runs/${run.id}/cancel`]: (call) => {
           const keeps = (call.body as { keepWorkspace?: boolean }).keepWorkspace === true;
           workspace = { ...workspace, keptUntil: keeps ? KEPT_UNTIL : ENDED_AT };
+          publishWorkspaceChange();
           return { body: CANCELLED_IN_WORKSPACE };
         },
       },
     });
+    await waitFor(() => expect(opened.live.topics()).toContain("workspace"));
+    publishWorkspaceChange = () => {
+      act(() =>
+        opened.live.push("workspace", { _tag: "invalidate", ids: [WORKSPACE_ID], kind: "updated" }),
+      );
+    };
     return {
       ...opened,
       setWorkspace: (next: Workspace) => {
         workspace = next;
+        publishWorkspaceChange();
       },
     };
   };
@@ -1316,7 +1327,7 @@ describe("A run's page > what happens to its workspace", () => {
     });
   });
 
-  it("deletes the workspace on cancel when the box stays ticked, and says it will be deleted shortly", async () => {
+  it("requests automatic cleanup on cancel and keeps files visible until removal succeeds", async () => {
     const user = userEvent.setup();
     const { api } = await openWithWorkspace(IN_WORKSPACE);
 
@@ -1329,11 +1340,13 @@ describe("A run's page > what happens to its workspace", () => {
         { keepWorkspace: false },
       ]);
     });
-    // The workspace exists until the controller's next sweep deletes it.
+    // Cancellation requests cleanup; only a successful removal confirms deletion.
     await waitFor(() => {
-      expect(readPageText(header)).toContain("Workspace will be deleted shortly");
+      expect(readPageText(header)).toContain(
+        "Automatic cleanup is due; workspace remains until removal succeeds",
+      );
     });
-    expect(within(header).queryByRole("button", { name: "Delete workspace" })).toBeNull();
+    expect(within(header).getByRole("button", { name: "Delete workspace" })).toBeDefined();
   });
 
   it("does not ask about a workspace when the run has none", async () => {
@@ -1372,7 +1385,7 @@ describe("A run's page > what happens to its workspace", () => {
     ]);
   });
 
-  it("reads the workspace again when the run ends while the page is open", async () => {
+  it("reads changed workspace retention through its topic when the run ends", async () => {
     const { hold, live, setWorkspace } = await openWithWorkspace(IN_WORKSPACE);
     const header = await findPageHeader();
 
@@ -1384,6 +1397,36 @@ describe("A run's page > what happens to its workspace", () => {
     await waitFor(() => {
       expect(readPageText(header)).toContain("Workspace kept until 9 Oct");
     });
+  });
+
+  it("updates workspace readiness while the run is still running, without a run push", async () => {
+    const { live, setWorkspace, api } = await openWithWorkspace(IN_WORKSPACE, {
+      ...WORKSPACE,
+      status: "provisioning",
+    });
+    const header = await findPageHeader();
+    const readsBefore = api.calls.filter(
+      (call) => call.path === `/api/v1/workspaces/${WORKSPACE_ID}`,
+    ).length;
+    expect(live.topics()).toContain("workspace");
+    setWorkspace({
+      ...WORKSPACE,
+      checkouts: [
+        {
+          ...buildCheckout("0199c0ff-4444-7000-8000-000000000004", "fresh-local-branch"),
+          checkoutId: "0199c0ff-4444-7000-8000-000000000003",
+          form: "worktree",
+        },
+      ],
+      observedAt: "2026-10-03T08:00:00.000Z",
+    });
+    await waitFor(() =>
+      expect(
+        api.calls.filter((call) => call.path === `/api/v1/workspaces/${WORKSPACE_ID}`).length,
+      ).toBeGreaterThan(readsBefore),
+    );
+    await waitFor(() => expect(readPageText(header)).toContain("fresh-local-branch"));
+    expect(readPageText(header)).toContain("running");
   });
 });
 

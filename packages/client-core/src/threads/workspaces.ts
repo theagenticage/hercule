@@ -16,11 +16,13 @@ import type {
   Resource,
   Runner,
   Session,
+  StartingRevision,
   SpawnWorkspace,
   ThreadWorkspace,
   Workspace,
 } from "@hercule/contract";
 import { pickProjectTone, type ProjectTone } from "./tone";
+import { describeStartingRevision } from "../starting-revision";
 
 /**
  * The value of the composer's workspace selector: the contract's
@@ -125,6 +127,44 @@ export const findReadyPrimary = (
       each.checkouts.some((checkout) => checkout.resourceId === resourceId),
   );
 
+/** Returns the selected primary, including an unavailable source that must be restored. */
+export const findPrimaryWorkspace = (
+  workspaces: readonly Workspace[],
+  resourceId: string,
+  runnerId: string | null,
+): Workspace | undefined =>
+  findReadyPrimary(workspaces, resourceId, runnerId) ??
+  workspaces.find(
+    (workspace) =>
+      workspace.kind === "primary" &&
+      workspace.runnerId === runnerId &&
+      workspace.status !== "deleted" &&
+      workspace.status !== "lost" &&
+      workspace.checkouts.some((checkout) => checkout.resourceId === resourceId),
+  );
+
+/** Returns only the selected source ids that a workspace menu may inspect on opening. */
+export const findWorkspaceInspectionIds = (
+  pick: WorkspacePick,
+  workspaces: readonly Workspace[],
+  runnerId: string | null,
+): readonly string[] => {
+  if (pick.kind === "none") return [];
+  if (pick.kind === "existing") return [pick.workspaceId];
+  const resources =
+    pick.kind === "primary"
+      ? [pick.resourceId]
+      : pick.checkouts.map((checkout) => checkout.resourceId);
+  return [
+    ...new Set(
+      resources.flatMap((resourceId) => {
+        const source = findPrimaryWorkspace(workspaces, resourceId, runnerId);
+        return source === undefined || source.status === "disposing" ? [] : [source.id];
+      }),
+    ),
+  ];
+};
+
 /** Returns the live worktrees of a project's repos that a thread could join, on any runner. */
 export const listProjectWorkspaces = (
   workspaces: readonly Workspace[],
@@ -200,24 +240,35 @@ export const buildPickKey = (pick: WorkspacePick): string => {
 };
 
 /**
- * Returns the pick with a different branch: the branch a main workspace
- * switches to, or the base a new worktree starts from.
+ * Returns a new-workspace pick with the selected starting revision. A legacy
+ * branch string selects a remote branch explicitly.
  *
  * Returns the pick unchanged in these cases:
  *
  * - a worktree of several repos. Choosing a base per repo comes after v1,
  *   and applying one branch to every repo could name a `main` that only one
  *   of them has. The field is read-only there for the same reason.
- * - a joined workspace, or a thread with no checkout: there is no branch to
- *   change.
+ * - a main or joined workspace, or a thread with no checkout: existing working
+ *   files keep their branch when a new Thread starts.
  */
-export const withBranch = (pick: WorkspacePick, branch: string): WorkspacePick => {
-  if (pick.kind === "primary") return { ...pick, branch };
+export const setWorkspaceStartingRevision = (
+  pick: WorkspacePick,
+  revision: StartingRevision | string,
+): WorkspacePick => {
   if (pick.kind !== "ephemeral") return pick;
   const only = pick.checkouts.length === 1 ? pick.checkouts[0] : undefined;
   return only === undefined
     ? pick
-    : { kind: "ephemeral", checkouts: [{ ...only, baseBranch: branch }] };
+    : {
+        kind: "ephemeral",
+        checkouts: [
+          {
+            resourceId: only.resourceId,
+            startingRevision:
+              typeof revision === "string" ? { kind: "remote", branch: revision } : revision,
+          },
+        ],
+      };
 };
 
 /**
@@ -279,8 +330,7 @@ export const parsePreferredWorkspace = (
  *
  * - a project with no repo works without a checkout, whatever the setting;
  * - otherwise the stored `thread.workspace` setting, when it is set;
- * - otherwise the main workspace for a one-repo project, and a worktree of
- *   each repo for a project with several.
+ * - otherwise a new workspace, with a worktree of each repository.
  *
  * A stored `none` is ignored (see `parsePreferredWorkspace`), so a project
  * with a repo never starts a thread outside it.
@@ -291,7 +341,7 @@ export const decideDefaultWorkspacePick = (
 ): WorkspacePick => {
   const first = repos[0];
   if (first === undefined) return { kind: "none" };
-  const mode = parsePreferredWorkspace(preferred) ?? (repos.length === 1 ? "primary" : "ephemeral");
+  const mode = parsePreferredWorkspace(preferred) ?? "ephemeral";
   if (mode === "primary") return { kind: "primary", resourceId: first.id };
   return { kind: "ephemeral", checkouts: repos.map((repo) => ({ resourceId: repo.id })) };
 };
@@ -393,10 +443,8 @@ export const buildWorkspaceLead = (
     case "primary": {
       const repo = formatRepoName(reading.resources.find((each) => each.id === pick.resourceId));
       const branch =
-        pick.branch ??
         findReadyPrimary(reading.workspaces, pick.resourceId, reading.runnerId)?.checkouts[0]
-          ?.branch ??
-        null;
+          ?.branch ?? null;
       const where: readonly Phrase[] =
         branch === null
           ? [{ text: `It works in the main workspace of ${repo} on ${reading.machine}.` }]
@@ -413,13 +461,15 @@ export const buildWorkspaceLead = (
         return [{ text: "It gets a worktree of each repo, side by side, each on a new branch." }];
       }
       const repo = formatRepoName(reading.resources.find((each) => each.id === only.resourceId));
-      const base =
-        only.baseBranch ?? findBaseBranch(reading.workspaces, only.resourceId, reading.runnerId);
-      const from: readonly Phrase[] =
-        base === null ? [{ text: "its default branch" }] : [{ text: base, mono: true }];
+      const source = findPrimaryWorkspace(reading.workspaces, only.resourceId, reading.runnerId);
+      const revision =
+        only.startingRevision ??
+        (only.baseBranch === undefined
+          ? { kind: source?.ownership === "adopted" ? ("current" as const) : ("remote" as const) }
+          : { kind: "remote" as const, branch: only.baseBranch });
       return [
         { text: `It gets its own worktree of ${repo}, on a new branch from ` },
-        ...from,
+        { text: describeStartingRevision(revision) },
         { text: "." },
       ];
     }

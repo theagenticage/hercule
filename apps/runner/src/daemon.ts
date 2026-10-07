@@ -150,7 +150,7 @@ export const runDaemon = (
       const socketPath = buildSocketPath(storageDir);
       // The runner's own git gets its credentials the same way a session's git
       // does: through this socket, with nothing written to disk.
-      const workspaces = makeWorkspaces({
+      const workspaces = yield* makeWorkspaces({
         storageDir,
         gitEnv: buildGitCredentialEnv({ socketPath }),
       });

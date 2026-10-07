@@ -19,12 +19,17 @@
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   createDecodeValidationError,
+  createInvalidStateError,
+  createForbiddenError,
+  WorkspaceAttachInput,
+  WorkspaceDisposeInput,
   Id,
   WorkspaceProvisionInput,
   type Conflict,
@@ -35,11 +40,15 @@ import {
   type Validation,
   type Workspace,
 } from "@hercule/contract";
-import { requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../../actor";
-import { withTransaction } from "../../db";
+import { CurrentActor, currentStamp, requireGrant, SYSTEM_ACTOR } from "../../actor";
+import { withTransaction, mintUuid, uuidToString } from "../../db";
 import { RunnerConnections } from "../../runners";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures } from "../absorbing";
+
+const decodeDispose = Schema.decodeUnknownEffect(WorkspaceDisposeInput);
+
+const decodeAttach = Schema.decodeUnknownEffect(WorkspaceAttachInput);
 
 const decodeProvision = Schema.decodeUnknownEffect(WorkspaceProvisionInput);
 
@@ -70,7 +79,9 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const found = yield* workspaces.sweepable(id);
           if (found === undefined) return undefined;
-          const frame = yield* workspaces.markGone(found.workspace, SYSTEM_ACTOR, found.expired);
+          const frame = yield* workspaces.reserveDisposal(found.workspace, SYSTEM_ACTOR, {
+            expired: found.expired,
+          });
           return { runnerId: found.workspace.runnerId, frame };
         }),
       );
@@ -80,10 +91,71 @@ const make = Effect.gen(function* () {
   });
 
   return {
+    /** Refreshes current Git facts through the runner, without fetching or rerunning setup. */
+    inspectWorkspace: (id: Id): Effect.Effect<Workspace, Exclude<WorkspaceError, Validation>> =>
+      Effect.gen(function* () {
+        yield* requireGrant("workspace.inspect");
+        const stored = yield* workspaces.readStoredWorkspace(id);
+        if (!(yield* workspaces.supportsInspection(stored.runnerId)))
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "This runner does not support workspace inspection. Upgrade and reconnect it before inspecting the workspace.",
+            ),
+          );
+        const answer = yield* connections.asked(
+          stored.runnerId,
+          {
+            _tag: "workspaceInspect",
+            requestId: uuidToString(mintUuid()),
+            workspaceId: id,
+          },
+          Duration.seconds(10),
+        );
+        if (
+          Option.isNone(answer) ||
+          answer.value._tag !== "workspaceInspection" ||
+          answer.value.report.workspaceId !== id ||
+          answer.value.report.observedAt === undefined
+        )
+          return yield* Effect.fail(
+            createInvalidStateError(
+              "The runner is offline or unavailable and did not return a current workspace observation. Reconnect it and inspect again.",
+            ),
+          );
+        yield* withTransaction(
+          sql,
+          workspaces.recordObservation(stored.runnerId, answer.value.report, yield* currentStamp),
+        );
+        return yield* workspaces.read(id);
+      }),
+
+    /** Persists a user-authorized attachment before asking its runner to validate the checkout. */
+    attachWorkspace: (
+      input: WorkspaceAttachInput,
+    ): Effect.Effect<Workspace, WorkspaceError | Conflict> =>
+      Effect.gen(function* () {
+        yield* requireGrant("workspace.attach");
+        if ((yield* CurrentActor)._tag !== "user") {
+          return yield* Effect.fail(
+            createForbiddenError(
+              "workspace.write",
+              "Only the user may attach an existing checkout. No session or workflow grant authorizes an external path.",
+            ),
+          );
+        }
+        const decoded = yield* Effect.mapError(decodeAttach(input), createDecodeValidationError);
+        const { workspace, frame } = yield* withTransaction(
+          sql,
+          workspaces.openAttachmentFor(decoded),
+        );
+        yield* connections.tell(decoded.runnerId, frame);
+        return workspace;
+      }),
+
     /**
      * Provisions the main workspace of a repo resource on one runner: a fresh
-     * clone under the runner's own storage. Returns the workspace row, before
-     * the runner has finished the clone.
+     * worktree under the runner's own storage. Returns the workspace row before
+     * preparation finishes.
      */
     provisionWorkspace: (
       input: WorkspaceProvisionInput,
@@ -104,26 +176,58 @@ const make = Effect.gen(function* () {
         return workspace;
       }),
 
-    /** Disposes of a workspace: marks the row gone, then tells the runner to delete it. */
+    /** Reserves safe removal before asking the runner to remove managed files. */
     disposeWorkspace: (
       id: Id,
-    ): Effect.Effect<Record<string, never>, Exclude<WorkspaceError, Validation>> =>
+      input: WorkspaceDisposeInput = {},
+    ): Effect.Effect<Record<string, never>, WorkspaceError> =>
       Effect.gen(function* () {
         yield* requireGrant("workspace.dispose");
-        // The check and the write are one transaction, so a session that starts
-        // in the workspace at the same time is either rejected or starts after
-        // the dispose.
+        if (input?.discardChanges === true && (yield* CurrentActor)._tag !== "user")
+          return yield* Effect.fail(
+            createForbiddenError(
+              "workspace.write",
+              "Only the user may discard workspace changes. Sessions and workflows may request ordinary safe disposal.",
+            ),
+          );
+        const decoded = yield* Effect.mapError(
+          decodeDispose(input ?? {}),
+          createDecodeValidationError,
+        );
+        const actor = yield* currentStamp;
         const { runnerId, frame } = yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const workspace = yield* workspaces.disposable(id);
             return {
               runnerId: workspace.runnerId,
-              frame: yield* workspaces.markGone(workspace, USER_ACTOR),
+              frame: yield* workspaces.reserveDisposal(workspace, actor, {
+                discardChanges: decoded.discardChanges ?? false,
+              }),
             };
           }),
         );
-        // After the commit: a transaction never waits on a runner.
+        yield* connections.tell(runnerId, frame);
+        return {};
+      }),
+
+    /** Forgets an existing checkout's registration while leaving all of its files in place. */
+    detachWorkspace: (
+      id: Id,
+    ): Effect.Effect<Record<string, never>, Exclude<WorkspaceError, Validation>> =>
+      Effect.gen(function* () {
+        yield* requireGrant("workspace.detach");
+        const actor = yield* currentStamp;
+        const { runnerId, frame } = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const workspace = yield* workspaces.detachable(id);
+            return {
+              runnerId: workspace.runnerId,
+              frame: yield* workspaces.reserveDetachment(workspace, actor),
+            };
+          }),
+        );
         yield* connections.tell(runnerId, frame);
         return {};
       }),

@@ -27,6 +27,10 @@ import {
   GOING_AWAY_CLOSE_CODE,
   RETIRED_CLOSE_CODE,
   RETIRED_CLOSE_REASON,
+  supportsWorkspaceLifecycle,
+  requiresWorkspaceLifecycle,
+  type WorkspaceInspect,
+  type WorkspaceInspection,
   type InstallRequest,
   type InstallResult,
   type LoginCode,
@@ -76,7 +80,7 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
  * carries an input. Those go through `sendFrameCarryingInput`, whose answer
  * is always a `SessionInputResult`.
  */
-export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode;
+export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode | WorkspaceInspect;
 
 /**
  * What came of sending a frame the runner answers:
@@ -145,7 +149,13 @@ export type FleetTraffic =
 
 /** A runner's answer to a `Request`, matched to it by the request's id. */
 export type Answer =
-  ProbeReport | InstallResult | LoginUrl | LoginFailed | LoginResult | SessionInputResult;
+  | ProbeReport
+  | InstallResult
+  | LoginUrl
+  | LoginFailed
+  | LoginResult
+  | SessionInputResult
+  | WorkspaceInspection;
 
 /**
  * The key callers of `refreshedFacts` wait under. The facts report has no
@@ -188,6 +198,7 @@ export interface Connected {
 
 interface Reachable extends Connected {
   readonly connection: Connection;
+  readonly capabilities: ReadonlyArray<string>;
   /**
    * The callers waiting for an answer, keyed by request id. It is kept per
    * connection, so closing the connection ends every wait on it, and an answer
@@ -279,10 +290,15 @@ const make = Effect.gen(function* () {
     key: string,
     send: (held: Reachable) => Effect.Effect<void>,
     deadline: Duration.Duration,
+    requiresWorkspaceLifecycle = false,
   ): Effect.Effect<SendOutcome<Reported>> =>
     Effect.suspend(() => {
       const held = reachable.get(id);
-      if (held === undefined) return Effect.succeed(NOT_SENT);
+      if (
+        held === undefined ||
+        (requiresWorkspaceLifecycle && !supportsWorkspaceLifecycle(held.capabilities))
+      )
+        return Effect.succeed(NOT_SENT);
       // Registered and removed as a resource: the removal runs however the
       // send or the wait ends, including an interruption between the two.
       // Nothing else removes a caller's entry, and a leftover entry would
@@ -325,9 +341,11 @@ const make = Effect.gen(function* () {
     key: string,
     send: (held: Reachable) => Effect.Effect<void>,
     deadline: Duration.Duration,
+    requiresWorkspaceLifecycle = false,
   ): Effect.Effect<Option.Option<Reported>> =>
-    Effect.map(sendAndAwaitReport(id, key, send, deadline), (outcome) =>
-      outcome._tag === "sent" ? outcome.answer : Option.none(),
+    Effect.map(
+      sendAndAwaitReport(id, key, send, deadline, requiresWorkspaceLifecycle),
+      (outcome) => (outcome._tag === "sent" ? outcome.answer : Option.none()),
     );
 
   /**
@@ -384,7 +402,13 @@ const make = Effect.gen(function* () {
           }),
         );
         const previous = reachable.get(id);
-        reachable.set(id, { connection, ...connected, pending: new Map(), reported: false });
+        reachable.set(id, {
+          connection,
+          ...connected,
+          capabilities: hello.negotiatedCapabilities,
+          pending: new Map(),
+          reported: false,
+        });
         if (previous !== undefined) {
           // The replaced connection will send nothing more, and its map entry
           // is gone, so its waiting callers are released now.
@@ -449,7 +473,13 @@ const make = Effect.gen(function* () {
       deadline: Duration.Duration,
     ): Effect.Effect<Option.Option<Answer>> =>
       Effect.map(
-        askAndAwaitReport(id, request.requestId, (held) => held.ask(request), deadline),
+        askAndAwaitReport(
+          id,
+          request.requestId,
+          (held) => held.ask(request),
+          deadline,
+          request._tag === "workspaceInspect",
+        ),
         // The facts report uses its own key, never a request id, so only an
         // answer can arrive under this key.
         Option.filter((reported): reported is Answer => reported._tag !== "factsReported"),
@@ -518,6 +548,29 @@ const make = Effect.gen(function* () {
       Effect.suspend(() => {
         const held = reachable.get(id);
         if (held === undefined) return Effect.succeed(false);
+        if (
+          ((frame._tag === "workspaceProvision" && requiresWorkspaceLifecycle(frame)) ||
+            frame._tag === "workspaceDispose" ||
+            frame._tag === "workspaceDetach") &&
+          !supportsWorkspaceLifecycle(held.capabilities)
+        )
+          return Effect.as(
+            publish(id, held.connection, {
+              _tag: "workspaceReported",
+              runnerId: id,
+              report: {
+                _tag: "workspaceReport",
+                workspaceId: frame.workspaceId,
+                ...(frame._tag === "workspaceProvision" || frame.requestId === undefined
+                  ? {}
+                  : { requestId: frame.requestId }),
+                status: "failed",
+                message:
+                  "This runner does not support the requested workspace lifecycle operation. Upgrade and reconnect the runner before retrying.",
+              },
+            }),
+            false,
+          );
         return Effect.as(held.ask(frame), true);
       }),
 

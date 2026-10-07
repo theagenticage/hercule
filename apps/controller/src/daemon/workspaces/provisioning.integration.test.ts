@@ -15,14 +15,15 @@
  *   for the inspection window, then deleted
  *
  * A thread that joins the workspace holds a lease of its own, and the
- * workspace is kept until the later of the two runs out.
+ * workspace becomes manual before the run can finish. Its files remain until explicit disposal.
  *
  * The sweep interval is shortened, as in the thread sweep's tests, and the
  * windows are crossed by moving the leases back rather than by waiting.
  */
 import { describe, expect, it } from "vitest";
 import { Duration } from "effect";
-import type { Run } from "@hercule/contract";
+import type { WorkspaceDispose } from "@hercule/protocol";
+import type { Run, Workspace } from "@hercule/contract";
 import { del, post } from "../../http/testing";
 import { readRun, startSentWorkflow, waitForRunTo } from "../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS, type Arranged } from "../../sessions/testing";
@@ -36,7 +37,6 @@ import {
   reportWorkspaceReady,
   spawnThread,
   withFleet,
-  type WorkspaceRecord,
 } from "../../workspaces/testing";
 
 const SWEEP = Duration.millis(50);
@@ -107,11 +107,28 @@ const cancelRun = async (arranged: Arranged, runId: string, body: unknown): Prom
   return (await response.json()) as Run;
 };
 
-const waitForDeleted = (arranged: Arranged, id: string): Promise<WorkspaceRecord> =>
-  waitUntil("deleted the workspace", async () => {
+const waitForDeleted = async (arranged: Arranged, id: string): Promise<Workspace> => {
+  const frame = await waitUntil(
+    "reserved removal before runner confirmation",
+    () =>
+      listFramesTagged(arranged.wire, "workspaceDispose").find(
+        (item) => item["workspaceId"] === id,
+      ) as WorkspaceDispose | undefined,
+  );
+  expect((await readWorkspace(arranged, id)).status).toBe("disposing");
+  expect(frame.discardChanges ?? false).toBe(false);
+  expect(frame.requestId).toEqual(expect.any(String));
+  arranged.wire.send({
+    _tag: "workspaceReport",
+    workspaceId: id,
+    requestId: frame.requestId!,
+    status: "deleted",
+  });
+  return await waitUntil("recorded confirmed deletion", async () => {
     const one = await readWorkspace(arranged, id);
     return one.status === "deleted" ? one : undefined;
   });
+};
 
 /** Returns the reason and the holder of each `workspace.deleted` audit entry, by workspace id. */
 const readDeletionReasons = async (arranged: Arranged): Promise<Record<string, unknown>> =>
@@ -260,7 +277,7 @@ describe("the sweep on the workspaces of runs", () => {
   );
 
   it(
-    "keeps a failed run's workspace that a thread joined until the thread's own window ends",
+    "keeps a failed run workspace indefinitely after a human Thread joins it",
     async () => {
       await withFleet(
         async (arranged) => {
@@ -288,12 +305,12 @@ describe("the sweep on the workspaces of runs", () => {
           expect(refused.status).toBe(409);
           expect(await readErrorMessage(refused)).toMatch(`stop sessions ${thread.id} first`);
 
-          // The thread can be resumed, so it keeps the workspace for the idle
-          // window, thirty days, which ends after the run's fourteen.
+          // The human Thread makes retention manual before releasing its active lease.
           await endResumable(arranged, thread);
           const released = await readWorkspace(arranged, workspaceId);
           expect(released.sessionIds).toEqual([]);
-          expect(Date.parse(String(released.keptUntil))).toBeGreaterThan(Date.now() + 29 * DAY_MS);
+          expect(released.retentionPolicy).toBe("manual");
+          expect(released.keptUntil).toBeNull();
 
           // Past the run's window, short of the thread's.
           await ageLeases(arranged, workspaceId, 15 * 24);
@@ -301,9 +318,17 @@ describe("the sweep on the workspaces of runs", () => {
           expect((await readWorkspace(arranged, workspaceId)).status).toBe("ready");
 
           await ageLeases(arranged, workspaceId, 16 * 24);
-          await waitForDeleted(arranged, workspaceId);
+          const decoy = await startCommitRun(arranged, repoId);
+          const decoyWorkspace = await readyWorkspaceOf(arranged, decoy);
+          finishCommit(arranged, decoy, {
+            status: "completed",
+            output: { sha: "decoy", branch: "decoy", committed: true },
+          });
+          await waitForRunStatus(arranged, decoy, "completed");
+          await waitForDeleted(arranged, decoyWorkspace);
+          expect((await readWorkspace(arranged, workspaceId)).status).toBe("ready");
           expect(await readDeletionReasons(arranged)).toEqual({
-            [workspaceId]: { reason: "idle", holder: `session:${thread.id}` },
+            [decoyWorkspace]: { reason: "none", holder: `run:${decoy}` },
           });
         },
         { workspaceSweepInterval: SWEEP },

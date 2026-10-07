@@ -32,6 +32,7 @@ const FORM: NewProjectForm = {
 /** Returns a client on a stub controller that answers the two writes with `handlers`. */
 const buildController = (handlers: Readonly<Record<string, Handler>> = {}) => {
   const api = createApiStub({
+    "GET /api/v1/resources": { body: { items: [] } },
     "POST /api/v1/projects": { body: PROJECT },
     "POST /api/v1/resources": {
       body: buildRepo(REPO_ID, "git@github.com:rogier/webshop.git", "github.com/rogier/webshop"),
