@@ -31,6 +31,10 @@
  *   open reply with the caret alone, and the dock above the composer;
  * - `page-working`: Milo, whose session works: a notice from yesterday, and
  *   the open reply with the text Milo is writing;
+ * - `page-replied`: Juno, idle, with no running turn: her stored reply, then
+ *   the message the user has just sent, which no turn has picked up yet;
+ * - `page-requests`: Ada, whose session waits on two Requests at once, so
+ *   the dock pages between them;
  * - `page-long-name`: the assistant whose name is too long for the sidebar;
  * - `page-not-found`: an address whose assistant does not exist.
  */
@@ -62,7 +66,7 @@ const CREATED_AT = "2026-09-10T09:00:00.000Z";
  * Returns an assistant named `name` whose id ends in `suffix`. Its main
  * conversation's id ends in the same suffix.
  */
-const buildAssistant = (suffix: string, name: string): Assistant => ({
+export const buildAssistant = (suffix: string, name: string): Assistant => ({
   id: `01a0ec64-6e80-7000-8000-a000000000${suffix}`,
   name,
   systemPrompt: `You are ${name}.`,
@@ -80,7 +84,7 @@ const buildAssistant = (suffix: string, name: string): Assistant => ({
   updatedAt: CREATED_AT,
 });
 
-const ADA = buildAssistant("10", "Ada");
+export const ADA = buildAssistant("10", "Ada");
 const MILO = buildAssistant("3b", "Milo");
 const JUNO = buildAssistant("1e", "Juno");
 const HERCULE = buildAssistant("4c", "Hercule");
@@ -92,7 +96,7 @@ const LONG_NAMED = buildAssistant(
 );
 
 /** Returns a session of `assistant`'s main conversation, last active `minutesAgo` minutes ago. */
-const buildAssistantSession = (
+export const buildAssistantSession = (
   assistant: Assistant,
   over: Partial<Session> & { readonly minutesAgo: number },
 ): Session =>
@@ -114,8 +118,28 @@ const ADA_REQUEST: OpenRequest = {
   detail: { command: "tail -n 200 /var/log/pg-backup.log" },
 };
 
+/** A question Ada asks while her approval is open, so that the dock holds two Requests. */
+const ADA_QUESTION: OpenRequest = {
+  requestId: "rq-ada-backup-window",
+  itemId: "it-ada-backup-window",
+  kind: "question",
+  detail: {
+    questions: [
+      {
+        question: "Move the backup window to start at 01:00?",
+        header: "Window",
+        options: [
+          { label: "Move it", description: "Start the backup job at 01:00 from tonight." },
+          { label: "Keep 02:00", description: "Leave the window as it is." },
+        ],
+        multiSelect: false,
+      },
+    ],
+  },
+};
+
 /** A message of a conversation, without the fields `buildConversation` fills in. */
-interface MessageStep {
+export interface MessageStep {
   readonly senderRole: ConversationMessage["senderRole"];
   /** When the message was stored, as the API spells a time. */
   readonly createdAt: string;
@@ -127,7 +151,7 @@ interface MessageStep {
  * oldest first, with positions from 1. A reply and a notice come from the
  * assistant's current session, and a reply from its turn `turnId`.
  */
-const buildConversation = (
+export const buildConversation = (
   assistant: Assistant,
   steps: ReadonlyArray<MessageStep>,
 ): ConversationMessage[] =>
@@ -150,7 +174,7 @@ const buildConversation = (
   });
 
 /** One event of a running turn, without the fields every event has. */
-type EventBody = TranscriptRow["event"] extends infer Event
+export type EventBody = TranscriptRow["event"] extends infer Event
   ? Event extends unknown
     ? Omit<Event, "eventId" | "sessionId" | "at">
     : never
@@ -160,7 +184,7 @@ type EventBody = TranscriptRow["event"] extends infer Event
  * Returns the rows of the running turn of `assistant`'s current session, all
  * at `at`, with positions from 1.
  */
-const buildRunningTurn = (
+export const buildRunningTurn = (
   assistant: Assistant,
   at: string,
   events: ReadonlyArray<EventBody>,
@@ -303,6 +327,56 @@ const ASSISTANTS: ReadonlyArray<SpecimenAssistant> = [
   },
 ];
 
+/** Juno's conversation: her stored reply, then the message the user has just sent. */
+const JUNO_MESSAGES = buildConversation(JUNO, [
+  {
+    senderRole: "owner",
+    createdAt: "2026-09-29T09:30:00.000Z",
+    text: "Did Marta's invoice go out?",
+  },
+  {
+    senderRole: "assistant",
+    createdAt: "2026-09-29T09:31:00.000Z",
+    text: "Yes. It went out at 09:28 in Brightline's company name, and Marta confirmed it.",
+  },
+  {
+    senderRole: "owner",
+    createdAt: "2026-09-29T09:41:00.000Z",
+    text: "Thanks. Put the next one in the same name.",
+  },
+]);
+
+/** Every assistant, with Juno idle after her reply and the user's newest message. */
+const REPLIED_ASSISTANTS: ReadonlyArray<SpecimenAssistant> = ASSISTANTS.map((entry) =>
+  entry.assistant === JUNO
+    ? {
+        assistant: JUNO,
+        currentSession: buildAssistantSession(JUNO, { status: "idle", minutesAgo: 0 }),
+        messages: JUNO_MESSAGES,
+      }
+    : entry,
+);
+
+/** Every assistant, with Ada waiting on two Requests. */
+const TWO_REQUESTS_ASSISTANTS: ReadonlyArray<SpecimenAssistant> = ASSISTANTS.map((entry) =>
+  entry.assistant === ADA
+    ? {
+        assistant: ADA,
+        currentSession: buildAssistantSession(ADA, {
+          status: "busy",
+          minutesAgo: 2,
+          openRequests: [ADA_REQUEST, ADA_QUESTION],
+        }),
+        messages: ADA_MESSAGES,
+        runningTurn: buildRunningTurn(ADA, "2026-09-29T09:38:00.000Z", [
+          { _tag: "turn.started", turnId: "turn-ada-backup", model: CLAUDE_SONNET.slug },
+          { _tag: "request.opened", request: ADA_REQUEST },
+          { _tag: "request.opened", request: ADA_QUESTION },
+        ]),
+      }
+    : entry,
+);
+
 /** Eight more assistants, idle but for one at work, for the scene with fourteen. */
 const MORE_ASSISTANTS: ReadonlyArray<SpecimenAssistant> = [
   "Iris",
@@ -406,6 +480,8 @@ export interface AssistantScene {
 const WITH_THREADS = buildSceneRecords(THREADS);
 const NO_THREADS = buildSceneRecords([]);
 const MANY_ASSISTANTS = buildSceneRecords(THREADS, [...ASSISTANTS, ...MORE_ASSISTANTS]);
+const REPLIED = buildSceneRecords(THREADS, REPLIED_ASSISTANTS);
+const TWO_REQUESTS = buildSceneRecords(THREADS, TWO_REQUESTS_ASSISTANTS);
 
 /** The scenes, in order: `?scene=1` is the first. */
 export const ASSISTANT_SCENES: ReadonlyArray<AssistantScene> = [
@@ -432,6 +508,13 @@ export const ASSISTANT_SCENES: ReadonlyArray<AssistantScene> = [
   },
   { name: "page-waiting", records: WITH_THREADS, path: `/assistants/${ADA.id}`, region: "window" },
   { name: "page-working", records: WITH_THREADS, path: `/assistants/${MILO.id}`, region: "window" },
+  { name: "page-replied", records: REPLIED, path: `/assistants/${JUNO.id}`, region: "window" },
+  {
+    name: "page-requests",
+    records: TWO_REQUESTS,
+    path: `/assistants/${ADA.id}`,
+    region: "window",
+  },
   {
     name: "page-long-name",
     records: WITH_THREADS,

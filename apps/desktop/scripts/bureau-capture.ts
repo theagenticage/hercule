@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares seven pairs of
+ * For each theme, Whitehaven and Orient Express, it compares eight pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -29,7 +29,11 @@
  *   by specimens/draft-reference.ts, and the draft specimen (draft.html);
  * - the draft of a fresh install, with starter threads in place of the start
  *   cards: the same pages, opened with `?state=first`, and again with
- *   `?state=first-no-repo` for a project with no repository.
+ *   `?state=first-no-repo` for a project with no repository;
+ * - the Conversation (the main pane below its floating header) of
+ *   assistant.html: the book's page edited by
+ *   specimens/conversation-reference.ts, and the Conversation specimen
+ *   (conversation.html).
  *
  * Each reference module edits the book's page to show its fixture's data.
  * For each region pair, the capture:
@@ -287,6 +291,46 @@ const DRAFT_PARTS = [
   ".intake-note > svg",
 ];
 
+// Every part of the Conversation whose box is compared, as a selector inside
+// `main.main`. Three parts are left out, and the pixel comparison checks
+// them:
+// - the transcript and its column: the app's column holds the virtualizer's
+//   items, and its height depends on the composer's;
+// - the composer's field, for the thread's reason: the book's fills the
+//   card, and the app's sits 8px inside it with 8px less padding;
+// - the caret, which the app draws as the open paragraph's `::after`, where
+//   the book draws a span.
+const CONVERSATION_PARTS = [
+  ".stamp",
+  ".notice",
+  ".notice > .cr",
+  ".notice > span",
+  ".notice .time",
+  ".msg",
+  ".msg > .cr",
+  ".msg-body",
+  ".msg-name",
+  ".msg-name > small",
+  ".msg-body > p",
+  ".msg--me",
+  ".bubble",
+  ".bubble-meta",
+  ".composer-wrap",
+  ".composer",
+  ".composer-card",
+  ".composer-row",
+  ".composer-row > *",
+  ".composer-row svg",
+];
+
+/**
+ * The Conversation's region of the window: the main pane below its floating
+ * header. The header is left out, because the book draws a bar there; the
+ * region starts 20px above the first block, at the header's clearance less
+ * the gap between two blocks.
+ */
+const CONVERSATION_REGION: Rect = { x: 272, y: 88, width: WIDTH - 272, height: HEIGHT - 88 };
+
 /** The regions of book pages compared with an app specimen, in the order they are compared. */
 const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   {
@@ -345,6 +389,15 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
     region: MAIN_PANE_REGION,
     scope: "main.main",
     parts: DRAFT_PARTS,
+  },
+  {
+    name: "conversation",
+    bookPage: "assistant.html",
+    referenceModule: "conversation-reference.ts",
+    specimenPage: "conversation.html",
+    region: CONVERSATION_REGION,
+    scope: "main.main",
+    parts: CONVERSATION_PARTS,
   },
 ];
 

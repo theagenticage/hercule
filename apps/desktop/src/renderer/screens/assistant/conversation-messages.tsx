@@ -6,21 +6,15 @@
  *
  * Each is presentational and `memo`, as the thread's messages are.
  */
-import { memo, type CSSProperties, type JSX } from "react";
+import { memo, type JSX } from "react";
 import { describeOpenReply, type OpenReplyBlock } from "@hercule/client-core";
-import { Face, type Look } from "../../faces";
+import { buildHueStyle, Face, type Look } from "../../faces";
 import { Markdown } from "../session/markdown";
 import { AgentFace, OpenMessageText } from "../session/messages";
 import type { AttachOpenParagraph } from "../session/use-session-live";
 
 /** The size of a notice's face, in CSS pixels: the book's `data-size="28"`. */
 const NOTICE_FACE_SIZE = 28;
-
-/**
- * Returns the style that colours an element in `look`'s hue: tokens.css
- * derives `--who-ink`, which the name and the caret are drawn in, from it.
- */
-const buildHueStyle = (look: Look): CSSProperties => ({ "--hue": `var(--hue-${look.hue})` });
 
 /** Renders the day stamp above the first message of a day, such as "Today" or "4 Sep". */
 export function DayStamp({ label }: { readonly label: string }): JSX.Element {
@@ -62,7 +56,7 @@ export const StoredReply = memo(function StoredReply({
   readonly text: string;
 }): JSX.Element {
   return (
-    <div className="msg" style={buildHueStyle(look)}>
+    <div className="msg" style={buildHueStyle(look.hue)}>
       <AgentFace look={look} pose="idle" />
       <div className="msg-body">
         <ReplyName name={name} detail={time} />
@@ -119,7 +113,7 @@ export function OpenReply({
   readonly attachOpenParagraph: AttachOpenParagraph;
 }): JSX.Element {
   return (
-    <div className="msg" style={buildHueStyle(look)}>
+    <div className="msg" style={buildHueStyle(look.hue)}>
       <AgentFace look={look} pose={block.pose} />
       <div className="msg-body">
         <ReplyName name={name} detail={describeOpenReply(block)} />

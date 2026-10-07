@@ -124,6 +124,8 @@
 }
 .notice .time {
   margin-left: 6px;
+  color: var(--faint);
+  white-space: nowrap;
 }
 
 /* The caret after the paragraph the assistant is writing, alone while the

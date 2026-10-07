@@ -241,6 +241,8 @@ function ConversationList({
   const showsScrollbar = useShowsClassicScrollbar(scrollRef);
   // True while the reader is at the bottom. The Conversation opens there.
   const followingRef = useRef(true);
+  // Where the view was at the last scroll event, to tell a scroll up from a scroll down.
+  const lastScrollTopRef = useRef(0);
   /**
    * The first stored message drawn at the last commit, and where it started
    * in the column. When earlier messages are added above it, the view moves
@@ -319,8 +321,16 @@ function ConversationList({
 
   const noteScroll = (): void => {
     const scroller = scrollRef.current!;
-    const following =
+    const atBottom =
       scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < FOLLOW_THRESHOLD;
+    // Only the reader scrolling up leaves the bottom. A scroll down that
+    // stops short of it is the virtualizer's first scroll to its estimated
+    // bottom, whose event can arrive after the blocks were measured taller
+    // than estimated; counting it would shrink the composer of a
+    // Conversation that was never scrolled.
+    const following =
+      atBottom || (followingRef.current && scroller.scrollTop >= lastScrollTopRef.current);
+    lastScrollTopRef.current = scroller.scrollTop;
     if (scroller.scrollTop < scroller.clientHeight) readEarlierMessages();
     if (following === followingRef.current) return;
     followingRef.current = following;
