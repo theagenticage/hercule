@@ -286,12 +286,15 @@ export { formatControllerAddress, isLoopbackOrigin } from "./controller-origin";
 export { formatNameList } from "./name-list";
 export {
   chooseNewProfileName,
+  describeGrantChange,
   describeProfileDeleteBlock,
   describeProfileUsers,
   formatGrantVerb,
   GRANT_FAMILY_TEXT,
   groupProfileUsers,
+  isUnrestrictedProfile,
   setGrantHeld,
+  sortProfiles,
   type ProfileUser,
 } from "./permission-profiles";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";

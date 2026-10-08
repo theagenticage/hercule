@@ -11,8 +11,15 @@
  */
 import type { FileRouteTypes } from "../routeTree.gen";
 
-/** The path of one Settings section, such as `/settings/profile`. */
-export type SettingsSectionPath = Extract<FileRouteTypes["to"], `/settings/${string}`>;
+/**
+ * The path of one Settings section, such as `/settings/profile`. A page of
+ * one record in a section, such as `/settings/permission-profiles/$id`, is not
+ * a section: its path needs a parameter, and Settings opens the section's list.
+ */
+export type SettingsSectionPath = Exclude<
+  Extract<FileRouteTypes["to"], `/settings/${string}`>,
+  `${string}$${string}`
+>;
 
 /** The section Settings opens before the user has opened one in this run. */
 const FIRST_SECTION: SettingsSectionPath = "/settings/appearance";

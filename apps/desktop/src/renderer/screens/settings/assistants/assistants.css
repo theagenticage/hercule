@@ -86,14 +86,6 @@
   width: 214px;
 }
 
-/* Not in the book: a failed create, above the tabs. */
-.set-col > .set-err {
-  margin: 0;
-  color: var(--fail-ink);
-  font-size: var(--t-12);
-  line-height: 1.45;
-}
-
 /* Not in the book, which always has assistants: the section with none. */
 .empty-assistants {
   display: grid;

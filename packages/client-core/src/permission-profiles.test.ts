@@ -6,8 +6,11 @@ import {
   describeProfileUsers,
   formatGrantVerb,
   GRANT_FAMILY_TEXT,
+  describeGrantChange,
   groupProfileUsers,
+  isUnrestrictedProfile,
   setGrantHeld,
+  sortProfiles,
   type ProfileUser,
 } from "./permission-profiles";
 
@@ -192,5 +195,47 @@ describe("setGrantHeld", () => {
     );
     expect(all).toEqual(ALL_GRANTS);
     expect(ALL_GRANTS.reduce((held, grant) => setGrantHeld(held, grant, false), all)).toEqual([]);
+  });
+});
+
+describe("sortProfiles", () => {
+  const profile = (id: string, name: string, shipped: boolean) => ({ id, name, shipped });
+
+  it("puts the shipped profiles first, then each group by name", () => {
+    const sorted = sortProfiles([
+      profile("1", "Reviewer", false),
+      profile("2", "worker", true),
+      profile("3", "Releaser", false),
+      profile("4", "assistant", true),
+    ]);
+    expect(sorted.map(({ name }) => name)).toEqual(["assistant", "worker", "Releaser", "Reviewer"]);
+  });
+
+  it("breaks a tie of names by id, and leaves its argument alone", () => {
+    const profiles = [profile("b", "Same", false), profile("a", "Same", false)];
+    expect(sortProfiles(profiles).map(({ id }) => id)).toEqual(["a", "b"]);
+    expect(profiles.map(({ id }) => id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("isUnrestrictedProfile", () => {
+  it("is true for the shipped profile named unrestricted only", () => {
+    expect(isUnrestrictedProfile({ name: "unrestricted", shipped: true })).toBe(true);
+    expect(isUnrestrictedProfile({ name: "worker", shipped: true })).toBe(false);
+    expect(isUnrestrictedProfile({ name: "unrestricted", shipped: false })).toBe(false);
+  });
+});
+
+describe("describeGrantChange", () => {
+  it("says a removed grant is taken away from the profile", () => {
+    expect(describeGrantChange("unrestricted", "task.delete", false)).toBe(
+      "This takes Delete on Tasks away from unrestricted.",
+    );
+  });
+
+  it("says a grant put back is given back to the profile", () => {
+    expect(describeGrantChange("unrestricted", "infra.write", true)).toBe(
+      "This gives Write on Machines back to unrestricted.",
+    );
   });
 });

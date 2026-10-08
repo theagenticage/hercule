@@ -6,12 +6,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import {
-  QueryClient,
-  QueryClientProvider,
-  type DataTag,
-  type QueryKey,
-} from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, queryOptions } from "@tanstack/react-query";
 import { useSavedRecordField } from "./saved-record-field";
 
 interface Note {
@@ -19,7 +14,10 @@ interface Note {
   readonly text: string;
 }
 
-const LIST_KEY = ["notes"] as DataTag<QueryKey, ReadonlyArray<Note>, Error>;
+const LIST_KEY = queryOptions({
+  queryKey: ["notes"],
+  queryFn: (): Promise<ReadonlyArray<Note>> => Promise.resolve([]),
+}).queryKey;
 
 /** A save that waits until the test settles it. */
 interface HeldSave {

@@ -150,6 +150,15 @@
   line-height: 1.45;
 }
 
+/* Not in the book: a failed create, above the section's records, such as
+   Assistants' tabs and Permission profiles' list. */
+.set-col > .set-err {
+  margin: 0;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
 /* Not in the book. A setting whose value is a long text, such as an
    assistant's persona, stacks: the label and hint above, a textarea the
    width of the section under them. The textarea grows with its text, so it

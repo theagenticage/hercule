@@ -1,7 +1,8 @@
 /**
  * What Settings > Permission profiles needs to interpret: the words for the
- * grant families, a free name for a new profile, who uses each profile, and
- * the grant list after one grant is switched on or off.
+ * grant families, the order of the profile list, a free name for a new
+ * profile, which profile is unrestricted, who uses each profile, and the
+ * grant list after one grant is switched on or off.
  */
 import { ALL_GRANTS } from "@hercule/contract";
 import type { Agent, Assistant, Grant, GrantFamily, Profile } from "@hercule/contract";
@@ -148,4 +149,46 @@ export const setGrantHeld = (
 ): ReadonlyArray<Grant> => {
   const current = new Set(grants);
   return ALL_GRANTS.filter((each) => (each === grant ? held : current.has(each)));
+};
+
+/**
+ * Returns `profiles` in the order the profile list shows them: the shipped
+ * profiles first, then the profiles the user made, each group by name and
+ * then by id so the order is the same on every read.
+ */
+export const sortProfiles = <P extends Pick<Profile, "id" | "name" | "shipped">>(
+  profiles: ReadonlyArray<P>,
+): ReadonlyArray<P> =>
+  profiles.toSorted(
+    (a, b) =>
+      Number(b.shipped) - Number(a.shipped) ||
+      a.name.localeCompare(b.name) ||
+      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+
+/** The name of the shipped profile that is meant to hold every grant. */
+const UNRESTRICTED_PROFILE_NAME = "unrestricted";
+
+/**
+ * Checks whether `profile` is the shipped `unrestricted` profile, which
+ * threads run on unless the user picks another one.
+ *
+ * The profile is found by its shipped name, so a rename makes this return
+ * `false`. A profile id that stays the same for it is tracked in issue #496.
+ */
+export const isUnrestrictedProfile = (profile: Pick<Profile, "name" | "shipped">): boolean =>
+  profile.shipped && profile.name === UNRESTRICTED_PROFILE_NAME;
+
+/**
+ * Returns the first line of the question that asks before a grant of the
+ * profile `profileName` changes: "This takes Delete on Tasks away from
+ * unrestricted." when `held` is false, and "This gives Delete on Tasks back
+ * to unrestricted." when it is true.
+ */
+export const describeGrantChange = (profileName: string, grant: Grant, held: boolean): string => {
+  const [family, verb = ""] = grant.split(".") as [GrantFamily, string?];
+  const what = `${formatGrantVerb(verb)} on ${GRANT_FAMILY_TEXT[family].label}`;
+  return held
+    ? `This gives ${what} back to ${profileName}.`
+    : `This takes ${what} away from ${profileName}.`;
 };

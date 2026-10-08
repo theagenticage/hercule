@@ -50,7 +50,6 @@ const INERT_ROWS = [
   "Providers",
   "Machines",
   "Identities",
-  "Permission profiles",
   "Secrets",
   "Bounds",
   "Plugins",
