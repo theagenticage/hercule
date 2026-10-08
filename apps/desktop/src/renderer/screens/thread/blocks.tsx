@@ -238,3 +238,35 @@ export const WaitingNote = memo(function WaitingNote({
     </div>
   );
 });
+
+/**
+ * Renders a warning the runner or the harness reported about the agent's
+ * work, such as a retried request or an event too large to send whole: the
+ * dot, the warning's `message` as the runner wrote it, and its time.
+ *
+ * The note is quiet, because the work went on: the dot and the message are
+ * in the muted ink, not in tomato, which means something failed. The dot is
+ * named "Warning", so a screen reader says what kind of note this is.
+ */
+export const WarningNote = memo(function WarningNote({
+  message,
+  at,
+  timezone,
+  today,
+}: {
+  readonly message: string;
+  readonly at: string;
+  readonly timezone: string;
+  readonly today: number;
+}): JSX.Element {
+  const time = formatBlockTime(at, timezone, today);
+  return (
+    <div className="warning-note">
+      <i className="dot" role="img" aria-label="Warning" />
+      <p>
+        {message}
+        {time === undefined ? null : <span className="time">{time}</span>}
+      </p>
+    </div>
+  );
+});

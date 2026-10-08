@@ -1,6 +1,7 @@
 /* The controls every screen shares: the buttons, the answer ledger, the
    pills, the segmented controls, the navigation rows, the counts, the text
-   field, the priority bars and the section headings. The rules and
+   field, the quiet text and dots, the priority bars and the section
+   headings. The rules and
    class names are the Bureau book's, as its system.css spells them. Each
    departure from the book says why. */
 
@@ -523,6 +524,25 @@ input.field[type="password"]:not(:placeholder-shown) {
 .fine {
   color: var(--faint);
   font-size: var(--t-12);
+}
+/* A quiet time or note at the end of a line, such as a notice's time or
+   Appearance's "Saved on this Mac". */
+.time {
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+/* A small round dot. `.dot--fail` is the book's warning dot: something
+   needs a look, such as a Connection that is reconnecting. */
+.dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.dot--fail {
+  background: var(--fail);
 }
 /* Items side by side, centred on one line. */
 .row {

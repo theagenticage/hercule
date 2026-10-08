@@ -141,6 +141,19 @@ const buildCommand = (
   buildItemCompleted(turnId, itemId, "command_execution", endSeconds),
 ];
 
+/** Returns a `runtime.warning` row, in turn `turnId` or, when it is undefined, between turns. */
+const buildWarning = (
+  seconds: number,
+  turnId: string | undefined,
+  message: string,
+): TranscriptRow =>
+  buildRow({
+    _tag: "runtime.warning",
+    ...buildEnvelope(seconds),
+    ...(turnId === undefined ? {} : { turnId }),
+    message,
+  });
+
 const REQUEST: OpenRequest = {
   requestId: "r1",
   itemId: "c1",
@@ -635,12 +648,11 @@ describe("buildThreadBlocks", () => {
     expect(findBlock(blocks, "ending", "ending:t1").duration).toBe(3000);
   });
 
-  it("draws no block for runtime, usage and session rows", () => {
+  it("draws no block for runtime error, usage and session rows", () => {
     const rows = [
       buildRow({ _tag: "session.started", ...buildEnvelope(0) }),
       buildTurnStarted("t1", 0),
       ...buildUserMessage("t1", "u1", 0, "Hi"),
-      buildRow({ _tag: "runtime.warning", ...buildEnvelope(1), turnId: "t1", message: "slow" }),
       buildRow({ _tag: "runtime.error", ...buildEnvelope(1), class: "unknown" }),
       buildRow({
         _tag: "session.usage.updated",
@@ -655,6 +667,40 @@ describe("buildThreadBlocks", () => {
       "user:u1",
       "agent:a1",
     ]);
+  });
+
+  it("places each runtime warning where its row sits, without splitting the work stretch", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Fix it"),
+      ...buildCommand("t1", "c1", 1, 2),
+      buildWarning(3, "t1", "retrying after a 529"),
+      ...buildCommand("t1", "c2", 4, 5),
+      ...buildAgentMessage("t1", "a1", 6, "Done."),
+      buildTurnCompleted("t1", 8),
+      // Between turns, a warning names no turn.
+      buildWarning(9, undefined, "the model was rerouted"),
+      buildTurnStarted("t2", 10),
+      ...buildUserMessage("t2", "u2", 10, "Thanks"),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+
+    expect(blocks.map((block) => (block.kind === "warning" ? block.message : block.key))).toEqual([
+      "user:u1",
+      "work:c1",
+      "retrying after a 529",
+      "agent:a1",
+      "the model was rerouted",
+      "user:u2",
+      "live",
+    ]);
+    const work = findBlock(blocks, "work", "work:c1");
+    expect(work.items.map((item) => item.itemId)).toEqual(["c1", "c2"]);
+    expect(work.endedAt).toBe(buildInstant(6));
+    expect(blocks.find((block) => block.kind === "warning")).toMatchObject({
+      at: buildInstant(3),
+    });
   });
 
   it("places the waiting block where its Request opened, and freezes the stretch there", () => {
@@ -779,6 +825,7 @@ describe("buildThreadBlocks", () => {
       ...buildCommand("t1", "c1", 1, 2),
       ...buildAgentMessage("t1", "a1", 3, "Halfway."),
       ...buildCommand("t1", "c2", 5, 6),
+      buildWarning(6, "t1", "retrying after a 529"),
       ...buildAgentMessage("t1", "a2", 7, "Done."),
       buildTurnCompleted("t1", 9, "interrupted"),
     ];

@@ -221,6 +221,45 @@ const buildTranscript = (steps: ReadonlyArray<TranscriptStep>): TranscriptRow[] 
     };
   });
 
+/**
+ * The Fix thread with two runtime warnings among its work, which the book
+ * never draws: a short one between two reads, and a long one, as the runner
+ * writes it when it shrinks an oversized event, between the last edit and
+ * the test run.
+ */
+const FIX_STEPS_WITH_WARNINGS: ReadonlyArray<TranscriptStep> = FIX_STEPS.flatMap((step) => {
+  const [seconds] = step;
+  if (seconds === 31) {
+    return [
+      [
+        24,
+        {
+          _tag: "runtime.warning",
+          turnId: TURN_ID,
+          message: "Overloaded (529). Retrying in 4s, attempt 1 of 10.",
+        },
+      ],
+      step,
+    ] as const;
+  }
+  if (seconds === 210) {
+    return [
+      [
+        196,
+        {
+          _tag: "runtime.warning",
+          turnId: TURN_ID,
+          message:
+            "A tool_call result was 6.43 MiB, too large to send (the limit is 2 MiB), so its output " +
+            "and raw data were left out. Item toolu_01HZK7Q4X9V3RTD8NB2WMJ5FEA.",
+        },
+      ],
+      step,
+    ] as const;
+  }
+  return [step];
+});
+
 /** The message the user queued behind the turn, four minutes ago. */
 const QUEUED_INPUT: Input = {
   id: "in-apple-pay",
@@ -242,6 +281,12 @@ export const FIX_THREAD: ThreadScreenRecords = {
   session: FIX_SESSION,
   transcript: buildTranscript(FIX_STEPS),
   queuedInputs: [QUEUED_INPUT],
+};
+
+/** The Fix thread with runtime warnings among its work, for the thread specimen's `?state=warning`. */
+export const FIX_THREAD_WITH_WARNINGS: ThreadScreenRecords = {
+  ...FIX_THREAD,
+  transcript: buildTranscript(FIX_STEPS_WITH_WARNINGS),
 };
 
 /** Every list the shell reads: the sidebar specimen's, with Fix and Read in `FIX_WORKSPACE`. */
