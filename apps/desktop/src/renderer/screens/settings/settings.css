@@ -29,6 +29,14 @@
   margin-left: -6px;
 }
 
+/* The book's own .time class (system.css), a quiet note at the end of the
+   header, such as Appearance's "Saved on this Mac". */
+.time {
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+
 /* Not in the book, whose button sits in the header itself. The open section
    draws its actions into this element, which adds no box of its own. */
 .bar-actions {

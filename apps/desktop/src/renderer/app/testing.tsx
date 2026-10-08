@@ -44,8 +44,11 @@ import {
   type TranscriptRow,
   type Workspace,
 } from "@hercule/contract";
+import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
 import type { Bridge } from "../../ipc/bridge";
 import type {
+  Appearance,
+  AppearanceSaveOutcome,
   ControllerUrlSaveOutcome,
   EncodedIpcPayload,
   EncodedIpcRequest,
@@ -82,6 +85,8 @@ export interface FakeBridge {
   readonly openDestination: (destination: EncodedIpcPayload<"destination.open">) => void;
   /** What the app asked main to keep of the first run, oldest first. `null` forgets it. */
   readonly firstRunWrites: readonly (FirstRunProgress | null)[];
+  /** Each Appearance the app asked main to save, oldest first. */
+  readonly appearanceWrites: readonly Appearance[];
   /** The URLs the app asked main to open in the browser, oldest first. */
   readonly openedLinks: readonly string[];
   /** How many times the app asked main to start Hercule on this Mac. */
@@ -103,6 +108,11 @@ export interface FakeBridge {
  * `setupToken` the setup token read, `pickFolder` the folder dialog, and
  * `firstRun` is what main keeps of the first run at launch. A write of the
  * first run replaces what a later read returns.
+ *
+ * `appearance` is the Appearance main keeps at launch, the defaults unless a
+ * test passes its own. A save of the Appearance replaces what a later read
+ * returns, unless `saveAppearance` answers it as `NotSaved`. Every save is
+ * recorded either way.
  */
 export const createFakeBridge = ({
   controllerUrl = null,
@@ -114,6 +124,8 @@ export const createFakeBridge = ({
   setupToken = { _tag: "PasteNeeded" },
   pickFolder = () => Promise.resolve({ _tag: "Cancelled" }),
   firstRun = null,
+  appearance = DEFAULT_APPEARANCE,
+  saveAppearance = () => Promise.resolve({ _tag: "Saved" }),
 }: {
   readonly controllerUrl?: string | null;
   readonly token?: string | null;
@@ -124,12 +136,16 @@ export const createFakeBridge = ({
   readonly setupToken?: SetupTokenReadOutcome;
   readonly pickFolder?: () => Promise<FolderPickOutcome>;
   readonly firstRun?: FirstRunProgress | null;
+  readonly appearance?: Appearance;
+  readonly saveAppearance?: (next: Appearance) => Promise<AppearanceSaveOutcome>;
 } = {}): FakeBridge => {
   const tokenWrites: (string | null)[] = [];
   const savedUrls: string[] = [];
   const firstRunWrites: (FirstRunProgress | null)[] = [];
+  const appearanceWrites: Appearance[] = [];
   const openedLinks: string[] = [];
   let keptFirstRun = firstRun;
+  let keptAppearance = appearance;
   let starts = 0;
   let logsFolderShows = 0;
   const menuListeners = new Set<(command: MenuCommand) => void>();
@@ -200,6 +216,15 @@ export const createFakeBridge = ({
           return Promise.resolve(undefined);
         },
       },
+      appearance: {
+        read: () => keptAppearance,
+        save: async (next) => {
+          appearanceWrites.push(next);
+          const outcome = await saveAppearance(next);
+          if (outcome._tag === "Saved") keptAppearance = next;
+          return outcome;
+        },
+      },
       link: {
         open: ({ url }) => {
           openedLinks.push(url);
@@ -224,6 +249,7 @@ export const createFakeBridge = ({
     goMenus,
     waitingLists,
     firstRunWrites,
+    appearanceWrites,
     openedLinks,
     startCount: () => starts,
     logsFolderShowCount: () => logsFolderShows,

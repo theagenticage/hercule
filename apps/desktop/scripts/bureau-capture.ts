@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares ten pairs of
+ * For each theme, Whitehaven and Orient Express, it compares eleven pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -38,7 +38,10 @@
  *   book's page edited by specimens/settings-assistants-reference.ts, and
  *   the Settings > Assistants specimen (settings-assistants.html);
  * - the same section scrolled to its end, because it is taller than the
- *   window. Both pages are opened with `?state=scrolled`.
+ *   window. Both pages are opened with `?state=scrolled`;
+ * - Settings > Appearance (the main pane) of settings-appearance.html: the
+ *   book's page edited by specimens/settings-appearance-reference.ts, and
+ *   the Settings > Appearance specimen (settings-appearance.html).
  *
  * Each reference module edits the book's page to show its fixture's data.
  * For each region pair, the capture:
@@ -408,6 +411,55 @@ const ASSISTANTS_SETTINGS_PARTS = [
   ".day-axis > span, .heartbeat-day-axis > span",
 ];
 
+// Every part of Settings > Appearance whose box is compared, as a selector
+// inside `main.main`: the header, the Settings list, and the section with
+// its theme cards, its rows and the glass demo.
+const APPEARANCE_SETTINGS_PARTS = [
+  ".bar",
+  ".bar > .crumb",
+  ".bar > .title",
+  // The app puts the header's actions in a slot of their own.
+  ".bar .time",
+  ".set-nav",
+  ".set-nav .side-h",
+  ".set-nav .nav-row",
+  ".set-nav .nav-row > svg",
+  ".set-body",
+  ".set-sec",
+  ".set-sec > h2",
+  ".set-sec > p",
+  ".themes",
+  ".tp",
+  ".tp-art",
+  ".tp-side > i",
+  ".tp-row",
+  ".tp-row > svg",
+  ".tp-line",
+  ".tp-comp",
+  ".tp-name",
+  ".tp-name > b",
+  ".tp-name > span",
+  ".set-row",
+  ".set-label",
+  ".set-label > b",
+  ".set-label > span",
+  ".pair",
+  ".pair > .field",
+  ".pair > .field > svg",
+  ".toggle",
+  ".range",
+  ".range-out",
+  ".glass-demo",
+  ".gd-page",
+  ".gd-page > p",
+  ".gd-page code",
+  ".codeblock",
+  ".gd-pill",
+  ".gd-pill .ptab",
+  ".gd-pill .ptab > svg",
+  ".gd-comp",
+];
+
 /** The regions of book pages compared with an app specimen, in the order they are compared. */
 const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   {
@@ -494,6 +546,15 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
     region: MAIN_PANE_REGION,
     scope: "main.main",
     parts: ASSISTANTS_SETTINGS_PARTS,
+  },
+  {
+    name: "settings-appearance",
+    bookPage: "settings-appearance.html",
+    referenceModule: "settings-appearance-reference.ts",
+    specimenPage: "settings-appearance.html",
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: APPEARANCE_SETTINGS_PARTS,
   },
 ];
 

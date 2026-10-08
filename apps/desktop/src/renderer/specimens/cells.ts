@@ -44,6 +44,7 @@ export type IconName =
   | "laptop"
   | "list"
   | "mic"
+  | "moon"
   | "more"
   | "office"
   | "palette"
@@ -59,6 +60,7 @@ export type IconName =
   | "sliders"
   | "sparkle"
   | "stop"
+  | "sun"
   | "system"
   | "tasks"
   | "terminal"
@@ -122,6 +124,7 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["laptop", [13]],
   ["list", [14]],
   ["mic", []],
+  ["moon", [14]],
   ["more", []],
   ["office", []],
   ["palette", []],
@@ -137,6 +140,7 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["sliders", [14]],
   ["sparkle", [14]],
   ["stop", [14]],
+  ["sun", [14]],
   ["system", []],
   ["tasks", [14]],
   ["terminal", [12]],

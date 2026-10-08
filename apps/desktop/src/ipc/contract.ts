@@ -30,6 +30,7 @@
 import { Schema } from "effect";
 import type * as ClientCore from "@hercule/client-core";
 import { IDENTITY_PORT, IDENTITY_PORT_COUNT } from "@hercule/contract";
+import { DAY_THEMES, NIGHT_THEMES, THEMES } from "./appearance";
 import { isHttpUrl } from "./http-url";
 
 /**
@@ -48,6 +49,13 @@ export interface RendererToMainIpcChannel {
    * the bridge function returns `Promise<void>`.
    */
   readonly response: Schema.Top;
+  /**
+   * Set on a channel the renderer calls synchronously: the page waits, with
+   * nothing painted, until main answers. `appearance.read` is one: the page
+   * must know its theme before its first paint, and an asynchronous answer
+   * arrives after it. Main answers such a channel from memory.
+   */
+  readonly synchronous?: true;
 }
 
 /**
@@ -61,6 +69,20 @@ const ControllerRefusalCases = {
   OriginNotAllowed: { origin: Schema.String },
   PreflightRefused: { origin: Schema.String, methods: Schema.Array(Schema.String) },
 };
+
+/**
+ * The outcomes of saving the Appearance in main's settings file.
+ *
+ * - `Saved`: the file holds the new Appearance.
+ * - `NotSaved`: the file could not be written, for example because the disk
+ *   is full. `reason` is a sentence for the user. The file still holds the
+ *   Appearance saved before.
+ */
+export const AppearanceSaveOutcome = Schema.TaggedUnion({
+  Saved: {},
+  NotSaved: { reason: Schema.String },
+});
+export type AppearanceSaveOutcome = typeof AppearanceSaveOutcome.Type;
 
 /**
  * What happened when main was asked to save the controller URL the user
@@ -213,6 +235,39 @@ export type FirstRunStep = ClientCore.FirstRunStep;
 /** What main keeps of the first run for the saved controller: the steps the user put off. */
 export const FirstRunProgress = Schema.Struct({ putOff: Schema.Array(FirstRunStep) });
 export type FirstRunProgress = typeof FirstRunProgress.Type;
+
+/**
+ * How the app looks on this Mac: every control of the Appearance page (spec
+ * 17 §Settings, Appearance). Main keeps it in its settings file.
+ *
+ * - `theme`: the theme in use while `followSystem` is off.
+ * - `followSystem`: whether the theme switches with macOS's appearance,
+ *   between `dayTheme`, a light theme, and `nightTheme`, a dark one.
+ * - `glassPercent`: the Glass level, from 0, solid, to 100.
+ * - `reduceTransparency`: whether every glass surface is solid, whatever the
+ *   Glass level. macOS's own setting has the same effect.
+ * - `density`: how the sidebar draws its thread rows.
+ * - `textSize`: the step of the text size, from 1 to 4; 2 is the tokens as
+ *   they are.
+ * - `openOn`: what a launch opens: the threads or the Office.
+ * - `reduceMotion`: whether every animation stops. macOS's own setting has
+ *   the same effect.
+ * - `marks`: whether rows show the marks of the systems their work came from.
+ */
+export const Appearance = Schema.Struct({
+  theme: Schema.Literals(THEMES),
+  followSystem: Schema.Boolean,
+  dayTheme: Schema.Literals(DAY_THEMES),
+  nightTheme: Schema.Literals(NIGHT_THEMES),
+  glassPercent: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+  reduceTransparency: Schema.Boolean,
+  density: Schema.Literals(["comfortable", "compact"]),
+  textSize: Schema.Literals([1, 2, 3, 4]),
+  openOn: Schema.Literals(["threads", "office"]),
+  reduceMotion: Schema.Boolean,
+  marks: Schema.Boolean,
+});
+export type Appearance = typeof Appearance.Type;
 
 /** An absolute `http:` or `https:` URL. */
 const HttpUrl = Schema.String.check(
@@ -427,6 +482,24 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
   "firstRunProgress.save": {
     request: Schema.NullOr(FirstRunProgress),
     response: Schema.Void,
+  },
+  /**
+   * Reads the Appearance saved on this Mac, or the defaults when none is
+   * saved. Synchronous, and answered from memory: `public/theme-init.js`
+   * calls it before the page's first paint.
+   */
+  "appearance.read": {
+    request: Schema.Undefined,
+    response: Appearance,
+    synchronous: true,
+  },
+  /**
+   * Saves the Appearance, and paints the window's background with the theme
+   * now in use. The page has already applied it to itself.
+   */
+  "appearance.save": {
+    request: Appearance,
+    response: AppearanceSaveOutcome,
   },
   /** Opens an `http:` or `https:` URL in the default browser. Refuses any other URL. */
   "link.open": {

@@ -2,9 +2,10 @@
  * The app's one window, the MainWindow service (see `./main-window.ts`), built
  * with Electron: how it opens, shows, hides and remembers where it was.
  *
- * - It opens hidden, painted with the theme's background, and shows once its
- *   first screen has reached it, so it never shows an empty page (see
- *   `./window-visibility.ts`).
+ * - It opens hidden, painted with the background of the theme in use, and
+ *   shows once its first screen has reached it, so it never shows an empty
+ *   page (see `./window-visibility.ts`). It repaints its background when the
+ *   theme in use changes.
  * - It opens where it was when the app last hid it or quit, moved onto a
  *   display when that position is on none. The first time, it opens at
  *   1440 by 900, centred.
@@ -60,6 +61,11 @@ const make = Effect.gen(function* () {
   yield* Effect.promise(() => app.whenReady());
   const settings = yield* AppSettings;
   const saved = yield* settings.readWindowState;
+  /** Returns the `--bg` of the theme in use now. */
+  const readBackground = Effect.map(settings.readAppearance, (appearance) =>
+    chooseWindowBackground(appearance, nativeTheme.shouldUseDarkColors),
+  );
+  const initialBackground = yield* readBackground;
 
   // Electron's events start effects that run in the background: saves and
   // logs. When main shuts down, it waits for those under way instead of
@@ -91,7 +97,7 @@ const make = Effect.gen(function* () {
           minWidth: MINIMUM_WINDOW_SIZE.width,
           minHeight: MINIMUM_WINDOW_SIZE.height,
           show: false,
-          backgroundColor: chooseWindowBackground(nativeTheme.shouldUseDarkColors),
+          backgroundColor: initialBackground,
           titleBarStyle: "hiddenInset",
           trafficLightPosition: TRAFFIC_LIGHT_POSITION,
           webPreferences: {
@@ -141,8 +147,14 @@ const make = Effect.gen(function* () {
     visibility.saveWindowStateOnQuit();
   };
 
-  const paintBackground = () =>
-    window.setBackgroundColor(chooseWindowBackground(nativeTheme.shouldUseDarkColors));
+  // A save that keeps the theme, such as a Glass change, leaves the colour as
+  // it is, so Electron is not asked to repaint the window for nothing.
+  // Electron returns the colour in upper case.
+  const paintBackground = Effect.map(readBackground, (color) => {
+    if (window.isDestroyed() || window.getBackgroundColor().toLowerCase() === color) return;
+    window.setBackgroundColor(color);
+  });
+  const repaintOnSystemAppearanceChange = () => Effect.runSync(paintBackground);
 
   window.on("close", hideInsteadOfClosing);
   // After the window has closed, macOS can still report a change to it, such
@@ -155,8 +167,8 @@ const make = Effect.gen(function* () {
   // Node calls every listener an event had when it was emitted.
   window.once("closed", () => window.removeAllListeners());
   yield* Effect.acquireRelease(
-    Effect.sync(() => nativeTheme.on("updated", paintBackground)),
-    () => Effect.sync(() => nativeTheme.off("updated", paintBackground)),
+    Effect.sync(() => nativeTheme.on("updated", repaintOnSystemAppearanceChange)),
+    () => Effect.sync(() => nativeTheme.off("updated", repaintOnSystemAppearanceChange)),
   );
   yield* Effect.acquireRelease(
     Effect.sync(() => app.on("before-quit", prepareToQuit)),
@@ -172,6 +184,7 @@ const make = Effect.gen(function* () {
       ),
     ),
     reload: Effect.sync(() => window.webContents.reload()),
+    paintBackground,
     show,
     showFirstTime: Effect.sync(visibility.showWindowFirstTime),
     isFocused: Effect.sync(() => window.isFocused()),

@@ -13,18 +13,29 @@ import type {
   EncodedIpcRequest,
   EncodedIpcResponse,
   MainToRendererIpcChannelName,
+  RENDERER_TO_MAIN_IPC_CHANNELS,
   RendererToMainIpcChannelName,
 } from "./contract";
 
 /**
+ * What the bridge function of the renderer-to-main channel `Name` returns:
+ * the response itself on a synchronous channel, and a promise of it on any
+ * other.
+ */
+type BridgeResult<Name extends RendererToMainIpcChannelName> =
+  (typeof RENDERER_TO_MAIN_IPC_CHANNELS)[Name] extends { readonly synchronous: true }
+    ? EncodedIpcResponse<Name>
+    : Promise<EncodedIpcResponse<Name>>;
+
+/**
  * The bridge function of one renderer-to-main channel. It takes no argument
- * when the channel needs no request. Its promise rejects with main's reason
- * when main refuses the message.
+ * when the channel needs no request. When main refuses the message, it
+ * throws, or its promise rejects, with main's reason.
  */
 type BridgeFunction<Name extends RendererToMainIpcChannelName> =
   EncodedIpcRequest<Name> extends undefined
-    ? () => Promise<EncodedIpcResponse<Name>>
-    : (request: EncodedIpcRequest<Name>) => Promise<EncodedIpcResponse<Name>>;
+    ? () => BridgeResult<Name>
+    : (request: EncodedIpcRequest<Name>) => BridgeResult<Name>;
 
 /**
  * The bridge function of one main-to-renderer channel. It calls `listener`

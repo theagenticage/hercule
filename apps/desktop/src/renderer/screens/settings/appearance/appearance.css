@@ -1,0 +1,207 @@
+/* Settings > Appearance, ported from the `<style>` of the Bureau book's
+   desktop/settings-appearance.html. Its class names are the book's, so each
+   rule maps 1:1 to the book's rule of the same name. Each departure from the
+   book is explained in a comment. */
+
+/* The theme cards: each card's preview is a tiny app drawn in its own
+   theme, because its `data-theme` sets that theme's tokens on it. */
+.themes {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+/* Not in the book, which draws no failed save. A row ends in 10px of
+   padding above its error; the cards have none, so the error under them
+   takes the same 10px as its margin. */
+.set-sec > .themes + .set-err {
+  margin-top: 10px;
+}
+.tp {
+  display: grid;
+  gap: 8px;
+  text-align: left;
+}
+.tp-art {
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  height: 96px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-1);
+  transition:
+    box-shadow var(--dur-2),
+    transform var(--dur-2) var(--ease-out);
+}
+.tp:hover .tp-art {
+  transform: translateY(-1px);
+}
+.tp[aria-pressed="true"] .tp-art {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--ink);
+}
+/* Not in the book, whose cards are not reached by the keyboard. The card's
+   focus ring goes round its preview, as the pressed ring does. */
+.tp:focus-visible {
+  outline: 0;
+}
+.tp:focus-visible .tp-art {
+  outline: 2px solid var(--focus);
+  outline-offset: 6px;
+}
+.tp-side {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 6px;
+  background: color-mix(in oklab, var(--bg) 80%, transparent);
+}
+.tp-side i {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.tp-side i:first-child {
+  background: var(--faint);
+}
+.tp-main {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 10px 0;
+  background: var(--surface);
+  box-shadow: -1px 0 0 var(--line-soft);
+}
+.tp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tp-line {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line);
+}
+.tp-line--you {
+  flex: none;
+  width: 12px;
+  background: var(--you);
+}
+.tp-comp {
+  margin-top: auto;
+  height: 16px;
+  border-radius: 7px 7px 0 0;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.tp-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-left: 2px;
+  white-space: nowrap;
+}
+.tp-name b {
+  font-weight: var(--w-medium);
+}
+.tp-name span {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* Follow the system's day and night selects, side by side. */
+.pair {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pair .field {
+  height: 30px;
+  min-width: 116px;
+  font-size: var(--t-13);
+}
+/* The book's field is as wide as the theme it shows. A native select is as
+   wide as its longest option, so it is sized to the option it shows. */
+.pair .field > select {
+  field-sizing: content;
+}
+
+/* A slice of a session under a header pill and the composer, so the slider
+   shows what it does. */
+.glass-demo {
+  position: relative;
+  height: 188px;
+  margin: 0 0 12px;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+/* The first and last lines sit wholly under the pill and the composer, so
+   they show through the glass and never poke out at an edge. */
+.gd-page {
+  padding: 20px 44px 0;
+  font-size: var(--t-13);
+  line-height: 1.55;
+}
+.gd-page p {
+  margin: 0 0 8px;
+}
+.gd-page pre {
+  margin: 0 0 8px;
+}
+/* The book's system.css colours the sample code. The app's transcript does
+   not, as it loads no highlighter, but the demo is the book's sample, so it
+   keeps the book's colours. */
+.gd-page .codeblock .k {
+  color: oklch(var(--char-ink-l) 0.13 var(--hue-grape));
+}
+.gd-page .codeblock .s {
+  color: oklch(var(--char-ink-l) 0.12 var(--hue-mint));
+}
+.gd-page .codeblock .f {
+  color: oklch(var(--char-ink-l) 0.12 var(--hue-sky));
+}
+.gd-pill {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+}
+.gd-comp {
+  position: absolute;
+  right: 40px;
+  bottom: 12px;
+  left: 40px;
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: var(--r-xl);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--glass-shadow);
+  color: var(--faint);
+}
+
+/* A narrow window (spec 17 §Settings, The frame). Five cards no longer fit
+   in one line, so they wrap, and the day and night selects stack. Not in the
+   book, which is drawn at one width. */
+@container (width < 520px) {
+  .themes {
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  }
+  .pair {
+    flex-wrap: wrap;
+  }
+}

@@ -45,7 +45,6 @@ const CONTROLLER = {
 
 /** The rows of the Settings list that lead nowhere yet. */
 const INERT_ROWS = [
-  "Appearance",
   "Threads",
   "Connections",
   "Providers",
@@ -77,18 +76,18 @@ const findSettingsList = (): Promise<HTMLElement> =>
   screen.findByRole("navigation", { name: "Settings" });
 
 describe("the way into Settings", () => {
-  it("opens Profile from the foot's Settings button the first time, and shows the button as pressed", async () => {
+  it("opens Appearance from the foot's Settings button the first time, and shows the button as pressed", async () => {
     const { router } = await startApp();
     const button = screen.getByRole("link", { name: "Settings" });
     expect(button.classList.contains("is-on")).toBe(false);
 
     await userEvent.click(button);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Profile" })).toBeTruthy();
-    expect(router.state.location.pathname).toBe("/settings/profile");
+    expect(await screen.findByRole("heading", { level: 1, name: "Appearance" })).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/settings/appearance");
     expect(button.classList.contains("is-on")).toBe(true);
     const list = await findSettingsList();
-    expect(within(list).getByRole("link", { name: "Profile" }).classList.contains("is-on")).toBe(
+    expect(within(list).getByRole("link", { name: "Appearance" }).classList.contains("is-on")).toBe(
       true,
     );
     // The sidebar stays beside Settings.
@@ -102,8 +101,8 @@ describe("the way into Settings", () => {
 
     fake.sendMenuCommand("openSettings");
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Profile" })).toBeTruthy();
-    expect(router.state.location.pathname).toBe("/settings/profile");
+    expect(await screen.findByRole("heading", { level: 1, name: "Appearance" })).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/settings/appearance");
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
