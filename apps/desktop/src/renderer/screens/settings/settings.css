@@ -18,10 +18,18 @@
   font-weight: var(--w-bold);
   letter-spacing: -0.01em;
   white-space: nowrap;
+  /* Not in the book. A record's name is the title and can be 128
+     characters, so a name too long for the header ends in an ellipsis rather
+     than pushing the header's actions out of the window. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .crumb {
+  flex: none;
   color: var(--faint);
   font-weight: var(--w-medium);
+  white-space: nowrap;
 }
 /* The link in the crumb of a section that shows one record, back to its list. */
 .crumb a:hover {

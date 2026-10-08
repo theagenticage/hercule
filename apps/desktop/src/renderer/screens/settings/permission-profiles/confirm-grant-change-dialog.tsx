@@ -30,17 +30,16 @@ export function ConfirmGrantChangeDialog({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const title = `Change ${profileName}?`;
   return (
-    <GlassDialog dialogRef={dialogRef} className="profile-dialog" label={title} onClose={onClose}>
+    <GlassDialog dialogRef={dialogRef} className="confirm-dialog" label={title} onClose={onClose}>
       <div className="pop-h">
         <b>{title}</b>
       </div>
-      <div className="pop-sec profile-dialog-body">
+      <div className="pop-sec confirm-dialog-body">
         <p>{describeGrantChange(profileName, grant, held)}</p>
         <p>
-          Threads run on {profileName} unless you pick another profile, so the change reaches them
-          on their next call.
+          {`Threads run on ${profileName} unless you pick another profile, so the change reaches them on their next call.`}
         </p>
-        <div className="profile-dialog-acts">
+        <div className="confirm-dialog-acts">
           <button
             type="button"
             className="btn btn--quiet"

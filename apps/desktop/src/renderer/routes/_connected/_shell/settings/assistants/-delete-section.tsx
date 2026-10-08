@@ -59,14 +59,14 @@ export function DeleteSection({
       {confirming && (
         <GlassDialog
           dialogRef={dialogRef}
-          className="delete-assistant-dialog"
+          className="confirm-dialog"
           label={`Delete ${assistant.name}?`}
           onClose={() => setConfirming(false)}
         >
           <div className="pop-h">
             <b>Delete {assistant.name}?</b>
           </div>
-          <div className="pop-sec delete-assistant-body">
+          <div className="pop-sec confirm-dialog-body">
             <p>
               This removes {assistant.name}’s Conversation and every message in it, and stops any
               session it is running. Its sessions stay in the history. This cannot be undone.
@@ -76,7 +76,7 @@ export function DeleteSection({
                 Could not delete: {readErrorMessage(remove.error)}
               </p>
             )}
-            <div className="delete-assistant-acts">
+            <div className="confirm-dialog-acts">
               <button
                 type="button"
                 className="btn btn--quiet"

@@ -14,9 +14,17 @@ export interface ProfileListEntry {
 }
 
 /**
+ * The most faces a row stacks. The Used by column is 200px wide, and the
+ * names after the faces are what tell users apart, so a profile with many
+ * users still draws a short stack.
+ */
+const MAX_STACKED_FACES = 3;
+
+/**
  * Renders the list of permission profiles (spec 17 §Settings, Permission
  * profiles): a lead and a table with one row per entry, in the order given.
- * Each row links to the profile's page.
+ * Each row links to the profile's page, and shows at most
+ * `MAX_STACKED_FACES` faces of its users.
  *
  * The table drops its Used by column below 600px of width, and its shield
  * below 400px, as the book draws it.
@@ -55,7 +63,7 @@ export function ProfileList({
               <span>{profile.shipped ? "Shipped with Hercule" : "Made by you"}</span>
             </span>
             <span className="profile-held">
-              {profile.grants.length} of {MAX_PROFILE_GRANTS}
+              {`${profile.grants.length} of ${MAX_PROFILE_GRANTS}`}
               <span className="profile-meter">
                 <i style={{ width: `${(profile.grants.length / MAX_PROFILE_GRANTS) * 100}%` }} />
               </span>
@@ -63,12 +71,12 @@ export function ProfileList({
             <span className={users.length === 0 ? "profile-used is-none" : "profile-used"}>
               {users.length > 0 && (
                 <span className="profile-faces">
-                  {users.map((user) => (
+                  {users.slice(0, MAX_STACKED_FACES).map((user) => (
                     <ProfileUserFace key={user.id} user={user} size={24} />
                   ))}
                 </span>
               )}
-              {describeProfileUsers(users)}
+              <span className="profile-used-names">{describeProfileUsers(users)}</span>
             </span>
             <ChevronRightIcon size={14} />
           </Link>

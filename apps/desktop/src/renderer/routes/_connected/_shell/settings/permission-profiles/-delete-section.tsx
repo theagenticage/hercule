@@ -45,24 +45,24 @@ export function DeleteSection({
       await queryClient.invalidateQueries({ queryKey });
     },
   });
-  const usedBy = describeProfileDeleteBlock(users);
+  const deleteBlock = describeProfileDeleteBlock(users);
   return (
     <section className="set-sec">
-      <h2>Delete {profile.name}</h2>
+      <h2>{`Delete ${profile.name}`}</h2>
       {profile.shipped ? (
         <div className="profile-fixed">
-          {profile.name} is shipped with Hercule, so it cannot be deleted. Edit its grants instead.
+          {`${profile.name} is shipped with Hercule, so it cannot be deleted. Edit its grants instead.`}
         </div>
       ) : (
         <SettingRow
           label="Delete profile"
-          hint={usedBy ?? "Removes it and its grants. This cannot be undone."}
+          hint={deleteBlock ?? "Removes it and its grants."}
           control={(labels) => (
             <button
               type="button"
               className="btn btn--danger"
               // A profile that is in use cannot be deleted. The hint says why.
-              disabled={usedBy !== null}
+              disabled={deleteBlock !== null}
               {...labels}
               onClick={() => {
                 remove.reset();
@@ -77,21 +77,21 @@ export function DeleteSection({
       {confirming && (
         <GlassDialog
           dialogRef={dialogRef}
-          className="profile-dialog"
+          className="confirm-dialog"
           label={`Delete ${profile.name}?`}
           onClose={() => setConfirming(false)}
         >
           <div className="pop-h">
-            <b>Delete {profile.name}?</b>
+            <b>{`Delete ${profile.name}?`}</b>
           </div>
-          <div className="pop-sec profile-dialog-body">
-            <p>This removes {profile.name} and its grants. This cannot be undone.</p>
+          <div className="pop-sec confirm-dialog-body">
+            <p>{`This removes ${profile.name} and its grants. This cannot be undone.`}</p>
             {remove.error !== null && (
               <p className="fl-err" role="alert">
-                Could not delete: {readErrorMessage(remove.error)}
+                {`Could not delete: ${readErrorMessage(remove.error)}`}
               </p>
             )}
-            <div className="profile-dialog-acts">
+            <div className="confirm-dialog-acts">
               <button
                 type="button"
                 className="btn btn--quiet"

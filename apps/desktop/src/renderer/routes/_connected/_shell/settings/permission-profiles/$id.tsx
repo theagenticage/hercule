@@ -20,7 +20,9 @@ import { useProfileUsers } from "./-profile-users";
  * An id that names no profile goes back to the list, once the read has
  * answered. The section remembers its list, never one profile's page.
  *
- * The loader reads what the list reads, for the reasons given there.
+ * The loader reads what the list reads, because the page shows the profile's
+ * users: the profiles and the agents on every open, and the assistants from
+ * the shell's read.
  */
 export const Route = createFileRoute("/_connected/_shell/settings/permission-profiles/$id")({
   staticData: { title: "Permission profiles" },

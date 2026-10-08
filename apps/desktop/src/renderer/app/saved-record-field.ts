@@ -11,13 +11,13 @@ import type { SavedField } from "./saved-field";
 
 /** What `useSavedRecordField` needs to know about the field and the record it belongs to. */
 export interface SavedRecordFieldOptions<
-  Record extends { readonly id: string },
+  ListedRecord extends { readonly id: string },
   Value,
   Change,
   Payload extends object,
 > {
   /** The key of the cached list that holds the record, such as the one `profilesQuery` reads. */
-  readonly listKey: DataTag<QueryKey, ReadonlyArray<Record>, Error>;
+  readonly listKey: DataTag<QueryKey, ReadonlyArray<ListedRecord>, Error>;
   /** Names what the record is, such as `"assistant"`. Saves of records of one kind and id share one mutation scope. */
   readonly recordKind: string;
   /** The id of the record the field belongs to. */
@@ -30,9 +30,9 @@ export interface SavedRecordFieldOptions<
    * Builds the update payload that applies the change to `latest`, the record
    * as the cache holds it when the save starts. An empty payload saves nothing.
    */
-  readonly buildPayload: (latest: Record, change: Change) => Payload;
+  readonly buildPayload: (latest: ListedRecord, change: Change) => Payload;
   /** Sends the update of the record `id` to the controller, and returns the record it stored. */
-  readonly update: (id: string, payload: Payload) => Promise<Record>;
+  readonly update: (id: string, payload: Payload) => Promise<ListedRecord>;
 }
 
 /**
@@ -67,11 +67,13 @@ export interface SavedRecordFieldOptions<
  *   could answer with the list from before the save.
  */
 export function useSavedRecordField<
-  Record extends { readonly id: string },
+  ListedRecord extends { readonly id: string },
   Value,
   Change,
   Payload extends object,
->(options: SavedRecordFieldOptions<Record, Value, Change, Payload>): SavedField<Value, Change> {
+>(
+  options: SavedRecordFieldOptions<ListedRecord, Value, Change, Payload>,
+): SavedField<Value, Change> {
   const { listKey, recordKind, id, stored, applyChange, buildPayload, update } = options;
   const queryClient = useQueryClient();
   // A key of this field's own, so the changes still saving are this field's
@@ -84,7 +86,7 @@ export function useSavedRecordField<
   const mutation = useMutation({
     mutationKey,
     scope: { id: `${recordKind}:${id}` },
-    mutationFn: async (change: Change): Promise<Record | null> => {
+    mutationFn: async (change: Change): Promise<ListedRecord | null> => {
       const latest = queryClient.getQueryData(listKey)?.find((each) => each.id === id);
       if (latest === undefined) return null;
       const payload = buildPayload(latest, change);

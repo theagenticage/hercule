@@ -12,7 +12,9 @@
  * The book's profiles, their grant counts and the users it names are the
  * fixture's (settings-profiles-fixture.ts), so this module does not edit
  * them. It edits only where the app draws something else than the book, for
- * the reason given:
+ * the reason given. It never changes how the book splits its text into text
+ * nodes: the app draws the same single text nodes, so the browser measures
+ * them the same.
  *
  * 1. stops every animation, so the working faces show the frame the app
  *    draws;
@@ -24,12 +26,9 @@
  *    book poses pr-review as working;
  * 4. draws each face in the look the app takes from the user's id, where the
  *    book casts or hashes it from the name;
- * 5. splits four texts into the text nodes the app's JSX makes: the Grants
- *    count ("16", " of ", "42"), the Delete heading ("Delete ", the name), the
- *    Used by lead before its link, and the dialog's second paragraph around
- *    the profile's name. The browser measures text that is split
- *    into nodes a fraction of a pixel (1/64) differently from one node, which
- *    shows in the pixel comparison;
+ * 5. puts the names after a list row's faces in a `span`, as the app does so
+ *    that a long name can end in an ellipsis. The book gives the `span` no
+ *    style, so it draws the same;
  * 6. gives the dialog the shadow and rim the app's `.pop` has (menus.css, the
  *    one in the book's glance.html page): the book's own system.css `.pop`
  *    follows the glass level (`--glass-shadow`, `--glass-rim`) and draws a
@@ -103,7 +102,7 @@ function findUsers(name: string): ReadonlyArray<ProfileUser> {
   return users.get(profile.id) ?? [];
 }
 
-// 2 to 4. The list's rows: the stack of faces, and the names after it.
+// 2 to 5. The list's rows: the stack of faces, and the names after it.
 const rows = findElements(document, "[data-rows] .prof", profiles.length);
 for (const row of rows) {
   const rowUsers = findUsers(findElement(row, ".nm > b").textContent);
@@ -115,26 +114,17 @@ for (const row of rows) {
   const stack = document.createElement("span");
   stack.className = "stack";
   stack.append(...rowUsers.map((user) => buildFace(user, 24)));
-  used.replaceChildren(stack, describeProfileUsers(rowUsers));
+  const names = document.createElement("span");
+  names.className = "used-names";
+  names.textContent = describeProfileUsers(rowUsers);
+  used.replaceChildren(stack, names);
 }
 
-// 2 to 5. A profile's page: its users, one row each, and the count.
+// 2 to 4. A profile's page: its users, one row each.
 const record = findElement(document, "[data-record]") as HTMLElement;
 if (!record.hidden) {
   const pageUsers = findUsers(findElement(document, ".bar .title").textContent);
   const userRows = findElements(record, "[data-users] .user", pageUsers.length);
-  const count = findElement(record, "[data-count]");
-  const [held, total] = count.textContent.split(" of ");
-  count.replaceChildren(held!, " of ", total!);
-  const deleteTitle = findElement(record, "[data-delete-title]");
-  deleteTitle.replaceChildren("Delete ", deleteTitle.textContent.slice("Delete ".length));
-  const usedByLead = findElement(record, ".set-sec > p > a").parentElement!;
-  usedByLead.replaceChildren(
-    "Change an assistant's profile on",
-    " ",
-    findElement(usedByLead, "a"),
-    ".",
-  );
   userRows.forEach((row, index) => {
     const user = pageUsers[index]!;
     findElement(row, ":scope > svg").replaceWith(buildFace(user, 30));
@@ -143,10 +133,6 @@ if (!record.hidden) {
       user.kind === "agent" ? "Agent" : "Assistant";
   });
 }
-
-const dialogLead = findElement(document, "[data-confirm] .pop-sec > p:nth-of-type(2)");
-const [beforeName, afterName] = dialogLead.textContent.split("unrestricted");
-dialogLead.replaceChildren(beforeName!, "unrestricted", afterName!);
 
 // 7. The book shows the dialog in its `.scrim` only in the confirm state.
 const scrim = findElement(document, "[data-confirm]") as HTMLElement;

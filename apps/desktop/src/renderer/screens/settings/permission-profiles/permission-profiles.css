@@ -112,6 +112,13 @@
   align-items: center;
   gap: 8px;
 }
+/* Not in the book, whose names are bare text in the flex row. Text in a flex
+   row cannot end in an ellipsis, so a long name needs a box of its own. */
+.profile-used-names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .profile-used.is-none {
   color: var(--faint);
 }
@@ -189,6 +196,9 @@
 .profile-verbs {
   display: inline-flex;
   flex: none;
+  /* Not in the book. In a narrow body the four verbs of Tasks are wider than
+     the row, so the verbs wrap onto a second line. */
+  flex-wrap: wrap;
   padding: 2px;
   gap: 2px;
   border-radius: var(--r-sm);
@@ -206,6 +216,7 @@
   border-radius: var(--r-btn);
   color: var(--faint);
   font-weight: var(--w-medium);
+  white-space: nowrap;
 }
 .profile-verbs button:hover {
   color: var(--muted);
@@ -216,6 +227,17 @@
   box-shadow:
     inset 0 0 0 1px var(--line-soft),
     var(--shadow-1);
+}
+/* The row stacks its control under the label (settings.css). The Name field
+   takes the row's width, and the verbs share the track's width, so a wrapped
+   line has no gap at its end. */
+@container (width < 520px) {
+  .profile-record .set-row > span.field {
+    width: auto;
+  }
+  .profile-verbs button {
+    flex: 1 0 auto;
+  }
 }
 .profile-verbs button .ic {
   margin-left: -3px;
@@ -257,24 +279,4 @@
 }
 .profile-fixed {
   color: var(--muted);
-}
-
-/* The dialogs that confirm a change to unrestricted and a Delete, on the
-   glass of the app's other dialogs. The book's `.dialog`. */
-.profile-dialog {
-  width: 400px;
-}
-.pop-sec.profile-dialog-body {
-  padding: 14px;
-}
-.profile-dialog-body > p {
-  margin: 0 0 10px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-.profile-dialog-acts {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
 }

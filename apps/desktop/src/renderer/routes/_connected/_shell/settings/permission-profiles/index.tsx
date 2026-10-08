@@ -80,7 +80,7 @@ function PermissionProfiles(): JSX.Element {
       </SettingsHeaderActions>
       {create.error !== null && (
         <p className="set-err" role="alert">
-          Could not create the profile: {readErrorMessage(create.error)}
+          {`Could not create the profile: ${readErrorMessage(create.error)}`}
         </p>
       )}
       <ProfileList

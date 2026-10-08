@@ -104,26 +104,6 @@
   max-width: 380px;
 }
 
-/* Not in the book: the dialog that confirms Delete, on the glass of the
-   app's other dialogs. */
-.delete-assistant-dialog {
-  width: 400px;
-}
-.pop-sec.delete-assistant-body {
-  padding: 14px;
-}
-.delete-assistant-body > p {
-  margin: 0 0 10px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-.delete-assistant-acts {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
-}
-
 @container (width < 520px) {
   .assistant-settings .set-row > span.field:not(.field--select) {
     width: auto;

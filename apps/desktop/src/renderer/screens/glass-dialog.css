@@ -19,3 +19,25 @@
 .glass-dialog::backdrop {
   background: var(--scrim);
 }
+
+/* A dialog that asks before something changes or goes, such as a Delete in
+   Settings: a title, a few lines of text, and Cancel and the action. Not in
+   the book. The body takes a 14px padding, which beats the menus' 6px 8px
+   with its second class. */
+.confirm-dialog {
+  width: 400px;
+}
+.pop-sec.confirm-dialog-body {
+  padding: 14px;
+}
+.confirm-dialog-body > p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.confirm-dialog-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}

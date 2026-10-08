@@ -20,14 +20,14 @@ export function UsedBySection({
     <section className="set-sec">
       <h2>Used by</h2>
       <p>
-        Change an assistant&apos;s profile on{" "}
+        {"Change an assistant's profile on "}
         <Link to="/settings/assistants" className="link">
           Assistants
         </Link>
         .
       </p>
       {users.length === 0 ? (
-        <div className="profile-none">No agent or assistant uses {profileName}.</div>
+        <div className="profile-none">{`No agent or assistant uses ${profileName}.`}</div>
       ) : (
         users.map((user) => (
           <div key={user.id} className="profile-user">

@@ -203,6 +203,17 @@ describe("Settings > Permission profiles, the list", () => {
     ]);
   });
 
+  it("stacks at most three faces for a profile that many agents use, and counts the rest", async () => {
+    const crowd = ["pr-review", "nightly", "triage", "lint", "deploy"].map((name, index) =>
+      buildAgent(`01a06d02-7900-7000-8000-00000000010${index}`, name, BUSY.id),
+    );
+    await openList({ "GET /api/v1/agents": { body: { items: crowd } } });
+
+    const busy = screen.getByRole("link", { name: /Busy/ });
+    expect(busy.querySelectorAll(".profile-faces > *")).toHaveLength(3);
+    expect(busy.querySelector(".profile-used")?.textContent).toBe("deploy, lint and 3 more");
+  });
+
   it("opens a profile's page from its row", async () => {
     const { router } = await openList();
 
@@ -550,6 +561,7 @@ describe("Settings > Permission profiles, Delete", () => {
   it("deletes a profile only once the dialog confirms it, then goes back to the list", async () => {
     const { calls, router } = await openProfile(TRIAGE);
 
+    expect(screen.getByText("Removes it and its grants.")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Delete profile" }));
     const dialog = await screen.findByRole("dialog", { name: "Delete Triage?" });
     expect(
