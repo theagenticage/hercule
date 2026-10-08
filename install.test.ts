@@ -13,20 +13,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, onTestFinished } from "vitest";
+import { buildServiceUnit, renderSystemdUnit } from "./packages/service/src/unit";
 
 const script = fileURLToPath(new URL("install.sh", import.meta.url));
 
 const launchAgentPath = join("Library", "LaunchAgents", "sh.hercule.service.plist");
+const systemdUnitPath = join(".config", "systemd", "user", "hercule.service");
 
-/** How install.sh is set up: its HERCULE_HOME, and any installed LaunchAgent. */
+/** How install.sh is set up: its HERCULE_HOME, and any installed service unit. */
 interface InstallSetup {
   /**
    * Returns the HERCULE_HOME install.sh runs with, given the home folder, or
    * undefined to leave it unset. By default it is `<home>/.hercule`.
    */
   readonly buildHerculeHome?: (home: string) => string | undefined;
-  /** The content of an installed LaunchAgent's plist, if there is one. */
+  /** The content of an installed LaunchAgent's plist, if there is one (macOS). */
   readonly launchAgent?: string;
+  /** The content of an installed systemd unit, if there is one (Linux). */
+  readonly systemdUnit?: string;
 }
 
 /** What one run of install.sh did. */
@@ -52,6 +56,10 @@ function runInstall(releaseDir: string, setup: InstallSetup = {}): InstallResult
   if (setup.launchAgent !== undefined) {
     mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true });
     writeFileSync(join(home, launchAgentPath), setup.launchAgent);
+  }
+  if (setup.systemdUnit !== undefined) {
+    mkdirSync(join(home, ".config", "systemd", "user"), { recursive: true });
+    writeFileSync(join(home, systemdUnitPath), setup.systemdUnit);
   }
   const herculeHome = (setup.buildHerculeHome ?? ((home) => join(home, ".hercule")))(home);
   const result = spawnSync("sh", [script], {
@@ -90,6 +98,22 @@ function buildLaunchAgent(environment: Readonly<Record<string, string>>): string
 `;
 }
 
+/**
+ * Renders an installed systemd unit for the Hercule Home `home` with the same
+ * renderer `hercule service install` writes, so install.sh is tested against
+ * that encoding rather than a copy of it.
+ */
+function buildSystemdUnit(home: string): string {
+  return renderSystemdUnit(
+    buildServiceUnit({
+      role: "runner",
+      program: "/usr/local/bin/hercule",
+      home,
+      path: "/usr/bin:/bin",
+    }),
+  );
+}
+
 /** Creates a temporary folder that is deleted when the test finishes. */
 function makeTemporaryDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -119,10 +143,11 @@ interface BinaryCall {
 }
 
 /**
- * Writes a release that install.sh accepts and installs: a zipped app, a
- * SHA256SUMS that matches, and in place of the binary a shell script that
- * records every call. `hercule --version` prints a version, and `hercule
- * service ...` prints a line and exits with `serviceExitCode`.
+ * Writes a release that install.sh accepts and installs: on macOS a zipped app
+ * and binary, on Linux just the binary, plus a SHA256SUMS that matches. The
+ * binary is a shell script that records every call. `hercule --version` prints
+ * a version, and `hercule service ...` prints a line and exits with
+ * `serviceExitCode`.
  *
  * Returns the release folder, and a function that reads the calls recorded so
  * far, in order.
@@ -134,9 +159,20 @@ function writeInstallableRelease(serviceExitCode = 0): {
   const dir = makeTemporaryDir("hercule-install-release-");
   const callsFile = join(makeTemporaryDir("hercule-install-calls-"), "calls");
 
+  // Detect platform and write the appropriate binary
+  const isMacOS = process.platform === "darwin";
+  const isLinux = process.platform === "linux";
+  const binaryName = isMacOS
+    ? "hercule-darwin-arm64"
+    : isLinux && process.arch === "x64"
+      ? "hercule-linux-x64"
+      : isLinux && process.arch === "arm64"
+        ? "hercule-linux-arm64"
+        : "hercule-darwin-arm64"; // fallback for tests on unsupported platforms
+
   // Each call is one line: the HERCULE_HOME, a tab, then the arguments.
   writeFileSync(
-    join(dir, "hercule-darwin-arm64"),
+    join(dir, binaryName),
     `#!/bin/sh
 printf '%s\\t%s\\n' "\${HERCULE_HOME-}" "$*" >> '${callsFile}'
 case $1 in
@@ -146,21 +182,27 @@ esac
 `,
   );
 
-  const appStage = makeTemporaryDir("hercule-install-app-");
-  const macOSDir = join(appStage, "Hercule.app", "Contents", "MacOS");
-  mkdirSync(macOSDir, { recursive: true });
-  writeFileSync(join(macOSDir, "Hercule"), "#!/bin/sh\n");
-  // The same command the `edge-build` job zips the app with.
-  const zip = spawnSync("ditto", [
-    "-c",
-    "-k",
-    "--keepParent",
-    join(appStage, "Hercule.app"),
-    join(dir, "Hercule-darwin-arm64.zip"),
-  ]);
-  expect(zip.status).toBe(0);
+  const assets = [binaryName];
 
-  const sha256sums = ["hercule-darwin-arm64", "Hercule-darwin-arm64.zip"]
+  // On macOS, also create the app
+  if (isMacOS) {
+    const appStage = makeTemporaryDir("hercule-install-app-");
+    const macOSDir = join(appStage, "Hercule.app", "Contents", "MacOS");
+    mkdirSync(macOSDir, { recursive: true });
+    writeFileSync(join(macOSDir, "Hercule"), "#!/bin/sh\n");
+    // The same command the `edge-build` job zips the app with.
+    const zip = spawnSync("ditto", [
+      "-c",
+      "-k",
+      "--keepParent",
+      join(appStage, "Hercule.app"),
+      join(dir, "Hercule-darwin-arm64.zip"),
+    ]);
+    expect(zip.status).toBe(0);
+    assets.push("Hercule-darwin-arm64.zip");
+  }
+
+  const sha256sums = assets
     .map((asset) => {
       const hash = createHash("sha256")
         .update(readFileSync(join(dir, asset)))
@@ -184,6 +226,9 @@ esac
 }
 
 const isAppleSilicon = process.platform === "darwin" && process.arch === "arm64";
+const isLinuxX64 = process.platform === "linux" && process.arch === "x64";
+const isLinuxArm64 = process.platform === "linux" && process.arch === "arm64";
+const isLinux = isLinuxX64 || isLinuxArm64;
 
 describe("install.sh", () => {
   it.runIf(isAppleSilicon)(
@@ -350,10 +395,129 @@ describe("install.sh", () => {
     expect(readdirSync(home)).toEqual([]);
   });
 
-  it.runIf(process.platform !== "darwin")("refuses to run anywhere but macOS", () => {
-    const { status, stderr } = runInstall(writeRelease(""));
+  it.runIf(isLinux)("installs the binary on a first install on Linux, and starts nothing", () => {
+    const release = writeInstallableRelease();
+
+    const { status, stdout, home, applicationsDir } = runInstall(release.dir, {
+      buildHerculeHome: (home) => join(home, "scratch-home"),
+    });
+
+    expect(status).toBe(0);
+    expect(existsSync(join(home, ".local", "bin", "hercule"))).toBe(true);
+    // No app is installed on Linux.
+    expect(readdirSync(applicationsDir)).toEqual([]);
+    // No unit is written and none is installed: the binary only printed
+    // its version.
+    expect(release.readBinaryCalls().map((call) => call.args)).toEqual(["--version"]);
+    expect(existsSync(join(home, ".config"))).toBe(false);
+    // The next steps carry the Home this run was given, and the binary's
+    // full path, because its folder is not on PATH. Both are quoted, so a
+    // path with a space pastes as one word.
+    expect(stdout).toContain("Nothing is running yet");
+    expect(stdout).toContain(
+      `HERCULE_HOME='${join(home, "scratch-home")}' '${join(home, ".local", "bin", "hercule")}' service install\n`,
+    );
+    expect(stdout).toContain('"Add machine"');
+    // The app is never named on Linux.
+    expect(stdout).not.toContain("Applications folder");
+  });
+
+  it.runIf(isLinux)(
+    "updates the installed service with `hercule service install` and the Home it names on Linux",
+    () => {
+      const release = writeInstallableRelease();
+
+      const { status, stdout } = runInstall(release.dir, {
+        buildHerculeHome: () => undefined,
+        systemdUnit: buildSystemdUnit("/home/someone/other-home"),
+      });
+
+      expect(status).toBe(0);
+      expect(release.readBinaryCalls()).toEqual([
+        { herculeHome: "/home/someone/other-home", args: "service install" },
+        { herculeHome: "", args: "--version" },
+      ]);
+      expect(stdout).toContain("fake hercule service output");
+      expect(stdout).not.toContain("Nothing is running yet");
+    },
+  );
+
+  it.runIf(isLinux)("fails when `hercule service install` fails on an update on Linux", () => {
+    const release = writeInstallableRelease(1);
+
+    const { status, stdout, stderr } = runInstall(release.dir, {
+      buildHerculeHome: () => undefined,
+      systemdUnit: buildSystemdUnit("/tmp/hercule-update-home"),
+    });
 
     expect(status).toBe(1);
-    expect(stderr).toContain("runs on macOS on Apple silicon only");
+    // The service's own output stays visible: it explains what went wrong.
+    expect(stdout).toContain("fake hercule service output");
+    expect(stderr).toContain("the binary is updated, but the service was not");
   });
+
+  it.runIf(isLinux)(
+    "decodes a systemd unit Home with percent, backslash, quote, and spaces",
+    () => {
+      const release = writeInstallableRelease();
+      const homeWithSpecialChars = '/tmp/50%-"test\\path" with spaces';
+
+      const { status, stdout } = runInstall(release.dir, {
+        buildHerculeHome: () => undefined,
+        systemdUnit: buildSystemdUnit(homeWithSpecialChars),
+      });
+
+      expect(status).toBe(0);
+      // The installer decoded the Home correctly and passed it to `service install`.
+      expect(release.readBinaryCalls()).toEqual([
+        { herculeHome: homeWithSpecialChars, args: "service install" },
+        { herculeHome: "", args: "--version" },
+      ]);
+      expect(stdout).toContain("fake hercule service output");
+    },
+  );
+
+  it.runIf(isLinux)(
+    "ignores relative XDG_CONFIG_HOME and falls back to ~/.config, like locateSystemdUnitDir",
+    () => {
+      const release = writeInstallableRelease();
+
+      const home = makeTemporaryDir("hercule-install-home-");
+      const applicationsDir = makeTemporaryDir("hercule-install-applications-");
+      // Create unit in ~/.config/systemd/user, not in relative-xdg/systemd/user
+      mkdirSync(join(home, ".config", "systemd", "user"), { recursive: true });
+      writeFileSync(
+        join(home, ".config", "systemd", "user", "hercule.service"),
+        buildSystemdUnit(join(home, "other-home")),
+      );
+
+      const result = spawnSync("sh", [script], {
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH,
+          HOME: home,
+          XDG_CONFIG_HOME: "relative-xdg",
+          HERCULE_RELEASE_URL: pathToFileURL(release.dir).href,
+          HERCULE_APPLICATIONS_DIR: applicationsDir,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      // The installer found the unit in ~/.config despite XDG_CONFIG_HOME being relative.
+      expect(release.readBinaryCalls()).toEqual([
+        { herculeHome: join(home, "other-home"), args: "service install" },
+        { herculeHome: "", args: "--version" },
+      ]);
+    },
+  );
+
+  it.runIf(process.platform !== "darwin" && process.platform !== "linux")(
+    "refuses to run on unsupported platforms",
+    () => {
+      const { status, stderr } = runInstall(writeRelease(""));
+
+      expect(status).toBe(1);
+      expect(stderr).toContain("the edge build runs on macOS on Apple silicon and on Linux");
+    },
+  );
 });

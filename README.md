@@ -20,29 +20,42 @@ Hercule is the successor to agentick (Python), built from scratch in TypeScript.
 
 ## Install
 
-On a Mac with Apple silicon:
+On a Mac with Apple silicon or on Linux (x86_64 and aarch64):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/theagenticage/hercule/edge/install.sh | sh
 ```
 
-This installs a build of `main`, from the rolling `edge` prerelease that every push to `main` replaces once CI passes. It is a dev build, not a stable release: stable releases come with [#191](https://github.com/theagenticage/hercule/issues/191) and [#102](https://github.com/theagenticage/hercule/issues/102). macOS on Apple silicon is the only platform for now.
+This installs a build of `main`, from the rolling `edge` prerelease that every push to `main` replaces once CI passes. It is a dev build, not a stable release: stable releases come with [#191](https://github.com/theagenticage/hercule/issues/191) and [#102](https://github.com/theagenticage/hercule/issues/102).
 
 The script installs:
 
 - the `hercule` binary at `~/.local/bin/hercule`. When `~/.local/bin` is not on your `PATH`, it prints the line to add to your shell profile.
-- the desktop app at `/Applications/Hercule.app`.
+- on macOS, the desktop app at `/Applications/Hercule.app`.
 
-A first install starts nothing, because only you know what this Mac is for. To run the controller on it:
+A first install starts nothing, because only you know what this machine is for. To run the controller on it:
 
 ```sh
 hercule service install
 hercule setup-url
 ```
 
-The first command installs a LaunchAgent that runs `hercule serve` at login and restarts it when it stops. The second prints the URL to open to set up the controller. To make this Mac a runner of a controller on another machine instead, run the join command from the Fleet's "Add machine" in that controller's web app; it installs the LaunchAgent for `hercule runner` itself.
+The first command installs a service unit (a LaunchAgent on macOS, a systemd user unit on Linux) that runs `hercule serve` and restarts it when it stops. The second prints the URL to open to set up the controller. To make this machine a runner of a controller on another machine instead, run the join command from the Fleet's "Add machine" in that controller's web app; it installs the service unit for `hercule runner` itself.
 
 Either way, Hercule keeps everything in the Hercule Home, which is `~/.hercule` unless `HERCULE_HOME` is set. Its logs are `logs/controller.log` and `logs/runner.log` there. `hercule service status` says whether the service is running; `hercule service stop`, `start`, `restart` and `uninstall` do what they say.
+
+**Linux-specific notes:**
+
+- **Lingering:** When `loginctl enable-linger` fails during installation, run `sudo loginctl enable-linger <user>` first. This lets the service run without a login session.
+- **Networked controller:** For a controller that other machines reach, set `bind.host` in `~/.hercule/config.toml`:
+
+  ```toml
+  [bind]
+  host = "192.168.1.10"  # LAN IP, or your Tailscale IP for a tailnet
+  port = 4937
+  ```
+
+  Then restart the service with `hercule service restart`. The service reads `config.toml` alone. See [spec 15 §1](docs/spec/15-packaging-and-operations.md#1-distribution) for more details.
 
 **To update, run the same line again.** It replaces the binary and the app together, so the two always agree, and restarts the service. The restart ends any turn in progress, so update when no agent is working. The controller migrates its database itself when it starts, and keeps a copy from before the migration in the Hercule Home's `backups/`.
 
