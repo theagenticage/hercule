@@ -37,15 +37,27 @@ let newBinary: string;
 /**
  * Downloads the edge release binary if it exists. Returns the path to the
  * downloaded binary, or undefined if no edge release exists yet.
+ *
+ * Fails loudly if the edge release exists but the expected binary asset is
+ * missing: that indicates a CI misconfiguration, not the absence of a baseline.
  */
 async function downloadEdgeBinary(targetDir: string): Promise<string | undefined> {
   const binaryPath = join(targetDir, BINARY_NAME);
   const downloadUrl = `${EDGE_RELEASE_URL}/${BINARY_NAME}`;
 
-  // Check if the edge release exists
+  // Check if the binary asset exists
   const headResponse = await fetch(downloadUrl, { method: "HEAD" });
   if (headResponse.status === 404) {
-    return undefined;
+    // Check if this is a missing asset or a missing release by trying the base release URL
+    const releaseCheckResponse = await fetch(EDGE_RELEASE_URL, { method: "HEAD" });
+    if (releaseCheckResponse.status === 404) {
+      // No edge release exists yet - skip the test
+      return undefined;
+    }
+    // Edge release exists but the binary asset is missing - fail loudly
+    throw new Error(
+      `Edge release exists but ${BINARY_NAME} asset is missing. This indicates a CI misconfiguration.`,
+    );
   }
   if (!headResponse.ok) {
     throw new Error(
