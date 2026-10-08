@@ -22,7 +22,7 @@ import {
   startController,
   type Controller,
 } from "../scripts/controller-process";
-import { createTemporaryHome, parseJsonOutput, type TemporaryHome } from "./harness";
+import { createTemporaryHome, parseJsonOutput, readApiKey, type TemporaryHome } from "./harness";
 
 const EDGE_RELEASE_URL = "https://github.com/theagenticage/hercule/releases/download/edge";
 
@@ -239,10 +239,13 @@ describe("upgrading from the previous edge release", () => {
       // 4. Start the new binary with the same home
       controller = await startController({ home: state!.home, binary: newBinary });
 
+      // Read the API key to authenticate CLI commands against the restarted controller
+      const apiKey = readApiKey(state!.home);
+
       // 5. Verify that the controller boots successfully
       const newControllerRead = await runCli(["controller", "read", "--json"], {
         home: state!.home,
-        env: { HERCULE_API_URL: controller.url },
+        env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey },
       });
       if (newControllerRead.code !== 0) {
         throw new Error(
@@ -254,7 +257,7 @@ describe("upgrading from the previous edge release", () => {
       // 6. Read every record back and verify it exists
       const projectRead = await runCli(["project", "read", testData.projectId, "--json"], {
         home: state!.home,
-        env: { HERCULE_API_URL: controller.url },
+        env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey },
       });
       expect(projectRead.code).toBe(0);
       const readProject = parseJsonOutput(projectRead) as { id: string; name: string };
@@ -263,7 +266,7 @@ describe("upgrading from the previous edge release", () => {
 
       const resourceRead = await runCli(["resource", "read", testData.resourceId, "--json"], {
         home: state!.home,
-        env: { HERCULE_API_URL: controller.url },
+        env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey },
       });
       expect(resourceRead.code).toBe(0);
       const readResource = parseJsonOutput(resourceRead) as { id: string; remote: string | null };
@@ -272,7 +275,7 @@ describe("upgrading from the previous edge release", () => {
 
       const assistantRead = await runCli(["assistant", "read", testData.assistantId, "--json"], {
         home: state!.home,
-        env: { HERCULE_API_URL: controller.url },
+        env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey },
       });
       expect(assistantRead.code).toBe(0);
       const readAssistant = parseJsonOutput(assistantRead) as { id: string; name: string };
@@ -282,7 +285,7 @@ describe("upgrading from the previous edge release", () => {
       // Read the conversation and its messages
       const conversationRead = await runCli(
         ["conversation", "read", testData.conversationId, "--json"],
-        { home: state!.home, env: { HERCULE_API_URL: controller.url } },
+        { home: state!.home, env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey } },
       );
       expect(conversationRead.code).toBe(0);
       const readConversation = parseJsonOutput(conversationRead) as {
@@ -295,7 +298,7 @@ describe("upgrading from the previous edge release", () => {
       // List messages in the conversation - should have 3 user messages
       const messagesRead = await runCli(
         ["conversation", "query-messages", testData.conversationId, "--json"],
-        { home: state!.home },
+        { home: state!.home, env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey } },
       );
       expect(messagesRead.code).toBe(0);
       const messages = parseJsonOutput(messagesRead) as {
