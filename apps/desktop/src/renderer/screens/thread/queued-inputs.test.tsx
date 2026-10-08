@@ -51,6 +51,23 @@ describe("the queued inputs", () => {
     expect(within(readRow(NEWER)).getByText("queued")).toBeTruthy();
   });
 
+  it("draws an input's images as small tiles before its text, read from the controller", async () => {
+    const image = {
+      id: "01a06d02-7700-7000-8000-0000000000a1",
+      name: "screen.png",
+      mimeType: "image/png",
+      sizeBytes: 4,
+    } as const;
+    const { calls } = await renderQueue({}, [{ ...OLDER, attachments: [image] }, NEWER]);
+
+    const tile = within(readRow(OLDER)).getByTitle("screen.png");
+    expect(tile.className).toBe("queued-image");
+    expect(within(readRow(NEWER)).queryByTitle("screen.png")).toBeNull();
+    await waitFor(() => {
+      expect(calls.map((call) => call.path)).toContain(`/api/v1/attachments/${image.id}/content`);
+    });
+  });
+
   it("steers an input into the running turn, then reads the queue again", async () => {
     const user = userEvent.setup();
     const remaining = [OLDER, NEWER];

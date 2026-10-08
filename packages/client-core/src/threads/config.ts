@@ -14,6 +14,7 @@ import type {
   ThreadWorkspace,
   Workspace,
 } from "@hercule/contract";
+import type { ShelfItem } from "../attachments/shelf";
 import type { ThreadDefaults } from "./thread-defaults";
 import type { WorkspacePick } from "./workspaces";
 
@@ -42,9 +43,13 @@ export interface ThreadConfig extends ThreadDefaults {
  */
 export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId">>;
 
-/** The unsent content the composer holds for one thread. */
+/**
+ * The unsent content the composer holds for one thread: its text and the
+ * images on its shelf. A draft with images and no text can be sent.
+ */
 export interface MessageDraft {
   readonly text: string;
+  readonly attachments: readonly ShelfItem[];
 }
 
 /** A thread the user is still composing, or one that exists as a session. */

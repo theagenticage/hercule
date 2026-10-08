@@ -6,8 +6,9 @@
  * `requestedAccessMode` and `accessMode` are both on the record because the
  * access-mode fallback of [06-providers section 8.4] must never be silent.
  */
-import { Schema, SchemaGetter, Tuple } from "effect";
+import { Duration, Schema, SchemaGetter, Tuple } from "effect";
 import {
+  ATTACHMENT_DOWNLOAD_TIMEOUT,
   AccessMode,
   ApprovalDecision,
   type ApprovalRequest,
@@ -16,6 +17,7 @@ import {
   OpenRequest,
   OutputSchema,
   QuestionAnswers,
+  SESSION_INPUT_DEADLINE,
   SubagentId,
   Usage,
   UsageReport,
@@ -34,6 +36,7 @@ import {
 } from "../errors";
 import { Id, Timestamp } from "../ids";
 import { UnenforcedSpecField } from "./agent";
+import { AttachmentId, MAX_ATTACHMENTS_PER_INPUT } from "./attachment";
 import { Branch } from "./workspace";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -68,10 +71,46 @@ export const SessionRequest = OpenRequest.mapMembers(
 
 export type SessionRequest = Schema.Schema.Type<typeof SessionRequest>;
 
-/** The longest prompt or turn input the API accepts: it is sent to the runner in one frame. */
+/**
+ * The longest prompt or turn input text the API accepts: the text is sent to
+ * the runner in one frame. Images are not part of it: a frame carries only a
+ * reference to each one.
+ */
 export const MAX_PROMPT_LENGTH = 64 * 1024;
 
+/** A prompt that must have text, for the payloads that cannot carry images. */
 export const Prompt = bounded(1, MAX_PROMPT_LENGTH);
+
+/**
+ * The text of a session's prompt or input. It may be empty when the payload
+ * carries images; `refuseEmptyPrompt` refuses a payload with neither.
+ */
+export const PromptText = bounded(0, MAX_PROMPT_LENGTH);
+
+/** The images sent with a prompt or input, in the order the user attached them. */
+const PromptAttachments = Schema.optionalKey(atMost(AttachmentId, MAX_ATTACHMENTS_PER_INPUT));
+
+/** The message of the issue for a prompt or input with no text and no images. */
+export const EMPTY_PROMPT_MESSAGE = "A prompt needs text or at least one image.";
+
+/**
+ * Refuses a session prompt or input with no text and no images. It checks
+ * `text` or `prompt`, whichever field the payload names its text with, so one
+ * filter serves every payload that carries `attachments`. The issue points at
+ * that field, so a client can show it where the user types the text.
+ */
+export const refuseEmptyPrompt = Schema.makeFilter(
+  (payload: {
+    readonly text?: string;
+    readonly prompt?: string;
+    readonly attachments?: ReadonlyArray<string>;
+  }) => {
+    const field = payload.prompt === undefined ? "text" : "prompt";
+    if ((payload[field] ?? "").length > 0 || (payload.attachments?.length ?? 0) > 0)
+      return undefined;
+    return { path: [field], issue: EMPTY_PROMPT_MESSAGE };
+  },
+);
 
 /**
  * The status of a session:
@@ -340,7 +379,9 @@ export type SpawnWorkspace = Schema.Schema.Type<typeof SpawnWorkspace>;
  * Agent or the setting, for this session only.
  */
 export const SessionSpawnInput = closedStruct({
-  prompt: Prompt,
+  prompt: PromptText,
+  /** Ids from `attachment.create`; the prompt's images. */
+  attachments: PromptAttachments,
   /**
    * The Agent to spawn from. Its fields take the place of the `thread.*`
    * settings, with the same precedence. `instanceId` and `permissionProfileId`
@@ -362,7 +403,7 @@ export const SessionSpawnInput = closedStruct({
   projectId: Schema.optionalKey(Id),
   /** Where the session works; when absent, the thread has no checkout. */
   workspace: Schema.optionalKey(SpawnWorkspace),
-});
+}).check(refuseEmptyPrompt);
 
 export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
 
@@ -386,12 +427,15 @@ export const SessionSelection = Schema.Struct(SESSION_SELECTION_FIELDS);
 export type SessionSelection = Schema.Schema.Type<typeof SessionSelection>;
 
 /**
- * One turn's input: the text, and the model and options sent with it. Declared
- * separately from the payload, so a service can spread these fields next to
- * the session id and apply the same bounds to an in-process caller.
+ * One turn's input: the text, the images, and the model and options sent with
+ * it. Declared separately from the payload, so a service can spread these
+ * fields next to the session id and apply the same bounds to an in-process
+ * caller. A struct built from these fields needs `refuseEmptyPrompt` too.
  */
 export const SESSION_INPUT_FIELDS = {
-  text: Prompt,
+  text: PromptText,
+  /** Ids from `attachment.create`; the input's images. */
+  attachments: PromptAttachments,
   ...SESSION_SELECTION_FIELDS,
 } as const;
 
@@ -401,7 +445,7 @@ export const SessionUpdateInput = closedStruct(SESSION_UPDATE_FIELDS);
 
 export type SessionUpdateInput = Schema.Schema.Type<typeof SessionUpdateInput>;
 
-export const SessionInputPayload = closedStruct(SESSION_INPUT_FIELDS);
+export const SessionInputPayload = closedStruct(SESSION_INPUT_FIELDS).check(refuseEmptyPrompt);
 
 export type SessionInputPayload = Schema.Schema.Type<typeof SessionInputPayload>;
 
@@ -410,7 +454,9 @@ export type SessionInputPayload = Schema.Schema.Type<typeof SessionInputPayload>
  * HTTP request sends in its path, and the text. A bound answer sends this
  * shape, so taking the answer queues the text as the session's next input.
  */
-export const SessionInputCall = closedStruct({ sessionId: Id, ...SESSION_INPUT_FIELDS });
+export const SessionInputCall = closedStruct({ sessionId: Id, ...SESSION_INPUT_FIELDS }).check(
+  refuseEmptyPrompt,
+);
 
 export type SessionInputCall = Schema.Schema.Type<typeof SessionInputCall>;
 
@@ -431,6 +477,18 @@ export const SessionInputOutcome = Schema.Struct({
 });
 
 export type SessionInputOutcome = Schema.Schema.Type<typeof SessionInputOutcome>;
+
+/**
+ * The longest the controller takes to answer `session.input` or `input.steer`:
+ * its wait for the runner's report, plus the time the runner may spend
+ * downloading the input's images first. A client sets its own request time
+ * limit above this, so it never gives up on a request the controller is still
+ * working on.
+ */
+export const MAX_INPUT_ANSWER_WAIT: Duration.Duration = Duration.sum(
+  SESSION_INPUT_DEADLINE,
+  ATTACHMENT_DOWNLOAD_TIMEOUT,
+);
 
 /**
  * The decision on an approval one of a session's agents is parked on.
@@ -491,10 +549,12 @@ export type SessionRespondToQuestionInput = Schema.Schema.Type<
  */
 export const SESSION_CONTINUE_FIELDS = {
   mode: Schema.Literal("fork"),
-  prompt: Prompt,
+  prompt: PromptText,
+  /** Ids from `attachment.create`; the prompt's images. */
+  attachments: PromptAttachments,
 } as const;
 
-export const SessionContinueInput = closedStruct(SESSION_CONTINUE_FIELDS);
+export const SessionContinueInput = closedStruct(SESSION_CONTINUE_FIELDS).check(refuseEmptyPrompt);
 
 export type SessionContinueInput = Schema.Schema.Type<typeof SessionContinueInput>;
 

@@ -22,7 +22,7 @@ import {
   MAX_PENDING_BYTES,
   MAX_PENDING_THREADS,
 } from "./threads";
-import { NO_USER_MATERIAL_PATHS } from "../testing";
+import { NO_USER_MATERIAL_PATHS, writeTestImage } from "../testing";
 import {
   computeSubagentAfter,
   createBareSubagent,
@@ -182,6 +182,18 @@ describe("what the Codex adapter reports about a machine", () => {
     ]);
     // Offered only when the server lists tiers: an empty select would be useless.
     expect(findModelOption(probed.models, "gpt-5.5", "serviceTier")).toBeUndefined();
+  });
+
+  it("takes images only on a model that lists image input, with no limit of its own", async () => {
+    const { result } = runProbe();
+
+    const probed = await result;
+    expect(probed.models.map((model) => [model.slug, model.imageInput])).toEqual([
+      ["gpt-6-astra", { maxBytes: null }],
+      // No `inputModalities`, as an older app-server sends: text only.
+      ["gpt-5.6-sol", null],
+      ["gpt-5.5", null],
+    ]);
   });
 
   it("reports an app-server that exits before replying to initialize as an error, not as a blank row", async () => {
@@ -503,6 +515,33 @@ describe("what an input does to a Codex session", () => {
     // The only `turn/start` is the session's first turn; steering started no second one.
     expect(listSentParams(run.requests, "turn/start")).toHaveLength(1);
   });
+
+  // Codex reads each image from its file, so the same items go on a new turn
+  // and on a steer: the text, which names each file, then the files.
+  for (const [method, start] of [
+    ["turn/start", startTestSession],
+    ["turn/steer", startBusySession],
+  ] as const) {
+    it(`sends attached images as localImage items after the text on ${method}`, async () => {
+      const run = await start();
+      const image = writeTestImage();
+
+      await Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "what is this?", attachments: [image] }),
+      );
+
+      expect(listSentParams(run.requests, method).at(-1)).toMatchObject({
+        input: [
+          {
+            type: "text",
+            text: `what is this?\n\n[Attached image "screenshot.png" is saved at: ${image.path}]`,
+            text_elements: [],
+          },
+          { type: "localImage", path: image.path },
+        ],
+      });
+    });
+  }
 
   it("starts a new turn instead when the turn it meant to steer is no longer active", async () => {
     const NEXT = "0199e0e7-0000-7000-8000-0000000000f9";

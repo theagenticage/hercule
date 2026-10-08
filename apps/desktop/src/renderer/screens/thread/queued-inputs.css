@@ -31,7 +31,7 @@
 }
 /* Not in the book. A failed delivery's reason, or a failed Steer or Cancel,
    takes a line of its own under the row, lined up with the input's text
-   after the 14px clock and the 10px gap. The row wraps only for these lines:
+   after the 14px clock, the input's image tiles and the 10px gaps. The row wraps only for these lines:
    every other item keeps its width, and the text shrinks first. */
 .queued {
   flex-wrap: wrap;
@@ -39,7 +39,8 @@
 }
 .queued-note {
   flex-basis: 100%;
-  padding-left: 24px;
+  /* Set on the row, past the clock and any image tiles before the text. */
+  padding-left: var(--queued-note-indent);
 }
 .queued-error {
   color: var(--fail-ink);

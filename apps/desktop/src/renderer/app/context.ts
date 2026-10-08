@@ -6,7 +6,14 @@
  * set, with a fake bridge, and run the same routes.
  */
 import type { QueryClient } from "@tanstack/react-query";
-import { createLive, type HerculeClient, type Live } from "@hercule/client-core";
+import {
+  createLive,
+  createUploadQueue,
+  type HerculeClient,
+  type Live,
+  type UploadQueue,
+  UPLOAD_CONCURRENCY,
+} from "@hercule/client-core";
 import type { Bridge } from "../../ipc/bridge";
 import { createControllerClient } from "./controller-client";
 import { createPendingSubmissions, type PendingSubmissions } from "./pending-submissions";
@@ -15,8 +22,8 @@ import { createDesktopTokenStore } from "./token-store";
 
 /**
  * The controller whose URL is saved in the app's settings, a client for it,
- * the live connection to it, and what the user has not sent yet in each of
- * its threads.
+ * the live connection to it, what the user has not sent yet in each of its
+ * threads, and the uploads of the images attached to those.
  */
 export interface SavedController {
   /** The controller's origin, for example `http://127.0.0.1:4937`. */
@@ -32,6 +39,13 @@ export interface SavedController {
   readonly live: Live;
   /** What each thread's, Draft Thread's and assistant's composer holds and has not sent yet. */
   readonly pendingSubmissions: PendingSubmissions;
+  /**
+   * The uploads of the images on every composer's shelf, three at a time
+   * across the whole app. It lives here, beside the pending submissions, so
+   * an upload keeps running when the user leaves the thread it was attached
+   * in, and its result still reaches that thread's shelf.
+   */
+  readonly uploads: UploadQueue;
 }
 
 export interface RouterContext {
@@ -45,7 +59,7 @@ export interface RouterContext {
 /**
  * Returns the saved controller at `url`: a client that sends `token` and
  * stores any change to it through main, a live connection that is not
- * started yet, and no pending submissions.
+ * started yet, no pending submissions, and no uploads.
  */
 const buildSavedController = (
   url: string,
@@ -58,6 +72,11 @@ const buildSavedController = (
     client,
     live: createLive({ client, baseUrl: url }),
     pendingSubmissions: createPendingSubmissions(),
+    uploads: createUploadQueue({
+      upload: client.uploadAttachment,
+      deleteAttachment: client.deleteAttachment,
+      concurrency: UPLOAD_CONCURRENCY,
+    }),
   };
 };
 

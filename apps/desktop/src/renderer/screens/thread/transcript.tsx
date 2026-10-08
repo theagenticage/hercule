@@ -66,6 +66,11 @@ const USER_CHARS_PER_LINE = 80;
 const AGENT_LINE_HEIGHT = 22.4;
 /** The height of one line of a user's bubble, in CSS pixels: 14px text at a line height of 1.55. */
 const USER_LINE_HEIGHT = 21.7;
+/**
+ * The height one row of images adds above a user's bubble, in CSS pixels: a
+ * 210px tile at 4:3, then the 8px gap or margin under it.
+ */
+const SENT_IMAGE_ROW_HEIGHT = 166;
 
 /**
  * Estimates a block's height before it is measured, from the book's
@@ -77,7 +82,9 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
   switch (block.kind) {
     case "user":
       return (
-        40 + USER_LINE_HEIGHT * Math.max(1, Math.ceil(block.text.length / USER_CHARS_PER_LINE))
+        40 +
+        USER_LINE_HEIGHT * Math.max(1, Math.ceil(block.text.length / USER_CHARS_PER_LINE)) +
+        SENT_IMAGE_ROW_HEIGHT * Math.ceil(block.attachments.length / 2)
       );
     case "agent":
       return (
@@ -220,7 +227,15 @@ export function Transcript({
   const renderBlock = (block: ThreadBlock, onScreen: boolean): JSX.Element => {
     switch (block.kind) {
       case "user":
-        return <UserMessage text={block.text} at={block.at} timezone={timezone} today={today} />;
+        return (
+          <UserMessage
+            text={block.text}
+            attachments={block.attachments}
+            at={block.at}
+            timezone={timezone}
+            today={today}
+          />
+        );
       case "agent":
         return (
           <AgentMessage

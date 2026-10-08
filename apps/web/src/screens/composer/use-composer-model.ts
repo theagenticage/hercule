@@ -2,27 +2,38 @@ import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  addFilesToShelf,
   addWorkspacePicks,
   applyPicks,
   buildComposerFields,
   buildComposerPlaceholder,
   buildRecentModel,
   computeEffectiveConfig,
+  applyUploadOutcome,
+  describeSendBlock,
+  findExpiredShelfKeys,
+  markShelfItemsExpired,
+  markShelfItemUploading,
   parseRecentModels,
   pushRecent,
   queryKeys,
   findResumeBlockedReason,
   buildSubmission,
   readThreadConfig,
+  removeShelfItem,
   type ComposerFields,
   type ComposerPick,
   type HerculeClient,
+  type ImageFile,
+  type MessageDraft,
   type RecentModel,
+  type ShelfItem,
   type Thread,
   type ThreadCatalogs,
   type ThreadConfig,
   type ThreadKind,
   type ThreadPicks,
+  type UploadQueue,
 } from "@hercule/client-core";
 import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
 import { useComposerDraft } from "../../app/thread-drafts";
@@ -57,7 +68,15 @@ export interface ComposerModel {
   readonly fields: ComposerFields;
   readonly picks: ThreadPicks;
   readonly recent: readonly RecentModel[];
-  readonly message: string;
+  /** The unsent text and the images on the shelf. */
+  readonly message: MessageDraft;
+  /**
+   * Why the images stop the message from being sent, such as an upload still
+   * running or a model that does not accept images; `null` when they do not.
+   */
+  readonly attachmentBlock: string | null;
+  /** Why the files last attached were left off the shelf; `null` once a later attach or send succeeds. */
+  readonly refusal: string | null;
   readonly placeholder: string;
   readonly sendTip: string;
   /** Why the thread can take no input at all; null when it can. */
@@ -66,6 +85,10 @@ export interface ComposerModel {
   readonly sending: boolean;
   readonly error: Error | null;
   readonly setMessage: (text: string) => void;
+  /** Adds images to the shelf and starts their uploads. */
+  readonly attachFiles: (files: readonly ImageFile[]) => void;
+  readonly removeAttachment: (key: string) => void;
+  readonly retryAttachment: (key: string) => void;
   readonly pick: (...steps: readonly ComposerPick[]) => void;
   readonly submit: () => void;
   readonly stop: () => void;
@@ -81,19 +104,51 @@ export interface ComposerModel {
  * arrives late, such as after a login while the draft is open, fills in
  * whatever the user has not picked.
  *
- * The unsent message and picks are the thread's drafts, so they survive a
- * visit to one of the thread's subagents.
+ * The unsent message, its images and the picks are the thread's drafts, so
+ * they survive a visit to one of the thread's subagents. An image's upload
+ * starts as soon as it is attached, in the app's `uploads` queue; its result
+ * goes into the draft even when the composer has unmounted in the meantime.
+ * An uploaded image's bytes go into the query cache as its content, so the
+ * sent message shows it without downloading it again.
  */
 export function useComposerModel(
   thread: Thread,
   catalogs: ThreadCatalogs,
   client: HerculeClient,
+  uploads: UploadQueue,
   onSend?: () => void,
 ): ComposerModel {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [{ message, picks }, changeDraft] = useComposerDraft();
   const [recent, setRecent] = useState(readRecent);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const changeShelf = (change: (shelf: readonly ShelfItem[]) => readonly ShelfItem[]): void => {
+    changeDraft((draft) => ({
+      ...draft,
+      message: { ...draft.message, attachments: change(draft.message.attachments) },
+    }));
+  };
+  const startUpload = (item: ShelfItem): void => {
+    void uploads.add(item.key, item.file).then((outcome) => {
+      if (outcome.status === "cancelled") return;
+      if (outcome.status === "uploaded")
+        queryClient.setQueryData(queryKeys.attachmentContent(outcome.attachment.id), item.file);
+      changeShelf((shelf) => applyUploadOutcome(shelf, item.key, outcome));
+    });
+  };
+  // A sent message leaves the shelf, except images attached while it was in
+  // flight, which belong to the next message. An image that expired is marked
+  // on its tile, so the user knows which one to attach again.
+  const clearSentShelf = (sent: readonly ShelfItem[]): void => {
+    const sentKeys = new Set(sent.map((item) => item.key));
+    changeShelf((shelf) => shelf.filter((item) => !sentKeys.has(item.key)));
+    setRefusal(null);
+  };
+  const markExpiredImages = (error: unknown, sent: readonly ShelfItem[]): void => {
+    const expired = findExpiredShelfKeys(error, sent);
+    if (expired.length > 0) changeShelf((shelf) => markShelfItemsExpired(shelf, expired));
+  };
 
   const session = thread.kind === "active" ? thread.session : null;
   const base = readThreadConfig(thread);
@@ -115,16 +170,26 @@ export function useComposerModel(
     sendingRef.current = false;
   };
   const spawn = useMutation({
-    mutationFn: (payload: SessionSpawnInput) => client.session.spawn({ payload }),
-    onSuccess: (created) => {
+    mutationFn: (sent: {
+      readonly payload: SessionSpawnInput;
+      readonly shelf: readonly ShelfItem[];
+    }) => client.session.spawn({ payload: sent.payload }),
+    onSuccess: (created, sent) => {
       rememberRecentModel();
+      clearSentShelf(sent.shelf);
       void navigate({ to: "/threads/$sessionId", params: { sessionId: created.id } });
+    },
+    onError: (error, sent) => {
+      markExpiredImages(error, sent.shelf);
     },
     onSettled: releaseSend,
   });
   const input = useMutation({
-    mutationFn: (sent: { readonly id: string; readonly payload: SessionInputPayload }) =>
-      client.session.input({ params: { id: sent.id }, payload: sent.payload }),
+    mutationFn: (sent: {
+      readonly id: string;
+      readonly payload: SessionInputPayload;
+      readonly shelf: readonly ShelfItem[];
+    }) => client.session.input({ params: { id: sent.id }, payload: sent.payload }),
     onSuccess: async (_answer, sent) => {
       rememberRecentModel();
       // Clear the picks only after the updated session is in the cache, so the
@@ -133,11 +198,18 @@ export function useComposerModel(
       // Text typed while the message was in flight is a new message, so the
       // box is cleared only while it still holds what was sent.
       changeDraft((draft) => ({
-        message: draft.message === sent.payload.text ? "" : draft.message,
+        message: {
+          ...draft.message,
+          text: draft.message.text === sent.payload.text ? "" : draft.message.text,
+        },
         picks: {},
       }));
+      clearSentShelf(sent.shelf);
       void queryClient.invalidateQueries({ queryKey: queryKeys.inputs(sent.id) });
       onSend?.();
+    },
+    onError: (error, sent) => {
+      markExpiredImages(error, sent.shelf);
     },
     onSettled: releaseSend,
   });
@@ -152,6 +224,8 @@ export function useComposerModel(
     picks,
     recent,
     message,
+    attachmentBlock: describeSendBlock(message.attachments, fields.model),
+    refusal,
     placeholder: buildComposerPlaceholder({
       readOnly,
       busy,
@@ -165,7 +239,30 @@ export function useComposerModel(
     sending: spawn.isPending || input.isPending,
     error: spawn.error ?? input.error ?? stopAgent.error,
     setMessage: (text) => {
-      changeDraft((draft) => ({ ...draft, message: text }));
+      changeDraft((draft) => ({ ...draft, message: { ...draft.message, text } }));
+    },
+    attachFiles: (files) => {
+      // The shelf hands out each image's key as it adds it, so the images are
+      // added once here, against the shelf this render holds, and not inside
+      // the draft update, which React may run twice.
+      const added = addFilesToShelf(message.attachments, files, fields.model);
+      const fresh = added.shelf.slice(message.attachments.length);
+      setRefusal(added.refusals.length === 0 ? null : added.refusals.join(" "));
+      if (fresh.length === 0) return;
+      changeShelf((shelf) => [...shelf, ...fresh]);
+      fresh.forEach(startUpload);
+    },
+    removeAttachment: (key) => {
+      const item = message.attachments.find((candidate) => candidate.key === key);
+      if (item === undefined) return;
+      uploads.discard(item);
+      changeShelf((shelf) => removeShelfItem(shelf, key));
+    },
+    retryAttachment: (key) => {
+      const item = message.attachments.find((candidate) => candidate.key === key);
+      if (item === undefined) return;
+      changeShelf((shelf) => markShelfItemUploading(shelf, key));
+      startUpload(item);
     },
     // Each pick is compared with the thread's own configuration, not with
     // earlier picks, so picking the configured value again clears the pick.
@@ -184,14 +281,15 @@ export function useComposerModel(
         thread.kind === "draft"
           ? addWorkspacePicks(picks, fields.workspace.value, catalogs.workspaces ?? [])
           : picks,
-        { text: message },
+        message,
       );
       sendingRef.current = true;
+      const shelf = message.attachments;
       switch (sent.kind) {
         case "spawn":
-          return spawn.mutate(sent.input);
+          return spawn.mutate({ payload: sent.input, shelf });
         case "input":
-          return input.mutate({ id: sent.sessionId, payload: sent.payload });
+          return input.mutate({ id: sent.sessionId, payload: sent.payload, shelf });
       }
     },
     stop: () => {

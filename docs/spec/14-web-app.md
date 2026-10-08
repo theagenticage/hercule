@@ -156,7 +156,7 @@ Ticket #18 pinned a 30-day rolling session cookie; the later ticket #19 and ADR 
 *(Pinned 2026-09-04, [#58](https://github.com/theagenticage/hercule/issues/58).)* The **Content-Security-Policy** the controller sends with the bundle, as one response header on `index.html` and on every file under `/assets/`:
 
 ```
-default-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:4939 http://127.0.0.1:4940 http://127.0.0.1:4941 http://127.0.0.1:4942 http://127.0.0.1:4943 http://127.0.0.1:4944 http://127.0.0.1:4945 http://127.0.0.1:4946 http://127.0.0.1:4947 http://127.0.0.1:4948; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+default-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:4939 http://127.0.0.1:4940 http://127.0.0.1:4941 http://127.0.0.1:4942 http://127.0.0.1:4943 http://127.0.0.1:4944 http://127.0.0.1:4945 http://127.0.0.1:4946 http://127.0.0.1:4947 http://127.0.0.1:4948; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
 ```
 
 *(Amended 2026-09-05, [#61](https://github.com/theagenticage/hercule/issues/61).)* `connect-src` was `'self'` alone when it was pinned, which blocks the one fetch the "local" runner alias below is built on: the app asks each runner's own loopback port who is there. The ten ports are the relaxation, and they are **named one by one on purpose**. `http://127.0.0.1:*` was the obvious writing and is the wrong one: a wildcard port lets anything that runs in this page speak to every service on the reader's machine. The threat this policy exists for is a script that runs in the app and reads the token; a script that could also reach every local port would be a far larger prize.
@@ -170,6 +170,8 @@ The policy has never covered top-level navigation, before this change or after i
 Everything the app needs it carries: fonts are self-hosted ([../design-language.md](../design-language.md) §Typography), and no script is ever inline. `img-src` allows `data:` for inline icons and avatars. `vite build` emits no inline script, so `script-src 'self'` holds with no exception and MUST keep holding: a build that needs an inline script is a build configuration to fix, never a directive to loosen. `style-src` is unqualified for the same reason; if a shipped component library turns out to need inline `style` attributes (Radix's popper is the known candidate) it may add `'unsafe-inline'` there, and only there, with a note saying why. No other directive relaxes. As of v1 nothing needs it: React writes element styles through the CSSOM, which `style-src` does not govern, and the marks legend's popover renders correctly under the served policy in the compiled binary. Every bundle response also carries `X-Content-Type-Options: nosniff`, so a file the type table does not name is not sniffed into a script.
 
 *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* `style-src` is now `'self' 'unsafe-inline'`, the relaxation the paragraph above allows, and "as of v1 nothing needs it" no longer holds. The workflow editor needs it: CodeMirror puts its base styles in a `<style>` element at run time, which `style-src 'self'` blocks, so the editor would render unstyled. Mounting the editor in a shadow root would avoid the change, but only because today's browsers do not apply `style-src` to constructed style sheets; that is a gap, not a guarantee. An injected style still cannot load anything from another origin, because `style-src`, `img-src` and `font-src` name no other origin. `script-src` is untouched, and nothing else relaxes: the `connect-src` ports and this are the policy's two relaxations.
+
+*(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465).)* `img-src` gains `blob:`, a third relaxation. The thread shows the images attached to prompts, and the API takes the bearer token in a header, never in a URL, so `<img src="/api/...">` cannot authenticate. Instead `@hercule/client-core` fetches an image's bytes with the bearer (`attachment.readContent`) and returns a `Blob`, and the app shows it through an object URL, which is a `blob:` URL. A `blob:` URL names bytes the page itself holds; it cannot load anything from another origin, so the threat this policy exists for gains nothing. The composer's shelf shows a pasted or picked file the same way, before it is uploaded.
 
 ## Performance guardrails
 
@@ -310,7 +312,7 @@ The Codex / t3-code shape: a centered column (800px), ~~a mono timestamp line~~ 
 
 *(Amended 2026-10-07, [#459](https://github.com/theagenticage/hercule/issues/459), [ADR 0039](../adr/0039-workspaces-preserve-runner-local-git-state-and-human-work.md).)* The workspace and branch rows below remain authoritative except where this amendment supersedes them. Explicit stored Thread defaults remain honored; with none set, a project-level coding draft chooses **New workspace**, including a single-repo project. **Use main workspace** explains shared working files, and **New workspace** explains separate working files on a new branch. A workspace's `+` explicitly shares its files. Starting a Thread in main files never switches its branch; the branch displayed is an observation, not a branch-switch request. For a new workspace, choose current committed state, a named local branch or a fetched remote branch/default explicitly, according to spec 03 section 6.8. A local branch never silently selects a same-named remote branch. Refresh observed facts at workspace/branch decisions; stale observations show their age. No idle polling is introduced.
 
-The web keeps its existing routes and workspace controls compatible; complete workspace-management UI remains outside this change. Existing branch, retention and error presentation uses the same client-core interpretation as the desktop. The removed composer attachment form stays removed; the public attachment operation is available through the CLI and the desktop onboarding flow.
+The web keeps its existing routes and workspace controls compatible; complete workspace-management UI remains outside this change. Existing branch, retention and error presentation uses the same client-core interpretation as the desktop. The removed composer form for adopting a checkout stays removed; `workspace.attach`, the operation that adopts one, is available through the CLI and the desktop onboarding flow. *(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465): this sentence said "attachment" for an adopted checkout; that word now means an image in a prompt.)*
 
 | Selector | Menu | After start |
 |---|---|---|
@@ -337,6 +339,36 @@ The web keeps its existing routes and workspace controls compatible; complete wo
 - Sidebar (244px): project header `10px 4px 2px 8px`, 12.5px `--w-emph`, the count mono 11px `--faint`, its `+` a 20px square always visible; a workspace label `6px 4px 1px 8px`, mono 11px `--faint`, its `+` at 0 opacity until hover; rows `4px 8px 4px 14px`; the draft row `· New thread · draft` in `--muted`.
 
 **Open:** the voice button is a placeholder for dictation into the composer, kept for the shape; no v1 feature is specced behind it.
+
+#### Images in prompts
+
+*(Added 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465).)* The user can attach images to a message: PNG, JPEG, GIF or WebP, at most 10 MiB each and 10 per message. The operations are in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §2. Everything that interprets an image (the size label, the type and size check, the shelf's state, the reason Send is blocked, the upload queue) is in `@hercule/client-core` with its own tests; the components only draw it. The desktop app draws the same behaviour in its own design system ([./17-desktop-app.md](./17-desktop-app.md)).
+
+**Three ways in.** Paste (the clipboard's files), drag and drop onto the composer card, and the row's `+` attach, which opens a file picker that takes several files and offers only the four types. Each accepted file goes on the **shelf** and starts uploading at once. At most three uploads run at a time, oldest first; a failed upload is not retried by itself.
+
+**The shelf, not a chip.** Nothing is inserted into the text. Every image is a tile on the shelf, and the text the user types is sent as it is. *(Decided 2026-10-08 by Rogier: both composers are a `<textarea>`, and an inline chip needs a rich editor. Follow-up [#466](https://github.com/theagenticage/hercule/issues/466).)*
+
+- **Shelf**: above the textarea, inside the card; a row that wraps, gap 8px, 8px under it; absent when empty.
+- **Tile**: 64×64, radius 8, a 1px `--line` border, the image `object-fit: cover`. The whole tile is a button, "Preview <name>", with `cursor: zoom-in`. Its `title` holds the name and the size.
+- **Remove**: a 20px round button inset 4px from the top-right corner, a dark translucent background, a 12px ×, `aria-label="Remove <name>"`, always visible, with the app's focus ring.
+- **Bottom strip**, one short word on one line, only while one of these holds: "Uploading…"; "Failed" with a retry button, `aria-label="Retry upload for <name>"`; "Expired"; "Unsupported". The tile's tooltip holds the whole reason: why the upload failed, "This image expired; attach it again.", or "Not supported by <model>". There is no caption under the tiles. *(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465): the strip held the whole sentence, which does not fit a 64px tile.)*
+- **Size labels** read "436 KB" or "3.2 MB", never "0 KB".
+
+**Refusals are said, never silent.** A file of another type, a file over 10 MiB, an eleventh image, or an image for a model that does not accept images is refused with one inline line in the composer's notice slot, naming the file. The line goes away on the next successful add or send.
+
+**The model decides.** When the picked model's `imageInput` is `null` ([./06-providers.md](./06-providers.md) §3.3), `+` attach is disabled and its tooltip says why, and a pasted or dropped image is refused with the notice. If images are already on the shelf when the user picks such a model, the shelf stays: each tile's strip shows "Unsupported", its tooltip "Not supported by <model>", and Send is disabled until the images are removed or the model is switched back.
+
+**Send waits.** Send is disabled, with the reason shown, while an upload runs, while one has failed, while one has expired, or while the model refuses images. A message may be images alone, with no text. The Draft Thread's first message may carry images too, and its title falls back to the first image's name.
+
+**Expired.** An upload no message has used is deleted after 24 hours. The Message Draft lives in memory only, so this shows only when the user sends: the controller answers `validation` at path `["attachments", i]`, and the composer marks that tile "Expired", with "This image expired; attach it again." in its tooltip.
+
+**Drag over.** While files are dragged over it, the card shows a dashed outline and the overlay "Drop images to attach".
+
+**The bubble.** A user's message shows its images above its text, in a grid of at most two columns and at most 210px wide; each tile 4:3, radius 8, a `--line` hairline border. The images load through `attachment.readContent` after a reload and in a second client alike, because the stream carries their references (`detail.attachments`). A queued input shows its images as small tiles in its row. The text the agent received has a path line per image added by the runner; the bubble shows only what the user wrote.
+
+**The lightbox.** Clicking a tile, on the shelf or in a bubble, opens a `role="dialog"` over a scrim, like the app's other dialogs. The image is at most 92vw × 86vh, with the caption "<name> (i/n)". ← and → move between the images of that shelf or message; Esc or a click on the scrim closes it.
+
+**Object URLs are revoked** when a tile is removed, when its message is sent, and when the component unmounts.
 
 ## The check-in view
 

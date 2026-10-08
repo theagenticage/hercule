@@ -62,8 +62,8 @@ const FACTS: RunnerFacts = {
 };
 
 const MODELS: ReadonlyArray<ModelDescriptor> = [
-  { slug: "clever", name: "Clever", isDefault: true, options: [] },
-  { slug: "fast", name: "Fast", options: [] },
+  { slug: "clever", name: "Clever", imageInput: { maxBytes: null }, isDefault: true, options: [] },
+  { slug: "fast", name: "Fast", imageInput: { maxBytes: null }, options: [] },
 ];
 
 /**

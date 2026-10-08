@@ -12,8 +12,13 @@ import { buildRunner } from "./workspaces.testing";
 const CLAUDE = buildInstance("claude-code", "Claude Code", [
   buildSnapshot({
     models: [
-      { slug: "default", name: "Default (recommended)", options: [] },
-      { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
+      {
+        slug: "default",
+        name: "Default (recommended)",
+        imageInput: { maxBytes: null },
+        options: [],
+      },
+      { slug: "claude-opus-5", name: "Claude Opus 5", imageInput: { maxBytes: null }, options: [] },
     ],
   }),
 ]);

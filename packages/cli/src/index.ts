@@ -121,7 +121,12 @@ const runOperation = async (
   home: string,
   io: Io,
 ): Promise<number> => {
-  const args = await parseArguments(command, tokens, buildStdinReader(command, tokens, io));
+  const args = await parseArguments(
+    command,
+    tokens,
+    buildStdinReader(command, tokens, io),
+    io.isTty(),
+  );
 
   let url: string;
   let token: string | null = null;

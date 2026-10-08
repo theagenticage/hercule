@@ -100,6 +100,7 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
     async () => {
       const context: ProviderRunnerContext = {
         cwd: null,
+        attachmentsDir: null,
         home: createTemporaryHome(),
         binary: binary!,
         env: { PATH: process.env["PATH"] ?? "" },
@@ -189,6 +190,7 @@ const authed =
           claudeCode.probe(
             {
               cwd: null,
+              attachmentsDir: null,
               home: CONFIG_DIR,
               binary,
               env: process.env,
@@ -302,6 +304,7 @@ const buildContext = (
   herculeTool: ProviderRunnerContext["herculeTool"] = prepareTool(),
 ): ProviderRunnerContext => ({
   cwd,
+  attachmentsDir: null,
   home: CONFIG_DIR,
   binary: binary!,
   env: {
@@ -710,6 +713,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
     });
     const context: ProviderRunnerContext = {
       cwd: scratch,
+      attachmentsDir: null,
       home,
       binary: binary!,
       // `HOME` points into the temporary directory too, so nothing the CLI
@@ -996,6 +1000,7 @@ const replayFixture = async (
       { ...SPEC, modelSelection: { model: "claude-sonnet-5-5", options: {} } },
       {
         cwd: "/workspace",
+        attachmentsDir: null,
         home: "/var/hercule/runner/providers/replay",
         binary: "/usr/local/bin/claude",
         env: { PATH: "/usr/bin" },

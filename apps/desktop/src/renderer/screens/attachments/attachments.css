@@ -1,0 +1,248 @@
+/* Attached images: the composer's shelf, the drop overlay, the user's bubble
+   and the lightbox. The Bureau book draws none of them, so every rule here
+   is not in the book. They take its tokens: hairline edges are inset box
+   shadows in `--line`, as `.stop` draws its edge, and the text is the
+   book's type scale.
+
+   A tile's corner is `--r-sm`. The strip and the remove button sit on the
+   image itself, so their dark glaze has no token and is the same in every
+   theme: an image looks the same in each. */
+
+/* ---------- The shelf ---------- */
+/* Above the message field, inside the card. The tiles' left edge lines up
+   with the field's text, 16px in; the field's own 8px margin is the space
+   under the shelf. */
+.shelf {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 16px 0;
+  list-style: none;
+}
+.shelf-tile {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  flex: none;
+}
+.shelf-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: zoom-in;
+}
+/* The hairline is drawn over the image, so a white screenshot keeps its
+   edge. */
+.shelf-preview::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--line);
+  pointer-events: none;
+}
+.shelf-preview img,
+.bubble-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.shelf-tile[data-status="uploading"] img {
+  opacity: 0.6;
+}
+/* Bureau has no warning colour, so each state that stops the send takes
+   the failure colour. */
+.shelf-tile:not([data-status="uploading"], [data-status="uploaded"]) .shelf-preview::after {
+  box-shadow: inset 0 0 0 1.5px var(--fail);
+}
+/* The global ring takes `--r-xs`; on a tile it follows the tile's corner. */
+.shelf-preview:focus-visible,
+.bubble-image:focus-visible {
+  border-radius: var(--r-sm);
+}
+.shelf-strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+  padding: 0 2px 0 4px;
+  border-radius: 0 0 var(--r-sm) var(--r-sm);
+  background: oklch(0.2 0.01 165 / 0.72);
+  color: oklch(0.98 0 0);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  letter-spacing: -0.02em;
+  /* The UI font has a width axis. At its normal width "Unsupported" is 67px,
+     wider than the 64px tile; at 87.5% it is 59px and fits. */
+  font-stretch: 87.5%;
+  pointer-events: none;
+}
+/* With no retry button beside it, the word sits in the middle of the strip. */
+.shelf-tile:not([data-status="failed"]) .shelf-strip {
+  padding-inline: 1px;
+  text-align: center;
+}
+.shelf-tile:not([data-status="uploading"]) .shelf-strip {
+  background: color-mix(in oklab, var(--fail) 88%, black);
+}
+/* The strip holds one short word; the tooltip holds the whole reason. */
+.shelf-strip-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.shelf-retry {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: inherit;
+  pointer-events: auto;
+}
+.shelf-retry:hover {
+  background: oklch(1 0 0 / 0.2);
+}
+.shelf-retry:focus-visible,
+.shelf-remove:focus-visible {
+  border-radius: 50%;
+}
+.shelf-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: oklch(0.2 0.01 165 / 0.72);
+  color: oklch(0.98 0 0);
+  transition: background var(--dur-1);
+}
+.shelf-remove:hover {
+  background: oklch(0.2 0.01 165 / 0.9);
+}
+
+/* ---------- Dropping images on the composer ---------- */
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  /* Opaque, so the field and the row under it do not show through the words. */
+  background: var(--surface);
+  outline: 1.5px dashed var(--accent);
+  outline-offset: -5px;
+  color: var(--accent-ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  pointer-events: none;
+}
+
+/* ---------- The user's bubble ---------- */
+/* Above the bubble's text, at the bubble's right edge: two columns at most,
+   each tile up to 210px wide, at 4:3. */
+.bubble-images {
+  display: grid;
+  grid-template-columns: repeat(var(--bubble-columns), minmax(0, 210px));
+  justify-content: end;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.bubble-image {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  cursor: zoom-in;
+}
+.bubble-image::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--line);
+  pointer-events: none;
+}
+
+/* ---------- The lightbox ---------- */
+/* Centred in the window, rather than 18vh from its top as the other glass
+   dialogs are, so the largest image fits. */
+.glass-dialog.lightbox {
+  align-items: center;
+  gap: 8px;
+  max-width: 92vw;
+  max-height: none;
+  margin: auto;
+  padding: 8px 8px 10px;
+}
+.lightbox-frame {
+  display: grid;
+  place-items: center;
+  min-width: 240px;
+  min-height: 180px;
+}
+.lightbox-image {
+  display: block;
+  max-width: calc(92vw - 16px);
+  max-height: 86vh;
+  border-radius: var(--r-md);
+}
+/* Until its bytes load, the image has no source and takes no room. */
+.lightbox-image:not([src]) {
+  display: none;
+}
+.lightbox-caption {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* ---------- A queued input's row ---------- */
+/* Square tiles between the clock and the text, with the same hairline edge
+   as the shelf's and the bubble's. */
+.queued-images {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+.queued-image {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  overflow: hidden;
+  border-radius: var(--r-xs);
+  background: var(--sunken);
+}
+.queued-image::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.queued-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

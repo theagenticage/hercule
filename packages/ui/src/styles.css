@@ -103,6 +103,9 @@
   --scrim-ink: rgb(23, 26, 33);
   --scrim-strength: 22%;
   --scrim: color-mix(in srgb, var(--scrim-ink) var(--scrim-strength), transparent);
+  /* The strong scrim behind a lightbox. It is near-black in both themes, so
+     the image stands apart from the page whatever its own colours are. */
+  --scrim-strong: rgba(10, 11, 15, 0.78);
 
   /* Syntax highlighting colours for code, such as a workflow's YAML. Keys are
      blue, quoted strings are olive, and comments and punctuation are grey in
@@ -226,6 +229,7 @@
   --color-project-hercule: var(--project-hercule);
   --color-project-ops: var(--project-ops);
   --color-scrim: var(--scrim);
+  --color-scrim-strong: var(--scrim-strong);
 
   --font-sans: var(--sans);
   --font-mono: var(--mono);

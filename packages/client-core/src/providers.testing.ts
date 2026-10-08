@@ -89,6 +89,6 @@ export const buildSnapshot = (
   harnessVersion: "2.1.263",
   versionVerdict: "ok",
   auth: { status: "ok", identity: "rogier@example.com", planLabel: "Claude Max" },
-  models: [{ slug: "default", name: "Default", options: [] }],
+  models: [{ slug: "default", name: "Default", imageInput: { maxBytes: null }, options: [] }],
   ...fields,
 });

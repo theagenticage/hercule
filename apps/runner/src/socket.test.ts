@@ -1,4 +1,3 @@
-import { makeTestWorkspaces } from "./workspaces/testing";
 /**
  * Tests the runner's end of the socket, mainly which controller it accepts.
  *
@@ -18,6 +17,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Logger, PubSub, Schema, Stream } from "effect";
 import {
   AGENT_STEPS_CAPABILITY,
+  ATTACHMENTS_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   PROTOCOL_VERSION,
   RunnerToController,
@@ -55,8 +55,9 @@ import type { ProviderAdapter } from "./providers";
 import { makeLogins, type Logins } from "./providers/login";
 import { makeSupervising } from "./sessions/supervisor";
 import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
-
 import * as workspaceFixtures from "./workspaces/testing";
+import { makeTestWorkspaces } from "./workspaces/testing";
+import { makeAttachmentCache } from "./attachments";
 
 /** This machine's facts. These tests are not about the probe. */
 const FACTS: RunnerFacts = {
@@ -334,6 +335,11 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
         headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
         providersDir: PROVIDERS_DIR,
         scratchDir: SCRATCH_DIR,
+        attachmentsDir: "/nonexistent/hercule-runner-attachments",
+        attachments: makeAttachmentCache({
+          controllerUrl: "https://controller.example:4938",
+          credential: "test",
+        }),
         workspaces,
         workspaceSteps: IDLE_STEPS,
         socketPath: `${STORAGE_DIR}/daemon.sock`,
@@ -561,13 +567,16 @@ describe("which controller a runner accepts", () => {
     expect(settled, "the runner ended a connection it should have kept").toBeUndefined();
     // The hello lists the workspace actions this build implements, so the
     // controller pins a run that commits only to a runner that can, the frame
-    // that reports the end of a device login, and agent steps.
+    // that reports the end of a device login, agent steps, and fetching the
+    // images of an input, so the controller sends images only to a runner
+    // that fetches them.
     expect(stub.received[0]).toMatchObject({
       _tag: "runnerHello",
       capabilities: expect.arrayContaining([
         "action:git.commit",
         LOGIN_ENDED_CAPABILITY,
         AGENT_STEPS_CAPABILITY,
+        ATTACHMENTS_CAPABILITY,
       ]) as unknown,
     });
 
@@ -1058,6 +1067,7 @@ describe("session frames on one connection", () => {
     const pending = runConnection(buildPin(stub), {
       providersDir: joinPath(root, "providers"),
       scratchDir: joinPath(root, "scratch"),
+      attachmentsDir: joinPath(root, "attachments"),
       sessions: makeSupervising([fake.adapter]),
       workspaceSteps: makeWorkspaceSteps({
         storageDir,

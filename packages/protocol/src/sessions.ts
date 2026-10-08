@@ -9,6 +9,7 @@
  */
 import { Schema } from "effect";
 
+import { AttachmentReference } from "./attachments";
 import { OutputSchema } from "./output-schema";
 import {
   Fact,
@@ -217,15 +218,24 @@ export const SessionBinding = Schema.Struct({
 export type SessionBinding = Schema.Schema.Type<typeof SessionBinding>;
 
 /**
- * One turn's input. It carries only text for now. Attachments can be added
- * later without breaking this shape (spec 16 section B).
+ * One turn's input: its text, and the images attached to it.
  * `modelSelection` is the session's current model, sent on every frame. A
  * harness accepts a model change only on the input that starts a turn, so an
  * adapter applies it there and ignores it the rest of the time.
  */
 export const TurnInput = Schema.Struct({
+  /** Empty when the input is images alone. */
   text: Schema.String,
   modelSelection: Schema.optionalKey(ModelSelection),
+  /**
+   * The input's images, in the order the user attached them. These are
+   * references, never bytes: the runner fetches each image over HTTP before
+   * it hands the turn to the harness, so a large image never holds up the
+   * socket. Sent only to a runner whose hello lists `ATTACHMENTS_CAPABILITY`.
+   */
+  attachments: Schema.optionalKey(
+    Schema.Array(AttachmentReference).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  ),
   /**
    * The agent step this input runs, set only on the input that starts an
    * agent step's turn. The runner reports how that turn ends as the step's
@@ -596,6 +606,12 @@ const TurnCompleted = defineEvent("turn.completed", {
 /**
  * `detail` stays Json: each adapter decides its shape per kind, and fixing
  * twelve shapes here would limit what each harness can report in future.
+ *
+ * One field is shared by every adapter: a `user_message` whose input had
+ * images carries them in `detail.attachments`, in the order the user attached
+ * them, each as `{ id, name, mimeType, sizeBytes }`. These are references
+ * only; a client reads the bytes through `attachment.readContent`. The field
+ * is absent when the input had no images.
  */
 const itemFields = {
   ...attribution,

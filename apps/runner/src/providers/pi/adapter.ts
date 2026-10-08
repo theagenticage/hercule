@@ -27,10 +27,16 @@ import type {
   SessionBinding,
   SessionSpec,
   SubagentId,
-  TurnInput,
   TurnState,
 } from "@hercule/protocol";
-import type { ProviderAdapter, ProviderRunnerContext, UserMaterial } from "../index";
+import type {
+  AdapterTurnInput,
+  LocalAttachment,
+  ProviderAdapter,
+  ProviderRunnerContext,
+  UserMaterial,
+} from "../index";
+import { appendAttachmentPaths, readAttachmentBase64 } from "../attachments";
 import { buildUserMessage } from "../events";
 import { buildFailedProbe } from "../probe";
 import { killProcessesHolding, runProcess, spawnPi, type Run } from "../process";
@@ -179,6 +185,23 @@ const MAX_RUNNING_SUBAGENTS = 4;
  * start another (spec 06 section 13.7).
  */
 const MAX_SUBAGENT_DEPTH = 2;
+
+/**
+ * Reads each image as base64, in pi's `images` shape. Fails with a message
+ * naming the image when a cached file cannot be read. pi's size limit is not
+ * checked here: the probe declares it, and the controller never sends a
+ * larger image.
+ */
+const readPiImages = (
+  attachments: ReadonlyArray<LocalAttachment>,
+): Effect.Effect<ReadonlyArray<Record<string, string>>, string> =>
+  Effect.forEach(attachments, (attachment) =>
+    Effect.map(readAttachmentBase64(attachment), (data) => ({
+      type: "image",
+      data,
+      mimeType: attachment.mimeType,
+    })),
+  );
 
 /** A session this adapter hosts, and the adapter's state for its pi processes. */
 interface Held {
@@ -1397,9 +1420,10 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         return binding;
       }),
 
-    sendInput: (sessionId: string, input: TurnInput): Effect.Effect<SendResult, string> =>
+    sendInput: (sessionId: string, input: AdapterTurnInput): Effect.Effect<SendResult, string> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
+        const images = yield* readPiImages(input.attachments ?? []);
         const generation = held.inputGeneration;
         if (input.modelSelection !== undefined)
           yield* selectModel(held, input.modelSelection, generation);
@@ -1415,7 +1439,11 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         // whatever turn id the state holds at that moment.
         const turnId = (root.state.turnId ??= crypto.randomUUID());
         yield* Effect.tapError(
-          root.rpc.send({ type: steered ? "steer" : "prompt", message: input.text }),
+          root.rpc.send({
+            type: steered ? "steer" : "prompt",
+            message: appendAttachmentPaths(input.text, input.attachments),
+            ...(images.length === 0 ? {} : { images }),
+          }),
           () =>
             // A prompt pi rejected opened no turn. Leaving its id would make
             // the next input steer a turn that never started.
@@ -1432,6 +1460,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           sessionId,
           turnId,
           text: input.text,
+          attachments: input.attachments,
           steered,
           providerRefs: { nativeSessionId: held.binding.nativeSessionId },
         })) {

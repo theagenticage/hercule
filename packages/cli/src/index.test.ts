@@ -163,6 +163,16 @@ describe("hercule session input --help", () => {
     );
   });
 
+  it("offers --image, and says the text may then be empty", async () => {
+    const out = await runHelp("session", "input");
+    expect(readBetweenSections(out, "flags:", "stdin:")).toMatch(
+      /--image <path>\s+optional; repeatable/,
+    );
+    expect(readBetweenSections(out, "stdin:", "returns:").replace(/\s+/g, " ")).toContain(
+      "With --image it may be empty, and when stdin is a terminal it is not read and the text is empty.",
+    );
+  });
+
   it("says the text is required on stdin and that there is no --text flag", async () => {
     const out = await runHelp("session", "input");
     const block = readBetweenSections(out, "stdin:", "returns:");
@@ -442,6 +452,37 @@ describe("a stdin field with no pipe", () => {
     expect(base.stderr.join("\n")).toContain(
       'echo "<description>" | hercule task create --title x',
     );
+  });
+
+  it("sends the images with empty text when --image is given, without reading stdin", async () => {
+    writeFileSync(join(home, "shot.png"), "PNG!");
+    const attachmentId = buildId("bbbbbbb2");
+    const fetch = stubFetch((request) =>
+      request.path === "/api/v1/attachments"
+        ? Response.json(
+            { id: attachmentId, name: "shot.png", mimeType: "image/png", sizeBytes: 4 },
+            { status: 201 },
+          )
+        : { inputId: buildId("ccccccc3"), result: "opened" },
+    );
+    const base = stubIo({
+      env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" },
+      fetch,
+    });
+    const io = {
+      ...base,
+      isTty: () => true,
+      stdin: () => Promise.reject(new Error("stdin was read at a terminal")),
+    };
+    const sessionId = buildId("aaaaaaa1");
+    const argv = ["session", "input", sessionId, "--image", join(home, "shot.png")];
+
+    expect(await main(["--home", home, ...argv], io)).toBe(0);
+    expect(fetch.calls.at(-1)).toMatchObject({
+      method: "POST",
+      path: `/api/v1/sessions/${sessionId}/input`,
+      body: { text: "", attachments: [attachmentId] },
+    });
   });
 });
 

@@ -224,7 +224,19 @@ export {
   SubagentStatus,
   Usage,
   UsageReport,
+  EMPTY_PROMPT_MESSAGE,
+  MAX_INPUT_ANSWER_WAIT,
+  refuseEmptyPrompt,
 } from "./groups/session";
+export {
+  Attachment,
+  AttachmentId,
+  IMAGE_MIME_TYPES,
+  ImageMimeType,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_NAME_LENGTH,
+  MAX_ATTACHMENTS_PER_INPUT,
+} from "./groups/attachment";
 export {
   INPUT_SORT_FIELDS,
   INPUT_SOURCES,
@@ -234,6 +246,7 @@ export {
   InputSource,
   InputStatus,
   InputUpdatePayload,
+  refuseEmptyInputUpdate,
 } from "./groups/input";
 export { StructuredResult, TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
 export { OwnerKind, SECRET_SORT_FIELDS, SecretFilter, SecretRef } from "./groups/secret";

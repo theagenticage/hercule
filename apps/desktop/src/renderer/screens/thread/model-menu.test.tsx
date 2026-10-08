@@ -30,7 +30,15 @@ const WORK_INSTANCE: ProviderInstance = {
     {
       ...SNAPSHOT,
       auth: { status: "ok", identity: "work@example.com", planLabel: "Claude Pro" },
-      models: [{ slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] }],
+      models: [
+        {
+          slug: "claude-haiku-5",
+          name: "Claude Haiku 5",
+          imageInput: { maxBytes: null },
+          isDefault: true,
+          options: [],
+        },
+      ],
     },
   ],
 };
@@ -46,6 +54,7 @@ const MANY_INSTANCE: ProviderInstance = {
         ...["4.1", "4.2", "4.3", "4.4", "4.5"].map((version) => ({
           slug: `claude-haiku-${version}`,
           name: `Claude Haiku ${version}`,
+          imageInput: { maxBytes: null },
           options: [],
         })),
       ],

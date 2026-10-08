@@ -8,16 +8,26 @@
  * derived from `api`, so an operation added to the contract appears here with
  * no edit.
  */
-import { api } from "@hercule/contract";
-import { Context, Effect, Result } from "effect";
+import { api, MAX_INPUT_ANSWER_WAIT, type Attachment } from "@hercule/contract";
+import { Context, Duration, Effect, Result } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import type * as HttpApi from "effect/unstable/httpapi/HttpApi";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 import type * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import type { ImageFile } from "./attachments/files";
 import { ApiError, toClientError } from "./errors";
 import type { TokenStore } from "./token-store";
+
+/**
+ * The longest the controller takes to answer `session.input` or `input.steer`,
+ * in milliseconds: the contract's `MAX_INPUT_ANSWER_WAIT` as a plain number,
+ * for a client that writes no Effect code. A client gives those two requests
+ * a time limit above this, so it never gives up on a request the controller
+ * is still working on.
+ */
+export const MAX_INPUT_ANSWER_WAIT_MS = Duration.toMillis(MAX_INPUT_ANSWER_WAIT);
 
 /** The derived client, with every Effect method turned into a promise method. */
 type Promisified<T> = {
@@ -48,6 +58,26 @@ export type HerculeClient = Operations & {
   readonly presentToken: (token: string | null) => void;
   /** Returns the current bearer token, or `null` when there is none. */
   readonly getToken: () => string | null;
+  /**
+   * Uploads one image with `attachment.create` and returns its record. The
+   * file's bytes are the request body; the controller reads the image type
+   * from them. Fails with the same errors as any other call.
+   */
+  readonly uploadAttachment: (file: ImageFile) => Promise<Attachment>;
+  /**
+   * Reads an image's bytes with `attachment.readContent`, as a `Blob` whose
+   * type is the image's type, ready for `URL.createObjectURL`. The bearer
+   * token goes in a header, as on every call, never in a URL. Fails with the
+   * same errors as any other call.
+   */
+  readonly readAttachmentContent: (id: string) => Promise<Blob>;
+  /**
+   * Deletes an image the user uploaded and no message has used yet, with
+   * `attachment.delete`. Fails with `not_found` for an image that a message
+   * uses, that someone else uploaded, or that is already gone, and with the
+   * same errors as any other call.
+   */
+  readonly deleteAttachment: (id: string) => Promise<void>;
 };
 
 /**
@@ -242,10 +272,31 @@ export const createClient = (options: ClientOptions): HerculeClient => {
     });
   };
 
+  let readContentCall: Call | undefined;
+
   const client: Record<string, unknown> = {
     setToken,
     presentToken,
     getToken: () => token,
+    uploadAttachment: async (file: ImageFile) =>
+      (client as Operations).attachment.create({
+        query: { name: file.name },
+        payload: new Uint8Array(await file.arrayBuffer()),
+      }),
+    deleteAttachment: async (id: string) => {
+      await (client as Operations).attachment.delete({ params: { id } });
+    },
+    // The promise methods drop `responseMode`, but the `Blob` needs the
+    // response's content type, so this call asks the derived client for the
+    // response beside the decoded bytes.
+    readAttachmentContent: async (id: string) => {
+      readContentCall ??= buildCall("attachment", "readContent");
+      const [bytes, response] = (await run(
+        readContentCall({ params: { id }, responseMode: "decoded-and-response" }),
+        undefined,
+      )) as [Uint8Array<ArrayBuffer>, { readonly headers: Readonly<Record<string, string>> }];
+      return new Blob([bytes], { type: response.headers["content-type"] ?? "" });
+    },
   };
 
   for (const group of Object.values(api.groups)) {

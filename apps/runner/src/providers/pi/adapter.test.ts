@@ -10,7 +10,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
-import { NO_USER_MATERIAL_PATHS } from "../testing";
+import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
 import { AGENT_FILE_VARIABLE, OUTPUT_SCHEMA_VARIABLE, SUBMIT_RESULT_TOOL } from "./extension";
 import {
@@ -352,6 +352,27 @@ describe("sending an input to a pi session", () => {
     // The one prompt came from the first input; the steer sent no second prompt.
     expect(listSentCommands(run.sent, "prompt")).toHaveLength(1);
   });
+
+  // pi takes the bytes inline, on a prompt and on a steer alike. The text
+  // names each image's file too, so the agent can use the file itself.
+  for (const [command, start] of [
+    ["prompt", startTestSession],
+    ["steer", startBusySession],
+  ] as const) {
+    it(`sends attached images as base64 on ${command}, after the text that names their files`, async () => {
+      const run = await start();
+      const image = writeTestImage();
+
+      await Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "what is this?", attachments: [image] }),
+      );
+
+      expect(listSentCommands(run.sent, command).at(-1)).toMatchObject({
+        message: `what is this?\n\n[Attached image "screenshot.png" is saved at: ${image.path}]`,
+        images: [{ type: "image", data: PNG_BYTES.toString("base64"), mimeType: "image/png" }],
+      });
+    });
+  }
 
   it("reports the user's message as an item of the turn it opened", async () => {
     const run = await startTestSession();

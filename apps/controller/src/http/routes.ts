@@ -24,6 +24,7 @@ import {
 } from "@hercule/contract";
 import { AgentService, AgentServiceLayer } from "../agents";
 import { AssistantResponderLayer, AssistantService, AssistantServiceLayer } from "../assistants";
+import { AttachmentService, AttachmentServiceLayer } from "../attachments";
 import { Auth, AuthLayer } from "../auth";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
@@ -85,6 +86,7 @@ import {
   WorkflowService,
   WorkflowServiceLayer,
 } from "../workflows";
+import { buildAttachmentResponse } from "./attachment-response";
 
 /**
  * Wraps a handler's service call: the contract's errors pass through, and
@@ -551,6 +553,24 @@ const inputRoutes = HttpApiBuilder.group(api, "input", (handlers) =>
 );
 
 /**
+ * The images a user attaches to an input. The content is streamed from its
+ * file (`buildAttachmentResponse`).
+ */
+const attachmentRoutes = HttpApiBuilder.group(api, "attachment", (handlers) =>
+  Effect.gen(function* () {
+    const attachments = yield* AttachmentService;
+    return handlers
+      .handle("create", ({ query, payload }) =>
+        withApiErrors(attachments.create({ name: query.name, bytes: payload })),
+      )
+      .handle("readContent", ({ params }) =>
+        withApiErrors(Effect.flatMap(attachments.readContent(params.id), buildAttachmentResponse)),
+      )
+      .handle("delete", ({ params }) => withApiErrors(attachments.delete(params.id)));
+  }),
+);
+
+/**
  * A transcript is the session's own stream, so the session service serves
  * it; the group is separate because the operation is `transcript.read`.
  */
@@ -741,6 +761,7 @@ export const operationLayers = Layer.mergeAll(
   RunServiceReferenceFill.pipe(Layer.provide(RunDomainLayer)),
   LiveTopicsLayer,
   WsTicketsLayer,
+  AttachmentServiceLayer,
 );
 
 /** The handlers of every group, which `HttpApiBuilder.layer(api)` needs to build routes. */
@@ -775,4 +796,5 @@ export const handlerLayers = Layer.mergeAll(
   sessionRoutes,
   inputRoutes,
   transcriptRoutes,
+  attachmentRoutes,
 );

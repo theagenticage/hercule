@@ -29,9 +29,26 @@ const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
 const LOCAL = buildRunner({ id: "r-local", name: "moss" });
 const REMOTE = buildRunner({ id: "r-remote", name: "cove" });
 
-const SONNET = { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [] };
-const OPUS = { slug: "claude-opus-5", name: "Claude Opus 5", options: [] };
-const GPT = { slug: "gpt-5", name: "GPT-5", isDefault: true, options: [] };
+const SONNET = {
+  slug: "claude-sonnet-5",
+  name: "Claude Sonnet 5",
+  imageInput: { maxBytes: null },
+  isDefault: true,
+  options: [],
+};
+const OPUS = {
+  slug: "claude-opus-5",
+  name: "Claude Opus 5",
+  imageInput: { maxBytes: null },
+  options: [],
+};
+const GPT = {
+  slug: "gpt-5",
+  name: "GPT-5",
+  imageInput: { maxBytes: null },
+  isDefault: true,
+  options: [],
+};
 
 const CLAUDE = buildInstance("claude-code", "Claude Code", [
   buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS] }),

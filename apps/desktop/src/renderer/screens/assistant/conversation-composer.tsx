@@ -76,10 +76,11 @@ export function ConversationComposer({
       // The draft is cleared once the message is in the cache, so the text
       // leaves the field in the same frame its bubble appears.
       await storeSentMessage(queryClient, client, conversationId, message);
-      // A Conversation takes no picks, so the draft's own empty picks are
-      // passed, which leaves them as they are.
+      // A Conversation takes no images and no picks, so no images and the
+      // draft's own empty picks are passed, which leaves them as they are.
       pendingSubmissions.clearSent(draftKey, {
         text,
+        attachments: [],
         picks: pendingSubmissions.read(draftKey).picks,
       });
     },

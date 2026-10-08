@@ -6,7 +6,7 @@
  * singleton. That way a test can build its own pair without the app knowing.
  */
 import type { QueryClient } from "@tanstack/react-query";
-import type { HerculeClient, Live } from "@hercule/client-core";
+import type { HerculeClient, Live, UploadQueue } from "@hercule/client-core";
 import type { Runner } from "@hercule/contract";
 
 export interface RouterContext {
@@ -18,6 +18,13 @@ export interface RouterContext {
    * else about the socket reaches this app.
    */
   readonly live: Live;
+  /**
+   * The uploads of the images on every composer's shelf, `UPLOAD_CONCURRENCY`
+   * at a time across the whole app. It lives here, built once beside the
+   * client, so an upload keeps running when the user leaves the thread it was
+   * attached in, and the limit holds however many composers are open.
+   */
+  readonly uploads: UploadQueue;
   /**
    * Returns the id of the listed runner that runs on the same machine as this
    * browser, or `null` when no local runner responds. Only a process outside

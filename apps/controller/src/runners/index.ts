@@ -28,6 +28,7 @@ export {
   type SessionTraffic,
 } from "./connections";
 export { buildOnlineClause, runnerRepository, type PlacementCandidate } from "./repository";
+export { RunnerAttachmentRouteLayer } from "./attachment-route";
 export { RunnerJoinRouteLayer } from "./route";
 export { RunnerPingSchedule, RunnerSocketRouteLayer, type RunnerPings } from "./socket";
 export {

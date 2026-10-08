@@ -35,6 +35,8 @@ interface PiModel {
   readonly id?: unknown;
   readonly name?: unknown;
   readonly provider?: unknown;
+  /** The input types the model takes, such as `["text", "image"]`. */
+  readonly input?: unknown;
   /** The model's thinking levels; a level the model does not support maps to `null`. */
   readonly thinkingLevelMap?: Readonly<Record<string, string | null>>;
 }
@@ -98,6 +100,15 @@ const buildThinkingOption = (model: PiModel): ReadonlyArray<ModelOption> => {
   ];
 };
 
+/**
+ * The largest image pi takes, in bytes before base64. pi drops an image whose
+ * base64 is over 4.5 MiB from the prompt, and 4.5 MiB of base64 holds
+ * 3.375 MiB (3,538,944 bytes) of image. The probe declares this limit on
+ * every model that takes images, so the controller refuses or holds a larger
+ * image before it is sent, instead of pi dropping it without a word.
+ */
+const PI_MAX_IMAGE_BYTES = 3_538_944;
+
 const buildCatalog = (models: ReadonlyArray<PiModel>): ReadonlyArray<ModelDescriptor> =>
   models
     .filter(
@@ -112,6 +123,12 @@ const buildCatalog = (models: ReadonlyArray<PiModel>): ReadonlyArray<ModelDescri
     .map((model) => ({
       slug: truncateFact(model.id as string),
       name: truncateFact(model.name as string),
+      // A catalog entry with no input list is read as text only, so a missing
+      // list never lets images through.
+      imageInput:
+        Array.isArray(model.input) && model.input.includes("image")
+          ? { maxBytes: PI_MAX_IMAGE_BYTES }
+          : null,
       options: buildThinkingOption(model),
     }));
 

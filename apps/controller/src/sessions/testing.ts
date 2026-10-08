@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   AGENT_STEPS_CAPABILITY,
+  ATTACHMENTS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   buildWorkspaceActionCapability,
   ControllerToRunner,
@@ -49,12 +50,13 @@ const SOCKET_PATH = "/api/v1/runners/socket";
 
 /**
  * The capabilities a runner of this build lists at hello: every workspace
- * action the controller's catalog knows, and agent steps.
+ * action the controller's catalog knows, agent steps, and images in inputs.
  */
 const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
   AGENT_STEPS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
+  ATTACHMENTS_CAPABILITY,
 ];
 
 /**
@@ -232,6 +234,8 @@ export interface Arranged {
   readonly wire: Wire;
   readonly instances: ReadonlyArray<ProviderInstance>;
   readonly runnerId: string;
+  /** The credential the runner got when it joined, which it presents on the socket and on HTTP. */
+  readonly credential: string;
   /**
    * Connects the same runner again, like one that restarted or lost its
    * connection: a second socket with the credential from the join.
@@ -360,6 +364,7 @@ export const withFleet = (
         wire,
         instances,
         runnerId: answer.runnerId,
+        credential: answer.credential,
         reconnect,
         enlist,
       });
@@ -459,7 +464,9 @@ const AGENT_FACTS = {
   identityPort: 4939,
 } as const;
 
-const AGENT_MODELS = [{ slug: "fast", name: "Fast", isDefault: true, options: [] }];
+const AGENT_MODELS = [
+  { slug: "fast", name: "Fast", imageInput: { maxBytes: null }, isDefault: true, options: [] },
+];
 
 /**
  * Runs `body` against a fleet whose one runner can run a session on any

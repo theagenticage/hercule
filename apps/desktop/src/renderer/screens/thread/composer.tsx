@@ -15,13 +15,16 @@ import {
   buildSubmission,
   buildThreadWorkspaceLabel,
   computeEffectiveConfig,
+  findExpiredShelfKeys,
   findResumeBlockedReason,
   formatAccessMode,
   isMutationRunning,
+  markShelfItemsExpired,
   queryKeys,
   readErrorMessage,
   readThreadConfig,
   type ComposerPick,
+  type ShelfItem,
   type ThreadCatalogs,
   type ThreadPicks,
 } from "@hercule/client-core";
@@ -40,6 +43,7 @@ import { BranchIcon } from "../../icons/branch";
 import { LaptopIcon } from "../../icons/laptop";
 import { ShieldIcon } from "../../icons/shield";
 import { WorkspaceIcon } from "../../icons/workspace";
+import { useComposerImages } from "../attachments/use-composer-images";
 import { ComposerFrame } from "../session/composer-frame";
 import { useSendOnMenuCommand } from "../session/send-key";
 import { TallyPill } from "../subagents/tally-pill";
@@ -49,9 +53,10 @@ import { ModelPick, OptionsPick } from "./composer-picks";
 import { QueuedInputs } from "./queued-inputs";
 import { WorkspaceDetailsTrigger } from "../workspace/details-trigger";
 
-/** What one send carried: the request, and the picks it was built from. */
+/** What one send carried: the request, and the images and picks it was built from. */
 interface SentSubmission {
   readonly payload: SessionInputPayload;
+  readonly attachments: readonly ShelfItem[];
   readonly picks: ThreadPicks;
   /** The account the thread runs on, which a picked model is remembered with. */
   readonly instanceId: string | null;
@@ -65,7 +70,8 @@ interface SentSubmission {
  * - the queued inputs, see `QueuedInputs`;
  * - the dock, while the session waits on a Request, with the pager line
  *   above it when there is one, see `AgentRequestDock`;
- * - the card: the message field, then a row with Attach, the access mode,
+ * - the card: the shelf of attached images, the message field, then a row
+ *   with Attach, the access mode,
  *   the model options when the model has any, the model, Dictate, and Send,
  *   or Stop while a turn runs;
  * - the lip under the card: where the thread works, and on which machine.
@@ -83,7 +89,12 @@ interface SentSubmission {
  * the workspace and the machine are fixed once the thread starts, so they
  * are plain text, with the reason as their tooltip.
  *
- * What the composer holds and has not sent, the text and the picks, is kept
+ * Images come in by paste, drop and Attach, see `useComposerImages`. A
+ * message can be images alone. Send waits while an upload runs, has failed
+ * or has expired, and while the model takes no images; the notice under the
+ * field says which.
+ *
+ * What the composer holds and has not sent, the text, the images and the picks, is kept
  * per thread in the controller's `pendingSubmissions` rather than here, so
  * it is still there when the user comes back to the thread.
  *
@@ -162,7 +173,11 @@ export function ThreadComposer({
       // The picks are cleared only once the session with the new model is in
       // the cache, so the pill never shows the old model in between.
       await queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-      pendingSubmissions.clearSent(sessionId, { text: sent.payload.text, picks: sent.picks });
+      pendingSubmissions.clearSent(sessionId, {
+        text: sent.payload.text,
+        attachments: sent.attachments,
+        picks: sent.picks,
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.inputs(sessionId) });
       const recent = buildRecentModel(sent.picks, sent.instanceId);
       if (recent !== null) rememberRecentModel(controller.url, recent);
@@ -170,14 +185,32 @@ export function ThreadComposer({
     // Kept in the pending submission rather than read from `input.error`: a
     // composer mounted again, after the user left and came back, has a
     // mutation of its own, which never saw this send fail.
-    onError: (error) => {
+    onError: (error, sent) => {
       pendingSubmissions.recordFailure(sessionId, readErrorMessage(error));
+      // An image the controller swept before the send is marked on its tile,
+      // so the user sees which one to attach again.
+      const expired = findExpiredShelfKeys(error, sent.attachments);
+      if (expired.length > 0)
+        pendingSubmissions.updateAttachments(sessionId, (shelf) =>
+          markShelfItemsExpired(shelf, expired),
+        );
     },
   });
   const stopAgent = useStopAgent(client, sessionId);
   const error =
     pending.failure ?? (stopAgent.error === null ? null : readErrorMessage(stopAgent.error));
-  const canSend = readOnly === null && pending.message.text.trim() !== "" && !sending;
+  const images = useComposerImages({
+    storeKey: sessionId,
+    shelf: pending.message.attachments,
+    imageInput: fields.model.imageInput,
+    modelName: fields.model.modelName,
+    readOnly: readOnly !== null,
+  });
+  const canSend =
+    readOnly === null &&
+    !sending &&
+    !images.sendBlocked &&
+    (pending.message.text.trim() !== "" || pending.message.attachments.length > 0);
 
   // Each pick is compared with the thread's own configuration, not with the
   // picks before it, so picking the configured value again removes the pick.
@@ -190,8 +223,10 @@ export function ThreadComposer({
     const submission = buildSubmission(thread, pending.picks, pending.message);
     pendingSubmissions.clearFailure(sessionId);
     if (stopAgent.error !== null) stopAgent.reset();
+    images.clearRefusal();
     input.mutate({
       payload: submission.payload,
+      attachments: pending.message.attachments,
       picks: pending.picks,
       instanceId: config.instanceId,
     });
@@ -219,6 +254,8 @@ export function ThreadComposer({
       onSend={submit}
       stop={busy ? { stopping: stopAgent.isPending, onStop: stop } : undefined}
       error={error}
+      notice={images.notice}
+      attachments={images.attachments}
       start={
         <>
           <span className="pick" title={fields.accessMode.locked ?? undefined}>

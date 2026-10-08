@@ -40,7 +40,6 @@ import {
   type SessionBinding,
   type SessionSpec,
   type SubagentId,
-  type TurnInput,
 } from "@hercule/protocol";
 import {
   normalize,
@@ -59,7 +58,8 @@ import {
   takeStopsDue,
   type RequestOpened,
 } from "./claude-code-subagents";
-import type { ProviderAdapter, ProviderRunnerContext } from "./index";
+import { appendAttachmentPaths, readAttachmentBase64 } from "./attachments";
+import type { AdapterTurnInput, ProviderAdapter, ProviderRunnerContext } from "./index";
 import { makeInstall } from "./install";
 import { PROBE_DEADLINE, buildFailedProbe } from "./probe";
 import type { LoginCommand } from "./login";
@@ -195,12 +195,14 @@ const LEGACY_MODELS: ReadonlyArray<ModelDescriptor> = [
     slug: "claude-opus-4-8",
     name: "Opus 4.8",
     isLegacy: true,
+    imageInput: { maxBytes: null },
     options: [buildEffortOption(["low", "medium", "high"])],
   },
   {
     slug: "claude-fable-5",
     name: "Fable 5",
     isLegacy: true,
+    imageInput: { maxBytes: null },
     options: [buildEffortOption(["low", "medium", "high"])],
   },
 ];
@@ -221,6 +223,9 @@ const buildModelDescriptor = (model: Model): ModelDescriptor => {
     slug: truncateFact(model.value),
     name: truncateFact(model.displayName),
     ...(model.value === "default" ? { isDefault: true } : {}),
+    // The CLI's model list has no field for input types, and every Claude
+    // model takes images.
+    imageInput: { maxBytes: null },
     options,
   };
 };
@@ -492,6 +497,29 @@ const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"
 ];
 
 /**
+ * Returns the content of the user message an input becomes. Text alone stays
+ * a plain string. With images, the content is the text block, which ends with
+ * the line naming each image's file, followed by one base64 image block per
+ * image, in order. Claude shrinks a large image itself. The images are read
+ * one at a time, so an input with many images does not read all its files at
+ * once. Fails with a message naming the image when a cached file cannot be
+ * read.
+ */
+const buildUserContent = (
+  turn: AdapterTurnInput,
+): Effect.Effect<SDKUserMessage["message"]["content"], string> => {
+  const attachments = turn.attachments ?? [];
+  if (attachments.length === 0) return Effect.succeed(turn.text);
+  return Effect.map(Effect.forEach(attachments, readAttachmentBase64), (images) => [
+    { type: "text", text: appendAttachmentPaths(turn.text, attachments) },
+    ...images.map((data, at) => ({
+      type: "image" as const,
+      source: { type: "base64" as const, media_type: attachments[at]!.mimeType, data },
+    })),
+  ]);
+};
+
+/**
  * The Claude tools in each tool family. The spec talks about tool families,
  * and this table is the only place a family is converted to tool names. A
  * family whose tools Claude does not have maps to an empty list.
@@ -554,6 +582,11 @@ const buildSessionOptions = (
       ? {}
       : { outputFormat: { type: "json_schema", schema: spec.outputSchema } }),
     ...(ctx.cwd === null ? {} : { cwd: ctx.cwd }),
+    // The agent's prompt names the file of each attached image, and the
+    // directory is outside the workspace, so the harness is told it may read
+    // there. Without this, a session that is not in `full-access` asks the
+    // user before it reads its own images.
+    ...(ctx.attachmentsDir === null ? {} : { additionalDirectories: [ctx.attachmentsDir] }),
     settingSources: [
       ...(ctx.userMaterial === undefined ? [] : (["user"] as const)),
       ...(spec.workspaceId === null ? [] : (["project"] as const)),
@@ -1034,8 +1067,11 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         );
       }),
 
-    sendInput: (sessionId: string, turn: TurnInput): Effect.Effect<SendResult, string> =>
+    sendInput: (sessionId: string, turn: AdapterTurnInput): Effect.Effect<SendResult, string> =>
       Effect.gen(function* () {
+        // Read before anything changes: an image that cannot be read refuses
+        // the input before a turn opens.
+        const content = yield* buildUserContent(turn);
         const model = turn.modelSelection?.model;
         const before = yield* getHostedSession(sessionId);
         const generation = before.inputGeneration;
@@ -1064,12 +1100,18 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // is already running, and the input joins it. Decide from what
         // `openTurn` just did, not from what was true before the wait.
         const steered = events.length === 0;
-        for (const event of buildUserMessage({ sessionId, turnId, text: turn.text, steered })) {
+        for (const event of buildUserMessage({
+          sessionId,
+          turnId,
+          text: turn.text,
+          steered,
+          attachments: turn.attachments,
+        })) {
           emit(event);
         }
         held.input.push({
           type: "user",
-          message: { role: "user", content: turn.text },
+          message: { role: "user", content },
           parent_tool_use_id: null,
           session_id: held.binding.nativeSessionId,
         });

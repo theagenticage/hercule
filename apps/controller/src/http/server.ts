@@ -15,7 +15,7 @@
  * 6. the credential middleware and the static grant check (`./middleware.ts`);
  * 7. the derived route's decoding, then the one-line handler.
  *
- * Four routes are not derived from the contract's HttpApi declaration:
+ * Five routes are not derived from the contract's HttpApi declaration:
  *
  * - The live socket at `GET /ws` stops after step 5. It passes the pre-setup
  *   gate, then authenticates in its own first frame, because a browser cannot
@@ -26,17 +26,26 @@
  * - The runner socket at `GET /api/v1/runners/socket` also stops before step 5,
  *   for the same reason: it presents a runner's durable credential, which no
  *   operation accepts and no grant applies to.
+ * - The attachment fetch at `GET /api/v1/runners/attachments/:id` also stops
+ *   before step 5, for the same reason: a runner fetches an input's image
+ *   with its credential.
  * - The OAuth callback at `GET /oauth/callback` also stops before the
  *   credential middleware: the browser arrives there from the provider with
  *   only a `state`, and gets a redirect rather than a JSON response.
  *
- * The body size limit is not part of that order. It belongs to the listener,
- * and is given to Bun as `maxRequestBodySize` and, for sockets, as
- * `maxPayloadLength`. So the transport rejects an oversize body before reading
- * any of it, and before this module runs at all. That `413` is the only
- * response the API sends outside the error envelope, on purpose: an enveloped
- * response would mean reading the body first, which is the cost the limit
- * exists to avoid.
+ * The body size limits sit outside that order, in two places:
+ *
+ * - The listener: Bun is given `MAX_UPLOAD_BODY_BYTES` as
+ *   `maxRequestBodySize` and `MAX_REQUEST_BODY_BYTES` as the sockets'
+ *   `maxPayloadLength`, so the transport rejects a larger body before
+ *   reading any of it, and before this module runs at all.
+ * - `limitRequestBody`, between steps 1 and 2: only an image upload may be
+ *   that large, so every other request is held to `MAX_REQUEST_BODY_BYTES`
+ *   by its `Content-Length`, again before any of the body is read.
+ *
+ * Both answer with a bare `413`, the one response the API sends outside the
+ * error envelope, on purpose: an enveloped response would mean reading the
+ * body first, which is the cost the limit exists to avoid.
  *
  * Each request runs on one fiber, and `BunHttpServer` connects the request's
  * abort signal to it: a client that disconnects interrupts the fiber.
@@ -47,9 +56,16 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServer from "effect/unstable/http/HttpServer";
-import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
-import { ALL_OPERATIONS, api, createValidationError } from "@hercule/contract";
+import {
+  ALL_OPERATIONS,
+  api,
+  createValidationError,
+  MAX_ATTACHMENT_BYTES,
+  OPERATIONS,
+} from "@hercule/contract";
 import { withCors } from "./cors";
 import { buildErrorResponse, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
@@ -61,6 +77,7 @@ import {
   Pipeline,
   Provisioning,
   checkSchedulerInterval,
+  runAttachmentSweepLoop,
   runIngestReconciler,
   runScheduler,
   sweepSessionsOnLostRunners,
@@ -68,39 +85,108 @@ import {
 } from "../daemon";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
-import { RunnerJoinRouteLayer, RunnerConnections, RunnerSocketRouteLayer } from "../runners";
+import {
+  RunnerAttachmentRouteLayer,
+  RunnerJoinRouteLayer,
+  RunnerConnections,
+  RunnerSocketRouteLayer,
+} from "../runners";
 import { resumeUnfinishedRuns } from "../runs";
 import { handlerLayers } from "./routes";
 import { withWebBundle, type WebBundle } from "./static";
 
 /**
- * The largest request body the controller reads, in bytes. The listener is
- * given this as `maxRequestBodySize`, so it is enforced by the transport.
+ * The largest request body the controller reads, in bytes, for every request
+ * except an image upload. `limitRequestBody` enforces it from the request's
+ * `Content-Length`, before the body is read.
  *
  * The largest value the public API accepts is a workflow's YAML source, at most
  * 256K characters. Encoded as JSON, one character can take up to six bytes,
  * because JSON escapes a control character as, for example, `\u0001`. So a
  * source can need 1.5 MiB, and the cap is set above that. Any source within the
  * length limit then reaches the controller, and a source that is too long gets
- * a normal error in the error envelope instead of the transport's bare `413`.
+ * a normal error in the error envelope instead of the bare `413`.
  *
  * Without a limit, an unauthenticated caller could push any number of bytes
- * into durable storage through a failed login's audit row. The limit belongs
- * to the listener, so it applies to every operation and to paths no operation
- * owns, and an oversize body is rejected before it is read.
+ * into durable storage through a failed login's audit row. The limit wraps
+ * the whole application, so it applies to every operation and to paths no
+ * operation owns.
  */
 export const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
 
 /**
- * The listener options that enforce the limit, on request bodies and on
+ * The largest body of an image upload (`attachment.create`), which is the
+ * largest image an input accepts. Bun enforces it on every request as
+ * `maxRequestBodySize`, so it also bounds an upload sent without a
+ * `Content-Length`.
+ */
+export const MAX_UPLOAD_BODY_BYTES = MAX_ATTACHMENT_BYTES;
+
+/**
+ * The listener options that enforce the limits, on request bodies and on
  * socket frames. Bun does not apply `maxRequestBodySize` to WebSocket frames,
  * so without the `websocket` option an unauthenticated connection could send
- * the controller a frame many times the documented size.
+ * the controller a frame many times the documented size. A frame never
+ * carries an image, so sockets keep the smaller limit.
  */
 export const bodyLimits = {
-  maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
+  maxRequestBodySize: MAX_UPLOAD_BODY_BYTES,
   websocket: { maxPayloadLength: MAX_REQUEST_BODY_BYTES },
 } as const;
+
+/** The path of `attachment.create`, the one route whose body may exceed `MAX_REQUEST_BODY_BYTES`. */
+const UPLOAD_PATH = OPERATIONS["attachment.create"].path;
+
+/**
+ * Checks whether a request is an image upload. The method and the path must
+ * match exactly, with the query string removed. A path the router would also
+ * accept, such as one in another case, is not treated as an upload, so it is
+ * held to the smaller limit rather than slipping past it.
+ */
+const isUpload = (request: HttpServerRequest.HttpServerRequest): boolean => {
+  const end = request.url.search(/[?#]/);
+  const path = end === -1 ? request.url : request.url.slice(0, end);
+  return request.method === OPERATIONS["attachment.create"].method && path === UPLOAD_PATH;
+};
+
+/** Builds a bare refusal of a request whose body was not read, closing its connection. */
+const refuseUnreadBody = (status: 411 | 413): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.empty({ status, headers: { connection: "close" } });
+
+/**
+ * Wraps `app` so that a request other than an image upload is refused when
+ * its body could exceed `MAX_REQUEST_BODY_BYTES`, before any of the body is
+ * read:
+ *
+ * - a `Content-Length` over the limit gets a bare `413`, like the one Bun
+ *   sends for a body over `maxRequestBodySize`;
+ * - a body sent with `Transfer-Encoding` gets a bare `411`, because its
+ *   length is known only after reading it. The upload is exempt, because
+ *   Bun's own limit bounds it.
+ *
+ * Both refusals close the connection. The body was never read, so the
+ * connection cannot be trusted for another request. Bun also keeps such a
+ * connection counted as busy once a large unread body has arrived: a graceful
+ * `server.stop()` then waits for it until Bun's idle timeout, about 10
+ * seconds, ends it. Closing the connection is what HTTP asks of a server that
+ * answers without reading the body (RFC 9112, section 9.6).
+ *
+ * It sits inside `withCors`, so the desktop app can read the refusal.
+ */
+const limitRequestBody = <E, R>(
+  app: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
+): Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  E,
+  R | HttpServerRequest.HttpServerRequest
+> =>
+  Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
+    if (isUpload(request)) return app;
+    if (request.headers["transfer-encoding"] !== undefined)
+      return Effect.succeed(refuseUnreadBody(411));
+    const length = Number(request.headers["content-length"] ?? 0);
+    return length > MAX_REQUEST_BODY_BYTES ? Effect.succeed(refuseUnreadBody(413)) : app;
+  });
 
 /** The operation id of each route, so a span has the same name as everything else uses. */
 const OPERATION_BY_ROUTE = new Map(
@@ -133,19 +219,24 @@ const routerLayer = HttpApiBuilder.layer(api).pipe(
  * Replaces a `415` response with a validation error in the envelope. The
  * derived routes respond to a body with the wrong content type with a bare
  * `415` and a text body, the only failure that would bypass the envelope. It
- * is bad input, so it is returned as a validation error.
+ * is bad input, so it is returned as a validation error that names the type
+ * the route takes: raw bytes for an image upload, JSON for everything else.
  */
 const rewriteUnsupportedMediaType = <E, R>(
   app: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
-): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R> =>
-  Effect.map(app, (response) =>
-    response.status === 415
-      ? buildErrorResponse(
-          createValidationError([
-            { path: [], message: "the request body must be application/json" },
-          ]),
-        )
-      : response,
+): Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  E,
+  R | HttpServerRequest.HttpServerRequest
+> =>
+  Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
+    Effect.map(app, (response) => {
+      if (response.status !== 415) return response;
+      const type = isUpload(request) ? "application/octet-stream" : "application/json";
+      return buildErrorResponse(
+        createValidationError([{ path: [], message: `the request body must be ${type}` }]),
+      );
+    }),
   );
 
 /**
@@ -194,10 +285,14 @@ const buildApplication = (bundle: WebBundle | undefined) =>
         liveLayer,
         RunnerJoinRouteLayer,
         RunnerSocketRouteLayer,
+        RunnerAttachmentRouteLayer,
         OAuthCallbackRouteLayer,
       ),
     ),
-    (routes) => withCors(withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes)))),
+    (routes) =>
+      withCors(
+        limitRequestBody(withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes)))),
+      ),
   );
 
 /**
@@ -235,6 +330,8 @@ export const serve = (bundle: WebBundle | undefined) =>
     yield* Effect.forkScoped(Effect.flatMap(Arrival, (arrival) => arrival.driving));
     // Workspaces nothing needs any more are removed from their runner's disk.
     yield* Effect.forkScoped(Effect.flatMap(Provisioning, (provisioning) => provisioning.driving));
+    // Images nobody sent within a day of their upload are deleted, with their files.
+    yield* Effect.forkScoped(runAttachmentSweepLoop);
     // The controller daemon's two inbound drivers, also before the listener:
     // the queues they read are created with the layer, so nothing a runner
     // reports while these fibers start is missed. Each has its own fiber, so a

@@ -202,6 +202,26 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the snapshot one runner reported for the instance, or `none`
+     * when that runner has not reported one.
+     */
+    readSnapshot: (
+      instanceId: string,
+      runnerId: string,
+    ): Effect.Effect<Option.Option<StoredSnapshot>, SqlError | Schema.SchemaError> =>
+      Effect.flatMap(
+        sql<SnapshotRow>`
+          SELECT ${sql.literal(SNAPSHOT_COLUMNS)} FROM capability_snapshots
+          WHERE instance_id = ${uuidFromString(instanceId)}
+            AND runner_id = ${uuidFromString(runnerId)}
+        `,
+        (rows) =>
+          rows[0] === undefined
+            ? Effect.succeed(Option.none())
+            : Effect.map(toSnapshot(rows[0]), Option.some),
+      ),
+
+    /**
      * Stores a runner's probe result for an instance, replacing the previous
      * one. A snapshot caches the last probe result, and keeps no history.
      */

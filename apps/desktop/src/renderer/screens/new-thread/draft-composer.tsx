@@ -11,7 +11,7 @@ import { BranchIcon } from "../../icons/branch";
 import { LaptopIcon } from "../../icons/laptop";
 import { ShieldIcon } from "../../icons/shield";
 import { WorkspaceIcon } from "../../icons/workspace";
-import { ComposerCard } from "../session/composer-frame";
+import { ComposerCard, type ComposerAttachments } from "../session/composer-frame";
 import { ComposerMenu } from "../thread/composer-menu";
 import { ModelPick, OptionsPick } from "../thread/composer-picks";
 import { AccessModeMenu } from "./access-mode-menu";
@@ -81,8 +81,8 @@ function DraftPick({
 
 /**
  * Renders a Draft Thread's composer, as the Bureau book's `session-empty`
- * page draws it: the card, see `ComposerCard`, with the message field and a
- * row with Attach, the access mode, the model options when the model has
+ * page draws it: the card, see `ComposerCard`, with the shelf of attached
+ * images, the message field and a row with Attach, the access mode, the model options when the model has
  * any, the model, Dictate and Send; then the lip under it, with the
  * workspace, the branch when there is one to pick, and the machine.
  *
@@ -91,8 +91,10 @@ function DraftPick({
  * applies only to a new workspace and never switches an existing checkout.
  *
  * ⏎ in the field calls `onSubmit`, and ⇧⏎ starts a new line. Send, and ⏎,
- * do nothing while `canSend` is false. Attach and Dictate are drawn but do
- * nothing yet, and carry `aria-disabled`.
+ * do nothing while `canSend` is false. `attachments` and `notice` are the
+ * card's: the shelf and the files the user attaches, and the line under the
+ * row that says why the images stop the start. Dictate is drawn but does
+ * nothing yet, and carries `aria-disabled`.
  */
 export function DraftComposer({
   view,
@@ -100,6 +102,8 @@ export function DraftComposer({
   placeholder,
   canSend,
   error,
+  notice,
+  attachments,
   readRecent,
   fieldRef,
   onTextChange,
@@ -113,6 +117,8 @@ export function DraftComposer({
   readonly canSend: boolean;
   /** The failed start's message, shown under the row, or `null`. */
   readonly error: string | null;
+  readonly notice: string | null;
+  readonly attachments: ComposerAttachments;
   /** Returns the models the user picked lately, which the model menu offers first. */
   readonly readRecent: () => readonly RecentModel[];
   readonly fieldRef: Ref<HTMLTextAreaElement>;
@@ -136,6 +142,8 @@ export function DraftComposer({
         canSend={canSend}
         onSend={onSubmit}
         error={error}
+        notice={notice}
+        attachments={attachments}
         start={
           <>
             <DraftPick

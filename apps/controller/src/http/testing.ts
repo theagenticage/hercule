@@ -52,6 +52,7 @@ import {
   LostRunnerSweepInterval,
   RunFibers,
   SchedulerInterval,
+  AttachmentSweepInterval,
   SessionInputDeadline,
   RunServiceReferenceLayer,
   SessionObserverLayer,
@@ -324,6 +325,8 @@ export interface ServerOptions {
   readonly inputDeadline?: Duration.Duration;
   /** The default ten minutes is longer than a test can wait. */
   readonly workspaceSweepInterval?: Duration.Duration;
+  /** The default hour is longer than a test can wait. */
+  readonly attachmentSweepInterval?: Duration.Duration;
   /** The default second is too long for a test that waits several ticks. */
   readonly eventRoutingInterval?: Duration.Duration;
   /** The default minute is longer than a test can wait. */
@@ -512,6 +515,7 @@ const provideTimings =
     provideIfSet(ProviderLoginDeadline, options.loginDeadline);
     provideIfSet(SessionInputDeadline, options.inputDeadline);
     provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
+    provideIfSet(AttachmentSweepInterval, options.attachmentSweepInterval);
     provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
     provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
     provideIfSet(SchedulerInterval, options.schedulerInterval);

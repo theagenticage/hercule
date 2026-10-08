@@ -84,6 +84,7 @@ const createHomeWithLogin = (): string => {
 
 const buildContext = (home: string): ProviderRunnerContext => ({
   cwd: createScratchDir("cwd"),
+  attachmentsDir: null,
   home,
   binary: binary!,
   env: { PATH: process.env["PATH"] ?? "" },

@@ -36,6 +36,7 @@ import {
   type TranscriptRow,
 } from "@hercule/contract";
 import type { Bridge } from "../../ipc/bridge";
+import { buildThumbnail } from "./thumbnails";
 
 /**
  * Reads whether the controller's first run has been completed. Works without
@@ -574,6 +575,55 @@ export const userQuery = (client: HerculeClient) =>
     queryKey: queryKeys.user(),
     queryFn: () => client.user.read(),
     ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads an image a user sent, at full size, as a `Blob`, for the lightbox.
+ * An image never changes once uploaded, so the entry never goes stale. It is
+ * dropped a minute after the lightbox closes, so a full-size image is not
+ * held after it is shown.
+ *
+ * An upload puts its file here as soon as it succeeds, so the image the user
+ * just sent is not read back from the controller.
+ */
+export const attachmentContentQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.attachmentContent(id),
+    queryFn: () => client.readAttachmentContent(id),
+    staleTime: Infinity,
+    gcTime: 60_000,
+  });
+
+/**
+ * Builds a thumbnail of an image a user sent, `width` × `height` device
+ * pixels, for the images above their bubble and in a queued input's row.
+ * Only the small WebP is cached: the image's full bytes are taken from the
+ * cache when an upload left them there, and read from the controller
+ * otherwise, and are dropped once the thumbnail is built.
+ *
+ * Like the image, the thumbnail never goes stale, and it is dropped a minute
+ * after no row shows it. A build that no row waits for any more is cancelled
+ * before it decodes the image. A failed build is not tried again: an image
+ * Chromium cannot decode does not change.
+ */
+export const attachmentThumbnailQuery = (
+  client: HerculeClient,
+  queryClient: QueryClient,
+  id: string,
+  width: number,
+  height: number,
+) =>
+  queryOptions({
+    queryKey: [...queryKeys.attachmentContent(id), "thumbnail", width, height] as const,
+    queryFn: async ({ signal }) => {
+      const content =
+        queryClient.getQueryData(attachmentContentQuery(client, id).queryKey) ??
+        (await client.readAttachmentContent(id));
+      return buildThumbnail(content, width, height, signal);
+    },
+    staleTime: Infinity,
+    gcTime: 60_000,
+    retry: false,
   });
 
 /**

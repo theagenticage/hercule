@@ -16,6 +16,7 @@ import {
   serveCredentialSocket,
   buildSocketPath,
 } from "./credentials";
+import { makeAttachmentCache } from "./attachments";
 import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { providerLogins } from "./providers";
@@ -147,6 +148,13 @@ export const runDaemon = (
       // The working directories of sessions without a workspace, one per
       // session. They can be deleted at any time.
       const scratchDir = joinPath(storageDir, "scratch");
+      // The images attached to each session's input, one directory per
+      // session, removed when the session exits.
+      const attachmentsDir = joinPath(storageDir, "attachments");
+      const attachments = makeAttachmentCache({
+        controllerUrl: pin.controllerUrl,
+        credential: pin.credential,
+      });
       const socketPath = buildSocketPath(storageDir);
       // The runner's own git gets its credentials the same way a session's git
       // does: through this socket, with nothing written to disk.
@@ -174,10 +182,11 @@ export const runDaemon = (
         }),
         (server) => Effect.promise(() => server.close()),
       );
-      // No session outlives this process, so anything in the scratch directory
-      // was left behind by the last run. Delete it here, so it does not grow
-      // with every crash.
+      // No session outlives this process, so anything in the scratch and
+      // attachments directories was left behind by the last run. Delete both
+      // here, so they do not grow with every crash.
       rmSync(scratchDir, { recursive: true, force: true });
+      rmSync(attachmentsDir, { recursive: true, force: true });
       // Install, once per start, the link and skill every session on this
       // machine uses to call Hercule. Doing it at every start means an upgraded
       // binary replaces the previous build's symlink and skill text
@@ -195,6 +204,8 @@ export const runDaemon = (
             headroom,
             providersDir,
             scratchDir,
+            attachmentsDir,
+            attachments,
             workspaces,
             workspaceSteps,
             socketPath,

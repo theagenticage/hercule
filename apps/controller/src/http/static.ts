@@ -78,7 +78,7 @@ export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self'",
   `connect-src 'self' ${IDENTITY_PORTS}`,
-  "img-src 'self' data:",
+  "img-src 'self' data: blob:",
   "font-src 'self'",
   // CodeMirror, the workflow YAML editor, adds its base styles in a `<style>`
   // element when it starts. `style-src 'self'` blocks that element, and the

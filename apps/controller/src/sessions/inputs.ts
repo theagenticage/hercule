@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Delivery } from "@hercule/protocol";
+import type { AttachmentReference, Delivery } from "@hercule/protocol";
 import type { InputSource, InputStatus, SortDirection } from "@hercule/contract";
 import {
   decodeCursor,
@@ -23,6 +23,7 @@ import {
   type CursorScope,
   type Page,
 } from "../db";
+import { listInputAttachments } from "../attachments";
 
 export interface StoredInput {
   readonly id: string;
@@ -30,6 +31,8 @@ export interface StoredInput {
   readonly source: InputSource;
   readonly actor: string;
   readonly text: string;
+  /** The images the input carries, in the order the user attached them. */
+  readonly attachments: ReadonlyArray<AttachmentReference>;
   readonly status: InputStatus;
   readonly delivery: Delivery | null;
   readonly createdAt: string;
@@ -116,12 +119,13 @@ const COLUMNS =
   "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, reason, " +
   "step_iteration";
 
-const toInput = (row: InputRow): StoredInput => ({
+const toInput = (row: InputRow, attachments: ReadonlyArray<AttachmentReference>): StoredInput => ({
   id: uuidToString(row.id),
   sessionId: uuidToString(row.session_id),
   source: row.source as InputSource,
   actor: row.actor,
   text: row.text,
+  attachments,
   status: row.status as InputStatus,
   delivery: row.delivery as Delivery | null,
   createdAt: row.created_at,
@@ -144,6 +148,25 @@ const buildCursorScope = (sessionId: string, direction: SortDirection): CursorSc
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  /** Builds the inputs from their rows, reading the images of all of them in one query. */
+  const buildInputs = (
+    rows: ReadonlyArray<InputRow>,
+  ): Effect.Effect<ReadonlyArray<StoredInput>, SqlError> =>
+    rows.length === 0
+      ? Effect.succeed([])
+      : listInputAttachments(rows.map((row) => uuidToString(row.id))).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+          Effect.map((byInput) =>
+            rows.map((row) => toInput(row, byInput.get(uuidToString(row.id)) ?? [])),
+          ),
+        );
+
+  /** Builds the input from the first row, or returns `none` when there is no row. */
+  const buildFirstInput = (
+    rows: ReadonlyArray<InputRow>,
+  ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+    Effect.map(buildInputs(rows.slice(0, 1)), (found) => Option.fromNullishOr(found[0]));
+
   return {
     insert: (input: NewInput): Effect.Effect<StoredInput, SqlError> =>
       Effect.gen(function* () {
@@ -162,6 +185,7 @@ const make = Effect.gen(function* () {
           source: input.source,
           actor: input.actor,
           text: input.text,
+          attachments: [],
           status: "queued",
           delivery: null,
           createdAt: input.at,
@@ -202,6 +226,7 @@ const make = Effect.gen(function* () {
           source: "subscription",
           actor: input.actor,
           text: input.text,
+          attachments: [],
           status: "queued",
           delivery: null,
           createdAt: input.at,
@@ -290,21 +315,21 @@ const make = Effect.gen(function* () {
 
     /** Returns an input by its id alone, or `none` when there is no such input. */
     read: (id: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
-      Effect.map(
+      Effect.flatMap(
         sql<InputRow>`
           SELECT ${sql.literal(COLUMNS)} FROM session_inputs WHERE id = ${uuidFromString(id)}
         `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
+        buildFirstInput,
       ),
 
     /** Returns one input of a session. An input id that belongs to another session returns `none`. */
     one: (sessionId: string, id: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
-      Effect.map(
+      Effect.flatMap(
         sql<InputRow>`
           SELECT ${sql.literal(COLUMNS)} FROM session_inputs
           WHERE id = ${uuidFromString(id)} AND session_id = ${uuidFromString(sessionId)}
         `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
+        buildFirstInput,
       ),
 
     list: (request: InputPageRequest): Effect.Effect<Page<StoredInput>, CursorError | SqlError> =>
@@ -325,11 +350,8 @@ const make = Effect.gen(function* () {
           WHERE session_id = ${uuidFromString(request.sessionId)} AND ${keyset}
           ${order} LIMIT ${request.limit + 1}
         `;
-        return yield* buildPage(
-          rows,
-          request.limit,
-          (found) => Effect.succeed(found.map(toInput)),
-          (last) => encodeCursor(scope, [last.createdAt], last.id),
+        return yield* buildPage(rows, request.limit, buildInputs, (last) =>
+          encodeCursor(scope, [last.createdAt], last.id),
         );
       }),
 
@@ -339,13 +361,13 @@ const make = Effect.gen(function* () {
      * start, a flush at the end of a turn, or a resume.
      */
     oldestWaiting: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
-      Effect.map(
+      Effect.flatMap(
         sql<InputRow>`
           SELECT ${sql.literal(COLUMNS)} FROM session_inputs
           WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
           ORDER BY created_at, id LIMIT 1
         `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
+        buildFirstInput,
       ),
 
     /**
@@ -363,7 +385,7 @@ const make = Effect.gen(function* () {
      * that is gone.
      */
     claim: (id: string, at: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
-      Effect.map(
+      Effect.flatMap(
         sql<InputRow>`
           UPDATE session_inputs SET sent_at = ${at}, reason = NULL
           WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
@@ -373,7 +395,7 @@ const make = Effect.gen(function* () {
             )
           RETURNING ${sql.literal(COLUMNS)}
         `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
+        buildFirstInput,
       ),
 
     /**
@@ -394,7 +416,7 @@ const make = Effect.gen(function* () {
       sessionId: string,
       at: string,
     ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
-      Effect.map(
+      Effect.flatMap(
         sql<InputRow>`
           UPDATE session_inputs SET sent_at = ${at}, reason = NULL
           WHERE id = (
@@ -414,7 +436,7 @@ const make = Effect.gen(function* () {
             )
           RETURNING ${sql.literal(COLUMNS)}
         `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), toInput),
+        buildFirstInput,
       ),
 
     /**

@@ -11,12 +11,12 @@
  * drift apart, for example a wait with a different timeout, or a home one copy
  * forgets to remove.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
 import type { ProviderEvent } from "@hercule/protocol";
-import type { UserMaterial } from "./index";
+import type { LocalAttachment, UserMaterial } from "./index";
 
 const homes: Array<string> = [];
 
@@ -117,4 +117,30 @@ export const NO_USER_MATERIAL_PATHS: UserMaterial = {
   skillDirs: [],
   promptTemplateDirs: [],
   instructionsFile: undefined,
+};
+
+/** A one-pixel PNG, small enough for every harness. */
+export const PNG_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+/**
+ * Writes `PNG_BYTES` into a scratch directory, as the runner's cache would,
+ * and returns the image as an adapter receives it. `overrides` changes the
+ * reference, for example its size, without changing the file.
+ */
+export const writeTestImage = (overrides: Partial<LocalAttachment> = {}): LocalAttachment => {
+  const id = "0199e0e7-0000-7000-8000-0000000000a1";
+  const path = join(createScratchHome("attachments"), id);
+  writeFileSync(path, PNG_BYTES);
+  return {
+    id,
+    name: "screenshot.png",
+    mimeType: "image/png",
+    sizeBytes: PNG_BYTES.length,
+    sha256: "0".repeat(64),
+    path,
+    ...overrides,
+  };
 };

@@ -24,15 +24,23 @@ const buildSnapshot = (
 });
 
 const MODELS = [
-  { slug: "claude-sonnet-5", name: "Sonnet 5", options: [] },
-  { slug: "claude-opus-5", name: "Opus 5", isDefault: true, options: [] },
+  { slug: "claude-sonnet-5", name: "Sonnet 5", imageInput: { maxBytes: null }, options: [] },
+  {
+    slug: "claude-opus-5",
+    name: "Opus 5",
+    imageInput: { maxBytes: null },
+    isDefault: true,
+    options: [],
+  },
 ];
 
 describe("buildThreadModelField", () => {
   it("offers the models of the local runner's snapshot when there is one", () => {
     const instance: Pick<ProviderInstance, "snapshots"> = {
       snapshots: [
-        buildSnapshot(OTHER, [{ slug: "claude-haiku-5", name: "Haiku 5", options: [] }]),
+        buildSnapshot(OTHER, [
+          { slug: "claude-haiku-5", name: "Haiku 5", imageInput: { maxBytes: null }, options: [] },
+        ]),
         buildSnapshot(LOCAL, MODELS),
       ],
     };

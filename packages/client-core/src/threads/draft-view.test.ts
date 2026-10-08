@@ -37,7 +37,15 @@ const UNRESTRICTED: Profile = {
 const CLAUDE = buildInstance("claude-code", "Claude Code", [
   buildSnapshot({
     runnerId: MOSS.id,
-    models: [{ slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [] }],
+    models: [
+      {
+        slug: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        imageInput: { maxBytes: null },
+        isDefault: true,
+        options: [],
+      },
+    ],
   }),
 ]);
 

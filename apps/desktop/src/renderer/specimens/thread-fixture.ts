@@ -228,6 +228,7 @@ const QUEUED_INPUT: Input = {
   source: "user",
   actor: "user",
   text: "Also check the Apple Pay path",
+  attachments: [],
   status: "queued",
   delivery: null,
   createdAt: new Date(SPECIMEN_NOW - 4 * 60_000).toISOString(),

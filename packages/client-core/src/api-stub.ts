@@ -44,6 +44,18 @@ export const buildErrorBody = (code: string, message: string): { error: unknown 
   },
 });
 
+/**
+ * Parses a request body as JSON, or returns it as text when it is not JSON,
+ * such as the image bytes `attachment.create` sends.
+ */
+const readBody = (sent: string): unknown => {
+  try {
+    return JSON.parse(sent);
+  } catch {
+    return sent;
+  }
+};
+
 /** Returns a promise that rejects with the signal's reason when `signal` aborts, as `fetch` does. */
 const rejectOnAbort = (signal: AbortSignal | null | undefined): Promise<never> =>
   new Promise((_resolve, reject) => {
@@ -81,7 +93,7 @@ export const createApiStub = (
       method: request.method,
       path: address.pathname,
       search: address.search,
-      body: sent.length === 0 ? undefined : JSON.parse(sent),
+      body: sent.length === 0 ? undefined : readBody(sent),
       authorization: request.headers.get("authorization"),
     };
     calls.push(call);

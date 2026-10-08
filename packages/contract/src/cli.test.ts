@@ -54,8 +54,15 @@ const collectResolvers = (): Record<string, string | undefined> =>
     listVisibleFields().map(([id, name, field]) => [`${id} ${name}`, field.resolves]),
   );
 
-/** The three operations a programmatic client calls and a terminal never does. */
-const HIDDEN = ["auth.login", "auth.logout", "auth.wsTicket"];
+/** The operations a programmatic client calls and a terminal never does. */
+const HIDDEN = [
+  "auth.login",
+  "auth.logout",
+  "auth.wsTicket",
+  "attachment.create",
+  "attachment.readContent",
+  "attachment.delete",
+];
 
 /** The command spelling of every visible operation, as the spec's command table lists it. */
 const COMMANDS: Record<string, string> = {
@@ -382,7 +389,7 @@ describe("the CLI table", () => {
     expect(Object.keys(table).sort()).toEqual(Object.keys(OPERATIONS).sort());
   });
 
-  it("hides exactly the three operations with no command", () => {
+  it("hides exactly the five operations with no command", () => {
     const hidden = rows.filter(([, row]) => row.hidden === true).map(([id]) => id);
     expect(hidden.sort()).toEqual([...HIDDEN].sort());
   });

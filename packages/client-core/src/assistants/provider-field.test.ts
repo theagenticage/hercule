@@ -38,8 +38,19 @@ const buildInstance = (
             versionVerdict: "ok",
             auth,
             models: [
-              { slug: "claude-sonnet-5", name: "Sonnet 5", isDefault: true, options: [] },
-              { slug: "claude-opus-5", name: "Opus 5", options: [] },
+              {
+                slug: "claude-sonnet-5",
+                name: "Sonnet 5",
+                imageInput: { maxBytes: null },
+                isDefault: true,
+                options: [],
+              },
+              {
+                slug: "claude-opus-5",
+                name: "Opus 5",
+                imageInput: { maxBytes: null },
+                options: [],
+              },
             ],
           },
         ],

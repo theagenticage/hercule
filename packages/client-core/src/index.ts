@@ -62,7 +62,37 @@ export {
 } from "./assistants/rotation";
 export { buildAssistantProviderField } from "./assistants/provider-field";
 export { buildAssistantRows, decideAssistantPose, type AssistantRow } from "./assistants/rows";
-export { createClient, type FetchLike, type HerculeClient } from "./client";
+export { checkImageFile, formatAttachmentSize, type ImageFile } from "./attachments/files";
+export {
+  addFilesToShelf,
+  applyUploadOutcome,
+  decideShelfTileState,
+  describeSendBlock,
+  EXPIRED_ATTACHMENT_MESSAGE,
+  findExpiredShelfKeys,
+  listUploadedAttachmentIds,
+  markShelfItemFailed,
+  markShelfItemsExpired,
+  markShelfItemUploaded,
+  markShelfItemUploading,
+  removeShelfItem,
+  type ShelfItem,
+  type ShelfItemStatus,
+  type ShelfModel,
+  type ShelfTileState,
+} from "./attachments/shelf";
+export {
+  createUploadQueue,
+  UPLOAD_CONCURRENCY,
+  type UploadOutcome,
+  type UploadQueue,
+} from "./attachments/upload-queue";
+export {
+  createClient,
+  MAX_INPUT_ANSWER_WAIT_MS,
+  type FetchLike,
+  type HerculeClient,
+} from "./client";
 export {
   buildConfigDraft,
   buildConfigFields,

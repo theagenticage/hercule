@@ -76,6 +76,11 @@ ledger groups), `--raised` is the lit layer for what needs attention. **Depth = 
 border (`--line`) + crisp shallow shadow.** In dark, prominence comes from the raised
 surface plus a faint white inner top highlight - never a color wash.
 
+Scrims dim the page behind an overlay. `--scrim` (light `rgb(23,26,33)` at 22%, dark black
+at 45%) sits behind dialogs, pickers and the drawer, which keep the page readable around
+them. `--scrim-strong` (`rgba(10,11,15,0.78)` in both themes) sits behind a lightbox only:
+the image is the whole content, so the page must fall away whatever the image's colours.
+
 ## Typography
 
 *(Pinned 2026-09-04, [#58](https://github.com/theagenticage/hercule/issues/58).)* **Both faces are self-hosted**: the `woff2` files ship in `packages/ui` and are served from the controller's own origin, never fetched from Google Fonts at runtime. Hercule runs on a LAN and on machines with no internet, the served bundle's CSP allows `font-src 'self'` only ([spec/14](./spec/14-web-app.md) §Auth in the client), and a font request to a third party would tell that party who is using Hercule and when. Google Fonts is where the faces come from, not where the browser gets them. The files live in `packages/ui/src/fonts` with their OFL licences beside them: Onest as one variable file per subset covering 400-600, IBM Plex Mono as static 400 and 500.

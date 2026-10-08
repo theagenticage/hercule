@@ -9,6 +9,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import type { SessionStart } from "@hercule/protocol";
+import type { AttachmentCache } from "../attachments";
 import { buildGitCredentialEnv } from "../credentials";
 import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
@@ -20,6 +21,10 @@ export interface Machine {
   readonly providersDir: string;
   /** Where a workspace-less session's empty cwd is made, one directory per session. */
   readonly scratchDir: string;
+  /** `<runner storage>/attachments`: one directory per session for the images of its input. */
+  readonly attachmentsDir: string;
+  /** Fetches the images of an input from the controller into a session's directory. */
+  readonly attachments: AttachmentCache;
   /** `<home>/runner/bin`, holding the `hercule` symlink, prepended to a session's `PATH`. */
   readonly binDir: string;
   /** The skill and the Claude plugin directory, prepared once at runner start (spec 06 section 9.3). */
@@ -41,6 +46,8 @@ export interface Resolved {
   readonly ctx: ProviderRunnerContext;
   /** The scratch directory, removed when the session exits. Undefined for a session that has a workspace. */
   readonly scratch: string | undefined;
+  /** The directory the session's images are cached in, removed when the session exits. */
+  readonly attachmentsDir: string;
 }
 
 /**
@@ -196,6 +203,13 @@ export const resolveSessionContext = (
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       return dir;
     });
+    // Created before the harness starts, because Claude takes the directories
+    // it may read only as a start option.
+    const attachmentsDir = yield* tryFilesystem(() => {
+      const dir = joinPath(machine.attachmentsDir, frame.sessionId);
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      return dir;
+    });
     // Only a Thread on the controller's local runner sees the user's own
     // material. The key is left out for every other session, so its adapter
     // keeps the harness isolated from the user's installation.
@@ -205,6 +219,7 @@ export const resolveSessionContext = (
         : undefined;
     return {
       scratch: placed.scratch,
+      attachmentsDir,
       ctx: {
         cwd: placed.cwd,
         home,
@@ -215,6 +230,7 @@ export const resolveSessionContext = (
         // from.
         secrets: frame.secrets,
         herculeTool: machine.herculeTool,
+        attachmentsDir,
         ...(userMaterial === undefined ? {} : { userMaterial }),
       },
     };

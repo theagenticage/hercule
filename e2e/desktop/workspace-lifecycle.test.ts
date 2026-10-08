@@ -54,6 +54,7 @@ const workspaces = Effect.runSync(makeWorkspaces({ storageDir: options.home, git
 process.once("SIGTERM", async () => { await Effect.runPromise(Scope.close(scope, Exit.void)); process.exit(0); });
 const machine = {
   providersDir: join(options.home, "providers"), scratchDir: join(options.home, "scratch"),
+  attachmentsDir: join(options.home, "attachments"),
   binDir: join(options.home, "bin"), herculeTool: { skill: "# fixture", claudePluginDir: join(options.home, "plugin") },
   controllerUrl: options.url, baseEnv: { PATH: process.env.PATH }, findBinary: () => "/fixture/never-executed",
   workspaces, socketPath: join(options.home, "credentials.sock"),
@@ -82,7 +83,7 @@ const handle = async (frame) => {
   switch (frame._tag) {
     case "ping": return send({ _tag: "pong" });
     case "probeRequest": return send({ _tag: "probeReport", requestId: frame.requestId, instanceId: frame.instanceId,
-      result: { harnessVersion: "fixture", auth: { status: "ok" }, models: [{ slug: "fixture", name: "Fixture", isDefault: true, options: [] }] } });
+      result: { harnessVersion: "fixture", auth: { status: "ok" }, models: [{ slug: "fixture", name: "Fixture", imageInput: { maxBytes: null }, isDefault: true, options: [] }] } });
     case "workspaceProvision": {
       const report = await Effect.runPromise(workspaces.provision(frame));
       log({ kind: "workspace", id: frame.workspaceId, cwd: Effect.runSync(workspaces.resolve(frame.workspaceId))?.cwd });

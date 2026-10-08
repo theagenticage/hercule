@@ -13,6 +13,7 @@ import { buildSubagent } from "./subagents.testing";
 const buildTurn = (turnId: string, user: string): ThreadTurn => ({
   turnId,
   user,
+  userAttachments: [],
   items: [],
   assistantText: "",
   startedAt: "2026-10-05T09:00:00.000Z",
@@ -39,6 +40,7 @@ describe("splitSubagentBrief", () => {
     key: `user:${text}`,
     itemId: text,
     text,
+    attachments: [],
     at: "2026-10-05T09:00:00.000Z",
   });
   const live: ThreadBlock = { kind: "live", key: "live", model: "claude-haiku-5" };

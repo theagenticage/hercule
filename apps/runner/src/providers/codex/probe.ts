@@ -172,6 +172,9 @@ const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescript
       slug: truncateFact(model.id),
       name: truncateFact(model.displayName),
       ...(model.isDefault === true ? { isDefault: true } : {}),
+      // An app-server too old to list input types is read as text only, so a
+      // missing list never lets images through.
+      imageInput: (model.inputModalities ?? []).includes("image") ? { maxBytes: null } : null,
       options: buildModelOptions(model),
     }));
 

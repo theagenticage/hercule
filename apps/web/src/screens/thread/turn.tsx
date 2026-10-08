@@ -2,8 +2,8 @@
  * One turn of the transcript. It shows:
  *
  * - a centred time separator, when the screen passes one;
- * - the user's message as a right-aligned bubble, unless `hidesUserMessage`
- *   leaves it out;
+ * - the user's message and images as a right-aligned bubble, unless
+ *   `hidesUserMessage` leaves it out;
  * - one line per subagent the turn started;
  * - the assistant's prose at full width;
  * - the divider that shows how long the agent worked, or how the turn ended,
@@ -15,6 +15,7 @@
 import type { JSX, ReactNode, RefObject } from "react";
 import { showsTurnDivider, type ThreadTurn } from "@hercule/client-core";
 import { OwnerBubble } from "../bubble";
+import { useAttachmentImages } from "../use-attachment-images";
 import { TimeSeparator } from "../time-separator";
 import { Markdown } from "../markdown";
 import { TurnDivider } from "./turn-divider";
@@ -43,12 +44,14 @@ export function Turn({
    */
   readonly hidesUserMessage?: boolean;
 }): JSX.Element {
+  const { images, observe } = useAttachmentImages(turn.userAttachments);
+  const hasUserMessage = turn.user !== "" || images.length > 0;
   return (
     <div className="flex flex-col gap-2">
       {stamp === undefined ? null : <TimeSeparator stamp={stamp} />}
-      {turn.user === "" || hidesUserMessage ? null : (
+      {!hasUserMessage || hidesUserMessage ? null : (
         <div className="flex justify-end">
-          <OwnerBubble text={turn.user} />
+          <OwnerBubble text={turn.user} images={images} imagesRef={observe} />
         </div>
       )}
       {spawnLines}

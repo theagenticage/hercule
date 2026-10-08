@@ -7,11 +7,13 @@ import {
   readErrorMessage,
 } from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
-import { Button } from "@hercule/ui";
+import { Button, useBlobImageSource, type LightboxImage } from "@hercule/ui";
 import { inputsQuery, sessionQuery } from "../../app/queries";
+import { useAttachmentImages } from "../use-attachment-images";
 
 /**
- * The list of queued messages above the composer, each with Steer and Cancel.
+ * The list of queued messages above the composer, each with Steer and Cancel,
+ * and with small thumbnails of its images before its text.
  * The query returns the session's whole input history; this component shows
  * only the inputs still `queued`, because sent, delivered or cancelled ones
  * can no longer be acted on.
@@ -76,10 +78,22 @@ function QueuedRow({
     onSuccess: onDone,
   });
   const failure = steer.error ?? cancel.error;
+  const { images, observe } = useAttachmentImages(row.attachments);
 
   return (
     <div className="flex flex-col gap-1 rounded-control border border-line-soft bg-surface px-3 py-2">
       <div className="flex items-center gap-2">
+        {images.length === 0 ? null : (
+          <span
+            ref={observe}
+            className="flex shrink-0 gap-1"
+            aria-label={`${String(images.length)} ${images.length === 1 ? "image" : "images"}`}
+          >
+            {images.map((image) => (
+              <QueuedThumbnail key={image.key} image={image} />
+            ))}
+          </span>
+        )}
         <span className="min-w-0 flex-1 truncate text-row text-ink">{row.text}</span>
         {actionable ? (
           <>
@@ -99,5 +113,19 @@ function QueuedRow({
         </p>
       )}
     </div>
+  );
+}
+
+/** Shows one image of a queued message at 24px; the name is its tooltip. */
+function QueuedThumbnail({ image }: { readonly image: LightboxImage }): JSX.Element {
+  const source = useBlobImageSource(image.blob);
+  return (
+    <img
+      ref={source}
+      alt={image.name}
+      title={image.name}
+      decoding="async"
+      className="size-6 rounded-control border border-line bg-raised object-cover"
+    />
   );
 }

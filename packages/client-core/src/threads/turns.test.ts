@@ -893,4 +893,59 @@ describe("buildTurns: the item an open request is about", () => {
       )!.result,
     ).toBe("completed");
   });
+
+  it("gathers the images of every message the user sent in a turn, in order", () => {
+    const first = {
+      id: "01920000-0000-7000-8000-000000000001",
+      name: "before.png",
+      mimeType: "image/png",
+      sizeBytes: 2048,
+    };
+    const second = {
+      id: "01920000-0000-7000-8000-000000000002",
+      name: "after.webp",
+      mimeType: "image/webp",
+      sizeBytes: 4096,
+    };
+    const buildUserStarted = (
+      itemId: string,
+      detail: Extract<TranscriptRow["event"], { _tag: "item.started" }>["detail"] & object,
+    ): TranscriptRow =>
+      buildRow({
+        _tag: "item.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.100Z",
+        turnId: "t1",
+        itemId,
+        kind: "user_message",
+        detail,
+      });
+    const rows = [
+      buildUserStarted("u1", { text: "Compare these", attachments: [first] }),
+      buildUserStarted("u2", { text: "and this one" }),
+      buildUserStarted("u3", { text: "", attachments: [second] }),
+    ];
+
+    const [turn] = buildTurns(rows, AGENT_ASKING_NOTHING);
+
+    expect(turn?.userAttachments).toEqual([first, second]);
+  });
+
+  it("gives a turn whose messages carry no images an empty list", () => {
+    const rows = [
+      buildRow({
+        _tag: "item.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.100Z",
+        turnId: "t1",
+        itemId: "u1",
+        kind: "user_message",
+        detail: { text: "Fix the login bug" },
+      }),
+    ];
+
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userAttachments).toEqual([]);
+  });
 });

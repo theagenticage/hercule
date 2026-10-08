@@ -62,6 +62,7 @@ export {
   Pipeline,
   PipelineLayer,
 } from "./events";
+export { AttachmentSweepInterval, runAttachmentSweepLoop } from "./attachments";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
 export { IngestExecutorLayer, IngestReconcileInterval, runIngestReconciler } from "./ingest";
 export { BindableOperationsLayer } from "./notifications";

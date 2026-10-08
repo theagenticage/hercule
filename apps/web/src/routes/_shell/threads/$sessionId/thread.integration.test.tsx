@@ -107,8 +107,14 @@ const INSTANCE_STARTED: ProviderInstance = {
   declared: DECLARED,
   snapshots: [
     buildInstanceSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
-      { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [] },
-      { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
+      {
+        slug: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        imageInput: { maxBytes: null },
+        isDefault: true,
+        options: [],
+      },
+      { slug: "claude-opus-5", name: "Claude Opus 5", imageInput: { maxBytes: null }, options: [] },
     ]),
   ],
   createdAt: "2026-09-08T09:00:00.000Z",
@@ -138,8 +144,19 @@ const INSTANCE_OPTIONS: ProviderInstance = {
   ...INSTANCE_STARTED,
   snapshots: [
     buildInstanceSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
-      { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [EFFORT] },
-      { slug: "claude-opus-5", name: "Claude Opus 5", options: [EFFORT] },
+      {
+        slug: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        imageInput: { maxBytes: null },
+        isDefault: true,
+        options: [EFFORT],
+      },
+      {
+        slug: "claude-opus-5",
+        name: "Claude Opus 5",
+        imageInput: { maxBytes: null },
+        options: [EFFORT],
+      },
     ]),
   ],
 };
@@ -150,7 +167,13 @@ const INSTANCE_OTHER: ProviderInstance = {
   name: "work",
   snapshots: [
     buildInstanceSnapshot(SESSION.runnerId, "work@example.com", "Claude Pro", [
-      { slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] },
+      {
+        slug: "claude-haiku-5",
+        name: "Claude Haiku 5",
+        imageInput: { maxBytes: null },
+        isDefault: true,
+        options: [],
+      },
     ]),
   ],
 };
@@ -2116,6 +2139,7 @@ const buildQueuedInput = (overrides: Partial<Input> = {}): Input => ({
   source: "user",
   actor: "user",
   text: "Also check the logs",
+  attachments: [],
   status: "queued",
   delivery: null,
   createdAt: "2026-09-08T10:02:00.000Z",
@@ -3874,5 +3898,92 @@ describe("Thread: the session view of an assistant's session", () => {
     await waitFor(() => {
       expect(row.getAttribute("aria-current")).toBe("page");
     });
+  });
+});
+
+describe("Thread: images", () => {
+  const SHOT = {
+    id: "01a06d02-6000-7000-8000-000000000001",
+    name: "before.png",
+    mimeType: "image/png",
+    sizeBytes: 2048,
+  } as const;
+  const SECOND_SHOT = { ...SHOT, id: "01a06d02-6000-7000-8000-000000000002", name: "after.png" };
+
+  it("shows a message of images alone as a bubble of previews, and opens them large", async () => {
+    const user = userEvent.setup();
+    const at = "2026-09-08T13:00:00.100Z";
+    const detail = { text: "", attachments: [SHOT, SECOND_SHOT] };
+    const { api } = await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(
+        buildTurnStart("t5", "2026-09-08T13:00:00.000Z"),
+        [
+          {
+            _tag: "item.started",
+            eventId: "",
+            sessionId: SESSION_ID,
+            at,
+            turnId: "t5",
+            itemId: "u5",
+            kind: "user_message",
+            detail,
+          },
+        ],
+        buildAssistantMessage("t5", "2026-09-08T13:00:01.000Z", "a5", "Both look fine."),
+        buildTurnCompletion("t5", "2026-09-08T13:00:02.000Z"),
+      ),
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Preview before.png" }));
+    const lightbox = screen.getByRole("dialog", { name: "before.png (1/2)" });
+    fireEvent.keyDown(lightbox, { key: "ArrowRight" });
+    expect(screen.getByRole("dialog", { name: "after.png (2/2)" })).toBeDefined();
+
+    // Each image's bytes are read from the controller for its preview.
+    const reads = api.calls.filter((call) => call.path.startsWith("/api/v1/attachments/"));
+    expect(new Set(reads.map((call) => call.path))).toEqual(
+      new Set([
+        `/api/v1/attachments/${SHOT.id}/content`,
+        `/api/v1/attachments/${SECOND_SHOT.id}/content`,
+      ]),
+    );
+  });
+
+  it("sends an active thread's images with its input, and empties the shelf once the input is taken", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
+      "POST /api/v1/attachments": { status: 201, body: SHOT },
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
+        body: { inputId: INPUT_ID, result: "opened" },
+      },
+    });
+
+    const picker = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    await user.upload(picker, [new File(["png"], "before.png", { type: "image/png" })]);
+    await user.type(screen.getByRole("textbox"), "Compare these");
+    const send = screen.getByRole<HTMLButtonElement>("button", { name: /send/i });
+    await waitFor(() => {
+      expect(send.disabled).toBe(false);
+    });
+    await user.click(send);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
+    });
+    const input = api.calls.find((call) => call.path === `/api/v1/sessions/${SESSION_ID}/input`);
+    expect(input?.body).toEqual({ text: "Compare these", attachments: [SHOT.id] });
+  });
+
+  it("shows a queued input's images as thumbnails beside its text", async () => {
+    await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: {
+        body: { items: [buildQueuedInput({ text: "", attachments: [SHOT, SECOND_SHOT] })] },
+      },
+    });
+
+    const thumbnails = await screen.findByLabelText("2 images");
+    expect(within(thumbnails).getByAltText("before.png")).toBeDefined();
+    expect(within(thumbnails).getByAltText("after.png")).toBeDefined();
   });
 });

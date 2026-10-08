@@ -54,7 +54,7 @@ const buildSnapshot = (
   harnessVersion: "2.1.263",
   versionVerdict: "ok" as const,
   auth: { status: "ok" as const, identity: "rogier@example.com", planLabel: "Claude Max" },
-  models: models.map((model) => ({ ...model, options: [] })),
+  models: models.map((model) => ({ ...model, imageInput: { maxBytes: null }, options: [] })),
 });
 
 const buildProviderInstance = (

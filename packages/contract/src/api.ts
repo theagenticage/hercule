@@ -11,6 +11,7 @@ import { API_PREFIX } from "./operations";
 import { agent } from "./groups/agent";
 import { apiKey } from "./groups/api-key";
 import { assistant } from "./groups/assistant";
+import { attachment } from "./groups/attachment";
 import { auth } from "./groups/auth";
 import { connection } from "./groups/connection";
 import { controller } from "./groups/controller";
@@ -70,6 +71,7 @@ export const api = HttpApi.make("hercule")
     session,
     input,
     transcript,
+    attachment,
     controller,
   )
   .prefix(API_PREFIX);

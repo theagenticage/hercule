@@ -29,6 +29,7 @@ const REQUEST = "0199e0e7-0000-7000-8000-0000000000a1";
 
 const CONTEXT: ProviderRunnerContext = {
   cwd: null,
+  attachmentsDir: null,
   home: `/var/hercule/runner/providers/${INSTANCE}`,
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin", HOME: "/home/rogier" },
@@ -453,6 +454,7 @@ describe("a device login", () => {
   // neutral home when it builds the command, just as it does for a session.
   const CODEX_CONTEXT: ProviderRunnerContext = {
     cwd: null,
+    attachmentsDir: null,
     home: mkdtempSync(join(tmpdir(), "hercule-login-")),
     binary: "/usr/local/bin/codex",
     env: { PATH: "/usr/local/bin:/usr/bin", HOME: "/home/rogier" },

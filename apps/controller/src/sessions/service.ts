@@ -52,7 +52,9 @@ import {
   DEFAULT_PAGE_LIMIT,
   Id,
   INPUT_SORT_FIELDS,
+  EMPTY_PROMPT_MESSAGE,
   INPUT_UPDATE_FIELDS,
+  refuseEmptyInputUpdate,
   InvalidState,
   NotFound,
   SESSION_SORT_FIELDS,
@@ -71,6 +73,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
+import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
 import { PluginHost } from "../plugins";
 import {
   afterCommit,
@@ -98,6 +101,11 @@ import {
   WITHDRAW_REASON_SESSION_ENDED,
   type WaitEndedBy,
 } from "./approval-notification";
+import {
+  findAttachmentRefusal,
+  refuseUnacceptedAttachments,
+  type AttachmentTurn,
+} from "./attachment-refusal";
 import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
@@ -159,7 +167,9 @@ const InputQueryInput = Schema.Struct({ id: Id, ...buildPageInputFields(INPUT_SO
 
 export type InputQueryInput = Schema.Schema.Type<typeof InputQueryInput>;
 
-const InputUpdate = Schema.Struct({ id: Id, inputId: Id, ...INPUT_UPDATE_FIELDS });
+const InputUpdate = Schema.Struct({ id: Id, inputId: Id, ...INPUT_UPDATE_FIELDS }).check(
+  refuseEmptyInputUpdate,
+);
 
 export type InputUpdate = Schema.Schema.Type<typeof InputUpdate>;
 
@@ -213,6 +223,8 @@ export interface CreateRequest {
   /** The spec sent to the runner. The row's stored fields are taken from it. */
   readonly spec: SessionSpec;
   readonly prompt: string;
+  /** The ids of the prompt's images, from `attachment.create`, in order. */
+  readonly attachments: ReadonlyArray<string>;
   /**
    * The session's title, chosen by the caller, or `undefined` to take it
    * from the prompt (`buildTitle`).
@@ -283,6 +295,8 @@ export interface TakeInputRequest<E> {
    */
   readonly buildResumeSpec: ((session: StoredSession) => Effect.Effect<string, E>) | undefined;
   readonly text: string;
+  /** The ids of the input's images, from `attachment.create`, in order. */
+  readonly attachments: ReadonlyArray<string>;
   readonly at: string;
   /**
    * Claims the row in the insert when the session is idle and has no input on
@@ -339,6 +353,12 @@ export type RecordedInputAnswer =
   | { readonly _tag: "unconfirmed"; readonly resultRequest: AgentStepResultRequest };
 
 /** Converts a page to the contract's shape, where a missing cursor is an absent key, not `null`. */
+/** Returns a stored input as the API shows it: each image without the digest only a runner checks. */
+const buildInputRecord = (row: StoredInput): Input => ({
+  ...row,
+  attachments: row.attachments.map(excludeDigest),
+});
+
 const toPageOutput = <A>(listing: Page<A>): { items: ReadonlyArray<A>; nextCursor?: string } => ({
   items: listing.items,
   ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
@@ -489,7 +509,8 @@ const buildStepKey = (
 
 /**
  * Builds what a frame carries to the runner for one stored input: its text,
- * the session's current model selection, and, for an agent step's prompt,
+ * its images when it has any, the session's current model selection, and,
+ * for an agent step's prompt,
  * the step's key, so the runner knows the turn the prompt starts is the
  * step's and reports its result. A `sessionInput` and a `sessionStart` carry
  * the same shape.
@@ -502,6 +523,7 @@ const buildTurnInput = (
   row: StoredInput,
 ): TurnInput => ({
   text: row.text,
+  ...(row.attachments.length === 0 ? {} : { attachments: row.attachments }),
   modelSelection: session.modelSelection,
   ...(row.stepIteration === null ? {} : { step: buildStepKey(session, row.stepIteration) }),
 });
@@ -521,11 +543,20 @@ const MAX_TITLE_LENGTH = 80;
 /**
  * Builds a session's short title, trimmed and cut to `MAX_TITLE_LENGTH`:
  * `chosen` when the caller chose a title, otherwise the first non-blank line
- * of the session's first prompt. That way a sidebar row has something to show
- * without reading the transcript.
+ * of the session's first prompt, otherwise the name of the prompt's first
+ * image. That way a sidebar row has something to show without reading the
+ * transcript.
  */
-const buildTitle = (chosen: string | undefined, prompt: string): string => {
-  const title = chosen ?? prompt.split("\n").find((one) => one.trim().length > 0) ?? "";
+const buildTitle = (
+  chosen: string | undefined,
+  prompt: string,
+  firstAttachmentName: string | undefined,
+): string => {
+  const title =
+    chosen ??
+    prompt.split("\n").find((line) => line.trim().length > 0) ??
+    firstAttachmentName ??
+    "";
   return title.trim().slice(0, MAX_TITLE_LENGTH);
 };
 
@@ -586,6 +617,8 @@ const make = Effect.gen(function* () {
   const observer = yield* SessionObserver;
   const workspaces = yield* WorkspaceService;
   const notifier = yield* Notifier;
+  // The attachment claim and the image check read through this service's client.
+  const provideSql = Effect.provideService(SqlClient.SqlClient, sql);
 
   /**
    * Each session's ingest state: its last sequence number and the delta text
@@ -621,6 +654,33 @@ const make = Effect.gen(function* () {
       sessions.one(id),
       Option.match({ onNone: () => Effect.void, onSome: announceSessionChange }),
     );
+
+  /**
+   * Checks that a waiting input's attachments can go to the runner and model
+   * the turn would run on (`findAttachmentRefusal`). Returns `true` when they
+   * cannot, after storing the refusal as the input's reason. The input stays
+   * waiting and unsent, where the user sees why and can change the input or
+   * the model. A later check that passes lets it be claimed as usual.
+   *
+   * The reason is written, and the session announced, only when it changed.
+   * The check repeats on every delivery pass while the refusal lasts, and
+   * each pass would otherwise rewrite the row and notify every client.
+   */
+  const holdInputWithRefusedAttachments = (
+    input: StoredInput,
+    turn: Omit<AttachmentTurn, "attachments">,
+  ): Effect.Effect<boolean, SqlError> =>
+    Effect.gen(function* () {
+      const refusal = yield* provideSql(
+        findAttachmentRefusal({ ...turn, attachments: input.attachments }),
+      );
+      if (refusal === undefined) return false;
+      if (input.reason !== refusal) {
+        yield* inputs.requeue(input.id, null, refusal);
+        yield* announceSessionChangeById(input.sessionId);
+      }
+      return true;
+    });
 
   /**
    * Puts an exited session back on the queue, with the spec that resumes its
@@ -1435,13 +1495,26 @@ const make = Effect.gen(function* () {
      * decided by the controller daemon is written. The session is always
      * stored as `queued`: whether the runner has room for it right now is
      * decided by dispatch, the same way for a new session as for any other.
+     *
+     * Fails with `Validation` when an image is gone or was uploaded by
+     * someone else, or when the session's runner or model cannot take images
+     * (`refuseUnacceptedAttachments`).
      */
-    create: (open: CreateRequest): Effect.Effect<void, SqlError> =>
+    create: (open: CreateRequest): Effect.Effect<void, Validation | SqlError> =>
       Effect.gen(function* () {
         const actor = yield* currentStamp;
+        const references = yield* provideSql(readClaimableAttachments(open.attachments));
+        yield* provideSql(
+          refuseUnacceptedAttachments({
+            runnerId: open.runnerId,
+            instanceId: open.spec.instanceId,
+            model: open.spec.modelSelection.model,
+            attachments: references,
+          }),
+        );
         yield* sessions.insert({
           id: open.id,
-          title: buildTitle(open.title, open.prompt),
+          title: buildTitle(open.title, open.prompt, references[0]?.name),
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
           conversationId: open.conversationId,
@@ -1466,7 +1539,7 @@ const make = Effect.gen(function* () {
         // The prompt is stored as an ordinary input, waiting with the
         // session. The frame that starts the session carries it, and a
         // controller that restarts in between still has it.
-        yield* inputs.insert({
+        const prompt = yield* inputs.insert({
           sessionId: open.id,
           source: "user",
           actor,
@@ -1474,6 +1547,7 @@ const make = Effect.gen(function* () {
           at: open.at,
           ...(open.step === undefined ? {} : { stepIteration: open.step.iteration }),
         });
+        yield* provideSql(claimAttachments(prompt.id, references));
         yield* audit.append({
           kind: open.kind,
           actor,
@@ -1565,6 +1639,18 @@ const make = Effect.gen(function* () {
               }
               continue;
             }
+            // Checked again here, because the runner or its models may have
+            // changed since the input was stored. A refused session stays
+            // queued, and its input stays waiting with the reason, where the
+            // user sees it and can change the input or the model.
+            if (
+              yield* holdInputWithRefusedAttachments(waiting.value, {
+                runnerId,
+                instanceId: spec.value.instanceId,
+                model: row.modelSelection.model,
+              })
+            )
+              continue;
             // The session's own token for the public API. It is created for
             // this start and its hash is stored in the same update that marks
             // the session as starting, so the token is valid exactly while the
@@ -1804,6 +1890,15 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Puts a claimed input back to waiting with `reason`, without sending
+     * it, the same way as an input the runner refused
+     * (`returnUndeliveredInput`). For a caller that finds, after the claim,
+     * that the input cannot go to the runner.
+     */
+    refuseClaimedInput: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
+      returnUndeliveredInput(row, reason),
+
+    /**
      * Puts a session back on the queue when its start frame could not be
      * sent, because the runner was not connected, and puts the input the
      * frame carried back to waiting. The input never left the controller, so
@@ -1959,11 +2054,27 @@ const make = Effect.gen(function* () {
      * input waits, and a later resume sends it. Joins the caller's
      * transaction, so when the caller fails, for example on an invalid model
      * option, neither the new selection nor the input is stored.
+     *
+     * Fails with `Validation` when an image is gone or was uploaded by
+     * someone else, or when the session's runner or the input's model cannot
+     * take images (`refuseUnacceptedAttachments`).
      */
     takeInput: <E = never>(
       taking: TakeInputRequest<E>,
-    ): Effect.Effect<StoredInput, E | SqlError | InvalidState> =>
+    ): Effect.Effect<StoredInput, E | Validation | SqlError | InvalidState> =>
       Effect.gen(function* () {
+        const references = yield* provideSql(readClaimableAttachments(taking.attachments));
+        if (references.length > 0) {
+          const session = Option.getOrThrow(yield* sessions.one(taking.sessionId));
+          yield* provideSql(
+            refuseUnacceptedAttachments({
+              runnerId: session.runnerId,
+              instanceId: session.instanceId,
+              model: taking.modelSelection.model,
+              attachments: references,
+            }),
+          );
+        }
         yield* sessions.setModelSelection(taking.sessionId, taking.modelSelection);
         const claimed =
           taking.claimWhenIdle &&
@@ -1978,6 +2089,7 @@ const make = Effect.gen(function* () {
           ...(claimed ? { sentAt: taking.at } : {}),
           ...(taking.stepIteration === undefined ? {} : { stepIteration: taking.stepIteration }),
         });
+        yield* provideSql(claimAttachments(created.id, references));
         // Someone is asking again, so the session may be resumed for every
         // input that waits.
         yield* sessions.setCrashGuardArmed(taking.sessionId, false);
@@ -1987,7 +2099,7 @@ const make = Effect.gen(function* () {
           yield* resume(taking.sessionId, taking.buildResumeSpec, taking.at, false);
         }
         yield* announceSessionChangeById(taking.sessionId);
-        return created;
+        return { ...created, attachments: references };
       }),
 
     resume,
@@ -2108,15 +2220,36 @@ const make = Effect.gen(function* () {
 
     /**
      * Claims the oldest input still waiting on an idle session, for a
-     * delivery pass that finds the session idle. Returns `none` when no input
-     * is waiting, when the session is not `idle`, or when another input of
-     * the session is sent and not yet answered: that input's turn may not
-     * have started yet, and the runner takes one input per turn.
+     * delivery pass that finds the session idle. Returns `none` when:
+     *
+     * - no input is waiting, or the session is not `idle`;
+     * - another input of the session is sent and not yet answered: that
+     *   input's turn may not have started yet, and the runner takes one input
+     *   per turn;
+     * - the oldest input's attachments cannot go to the session's runner and
+     *   model (`holdInputWithRefusedAttachments`). The inputs queued behind
+     *   it wait for it, as in any queue.
      */
     claimOldestUnlessOneIsOnTheWire: (
       sessionId: string,
     ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
-      Effect.flatMap(nowIso, (at) => inputs.claimOldestUnlessOneIsOnTheWire(sessionId, at)),
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const waiting = yield* inputs.oldestWaiting(sessionId);
+          if (Option.isNone(waiting)) return Option.none();
+          if (waiting.value.attachments.length > 0) {
+            const session = Option.getOrThrow(yield* sessions.one(sessionId));
+            const held = yield* holdInputWithRefusedAttachments(waiting.value, {
+              runnerId: session.runnerId,
+              instanceId: session.instanceId,
+              model: session.modelSelection.model,
+            });
+            if (held) return Option.none();
+          }
+          return yield* inputs.claimOldestUnlessOneIsOnTheWire(sessionId, yield* nowIso);
+        }),
+      ),
 
     /**
      * Records the outcome of a send that carried an input to a runner: a
@@ -2466,7 +2599,14 @@ const make = Effect.gen(function* () {
           // took it, and the runner can take one new input now.
           if (moved === "idle" && event._tag === "turn.completed") {
             const next = yield* inputs.oldestWaiting(id);
-            if (Option.isSome(next)) {
+            if (
+              Option.isSome(next) &&
+              !(yield* holdInputWithRefusedAttachments(next.value, {
+                runnerId: session.runnerId,
+                instanceId: session.instanceId,
+                model: session.modelSelection.model,
+              }))
+            ) {
               claimedInput = Option.getOrUndefined(yield* inputs.claim(next.value.id, at));
             }
           }
@@ -2530,14 +2670,17 @@ const make = Effect.gen(function* () {
             direction: resolveSortDirection(sort, INPUT_DIRECTION),
           }),
         );
-        return toPageOutput(listing);
+        return toPageOutput({ ...listing, items: listing.items.map(buildInputRecord) });
       }),
 
     /**
-     * Replaces the text of an input still waiting on its session, and returns
-     * the changed input. Fails with `InvalidState` when the input was already
-     * sent, delivered or cancelled, or when the session answers an
-     * assistant's conversation.
+     * Replaces the text of an input still waiting on its session, and its
+     * images when `attachments` is given, and returns the changed input.
+     * Fails with `InvalidState` when the input was already sent, delivered or
+     * cancelled, or when the session answers an assistant's conversation.
+     * Fails with `Validation` when an image is gone or was uploaded by
+     * someone else, or when the session's runner or model cannot take images
+     * (`refuseUnacceptedAttachments`).
      *
      * The input a `queued` session will start with can be changed: it is
      * still waiting, and dispatch sends whatever text it holds when it claims
@@ -2547,7 +2690,7 @@ const make = Effect.gen(function* () {
     updateInput: (input: InputUpdate): Effect.Effect<Input, InputError> =>
       Effect.gen(function* () {
         yield* requireGrant("input.update");
-        const { id, inputId, text } = yield* Effect.mapError(
+        const { id, inputId, text, attachments } = yield* Effect.mapError(
           decodeInputUpdate(input),
           createDecodeValidationError,
         );
@@ -2557,8 +2700,31 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const row = yield* queuedInput(id, inputId);
             yield* inputs.rewrite(inputId, text);
-            yield* announceSessionChangeById(id);
-            return { ...row, text };
+            if (attachments === undefined) {
+              // The payload cannot see the stored images, so an empty text
+              // that leaves the input with nothing is refused here.
+              if (text.length === 0 && row.attachments.length === 0)
+                return yield* Effect.fail(
+                  createValidationError([{ path: ["text"], message: EMPTY_PROMPT_MESSAGE }]),
+                );
+              yield* announceSessionChangeById(id);
+              return buildInputRecord({ ...row, text });
+            }
+            const references = yield* provideSql(
+              readClaimableAttachments(attachments, row.attachments),
+            );
+            const session = yield* readSession(id);
+            yield* provideSql(
+              refuseUnacceptedAttachments({
+                runnerId: session.runnerId,
+                instanceId: session.instanceId,
+                model: session.modelSelection.model,
+                attachments: references,
+              }),
+            );
+            yield* provideSql(claimAttachments(inputId, references));
+            yield* announceSessionChange(session);
+            return buildInputRecord({ ...row, text, attachments: references });
           }),
         );
       }),
@@ -2607,7 +2773,7 @@ const make = Effect.gen(function* () {
             const row = yield* queuedInput(sessionId, inputId);
             yield* inputs.cancel(inputId);
             yield* announceSessionChange(session);
-            return { ...row, status: "cancelled" as const };
+            return buildInputRecord({ ...row, status: "cancelled" });
           }),
         );
       }),

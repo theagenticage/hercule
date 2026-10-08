@@ -447,6 +447,25 @@ describe("what the controller sends for a session", () => {
     expect(Effect.runSync(Schema.encodeEffect(TurnInput)({ text: "" }))).toEqual({ text: "" });
   });
 
+  it("carries an input's images as references, and refuses a type or a digest it cannot check", () => {
+    const image = {
+      id: "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c80",
+      name: "screenshot.png",
+      mimeType: "image/png",
+      sizeBytes: 446_464,
+      sha256: "a".repeat(64),
+    };
+    const decodeInput = (input: unknown) =>
+      Effect.runSyncExit(Schema.decodeUnknownEffect(TurnInput)(input))._tag;
+    expect(decodeInput({ text: "", attachments: [image] })).toBe("Success");
+    expect(decodeInput({ text: "", attachments: [{ ...image, mimeType: "image/svg+xml" }] })).toBe(
+      "Failure",
+    );
+    expect(decodeInput({ text: "", attachments: [{ ...image, sha256: "A".repeat(64) }] })).toBe(
+      "Failure",
+    );
+  });
+
   it("needs every field of the spec and of the binding", () => {
     for (const key of Object.keys(spec)) {
       expect(decode(SessionSpec, omitKey(spec, key))._tag, key).toBe("Failure");

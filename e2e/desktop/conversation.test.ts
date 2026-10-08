@@ -112,6 +112,7 @@ describe("the Conversation", () => {
     const assistant = await readAssistant(client, "Hercule");
     const { app, page } = await openSignedIn(url);
     await keepWindowOnTop(app);
+    await page.evaluate(recordFrames);
 
     await page
       .getByRole("navigation", { name: "Assistants", exact: true })
@@ -134,6 +135,13 @@ describe("the Conversation", () => {
     const session = await waitForBusySession(client, assistant.mainConversationId, runner);
     await stop.waitFor();
     expect(await send.count()).toBe(0);
+
+    // The page subscribes to the session's tap only after it has learned of
+    // the session, a moment after Stop shows. A delta the runner sends before
+    // then reaches no one, and the first text's words before its pause would
+    // never show. So the script starts once both live subscriptions are in
+    // place; see buildLiveCheck.
+    await expect.poll(() => page.evaluate(buildLiveCheck(session.id))).toBe(true);
 
     // The first text pauses a few words in, so the test sees it half written
     // however slowly the app catches up with the stream.

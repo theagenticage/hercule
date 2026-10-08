@@ -48,6 +48,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Schema } from "effect";
 import { pollUntil } from "./poll.ts";
 import type {
+  ATTACHMENTS_CAPABILITY,
+  AttachmentReference,
   ControllerToRunner,
   ExitReason,
   ItemKind,
@@ -115,8 +117,19 @@ const PROBE_RESULT: ProbeResult = {
   harnessVersion: "1.0.0",
   auth: { status: "ok" },
   models: [
-    { slug: "scripted", name: "Scripted", isDefault: true, options: MODEL_OPTIONS },
-    { slug: "scripted-large", name: "Scripted Large", options: MODEL_OPTIONS },
+    {
+      slug: "scripted",
+      name: "Scripted",
+      imageInput: { maxBytes: null },
+      isDefault: true,
+      options: MODEL_OPTIONS,
+    },
+    {
+      slug: "scripted-large",
+      name: "Scripted Large",
+      imageInput: { maxBytes: null },
+      options: MODEL_OPTIONS,
+    },
   ],
 };
 
@@ -438,13 +451,16 @@ export async function enlistScriptedRunner(
    * Reports a user message as an item of the agent's running turn, as the
    * Claude Code adapter does for every input it delivers and for the brief a
    * subagent starts with. A message steered into a turn that was already
-   * running is marked `steered`.
+   * running is marked `steered`. The input's images are listed in
+   * `detail.attachments` without their checksum, as a real runner lists
+   * them; the scripted runner never fetches their bytes.
    */
   const reportUserMessage = (
     session: HostedSession,
     agent: Agent,
     text: string,
     steered: boolean,
+    attachments: ReadonlyArray<AttachmentReference> = [],
   ): void => {
     const turnId = agent.turnId;
     if (turnId === undefined) {
@@ -456,7 +472,20 @@ export async function enlistScriptedRunner(
       turnId,
       itemId: randomUUID(),
       kind: "user_message",
-      detail: { text, ...(steered ? { steered: true } : {}) },
+      detail: {
+        text,
+        ...(steered ? { steered: true } : {}),
+        ...(attachments.length === 0
+          ? {}
+          : {
+              attachments: attachments.map(({ id, name, mimeType, sizeBytes }) => ({
+                id,
+                name,
+                mimeType,
+                sizeBytes,
+              })),
+            }),
+      },
     } as const;
     const stamp = () => stampAgentEvent(session.sessionId, agent);
     reportEvent(session, { _tag: "item.started", ...stamp(), ...item });
@@ -923,7 +952,7 @@ export async function enlistScriptedRunner(
       delivery: running ? "steered" : "opened",
     });
     if (!running) openTurn(session, session.main);
-    reportUserMessage(session, session.main, frame.input.text, running);
+    reportUserMessage(session, session.main, frame.input.text, running, frame.input.attachments);
   };
 
   const answerFrame = (frame: ControllerToRunner): void => {
@@ -1068,7 +1097,10 @@ export async function enlistScriptedRunner(
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
             protocolVersion: 4 satisfies typeof PROTOCOL_VERSION,
-            capabilities: ["workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY],
+            capabilities: [
+              "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
+              "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,
+            ],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),
             facts: { ...FACTS, identityPort },

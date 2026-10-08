@@ -1,7 +1,7 @@
 /**
  * The clients the app talks to the controller through. Every request they
- * send gives up after 5 seconds, or after 15 for an operation that waits on
- * the runner.
+ * send gives up after 5 seconds, after 135 for an operation that waits on
+ * the runner, and after 120 for one that carries an image's bytes.
  *
  * A controller can accept a connection and never answer, or send the headers
  * and never the body, and neither Chromium nor the client gives up on its own.
@@ -10,6 +10,7 @@
  */
 import {
   createClient,
+  MAX_INPUT_ANSWER_WAIT_MS,
   type FetchLike,
   type HerculeClient,
   type TokenStore,
@@ -26,12 +27,19 @@ const REQUEST_TIMEOUT_MS = 5000;
 
 /**
  * How long a request to an operation in RUNNER_WAITING_OPERATIONS waits for
- * the controller's whole answer. The controller itself waits up to 10 seconds
- * for the runner to confirm the message (spec 17 §Reaching the controller).
+ * the controller's whole answer: the controller's own longest wait, plus 5
+ * seconds for the answer to travel. The controller waits up to 10 seconds
+ * for the runner to confirm a message, and up to 2 minutes more while the
+ * runner downloads the message's images (spec 17 §Reaching the controller).
  * A limit shorter than that would report a failure for a message that still
  * arrives, and a user who sent it again would send it twice.
+ *
+ * The limit applies to every message, not only to one with images: telling
+ * them apart would mean parsing the request's body here, in the fetch
+ * wrapper. A message without images loses nothing by it, because a working
+ * controller still answers it within 10 seconds.
  */
-const RUNNER_WAIT_TIMEOUT_MS = 15_000;
+const RUNNER_WAIT_TIMEOUT_MS = MAX_INPUT_ANSWER_WAIT_MS + 5000;
 
 /**
  * The operations whose answer waits on the runner: sending a message to a
@@ -53,23 +61,50 @@ const RUNNER_WAITING_OPERATIONS = [
 const buildPathPattern = (path: string): RegExp =>
   new RegExp(`^${path.replace(/:[^/]+/g, "[^/]+")}$`);
 
-/** The method and path pattern of each operation that waits on the runner, built once at load. */
-const RUNNER_WAITING_ROUTES = RUNNER_WAITING_OPERATIONS.map((operation) => ({
+/**
+ * How long a request that carries an image's bytes, up or down, waits for
+ * the controller's whole answer. An image may be 10 MiB, which takes about
+ * 85 seconds over a 1 Mbit/s uplink, so 5 seconds would fail any upload
+ * that is not on a fast network.
+ */
+const IMAGE_TRANSFER_TIMEOUT_MS = 120_000;
+
+/** The operations whose request or answer is an image's bytes. */
+const IMAGE_TRANSFER_OPERATIONS = [
+  api.groups.attachment.endpoints.create,
+  api.groups.attachment.endpoints.readContent,
+];
+
+/**
+ * The method, path pattern and limit of each operation that takes longer
+ * than REQUEST_TIMEOUT_MS, built once at load.
+ */
+const SLOW_ROUTES = [
+  ...RUNNER_WAITING_OPERATIONS.map((operation) => ({
+    operation,
+    timeout: RUNNER_WAIT_TIMEOUT_MS,
+  })),
+  ...IMAGE_TRANSFER_OPERATIONS.map((operation) => ({
+    operation,
+    timeout: IMAGE_TRANSFER_TIMEOUT_MS,
+  })),
+].map(({ operation, timeout }) => ({
   method: operation.method,
   pattern: buildPathPattern(operation.path),
+  timeout,
 }));
 
 /**
- * Returns how long a request with `method` to `url` may take: longer for an
- * operation that waits on the runner, REQUEST_TIMEOUT_MS for any other.
+ * Returns how long a request with `method` to `url` may take: the limit of
+ * its operation when that operation is one of SLOW_ROUTES, REQUEST_TIMEOUT_MS
+ * for any other.
  */
 const decideRequestTimeout = (url: string, method: string): number => {
   const { pathname } = new URL(url);
-  return RUNNER_WAITING_ROUTES.some(
-    (route) => route.method === method && route.pattern.test(pathname),
-  )
-    ? RUNNER_WAIT_TIMEOUT_MS
-    : REQUEST_TIMEOUT_MS;
+  return (
+    SLOW_ROUTES.find((route) => route.method === method && route.pattern.test(pathname))?.timeout ??
+    REQUEST_TIMEOUT_MS
+  );
 };
 
 /**
