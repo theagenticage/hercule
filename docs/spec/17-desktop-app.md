@@ -1738,6 +1738,7 @@ The earlier sizes come from that commit's CI build; the final sizes come from th
 | Work while idle | none | none: the line has no state, no timer and no animation |
 | Work per streamed token | unchanged | unchanged: tokens are still painted into the paragraph being written, without a render, and a warning line is a memoized component whose props never change |
 
+- **The numbers above predate a rebase onto `main` at d05f2f7a,** which brought in the flat sidebar (#473) and #481. On the rebased tree, `check-bundle-budget` reports 326.3 kB for the first screen's JavaScript and CSS, gzipped; the warning line's share was not measured again.
 - **The transcript's virtual list guesses a warning's height** as 17.4px per line at about 110 characters a line, and measures it once drawn, as it does every block.
 
 ## Slices
