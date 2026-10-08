@@ -1,0 +1,54 @@
+/* The details card beside the sidebar. Not in the book; it takes the glass of
+   the composer's menus (`.pop`, menus.css), and its layout follows T3 Code's
+   card: the title in bold, then one line per detail, each with its icon.
+   It shows and moves in one frame, with no transition, because it follows
+   the pointer. */
+.thread-hover {
+  /* The browser centres a popover in the window. The card is placed by its
+     `left` and `top`, which the list sets beside the hovered row. */
+  inset: auto;
+  margin: 0;
+  width: max-content;
+  min-width: 240px;
+  max-width: 300px;
+  padding: 10px 12px;
+  pointer-events: none;
+}
+/* Only while it shows: a `display` on the card itself would beat the
+   browser's rule that hides a closed popover. */
+.thread-hover:popover-open {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.thread-hover-title {
+  margin: 0;
+  font-weight: var(--w-bold);
+  overflow-wrap: anywhere;
+}
+.thread-hover-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* Every icon takes a slot of the same width, so the texts line up, also when
+   a provider has no mark. */
+.thread-hover-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 12px;
+}
+.thread-hover-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* The project's tile draws its swatch 11px wide, 6px before its name. One
+   more pixel puts the name where the other details' text starts. */
+.thread-hover .proj {
+  gap: 7px;
+  font-weight: inherit;
+}

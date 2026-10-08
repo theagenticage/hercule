@@ -119,7 +119,8 @@ const PROJECTS: ReadonlyArray<Project> = [
 export const STUDIO_MAC: Runner = buildRunner("r-studio-mac", "studio-mac");
 
 /**
- * The book's seven threads. Their activity times give the book's order:
+ * The book's seven threads. Each was created when it was last active, so
+ * their creation times give the book's order:
  *
  * - Waiting on you: Fix, then Migrate;
  * - the projects: webshop (newest thread Fix), payments-api (Payout), ops
@@ -127,8 +128,8 @@ export const STUDIO_MAC: Runner = buildRunner("r-studio-mac", "studio-mac");
  * - inside each project: Fix, Read, Refactor; Payout, iDEAL; Migrate, Rotate.
  *
  * Read and iDEAL are idle, so their rows show their age: "20m" and "1h".
- * Every thread is on one runner, which is online, and in no workspace, so no
- * workspace label is drawn.
+ * Every thread is on one runner, which is online, and in no workspace, so
+ * each row's third line is "No workspace".
  */
 export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
   {
@@ -288,9 +289,9 @@ export const SPECIMEN_INSTANCES: ReadonlyArray<ProviderInstance> = [
 
 /**
  * Returns a thread's session: on studio-mac unless `over` names another
- * runner, running `model`, and last active `minutesAgo` minutes before
- * `SPECIMEN_NOW`. Every other field is `buildSession`'s default unless `over`
- * sets it.
+ * runner, running `model`, and created and last active `minutesAgo` minutes
+ * before `SPECIMEN_NOW`. Every other field is `buildSession`'s default unless
+ * `over` sets it.
  */
 export const buildSpecimenSession = ({
   minutesAgo,
@@ -301,14 +302,17 @@ export const buildSpecimenSession = ({
   readonly title: string;
   readonly minutesAgo: number;
   readonly model: SpecimenModel;
-}): Session =>
-  buildSession({
+}): Session => {
+  const at = new Date(SPECIMEN_NOW - minutesAgo * 60_000).toISOString();
+  return buildSession({
     runnerId: STUDIO_MAC.id,
     instanceId: model.instanceId,
     modelSelection: { model: model.slug, options: {} },
-    lastActivityAt: new Date(SPECIMEN_NOW - minutesAgo * 60_000).toISOString(),
+    createdAt: at,
+    lastActivityAt: at,
     ...over,
   });
+};
 
 /** Every list the sidebar reads, as its query returns it. */
 export const SPECIMEN_RECORDS: SidebarRecords = {

@@ -128,3 +128,18 @@ window.AnimationEvent = class extends Event {
     this.pseudoElement = init.pseudoElement ?? "";
   }
 };
+
+/**
+ * jsdom has no popover API. The sidebar's card of thread details shows and
+ * hides itself with `togglePopover`, so each test that renders the sidebar
+ * would fail without it. The stub only keeps the open state, as a browser
+ * does, and returns it: jsdom draws nothing, so a test reads what the
+ * popover holds rather than whether it shows.
+ */
+const openPopovers = new WeakSet<HTMLElement>();
+HTMLElement.prototype.togglePopover = function (this: HTMLElement, force?: boolean) {
+  const open = force ?? !openPopovers.has(this);
+  if (open) openPopovers.add(this);
+  else openPopovers.delete(this);
+  return open;
+};

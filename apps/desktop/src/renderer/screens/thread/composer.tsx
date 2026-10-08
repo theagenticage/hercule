@@ -17,6 +17,7 @@ import {
   computeEffectiveConfig,
   findExpiredShelfKeys,
   findResumeBlockedReason,
+  holdsMessageContent,
   formatAccessMode,
   isMutationRunning,
   markShelfItemsExpired,
@@ -207,10 +208,7 @@ export function ThreadComposer({
     readOnly: readOnly !== null,
   });
   const canSend =
-    readOnly === null &&
-    !sending &&
-    !images.sendBlocked &&
-    (pending.message.text.trim() !== "" || pending.message.attachments.length > 0);
+    readOnly === null && !sending && !images.sendBlocked && holdsMessageContent(pending.message);
 
   // Each pick is compared with the thread's own configuration, not with the
   // picks before it, so picking the configured value again removes the pick.

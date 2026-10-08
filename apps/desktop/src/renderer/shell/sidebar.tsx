@@ -3,6 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useAssistantRows } from "../app/assistant-rows";
 import { useDraftThread } from "../app/draft-thread";
+import { useUnsentKeys } from "../app/pending-submissions";
 import {
   projectsQuery,
   providersQuery,
@@ -35,9 +36,9 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *   and the Office as square icon buttons, where the book draws New thread
  *   and Search as two rows and has no Office button;
  * - the thread list: Waiting on you, with the threads and the assistants
- *   that wait on the user, then the threads grouped by project and
- *   workspace, with the Draft Thread's row, while one is open, in the group
- *   it will join;
+ *   that wait on the user, then the threads of each project, newest created
+ *   first, with the Draft Thread's row, while one is open, first in its
+ *   project. A row whose composer holds unsent work is tinted;
  * - the Assistants section, pinned under the list, while there is an
  *   assistant;
  * - the foot: the thread counts, the signed-in user and the Settings button.
@@ -72,6 +73,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const assistantRows = useAssistantRows();
   const waiting = useWaiting();
+  const unsentKeys = useUnsentKeys(controller.pendingSubmissions);
   useRelatedReads(threads, projects, workspaces);
   // The Draft Thread the new-thread screen shows, while that screen is open.
   // Its row reads the draft as the screen does, see `useDraftThread`.
@@ -109,6 +111,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
     runners,
     instances,
     draft,
+    unsentKeys,
     expanded,
     selectedId,
   });

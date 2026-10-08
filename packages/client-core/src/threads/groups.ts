@@ -191,7 +191,7 @@ export const decideDraftPlaceForPick = ({
 };
 
 /** Checks whether the draft being written joins the group of the threads in `workspaceId`. */
-const holdsDraft = (
+const joinsDraft = (
   draft: DraftPlace | null,
   joins: boolean,
   workspaceId: string | null,
@@ -373,7 +373,7 @@ export const buildThreadGroups = ({
         ...(workspace !== undefined && rowsIn.length === 0 && retainedWorkspaces.includes(workspace)
           ? { showWhenEmpty: true }
           : {}),
-        draft: holdsDraft(draftPlace, joins, workspaceId),
+        draft: joinsDraft(draftPlace, joins, workspaceId),
         rows: rowsIn,
       };
     });

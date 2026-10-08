@@ -107,51 +107,6 @@
   color: var(--muted);
 }
 
-/* A workspace label, under its project's header. The book has no workspace
-   label; this one is designed from the section heading's family:
-   22px, the text where a row's text starts, 12px in the UI face at medium
-   weight, in faint ink. The first part of the name ellipsizes; the machine's
-   name after it never does. The `+` shows on hover and on keyboard focus, and
-   lines up with the project header's `+`. */
-.side-ws {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 22px;
-  margin: 0;
-  padding: 0 4px 0 10px;
-  color: var(--faint);
-  font-size: var(--t-12);
-  font-weight: var(--w-medium);
-  white-space: nowrap;
-}
-.side-ws-name {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-}
-.side-ws-clip {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* `pre` keeps the space that starts the machine's part, which a flex item
-   would otherwise drop. */
-.side-ws-keep {
-  flex: none;
-  white-space: pre;
-}
-.side-ws .icon-btn {
-  opacity: 0;
-  transition:
-    opacity var(--dur-1),
-    background var(--dur-1),
-    color var(--dur-1);
-}
-.side-ws:hover .icon-btn,
-.side-ws:focus-within .icon-btn {
-  opacity: 1;
-}
-
 .side-row {
   display: flex;
   align-items: center;
@@ -160,6 +115,13 @@
   padding: 1px 8px 1px 10px;
   border-radius: var(--r-sm);
   transition: background var(--dur-1);
+}
+/* Not in the book: a row whose composer holds unsent work, and the draft's
+   row, take a light wash of the accent, lighter than a selected row's
+   background, so unsent work is found again. Hover and selection draw over
+   it; a selected row keeps only its pencil. */
+.side-row.is-unsent {
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
 }
 .side-row:hover {
   background: var(--hover);
@@ -189,6 +151,33 @@
 }
 .side-meta {
   color: var(--faint);
+}
+/* The pencil before an unsent row's title, in the accent's ink. Lowered
+   1.5px from the baseline, its strokes sit centred on the title's capitals. */
+.side-name .ic {
+  margin-right: 4px;
+  color: var(--accent-ink);
+  vertical-align: -1.5px;
+}
+/* Not in the book, whose rows have two lines: a thread row's third line, its
+   workspace, in a second line's faint ink. The first part ellipsizes; the
+   machine's name after it never does. */
+.side-ws-line {
+  display: flex;
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.side-ws-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* `pre` keeps the space that starts the machine's part, which a flex item
+   would otherwise drop. */
+.side-ws-keep {
+  flex: none;
+  white-space: pre;
 }
 .side-ask {
   color: var(--you-ink);

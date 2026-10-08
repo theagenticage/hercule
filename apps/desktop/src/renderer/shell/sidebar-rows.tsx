@@ -1,6 +1,6 @@
 /**
- * The items of the sidebar's thread list: section headers, workspace labels,
- * thread rows, the waiting assistants' rows, the draft's row and "more" rows,
+ * The items of the sidebar's thread list: section headers, thread rows, the
+ * waiting assistants' rows, the draft's row and "more" rows,
  * drawn as the Bureau book's crew.js draws them.
  *
  * Each item draws itself at its kind's fixed height, with the space above it
@@ -18,14 +18,14 @@
  */
 import { memo, useId, type ComponentProps, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { describePose, isSeatedPose, joinLabelText, type Pose } from "@hercule/client-core";
+import { describePose, isSeatedPose, type Pose } from "@hercule/client-core";
 import { buildLook, Face } from "../faces";
+import { ComposeIcon } from "../icons/compose";
 import { PlusIcon } from "../icons/plus";
 import { Mark } from "../marks";
 import { AgeLabel } from "../screens/age-label";
 import { ProjectTile, type ProjectTint } from "../screens/project-tile";
 import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
-import { WorkspaceDetailsTrigger } from "../screens/workspace/details-trigger";
 import { ITEM_HEIGHTS, type RowEnd, type SectionKey } from "./sidebar-items";
 
 /** What every item takes from the list: its key in the list, and the space above it. */
@@ -224,75 +224,45 @@ export const ProjectHeader = memo(function ProjectHeader({
   );
 });
 
+/** The size of the pencil before an unsent row's title, in CSS pixels. */
+const UNSENT_ICON_SIZE = 12;
+
 /**
- * Renders a workspace group's label under its project's heading. `clip` may
- * be cut short with an ellipsis; `keep`, the machine's name, never is. When
- * `joinableWorkspaceId` is set, the label has a `+`, shown on hover and on
- * focus, that opens a new thread in `projectId` joining that workspace. The
- * threads with no workspace, and a workspace that is not ready, have no `+`:
- * there is no workspace a new thread could join.
+ * Renders a row's third line: its workspace, as `clip`, which may be cut
+ * short with an ellipsis, then `keep`, the machine's name, which never is.
+ * `keep` is "" when there is nothing to keep.
  */
-export const WorkspaceLabel = memo(function WorkspaceLabel({
-  itemKey,
-  leading,
-  projectId,
-  workspaceId,
-  joinableWorkspaceId,
+function WorkspaceLine({
   clip,
   keep,
-}: Placement & {
-  readonly projectId: string;
-  readonly workspaceId: string | null;
-  readonly joinableWorkspaceId: string | null;
+}: {
   readonly clip: string;
   readonly keep: string;
 }): JSX.Element {
   return (
-    <h4
-      className="side-ws side-item"
-      data-key={itemKey}
-      tabIndex={-1}
-      style={{ marginTop: leading, height: ITEM_HEIGHTS["workspace-label"] }}
-    >
-      {workspaceId === null ? (
-        <span className="side-ws-name">
-          <span className="side-ws-clip">{clip}</span>
-          {keep === "" ? null : <span className="side-ws-keep">{keep}</span>}
-        </span>
-      ) : (
-        <WorkspaceDetailsTrigger
-          workspaceId={workspaceId}
-          label={`Inspect workspace ${clip}`}
-          className="side-ws-name workspace-details-trigger"
-        >
-          <span className="side-ws-clip">{clip}</span>
-          {keep === "" ? null : <span className="side-ws-keep">{keep}</span>}
-        </WorkspaceDetailsTrigger>
-      )}
-      {joinableWorkspaceId === null ? null : (
-        <Link
-          to="/"
-          search={{ project: projectId, workspace: joinableWorkspaceId }}
-          activeOptions={{ exact: true }}
-          className="icon-btn icon-btn--sm"
-          title={`New thread in ${joinLabelText({ clip, keep })}`}
-        >
-          <PlusIcon size={14} />
-        </Link>
-      )}
-    </h4>
+    <span className="side-ws-line">
+      <span className="side-ws-clip">{clip}</span>
+      {keep === "" ? null : <span className="side-ws-keep">{keep}</span>}
+    </span>
   );
-});
+}
 
 /**
- * Renders a thread in its project: its title, its second line (the model's
- * name), and its end: the working or the waiting mark, a word, or its age.
+ * Renders a thread in its project, in three lines: its title, the model's
+ * name (`secondLine`), and its workspace (`workspaceClip` and
+ * `workspaceKeep`, see `WorkspaceLine`). Its end is the working or the
+ * waiting mark, a word, or its age. When `unsent` is true, the composer of
+ * the thread holds work the user has not sent: the row is tinted and a pencil
+ * sits before the title.
  *
- * The link is named "<title>, <pose words>", such as "Fix checkout, working",
- * and described by the second line and, when the end is not a mark, the end
- * in words, such as "offline" or "20 minutes ago". A mark says the pose,
- * which the name already holds, so it is hidden. While `officeOpen` is true,
- * it opens the thread in the Office's drawer if the thread has a colleague
+ * The link is named "<title>, <pose words>", such as "Fix checkout,
+ * working", with ", unsent message" after it when `unsent` is true. It is
+ * described by the model, then `placeDescription`, which names the project,
+ * the workspace, the machine and the branch the card shown on hover holds,
+ * and, when the end is not a mark, the end in words, such as "offline" or
+ * "20 minutes ago". A mark says the pose, which
+ * the name already holds, so it is hidden. While `officeOpen` is true, it
+ * opens the thread in the Office's drawer if the thread has a colleague
  * there, and on its own screen if it does not.
  */
 export const ThreadRow = memo(function ThreadRow({
@@ -304,6 +274,10 @@ export const ThreadRow = memo(function ThreadRow({
   pose,
   end,
   activityAt,
+  workspaceClip,
+  workspaceKeep,
+  placeDescription,
+  unsent,
   onScreen,
   officeOpen,
 }: Placement & {
@@ -313,14 +287,19 @@ export const ThreadRow = memo(function ThreadRow({
   readonly pose: Pose;
   readonly end: RowEnd;
   readonly activityAt: string;
+  readonly workspaceClip: string;
+  readonly workspaceKeep: string;
+  readonly placeDescription: string;
+  readonly unsent: boolean;
   readonly onScreen: boolean;
   readonly officeOpen: boolean;
 }): JSX.Element {
   const id = useId();
   const secondLineId = `${id}-second-line`;
+  const placeId = `${id}-place`;
   const endId = `${id}-end`;
   const endIsMark = end === "working" || end === "waiting";
-  const describedBy = [secondLine === null ? null : secondLineId, endIsMark ? null : endId]
+  const describedBy = [secondLine === null ? null : secondLineId, placeId, endIsMark ? null : endId]
     .filter((each) => each !== null)
     .join(" ");
   return (
@@ -328,19 +307,30 @@ export const ThreadRow = memo(function ThreadRow({
       sessionId={sessionId}
       pose={pose}
       officeOpen={officeOpen}
-      className="side-row side-item"
+      className={unsent ? "side-row is-unsent side-item" : "side-row side-item"}
       data-key={itemKey}
       style={{ marginTop: leading, height: ITEM_HEIGHTS["thread-row"] }}
-      aria-label={`${title}, ${describePose(pose)}`}
-      aria-describedby={describedBy === "" ? undefined : describedBy}
+      aria-label={`${title}, ${describePose(pose)}${unsent ? ", unsent message" : ""}`}
+      aria-describedby={describedBy}
     >
       <span className="side-text">
-        <span className="side-name">{title}</span>
+        <span className="side-name">
+          {unsent ? <ComposeIcon size={UNSENT_ICON_SIZE} /> : null}
+          {title}
+        </span>
         {secondLine === null ? null : (
           <span className="side-meta" id={secondLineId}>
             {secondLine}
           </span>
         )}
+        <WorkspaceLine clip={workspaceClip} keep={workspaceKeep} />
+        {/* A screen reader reads where the thread works from this text,
+            which is never drawn: the project, the machine and the branch
+            show only in the card on hover, and the workspace line's two
+            parts would be read without the space between them. */}
+        <span hidden id={placeId}>
+          {placeDescription}
+        </span>
       </span>
       {endIsMark ? (
         <span className="side-end">
@@ -366,27 +356,40 @@ export const ThreadRow = memo(function ThreadRow({
 });
 
 /**
- * Renders the row of the Draft Thread open in the main pane: "New thread",
- * where it will work and on which machine (`meta`), and "draft" at its end.
- * It is marked as the open screen, like the open thread's row. It is not a
- * link, because it leads to the screen it marks.
+ * Renders the row of the Draft Thread open in the main pane, drawn as a
+ * thread row: "New thread" after a pencil, the model's name (`model`) when
+ * the draft has one, where it will work and on which machine
+ * (`workspaceClip` and `workspaceKeep`, see `WorkspaceLine`), and "draft" at
+ * its end. It is tinted as a row with unsent work is, because a
+ * draft is unsent work, and marked as the open screen, like the open
+ * thread's row. It is not a link, because it leads to the screen it marks.
  */
 export const DraftRow = memo(function DraftRow({
   itemKey,
   leading,
-  meta,
-}: Placement & { readonly meta: string }): JSX.Element {
+  model,
+  workspaceClip,
+  workspaceKeep,
+}: Placement & {
+  readonly model: string | null;
+  readonly workspaceClip: string;
+  readonly workspaceKeep: string;
+}): JSX.Element {
   return (
     <div
-      className="side-row is-on side-item"
+      className="side-row is-unsent is-on side-item"
       data-key={itemKey}
       tabIndex={-1}
       aria-current="page"
       style={{ marginTop: leading, height: ITEM_HEIGHTS["draft-row"] }}
     >
       <span className="side-text">
-        <span className="side-name">New thread</span>
-        <span className="side-meta">{meta}</span>
+        <span className="side-name">
+          <ComposeIcon size={UNSENT_ICON_SIZE} />
+          New thread
+        </span>
+        {model === null ? null : <span className="side-meta">{model}</span>}
+        <WorkspaceLine clip={workspaceClip} keep={workspaceKeep} />
       </span>
       <span className="side-end">draft</span>
     </div>

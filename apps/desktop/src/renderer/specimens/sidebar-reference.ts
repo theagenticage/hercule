@@ -6,10 +6,10 @@
  *
  * First it stops every animation, so the waiting faces show the frame the
  * app draws, and it hides the traffic-light placeholders, where macOS draws
- * the real ones over the app's window. Then it makes exactly six edits. The
- * first five are where the app shows what its data holds and the book shows
- * its own sample data; the sixth is where the app's layout departs from the
- * book's:
+ * the real ones over the app's window. Then it makes exactly seven edits.
+ * The first five are where the app shows what its data holds and the book
+ * shows its own sample data; the last two are where the app's layout departs
+ * from the book's:
  *
  * 1. removes the Threads and Hercule tabs and the Assistants section, which
  *    v1 does not have (spec 17 §Scope);
@@ -26,7 +26,11 @@
  *    sidebar.css lays them out: the book draws New thread and Search as two
  *    rows and has no Office button. Search becomes a 30px icon button with
  *    the book's search icon, and the Office button follows it with the icon
- *    of the Office row in the book's Hercule tab.
+ *    of the Office row in the book's Hercule tab;
+ * 7. gives each project row a third line, the thread's workspace, "No
+ *    workspace" for every fixture thread, styled as sidebar.css styles
+ *    `.side-ws-line`, and makes the row 51px tall, as `ITEM_HEIGHTS` in
+ *    sidebar-items.ts has it: the book's rows have two lines.
  *
  * An edit that finds nothing to edit fails, because the book has changed and
  * the comparison would no longer compare what it claims to.
@@ -115,5 +119,23 @@ Object.assign((findElement(actions, ".nav-row") as HTMLElement).style, {
 });
 for (const button of [search, office])
   Object.assign(button.style, { width: "30px", height: "30px" });
+
+// 7. The workspace line under each project row.
+for (const row of side.querySelectorAll<HTMLElement>('[data-pane="threads"] .side-row')) {
+  const line = document.createElement("span");
+  Object.assign(line.style, {
+    display: "flex",
+    minWidth: "0",
+    color: "var(--faint)",
+    fontSize: "var(--t-12)",
+    whiteSpace: "nowrap",
+  });
+  const clip = document.createElement("span");
+  Object.assign(clip.style, { overflow: "hidden", textOverflow: "ellipsis" });
+  clip.textContent = "No workspace";
+  line.append(clip);
+  findElement(row, ".side-text").append(line);
+  row.style.height = "51px";
+}
 
 await markSheetReady();

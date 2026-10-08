@@ -4,11 +4,12 @@
  * (spec 17, §Design system, **The sidebar**):
  *
  * - the live socket connects from `app://hercule` under the release policy;
- * - the list groups the threads by project and by workspace, and each row
- *   ends in the right mark, word or age;
+ * - the list groups the threads by project, newest created first, each row
+ *   names its workspace and ends in the right mark, word or age;
  * - a Request that opens brings its thread into Waiting on you within 1 s, and
  *   takes it out again when it closes;
- * - a new thread appears, and a thread in a new workspace brings its label;
+ * - a new thread appears at the top of its project, also one in a new
+ *   worktree, which its row names;
  * - a runner that goes offline shows its threads as offline until it returns;
  * - the list mounts about as many rows for 500 threads as for 40.
  *
@@ -37,17 +38,17 @@ const longTests = process.env["HERCULE_LONG_TESTS"] === "1";
  * line of text:
  *
  * - a section header: "Waiting on you 2", or "project Webshop";
- * - a workspace label: "workspace webshop · studio";
  * - a Waiting on you row: its accessible name and its question, as
  *   "Thread 3, waiting on you: Run pnpm test?";
- * - a thread row: its accessible name and its end, as
- *   "Thread 1, working | mark:working", "Thread 4, working | queued" or
- *   "Thread 5, idle | now";
+ * - a thread row: its accessible name, its workspace line and its end, as
+ *   "Thread 1, working | webshop · studio | mark:working",
+ *   "Thread 4, working | No workspace | queued" or
+ *   "Thread 5, idle | No workspace | now";
  * - a "more" row: its label, "35 more threads";
  * - the Draft Thread's row: its name and its end, "New thread | draft".
  *
- * The app opens on a Draft Thread in no project, so every list ends in the
- * draft's row, under "No project".
+ * The app opens on a Draft Thread in no project, so every list has the
+ * draft's row first under "No project", which is the last section.
  */
 function readSidebarItems(page: Page): Promise<string[]> {
   return page.evaluate(() =>
@@ -57,15 +58,15 @@ function readSidebarItems(page: Page): Promise<string[]> {
       const name = item.getAttribute("aria-label") ?? readText(".side-name");
       if (item.matches(".side-h--proj")) return `project ${readText(".proj-name")}`;
       if (item.matches(".side-h")) return item.textContent;
-      if (item.matches(".side-ws")) return `workspace ${readText(".side-ws-name")}`;
       if (item.matches(".side-row--wait")) return `${name}: ${readText(".side-ask")}`;
       if (item.matches(".side-row--more")) return item.textContent;
+      if (item.getAttribute("data-key") === "draft") return `${name} | ${readText(".side-end")}`;
       const mark = item.querySelector(".side-end .mark");
       const end =
         mark === null
           ? (item.querySelector(".side-age")?.textContent ?? readText(".side-end"))
           : `mark:${mark.className.replace(/^mark mark--/, "")}`;
-      return `${name} | ${end}`;
+      return `${name} | ${readText(".side-ws-line")} | ${end}`;
     }),
   );
 }
@@ -116,7 +117,7 @@ describe("the sidebar", () => {
     expect(refusals).toEqual([]);
   });
 
-  it("lists the threads by project and workspace, each row ending in its mark, word or age", async () => {
+  it("lists the threads by project, newest created first, each row naming its workspace and ending in its mark, word or age", async () => {
     const { url, fleet, client, waitForStatus } = await arrangeFleet();
     const webshop = await fleet.createProject("Webshop");
     const payments = await fleet.createProject("Payments");
@@ -127,8 +128,8 @@ describe("the sidebar", () => {
     const laptop = await fleet.enlistRunner("laptop");
     const primary = { kind: "primary", resourceId: repository.id } as const;
 
-    // Each step waits for the one before it to land, so every thread's last
-    // activity is later than the one before, and the order below is certain.
+    // Each step waits for the one before it to land, so every thread is
+    // created later than the one before, and the order below is certain.
     const [working] = await fleet.spawnThreads(1, {
       runner: studio,
       projectId: webshop.id,
@@ -167,27 +168,24 @@ describe("the sidebar", () => {
 
     const { page } = await openSignedIn(url);
 
-    // Payments comes first: its newest activity, the exit, is the latest.
-    // Inside a project the worktrees come before the main workspace, and each
-    // group lists its newest thread first. Both threads on the offline laptop
-    // are away: the idle one shows "offline", and the exited one shows its
-    // age, as spec 17's pose table has it for a session that has exited on an
-    // offline runner.
+    // Payments comes first: its newest thread, Thread 6, is the newest of
+    // all. Inside a project the newest thread comes first, whatever workspace
+    // it works in. Both threads on the offline laptop are away: the idle one
+    // shows "offline", and the exited one shows its age, as spec 17's pose
+    // table has it for a session that has exited on an offline runner.
     await expect
       .poll(() => readSidebarItems(page))
       .toEqual([
         "Waiting on you 1",
         "Thread 3, waiting on you: Run pnpm test?",
         "project Payments",
-        "Thread 6, can't be reached | now",
-        "Thread 5, can't be reached | offline",
-        "Thread 4, working | queued",
+        "Thread 6, can't be reached | No workspace | now",
+        "Thread 5, can't be reached | No workspace | offline",
+        "Thread 4, working | No workspace | queued",
         "project Webshop",
-        `workspace ${branch}`,
-        "Thread 2, working | mark:working",
-        "workspace webshop · studio",
-        "Thread 3, waiting on you | mark:waiting",
-        "Thread 1, working | mark:working",
+        "Thread 3, waiting on you | webshop · studio | mark:waiting",
+        `Thread 2, working | ${branch} | mark:working`,
+        "Thread 1, working | webshop · studio | mark:working",
         "project No project",
         "New thread | draft",
       ]);
@@ -202,8 +200,8 @@ describe("the sidebar", () => {
     const { page } = await openSignedIn(url);
     const working = [
       "project No project",
-      "Thread 1, working | mark:working",
       "New thread | draft",
+      "Thread 1, working | No workspace | mark:working",
     ];
     await expect.poll(() => readSidebarItems(page)).toEqual(working);
 
@@ -217,8 +215,8 @@ describe("the sidebar", () => {
       "Waiting on you 1",
       "Thread 1, waiting on you: Run pnpm test?",
       "project No project",
-      "Thread 1, waiting on you | mark:waiting",
       "New thread | draft",
+      "Thread 1, waiting on you | No workspace | mark:waiting",
     ]);
 
     await client.session.respondToApprovalRequest({
@@ -229,7 +227,7 @@ describe("the sidebar", () => {
     await expect.poll(() => readSidebarItems(page)).toEqual(working);
   });
 
-  it("shows a new thread, and a thread in a new workspace under that workspace's label", async () => {
+  it("shows a new thread at the top of its project, also one in a new worktree, which its row names", async () => {
     const { url, fleet, client, waitForStatus } = await arrangeFleet();
     const webshop = await fleet.createProject("Webshop");
     const repository = await fleet.createRepository("https://github.com/example/webshop", [
@@ -248,8 +246,7 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        "workspace webshop · studio",
-        "Thread 1, working | mark:working",
+        "Thread 1, working | webshop · studio | mark:working",
         "project No project",
         "New thread | draft",
       ]);
@@ -259,15 +256,14 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        "workspace webshop · studio",
-        "Thread 2, working | mark:working",
-        "Thread 1, working | mark:working",
+        "Thread 2, working | webshop · studio | mark:working",
+        "Thread 1, working | webshop · studio | mark:working",
         "project No project",
         "New thread | draft",
       ]);
 
     // The new worktree is in no list the app holds, so the app reads the
-    // workspaces again to label it.
+    // workspaces again to name it on the row.
     const [inWorktree] = await fleet.spawnThreads(1, {
       runner,
       projectId: webshop.id,
@@ -279,11 +275,9 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        `workspace ${branch}`,
-        "Thread 3, working | mark:working",
-        "workspace webshop · studio",
-        "Thread 2, working | mark:working",
-        "Thread 1, working | mark:working",
+        `Thread 3, working | ${branch} | mark:working`,
+        "Thread 2, working | webshop · studio | mark:working",
+        "Thread 1, working | webshop · studio | mark:working",
         "project No project",
         "New thread | draft",
       ]);
@@ -292,7 +286,9 @@ describe("the sidebar", () => {
   it("shows a runner's threads as offline while it is gone, and as before once it returns", async () => {
     const { url, fleet, waitForStatus } = await arrangeFleet();
     const runner = await fleet.enlistRunner("laptop");
-    const [working, idle] = await fleet.spawnThreads(2, { runner });
+    // One at a time, so Thread 2 is created after Thread 1 and comes first.
+    const [working] = await fleet.spawnThreads(1, { runner });
+    const [idle] = await fleet.spawnThreads(1, { runner });
     await waitForStatus(working!.id, "busy");
     await waitForStatus(idle!.id, "busy");
     runner.completeTurn(idle!.id);
@@ -300,9 +296,9 @@ describe("the sidebar", () => {
     const { page } = await openSignedIn(url);
     const before = [
       "project No project",
-      "Thread 2, idle | now",
-      "Thread 1, working | mark:working",
       "New thread | draft",
+      "Thread 2, idle | No workspace | now",
+      "Thread 1, working | No workspace | mark:working",
     ];
     await expect.poll(() => readSidebarItems(page)).toEqual(before);
 
@@ -311,9 +307,9 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project No project",
-        "Thread 2, can't be reached | offline",
-        "Thread 1, can't be reached | offline",
         "New thread | draft",
+        "Thread 2, can't be reached | No workspace | offline",
+        "Thread 1, can't be reached | No workspace | offline",
       ]);
     expect(await readCounts(page)).toBe("0 working · 0 waiting · 0 idle");
 

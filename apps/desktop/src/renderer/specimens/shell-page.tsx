@@ -485,15 +485,17 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
 /**
  * Applies the URL's theme and draws the shell into `#root` from `records`,
  * with the app's address at `path`, and the records of each screen in
- * `screens`. A draft's picks are written to its pending submission before
- * the first render, as if the user had made them. Returns once the page is
- * in the document. Fails when the page has no `#root`, draws nothing, or
- * tries to read a record the cache does not hold.
+ * `screens`. A draft's picks, and a message in the composer of each thread in
+ * `unsentThreadIds`, are written to their pending submissions before the
+ * first render, as if the user had made them. Returns once the page is in the
+ * document. Fails when the page has no `#root`, draws nothing, or tries to
+ * read a record the cache does not hold.
  */
 async function mountShellSpecimen(
   records: SidebarRecords,
   path: string,
   screens: OpenScreens,
+  unsentThreadIds: readonly string[] = [],
 ): Promise<void> {
   applySheetTheme();
   const client = createClient({ baseUrl: CONTROLLER_URL, fetch: refuseRequest });
@@ -505,6 +507,9 @@ async function mountShellSpecimen(
       buildDraftKey(screens.draft.projectId, null),
       screens.draft.picks,
     );
+  }
+  for (const sessionId of unsentThreadIds) {
+    pendingSubmissions.writeText(sessionId, "Also check the alt text on the gallery page");
   }
   const router = buildRouter(client, pendingSubmissions, path, screens.thread?.session.id);
   await router.load();
@@ -529,12 +534,17 @@ async function mountShellSpecimen(
  * with the app's address at `path`: `/threads/<id>` to select a thread in the
  * sidebar, where the screen stays empty, or `/` for a Draft Thread in no
  * project, which the sidebar draws as a row and the screen as the app does.
+ * The composer of each thread in `unsentThreadIds` holds an unsent message.
  * Returns once the sidebar is in the document. Fails when the page has no
  * `#root`, the sidebar draws no row, or it tries to read a record the cache
  * does not hold.
  */
-export async function mountSidebarSpecimen(records: SidebarRecords, path: string): Promise<void> {
-  await mountShellSpecimen(records, path, {});
+export async function mountSidebarSpecimen(
+  records: SidebarRecords,
+  path: string,
+  unsentThreadIds: readonly string[] = [],
+): Promise<void> {
+  await mountShellSpecimen(records, path, {}, unsentThreadIds);
 }
 
 /**

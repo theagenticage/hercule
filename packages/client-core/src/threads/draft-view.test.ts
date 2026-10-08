@@ -1,11 +1,13 @@
 /**
  * Tests `buildDraftView`, which the draft screen and the sidebar's draft row
  * both read. The tests check the words the lip shows for the workspace and
- * the machine, the sidebar row's words, and the group the row sits in:
+ * the machine, the sidebar row's words, and the group the row sits in. The
+ * row's machine is always the part of its third line that is never cut short:
  *
  * - before any pick, and after one;
  * - when the draft joins a workspace, whose machine the lip names plainly;
- * - when the draft has no project, and so no checkout.
+ * - when the draft has no project, and so no checkout;
+ * - the model's display name on the sidebar row, before and after a model pick.
  */
 import { describe, expect, it } from "vitest";
 import type { Profile, SettingsState } from "@hercule/contract";
@@ -45,6 +47,13 @@ const CLAUDE = buildInstance("claude-code", "Claude Code", [
         isDefault: true,
         options: [],
       },
+      {
+        slug: "claude-opus-5-5",
+        name: "Opus 5.5",
+        imageInput: { maxBytes: null },
+        isDefault: false,
+        options: [],
+      },
     ],
   }),
 ]);
@@ -63,8 +72,8 @@ const READS: DraftReads = {
 
 /** Returns the parts of a draft the lip and the sidebar row show. */
 const readLabels = (...args: Parameters<typeof buildDraftView>) => {
-  const { workspaceLabel, machineLabel, rowMeta, place } = buildDraftView(...args);
-  return { workspaceLabel, machineLabel, rowMeta, place };
+  const { workspaceLabel, machineLabel, rowWorkspace, place } = buildDraftView(...args);
+  return { workspaceLabel, machineLabel, rowWorkspace, place };
 };
 
 describe("buildDraftView", () => {
@@ -72,7 +81,7 @@ describe("buildDraftView", () => {
     expect(readLabels(READS, { projectId: WEBSHOP_PROJECT.id, workspaceId: null }, {})).toEqual({
       workspaceLabel: "New workspace",
       machineLabel: "moss",
-      rowMeta: "New workspace · moss",
+      rowWorkspace: { clip: "New workspace", keep: " · moss" },
       place: { projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true },
     });
   });
@@ -89,7 +98,7 @@ describe("buildDraftView", () => {
       kind: "ephemeral",
       checkouts: [{ resourceId: WEBSHOP.id }],
     });
-    expect(view.rowMeta).toBe("New workspace · moss");
+    expect(view.rowWorkspace).toEqual({ clip: "New workspace", keep: " · moss" });
     expect(view.place).toEqual({
       projectId: WEBSHOP_PROJECT.id,
       workspaceId: null,
@@ -103,7 +112,7 @@ describe("buildDraftView", () => {
     ).toEqual({
       workspaceLabel: "Main workspace",
       machineLabel: "moss",
-      rowMeta: "Main workspace · moss",
+      rowWorkspace: { clip: "Main workspace", keep: " · moss" },
       place: { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id, createsWorkspace: false },
     });
   });
@@ -114,7 +123,7 @@ describe("buildDraftView", () => {
     ).toEqual({
       workspaceLabel: "hercule/thread-3f1",
       machineLabel: "moss",
-      rowMeta: "hercule/thread-3f1 · moss",
+      rowWorkspace: { clip: "hercule/thread-3f1", keep: " · moss" },
       place: { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id, createsWorkspace: false },
     });
   });
@@ -122,8 +131,15 @@ describe("buildDraftView", () => {
   it("works without a checkout in no project, and sits with the threads of no project", () => {
     const view = buildDraftView(READS, { projectId: null, workspaceId: null }, {});
 
-    expect(view.rowMeta).toBe("No workspace · moss");
+    expect(view.rowWorkspace).toEqual({ clip: "No workspace", keep: " · moss" });
     expect(view.branch).toBeNull();
     expect(view.place).toEqual({ projectId: null, workspaceId: null, createsWorkspace: false });
+  });
+
+  it("names the model on the sidebar row as the catalog does, and follows a model pick", () => {
+    const address = { projectId: WEBSHOP_PROJECT.id, workspaceId: null };
+
+    expect(buildDraftView(READS, address, {}).rowModel).toBe("Claude Sonnet 5");
+    expect(buildDraftView(READS, address, { model: "claude-opus-5-5" }).rowModel).toBe("Opus 5.5");
   });
 });

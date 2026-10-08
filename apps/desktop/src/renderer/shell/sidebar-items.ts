@@ -1,8 +1,8 @@
 /**
  * Builds what the sidebar draws from the lists it reads: the flat list of
- * items the virtualized list draws (section headers, workspace labels, rows
- * and "more" rows, each with a fixed height and the space the book puts above
- * it), and the thread counts in the foot.
+ * items the virtualized list draws (section headers, rows and "more" rows,
+ * each with a fixed height and the space the book puts above it), and the
+ * thread counts in the foot.
  *
  * Which threads are shown, in which order, and in what pose is decided in
  * client-core. This file only lays the result out in Bureau's geometry.
@@ -13,6 +13,9 @@ import {
   countThreadsByPose,
   decideThreadPose,
   decideThreadRowEnd,
+  holdsDraft,
+  listProjectRows,
+  sortProjectsByNewestThread,
   type DraftPlace,
   type ExpandedSections,
   type Pose,
@@ -23,6 +26,7 @@ import {
   type ThreadRowEnd,
   type Waiting,
   type WaitingSection,
+  type WorkspaceLabel,
 } from "@hercule/client-core";
 import type {
   Project,
@@ -35,6 +39,7 @@ import type {
 import type { GoMenuItem } from "../../ipc/contract";
 import { buildDestinationKey } from "../../ipc/destination";
 import { pickProjectTint, type ProjectTint } from "../screens/project-tile";
+import type { ThreadHoverDetails } from "./thread-hover-card";
 
 /**
  * The end of a thread row, as one string so a memoized row can compare it:
@@ -81,21 +86,6 @@ export type SidebarItemContent =
       readonly tint: ProjectTint | null;
     }
   | {
-      readonly kind: "workspace-label";
-      readonly key: string;
-      /** The project the workspace is in, which a new thread joining it starts in. */
-      readonly projectId: string;
-      readonly workspaceId: string | null;
-      /**
-       * The workspace a new thread started from the label joins. `null` for
-       * the threads that work without a checkout, and for a workspace that is
-       * not ready, which a new thread cannot join.
-       */
-      readonly joinableWorkspaceId: string | null;
-      readonly clip: string;
-      readonly keep: string;
-    }
-  | {
       readonly kind: "thread-row";
       readonly key: string;
       readonly sessionId: string;
@@ -104,12 +94,36 @@ export type SidebarItemContent =
       readonly pose: Pose;
       readonly end: RowEnd;
       readonly activityAt: string;
+      /**
+       * The row's third line, the thread's workspace, in two parts: the
+       * part that may be cut short, such as "hercule/thread-3f1", "webshop"
+       * or "No workspace", and the part that never is, such as " · moss",
+       * or "" when there is none.
+       */
+      readonly workspaceClip: string;
+      readonly workspaceKeep: string;
+      /**
+       * Where the thread works, in words, for the row's accessible
+       * description, such as "in webshop, webshop main workspace, on moss,
+       * branch main".
+       */
+      readonly placeDescription: string;
+      /** Whether the thread's composer holds text or images the user has not sent. */
+      readonly unsent: boolean;
+      /** What the card shows while the pointer rests on the row. */
+      readonly details: ThreadHoverDetails;
     }
   | {
       readonly kind: "draft-row";
       readonly key: string;
-      /** Where the draft will work and on which machine, such as "New workspace · studio-mac". */
-      readonly meta: string;
+      /** The name of the model the draft will run, or `null` while it has none. */
+      readonly model: string | null;
+      /**
+       * Where the draft will work and on which machine, in the two parts of a
+       * thread row's third line, such as "New workspace" and " · studio-mac".
+       */
+      readonly workspaceClip: string;
+      readonly workspaceKeep: string;
     }
   | { readonly kind: "more"; readonly key: string; readonly label: string };
 
@@ -119,10 +133,7 @@ export type SidebarItemContent =
  */
 export type SidebarItem = SidebarItemContent & {
   readonly section: SectionKey;
-  /**
-   * The space above the item, in CSS pixels: 8 above a section's first item,
-   * 9 above a workspace label that follows a thread row, 1 above the others.
-   */
+  /** The space above the item, in CSS pixels: 8 above a section's first item, 1 above the others. */
   readonly leading: number;
 };
 
@@ -137,20 +148,22 @@ export type SidebarItemKind = SidebarItem["kind"];
  * - a section header (`h3.side-h`) is 24;
  * - a Waiting on you row (`.side-row--wait`) is 38, a thread's and an
  *   assistant's alike;
- * - a thread row (`.side-row`) is 35, and so is the draft's row, which is
- *   drawn as one;
  * - a "more" row (`.side-row--more`, in the book's swarm state) is 28.
  *
- * The book has no workspace label, so its 22 is this app's own design.
+ * The book's thread row (`.side-row`) is 35, with two lines. This app's
+ * thread row has a third line, the workspace, so its height is its own: the
+ * row's 1px padding above and below, plus three lines at `.side-text`'s line
+ * height of 1.3: the 13px title (16.9px) and two 12px lines (15.6px each).
+ * That is 50.1, rounded up to 51 so every row starts on a whole pixel. The
+ * draft's row is drawn as a thread row, with the same three lines.
  */
 export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
   "waiting-header": 24,
   "waiting-thread-row": 38,
   "waiting-assistant-row": 38,
   "project-header": 24,
-  "workspace-label": 22,
-  "thread-row": 35,
-  "draft-row": 35,
+  "thread-row": 51,
+  "draft-row": 51,
   more: 28,
 };
 
@@ -159,15 +172,6 @@ const SECTION_LEADING = 8;
 
 /** The space between two items of a section: the book's `.side-sec { gap: 1px }`. */
 const ITEM_LEADING = 1;
-
-/**
- * The space above a workspace label that follows a thread row, or the draft's
- * row: the usual gap plus 8 px, so the label starts a new group of rows
- * instead of reading as the row's third line. A label right after its
- * project's header keeps the usual gap. The book draws no workspace label, so
- * this spacing is the design's own.
- */
-const WORKSPACE_LABEL_LEADING = ITEM_LEADING + 8;
 
 /** Returns the section key of a project's section. */
 const buildProjectSectionKey = (projectId: string | null): SectionKey =>
@@ -242,35 +246,28 @@ const buildWaitingRow = (waiting: Waiting): SidebarItemContent => {
 interface SidebarItemSources {
   readonly sections: SidebarSections;
   readonly sessions: ReadonlyMap<string, Session>;
+  /** Each thread's pose and its row's end, by session id. */
   readonly poses: ReadonlyMap<string, Pose>;
-  readonly runners: ReadonlyMap<string, Runner>;
+  readonly ends: ReadonlyMap<string, RowEnd>;
   /** The project list in its own order, which decides each project's tint. */
   readonly projects: readonly Project[];
+  /** The lists a row names its workspace, machine, branch and provider from. */
+  readonly workspaces: readonly Workspace[];
+  readonly resources: readonly Resource[];
+  readonly runners: readonly Runner[];
+  readonly instances: readonly ProviderInstance[];
+  /** The session ids of the threads whose composer holds unsent work. */
+  readonly unsentKeys: ReadonlySet<string>;
   /**
-   * The second line of the draft's row, while a Draft Thread is open, or
-   * `null`. The row is drawn in the workspace group the sections mark as
-   * holding the draft.
+   * The draft's row, while a Draft Thread is open, or `null`: its model and
+   * its third line. The row is drawn first in the project the sections mark
+   * as holding the draft.
    */
-  readonly draftMeta: string | null;
+  readonly draftRow: {
+    readonly model: string | null;
+    readonly workspace: WorkspaceLabel;
+  } | null;
 }
-
-/**
- * Returns the space above `content`, which follows `previous` in its
- * section, or starts it when `previous` is undefined.
- */
-const decideLeading = (
-  content: SidebarItemContent,
-  previous: SidebarItemContent | undefined,
-): number => {
-  if (previous === undefined) return SECTION_LEADING;
-  if (
-    content.kind === "workspace-label" &&
-    (previous.kind === "thread-row" || previous.kind === "draft-row")
-  ) {
-    return WORKSPACE_LABEL_LEADING;
-  }
-  return ITEM_LEADING;
-};
 
 /** Returns a section's items: its contents, each given the section and the space above it. */
 const placeInSection = (
@@ -280,7 +277,7 @@ const placeInSection = (
   contents.map((content, index) => ({
     ...content,
     section,
-    leading: decideLeading(content, contents[index - 1]),
+    leading: index === 0 ? SECTION_LEADING : ITEM_LEADING,
   }));
 
 /**
@@ -307,63 +304,87 @@ const buildWaitingContents = (waiting: WaitingSection): SidebarItemContent[] => 
 };
 
 /**
- * Returns what a project's section draws: its header, then per workspace
- * group its label (when the group has one), its rows and, in the group that
- * holds the draft, the draft's row, then its "more" row when it hides some.
- * The threads in no project are headed "No project".
+ * Returns what a project's section draws: its header, then the draft's row
+ * when the project holds the Draft Thread, then its shown threads in one
+ * list, newest created first, then its "more" row when it hides some. The
+ * threads in no project are headed "No project".
  *
- * The draft's row is its group's last, as its tab is the last of the
- * header's tabs. A draft that starts a new workspace has a group of its own,
- * right under the project's header.
+ * The draft's row is first because the draft is the newest thread of its
+ * project. Workspaces have no group of their own: each row names its
+ * workspace on its third line.
  */
 const buildProjectContents = (
   project: ProjectSection,
-  { sessions, poses, runners, projects, draftMeta }: SidebarItemSources,
+  {
+    sessions,
+    poses,
+    ends,
+    projects,
+    workspaces,
+    resources,
+    runners,
+    instances,
+    unsentKeys,
+    draftRow,
+  }: SidebarItemSources,
 ): SidebarItemContent[] => {
   const section = buildProjectSectionKey(project.projectId);
+  // Only the group of the threads in no project has no name.
+  const projectName = project.name ?? "No project";
+  const tint = project.projectId === null ? null : pickProjectTint(project.projectId, projects);
   const contents: SidebarItemContent[] = [
     {
       kind: "project-header",
       key: buildHeaderKey(section),
       projectId: project.projectId,
-      // Only the group of the threads in no project has no name.
-      name: project.name ?? "No project",
-      tint: project.projectId === null ? null : pickProjectTint(project.projectId, projects),
+      name: projectName,
+      tint,
     },
   ];
-  for (const lane of project.workspaces) {
-    // Only the threads in no project have no project id, and they are one
-    // group with no label.
-    if (lane.label !== null && project.projectId !== null) {
-      contents.push({
-        kind: "workspace-label",
-        key: `workspace:${section}:${lane.key}`,
-        projectId: project.projectId,
-        workspaceId: lane.workspaceId,
-        joinableWorkspaceId: lane.joinable ? lane.workspaceId : null,
-        clip: lane.label.clip,
-        keep: lane.label.keep,
-      });
-    }
-    for (const row of lane.rows) {
-      const session = sessions.get(row.id);
-      const pose = poses.get(row.id);
-      if (session === undefined || pose === undefined) continue;
-      const runner = session.runnerId === null ? undefined : runners.get(session.runnerId);
-      contents.push({
-        kind: "thread-row",
-        key: `thread:${row.id}`,
-        sessionId: row.id,
+  if (draftRow !== null && holdsDraft(project)) {
+    contents.push({
+      kind: "draft-row",
+      key: "draft",
+      model: draftRow.model,
+      workspaceClip: draftRow.workspace.clip,
+      workspaceKeep: draftRow.workspace.keep,
+    });
+  }
+  const rows = listProjectRows({
+    group: project,
+    sessions,
+    workspaces,
+    resources,
+    runners,
+    instances,
+  });
+  for (const row of rows) {
+    const pose = poses.get(row.id);
+    const end = ends.get(row.id);
+    if (pose === undefined || end === undefined) continue;
+    contents.push({
+      kind: "thread-row",
+      key: `thread:${row.id}`,
+      sessionId: row.id,
+      title: row.title,
+      secondLine: row.secondLine,
+      pose,
+      end,
+      activityAt: row.activityAt,
+      workspaceClip: row.workspace.clip,
+      workspaceKeep: row.workspace.keep,
+      placeDescription: row.placeDescription,
+      unsent: unsentKeys.has(row.id),
+      details: {
         title: row.title,
-        secondLine: row.secondLine,
-        pose,
-        end: flattenRowEnd(decideThreadRowEnd(session, runner)),
-        activityAt: row.activityAt,
-      });
-    }
-    if (lane.draft && draftMeta !== null) {
-      contents.push({ kind: "draft-row", key: "draft", meta: draftMeta });
-    }
+        projectName,
+        tint,
+        machine: row.machine,
+        branch: row.branch,
+        model: row.secondLine,
+        providerId: row.providerId,
+      },
+    });
   }
   if (project.hiddenCount > 0) {
     contents.push({
@@ -376,13 +397,25 @@ const buildProjectContents = (
 };
 
 /**
+ * Returns `groups` without the workspace groups that hold no thread and not
+ * the draft, and without the projects left with no workspace group. The
+ * desktop sidebar lists threads, so a workspace no thread uses, kept or
+ * failed, is not shown in it (spec 17 §The sidebar).
+ */
+const dropEmptyWorkspaceGroups = (groups: readonly ProjectGroup[]): readonly ProjectGroup[] =>
+  groups.flatMap((group) => {
+    const workspaces = group.workspaces.filter((lane) => lane.rows.length > 0 || lane.draft);
+    return workspaces.length === 0 ? [] : [{ ...group, workspaces }];
+  });
+
+/**
  * Returns the sidebar's items, top to bottom: Waiting on you when a thread or
  * an assistant is waiting, then each project's section in the order of
  * `sections.projects`.
  *
- * A thread row whose session is missing from `sessions` or `poses` is left
- * out. All three are built from one read of the thread list, so this does
- * not happen.
+ * A thread row whose session is missing from `sessions`, `poses` or `ends`
+ * is left out. All of them are built from one read of the thread list, so
+ * this does not happen.
  */
 const buildSidebarItems = (sources: SidebarItemSources): readonly SidebarItem[] => {
   const { sections } = sources;
@@ -412,10 +445,16 @@ export interface SidebarSources {
   /** The instances whose catalogs give a row its model name. */
   readonly instances: readonly ProviderInstance[];
   /**
-   * The open Draft Thread, or `null`: the group it will join, and the second
-   * line of its row, such as "New workspace · studio-mac".
+   * The open Draft Thread, or `null`: the group it will join, and its row's
+   * model name and third line, such as "New workspace" and " · studio-mac".
    */
-  readonly draft: { readonly place: DraftPlace; readonly rowMeta: string } | null;
+  readonly draft: {
+    readonly place: DraftPlace;
+    readonly rowModel: string | null;
+    readonly rowWorkspace: WorkspaceLabel;
+  } | null;
+  /** The keys of the composers that hold unsent work: a thread's key is its session id. */
+  readonly unsentKeys: ReadonlySet<string>;
   /** The keys of the sections whose "more" row the user pressed. */
   readonly expanded: ReadonlySet<SectionKey>;
   /** The session id of the open thread, which its section always shows, or `null`. */
@@ -432,8 +471,8 @@ export interface Sidebar {
  * Returns what the sidebar draws from `sources`: its items, top to bottom,
  * and how many threads are working, waiting and idle.
  *
- * Each thread's pose is decided once, here, and serves the order of the
- * sections, the rows' marks and the counts.
+ * Each thread's pose and its row's end are decided once, here. The pose
+ * serves the order of the sections, the rows' names and the counts.
  */
 export const buildSidebar = ({
   threads,
@@ -444,20 +483,24 @@ export const buildSidebar = ({
   runners,
   instances,
   draft,
+  unsentKeys,
   expanded,
   selectedId,
 }: SidebarSources): Sidebar => {
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
+  const findRunner = (session: Session): Runner | undefined =>
+    session.runnerId === null ? undefined : runnersById.get(session.runnerId);
   const poses = new Map(
+    threads.map((session) => [session.id, decideThreadPose(session, findRunner(session))]),
+  );
+  const ends = new Map(
     threads.map((session) => [
       session.id,
-      decideThreadPose(
-        session,
-        session.runnerId === null ? undefined : runnersById.get(session.runnerId),
-      ),
+      flattenRowEnd(decideThreadRowEnd(session, findRunner(session))),
     ]),
   );
-  const groups = buildThreadGroups({
+  const sessions = new Map(threads.map((session) => [session.id, session]));
+  const groupedThreads = buildThreadGroups({
     sessions: threads,
     projects,
     workspaces,
@@ -467,6 +510,7 @@ export const buildSidebar = ({
     mode: "meta",
     draft: draft?.place ?? null,
   });
+  const groups = sortProjectsByNewestThread(dropEmptyWorkspaceGroups(groupedThreads), sessions);
   const sections = buildSidebarSections({
     groups,
     waiting,
@@ -476,11 +520,16 @@ export const buildSidebar = ({
   });
   const items = buildSidebarItems({
     sections,
-    sessions: new Map(threads.map((session) => [session.id, session])),
+    sessions,
     poses,
-    runners: runnersById,
+    ends,
     projects,
-    draftMeta: draft?.rowMeta ?? null,
+    workspaces,
+    resources,
+    runners,
+    instances,
+    unsentKeys,
+    draftRow: draft === null ? null : { model: draft.rowModel, workspace: draft.rowWorkspace },
   });
   return { items, counts: countThreadsByPose(poses.values()) };
 };
@@ -504,7 +553,6 @@ const buildGoMenuItem = (item: SidebarItem): GoMenuItem | null => {
       };
     case "waiting-header":
     case "project-header":
-    case "workspace-label":
     case "draft-row":
     case "more":
       return null;

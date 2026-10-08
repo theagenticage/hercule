@@ -5,19 +5,22 @@
  * in both themes.
  *
  * - Scene 1 has an open thread and three projects:
- *   - webshop, whose threads are split into workspace groups: a worktree, the
- *     main workspace and "no workspace", two threads each. The open thread
- *     sits in the worktree's group;
+ *   - webshop, whose threads work in a worktree, in the main workspace and in
+ *     no workspace, so the rows' third lines show each kind. The open thread
+ *     is in the worktree, and the composer of "Tidy product image alt text"
+ *     holds an unsent message, so its row is tinted;
  *   - ops, whose five threads each end their row differently: "queued",
  *     "offline", and the ages of a thread the crash-loop guard holds, an
  *     asleep thread and an ended one;
- *   - a project with a very long name, whose main workspace's label and
+ *   - a project with a very long name, whose main workspace's name and
  *     whose thread's title are too long for the sidebar.
  * - Scene 2 has no open thread. Five threads wait on the user, so Waiting on
  *   you shows three and a "more" row; payments-api has eight threads, so it
- *   shows five and a "more" row; and four threads belong to no project.
- * - Scene 3 is scene 2 with payments-api's "more" row pressed, so the
- *   project shows every thread.
+ *   shows five and a "more" row; and two threads belong to no project.
+ * - Scene 3 is scene 2 without the threads in no project, and with
+ *   payments-api's "more" row pressed, so the project shows every thread.
+ *   With three lines per row, scene 2 expanded would be taller than the
+ *   capture's window.
  *
  * The threads run on the sidebar specimen's runner and models
  * (sidebar-fixture.ts), except the one on build-box, a runner that is
@@ -83,9 +86,8 @@ const THREAD_IDS = {
 } as const;
 
 /**
- * The workspaces, in catalog order: a worktree of webshop, which the sidebar
- * lists first in its project, then the main workspaces of webshop and of the
- * long-named project, both on studio-mac.
+ * The workspaces: a worktree of webshop, then the main workspaces of webshop
+ * and of the long-named project, all on studio-mac.
  */
 const WORKSPACES = [
   buildWorkspace({
@@ -116,12 +118,11 @@ const buildTimeBefore = (minutes: number): string =>
   new Date(SPECIMEN_NOW - minutes * 60_000).toISOString();
 
 /**
- * Scene 1's threads, newest first in each group.
+ * Scene 1's threads. Each was created when it was last active.
  *
- * webshop's six threads are one more than a project shows. Its two working
- * threads and three newest idle ones are picked; the sixth, Apple Pay, is
- * shown only because it is the open thread. So every group shows both its
- * threads and there is no "more" row.
+ * webshop has five threads, as many as a project shows, so there is no
+ * "more" row. With three rows per thread, a sixth would make the list taller
+ * than the capture's window.
  */
 const SCENE_1_THREADS: ReadonlyArray<Session> = [
   buildSpecimenSession({
@@ -167,14 +168,6 @@ const SCENE_1_THREADS: ReadonlyArray<Session> = [
     status: "idle",
     minutesAgo: 95,
     model: GPT,
-  }),
-  buildSpecimenSession({
-    id: "s-support-summary",
-    title: "Summarize last week's support tickets",
-    projectId: "p-webshop",
-    status: "idle",
-    minutesAgo: 120,
-    model: CLAUDE_SONNET,
   }),
   // ops: one thread for each way a row can end other than a mark.
   buildSpecimenSession({
@@ -250,15 +243,11 @@ const SCENE_1_THREADS: ReadonlyArray<Session> = [
 ];
 
 /**
- * Scene 2's threads, all in no workspace.
- *
- * - payments-api has eight: three waiting, two working and three that are
- *   neither. It shows the waiting and the working ones, and "3 more threads".
- * - Four belong to no project, two of them waiting.
- * - Waiting on you counts all five waiting threads, shows the three newest,
- *   and "2 more waiting on you".
+ * payments-api's eight threads, in no workspace: three waiting, two working
+ * and three that are neither. Capped, it shows the waiting and the working
+ * ones, and "3 more threads".
  */
-const SCENE_2_THREADS: ReadonlyArray<Session> = [
+const PAYMENTS_THREADS: ReadonlyArray<Session> = [
   buildSpecimenSession({
     id: "s-payout-report",
     title: "Payout report for September",
@@ -363,7 +352,15 @@ const SCENE_2_THREADS: ReadonlyArray<Session> = [
     minutesAgo: 26 * 60,
     model: CLAUDE_SONNET,
   }),
-  // The threads in no project.
+];
+
+/**
+ * Scene 2's threads: payments-api's, and two in no project, both waiting.
+ * Waiting on you counts all five waiting threads, shows the three newest,
+ * and "2 more waiting on you".
+ */
+const SCENE_2_THREADS: ReadonlyArray<Session> = [
+  ...PAYMENTS_THREADS,
   buildSpecimenSession({
     id: "s-playwright-flake",
     title: "Explain the flaky Playwright run",
@@ -396,20 +393,6 @@ const SCENE_2_THREADS: ReadonlyArray<Session> = [
       },
     ],
   }),
-  buildSpecimenSession({
-    id: "s-auditor-reply",
-    title: "Draft a reply to the auditor",
-    status: "busy",
-    minutesAgo: 14,
-    model: GPT,
-  }),
-  buildSpecimenSession({
-    id: "s-hosting-prices",
-    title: "Compare Hetzner and OVH pricing",
-    status: "idle",
-    minutesAgo: 120,
-    model: GPT,
-  }),
 ];
 
 /** Returns every list the sidebar reads, holding `threads` and every scene's projects, workspaces and runners. */
@@ -431,6 +414,8 @@ export interface SidebarScene {
   readonly path: string;
   /** The text of the "more" row the page presses once the sidebar is drawn, or `null` to press none. */
   readonly pressMore: string | null;
+  /** The session ids of the threads whose composer holds an unsent message. */
+  readonly unsentThreadIds: readonly string[];
 }
 
 /** The scenes, in order: `?scene=1` is the first. */
@@ -439,7 +424,13 @@ export const SIDEBAR_SCENES: ReadonlyArray<SidebarScene> = [
     records: buildSceneRecords(SCENE_1_THREADS),
     path: `/threads/${THREAD_IDS.applePay}`,
     pressMore: null,
+    unsentThreadIds: [THREAD_IDS.altText],
   },
-  { records: buildSceneRecords(SCENE_2_THREADS), path: "/", pressMore: null },
-  { records: buildSceneRecords(SCENE_2_THREADS), path: "/", pressMore: "3 more threads" },
+  { records: buildSceneRecords(SCENE_2_THREADS), path: "/", pressMore: null, unsentThreadIds: [] },
+  {
+    records: buildSceneRecords(PAYMENTS_THREADS),
+    path: "/",
+    pressMore: "3 more threads",
+    unsentThreadIds: [],
+  },
 ];

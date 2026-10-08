@@ -51,6 +51,6 @@ function pressMoreRow(label: string): void {
 const scene = readScene();
 // The capture script reads this to know how many scenes there are to capture.
 document.documentElement.dataset.sceneCount = String(SIDEBAR_SCENES.length);
-await mountSidebarSpecimen(scene.records, scene.path);
+await mountSidebarSpecimen(scene.records, scene.path, scene.unsentThreadIds);
 if (scene.pressMore !== null) pressMoreRow(scene.pressMore);
 await markSheetReady();
