@@ -67,6 +67,7 @@ import {
   type HerculeClient,
   type ThreadPicks,
 } from "@hercule/client-core";
+import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
 import type { Bridge } from "../../ipc/bridge";
 import {
   assistantsQuery,
@@ -95,11 +96,13 @@ import {
   createPendingSubmissions,
   type PendingSubmissions,
 } from "../app/pending-submissions";
+import { createAppearanceStore } from "../app/appearance";
 import { createQueryClient } from "../app/query-client";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
 import { DraftScreen } from "../screens/new-thread/draft-screen";
 import { AgentPage } from "../screens/thread/agent-page";
 import { Route as SettingsRoute } from "../routes/_connected/_shell/settings/route";
+import { Route as AppearanceSettingsRoute } from "../routes/_connected/_shell/settings/appearance";
 import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/settings/assistants/route";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
@@ -158,11 +161,21 @@ export interface AssistantsSettingsRecords {
   readonly connections: ReadonlyArray<Connection>;
 }
 
+/**
+ * The records Settings > Appearance reads. The section itself reads none:
+ * it reads the Appearance from the bridge.
+ */
+export interface AppearanceSettingsRecords {
+  /** The Connections the Settings list reads for its Connections row's dot. */
+  readonly connections: ReadonlyArray<Connection>;
+}
+
 /** The screens a shell specimen opens beside the sidebar. It opens at most one of them. */
 interface OpenScreens {
   readonly thread?: ThreadScreenRecords;
   readonly draft?: DraftScreenRecords;
   readonly assistantsSettings?: AssistantsSettingsRecords;
+  readonly appearanceSettings?: AppearanceSettingsRecords;
 }
 
 /** An address that never answers. The client sends nothing to it. */
@@ -192,7 +205,8 @@ const buildBridgeCallError = (call: string): Error =>
  * The bridge the page passes to the app. It refuses every call, for the same
  * reason the client refuses every request, except what the shell sends main
  * for the Go menu, the dock badge and the notifications: it accepts that,
- * and ignores it. It sends no menu command and opens no thread or
+ * and ignores it. It reads the Appearance as the defaults, so the page looks
+ * as it does on a Mac where the user never changed them. It sends no menu command and opens no thread or
  * assistant.
  */
 const REFUSING_BRIDGE: Bridge = {
@@ -236,6 +250,10 @@ const REFUSING_BRIDGE: Bridge = {
     read: () => Promise.reject(buildBridgeCallError("firstRunProgress.read")),
     save: () => Promise.reject(buildBridgeCallError("firstRunProgress.save")),
   },
+  appearance: {
+    read: () => DEFAULT_APPEARANCE,
+    save: () => Promise.reject(buildBridgeCallError("appearance.save")),
+  },
   link: {
     open: () => Promise.reject(buildBridgeCallError("link.open")),
   },
@@ -259,7 +277,7 @@ const seedQueryCache = (
   queryClient: QueryClient,
   client: HerculeClient,
   records: SidebarRecords,
-  { thread, draft, assistantsSettings }: OpenScreens,
+  { thread, draft, assistantsSettings, appearanceSettings }: OpenScreens,
 ): void => {
   queryClient.setQueryData(threadsQuery(client).queryKey, records.threads);
   queryClient.setQueryData(projectsQuery(client).queryKey, records.projects);
@@ -296,6 +314,9 @@ const seedQueryCache = (
   if (assistantsSettings !== undefined) {
     queryClient.setQueryData(profilesQuery(client).queryKey, assistantsSettings.profiles);
     queryClient.setQueryData(connectionsQuery(client).queryKey, assistantsSettings.connections);
+  }
+  if (appearanceSettings !== undefined) {
+    queryClient.setQueryData(connectionsQuery(client).queryKey, appearanceSettings.connections);
   }
   if (thread !== undefined) {
     const sessionId = thread.session.id;
@@ -337,7 +358,8 @@ function AssistantRoute(): JSX.Element {
 /**
  * Builds the router: the root, the `_connected` and `_shell` layout routes,
  * the three screens the sidebar links to, `/`, `/threads/$sessionId` and
- * `/assistants/$assistantId`, and Settings with its Assistants section,
+ * `/assistants/$assistantId`, and Settings with its Appearance and
+ * Assistants sections,
  * starting at `path`. The ids are the app's, because the sidebar and the
  * screens read their context, and the sidebar its selected thread or draft,
  * by route id.
@@ -348,7 +370,7 @@ function AssistantRoute(): JSX.Element {
  * that the assistant was not found when the fixture holds no assistant with
  * the address's id.
  *
- * Settings and its Assistants section are the app's own routes, attached
+ * Settings and its two sections are the app's own routes, attached
  * under this router's `_shell`, because their components read their search
  * and their context through their own `Route`. The Assistants route is
  * attached without its loader: the loader reads the permission profiles and
@@ -368,6 +390,7 @@ const buildRouter = (
     // `live` is null: the sidebar never touches the live connection.
     beforeLoad: () => ({
       bridge: REFUSING_BRIDGE,
+      appearance: createAppearanceStore(REFUSING_BRIDGE),
       controller: {
         url: CONTROLLER_URL,
         client,
@@ -396,6 +419,11 @@ const buildRouter = (
     getParentRoute: () => settingsRoute,
     loader: undefined,
   } as never);
+  const appearanceSettingsRoute = AppearanceSettingsRoute.update({
+    id: "/appearance",
+    path: "/appearance",
+    getParentRoute: () => settingsRoute,
+  } as never);
   const routeTree = rootRoute.addChildren([
     connectedRoute.addChildren([
       shellRoute.addChildren([
@@ -413,7 +441,7 @@ const buildRouter = (
           path: "assistants/$assistantId",
           component: AssistantRoute,
         }),
-        settingsRoute.addChildren([assistantsSettingsRoute]),
+        settingsRoute.addChildren([appearanceSettingsRoute, assistantsSettingsRoute]),
       ]),
     ]),
   ]);
@@ -438,7 +466,8 @@ const waitForElement = async (selector: string): Promise<void> => {
 /**
  * Checks that the page drew the sidebar's thread rows, the transcript when
  * `screens` opens a thread, an assistant's settings when it opens Settings >
- * Assistants, and the start cards with the focus in the message field when
+ * Assistants, the theme cards when it opens Settings > Appearance, and the
+ * start cards with the focus in the message field when
  * it opens a draft, and started no read. Fails with the keys of the
  * reads it started, or with what it did not draw, otherwise.
  */
@@ -462,6 +491,11 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
   ) {
     throw new Error(
       "Settings > Assistants drew no assistant's settings. Check the page's console for the error.",
+    );
+  }
+  if (screens.appearanceSettings !== undefined && document.querySelector(".themes") === null) {
+    throw new Error(
+      "Settings > Appearance drew no theme cards. Check the page's console for the error.",
     );
   }
   if (screens.draft !== undefined) {
@@ -594,4 +628,20 @@ export async function mountAssistantsSettingsSpecimen(
   settings: AssistantsSettingsRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, path, { assistantsSettings: settings });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Settings > Appearance open: the main pane shows the app's real
+ * Settings frame and Appearance section, with the Appearance's defaults, and
+ * the Settings list reads the Connections from `settings`.
+ * Returns once the theme cards are in the document. Fails when the page has
+ * no `#root`, draws no sidebar row or no theme card, or tries to read a
+ * record the cache does not hold.
+ */
+export async function mountAppearanceSettingsSpecimen(
+  records: SidebarRecords,
+  settings: AppearanceSettingsRecords,
+): Promise<void> {
+  await mountShellSpecimen(records, "/settings/appearance", { appearanceSettings: settings });
 }

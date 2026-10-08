@@ -39,7 +39,7 @@ const SETTINGS_GROUPS: ReadonlyArray<{
     heading: "You",
     rows: [
       { label: "Profile", Icon: UserIcon, to: "/settings/profile" },
-      { label: "Appearance", Icon: PaletteIcon, to: null },
+      { label: "Appearance", Icon: PaletteIcon, to: "/settings/appearance" },
       { label: "Threads", Icon: ThreadsIcon, to: null },
     ],
   },

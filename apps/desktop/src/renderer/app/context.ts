@@ -15,6 +15,7 @@ import {
   UPLOAD_CONCURRENCY,
 } from "@hercule/client-core";
 import type { Bridge } from "../../ipc/bridge";
+import { createAppearanceStore, type AppearanceStore } from "./appearance";
 import { createControllerClient } from "./controller-client";
 import { createPendingSubmissions, type PendingSubmissions } from "./pending-submissions";
 import { createQueryClient } from "./query-client";
@@ -54,6 +55,8 @@ export interface RouterContext {
   /** The saved controller, or `null` until the user has connected to one. */
   readonly controller: SavedController | null;
   readonly queryClient: QueryClient;
+  /** The Appearance the page shows, which the Appearance page changes. */
+  readonly appearance: AppearanceStore;
 }
 
 /**
@@ -97,5 +100,6 @@ export const buildRouterContext = async (bridge: Bridge): Promise<RouterContext>
     bridge,
     controller: controllerUrl === null ? null : buildSavedController(controllerUrl, token, bridge),
     queryClient: createQueryClient(),
+    appearance: createAppearanceStore(bridge),
   };
 };

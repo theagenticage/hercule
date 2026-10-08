@@ -239,8 +239,7 @@ const withLegacyController = async (
   ) => Promise<void>,
 ) => {
   const fixture = await createLegacyInstallation();
-  const port = 20_000 + Math.floor(Math.random() * 40_000);
-  let controller = await startControllerProcess(fixture.home, port);
+  let controller = await startControllerProcess(fixture.home);
   let wire: Awaited<ReturnType<typeof connectProofRunner>> | undefined;
   try {
     // The controller owns SQLite exclusively. Stop it before examining the
@@ -273,7 +272,7 @@ const withLegacyController = async (
     } finally {
       reader.close();
     }
-    controller = await startControllerProcess(fixture.home, port);
+    controller = await startControllerProcess(fixture.home);
     const token = fixture.token;
     const manager = makeTestWorkspaces({ storageDir: fixture.storageDir, gitEnv: fixture.gitEnv });
     wire = await connectProofRunner(

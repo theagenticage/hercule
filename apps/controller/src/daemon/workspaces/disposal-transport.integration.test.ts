@@ -89,8 +89,7 @@ describe("disposal intent after a complete controller process restart", () => {
         GIT_CONFIG_VALUE_0: remoteUrl,
       };
       let manager = makeTestWorkspaces({ storageDir: runnerHome, gitEnv });
-      const port = 20_000 + Math.floor(Math.random() * 40_000);
-      let controller = await startControllerProcess(home, port);
+      let controller = await startControllerProcess(home);
       const wires: Array<ProofRunner> = [];
       try {
         const setupToken = new URL(
@@ -164,7 +163,7 @@ describe("disposal intent after a complete controller process restart", () => {
         } finally {
           persisted.close();
         }
-        controller = await startControllerProcess(home, port);
+        controller = await startControllerProcess(home);
         expect((await readWorkspace(controller.base, token, workspaceId)).status).toBe("disposing");
         wire = await connectProofRunner(controller.base, joined);
         wires.push(wire);
@@ -208,7 +207,7 @@ describe("disposal intent after a complete controller process restart", () => {
         await controller.stop();
         wire.close();
         manager = makeTestWorkspaces({ storageDir: runnerHome, gitEnv });
-        controller = await startControllerProcess(home, port);
+        controller = await startControllerProcess(home);
         expect((await readWorkspace(controller.base, token, workspaceId)).status).toBe("disposing");
         wire = await connectProofRunner(controller.base, joined);
         wires.push(wire);

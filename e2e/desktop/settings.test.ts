@@ -2,8 +2,8 @@
  * Tests opening and leaving Settings in the packaged app, signed in to a real
  * controller:
  *
- * - the Settings button in the sidebar's foot opens Settings on Profile, and
- *   is marked as the current page while Settings is open;
+ * - the Settings button in the sidebar's foot opens Settings on Appearance,
+ *   and is marked as the current page while Settings is open;
  * - Hercule › Settings… opens it too, and carries ⌘,;
  * - the rows of sections that are not built yet are inert: each says so in
  *   its tooltip, and pressing it leaves the open section as it was;
@@ -30,7 +30,6 @@ import {
 
 /** The rows of the Settings list whose sections are not built yet. */
 const INERT_ROWS = [
-  "Appearance",
   "Threads",
   "Connections",
   "Providers",
@@ -68,8 +67,19 @@ async function waitForSection(page: Page, section: string): Promise<void> {
     .toBe(section);
 }
 
+/** Opens Settings from the sidebar's foot, then its Profile section. */
+async function openProfile(page: Page): Promise<void> {
+  await findSettingsButton(page).click();
+  await waitForSection(page, "Appearance");
+  await page
+    .getByRole("navigation", { name: "Settings" })
+    .getByText("Profile", { exact: true })
+    .click();
+  await waitForSection(page, "Profile");
+}
+
 describe("Settings", () => {
-  it("opens on Profile from the Settings button in the sidebar's foot, and marks the button as the current page", async () => {
+  it("opens on Appearance from the Settings button in the sidebar's foot, and marks the button as the current page", async () => {
     const { url } = await arrangeFleet();
     const { page } = await openSignedIn(url);
     const button = findSettingsButton(page);
@@ -77,8 +87,8 @@ describe("Settings", () => {
 
     await button.click();
 
-    await waitForSection(page, "Profile");
-    expect(await readCurrentSection(page)).toBe("Profile");
+    await waitForSection(page, "Appearance");
+    expect(await readCurrentSection(page)).toBe("Appearance");
     expect(await button.getAttribute("aria-current")).toBe("page");
   });
 
@@ -94,7 +104,7 @@ describe("Settings", () => {
 
     await chooseMenuItem(app, "Hercule", "Settings…");
 
-    await waitForSection(page, "Profile");
+    await waitForSection(page, "Appearance");
     expect(await findSettingsButton(page).getAttribute("aria-current")).toBe("page");
   });
 
@@ -102,7 +112,7 @@ describe("Settings", () => {
     const { url } = await arrangeFleet();
     const { page } = await openSignedIn(url);
     await findSettingsButton(page).click();
-    await waitForSection(page, "Profile");
+    await waitForSection(page, "Appearance");
     const list = page.getByRole("navigation", { name: "Settings" });
 
     for (const label of INERT_ROWS) {
@@ -112,21 +122,20 @@ describe("Settings", () => {
       // Playwright waits for a row marked `aria-disabled` to be enabled
       // before it clicks, so the click is forced, as a user's click is.
       await row.click({ force: true });
-      expect(await readCurrentSection(page), label).toBe("Profile");
-      expect(await page.locator(".bar .title").textContent(), label).toBe("Profile");
+      expect(await readCurrentSection(page), label).toBe("Appearance");
+      expect(await page.locator(".bar .title").textContent(), label).toBe("Appearance");
     }
     // A navigation the clicks started would end after the checks above, so
     // the test waits a moment and checks once more.
     await page.waitForTimeout(300);
-    expect(await readCurrentSection(page)).toBe("Profile");
-    expect(await page.locator(".bar .title").textContent()).toBe("Profile");
+    expect(await readCurrentSection(page)).toBe("Appearance");
+    expect(await page.locator(".bar .title").textContent()).toBe("Appearance");
   });
 
   it("stacks a row's control under its label in a window at its narrowest", async () => {
     const { url } = await arrangeFleet();
     const { app, page } = await openSignedIn(url);
-    await findSettingsButton(page).click();
-    await waitForSection(page, "Profile");
+    await openProfile(page);
 
     // 800 by 500 is the window's minimum size.
     await app.evaluate(({ BrowserWindow }) => {
@@ -148,8 +157,7 @@ describe("Settings", () => {
     const username = "AlexanderVanDerMeer";
     const { url } = await startControllerForTest({ setUp: true, username });
     const { app, page } = await openSignedIn(url, username);
-    await findSettingsButton(page).click();
-    await waitForSection(page, "Profile");
+    await openProfile(page);
 
     await app.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0]!.setSize(800, 500);
@@ -176,7 +184,7 @@ describe("Settings", () => {
     const { page } = await openSignedIn(url);
     const button = findSettingsButton(page);
     await button.click();
-    await waitForSection(page, "Profile");
+    await waitForSection(page, "Appearance");
 
     await page
       .getByRole("navigation", { name: "Threads", exact: true })

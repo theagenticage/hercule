@@ -14,7 +14,6 @@ import { BranchIcon } from "../icons/branch";
 import { LaptopIcon } from "../icons/laptop";
 import { ProjectTile, type ProjectTint } from "../screens/project-tile";
 import { ProviderLogo } from "../screens/thread/provider-logo";
-import "../screens/thread/menus.css";
 import "./thread-hover-card.css";
 
 /** What the card shows about one thread. */
@@ -102,7 +101,7 @@ export function ThreadHoverCard({
   }, [placement]);
 
   return (
-    <div ref={cardRef} popover="manual" className="pop thread-hover" aria-hidden="true">
+    <div ref={cardRef} popover="manual" className="thread-hover" aria-hidden="true">
       {details === null ? null : (
         <>
           <p className="thread-hover-title">{details.title}</p>

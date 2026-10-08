@@ -19,6 +19,7 @@ import { Route as ConnectedShellOfficeRouteImport } from './routes/_connected/_s
 import { Route as ConnectedShellSettingsRouteRouteImport } from './routes/_connected/_shell/settings/route'
 import { Route as ConnectedShellAssistantsAssistantIdRouteImport } from './routes/_connected/_shell/assistants/$assistantId'
 import { Route as ConnectedShellSettingsIndexRouteImport } from './routes/_connected/_shell/settings/index'
+import { Route as ConnectedShellSettingsAppearanceRouteImport } from './routes/_connected/_shell/settings/appearance'
 import { Route as ConnectedShellSettingsAssistantsRouteRouteImport } from './routes/_connected/_shell/settings/assistants/route'
 import { Route as ConnectedShellSettingsProfileRouteImport } from './routes/_connected/_shell/settings/profile'
 import { Route as ConnectedShellSettingsSystemRouteImport } from './routes/_connected/_shell/settings/system'
@@ -77,6 +78,12 @@ const ConnectedShellSettingsIndexRoute =
     path: '/',
     getParentRoute: () => ConnectedShellSettingsRouteRoute,
   } as any)
+const ConnectedShellSettingsAppearanceRoute =
+  ConnectedShellSettingsAppearanceRouteImport.update({
+    id: '/appearance',
+    path: '/appearance',
+    getParentRoute: () => ConnectedShellSettingsRouteRoute,
+  } as any)
 const ConnectedShellSettingsAssistantsRouteRoute =
   ConnectedShellSettingsAssistantsRouteRouteImport.update({
     id: '/assistants',
@@ -124,6 +131,7 @@ export interface FileRoutesByFullPath {
   '/settings/assistants': typeof ConnectedShellSettingsAssistantsRouteRoute
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRouteRouteWithChildren
   '/assistants/$assistantId': typeof ConnectedShellAssistantsAssistantIdRoute
+  '/settings/appearance': typeof ConnectedShellSettingsAppearanceRoute
   '/settings/profile': typeof ConnectedShellSettingsProfileRoute
   '/settings/system': typeof ConnectedShellSettingsSystemRoute
   '/settings/': typeof ConnectedShellSettingsIndexRoute
@@ -138,6 +146,7 @@ export interface FileRoutesByTo {
   '/office': typeof ConnectedShellOfficeRoute
   '/settings/assistants': typeof ConnectedShellSettingsAssistantsRouteRoute
   '/assistants/$assistantId': typeof ConnectedShellAssistantsAssistantIdRoute
+  '/settings/appearance': typeof ConnectedShellSettingsAppearanceRoute
   '/settings/profile': typeof ConnectedShellSettingsProfileRoute
   '/settings/system': typeof ConnectedShellSettingsSystemRoute
   '/settings': typeof ConnectedShellSettingsIndexRoute
@@ -157,6 +166,7 @@ export interface FileRoutesById {
   '/_connected/_shell/settings/assistants': typeof ConnectedShellSettingsAssistantsRouteRoute
   '/_connected/_shell/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRouteRouteWithChildren
   '/_connected/_shell/assistants/$assistantId': typeof ConnectedShellAssistantsAssistantIdRoute
+  '/_connected/_shell/settings/appearance': typeof ConnectedShellSettingsAppearanceRoute
   '/_connected/_shell/settings/profile': typeof ConnectedShellSettingsProfileRoute
   '/_connected/_shell/settings/system': typeof ConnectedShellSettingsSystemRoute
   '/_connected/_shell/settings/': typeof ConnectedShellSettingsIndexRoute
@@ -175,6 +185,7 @@ export interface FileRouteTypes {
     | '/settings/assistants'
     | '/threads/$sessionId'
     | '/assistants/$assistantId'
+    | '/settings/appearance'
     | '/settings/profile'
     | '/settings/system'
     | '/settings/'
@@ -189,6 +200,7 @@ export interface FileRouteTypes {
     | '/office'
     | '/settings/assistants'
     | '/assistants/$assistantId'
+    | '/settings/appearance'
     | '/settings/profile'
     | '/settings/system'
     | '/settings'
@@ -207,6 +219,7 @@ export interface FileRouteTypes {
     | '/_connected/_shell/settings/assistants'
     | '/_connected/_shell/threads/$sessionId'
     | '/_connected/_shell/assistants/$assistantId'
+    | '/_connected/_shell/settings/appearance'
     | '/_connected/_shell/settings/profile'
     | '/_connected/_shell/settings/system'
     | '/_connected/_shell/settings/'
@@ -292,6 +305,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectedShellSettingsIndexRouteImport
       parentRoute: typeof ConnectedShellSettingsRouteRoute
     }
+    '/_connected/_shell/settings/appearance': {
+      id: '/_connected/_shell/settings/appearance'
+      path: '/appearance'
+      fullPath: '/settings/appearance'
+      preLoaderRoute: typeof ConnectedShellSettingsAppearanceRouteImport
+      parentRoute: typeof ConnectedShellSettingsRouteRoute
+    }
     '/_connected/_shell/settings/assistants': {
       id: '/_connected/_shell/settings/assistants'
       path: '/assistants'
@@ -339,6 +359,7 @@ declare module '@tanstack/react-router' {
 
 interface ConnectedShellSettingsRouteRouteChildren {
   ConnectedShellSettingsAssistantsRouteRoute: typeof ConnectedShellSettingsAssistantsRouteRoute
+  ConnectedShellSettingsAppearanceRoute: typeof ConnectedShellSettingsAppearanceRoute
   ConnectedShellSettingsProfileRoute: typeof ConnectedShellSettingsProfileRoute
   ConnectedShellSettingsSystemRoute: typeof ConnectedShellSettingsSystemRoute
   ConnectedShellSettingsIndexRoute: typeof ConnectedShellSettingsIndexRoute
@@ -348,6 +369,8 @@ const ConnectedShellSettingsRouteRouteChildren: ConnectedShellSettingsRouteRoute
   {
     ConnectedShellSettingsAssistantsRouteRoute:
       ConnectedShellSettingsAssistantsRouteRoute,
+    ConnectedShellSettingsAppearanceRoute:
+      ConnectedShellSettingsAppearanceRoute,
     ConnectedShellSettingsProfileRoute: ConnectedShellSettingsProfileRoute,
     ConnectedShellSettingsSystemRoute: ConnectedShellSettingsSystemRoute,
     ConnectedShellSettingsIndexRoute: ConnectedShellSettingsIndexRoute,

@@ -13,6 +13,7 @@
  */
 import { app, BrowserWindow, type NativeImage } from "electron";
 import type { Bitmap } from "./compare-bitmaps.ts";
+import { NIGHT_THEMES } from "../src/ipc/appearance.ts";
 import { pollUntil } from "./poll.ts";
 
 // The themes the sheets are captured in: the two the book is compared in, and
@@ -44,7 +45,8 @@ export const MAIN_PANE_REGION: Rect = { x: 272, y: 0, width: WIDTH - 272, height
 
 /**
  * Opens `url` in a hidden window with a 1440 × 900 content area, which
- * reports neither Reduce motion nor Reduce transparency, and waits until the
+ * reports neither Reduce motion nor Reduce transparency, reports the
+ * macOS appearance that matches the URL's `?theme=`, and waits until the
  * page sets `data-ready` on `<html>`. When `moduleUrl` is given,
  * the page imports that module once it has loaded; the module must set
  * `data-ready` itself. Returns the window. Fails when the page does not load,
@@ -78,15 +80,25 @@ export async function openSheet(url: string, moduleUrl?: string): Promise<Browse
     //   keeps a filter that blurs by 0 px. The glass's shadows then differ by
     //   a few levels.
     // The comparison is of the pages as most Macs show them, so each window
-    // reports neither preference, whatever the machine's settings. The
-    // debugger answers no command until the window has loaded a page, so the
-    // window loads an empty one first; the setting then holds for the sheet.
+    // reports neither preference, whatever the machine's settings.
+    //
+    // Each window also reports the macOS appearance that matches the sheet's
+    // theme, dark for a dark theme. Settings > Appearance presses the card
+    // of the theme that macOS's appearance puts in use, and the book presses
+    // the card of the page's theme, so without this the two would press
+    // different cards on a Mac in the other appearance. No other sheet reads
+    // the appearance.
+    //
+    // The debugger answers no command until the window has loaded a page, so
+    // the window loads an empty one first; the settings then hold for the
+    // sheet.
     await window.loadURL("about:blank");
     window.webContents.debugger.attach();
     await window.webContents.debugger.sendCommand("Emulation.setEmulatedMedia", {
       features: [
         { name: "prefers-reduced-motion", value: "no-preference" },
         { name: "prefers-reduced-transparency", value: "no-preference" },
+        { name: "prefers-color-scheme", value: decideColorScheme(url) },
       ],
     });
     await window.loadURL(url);
@@ -119,6 +131,17 @@ export async function openSheet(url: string, moduleUrl?: string): Promise<Browse
       { cause: error },
     );
   }
+}
+
+/**
+ * Returns the macOS appearance that matches the theme in `url`'s `?theme=`:
+ * `dark` for a dark theme, and `light` for a light one or none.
+ */
+function decideColorScheme(url: string): "light" | "dark" {
+  const theme = new URL(url).searchParams.get("theme");
+  return theme !== null && (NIGHT_THEMES as ReadonlyArray<string>).includes(theme)
+    ? "dark"
+    : "light";
 }
 
 /**

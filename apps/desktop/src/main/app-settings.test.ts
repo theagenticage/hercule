@@ -12,7 +12,8 @@ import {
   NoControllerSaved,
   type WindowState,
 } from "./app-settings";
-import type { FirstRunProgress } from "../ipc/contract";
+import { DEFAULT_APPEARANCE } from "../ipc/appearance";
+import type { Appearance, FirstRunProgress } from "../ipc/contract";
 import { makeTemporarySettingsFile } from "./testing";
 
 let file: string;
@@ -374,5 +375,49 @@ describe("the first run's progress", () => {
     const exit = await runWithAppSettings(Effect.exit(saveFirstRunProgress({ putOff: [] })));
     expect(exit).toEqual(Exit.fail(new NoControllerSaved("the first run's progress")));
     expect(existsSync(file)).toBe(false);
+  });
+});
+
+describe("the Appearance", () => {
+  const readAppearance = AppSettings.use((settings) => settings.readAppearance);
+  const saveAppearance = (appearance: Appearance) =>
+    AppSettings.use((settings) => settings.saveAppearance(appearance));
+  const nile: Appearance = {
+    ...DEFAULT_APPEARANCE,
+    theme: "nile",
+    followSystem: false,
+    glassPercent: 0,
+  };
+
+  it("is the defaults before one is saved", async () => {
+    expect(await runWithAppSettings(readAppearance)).toEqual(DEFAULT_APPEARANCE);
+  });
+
+  it("is read from the file", async () => {
+    writeFileSync(file, JSON.stringify({ appearance: nile }));
+    expect(await runWithAppSettings(readAppearance)).toEqual(nile);
+  });
+
+  it("is the defaults when its value does not decode, and costs no other key", async () => {
+    writeFileSync(
+      file,
+      JSON.stringify({
+        controllerUrl: "http://127.0.0.1:4937",
+        appearance: { ...nile, theme: "poirot" },
+      }),
+    );
+    const read = await runWithAppSettings(
+      Effect.all([readAppearance, AppSettings.use((settings) => settings.readControllerUrl)]),
+    );
+    expect(read).toEqual([DEFAULT_APPEARANCE, "http://127.0.0.1:4937"]);
+  });
+
+  it("is saved beside the other keys", async () => {
+    writeFileSync(file, JSON.stringify({ controllerUrl: "http://127.0.0.1:4937" }));
+    const afterSave = await runWithAppSettings(
+      Effect.andThen(saveAppearance(nile), readAppearance),
+    );
+    expect(afterSave).toEqual(nile);
+    expect(readFileObject()).toEqual({ controllerUrl: "http://127.0.0.1:4937", appearance: nile });
   });
 });

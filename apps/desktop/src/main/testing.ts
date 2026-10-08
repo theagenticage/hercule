@@ -56,6 +56,7 @@ export const makeFakeMainWindow = (): FakeMainWindow => {
       reload: record("reload"),
       show: record("show"),
       showFirstTime: record("showFirstTime"),
+      paintBackground: record("paintBackground"),
       isFocused: Effect.sync(() => fake.focused),
       showAndSend: (name, payload) => record(`showAndSend ${name} ${JSON.stringify(payload)}`),
       showWarning: (message) => record(`showWarning ${message}`),

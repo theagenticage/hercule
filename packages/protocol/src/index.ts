@@ -53,6 +53,7 @@ import {
 } from "./workspace-steps";
 
 export * from "./attachments";
+export * from "./identity-port";
 export * from "./output-schema";
 export * from "./remote";
 export * from "./sessions";
@@ -145,19 +146,6 @@ export const ProviderBinary = Schema.Struct({
 });
 
 export type ProviderBinary = Schema.Schema.Type<typeof ProviderBinary>;
-
-/**
- * The first loopback port a runner tries for `GET /identity`, and how many
- * consecutive ports it tries.
- *
- * The set is small and fixed rather than "whatever is free", because the web
- * app's Content-Security-Policy has to list the ports in advance, and a policy
- * listing every port would let any script in the app reach every service on the
- * user's machine.
- */
-export const IDENTITY_PORT = 4939;
-
-export const IDENTITY_PORT_COUNT = 10;
 
 /**
  * What a runner knows about the machine it is on. This is state where the

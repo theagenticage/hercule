@@ -1698,6 +1698,23 @@ The earlier sizes come from that commit's CI build; the final sizes come from th
 - **Work per streamed token and the uploads' network use were not measured.** A bubble's images are read once, when the bubble first draws, and at most three uploads run at a time.
 - **One run, not the median of three.** The one-minute load average was 5.6 at spawn and 5.5 at the end, from other worktrees' runs on the machine.
 
+**Settings › Appearance, slice 12,** measured 2026-10-08 on the reference machine with `pnpm build:desktop`'s size checks, five runs of `apps/desktop/scripts/perf.ts` before the change and one after (its five launches on the new-thread screen), and one Chromium trace each of a theme change and a Glass drag in the packaged app, on the working tree of branch `feat/411-appearance-themes-glass`, for [#411](https://github.com/theagenticage/hercule/issues/411). The page adds no process, no timer, no polling and no live topic.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Processes | none added | 4 |
+| Launch, spawn to first paint and to window shown | `appearance.read` adds one synchronous message, answered from memory | before: first paint 236 to 288 ms, shown 346 to 420 ms; after: first paint 216 to 270 ms, shown 343 to 368 ms. The message is lost in the spread between launches |
+| The first screen's JavaScript, gzipped | grows only by the foot button's handler, the route stub and `theme-init.js`'s reading of the Appearance | 324.2 kB, up 1.2 kB from 323.0 kB; `theme-init.js` is 1.5 kB, up from 0.8 kB. The first screen was over its 250 kB guide before this change |
+| Main's startup file, minified | 160 kB | 148.0 kB, down from 159.1 kB: `@hercule/protocol` now declares `"sideEffects": false` and keeps the identity port in a module of its own, so main no longer takes in the whole protocol through the contract (spec 14) |
+| The Appearance chunk, gzipped, not on the first screen | its own chunk | 3.6 kB of JavaScript and 1.0 kB of CSS |
+| A change of theme | one frame that restyles the page | one frame with two style passes, 2.0 ms and 1.6 ms: the snap's computed-style read, then the frame's own. One layout |
+| Dragging the Glass slider | a restyle per input event while the user drags, nothing after | 20 input events over the drag, 36 style passes and 18 ms of style work in all, one save on release, and no style pass or frame after it |
+
+- **The theme change restyles twice in its frame,** because `theme-init.js` reads a computed style while transitions are off, so no control fades. The second pass costs 1.6 ms, and a snap without it would start every transition on the page.
+- **A few small style passes follow a theme change,** 0.2 ms in all, over the next few frames. Their cause was not traced; they end on their own.
+- **Memory was not measured with the Appearance page open.** The perf script opens Profile and Assistants, and the Appearance page reads nothing from the controller.
+- **The one-minute load average was 3.1 to 9.5** at the After launches, from other worktrees' runs on the machine.
+
 **The flat sidebar,** measured 2026-10-08 on the reference machine with `pnpm build:desktop`'s size checks, on `main` at d1c8e7a4 (Before) and on the working tree of branch `t3/desktop-sidebar-flat-threads` (After), for [#473](https://github.com/theagenticage/hercule/issues/473). The change adds no process, no read, no live topic and no polling. The hover card is one popover element for the whole list, and its 400ms delay is the only timer, running only while the pointer rests on a thread row. Typing in a composer does not draw the sidebar again: the set of threads with unsent work keeps its identity until a thread gains or loses unsent work. A thread row grows from 35px to 59px for its third line and the space around its text, so the virtualized list mounts fewer rows for the same height. The end-to-end suite's check that a project of 500 threads mounts about as many rows as one of 40 still passes.
 
 | Measure | Before | After |

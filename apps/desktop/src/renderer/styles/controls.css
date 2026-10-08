@@ -423,6 +423,14 @@ input.field[type="password"]:not(:placeholder-shown) {
   appearance: none;
   cursor: default;
 }
+/* A select field that starts with an icon, such as Follow the system's sun
+   and moon. The select still covers the whole field, icon included: it
+   reaches back over the field's left padding, the icon and the gap after it,
+   11px + 14px + 8px = 33px, and its text starts where it would after them. */
+.field--select > .ic + select {
+  margin-left: -33px;
+  padding-left: 33px;
+}
 .field:has(> input, > select):focus-within {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -473,6 +481,30 @@ input.field[type="password"]:not(:placeholder-shown) {
 .toggle[aria-checked="true"]::after {
   background: var(--raised);
   transform: translateX(14px);
+}
+/* Not in the book. A switch the user cannot change, such as Reduce
+   transparency while macOS's own is on, at half opacity like a disabled
+   button. */
+.toggle:disabled {
+  opacity: 0.5;
+}
+
+/* A slider in ink, like the toggle's on state, such as the Glass level. The
+   native control keeps its keyboard and screen reader behaviour. The value
+   beside it is a `.range-out`. */
+.range {
+  width: 200px;
+  flex: none;
+  margin: 0;
+  accent-color: var(--ink);
+}
+.range-out {
+  width: 38px;
+  flex: none;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 /* ---------- Text ---------- */

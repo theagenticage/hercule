@@ -8,7 +8,7 @@
   box-sizing: border-box;
 }
 
-/* In the two themes the app shows, `--bg` is the exact 8-bit sRGB colour
+/* In each of the five themes, `--bg` is the exact 8-bit sRGB colour
    that main gives the native window (src/main/window-background.ts), not the
    book's oklch value. tokens.css is the book's file and stays unchanged.
 
@@ -25,14 +25,35 @@
    match them too, or at times sit one step off in a single channel. No CSS
    value removes that last step: macOS's own conversion varies over time.
 
-   Only these two themes, because public/theme-init.js sets no other. A rule
-   on :root would also replace `--bg` in the book's other themes. */
+   One rule per theme rather than one on :root, so a nested [data-theme]
+   preview gets its own theme's `--bg`. */
 [data-theme="whitehaven"] {
   --bg: #f4f3f0;
 }
 
+[data-theme="styles"] {
+  --bg: #f5eee3;
+}
+
 [data-theme="orient-express"] {
   --bg: #1a1310;
+}
+
+[data-theme="nile"] {
+  --bg: #0e1714;
+}
+
+[data-theme="end-house"] {
+  --bg: #1d1217;
+}
+
+/* The glass level comes from the Appearance's Glass slider: theme-init.js
+   sets `--glass-percent`, from 0 to 100, on the root element, and never the
+   level itself. This rule loads after tokens.css, so it replaces the book's
+   default of 0.4; the reduce-transparency rule in tokens.css is !important,
+   and the solid-glass rule below is more specific, so both still win. */
+:root {
+  --glass-level: calc(var(--glass-percent, 40) / 100);
 }
 
 html,
@@ -190,15 +211,21 @@ html[data-theme-changing] *::after {
   }
 }
 
-/* While the Office is open, nothing in the window is see-through, by the same
-   mechanism as Reduce transparency: the glass level is 0, so every glass fill
-   is the solid surface under it, and the filter is none, so no backdrop
-   filter is drawn. The rim and the shadow stay. A backdrop filter anywhere
-   in the window makes the GPU process composite the whole window again for
-   every frame the Office draws (spec 17, Performance, Rules, rule 5). The Office
-   screen sets data-office on the root element while it is mounted. */
+/* Nothing in the window is see-through while either attribute is on the root
+   element. It is the same mechanism as Reduce transparency: the glass level
+   is 0, so every glass fill is the solid surface under it, and the filter is
+   none, so no backdrop filter is drawn. The rim and the shadow stay.
+   - The Office screen sets data-office while it is mounted. A backdrop filter
+     anywhere in the window makes the GPU process composite the whole window
+     again for every frame the Office draws (spec 17, Performance, Rules,
+     rule 5).
+   - theme-init.js sets data-solid-glass while the app's own Reduce
+     transparency is on, or the Glass slider is at 0. A level of 0 alone
+     would still draw a filter that changes no pixel. */
 :root[data-office],
-:root[data-office] [data-theme] {
+:root[data-office] [data-theme],
+:root[data-solid-glass],
+:root[data-solid-glass] [data-theme] {
   --glass-level: 0;
   --glass-filter: none;
 }

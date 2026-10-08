@@ -4,8 +4,9 @@
  * the app's specimen sheet, which draws the same cells with the app's
  * components.
  *
- * crew.js returns each piece as a string of markup, so this is the one file
- * in the renderer that may set `innerHTML`. The markup is the book's own,
+ * crew.js returns each piece as a string of markup, so this is one of the
+ * two files in the renderer that may set `innerHTML`, with
+ * settings-appearance-reference.ts. The markup is the book's own,
  * from its second edition in docs/design/crew-bureau-2.
  */
 import "./sheet.css";

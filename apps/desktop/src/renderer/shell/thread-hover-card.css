@@ -1,13 +1,30 @@
 /* The details card beside the sidebar. Not in the book; it takes the glass of
-   the composer's menus (`.pop`, menus.css), and its layout follows T3 Code's
+   the composer's menus (`.pop` in menus.css), and its layout follows T3 Code's
    card: the title in bold, then one line per detail, each with its icon.
    It shows and moves in one frame, with no transition, because it follows
-   the pointer. */
+   the pointer.
+
+   The glass is written out here rather than taken from `.pop`: importing
+   menus.css from the sidebar would load it with the first screen, ahead of
+   the stylesheets that follow it today, and change which of two equally
+   specific rules wins on other screens. */
 .thread-hover {
-  /* The browser centres a popover in the window. The card is placed by its
-     `left` and `top`, which the list sets beside the hovered row. */
+  /* The browser centres a popover in the window and draws it with a border
+     and the system's colours. The card is placed by its `left` and `top`,
+     which the list sets beside the hovered row. */
   inset: auto;
   margin: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: var(--t-13);
+  border-radius: var(--r-lg);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-3);
   width: max-content;
   min-width: 240px;
   max-width: 300px;

@@ -16,32 +16,45 @@ import { waitUntil } from "../../sessions/testing";
 import { FACTS, MODELS } from "../../workspaces/testing";
 
 const controllerRoot = resolve(import.meta.dirname, "../..");
+// The server binds port 0, and the process prints the port the system gave
+// it. A port picked by the test and handed to the process could be taken by
+// another process before the server binds it. The configured `bind.port` is
+// left at its default: it only sets the origin of the setup URL, and the
+// tests read just the token from that URL.
 const controllerCode = `
   import { Effect } from "effect";
+  import * as HttpServer from "effect/unstable/http/HttpServer";
   import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
   import { claudeCode } from "@hercule/plugin-claude-code";
   import { bootWith } from ${JSON.stringify(join(controllerRoot, "bootstrap.ts"))};
   import { operationLayers, bodyLimits, serve } from ${JSON.stringify(join(controllerRoot, "http/index.ts"))};
-  const port = Number(process.env.PROOF_CONTROLLER_PORT);
   await Effect.runPromise(bootWith({
-    argv: ["-c", "bind.port=" + port], env: process.env,
+    argv: [], env: process.env,
     masterKeyBackend: "file", plugins: [claudeCode]
   }, () => Effect.gen(function* () {
     yield* serve(undefined);
-    console.log("proof controller listening");
+    const { address } = yield* HttpServer.HttpServer;
+    if (address._tag !== "TcpAddress") throw new Error("expected a TCP address");
+    console.log("proof controller listening on port " + address.port);
     yield* Effect.never;
   }).pipe(Effect.provide(operationLayers),
-    Effect.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port, ...bodyLimits })))));
+    Effect.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, ...bodyLimits })))));
 `;
 
 const assertProcessGone = (pid: number): void => {
   expect(() => process.kill(pid, 0)).toThrow();
 };
 
-export const startControllerProcess = async (home: string, port: number) => {
+/**
+ * Starts the production controller in a child process on the Home `home`,
+ * listening on a free loopback port. Returns its base URL, which changes on
+ * every start, and a function that kills it. Fails when the process exits or
+ * does not answer within the wait deadline.
+ */
+export const startControllerProcess = async (home: string) => {
   const child = Bun.spawn([process.execPath, "--eval", controllerCode], {
     cwd: controllerRoot,
-    env: { ...buildCleanEnv(), HERCULE_HOME: home, PROOF_CONTROLLER_PORT: String(port) },
+    env: { ...buildCleanEnv(), HERCULE_HOME: home },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -56,18 +69,20 @@ export const startControllerProcess = async (home: string, port: number) => {
       stdout.push(decoder.decode(item.value));
     }
   })();
-  const base = `http://127.0.0.1:${String(port)}`;
+  let base = "";
   const stop = async (): Promise<void> => {
     if (child.exitCode === null) child.kill("SIGKILL");
     await child.exited;
     await Promise.all([output, stderr]);
     assertProcessGone(child.pid);
-    await expect(fetch(`${base}/api/v1/setup`)).rejects.toThrow();
+    if (base !== "") await expect(fetch(`${base}/api/v1/setup`)).rejects.toThrow();
   };
   try {
     await waitUntil("started the file-backed controller process", async () => {
       if (child.exitCode !== null) throw new Error(`Proof controller exited: ${await stderr}`);
-      if (!stdout.join("").includes("proof controller listening")) return undefined;
+      const port = /proof controller listening on port (\d+)/.exec(stdout.join(""))?.[1];
+      if (port === undefined) return undefined;
+      base = `http://127.0.0.1:${port}`;
       try {
         return (await fetch(`${base}/api/v1/setup`)).ok ? true : undefined;
       } catch {
