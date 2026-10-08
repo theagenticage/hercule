@@ -18,8 +18,7 @@
  * job rather than skipping it. Locally, with no `edge` release, the test is
  * skipped and says so.
  */
-import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -73,38 +72,61 @@ let edgeBinary: string | undefined;
 let newBinary: string;
 
 /**
- * Downloads the `edge` release binary with `gh`, which uses the job's GitHub
- * token. Returns the path, or `undefined` when no `edge` release exists and
- * this is not CI.
+ * Downloads the `edge` release binary through the GitHub API, using the job
+ * token when one is set. Returns the path, or `undefined` when no `edge`
+ * release exists and this is not CI.
  *
  * Fails when CI has no `edge` release, and when the release exists but the
  * expected asset is missing.
  */
-function downloadEdgeBinary(targetDir: string): string | undefined {
-  const view = spawnSync("gh", ["release", "view", EDGE_TAG, "--json", "tagName"], {
-    encoding: "utf8",
+async function downloadEdgeBinary(targetDir: string): Promise<string | undefined> {
+  const token = process.env["GH_TOKEN"] ?? process.env["GITHUB_TOKEN"];
+  const repo =
+    process.env["GH_REPO"] ?? process.env["GITHUB_REPOSITORY"] ?? "theagenticage/hercule";
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  if (token !== undefined && token !== "") headers.Authorization = `Bearer ${token}`;
+
+  const view = await fetch(`https://api.github.com/repos/${repo}/releases/tags/${EDGE_TAG}`, {
+    headers,
   });
-  if (view.status !== 0) {
-    const detail = `${view.stderr}${view.stdout}`.trim();
+  if (view.status === 404) {
     if (process.env["CI"]) {
       throw new Error(
-        `No edge release found. CI requires an edge release baseline to validate migrations.\n${detail}`,
+        "No edge release found. CI requires an edge release baseline to validate migrations.",
       );
     }
     return undefined;
   }
-
-  const download = spawnSync(
-    "gh",
-    ["release", "download", EDGE_TAG, "--pattern", BINARY_NAME, "--dir", targetDir, "--clobber"],
-    { encoding: "utf8" },
-  );
-  const binaryPath = join(targetDir, BINARY_NAME);
-  if (download.status !== 0 || !existsSync(binaryPath)) {
+  if (!view.ok) {
     throw new Error(
-      `Edge release exists but ${BINARY_NAME} is missing. This indicates a CI misconfiguration.\n${download.stderr}${download.stdout}`,
+      `Failed to look up the edge release: ${String(view.status)} ${await view.text()}`,
     );
   }
+
+  const release = (await view.json()) as {
+    assets: ReadonlyArray<{ name: string; url: string }>;
+  };
+  const asset = release.assets.find((one) => one.name === BINARY_NAME);
+  if (asset === undefined) {
+    throw new Error(
+      `Edge release exists but ${BINARY_NAME} is missing. This indicates a CI misconfiguration.`,
+    );
+  }
+
+  const downloadHeaders: Record<string, string> = { Accept: "application/octet-stream" };
+  if (token !== undefined && token !== "") downloadHeaders.Authorization = `Bearer ${token}`;
+  const download = await fetch(asset.url, { headers: downloadHeaders });
+  if (!download.ok) {
+    throw new Error(
+      `Failed to download ${BINARY_NAME}: ${String(download.status)} ${download.statusText}`,
+    );
+  }
+
+  const binaryPath = join(targetDir, BINARY_NAME);
+  writeFileSync(binaryPath, Buffer.from(await download.arrayBuffer()), { mode: 0o755 });
   chmodSync(binaryPath, 0o755);
   return binaryPath;
 }
@@ -183,7 +205,7 @@ beforeAll(async () => {
   state = createTemporaryHome();
   const downloadDir = join(state.home, "edge-download");
   mkdirSync(downloadDir, { recursive: true });
-  edgeBinary = downloadEdgeBinary(downloadDir);
+  edgeBinary = await downloadEdgeBinary(downloadDir);
   if (edgeBinary !== undefined) {
     const bytes = statSync(edgeBinary).size;
     console.log(`Downloaded ${BINARY_NAME} (${String(bytes)} bytes) from the ${EDGE_TAG} release.`);
