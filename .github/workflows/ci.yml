@@ -41,6 +41,12 @@ jobs:
       # (spec 15 section 3, ADR 0018).
       - run: pnpm dep-lint
 
+      # A landed migration is never edited: editing one in place breaks every
+      # database that already ran the old version.
+      - run: bun run scripts/check-migrations.ts
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+
       # install.sh is the one shell script users run. The runner image ships
       # shellcheck.
       - run: shellcheck install.sh
