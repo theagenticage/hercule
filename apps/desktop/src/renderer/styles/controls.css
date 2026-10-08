@@ -1,9 +1,8 @@
 /* The controls every screen shares: the buttons, the answer ledger, the
    pills, the segmented controls, the navigation rows, the counts, the text
    field, the quiet text and dots, the priority bars and the section
-   headings. The rules and
-   class names are the Bureau book's, as its system.css spells them. Each
-   departure from the book says why. */
+   headings. The rules and class names are the Bureau book's, as its
+   system.css spells them. Each departure from the book says why. */
 
 /* ---------- Buttons ---------- */
 /* One doctrine for every button:
@@ -532,8 +531,8 @@ input.field[type="password"]:not(:placeholder-shown) {
   font-size: var(--t-12);
   white-space: nowrap;
 }
-/* A small round dot. `.dot--fail` is the book's warning dot: something
-   needs a look, such as a Connection that is reconnecting. */
+/* A small round dot. `.dot--fail` is the book's tomato dot: something
+   failed or needs a look, such as a Connection that is reconnecting. */
 .dot {
   width: 7px;
   height: 7px;

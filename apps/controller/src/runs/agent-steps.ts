@@ -72,6 +72,9 @@ const findPreviousStepSession = (run: StoredRun, step: AgentStep): string | unde
  * - `session_failed`, or `interrupted` because the runner restarted while
  *   the turn ran: the session ended before the turn did, so the run fails
  *   with `session-failed`;
+ * - `output_too_large`: the turn completed, but its output, such as its final
+ *   message, was too large for the runner to send, so the run fails with
+ *   `step-failed`;
  * - any other code fails the run with `step-failed`. Those codes belong to
  *   workspace actions, and a runner sends none of them for an agent step.
  */
@@ -87,6 +90,7 @@ export const decideAgentStepFailureReason = (
     case "action_failed":
     case "timeout":
     case "unsupported_action":
+    case "output_too_large":
       return "step-failed";
   }
 };

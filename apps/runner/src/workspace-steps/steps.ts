@@ -22,6 +22,7 @@ import type * as Scope from "effect/Scope";
 import {
   type ActionStepStart,
   type AgentStepResultRequest,
+  MAX_FRAME_BYTES,
   MAX_MESSAGE_LENGTH,
   type WorkspaceStepKey,
   type WorkspaceStepOutcome,
@@ -30,6 +31,7 @@ import {
   type WorkspaceStepSettle,
 } from "@hercule/protocol";
 import { buildGitCredentialEnv, RUNNER_WORKSPACE_VARIABLE } from "../credentials";
+import { describeExcessSize, measureFrameBytes } from "../frame-size";
 import { describeCause } from "../report";
 import { buildSubstrateEnv, type Workspaces } from "../workspaces";
 import {
@@ -176,16 +178,37 @@ interface AgentStep {
   readonly isTurnRunning: Effect.Effect<boolean>;
 }
 
+/**
+ * Builds the result frame of a step, one that always fits in one frame. When
+ * the frame with `outcome` would be larger than `MAX_FRAME_BYTES`, its
+ * outcome is replaced with a failure `output_too_large` that gives the size.
+ * The controller closes the socket on a larger frame, which ends the stream of
+ * every session on this runner. Only a completed step's output can grow that
+ * large: an agent step without an output schema completes with the turn's
+ * whole final message.
+ */
 const buildResultFrame = (
   key: WorkspaceStepKey,
   outcome: WorkspaceStepOutcome,
-): WorkspaceStepResult => ({
-  _tag: "workspaceStepResult",
-  runId: key.runId,
-  stepId: key.stepId,
-  iteration: key.iteration,
-  outcome,
-});
+): WorkspaceStepResult => {
+  const frame: WorkspaceStepResult = {
+    _tag: "workspaceStepResult",
+    runId: key.runId,
+    stepId: key.stepId,
+    iteration: key.iteration,
+    outcome,
+  };
+  const bytes = measureFrameBytes(frame);
+  if (bytes <= MAX_FRAME_BYTES) return frame;
+  return {
+    ...frame,
+    outcome: {
+      status: "failed",
+      code: "output_too_large",
+      message: `The step's output was ${describeExcessSize(bytes)}.`,
+    },
+  };
+};
 
 /**
  * How an agent step ends when this runner has no record of its turn. The
@@ -333,6 +356,10 @@ export const makeWorkspaceSteps = (options: {
    * step is forgotten, so a start sent again at any moment finds the step
    * either still held or finished on disk.
    *
+   * The file holds the outcome the frame carries, so an output too large to
+   * send is saved as its `output_too_large` failure, and a start sent again
+   * after a reconnect is answered with that failure too.
+   *
    * A failed write does not stop the result from being sent. Without the
    * file, a start sent again after a lost result is answered as for a step
    * this runner never heard of: an action step runs again, as after a crash,
@@ -345,14 +372,15 @@ export const makeWorkspaceSteps = (options: {
     forget: () => void,
   ): Effect.Effect<void> =>
     Effect.suspend(() => {
+      const frame = buildResultFrame(key, outcome);
       try {
-        writeStepResult(storageDir, workspaceId, key, outcome);
+        writeStepResult(storageDir, workspaceId, key, frame.outcome);
       } catch {
         // Sent anyway: a result the controller receives is worth more than
         // the file, which only answers a start sent again.
       }
       forget();
-      return send(buildResultFrame(key, outcome));
+      return send(frame);
     });
 
   /** Saves the result of an action step, forgets the step, then sends the result. */

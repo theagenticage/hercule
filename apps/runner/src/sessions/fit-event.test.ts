@@ -59,6 +59,12 @@ const buildItemCompleted = (extra: Partial<ProviderEvent>): ProviderEvent =>
 
 type Warning = Extract<ProviderEvent, { readonly _tag: "runtime.warning" }>;
 type Delta = Extract<ProviderEvent, { readonly _tag: "content.delta" }>;
+type TurnCompleted = Extract<ProviderEvent, { readonly _tag: "turn.completed" }>;
+
+/** Native ids too many to fit in one frame: their number has no bound. */
+const MANY_REFS = Object.fromEntries(
+  Array.from({ length: 5000 }, (_, index) => [`ref-${String(index)}`, buildText(500)]),
+);
 
 const expectWarning = (event: ProviderEvent | undefined): Warning => {
   expect(event?._tag).toBe("runtime.warning");
@@ -187,44 +193,82 @@ describe("fitting an event into one frame", () => {
     const [turn, warning, ...rest] = fitAndCheck(event);
 
     expect(rest).toEqual([]);
-    const { structuredResult, ...turnWithoutResult } = turn as Extract<
-      ProviderEvent,
-      { readonly _tag: "turn.completed" }
-    >;
+    const { structuredResult, ...turnWithoutResult } = turn as TurnCompleted;
     expect(turnWithoutResult).toEqual({ ...event, raw: undefined, structuredResult: undefined });
     expect(structuredResult?.outcome).toBe("schema-failure");
-    expect(structuredResult?.outcome === "schema-failure" && structuredResult.reason).toMatch(
-      /^The turn's structured result was 4\.\d\d MiB, too large to send \(the limit is 2 MiB\)\.$/,
+    // The result's size is given without the raw data, which is not part of it.
+    expect(structuredResult?.outcome === "schema-failure" && structuredResult.reason).toBe(
+      "The turn's structured result was 2.01 MiB, too large to send (the limit is 2 MiB).",
     );
-    expect(turn).not.toHaveProperty("raw");
     expect(expectWarning(warning)).toMatchObject({ subagentId: "agent-1", turnId: "t-1" });
     expect((warning as Warning).message).toMatch(
-      /^The turn's structured result was 4\.\d\d MiB, too large to send \(the limit is 2 MiB\), so it was replaced by a failure, and the turn's raw data was left out\.$/,
+      /^The end of a turn was 4\.\d\d MiB, too large to send \(the limit is 2 MiB\), so its structured result was replaced by a failure, and its raw data was left out\.$/,
+    );
+  });
+
+  it("drops native ids last, so a turn's end and a session's end are never dropped", () => {
+    const turnEnd: ProviderEvent = {
+      _tag: "turn.completed",
+      eventId: "e-turn",
+      sessionId: SESSION,
+      at,
+      turnId: "t-1",
+      state: "completed",
+      structuredResult: { outcome: "ok", value: { text: buildText(MAX_FRAME_BYTES) } },
+      providerRefs: MANY_REFS,
+    };
+    const sessionEnd: ProviderEvent = {
+      _tag: "session.exited",
+      eventId: "e-exit",
+      sessionId: SESSION,
+      at,
+      reason: "crash",
+      providerRefs: MANY_REFS,
+    };
+
+    const [turn, turnWarning] = fitAndCheck(turnEnd);
+    expect(turn).toMatchObject({ _tag: "turn.completed", turnId: "t-1" });
+    expect(turn).not.toHaveProperty("providerRefs");
+    expect(expectWarning(turnWarning).message).toMatch(
+      /, so its structured result was replaced by a failure, and its native ids were left out\.$/,
+    );
+
+    const [exit, exitWarning] = fitAndCheck(sessionEnd);
+    expect(exit).toMatchObject({ _tag: "session.exited", reason: "crash" });
+    expect(expectWarning(exitWarning).message).toMatch(
+      /^The session's end was 2\.\d\d MiB, .*, so its native ids were left out\.$/,
     );
   });
 
   it("replaces an event that cannot be shrunk enough with the warning alone", () => {
-    // Native ids are unbounded in number, and no step removes them.
-    const providerRefs = Object.fromEntries(
-      Array.from({ length: 5000 }, (_, index) => [`ref-${String(index)}`, buildText(500)]),
-    );
+    // A request's list of paths has no bound, and no step shortens it.
     const event: ProviderEvent = {
-      _tag: "runtime.error",
-      eventId: "e-error",
+      _tag: "request.opened",
+      eventId: "e-request",
       sessionId: SESSION,
       at,
-      turnId: "t-1",
-      class: "unknown",
-      providerRefs,
+      request: {
+        requestId: "r-1",
+        itemId: "i-1",
+        kind: "file_change_approval",
+        detail: { paths: Array.from({ length: 5000 }, () => buildText(500)) },
+        decisions: ["allow", "deny"],
+      },
     };
     const [warning, ...rest] = fitAndCheck(event);
 
     expect(rest).toEqual([]);
-    expect(expectWarning(warning)).toMatchObject({ turnId: "t-1", sessionId: SESSION });
+    expect(expectWarning(warning)).toMatchObject({ sessionId: SESSION });
     expect(warning).not.toHaveProperty("subagentId");
     expect((warning as Warning).message).toMatch(
-      /^A runtime\.error event was 2\.\d\d MiB, too large to send \(the limit is 2 MiB\), so it was left out\.$/,
+      /^A request was 2\.\d+ MiB, too large to send \(the limit is 2 MiB\), so it was left out\.$/,
     );
+  });
+
+  it("writes An before a kind that starts with a vowel", () => {
+    const event = buildItemCompleted({ kind: "assistant_message", raw: RAW });
+    const [, warning] = fitAndCheck(event);
+    expect(expectWarning(warning).message).toMatch(/^An assistant message result was /);
   });
 
   it("puts the warning about a subagent's introduction on the agent that started it", () => {

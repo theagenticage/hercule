@@ -687,10 +687,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       });
 
     /**
-     * Numbers an event and sends it. Every event goes out through here, in
-     * sequence order. An event too large for one frame is first shrunk by
-     * `fitEventToFrame`, and its parts are numbered one after the other while
-     * no other event can be sent in between. The bookkeeping in
+     * Numbers an event and sends it. Every event goes out through here. An
+     * event too large for one frame is first shrunk by `fitEventToFrame`, and
+     * the events that come back are numbered with no other event between
+     * them. The bookkeeping in
      * `sendFittedEvent` sees the events as sent, not as the adapter made them.
      */
     const sendSequenced = (event: ProviderEvent): Effect.Effect<void> =>

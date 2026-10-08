@@ -77,6 +77,9 @@ export {
  *
  * - Version 2 put a session's first input on `SessionStart`.
  * - Version 4 prevents older peers from displaying incomplete usage as exact.
+ * - Version 5 added the `output_too_large` failure of a workspace step. An
+ *   older controller could not decode it and would close the socket on it,
+ *   again after every reconnect, so the two refuse each other at hello.
  * - Version 3 added subagents: the `subagentId` on session events and on
  *   `SessionInterrupt`. A capability with a fallback would not be safe here.
  *   A controller that ignored `subagentId` would book a subagent's turns to
@@ -84,7 +87,7 @@ export {
  *   whole session where the user asked to stop one subagent (spec 03
  *   section 2.2).
  */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /**
  * The close code and reason the controller uses to end the connection of a

@@ -3,17 +3,16 @@
  *
  * The controller closes the runner's socket on a frame larger than
  * `MAX_FRAME_BYTES`, and that ends the stream of every session on the runner.
- * Most fields of an event are bounded by the protocol, but `raw`, an item's
- * `detail`, a `content.delta` and a turn's structured result are not: a
- * Claude `Read` of a large image puts its bytes in `detail` and again in
- * `raw`. So the supervisor passes every event through `fitEventToFrame`
- * before it numbers it (spec 06 section 6).
+ * Most fields of an event are bounded by the protocol, but `raw`, the native
+ * ids in `providerRefs`, an item's `detail`, a `content.delta` and a turn's
+ * structured result are not: a Claude `Read` of a large image puts its bytes
+ * in `detail` and again in `raw`. So the supervisor passes every event through
+ * `fitEventToFrame` before it numbers it (spec 06 section 6).
  */
 import { MAX_FRAME_BYTES, type ProviderEvent } from "@hercule/protocol";
+import { describeExcessSize, measureFrameBytes } from "../frame-size";
 
 type ContentDelta = Extract<ProviderEvent, { readonly _tag: "content.delta" }>;
-
-type TurnCompleted = Extract<ProviderEvent, { readonly _tag: "turn.completed" }>;
 
 /**
  * The most bytes one UTF-16 code unit can take in a frame. JSON escapes a
@@ -23,23 +22,13 @@ type TurnCompleted = Extract<ProviderEvent, { readonly _tag: "turn.completed" }>
  */
 const MAX_BYTES_PER_UNIT = 6;
 
-const BYTES_PER_MIB = 1024 * 1024;
-
 /**
- * Measures the bytes `event` takes on the socket, as the UTF-8 text of its
- * `sessionEvent` frame. The frame is measured with the largest possible
- * sequence number, so the result holds for whatever number the event gets.
- *
- * The socket sends `JSON.stringify` of the frame as the `RunnerToController`
- * schema encodes it. That encoding transforms no field of an event: it may
- * write the keys in another order, but every value stays the same, so the byte
- * count is the same.
+ * Measures the bytes `event` takes on the socket as a `sessionEvent` frame.
+ * The frame is measured with the largest possible sequence number, so the
+ * result holds for whatever number the event gets.
  */
-const measureFrameBytes = (event: ProviderEvent): number =>
-  Buffer.byteLength(
-    JSON.stringify({ _tag: "sessionEvent", seq: Number.MAX_SAFE_INTEGER, event }),
-    "utf8",
-  );
+const measureEventBytes = (event: ProviderEvent): number =>
+  measureFrameBytes({ _tag: "sessionEvent", seq: Number.MAX_SAFE_INTEGER, event });
 
 /** Checks whether a UTF-16 code unit is the first half of a surrogate pair. */
 const isHighSurrogate = (unit: number): boolean => unit >= 0xd800 && unit <= 0xdbff;
@@ -59,11 +48,10 @@ const splitDelta = (event: ContentDelta): ReadonlyArray<ContentDelta> | undefine
   // The rest of the frame is measured under both ids, because a new id can be
   // longer than the event's own.
   const rest = Math.max(
-    measureFrameBytes({ ...event, delta: "" }),
-    measureFrameBytes({ ...event, eventId: crypto.randomUUID(), delta: "" }),
+    measureEventBytes({ ...event, delta: "" }),
+    measureEventBytes({ ...event, eventId: crypto.randomUUID(), delta: "" }),
   );
-  const room = MAX_FRAME_BYTES - rest;
-  const unitsPerPiece = Math.floor(room / MAX_BYTES_PER_UNIT);
+  const unitsPerPiece = Math.floor((MAX_FRAME_BYTES - rest) / MAX_BYTES_PER_UNIT);
   // A piece of one unit could not hold a surrogate pair.
   if (unitsPerPiece < 2) return undefined;
   const pieces: Array<ContentDelta> = [];
@@ -81,74 +69,53 @@ const splitDelta = (event: ContentDelta): ReadonlyArray<ContentDelta> | undefine
   return pieces;
 };
 
-/** Formats a byte count as MiB, rounded up so a size over the limit never reads as equal to it. */
-const formatMiB = (bytes: number): string => {
-  const hundredths = Math.ceil((bytes / BYTES_PER_MIB) * 100) / 100;
-  return `${String(hundredths)} MiB`;
+/** Returns `noun` after "A" or "An", whichever its first letter takes. */
+const withArticle = (noun: string): string => `${/^[aeiou]/i.test(noun) ? "An" : "A"} ${noun}`;
+
+/** What each event that is not about an item is, as words a user reads. */
+const EVENT_SUBJECTS: Record<
+  Exclude<ProviderEvent["_tag"], "item.started" | "item.completed">,
+  string
+> = {
+  "session.started": "The session's start",
+  "session.exited": "The session's end",
+  "turn.started": "The start of a turn",
+  "turn.completed": "The end of a turn",
+  "content.delta": "A piece of streamed text",
+  "session.usage.updated": "A usage update",
+  "runtime.warning": "A warning",
+  "runtime.error": "An error",
+  "request.opened": "A request",
+  "request.resolved": "The end of a request",
+  "subagent.started": "The start of a subagent",
 };
 
 /**
- * Describes a frame size over the limit in words a user reads, for example
- * "4.01 MiB, too large to send (the limit is 2 MiB)". Every warning and
- * reason this module writes uses it, so the wording is in one place.
- */
-const describeExcessSize = (bytes: number): string =>
-  `${formatMiB(bytes)}, too large to send (the limit is ${formatMiB(MAX_FRAME_BYTES)})`;
-
-/**
- * Names what an event carried, as the start of a sentence for a user: the
- * result or the input of an item, by its kind written as words ("A tool
- * call result"), or the event's type for anything else.
+ * Names what `event` is, as the start of a sentence a user reads: the input
+ * or the result of an item, by its kind written as words ("A tool call
+ * result"), or the kind of event.
  */
 const describeEventSubject = (event: ProviderEvent): string => {
   switch (event._tag) {
-    case "item.completed":
-      return `A ${event.kind.replace(/_/g, " ")} result`;
     case "item.started":
-      return `A ${event.kind.replace(/_/g, " ")} input`;
-    case "content.delta":
-      return "A piece of streamed text";
+      return withArticle(`${event.kind.replace(/_/g, " ")} input`);
+    case "item.completed":
+      return withArticle(`${event.kind.replace(/_/g, " ")} result`);
     default:
-      return `A ${event._tag} event`;
+      return EVENT_SUBJECTS[event._tag];
   }
 };
 
 /**
- * Describes a structured result too large to send, for example "The turn's
- * structured result was 2.31 MiB, too large to send (the limit is 2 MiB)".
- */
-const describeOversizedResult = (bytes: number): string =>
-  `The turn's structured result was ${describeExcessSize(bytes)}`;
-
-/**
- * Replaces a turn's `ok` structured result with a schema failure that gives the
- * size as its reason. A `turn.completed` must never be dropped: it ends the
- * turn for the controller and for the supervisor, and ends an agent step's turn
- * as a `schema_failure` with this reason instead of leaving the step waiting.
- * Returns undefined when the turn has no `ok` result to replace.
- */
-const replaceStructuredResult = (event: TurnCompleted, bytes: number): TurnCompleted | undefined =>
-  event.structuredResult?.outcome === "ok"
-    ? {
-        ...event,
-        structuredResult: {
-          outcome: "schema-failure",
-          reason: `${describeOversizedResult(bytes)}.`,
-        },
-      }
-    : undefined;
-
-/**
- * Builds the `runtime.warning` that tells the user what was left out of
- * `event` to make it fit, on the same agent and turn as the event. `sentence`
- * is the whole explanation; the item's id, when there is one, follows it,
- * because the id is long and only useful for debugging.
+ * Builds the `runtime.warning` that says what happened to `event`, on the
+ * same agent and turn as the event. The item's id, when there is one, follows
+ * `sentence`, because the id is long and only useful for debugging.
  *
  * `subagent.started` belongs to the agent that started the subagent, and its
  * `subagentId` names the new subagent, so its warning goes to the parent:
  * `parentSubagentId`, or the session's own agent when that is absent.
  */
-const buildOmissionWarning = (event: ProviderEvent, sentence: string): ProviderEvent => {
+const buildWarning = (event: ProviderEvent, sentence: string): ProviderEvent => {
   const subagentId =
     event._tag === "subagent.started"
       ? event.parentSubagentId
@@ -168,15 +135,9 @@ const buildOmissionWarning = (event: ProviderEvent, sentence: string): ProviderE
   };
 };
 
-/**
- * Builds the warning for `event`, whose frame took `bytes`, saying what
- * `leftOut` describes, for example "its raw data was left out".
- */
-const warnOfOmission = (event: ProviderEvent, bytes: number, leftOut: string): ProviderEvent =>
-  buildOmissionWarning(
-    event,
-    `${describeEventSubject(event)} was ${describeExcessSize(bytes)}, so ${leftOut}.`,
-  );
+/** Joins words as a list a person writes: "a", "a and b", "a, b and c". */
+const joinAsList = (words: ReadonlyArray<string>): string =>
+  words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
 
 /**
  * Returns `event` as events whose `sessionEvent` frames each take at most
@@ -186,64 +147,86 @@ const warnOfOmission = (event: ProviderEvent, bytes: number, leftOut: string): P
  * 1. Its `raw` is dropped.
  * 2. A `content.delta` is split into consecutive deltas. The stream is
  *    append-only, so the pieces add up to the same text.
- * 3. An `item.started` or `item.completed` also loses its `detail`.
+ * 3. An `item.started` or `item.completed` loses its `detail`.
  * 4. A `turn.completed` has an `ok` structured result replaced by a schema
- *    failure, so the turn still ends.
- * 5. Anything still too big is not sent at all.
+ *    failure that gives the result's size, so an agent step fails with a
+ *    reason instead of a value too large to send.
+ * 5. Its `providerRefs` are dropped.
+ * 6. Anything still too big is not sent at all. Every field left on a
+ *    `turn.completed` or a `session.exited` is bounded by the protocol, so
+ *    neither ever reaches this step: a turn or a session left open would never
+ *    end.
  *
- * Whenever something is left out, a `runtime.warning` that names what was left
- * out is added after the shrunk event, so the item it names already exists
- * when the warning arrives. A loss is never silent.
+ * Whenever something is left out, a `runtime.warning` that says what is added
+ * after the shrunk event, so the item it names already exists when the warning
+ * arrives. A loss is never silent. After a `session.exited` the warning is
+ * still stored, because the controller records events after a session's end.
  */
 export const fitEventToFrame = (event: ProviderEvent): ReadonlyArray<ProviderEvent> => {
-  const bytes = measureFrameBytes(event);
+  const bytes = measureEventBytes(event);
   if (bytes <= MAX_FRAME_BYTES) return [event];
 
+  const subject = `${describeEventSubject(event)} was ${describeExcessSize(bytes)}`;
+  // What was left out, as nouns after "its", and whether each is plural.
+  const leftOut: Array<{ readonly noun: string; readonly plural: boolean }> = [];
+  let replacedResult = false;
+  const buildLossWarning = (): ProviderEvent => {
+    const clauses: Array<string> = [];
+    if (replacedResult) clauses.push("its structured result was replaced by a failure");
+    if (leftOut.length > 0) {
+      const verb = leftOut.length > 1 || leftOut[0]?.plural === true ? "were" : "was";
+      clauses.push(`its ${joinAsList(leftOut.map((part) => part.noun))} ${verb} left out`);
+    }
+    return buildWarning(event, `${subject}, so ${clauses.join(", and ")}.`);
+  };
+
   const { raw, ...withoutRaw } = event;
-  const lostRaw = raw !== undefined;
-  if (lostRaw && measureFrameBytes(withoutRaw) <= MAX_FRAME_BYTES) {
-    return [withoutRaw, warnOfOmission(event, bytes, "its raw data was left out")];
+  let shrunk: ProviderEvent = withoutRaw;
+  if (raw !== undefined) {
+    leftOut.push({ noun: "raw data", plural: false });
+    if (measureEventBytes(shrunk) <= MAX_FRAME_BYTES) return [shrunk, buildLossWarning()];
   }
 
-  if (withoutRaw._tag === "content.delta") {
-    const pieces = splitDelta(withoutRaw);
-    if (pieces !== undefined) {
-      return lostRaw
-        ? [...pieces, warnOfOmission(event, bytes, "its raw data was left out")]
-        : pieces;
-    }
+  if (shrunk._tag === "content.delta") {
+    const pieces = splitDelta(shrunk);
+    if (pieces !== undefined) return leftOut.length > 0 ? [...pieces, buildLossWarning()] : pieces;
   }
 
-  if (withoutRaw._tag === "item.started" || withoutRaw._tag === "item.completed") {
-    const { detail, ...withoutDetail } = withoutRaw;
-    if (detail !== undefined && measureFrameBytes(withoutDetail) <= MAX_FRAME_BYTES) {
+  if (shrunk._tag === "item.started" || shrunk._tag === "item.completed") {
+    const { detail, ...withoutDetail } = shrunk;
+    if (detail !== undefined) {
       // An item's result carries its output; an item's input, its details.
-      const detailName = withoutRaw._tag === "item.completed" ? "output" : "details";
-      const leftOut = lostRaw
-        ? `its ${detailName} and raw data were left out`
-        : `its ${detailName} ${detailName === "output" ? "was" : "were"} left out`;
-      return [withoutDetail, warnOfOmission(event, bytes, leftOut)];
+      leftOut.unshift(
+        shrunk._tag === "item.completed"
+          ? { noun: "output", plural: false }
+          : { noun: "details", plural: true },
+      );
+      shrunk = withoutDetail;
+      if (measureEventBytes(shrunk) <= MAX_FRAME_BYTES) return [shrunk, buildLossWarning()];
     }
   }
 
-  if (withoutRaw._tag === "turn.completed") {
-    const withoutResult = replaceStructuredResult(withoutRaw, bytes);
-    if (withoutResult !== undefined && measureFrameBytes(withoutResult) <= MAX_FRAME_BYTES) {
-      const rawNote = lostRaw ? ", and the turn's raw data was left out" : "";
-      return [
-        withoutResult,
-        buildOmissionWarning(
-          event,
-          `${describeOversizedResult(bytes)}, so it was replaced by a failure${rawNote}.`,
-        ),
-      ];
-    }
+  if (shrunk._tag === "turn.completed" && shrunk.structuredResult?.outcome === "ok") {
+    // The turn is measured without its raw data, which is already left out,
+    // so the size given is close to the result's own.
+    const resultBytes = measureEventBytes(shrunk);
+    shrunk = {
+      ...shrunk,
+      structuredResult: {
+        outcome: "schema-failure",
+        reason: `The turn's structured result was ${describeExcessSize(resultBytes)}.`,
+      },
+    };
+    replacedResult = true;
+    if (measureEventBytes(shrunk) <= MAX_FRAME_BYTES) return [shrunk, buildLossWarning()];
   }
 
-  return [
-    buildOmissionWarning(
-      event,
-      `A ${event._tag} event was ${describeExcessSize(bytes)}, so it was left out.`,
-    ),
-  ];
+  const { providerRefs, ...withoutRefs } = shrunk;
+  if (providerRefs !== undefined) {
+    leftOut.push({ noun: "native ids", plural: true });
+    shrunk = withoutRefs;
+    if (measureEventBytes(shrunk) <= MAX_FRAME_BYTES) return [shrunk, buildLossWarning()];
+  }
+
+  return [buildWarning(event, `${subject}, so it was left out.`)];
 };

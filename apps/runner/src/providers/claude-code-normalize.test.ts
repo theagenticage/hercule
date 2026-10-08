@@ -19,6 +19,7 @@ import {
   buildNormalizingState,
   isAnyAgentWorking,
 } from "./claude-code-normalize";
+import { measureFrameBytes } from "../frame-size";
 import { fitEventToFrame } from "../sessions/fit-event";
 import { deferUntilTurnOpens, type RequestOpened } from "./claude-code-subagents";
 import {
@@ -1673,8 +1674,8 @@ describe("a tool result too large for one frame", () => {
     },
   };
 
-  const measureFrameBytes = (event: Event): number =>
-    Buffer.byteLength(JSON.stringify({ _tag: "sessionEvent", seq: 1, event }));
+  const measureEventBytes = (event: Event): number =>
+    measureFrameBytes({ _tag: "sessionEvent", seq: 1, event });
 
   it("is normalized to an item.completed larger than a frame, which fitting sends with a warning", () => {
     const running = buildTestState();
@@ -1685,7 +1686,7 @@ describe("a tool result too large for one frame", () => {
     // The image is in `detail` and again in `raw`, so the frame would close
     // the runner's socket.
     expect(completed).toBeDefined();
-    expect(measureFrameBytes(completed!)).toBeGreaterThan(MAX_FRAME_BYTES);
+    expect(measureEventBytes(completed!)).toBeGreaterThan(MAX_FRAME_BYTES);
 
     const fitted = fitEventToFrame(completed!);
     expect(fitted.map(formatEvent)).toEqual([
@@ -1693,7 +1694,7 @@ describe("a tool result too large for one frame", () => {
       "runtime.warning",
     ]);
     for (const event of fitted)
-      expect(measureFrameBytes(event)).toBeLessThanOrEqual(MAX_FRAME_BYTES);
+      expect(measureEventBytes(event)).toBeLessThanOrEqual(MAX_FRAME_BYTES);
     const warning = fitted[1];
     expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain(`Item ${TOOL}.`);
   });

@@ -536,17 +536,17 @@ describe("the hello exchange", () => {
   });
 
   // Version 3 cannot distinguish incomplete usage from exact counts.
-  it("refuses a runner on protocol version 3 and says to upgrade it", async () => {
+  it("refuses a runner on protocol version 4 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dial(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 3 }));
+      wire.send(buildHello({ protocolVersion: 4 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(4);
+      expect(PROTOCOL_VERSION).toBe(5);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 4 and the runner does not; " +
-          "upgrade the runner to a build that uses version 4",
+        "this controller uses runner protocol version 5 and the runner does not; " +
+          "upgrade the runner to a build that uses version 5",
       );
       expect(wire.frames).toEqual([]);
     });
