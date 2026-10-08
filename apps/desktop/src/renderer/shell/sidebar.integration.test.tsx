@@ -32,6 +32,7 @@ import {
   type SidebarRecords,
 } from "../app/testing";
 import { buildDraftKey } from "../app/pending-submissions";
+import { ITEM_HEIGHTS } from "./sidebar-items";
 
 // Every thread row names its thread with `describePose`, so its calls count
 // the rows that drew. The function itself is the real one.
@@ -543,10 +544,13 @@ describe("the sidebar", () => {
     expect(readFocusedKey()).toBe(focused);
     expect(nav.querySelectorAll("[data-key]").length).toBeLessThanOrEqual(45);
 
-    // Scroll far down the list: the rows there mount, and the focused row,
-    // far above them, stays.
+    // Scroll far down the list, to about the 235th row: the rows there
+    // mount, and the focused row, far above them, stays.
     act(() => {
-      Object.defineProperty(nav, "scrollTop", { configurable: true, value: 12_000 });
+      Object.defineProperty(nav, "scrollTop", {
+        configurable: true,
+        value: 235 * ITEM_HEIGHTS["thread-row"],
+      });
       fireEvent.scroll(nav);
     });
     await waitFor(() => {
@@ -834,7 +838,7 @@ describe("the sidebar's card of thread details", () => {
       const index = this.hasAttribute("data-key")
         ? [...this.parentElement!.children].indexOf(this)
         : 0;
-      return DOMRect.fromRect({ x: 0, y: index * 51, width: 272, height: 51 });
+      return DOMRect.fromRect({ x: 0, y: index * 59, width: 272, height: 59 });
     });
     vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (
       this: HTMLElement,

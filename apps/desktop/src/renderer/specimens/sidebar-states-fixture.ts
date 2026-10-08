@@ -9,14 +9,15 @@
  *     no workspace, so the rows' third lines show each kind. The open thread
  *     is in the worktree, and the composer of "Tidy product image alt text"
  *     holds an unsent message, so its row is tinted;
- *   - ops, whose five threads each end their row differently: "queued",
- *     "offline", and the ages of a thread the crash-loop guard holds, an
- *     asleep thread and an ended one;
+ *   - ops, whose three threads each end their row differently: "queued",
+ *     "offline", and the age of an ended thread. An asleep thread, or one
+ *     the crash-loop guard holds, ends its row with its age too, so the
+ *     scene leaves them out to fit the capture's window;
  *   - a project with a very long name, whose main workspace's name and
  *     whose thread's title are too long for the sidebar.
- * - Scene 2 has no open thread. Five threads wait on the user, so Waiting on
- *   you shows three and a "more" row; payments-api has eight threads, so it
- *   shows five and a "more" row; and two threads belong to no project.
+ * - Scene 2 has no open thread. Four threads wait on the user, so Waiting on
+ *   you shows three and a "more" row; payments-api has seven threads, so it
+ *   shows five and a "more" row; and one thread belongs to no project.
  * - Scene 3 is scene 2 without the threads in no project, and with
  *   payments-api's "more" row pressed, so the project shows every thread.
  *   With three lines per row, scene 2 expanded would be taller than the
@@ -189,30 +190,6 @@ const SCENE_1_THREADS: ReadonlyArray<Session> = [
     model: CLAUDE_SONNET,
   }),
   buildSpecimenSession({
-    id: "s-postgres-upgrade",
-    title: "Upgrade Postgres to 17",
-    projectId: "p-ops",
-    // It exited before its first turn too many times: the crash-loop guard
-    // holds it until the user's next message.
-    status: "exited",
-    resumable: true,
-    resumeHeld: true,
-    exitedAt: buildTimeBefore(50),
-    minutesAgo: 50,
-    model: CLAUDE_SONNET,
-  }),
-  buildSpecimenSession({
-    id: "s-grafana-migration",
-    title: "Migrate ops dashboards to Grafana 11",
-    projectId: "p-ops",
-    // Asleep: the next message resumes it.
-    status: "exited",
-    resumable: true,
-    exitedAt: buildTimeBefore(300),
-    minutesAgo: 300,
-    model: GPT,
-  }),
-  buildSpecimenSession({
     id: "s-iam-audit",
     title: "Audit IAM roles",
     projectId: "p-ops",
@@ -243,9 +220,9 @@ const SCENE_1_THREADS: ReadonlyArray<Session> = [
 ];
 
 /**
- * payments-api's eight threads, in no workspace: three waiting, two working
- * and three that are neither. Capped, it shows the waiting and the working
- * ones, and "3 more threads".
+ * payments-api's seven threads, in no workspace: three waiting, two working
+ * and two that are neither. Capped, it shows the waiting and the working
+ * ones, and "2 more threads".
  */
 const PAYMENTS_THREADS: ReadonlyArray<Session> = [
   buildSpecimenSession({
@@ -335,14 +312,6 @@ const PAYMENTS_THREADS: ReadonlyArray<Session> = [
     model: CLAUDE_SONNET,
   }),
   buildSpecimenSession({
-    id: "s-chargeback-docs",
-    title: "Document the chargeback flow",
-    projectId: "p-payments-api",
-    status: "idle",
-    minutesAgo: 70,
-    model: CLAUDE_SONNET,
-  }),
-  buildSpecimenSession({
     id: "s-ledger-split",
     title: "Split the ledger service",
     projectId: "p-payments-api",
@@ -355,7 +324,7 @@ const PAYMENTS_THREADS: ReadonlyArray<Session> = [
 ];
 
 /**
- * Scene 2's threads: payments-api's, and two in no project, both waiting.
+ * Scene 2's threads: payments-api's, and one in no project, waiting.
  * Waiting on you counts all five waiting threads, shows the three newest,
  * and "2 more waiting on you".
  */
@@ -374,22 +343,6 @@ const SCENE_2_THREADS: ReadonlyArray<Session> = [
         kind: "tool_approval",
         decisions: ["allow", "deny"],
         detail: { toolName: "WebFetch" },
-      },
-    ],
-  }),
-  buildSpecimenSession({
-    id: "s-incident-notes",
-    title: "Summarize the incident notes",
-    status: "busy",
-    minutesAgo: 8,
-    model: CLAUDE_SONNET,
-    openRequests: [
-      {
-        requestId: "rq-incident-notes",
-        itemId: "it-incident-notes",
-        kind: "file_read_approval",
-        decisions: ["allow", "deny"],
-        detail: { paths: ["notes/2026-09-27-incident.md", "notes/2026-09-28-incident.md"] },
       },
     ],
   }),
@@ -430,7 +383,7 @@ export const SIDEBAR_SCENES: ReadonlyArray<SidebarScene> = [
   {
     records: buildSceneRecords(PAYMENTS_THREADS),
     path: "/",
-    pressMore: "3 more threads",
+    pressMore: "2 more threads",
     unsentThreadIds: [],
   },
 ];

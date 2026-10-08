@@ -154,16 +154,19 @@ export type SidebarItemKind = SidebarItem["kind"];
  * thread row has a third line, the workspace, so its height is its own: the
  * row's 1px padding above and below, plus three lines at `.side-text`'s line
  * height of 1.3: the 13px title (16.9px) and two 12px lines (15.6px each).
- * That is 50.1, rounded up to 51 so every row starts on a whole pixel. The
- * draft's row is drawn as a thread row, with the same three lines.
+ * That is 50.1, and 8px more gives 58.1, rounded up to 59 so every row
+ * starts on a whole pixel. The row centres its text, so the 8px is split
+ * above and below it: with three lines, rows that sat almost touching were
+ * hard to tell apart. The draft's row is drawn as a thread row, with the
+ * same three lines.
  */
 export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
   "waiting-header": 24,
   "waiting-thread-row": 38,
   "waiting-assistant-row": 38,
   "project-header": 24,
-  "thread-row": 51,
-  "draft-row": 51,
+  "thread-row": 59,
+  "draft-row": 59,
   more: 28,
 };
 

@@ -29,7 +29,7 @@
  *    of the Office row in the book's Hercule tab;
  * 7. gives each project row a third line, the thread's workspace, "No
  *    workspace" for every fixture thread, styled as sidebar.css styles
- *    `.side-ws-line`, and makes the row 51px tall, as `ITEM_HEIGHTS` in
+ *    `.side-ws-line`, and makes the row 59px tall, as `ITEM_HEIGHTS` in
  *    sidebar-items.ts has it: the book's rows have two lines.
  *
  * An edit that finds nothing to edit fails, because the book has changed and
@@ -135,7 +135,7 @@ for (const row of side.querySelectorAll<HTMLElement>('[data-pane="threads"] .sid
   clip.textContent = "No workspace";
   line.append(clip);
   findElement(row, ".side-text").append(line);
-  row.style.height = "51px";
+  row.style.height = "59px";
 }
 
 await markSheetReady();
