@@ -23,6 +23,10 @@
   color: var(--faint);
   font-weight: var(--w-medium);
 }
+/* The link in the crumb of a section that shows one record, back to its list. */
+.crumb a:hover {
+  color: var(--ink);
+}
 /* The book's pages set this inline on the title: the crumb ends in a slash,
    which sits closer to the title than the bar's gap. */
 .bar > .crumb + .title {
