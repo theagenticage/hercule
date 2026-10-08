@@ -36,8 +36,8 @@
  * The body size limits sit outside that order, in two places:
  *
  * - The listener: Bun is given `MAX_UPLOAD_BODY_BYTES` as
- *   `maxRequestBodySize` and `MAX_REQUEST_BODY_BYTES` as the sockets'
- *   `maxPayloadLength`, so the transport rejects a larger body before
+ *   `maxRequestBodySize` and the protocol's `MAX_FRAME_BYTES` as the sockets'
+ *   `maxPayloadLength`, so the transport rejects a larger body or frame before
  *   reading any of it, and before this module runs at all.
  * - `limitRequestBody`, between steps 1 and 2: only an image upload may be
  *   that large, so every other request is held to `MAX_REQUEST_BODY_BYTES`
@@ -66,6 +66,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   OPERATIONS,
 } from "@hercule/contract";
+import { MAX_FRAME_BYTES } from "@hercule/protocol";
 import { withCors } from "./cors";
 import { buildErrorResponse, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
@@ -127,11 +128,13 @@ export const MAX_UPLOAD_BODY_BYTES = MAX_ATTACHMENT_BYTES;
  * socket frames. Bun does not apply `maxRequestBodySize` to WebSocket frames,
  * so without the `websocket` option an unauthenticated connection could send
  * the controller a frame many times the documented size. A frame never
- * carries an image, so sockets keep the smaller limit.
+ * carries an image, so sockets are held to `MAX_FRAME_BYTES`, which the
+ * runner also reads, so it never sends an event too large for one frame.
+ * Bun closes a socket whose frame is larger.
  */
 export const bodyLimits = {
   maxRequestBodySize: MAX_UPLOAD_BODY_BYTES,
-  websocket: { maxPayloadLength: MAX_REQUEST_BODY_BYTES },
+  websocket: { maxPayloadLength: MAX_FRAME_BYTES },
 } as const;
 
 /** The path of `attachment.create`, the one route whose body may exceed `MAX_REQUEST_BODY_BYTES`. */

@@ -102,6 +102,14 @@ export const RETIRED_CLOSE_REASON = "RETIRED";
 export const GOING_AWAY_CLOSE_CODE = 1001;
 
 /**
+ * The largest WebSocket message either end accepts, in bytes of its UTF-8
+ * text. The controller closes the socket on a larger one, which ends the
+ * stream of every session on that runner, so the runner shrinks any event
+ * that would not fit before it sends it (spec 06 section 6).
+ */
+export const MAX_FRAME_BYTES = 2 * 1024 * 1024;
+
+/**
  * The protocol version a peer claims. Any version that could exist decodes,
  * ours or not, so a mismatch is rejected with a clear reason rather than
  * reported as an unreadable frame.

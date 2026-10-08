@@ -41,6 +41,7 @@ import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } f
 import { now, describeCause } from "../report";
 import type { WorkspaceSteps } from "../workspace-steps";
 import { resolveSessionContext, type Machine, type Resolved } from "./context";
+import { fitEventToFrame } from "./fit-event";
 import { buildAgentStepOutcome, type StepTurnEnding } from "./step-outcome";
 
 /**
@@ -572,120 +573,129 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       });
 
     /**
+     * Numbers an event that fits in one frame and sends it. The inactivity
+     * clock is updated before the send, so anyone who has seen the frame knows
+     * the clock already reflects the event.
+     */
+    const sendFittedEvent = (event: ProviderEvent): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const held = live.get(event.sessionId);
+        if (held !== undefined) {
+          switch (event._tag) {
+            case "turn.started":
+              held.openTurns.add(event.turnId);
+              // A turn the harness opened on its own, or a subagent's turn,
+              // also ends the idle wait, not only an input frame.
+              yield* cancelIdleUnload(held);
+              break;
+            case "turn.completed":
+              held.openTurns.delete(event.turnId);
+              // A Request cannot outlive its agent's turn. The controller
+              // also closes them on this event, and a Request left here
+              // would stop every later turn from being watched. Only this
+              // agent's Requests close: another agent may still wait on its
+              // user, even after the session's own turn has ended.
+              for (const [requestId, asker] of held.parkedRequests) {
+                if (asker === event.subagentId) held.parkedRequests.delete(requestId);
+              }
+              if (isIdle(held)) yield* armIdleUnload(held, event.sessionId);
+              // A step's turn is a turn of the session's own agent. A
+              // subagent's turn ending, even inside the step's turn, does
+              // not end the step.
+              if (
+                event.subagentId === undefined &&
+                held.step !== undefined &&
+                isStepTurn(held.step, event.turnId)
+              ) {
+                yield* finishStepTurn(held, held.step, event);
+              }
+              break;
+            case "content.delta": {
+              // A step's result is the final message of the session's own
+              // agent, so a subagent's text is never collected for it.
+              const step = held.step;
+              if (
+                step === undefined ||
+                event.subagentId !== undefined ||
+                event.streamKind !== "assistant_text"
+              ) {
+                break;
+              }
+              const item = step.texts.get(event.itemId);
+              if (item === undefined) {
+                step.texts.set(event.itemId, { turnId: event.turnId, text: event.delta });
+              } else {
+                item.text += event.delta;
+              }
+              break;
+            }
+            case "session.exited": {
+              // Every exit the relay sees passes through here, whatever
+              // ended the session: the harness itself, a stop by the
+              // controller, a timeout or the runner's shutdown.
+              const step = held.step;
+              if (step === undefined) break;
+              // The exit of an earlier run under the same id must not end
+              // the step of the run that replaced it. Only the adapter can
+              // tell the two apart, as in `releaseSession`.
+              if (yield* isHeldBy(held.adapter, event.sessionId)) break;
+              yield* finishStepTurn(held, step, event);
+              break;
+            }
+            case "request.opened":
+              held.parkedRequests.set(event.request.requestId, event.subagentId);
+              // A session waiting on its user is in use, however long the
+              // user takes to answer.
+              yield* cancelIdleUnload(held);
+              break;
+            case "request.resolved":
+              held.parkedRequests.delete(event.requestId);
+              break;
+            default:
+              break;
+          }
+          // A session is watched exactly while a turn of any agent is open
+          // and no agent waits on its user. The watch is brought in line
+          // with the open turns and open Requests after every event,
+          // instead of being started and stopped in each case above, so a
+          // fiber from an earlier state can never be left behind to stop a
+          // session that is not stuck.
+          if (isWatched(held)) {
+            held.lastEventAt = yield* Clock.currentTimeMillis;
+            if (held.inactivity === undefined) {
+              held.inactivity = yield* Effect.forkDetach(watchInactivity(held, event.sessionId));
+            }
+          } else if (held.inactivity !== undefined) {
+            const fiber = held.inactivity;
+            held.inactivity = undefined;
+            yield* Fiber.interrupt(fiber);
+          }
+        }
+        lastSeq += 1;
+        const frame: RunnerToController = { _tag: "sessionEvent", seq: lastSeq, event };
+        if (event._tag === "session.exited") yield* releaseSession(event.sessionId);
+        yield* sendFrame(frame);
+        // Resolve after the send, not before: when `shutdown` wakes up, the
+        // frame must already be on the wire.
+        if (event._tag === "session.exited") {
+          const waiting = stopping.get(event.sessionId);
+          if (waiting !== undefined) {
+            stopping.delete(event.sessionId);
+            yield* Deferred.succeed(waiting, undefined);
+          }
+        }
+      });
+
+    /**
      * Numbers an event and sends it. Every event goes out through here, in
-     * sequence order. The inactivity clock is updated before the send, so
-     * anyone who has seen the frame knows the clock already reflects the
-     * event.
+     * sequence order. An event too large for one frame is first shrunk by
+     * `fitEventToFrame`, and its parts are numbered one after the other while
+     * no other event can be sent in between. The bookkeeping in
+     * `sendFittedEvent` sees the events as sent, not as the adapter made them.
      */
     const sendSequenced = (event: ProviderEvent): Effect.Effect<void> =>
       sequencing.withPermits(1)(
-        Effect.gen(function* () {
-          const held = live.get(event.sessionId);
-          if (held !== undefined) {
-            switch (event._tag) {
-              case "turn.started":
-                held.openTurns.add(event.turnId);
-                // A turn the harness opened on its own, or a subagent's turn,
-                // also ends the idle wait, not only an input frame.
-                yield* cancelIdleUnload(held);
-                break;
-              case "turn.completed":
-                held.openTurns.delete(event.turnId);
-                // A Request cannot outlive its agent's turn. The controller
-                // also closes them on this event, and a Request left here
-                // would stop every later turn from being watched. Only this
-                // agent's Requests close: another agent may still wait on its
-                // user, even after the session's own turn has ended.
-                for (const [requestId, asker] of held.parkedRequests) {
-                  if (asker === event.subagentId) held.parkedRequests.delete(requestId);
-                }
-                if (isIdle(held)) yield* armIdleUnload(held, event.sessionId);
-                // A step's turn is a turn of the session's own agent. A
-                // subagent's turn ending, even inside the step's turn, does
-                // not end the step.
-                if (
-                  event.subagentId === undefined &&
-                  held.step !== undefined &&
-                  isStepTurn(held.step, event.turnId)
-                ) {
-                  yield* finishStepTurn(held, held.step, event);
-                }
-                break;
-              case "content.delta": {
-                // A step's result is the final message of the session's own
-                // agent, so a subagent's text is never collected for it.
-                const step = held.step;
-                if (
-                  step === undefined ||
-                  event.subagentId !== undefined ||
-                  event.streamKind !== "assistant_text"
-                ) {
-                  break;
-                }
-                const item = step.texts.get(event.itemId);
-                if (item === undefined) {
-                  step.texts.set(event.itemId, { turnId: event.turnId, text: event.delta });
-                } else {
-                  item.text += event.delta;
-                }
-                break;
-              }
-              case "session.exited": {
-                // Every exit the relay sees passes through here, whatever
-                // ended the session: the harness itself, a stop by the
-                // controller, a timeout or the runner's shutdown.
-                const step = held.step;
-                if (step === undefined) break;
-                // The exit of an earlier run under the same id must not end
-                // the step of the run that replaced it. Only the adapter can
-                // tell the two apart, as in `releaseSession`.
-                if (yield* isHeldBy(held.adapter, event.sessionId)) break;
-                yield* finishStepTurn(held, step, event);
-                break;
-              }
-              case "request.opened":
-                held.parkedRequests.set(event.request.requestId, event.subagentId);
-                // A session waiting on its user is in use, however long the
-                // user takes to answer.
-                yield* cancelIdleUnload(held);
-                break;
-              case "request.resolved":
-                held.parkedRequests.delete(event.requestId);
-                break;
-              default:
-                break;
-            }
-            // A session is watched exactly while a turn of any agent is open
-            // and no agent waits on its user. The watch is brought in line
-            // with the open turns and open Requests after every event,
-            // instead of being started and stopped in each case above, so a
-            // fiber from an earlier state can never be left behind to stop a
-            // session that is not stuck.
-            if (isWatched(held)) {
-              held.lastEventAt = yield* Clock.currentTimeMillis;
-              if (held.inactivity === undefined) {
-                held.inactivity = yield* Effect.forkDetach(watchInactivity(held, event.sessionId));
-              }
-            } else if (held.inactivity !== undefined) {
-              const fiber = held.inactivity;
-              held.inactivity = undefined;
-              yield* Fiber.interrupt(fiber);
-            }
-          }
-          lastSeq += 1;
-          const frame: RunnerToController = { _tag: "sessionEvent", seq: lastSeq, event };
-          if (event._tag === "session.exited") yield* releaseSession(event.sessionId);
-          yield* sendFrame(frame);
-          // Resolve after the send, not before: when `shutdown` wakes up, the
-          // frame must already be on the wire.
-          if (event._tag === "session.exited") {
-            const waiting = stopping.get(event.sessionId);
-            if (waiting !== undefined) {
-              stopping.delete(event.sessionId);
-              yield* Deferred.succeed(waiting, undefined);
-            }
-          }
-        }),
+        Effect.forEach(fitEventToFrame(event), sendFittedEvent, { discard: true }),
       );
 
     /**

@@ -406,10 +406,10 @@ const AnswerText = Message.check(
 /**
  * The most characters all the answers to one request may hold together,
  * headers included. The answers travel to the runner and come back in
- * `request.resolved`, and a frame over the socket's 2 MiB limit closes the
+ * `request.resolved`, and a frame over `MAX_FRAME_BYTES` (2 MiB) closes the
  * runner's connection, ending the stream of every session on it. JSON can
- * write one character as six bytes, so the limit stays far below 2 MiB
- * divided by six. Four full messages is still more than anyone types in
+ * write one character as six bytes, so the limit stays far below
+ * `MAX_FRAME_BYTES` divided by six. Four full messages is still more than anyone types in
  * answer to a question.
  */
 export const MAX_ANSWERS_LENGTH = 4 * MAX_MESSAGE_LENGTH;
