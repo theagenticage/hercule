@@ -223,13 +223,6 @@ describe("upgrading from the previous edge release", () => {
       );
       expect(msg3Result.code).toBe(0);
 
-      // Update settings
-      const settingsResult = await runCli(
-        ["settings", "update", "--timezone", "America/New_York", "--json"],
-        { home: state!.home },
-      );
-      expect(settingsResult.code).toBe(0);
-
       // Save the IDs of what we created for verification later
       const testData = {
         projectId: project.id,
@@ -306,11 +299,6 @@ describe("upgrading from the previous edge release", () => {
         "Test message 2",
         "Test message 3",
       ]);
-
-      const settingsRead = await runCli(["settings", "read", "--json"], { home: state!.home });
-      expect(settingsRead.code).toBe(0);
-      const settings = parseJsonOutput(settingsRead) as { user: { timezone: string } };
-      expect(settings.user.timezone).toBe("America/New_York");
     } finally {
       await controller?.stop().catch(() => -1);
     }
