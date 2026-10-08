@@ -44,7 +44,18 @@ The first command installs a service unit (a LaunchAgent on macOS, a systemd use
 
 Either way, Hercule keeps everything in the Hercule Home, which is `~/.hercule` unless `HERCULE_HOME` is set. Its logs are `logs/controller.log` and `logs/runner.log` there. `hercule service status` says whether the service is running; `hercule service stop`, `start`, `restart` and `uninstall` do what they say.
 
-On Linux, when `loginctl enable-linger` fails during installation, you'll be asked to run `sudo loginctl enable-linger <user>` first. This lets the service run without a login session. To set `bind.host` in `config.toml` for a controller that other machines reach, see the setup instructions in the Hercule Home after running `hercule service install`.
+**Linux-specific notes:**
+
+- **Lingering:** When `loginctl enable-linger` fails during installation, run `sudo loginctl enable-linger <user>` first. This lets the service run without a login session.
+- **Networked controller:** For a controller that other machines reach, set `bind.host` in `~/.hercule/config.toml`:
+
+  ```toml
+  [bind]
+  host = "192.168.1.10"  # LAN IP, or your Tailscale IP for a tailnet
+  port = 4937
+  ```
+
+  Then restart the service with `hercule service restart`. The service reads `config.toml` alone. See [spec 15 §1](docs/spec/15-packaging-and-operations.md#1-distribution) for more details.
 
 **To update, run the same line again.** It replaces the binary and the app together, so the two always agree, and restarts the service. The restart ends any turn in progress, so update when no agent is working. The controller migrates its database itself when it starts, and keeps a copy from before the migration in the Hercule Home's `backups/`.
 

@@ -132,40 +132,36 @@ jobs:
             -v "$PWD/dist-binary:/out" \
             debian:bookworm-slim /out/hercule-linux-arm64 --version
 
+      # Upload artifacts on both main and PRs. On PRs, short retention for testing;
+      # on main, 1 day for edge-build to consume.
       - uses: actions/upload-artifact@v7
-        if: github.ref == 'refs/heads/main'
         with:
-          retention-days: 1
+          retention-days: ${{ github.ref == 'refs/heads/main' && 1 || 1 }}
           name: hercule-linux
           path: |
             dist-binary/hercule-linux-x64
             dist-binary/hercule-linux-arm64
           if-no-files-found: error
 
-  # Tests install.sh on Linux x64 with the binaries edge-linux built. Runs on
-  # pull requests so the installer can be tested before merge.
+  # Tests install.sh on Linux x64 with the binary edge-linux built. Runs on
+  # pull requests so the installer can be tested before merge. Consumes the
+  # artifact edge-linux uploaded, so the tested binary is the one that gets
+  # published.
   edge-linux-install:
     needs: [edge-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - uses: ./.github/actions/setup
-
-      - name: Cross-compile Linux x64 binary
-        run: |
-          bun run scripts/gen-version.ts
-          pnpm --filter @hercule/web build
-          bun run scripts/check-bundle-budget.ts
-          bun run scripts/gen-web-bundle.ts
-          bun build packages/hercule/src/main.ts \
-            --compile --target=bun-linux-x64 \
-            --outfile dist-binary/hercule-linux-x64
+      - uses: actions/download-artifact@v8
+        with:
+          name: hercule-linux
+          path: linux-binaries
 
       - name: Assemble release directory for install.sh test
         run: |
           mkdir test-release
-          cp dist-binary/hercule-linux-x64 test-release/
+          cp linux-binaries/hercule-linux-x64 test-release/
           cd test-release
           sha256sum hercule-linux-x64 > SHA256SUMS
           cat SHA256SUMS
@@ -184,7 +180,7 @@ jobs:
   # The asset names and the format of SHA256SUMS are what `install.sh` reads;
   # change them together.
   edge-build:
-    needs: [check, desktop, edge-linux]
+    needs: [check, desktop, edge-linux, edge-linux-install]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
     timeout-minutes: 30

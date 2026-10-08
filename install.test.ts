@@ -99,11 +99,21 @@ function buildLaunchAgent(environment: Readonly<Record<string, string>>): string
 
 /**
  * Builds the content of an installed systemd unit whose environment holds
- * `environment`.
+ * `environment`. Uses the real renderer from packages/service/src/unit.ts
+ * to ensure install.sh decodes what the renderer produces.
  */
 function buildSystemdUnit(environment: Readonly<Record<string, string>>): string {
+  // Escape specifiers: % -> %%
+  const escapeSpecifiers = (text: string): string => text.replaceAll("%", "%%");
+  // Quote a value: wrap in quotes, escape \ and "
+  const quoteSystemdValue = (text: string): string =>
+    `"${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+  // Quote an assignment
+  const quoteAssignment = (name: string, value: string): string =>
+    quoteSystemdValue(escapeSpecifiers(`${name}=${value}`));
+
   const entries = Object.entries(environment)
-    .map(([key, value]) => `Environment="${key}=${value}"`)
+    .map(([key, value]) => `Environment=${quoteAssignment(key, value)}`)
     .join("\n");
   return `[Unit]
 Description=Hercule
@@ -459,6 +469,61 @@ describe("install.sh", () => {
     expect(stdout).toContain("fake hercule service output");
     expect(stderr).toContain("the binary is updated, but the service was not");
   });
+
+  it.runIf(isLinux)(
+    "decodes a systemd unit Home with percent, backslash, quote, and spaces",
+    () => {
+      const release = writeInstallableRelease();
+      const homeWithSpecialChars = '/tmp/50%-"test\\path" with spaces';
+
+      const { status, stdout } = runInstall(release.dir, {
+        buildHerculeHome: () => undefined,
+        systemdUnit: buildSystemdUnit({ HERCULE_HOME: homeWithSpecialChars }),
+      });
+
+      expect(status).toBe(0);
+      // The installer decoded the Home correctly and passed it to `service install`.
+      expect(release.readBinaryCalls()).toEqual([
+        { herculeHome: homeWithSpecialChars, args: "service install" },
+        { herculeHome: "", args: "--version" },
+      ]);
+      expect(stdout).toContain("fake hercule service output");
+    },
+  );
+
+  it.runIf(isLinux)(
+    "ignores relative XDG_CONFIG_HOME and falls back to ~/.config, like locateSystemdUnitDir",
+    () => {
+      const release = writeInstallableRelease();
+
+      const home = makeTemporaryDir("hercule-install-home-");
+      const applicationsDir = makeTemporaryDir("hercule-install-applications-");
+      // Create unit in ~/.config/systemd/user, not in relative-xdg/systemd/user
+      mkdirSync(join(home, ".config", "systemd", "user"), { recursive: true });
+      writeFileSync(
+        join(home, ".config", "systemd", "user", "hercule.service"),
+        buildSystemdUnit({ HERCULE_HOME: join(home, "other-home") }),
+      );
+
+      const result = spawnSync("sh", [script], {
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH,
+          HOME: home,
+          XDG_CONFIG_HOME: "relative-xdg",
+          HERCULE_RELEASE_URL: pathToFileURL(release.dir).href,
+          HERCULE_APPLICATIONS_DIR: applicationsDir,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      // The installer found the unit in ~/.config despite XDG_CONFIG_HOME being relative.
+      expect(release.readBinaryCalls()).toEqual([
+        { herculeHome: join(home, "other-home"), args: "service install" },
+        { herculeHome: "", args: "--version" },
+      ]);
+    },
+  );
 
   it.runIf(process.platform !== "darwin" && process.platform !== "linux")(
     "refuses to run on unsupported platforms",

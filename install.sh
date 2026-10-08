@@ -61,7 +61,13 @@ app="${HERCULE_APPLICATIONS_DIR:-/Applications}/Hercule.app"
 # The file `hercule service install` keeps the unit in. Whether it exists is
 # what tells an update from a first install.
 plist_path="$HOME/Library/LaunchAgents/sh.hercule.service.plist"
-systemd_unit_path="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/hercule.service"
+# The systemd unit path. XDG_CONFIG_HOME is ignored if relative, per the XDG
+# Base Directory spec (locateSystemdUnitDir in packages/service/src/systemd.ts).
+case "${XDG_CONFIG_HOME:-}" in
+  /*) config_home=$XDG_CONFIG_HOME ;;
+  *) config_home=$HOME/.config ;;
+esac
+systemd_unit_path="$config_home/systemd/user/hercule.service"
 
 fail() {
   printf 'install.sh: %s\n' "$*" >&2
@@ -115,9 +121,21 @@ read_installed_hercule_home() {
       [ -f "$systemd_unit_path" ] || return 0
       # Extract HERCULE_HOME from the systemd unit file. The line is:
       # Environment="HERCULE_HOME=/path/to/home"
-      home=$(grep -E '^Environment="HERCULE_HOME=' "$systemd_unit_path" 2> /dev/null | sed -E 's/^Environment="HERCULE_HOME=([^"]*)"$/\1/')
-      if [ -n "$home" ]; then
-        printf '%s\n' "$home"
+      # The value is quoted and escaped: backslashes and quotes are escaped with
+      # backslash, and % is escaped as %%. Decode exactly what renderSystemdUnit
+      # (packages/service/src/unit.ts) produces.
+      line=$(grep -E '^Environment="HERCULE_HOME=' "$systemd_unit_path" 2> /dev/null | head -1)
+      if [ -n "$line" ]; then
+        # Extract the quoted value after Environment= and remove outer quotes
+        escaped=$(printf '%s\n' "$line" | sed -E 's/^Environment="(.*)"/\1/')
+        # Unescape: \\ -> \, \" -> ", then %% -> %
+        # Use sed to handle the escapes: first backslash escapes, then percent
+        unescaped=$(printf '%s\n' "$escaped" | sed -e 's/\\\\/\x00/g' -e 's/\\"/"/g' -e 's/\x00/\\/g' -e 's/%%/%/g')
+        if [ -n "$unescaped" ]; then
+          # The value is HERCULE_HOME=<path>; strip the prefix
+          home=$(printf '%s\n' "$unescaped" | sed 's/^HERCULE_HOME=//')
+          printf '%s\n' "$home"
+        fi
       fi
       ;;
   esac
