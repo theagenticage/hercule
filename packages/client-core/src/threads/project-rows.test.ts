@@ -212,7 +212,7 @@ describe("sortProjectsByNewestThread", () => {
     ).toEqual([WEBSHOP_PROJECT.id, OPS_PROJECT.id, null]);
   });
 
-  it("keeps the order projects came in when their newest threads were created at the same moment", () => {
+  it("sorts projects whose newest threads were created at the same moment by project id, whatever order they came in", () => {
     // ops's newest thread is now as new as webshop's.
     const tied = new Map(SESSIONS_BY_ID).set("s-keys", {
       ...SESSIONS_BY_ID.get("s-keys")!,
@@ -222,9 +222,9 @@ describe("sortProjectsByNewestThread", () => {
     const listIds = (sorted: readonly { readonly projectId: string | null }[]) =>
       sorted.map((group) => group.projectId);
 
-    expect(listIds(sortProjectsByNewestThread(groups, tied))).toEqual(listIds(groups));
-    expect(listIds(sortProjectsByNewestThread(groups.toReversed(), tied))).toEqual(
-      listIds(groups.toReversed()),
-    );
+    const byId = listIds(groups).toSorted();
+
+    expect(listIds(sortProjectsByNewestThread(groups, tied))).toEqual(byId);
+    expect(listIds(sortProjectsByNewestThread(groups.toReversed(), tied))).toEqual(byId);
   });
 });

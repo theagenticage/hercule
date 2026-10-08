@@ -763,6 +763,7 @@ describe("the sidebar's card of thread details", () => {
     ],
     ["the row is pressed", ({ bunPin }) => fireEvent.pointerDown(bunPin)],
     ["the list scrolls", ({ nav }) => fireEvent.scroll(nav)],
+    ["the window is resized", () => fireEvent(window, new Event("resize"))],
   ])("hides the card at once when %s", async (_, hide) => {
     const rows = await startHovering();
     restOn(rows.bunPin);

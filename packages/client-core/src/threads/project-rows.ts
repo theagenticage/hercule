@@ -121,6 +121,10 @@ const findNewestCreated = (group: ProjectGroup, sessions: ReadonlyMap<string, Se
     0,
   );
 
+/** Compares two project ids so that sorting puts them in ascending order. */
+const compareProjectIds = (a: string | null, b: string | null): number =>
+  a === b ? 0 : (a ?? "") < (b ?? "") ? -1 : 1;
+
 /** Checks whether the draft being written sits in one of the project group's workspace groups. */
 export const holdsDraft = (group: ProjectGroup): boolean =>
   group.workspaces.some((lane) => lane.draft);
@@ -134,7 +138,10 @@ export const holdsDraft = (group: ProjectGroup): boolean =>
  * - otherwise, by the creation time of the group's newest thread, newest
  *   first. A group with no threads counts as created at time 0.
  *
- * Groups that tie keep the order they came in. `groups` must be the uncapped
+ * Groups whose newest threads were created at the same moment are sorted by
+ * project id. They do not keep the order they came in, because
+ * `buildThreadGroups` sorts by latest activity, and a tie would then move
+ * the projects whenever a thread works. `groups` must be the uncapped
  * groups from `buildThreadGroups`, because a capped section may hide its
  * newest thread. `sessions` holds each thread's session by id.
  */
@@ -148,6 +155,7 @@ export const sortProjectsByNewestThread = (
       (a, b) =>
         Number(a.group.projectId === null) - Number(b.group.projectId === null) ||
         Number(holdsDraft(b.group)) - Number(holdsDraft(a.group)) ||
-        b.newest - a.newest,
+        b.newest - a.newest ||
+        compareProjectIds(a.group.projectId, b.group.projectId),
     )
     .map(({ group }) => group);

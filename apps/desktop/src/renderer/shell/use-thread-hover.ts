@@ -57,7 +57,8 @@ const placeBesideRow = (list: HTMLElement, key: string): ThreadHoverPlacement | 
  * - The card shows once the pointer has rested on a thread row for 400ms.
  * - While the card shows, moving to another thread row switches it at once.
  * - Moving to any other item, past the end of the list or out of it hides
- *   it at once, and so do a press on the list and a scroll of the list. In
+ *   it at once, and so do a press on the list, a scroll of the list and a
+ *   resize of the window. In
  *   the space between two items, a card that shows stays, and a card that
  *   waits for the delay is cancelled.
  * - After a press, the pressed row's card does not come back until the
@@ -111,6 +112,20 @@ export const useThreadHover = (
     },
     [],
   );
+
+  // A resize of the window moves the sidebar's rows and can push the card
+  // past the window's edge, so it hides, as on a scroll. The listener is
+  // added only while the card shows.
+  const cardShows = placement !== null;
+  useEffect(() => {
+    if (!cardShows) return;
+    window.addEventListener("resize", hide);
+    return () => {
+      window.removeEventListener("resize", hide);
+    };
+    // `hide` reads only refs and a state setter, so the first one stays correct.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardShows]);
 
   // Measured before the browser paints, so the card never shows beside a
   // row that has moved. A placement that did not change is kept, so the card
