@@ -12,7 +12,10 @@
  * - assistant-states.tsx, which draws the Assistants section and opens an
  *   assistant's page;
  * - settings-assistants.tsx, which opens Settings > Assistants, and whose
- *   main pane `pnpm compare:bureau` compares with the book's.
+ *   main pane `pnpm compare:bureau` compares with the book's;
+ * - settings-profiles.tsx, which opens Settings > Permission profiles, the
+ *   list or one profile's page, and whose main pane `pnpm compare:bureau`
+ *   compares with the book's.
  *
  * The page builds a router whose routes have the app's route ids, so the
  * sidebar and the screens find the controller in their route context, and
@@ -46,6 +49,7 @@ import {
   useSearch,
 } from "@tanstack/react-router";
 import type {
+  Agent,
   Assistant,
   Connection,
   ConversationMessage,
@@ -70,6 +74,7 @@ import {
 import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
 import type { Bridge } from "../../ipc/bridge";
 import {
+  agentsQuery,
   assistantsQuery,
   connectionsQuery,
   conversationMessagesQuery,
@@ -104,6 +109,8 @@ import { AgentPage } from "../screens/thread/agent-page";
 import { Route as SettingsRoute } from "../routes/_connected/_shell/settings/route";
 import { Route as AppearanceSettingsRoute } from "../routes/_connected/_shell/settings/appearance";
 import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/settings/assistants/route";
+import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/index";
+import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
 
@@ -161,6 +168,16 @@ export interface AssistantsSettingsRecords {
   readonly connections: ReadonlyArray<Connection>;
 }
 
+/** What Settings > Permission profiles reads besides the sidebar's lists. */
+export interface PermissionProfilesSettingsRecords {
+  /** Every permission profile, in the order the controller lists them. */
+  readonly profiles: ReadonlyArray<Profile>;
+  /** The plain agents, whose permission profiles the section shows as users. */
+  readonly agents: ReadonlyArray<Agent>;
+  /** The Connections the Settings list reads for its Connections row's dot. */
+  readonly connections: ReadonlyArray<Connection>;
+}
+
 /**
  * The records Settings > Appearance reads. The section itself reads none:
  * it reads the Appearance from the bridge.
@@ -175,6 +192,7 @@ interface OpenScreens {
   readonly thread?: ThreadScreenRecords;
   readonly draft?: DraftScreenRecords;
   readonly assistantsSettings?: AssistantsSettingsRecords;
+  readonly permissionProfilesSettings?: PermissionProfilesSettingsRecords;
   readonly appearanceSettings?: AppearanceSettingsRecords;
 }
 
@@ -277,7 +295,13 @@ const seedQueryCache = (
   queryClient: QueryClient,
   client: HerculeClient,
   records: SidebarRecords,
-  { thread, draft, assistantsSettings, appearanceSettings }: OpenScreens,
+  {
+    thread,
+    draft,
+    assistantsSettings,
+    permissionProfilesSettings,
+    appearanceSettings,
+  }: OpenScreens,
 ): void => {
   queryClient.setQueryData(threadsQuery(client).queryKey, records.threads);
   queryClient.setQueryData(projectsQuery(client).queryKey, records.projects);
@@ -314,6 +338,14 @@ const seedQueryCache = (
   if (assistantsSettings !== undefined) {
     queryClient.setQueryData(profilesQuery(client).queryKey, assistantsSettings.profiles);
     queryClient.setQueryData(connectionsQuery(client).queryKey, assistantsSettings.connections);
+  }
+  if (permissionProfilesSettings !== undefined) {
+    queryClient.setQueryData(profilesQuery(client).queryKey, permissionProfilesSettings.profiles);
+    queryClient.setQueryData(agentsQuery(client).queryKey, permissionProfilesSettings.agents);
+    queryClient.setQueryData(
+      connectionsQuery(client).queryKey,
+      permissionProfilesSettings.connections,
+    );
   }
   if (appearanceSettings !== undefined) {
     queryClient.setQueryData(connectionsQuery(client).queryKey, appearanceSettings.connections);
@@ -358,9 +390,8 @@ function AssistantRoute(): JSX.Element {
 /**
  * Builds the router: the root, the `_connected` and `_shell` layout routes,
  * the three screens the sidebar links to, `/`, `/threads/$sessionId` and
- * `/assistants/$assistantId`, and Settings with its Appearance and
- * Assistants sections,
- * starting at `path`. The ids are the app's, because the sidebar and the
+ * `/assistants/$assistantId`, and Settings with its Appearance, Assistants
+ * and Permission profiles sections, starting at `path`. The ids are the app's, because the sidebar and the
  * screens read their context, and the sidebar its selected thread or draft,
  * by route id.
  *
@@ -370,12 +401,12 @@ function AssistantRoute(): JSX.Element {
  * that the assistant was not found when the fixture holds no assistant with
  * the address's id.
  *
- * Settings and its two sections are the app's own routes, attached
+ * Settings and its sections are the app's own routes, attached
  * under this router's `_shell`, because their components read their search
  * and their context through their own `Route`. The Assistants route is
  * attached without its loader: the loader reads the permission profiles and
  * the settings again each time the section opens, and the query cache
- * already holds both.
+ * already holds both. The Permission profiles routes are attached the same way.
  */
 const buildRouter = (
   client: HerculeClient,
@@ -419,6 +450,18 @@ const buildRouter = (
     getParentRoute: () => settingsRoute,
     loader: undefined,
   } as never);
+  const permissionProfilesSettingsRoute = PermissionProfilesSettingsRoute.update({
+    id: "/permission-profiles/",
+    path: "/permission-profiles/",
+    getParentRoute: () => settingsRoute,
+    loader: undefined,
+  } as never);
+  const permissionProfileSettingsRoute = PermissionProfileSettingsRoute.update({
+    id: "/permission-profiles/$id",
+    path: "/permission-profiles/$id",
+    getParentRoute: () => settingsRoute,
+    loader: undefined,
+  } as never);
   const appearanceSettingsRoute = AppearanceSettingsRoute.update({
     id: "/appearance",
     path: "/appearance",
@@ -441,7 +484,12 @@ const buildRouter = (
           path: "assistants/$assistantId",
           component: AssistantRoute,
         }),
-        settingsRoute.addChildren([appearanceSettingsRoute, assistantsSettingsRoute]),
+        settingsRoute.addChildren([
+          appearanceSettingsRoute,
+          assistantsSettingsRoute,
+          permissionProfilesSettingsRoute,
+          permissionProfileSettingsRoute,
+        ]),
       ]),
     ]),
   ]);
@@ -491,6 +539,14 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
   ) {
     throw new Error(
       "Settings > Assistants drew no assistant's settings. Check the page's console for the error.",
+    );
+  }
+  if (
+    screens.permissionProfilesSettings !== undefined &&
+    document.querySelector(".profile-list, .profile-record") === null
+  ) {
+    throw new Error(
+      "Settings > Permission profiles drew no list and no profile. Check the page's console for the error.",
     );
   }
   if (screens.appearanceSettings !== undefined && document.querySelector(".themes") === null) {
@@ -628,6 +684,24 @@ export async function mountAssistantsSettingsSpecimen(
   settings: AssistantsSettingsRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, path, { assistantsSettings: settings });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Settings > Permission profiles open at `path`:
+ * `/settings/permission-profiles` for the list, or
+ * `/settings/permission-profiles/<id>` for one profile's page. The main pane
+ * shows the app's real Settings frame and section, which read the profiles
+ * and the agents from `settings`. Returns once the list or the profile is in
+ * the document. Fails when the page has no `#root`, draws no sidebar row, no
+ * list and no profile, or tries to read a record the cache does not hold.
+ */
+export async function mountPermissionProfilesSettingsSpecimen(
+  records: SidebarRecords,
+  path: string,
+  settings: PermissionProfilesSettingsRecords,
+): Promise<void> {
+  await mountShellSpecimen(records, path, { permissionProfilesSettings: settings });
 }
 
 /**
