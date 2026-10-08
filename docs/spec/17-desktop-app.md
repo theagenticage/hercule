@@ -1768,12 +1768,12 @@ The earlier sizes come from that commit's CI build; the final sizes come from th
 - **The numbers above predate a rebase onto `main` at d05f2f7a,** which brought in the flat sidebar (#473) and #481. On the rebased tree, `check-bundle-budget` reports 326.3 kB for the first screen's JavaScript and CSS, gzipped; the warning line's share was not measured again.
 - **The transcript's virtual list guesses a warning's height** as 17.4px per line at about 110 characters a line, and measures it once drawn, as it does every block.
 
-**Settings › Permission profiles,** to be measured for [#494](https://github.com/theagenticage/hercule/issues/494) with `pnpm build:desktop`'s size checks and `apps/desktop/scripts/perf.ts`, with the profile's page open. The section adds no process, no timer, no polling and no live topic of its own beyond `assistant`: its loader reads the profiles and the agents each time it opens.
+**Settings › Permission profiles,** measured for [#494](https://github.com/theagenticage/hercule/issues/494) with `pnpm build:desktop`'s size checks against a build of `main`. The rows `apps/desktop/scripts/perf.ts` measures were not run for this change and stay TBD. The section adds no process, no timer, no polling and no live topic of its own beyond `assistant`: its loader reads the profiles and the agents each time it opens.
 
 | Measure | Budget | Measured |
 |---|---|---|
 | Processes | none added | TBD |
-| The Permission profiles chunk, gzipped, not on the first screen | its own chunk | TBD |
+| The Permission profiles chunk, gzipped, not on the first screen | its own chunk | the list 1.7 kB and the profile's page 3.7 kB, each a route chunk; 1.8 kB of code shared by the two, and 1.1 kB of CSS. The first screen is 326.4 kB against `main`'s 326.3 kB |
 | Memory, 40 threads | summed 220 MB, renderer 100 MB | TBD |
 | Idle, window visible | the idle row | TBD |
 | Launch, spawn to window shown | 500 ms | TBD |
