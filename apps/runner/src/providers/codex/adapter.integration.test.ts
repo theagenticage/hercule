@@ -859,7 +859,13 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
         );
         await waitUntil(() => model.waitingChildren.has(childId) && rootCompletions().length === 1);
         await Effect.runPromise(adapter.interrupt(sessionId, childId));
-        await waitUntil(() => childCompletions().length === 1);
+        // Codex reports a turn's usage in its own notification, which may
+        // arrive after the turn's completion, so the test waits for both.
+        const childUsageReports = () =>
+          seen.filter(
+            (event) => event._tag === "session.usage.updated" && event.subagentId === childId,
+          );
+        await waitUntil(() => childCompletions().length === 1 && childUsageReports().length >= 1);
         expect(childCompletions()[0]!.state).toBe("interrupted");
         const cancelledUsage = seen
           .filter((event) => event._tag === "session.usage.updated" && event.subagentId === childId)
@@ -872,11 +878,15 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
           cacheReadTokens: 0,
           cacheWriteTokens: 0,
         });
+        const reportsBeforeCompletion = childUsageReports().length;
         model.scheduleFollowup(childId, false);
         await Effect.runPromise(
           adapter.sendInput(sessionId, { text: "Continue the child to completion." }),
         );
-        await waitUntil(() => childCompletions().length === 2);
+        await waitUntil(
+          () =>
+            childCompletions().length === 2 && childUsageReports().length > reportsBeforeCompletion,
+        );
         const completedUsage = seen
           .filter((event) => event._tag === "session.usage.updated" && event.subagentId === childId)
           .at(-1);
