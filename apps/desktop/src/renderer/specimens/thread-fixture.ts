@@ -250,7 +250,7 @@ const FIX_STEPS_WITH_WARNINGS: ReadonlyArray<TranscriptStep> = FIX_STEPS.flatMap
           _tag: "runtime.warning",
           turnId: TURN_ID,
           message:
-            "A tool_call result was 6.43 MiB, too large to send (the limit is 2 MiB), so its output " +
+            "A tool call result was 6.43 MiB, too large to send (the limit is 2 MiB), so its output " +
             "and raw data were left out. Item toolu_01HZK7Q4X9V3RTD8NB2WMJ5FEA.",
         },
       ],
