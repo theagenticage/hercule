@@ -2859,7 +2859,8 @@ describe("an agent step's turn", () => {
     expect(listStepResults(sent)[0]?.outcome).toEqual({
       status: "failed",
       code: "schema_failure",
-      message: "The turn's result did not match the step's output schema: missing property verdict",
+      message:
+        "The turn gave no valid result for the step's output schema: missing property verdict",
     });
   });
 
@@ -2887,7 +2888,7 @@ describe("an agent step's turn", () => {
     const outcome = listStepResults(sent)[0]?.outcome;
     expect(outcome).toMatchObject({ status: "failed", code: "schema_failure" });
     expect(outcome?.status === "failed" ? outcome.message : "").toMatch(
-      /^The turn's result did not match the step's output schema: The turn's structured result was 2\.\d\d MiB, too large to send \(the limit is 2 MiB\)\.$/,
+      /^The turn gave no valid result for the step's output schema: The turn's structured result was 2\.\d\d MiB, too large to send \(the limit is 2 MiB\)\.$/,
     );
     // The turn still ends, for the controller as for the supervisor, and the
     // warning follows it.

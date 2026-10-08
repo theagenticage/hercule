@@ -51,7 +51,8 @@ describe("buildAgentStepOutcome", () => {
     expect(buildAgentStepOutcome(ending, WITH_SCHEMA)).toEqual({
       status: "failed",
       code: "schema_failure",
-      message: "The turn's result did not match the step's output schema: missing property verdict",
+      message:
+        "The turn gave no valid result for the step's output schema: missing property verdict",
     });
   });
 
