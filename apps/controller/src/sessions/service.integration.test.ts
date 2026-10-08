@@ -525,11 +525,14 @@ describe("SessionService.claimStarts", () => {
         yield* rows.bind(sessionId, runnerId, instanceId, "native-1");
         const holder = { kind: "session", id: sessionId } as const;
         yield* workspaces.acquire(holder, workspaceId, exitedAt);
+        const { lastActivityAt: lastActiveBeforeExit } = Option.getOrThrow(
+          yield* rows.one(sessionId),
+        );
         yield* rows.moved(sessionId, "exited", exitedAt);
         yield* workspaces.release(holder, "idle", exitedAt);
         // What a resume writes: the row back on the queue, the lease taken
         // again, and the crash-loop guard armed.
-        yield* rows.resume(sessionId, spec, at);
+        yield* rows.resume(sessionId, spec);
         yield* workspaces.acquire(holder, workspaceId, at);
         yield* rows.setCrashGuardArmed(sessionId, true);
 
@@ -548,6 +551,7 @@ describe("SessionService.claimStarts", () => {
         return {
           claimed,
           after: Option.getOrThrow(yield* rows.one(sessionId)),
+          lastActiveBeforeExit,
           streamRows: stream[0]!.count,
           leases,
         };
@@ -559,11 +563,12 @@ describe("SessionService.claimStarts", () => {
       status: "exited",
       exitedAt,
       resumable: true,
-      // The resume armed the guard and moved the last activity on. Both go
-      // back to what they were at the exit.
+      // The resume armed the guard, and it goes back to disarmed. Neither the
+      // exit nor the resume touched the last activity.
       crashGuardArmed: false,
-      lastActivityAt: exitedAt,
+      lastActivityAt: result.lastActiveBeforeExit,
     });
+    expect(result.lastActiveBeforeExit).not.toBe(exitedAt);
     // Nothing exited again, so no exit was written to the stream.
     expect(result.streamRows).toBe(0);
     // The session can still be resumed, so the workspace is kept for the

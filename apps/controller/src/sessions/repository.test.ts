@@ -278,6 +278,90 @@ const insertStartedSession = (tokenHash: string) =>
     return { sessionId, runnerId: row.value.runnerId };
   });
 
+const minutesAfterAt = (minutes: number): string =>
+  new Date(Date.parse(at) + minutes * 60_000).toISOString();
+
+describe("a session's last activity", () => {
+  it("follows the session's work, and an exit and anything after it do not move it", async () => {
+    const times = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const { sessionId } = yield* insertStartedSession("hash");
+        const read = Effect.map(sessions.one(sessionId), (row) =>
+          Option.match(row, {
+            onNone: () => "missing",
+            onSome: (one) => one.lastActivityAt,
+          }),
+        );
+        yield* sessions.moved(sessionId, "busy", minutesAfterAt(1));
+        const busy = yield* read;
+        yield* sessions.touched(sessionId, minutesAfterAt(2));
+        const touched = yield* read;
+        yield* sessions.moved(sessionId, "exited", minutesAfterAt(3));
+        const exited = yield* read;
+        yield* sessions.touched(sessionId, minutesAfterAt(4));
+        const touchedAfterExit = yield* read;
+        return { busy, touched, exited, touchedAfterExit };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(times).toEqual({
+      busy: minutesAfterAt(1),
+      touched: minutesAfterAt(2),
+      exited: minutesAfterAt(2),
+      touchedAfterExit: minutesAfterAt(2),
+    });
+  });
+
+  it("is not moved by an exit the controller itself causes, such as a runner restart", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const retired = yield* insertStartedSession("hash-retired");
+        yield* sessions.endOnRunner(retired.runnerId, minutesAfterAt(5));
+        const reported = yield* insertStartedSession("hash-reported");
+        yield* sessions.reportedGone(reported.runnerId, [], minutesAfterAt(5));
+        const queued = yield* aSession;
+        yield* sessions.endQueued(queued, minutesAfterAt(5));
+        return yield* Effect.all(
+          [retired.sessionId, reported.sessionId, queued].map((id) =>
+            Effect.map(sessions.one(id), (row) =>
+              Option.map(row, (one) => [one.exitedAt, one.lastActivityAt]),
+            ),
+          ),
+        );
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    // Each session was last active when dispatch started it (or when it was
+    // written), and only `exitedAt` records the exit.
+    expect(rows).toEqual([
+      Option.some([minutesAfterAt(5), at]),
+      Option.some([minutesAfterAt(5), at]),
+      Option.some([minutesAfterAt(5), at]),
+    ]);
+  });
+
+  it("is not moved by queueing a resume, nor by undoing it", async () => {
+    const times = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* insertResumableSession;
+        const read = Effect.map(sessions.one(sessionId), (row) =>
+          Option.map(row, (one) => one.lastActivityAt),
+        );
+        yield* sessions.resume(sessionId, "{}");
+        const resumed = yield* read;
+        yield* sessions.undoResume(sessionId);
+        const undone = yield* read;
+        return { resumed, undone };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(times).toEqual({ resumed: Option.some(at), undone: Option.some(at) });
+  });
+});
+
 describe("the session token hash", () => {
   it("is cleared by every move to a status with no process behind it", async () => {
     const hashes = await run(
@@ -453,7 +537,7 @@ describe("resuming an exited session", () => {
         const sessions = yield* sessionRepository;
         const sessionId = yield* insertResumableSession;
         const exited = yield* sessions.one(sessionId);
-        yield* sessions.resume(sessionId, "{}", at);
+        yield* sessions.resume(sessionId, "{}");
         const resumed = yield* sessions.one(sessionId);
         yield* sessions.setCrashGuardArmed(sessionId, true);
         yield* sessions.moved(sessionId, "exited", at);
@@ -529,7 +613,7 @@ describe("whether an input waits on a session", () => {
         const sessionId = yield* insertResumableSession;
         // An exited session's input is never claimed, so the session is put
         // back on the queue first.
-        yield* sessions.resume(sessionId, "{}", at);
+        yield* sessions.resume(sessionId, "{}");
         const empty = yield* sessions.one(sessionId);
         const sent = yield* inputs.insert({
           sessionId,

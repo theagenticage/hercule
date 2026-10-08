@@ -200,6 +200,15 @@ describe("buildSidebar", () => {
     ]);
   });
 
+  it("gives each thread row the time its thread was created, for the age it shows, not the time of its last activity", () => {
+    const items = buildItems({
+      threads: [thread("s-old", 1, { projectId: OPS_PROJECT.id, lastActivityAt: at(9) })],
+    });
+
+    const row = items.find((item) => item.kind === "thread-row");
+    expect(row?.kind === "thread-row" ? row.createdAt : undefined).toBe(at(1));
+  });
+
   it("sorts the projects by their newest thread's creation time, not by their latest activity", () => {
     const items = buildItems({
       threads: [

@@ -273,7 +273,7 @@ export const ThreadRow = memo(function ThreadRow({
   secondLine,
   pose,
   end,
-  activityAt,
+  createdAt,
   workspaceClip,
   workspaceKeep,
   placeDescription,
@@ -286,7 +286,7 @@ export const ThreadRow = memo(function ThreadRow({
   readonly secondLine: string | null;
   readonly pose: Pose;
   readonly end: RowEnd;
-  readonly activityAt: string;
+  readonly createdAt: string;
   readonly workspaceClip: string;
   readonly workspaceKeep: string;
   readonly placeDescription: string;
@@ -339,7 +339,7 @@ export const ThreadRow = memo(function ThreadRow({
       ) : end === "age" ? (
         <span className="side-end">
           <AgeLabel
-            at={activityAt}
+            at={createdAt}
             onScreen={onScreen}
             descriptionId={endId}
             as="span"

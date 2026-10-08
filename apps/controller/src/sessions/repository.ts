@@ -461,7 +461,6 @@ const make = Effect.gen(function* () {
       yield* sql`
         UPDATE sessions SET
           status = 'exited',
-          last_activity_at = ${at},
           open_requests = '[]',
           token_hash = NULL,
           exited_at = ${at}
@@ -764,7 +763,11 @@ const make = Effect.gen(function* () {
     },
 
     /**
-     * Changes the session's status and updates its last activity time.
+     * Changes the session's status and updates its last activity time,
+     * except for a move to `exited`: an exit is not activity, so the time
+     * stays what the last real activity wrote, and `exitedAt` holds the exit.
+     * A runner restart exits every live session at once, and stamping each
+     * with that moment would make all of them look equally recent.
      *
      * - `startedAt` is written once, when the session first becomes `idle` or
      *   `busy`. A session resumed later keeps its first start time.
@@ -782,7 +785,7 @@ const make = Effect.gen(function* () {
       Effect.asVoid(sql`
         UPDATE sessions SET
           status = ${status},
-          last_activity_at = ${at},
+          last_activity_at = CASE WHEN ${status} = 'exited' THEN last_activity_at ELSE ${at} END,
           started_at = CASE WHEN started_at IS NULL AND ${status} IN ('idle', 'busy') THEN ${at}
                             ELSE started_at END,
           exited_at = CASE WHEN ${status} = 'exited' THEN ${at} ELSE exited_at END,
@@ -831,6 +834,9 @@ const make = Effect.gen(function* () {
      * It decides nothing: whether the session may be resumed is the service's
      * check, made in the same transaction just before this write.
      *
+     * It leaves `last_activity_at` alone: queuing is not activity, and dispatch
+     * stamps it when the resumed process starts (`started`).
+     *
      * An exited row holds no token hash (migration 0023), so a token that
      * leaked before the exit stays invalid once the session is back on the
      * queue. Dispatch creates a new token for the resumed process.
@@ -841,12 +847,11 @@ const make = Effect.gen(function* () {
      * harmless, because `runner_seq` is only used to drop duplicates and the
      * transcript is read in `position` order.
      */
-    resume: (sessionId: string, spec: string, at: string): Effect.Effect<void, SqlError> =>
+    resume: (sessionId: string, spec: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE sessions SET
           status = 'queued',
           spec = ${spec},
-          last_activity_at = ${at},
           open_requests = '[]',
           stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
                          WHERE session_id = sessions.id)
@@ -872,11 +877,6 @@ const make = Effect.gen(function* () {
      * - the crash-loop guard is disarmed. The service resumes a session only
      *   while the guard does not hold it, and a resume arms it, so before the
      *   resume it was disarmed.
-     * - `last_activity_at` goes back to the exit time, which the exit wrote to
-     *   it. One later time is lost: an event the runner reported after the
-     *   exit is still recorded and moves `last_activity_at` on. That loss is
-     *   harmless: for an exited session the time is only shown and sorted
-     *   by, and `endOnLostRunners` reads it only for running sessions.
      *
      * The spec and the stream offset the resume wrote stay: the next resume
      * writes both again. A queued row holds no token hash and no open
@@ -892,8 +892,7 @@ const make = Effect.gen(function* () {
         sql<{ readonly id: Uint8Array }>`
           UPDATE sessions SET
             status = 'exited',
-            crash_guard_armed = 0,
-            last_activity_at = exited_at
+            crash_guard_armed = 0
           WHERE id = ${uuidFromString(sessionId)} AND status = 'queued'
             AND exited_at IS NOT NULL
           RETURNING id
@@ -962,9 +961,15 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(sessionId)}
       `),
 
+    /**
+     * Sets the session's last activity time to `at`. An exited session is left
+     * alone: an event that arrives after the exit is recorded in the stream,
+     * but it is not activity.
+     */
     touched: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(
-        sql`UPDATE sessions SET last_activity_at = ${at} WHERE id = ${uuidFromString(sessionId)}`,
+        sql`UPDATE sessions SET last_activity_at = ${at}
+            WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'`,
       ),
 
     /**
