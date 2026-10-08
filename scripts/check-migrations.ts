@@ -15,7 +15,24 @@ import { spawnSync } from "node:child_process";
 const BASE_REF = process.env["BASE_REF"] ?? "main";
 const MIGRATIONS_DIR = "apps/controller/src/db/migrations/";
 
-const result = spawnSync("git", ["diff", BASE_REF, "--name-status", "--", MIGRATIONS_DIR], {
+/**
+ * Returns the ref `git diff` should read as the baseline. A pull-request
+ * checkout has `origin/<branch>` after a full fetch, and may not have a local
+ * branch of the same name.
+ */
+function resolveBaseRef(name: string): string {
+  const remote = `origin/${name}`;
+  const remoteCheck = spawnSync("git", ["rev-parse", "--verify", remote], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (remoteCheck.status === 0) return remote;
+  return name;
+}
+
+const baseRef = resolveBaseRef(BASE_REF);
+
+const result = spawnSync("git", ["diff", baseRef, "--name-status", "--", MIGRATIONS_DIR], {
   encoding: "utf8",
   stdio: ["inherit", "pipe", "inherit"],
 });

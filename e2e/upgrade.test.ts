@@ -8,85 +8,171 @@
  * that assumes a shape older rows do not have), and checks that no landed
  * migration has been edited since `edge` was built.
  *
- * The test is skipped when no `edge` release exists yet. Once the first `edge`
- * release is published, this becomes the baseline for every change that follows.
+ * Seeding uses the previous release's own CLI against that release's
+ * controller, the way an operator would. The fixture is a real conversation:
+ * several owner turns, plus every notice or reply the old controller wrote
+ * for them. After the upgrade the test asserts that conversation in full;
+ * it does not drop notices or keep only owner lines.
+ *
+ * In CI the previous `edge` release must exist: a missing baseline fails the
+ * job rather than skipping it. Locally, with no `edge` release, the test is
+ * skipped and says so.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   PASSWORD,
   ROOT,
   USERNAME,
+  completeSetup,
   runCli,
   startController,
   type Controller,
+  type Ran,
 } from "../scripts/controller-process";
-import { createTemporaryHome, parseJsonOutput, readApiKey, type TemporaryHome } from "./harness";
+import {
+  createTemporaryHome,
+  parseJsonOutputOrFail,
+  readApiKey,
+  waitForEnrolledRunner,
+  type Page,
+  type TemporaryHome,
+} from "./harness";
 
-const EDGE_RELEASE_URL = "https://github.com/theagenticage/hercule/releases/download/edge";
-
-// The upgrade test runs on the same platform as CI: macOS arm64 for now.
-// Once Linux edge binaries are published, the test can select by platform.
+const EDGE_TAG = "edge";
 const BINARY_NAME = "hercule-darwin-arm64";
+
+/** Three turns of one conversation, seeded through the old release's CLI. */
+const TURNS = [
+  "What is the status of the test-project repository?",
+  "Which risks should we watch this week?",
+  "What should we do next?",
+] as const;
+
+/** The fields of a conversation message that a migration must keep intact. */
+interface SeededMessage {
+  readonly id: string;
+  readonly position: number;
+  readonly senderRole: string;
+  readonly senderLabel: string;
+  readonly text: string;
+  readonly sessionId: string | null;
+  readonly turnId: string | null;
+}
+
+interface SeededSession {
+  readonly id: string;
+  readonly conversationId: string;
+}
 
 let state: TemporaryHome | undefined;
 let edgeBinary: string | undefined;
 let newBinary: string;
 
 /**
- * Downloads the edge release binary if it exists. Returns the path to the
- * downloaded binary, or undefined if no edge release exists yet.
+ * Downloads the `edge` release binary with `gh`, which uses the job's GitHub
+ * token. Returns the path, or `undefined` when no `edge` release exists and
+ * this is not CI.
  *
- * Fails loudly if the edge release exists but the expected binary asset is
- * missing: that indicates a CI misconfiguration, not the absence of a baseline.
+ * Fails when CI has no `edge` release, and when the release exists but the
+ * expected asset is missing.
  */
-async function downloadEdgeBinary(targetDir: string): Promise<string | undefined> {
-  const binaryPath = join(targetDir, BINARY_NAME);
-  const downloadUrl = `${EDGE_RELEASE_URL}/${BINARY_NAME}`;
-
-  // Check if the binary asset exists
-  const headResponse = await fetch(downloadUrl, { method: "HEAD" });
-  if (headResponse.status === 404) {
-    // Check if this is a missing asset or a missing release by trying the base release URL
-    const releaseCheckResponse = await fetch(EDGE_RELEASE_URL, { method: "HEAD" });
-    if (releaseCheckResponse.status === 404) {
-      // No edge release exists yet
-      if (process.env.CI) {
-        // In CI, fail loudly if there's no baseline rather than silently skipping
-        throw new Error(
-          "No edge release found. CI requires an edge release baseline to validate migrations.",
-        );
-      }
-      // Outside CI, skip the test
-      return undefined;
+function downloadEdgeBinary(targetDir: string): string | undefined {
+  const view = spawnSync("gh", ["release", "view", EDGE_TAG, "--json", "tagName"], {
+    encoding: "utf8",
+  });
+  if (view.status !== 0) {
+    const detail = `${view.stderr}${view.stdout}`.trim();
+    if (process.env["CI"]) {
+      throw new Error(
+        `No edge release found. CI requires an edge release baseline to validate migrations.\n${detail}`,
+      );
     }
-    // Edge release exists but the binary asset is missing - fail loudly
+    return undefined;
+  }
+
+  const download = spawnSync(
+    "gh",
+    ["release", "download", EDGE_TAG, "--pattern", BINARY_NAME, "--dir", targetDir, "--clobber"],
+    { encoding: "utf8" },
+  );
+  const binaryPath = join(targetDir, BINARY_NAME);
+  if (download.status !== 0 || !existsSync(binaryPath)) {
     throw new Error(
-      `Edge release exists but ${BINARY_NAME} asset is missing. This indicates a CI misconfiguration.`,
+      `Edge release exists but ${BINARY_NAME} is missing. This indicates a CI misconfiguration.\n${download.stderr}${download.stdout}`,
     );
   }
-  if (!headResponse.ok) {
-    throw new Error(
-      `Failed to check edge release: ${headResponse.status} ${headResponse.statusText}`,
-    );
-  }
-
-  // Download the binary
-  const response = await fetch(downloadUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to download edge binary: ${response.status} ${response.statusText}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  writeFileSync(binaryPath, buffer, { mode: 0o755 });
-
+  chmodSync(binaryPath, 0o755);
   return binaryPath;
 }
 
+/** Runs one CLI command and fails with that command's own output. */
+function expectJson<A>(ran: Ran): A {
+  return parseJsonOutputOrFail<A>(ran);
+}
+
+/** Lists every message in a conversation, oldest first. */
+async function listMessages(
+  options: { readonly home: string; readonly binary: string },
+  conversationId: string,
+): Promise<ReadonlyArray<SeededMessage>> {
+  const page = expectJson<Page<SeededMessage>>(
+    await runCli(["conversation", "message", "list", conversationId, "--json"], options),
+  );
+  return [...page.items].sort((left, right) => left.position - right.position);
+}
+
+/**
+ * Waits until the conversation holds every owner turn, then until the list
+ * stops growing, so notices the controller writes after a send are kept.
+ */
+async function waitForSeededConversation(
+  options: { readonly home: string; readonly binary: string },
+  conversationId: string,
+): Promise<ReadonlyArray<SeededMessage>> {
+  const deadline = Date.now() + 30_000;
+  let latest: ReadonlyArray<SeededMessage> = [];
+  while (Date.now() < deadline) {
+    latest = await listMessages(options, conversationId);
+    const ownerTexts = latest
+      .filter((message) => message.senderRole === "owner")
+      .map((m) => m.text);
+    if (TURNS.every((turn) => ownerTexts.includes(turn))) {
+      await sleep(1_000);
+      const again = await listMessages(options, conversationId);
+      if (again.length === latest.length) return again;
+      latest = again;
+    }
+    await sleep(250);
+  }
+  throw new Error(
+    `conversation ${conversationId} never held all ${String(TURNS.length)} owner turns:\n${JSON.stringify(latest, null, 2)}`,
+  );
+}
+
+/** Restarts the controller on the same port after a short wait for the bind to free. */
+async function startOnPort(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly port: number;
+}): Promise<Controller> {
+  let last: Error | undefined;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      return await startController(options);
+    } catch (error) {
+      last = error as Error;
+      if (!/in use/.test(last.message)) throw last;
+      await sleep(100);
+    }
+  }
+  throw last ?? new Error("hercule serve did not start on the previous port");
+}
+
 beforeAll(async () => {
-  // Check that the new binary exists
   newBinary = join(ROOT, "hercule");
   if (!existsSync(newBinary)) {
     throw new Error(
@@ -94,14 +180,14 @@ beforeAll(async () => {
     );
   }
 
-  // Set up a scratch home
   state = createTemporaryHome();
-
-  // Try to download the edge binary
   const downloadDir = join(state.home, "edge-download");
   mkdirSync(downloadDir, { recursive: true });
-
-  edgeBinary = await downloadEdgeBinary(downloadDir);
+  edgeBinary = downloadEdgeBinary(downloadDir);
+  if (edgeBinary !== undefined) {
+    const bytes = statSync(edgeBinary).size;
+    console.log(`Downloaded ${BINARY_NAME} (${String(bytes)} bytes) from the ${EDGE_TAG} release.`);
+  }
 }, 60_000);
 
 afterAll(() => {
@@ -115,211 +201,160 @@ describe("upgrading from the previous edge release", () => {
       return;
     }
 
-    // 1. Start the edge binary and complete setup
+    const home = state!.home;
+    const edge = { home, binary: edgeBinary };
     let controller: Controller | undefined;
     try {
-      controller = await startController({ home: state!.home, binary: edgeBinary });
-      const url = controller.url;
+      controller = await startController({ home, binary: edgeBinary });
 
-      // Read the setup URL from the file
-      const setupUrlFile = join(state!.home, "setup-url");
-      const setupUrl = readFileSync(setupUrlFile, "utf8").trim();
-      const token = new URL(setupUrl).searchParams.get("token")!;
+      const setup = await completeSetup({ home, url: controller.url, binary: edgeBinary });
+      expect(setup.code, `${setup.stdout}\n${setup.stderr}`).toBe(0);
 
-      const setupResult = await runCli(
-        [
-          "setup",
-          "complete",
-          "--setup-token",
-          token,
-          "--username",
-          USERNAME,
-          "--password-stdin",
-          "--timezone",
-          "UTC",
-          "--json",
-        ],
-        { home: state!.home, env: { HERCULE_API_URL: url }, stdin: PASSWORD },
+      const login = await runCli(
+        ["login", controller.url, "--username", USERNAME, "--password-stdin", "--name", "upgrade"],
+        { ...edge, stdin: PASSWORD },
       );
-      expect(setupResult.code).toBe(0);
+      expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
+      readApiKey(home);
 
-      // Log in and get an API key
-      const loginResult = await runCli(
-        ["login", url, "--username", USERNAME, "--password-stdin", "--name", "upgrade-test"],
-        { home: state!.home, stdin: PASSWORD },
+      await waitForEnrolledRunner(edge);
+
+      const project = expectJson<{ id: string; name: string }>(
+        await runCli(["project", "create", "--name", "test-project", "--json"], edge),
       );
-      expect(loginResult.code).toBe(0);
 
-      // 2. Fill the database with realistic data
-      // Wait for the default runner to join
-      let runnerJoined = false;
-      for (let i = 0; i < 100; i++) {
-        const controllerRead = await runCli(["controller", "read", "--json"], {
-          home: state!.home,
-        });
-        if (controllerRead.code === 0) {
-          const data = parseJsonOutput(controllerRead) as { defaultRunnerId: string | null };
-          if (data.defaultRunnerId !== null) {
-            runnerJoined = true;
-            break;
-          }
-        }
-        await new Promise((resolve) => setTimeout(resolve, 100));
+      const resource = expectJson<{ id: string; remote: string | null }>(
+        await runCli(
+          [
+            "resource",
+            "create",
+            "--project",
+            project.id,
+            "--kind",
+            "repo",
+            "--remote",
+            "https://github.com/example/repo",
+            "--json",
+          ],
+          edge,
+        ),
+      );
+
+      const assistant = expectJson<{ id: string; name: string; mainConversationId: string }>(
+        await runCli(["assistant", "create", "--name", "upgrade-assistant", "--json"], edge),
+      );
+
+      for (const text of TURNS) {
+        const sent = await runCli(
+          ["conversation", "send", assistant.mainConversationId, "--json"],
+          {
+            ...edge,
+            stdin: text,
+          },
+        );
+        expect(sent.code, `${sent.stdout}\n${sent.stderr}`).toBe(0);
       }
-      expect(runnerJoined, "Default runner should have joined").toBe(true);
 
-      // Create a project with a repository resource
-      const projectResult = await runCli(
-        ["project", "create", "--name", "test-project", "--json"],
-        { home: state!.home },
+      const seededMessages = await waitForSeededConversation(edge, assistant.mainConversationId);
+      const ownerMessages = seededMessages.filter((message) => message.senderRole === "owner");
+      expect(ownerMessages.map((message) => message.text)).toEqual([...TURNS]);
+      expect(
+        seededMessages.length,
+        "the conversation must keep every message the old controller wrote, not only owner turns",
+      ).toBeGreaterThanOrEqual(TURNS.length);
+      console.log(
+        `Seeded conversation ${assistant.mainConversationId} with ${String(seededMessages.length)} messages: ${seededMessages
+          .map((message) => `${message.senderRole}:${message.position}`)
+          .join(", ")}`,
       );
-      expect(projectResult.code).toBe(0);
-      const project = parseJsonOutput(projectResult) as { id: string };
 
-      const resourceResult = await runCli(
-        [
-          "resource",
-          "create",
-          "--project",
-          project.id,
-          "--kind",
-          "repo",
-          "--remote",
-          "https://github.com/example/repo",
-          "--json",
-        ],
-        { home: state!.home },
+      const seededSessions = expectJson<Page<SeededSession>>(
+        await runCli(
+          ["session", "list", "--conversation", assistant.mainConversationId, "--json"],
+          edge,
+        ),
+      ).items;
+
+      const settings = expectJson<{ user: { timezone?: string } }>(
+        await runCli(
+          ["settings", "update", "--user", '{"timezone":"America/New_York"}', "--json"],
+          edge,
+        ),
       );
-      expect(resourceResult.code).toBe(0);
-      const resource = parseJsonOutput(resourceResult) as { id: string };
+      expect(settings.user.timezone).toBe("America/New_York");
 
-      // Note: Creating a GitHub connection and provider instances require specific
-      // credentials/configuration which aren't available in the test environment.
-      // The upgrade test focuses on schema migration and data integrity, which is
-      // adequately tested by project, resource, assistant, conversation, and settings.
-
-      // Create an assistant (which automatically creates its main conversation)
-      const assistantResult = await runCli(
-        ["assistant", "create", "--name", "test-assistant", "--json"],
-        { home: state!.home },
-      );
-      expect(assistantResult.code).toBe(0);
-      const assistant = parseJsonOutput(assistantResult) as {
-        id: string;
-        mainConversationId: string;
-      };
-
-      // Send several messages to the assistant's conversation to create turns
-      // Note: conversation send reads the message from stdin directly (no --text-stdin flag)
-      const msg1Result = await runCli(
-        ["conversation", "send", assistant.mainConversationId, "--json"],
-        { home: state!.home, stdin: "Test message 1" },
-      );
-      expect(msg1Result.code).toBe(0);
-
-      const msg2Result = await runCli(
-        ["conversation", "send", assistant.mainConversationId, "--json"],
-        { home: state!.home, stdin: "Test message 2" },
-      );
-      expect(msg2Result.code).toBe(0);
-
-      const msg3Result = await runCli(
-        ["conversation", "send", assistant.mainConversationId, "--json"],
-        { home: state!.home, stdin: "Test message 3" },
-      );
-      expect(msg3Result.code).toBe(0);
-
-      // Save the IDs of what we created for verification later
-      const testData = {
-        projectId: project.id,
-        resourceId: resource.id,
-        assistantId: assistant.id,
-        conversationId: assistant.mainConversationId,
-      };
-
-      // 3. Stop the edge binary
+      const port = controller.port;
       const stopCode = await controller.stop();
       expect(stopCode).toBe(0);
       controller = undefined;
 
-      // 4. Start the new binary with the same home
-      controller = await startController({ home: state!.home, binary: newBinary });
+      controller = await startOnPort({ home, binary: newBinary, port });
+      const upgraded = { home, binary: newBinary };
 
-      // Read the API key to authenticate CLI commands against the restarted controller
-      const apiKey = readApiKey(state!.home);
+      expectJson(await runCli(["controller", "read", "--json"], upgraded));
 
-      // 5. Verify that the controller boots successfully
-      const newControllerRead = await runCli(["controller", "read", "--json"], {
-        home: state!.home,
-        env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey },
-      });
-      if (newControllerRead.code !== 0) {
-        throw new Error(
-          `controller read failed with exit code ${newControllerRead.code}:\nstdout: ${newControllerRead.stdout}\nstderr: ${newControllerRead.stderr}\ncontroller output: ${controller.output()}`,
-        );
-      }
-      expect(newControllerRead.code).toBe(0);
-
-      // 6. Read every record back and verify it exists
-      const projectRead = await runCli(["project", "read", testData.projectId, "--json"], {
-        home: state!.home,
-        env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey },
-      });
-      expect(projectRead.code).toBe(0);
-      const readProject = parseJsonOutput(projectRead) as { id: string; name: string };
-      expect(readProject.id).toBe(testData.projectId);
-      expect(readProject.name).toBe("test-project");
-
-      const resourceRead = await runCli(["resource", "read", testData.resourceId, "--json"], {
-        home: state!.home,
-        env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey },
-      });
-      expect(resourceRead.code).toBe(0);
-      const readResource = parseJsonOutput(resourceRead) as { id: string; remote: string | null };
-      expect(readResource.id).toBe(testData.resourceId);
-      expect(readResource.remote).toBe("https://github.com/example/repo");
-
-      const assistantRead = await runCli(["assistant", "read", testData.assistantId, "--json"], {
-        home: state!.home,
-        env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey },
-      });
-      expect(assistantRead.code).toBe(0);
-      const readAssistant = parseJsonOutput(assistantRead) as { id: string; name: string };
-      expect(readAssistant.id).toBe(testData.assistantId);
-      expect(readAssistant.name).toBe("test-assistant");
-
-      // Read the conversation and its messages
-      const conversationRead = await runCli(
-        ["conversation", "read", testData.conversationId, "--json"],
-        { home: state!.home, env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey } },
+      const readProject = expectJson<{ id: string; name: string }>(
+        await runCli(["project", "read", project.id, "--json"], upgraded),
       );
-      expect(conversationRead.code).toBe(0);
-      const readConversation = parseJsonOutput(conversationRead) as {
-        id: string;
-        assistantId: string;
-      };
-      expect(readConversation.id).toBe(testData.conversationId);
-      expect(readConversation.assistantId).toBe(testData.assistantId);
+      expect(readProject).toMatchObject({ id: project.id, name: "test-project" });
 
-      // List messages in the conversation - should have 3 user messages
-      const messagesRead = await runCli(
-        ["conversation", "message", "list", testData.conversationId, "--json"],
-        { home: state!.home, env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey } },
+      const readResource = expectJson<{ id: string; remote: string | null }>(
+        await runCli(["resource", "read", resource.id, "--json"], upgraded),
       );
-      expect(messagesRead.code).toBe(0);
-      const messages = parseJsonOutput(messagesRead) as {
-        items: Array<{ id: string; senderRole: string; text: string }>;
-      };
-      // Filter to just the user messages (sender sent 3, assistant may have replied with notices)
-      const userMessages = messages.items.filter((m) => m.senderRole === "owner");
-      expect(userMessages).toHaveLength(3);
-      expect(userMessages.map((m) => m.text).sort()).toEqual([
-        "Test message 1",
-        "Test message 2",
-        "Test message 3",
-      ]);
+      expect(readResource).toMatchObject({
+        id: resource.id,
+        remote: "https://github.com/example/repo",
+      });
+
+      const readAssistant = expectJson<{ id: string; name: string; mainConversationId: string }>(
+        await runCli(["assistant", "read", assistant.id, "--json"], upgraded),
+      );
+      expect(readAssistant).toMatchObject({
+        id: assistant.id,
+        name: "upgrade-assistant",
+        mainConversationId: assistant.mainConversationId,
+      });
+
+      const readConversation = expectJson<{ id: string; assistantId: string }>(
+        await runCli(["conversation", "read", assistant.mainConversationId, "--json"], upgraded),
+      );
+      expect(readConversation).toMatchObject({
+        id: assistant.mainConversationId,
+        assistantId: assistant.id,
+      });
+
+      const upgradedMessages = await listMessages(upgraded, assistant.mainConversationId);
+      expect(upgradedMessages.map(summarizeMessage)).toEqual(seededMessages.map(summarizeMessage));
+
+      const upgradedSessions = expectJson<Page<SeededSession>>(
+        await runCli(
+          ["session", "list", "--conversation", assistant.mainConversationId, "--json"],
+          upgraded,
+        ),
+      ).items;
+      expect(upgradedSessions.map((session) => session.id).sort()).toEqual(
+        seededSessions.map((session) => session.id).sort(),
+      );
+
+      const upgradedSettings = expectJson<{ user: { timezone?: string } }>(
+        await runCli(["settings", "read", "--json"], upgraded),
+      );
+      expect(upgradedSettings.user.timezone).toBe("America/New_York");
     } finally {
       await controller?.stop().catch(() => -1);
     }
   }, 180_000);
 });
+
+/** Returns the fields a migration must preserve on a conversation message. */
+function summarizeMessage(message: SeededMessage): SeededMessage {
+  return {
+    id: message.id,
+    position: message.position,
+    senderRole: message.senderRole,
+    senderLabel: message.senderLabel,
+    text: message.text,
+    sessionId: message.sessionId,
+    turnId: message.turnId,
+  };
+}
