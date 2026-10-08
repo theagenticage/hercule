@@ -1,8 +1,8 @@
 /**
  * The app's settings file: the one small file main keeps in the app's user
  * data folder, `settings.json`. It holds the saved controller URL, the login
- * token as the Keychain encrypted it, the window's state, and the steps of
- * the first run the user put off. The token sits beside the URL of the
+ * token as the Keychain encrypted it, the window's state, the steps of the
+ * first run the user put off, and the Appearance. The token sits beside the URL of the
  * controller it belongs to, so that one write changes both.
  *
  * The file is read once, when main starts, and kept in memory; reads never
@@ -23,7 +23,8 @@ import * as Layer from "effect/Layer";
 import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import { FirstRunProgress } from "../ipc/contract";
+import { Appearance, FirstRunProgress } from "../ipc/contract";
+import { DEFAULT_APPEARANCE } from "../ipc/appearance";
 import { isHttpUrl } from "../ipc/http-url";
 
 /** The URL of the controller the app connects to. */
@@ -162,6 +163,8 @@ const make = (file: string) =>
     let encryptedToken = yield* decodeSettingsKey(EncryptedToken, settings, "token", file);
     let windowState = yield* decodeSettingsKey(WindowState, settings, "window", file);
     let firstRun = yield* decodeSettingsKey(FirstRunProgress, settings, "firstRun", file);
+    let appearance =
+      (yield* decodeSettingsKey(Appearance, settings, "appearance", file)) ?? DEFAULT_APPEARANCE;
     const fileWriteLock = yield* Semaphore.make(1);
 
     /**
@@ -287,6 +290,23 @@ const make = (file: string) =>
             const encoded = yield* Effect.orDie(Schema.encodeEffect(FirstRunProgress)(progress));
             yield* writeSettings({ ...settings, firstRun: encoded });
             firstRun = progress;
+          }),
+        ),
+
+      /** Returns the saved Appearance, or the defaults when none is saved. */
+      readAppearance: Effect.sync(() => appearance),
+
+      /**
+       * Saves the Appearance. Fails when the file cannot be written, and then
+       * keeps the Appearance saved before.
+       */
+      saveAppearance: (next: Appearance) =>
+        runSave(
+          Effect.gen(function* () {
+            // The schema encodes every value of its type.
+            const encoded = yield* Effect.orDie(Schema.encodeEffect(Appearance)(next));
+            yield* writeSettings({ ...settings, appearance: encoded });
+            appearance = next;
           }),
         ),
     };

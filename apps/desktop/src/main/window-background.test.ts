@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { WINDOW_BACKGROUND } from "./window-background";
+import { DEFAULT_APPEARANCE, THEMES } from "../ipc/appearance";
+import { chooseWindowBackground, WINDOW_BACKGROUND } from "./window-background";
 
 const readStyles = (name: string): string =>
   readFileSync(new URL(`../renderer/styles/${name}`, import.meta.url), "utf8");
@@ -60,20 +61,21 @@ const convertOklchToHex = ([lightness, chroma, hue]: [number, number, number]): 
 };
 
 describe("the window background", () => {
-  it("is Whitehaven's --bg in the light appearance", () => {
-    expect(WINDOW_BACKGROUND.light).toBe(
-      convertOklchToHex(readBackgroundToken('[data-theme="whitehaven"]')),
+  it.each(THEMES)("is the --bg of %s in tokens.css, as 8-bit sRGB", (theme) => {
+    expect(WINDOW_BACKGROUND[theme]).toBe(
+      convertOklchToHex(readBackgroundToken(`[data-theme="${theme}"]`)),
     );
   });
 
-  it("is Orient Express's --bg in the dark appearance", () => {
-    expect(WINDOW_BACKGROUND.dark).toBe(
-      convertOklchToHex(readBackgroundToken('[data-theme="orient-express"]')),
-    );
+  it.each(THEMES)("is the exact --bg that base.css gives the page in %s", (theme) => {
+    expect(readBackgroundOverride(`[data-theme="${theme}"]`)).toBe(WINDOW_BACKGROUND[theme]);
   });
 
-  it("is the exact --bg that base.css gives the page in both themes", () => {
-    expect(readBackgroundOverride('[data-theme="whitehaven"]')).toBe(WINDOW_BACKGROUND.light);
-    expect(readBackgroundOverride('[data-theme="orient-express"]')).toBe(WINDOW_BACKGROUND.dark);
+  it("is the theme in use's: by macOS's appearance with Follow the system on, the chosen theme with it off", () => {
+    const followSystem = { ...DEFAULT_APPEARANCE, dayTheme: "styles", nightTheme: "nile" } as const;
+    expect(chooseWindowBackground(followSystem, false)).toBe(WINDOW_BACKGROUND.styles);
+    expect(chooseWindowBackground(followSystem, true)).toBe(WINDOW_BACKGROUND.nile);
+    const endHouse = { ...followSystem, followSystem: false, theme: "end-house" } as const;
+    expect(chooseWindowBackground(endHouse, false)).toBe(WINDOW_BACKGROUND["end-house"]);
   });
 });

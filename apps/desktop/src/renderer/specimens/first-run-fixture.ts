@@ -22,6 +22,7 @@ import {
   type Resource,
   type Runner,
 } from "@hercule/contract";
+import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
 import type { Bridge } from "../../ipc/bridge";
 import type {
   FirstRunProgress,
@@ -289,6 +290,7 @@ const createScriptedBridge = ({
         return done();
       },
     },
+    appearance: { read: () => DEFAULT_APPEARANCE, save: done },
     link: { open: done },
     menu: { onCommand: () => () => undefined },
     destination: { onOpen: () => () => undefined },

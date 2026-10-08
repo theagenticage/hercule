@@ -32,6 +32,19 @@ const invokeChannel = async <Name extends RendererToMainIpcChannelName>(
 };
 
 /**
+ * Sends one message to main on the synchronous channel `name`, and blocks
+ * the page until main replies. Returns main's response, and throws main's
+ * reason when main refuses the message.
+ */
+const readChannelSynchronously = <Name extends RendererToMainIpcChannelName>(
+  name: Name,
+): EncodedIpcResponse<Name> => {
+  const reply = ipcRenderer.sendSync(name) as IpcReply<EncodedIpcResponse<Name>>;
+  if ("refusal" in reply) throw new Error(reply.refusal);
+  return reply.response;
+};
+
+/**
  * Calls `listener` with the payload of each message main sends on the
  * channel `name`, and returns a function that removes the listener. The
  * listener never sees Electron's event object, whose `sender` would let the
@@ -90,6 +103,10 @@ const bridge: Bridge = {
   firstRunProgress: {
     read: () => invokeChannel("firstRunProgress.read"),
     save: (progress) => invokeChannel("firstRunProgress.save", progress),
+  },
+  appearance: {
+    read: () => readChannelSynchronously("appearance.read"),
+    save: (appearance) => invokeChannel("appearance.save", appearance),
   },
   link: {
     open: (request) => invokeChannel("link.open", request),

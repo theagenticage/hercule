@@ -367,6 +367,22 @@ contextBridge.exposeInMainWorld("rawIpc", { invoke: (channel, ...args) => ipcRen
       refused: `Main refused a message on controllerUrl.read: it comes from ${stranger.url}, not app://hercule.`,
     });
   });
+
+  it("refuses a synchronous message from a page whose origin is not app://hercule", async () => {
+    const { app } = await launchForTest();
+    const stranger = await startServerForTest(answerWithEmptyPage);
+
+    // `appearance.read` is answered synchronously, so the bridge throws
+    // main's refusal rather than rejecting a promise.
+    const outcome = await runScriptInWindowAt(
+      app,
+      `${stranger.url}/`,
+      "(() => { try { return { value: window.bridge.appearance.read() }; } catch (error) { return { refused: error.message }; } })()",
+    );
+    expect(outcome).toEqual({
+      refused: `Main refused a message on appearance.read: it comes from ${stranger.url}, not app://hercule.`,
+    });
+  });
 });
 
 describe("the stored token", () => {

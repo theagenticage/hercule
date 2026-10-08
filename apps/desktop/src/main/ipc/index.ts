@@ -3,12 +3,13 @@
  * registered with Electron once at boot.
  */
 import { userInfo } from "node:os";
-import { ipcMain } from "electron";
-import { Effect, type ManagedRuntime } from "effect";
+import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { Effect, Exit, type ManagedRuntime } from "effect";
 import {
   type IpcRequest,
   type IpcResponse,
   RENDERER_TO_MAIN_IPC_CHANNELS,
+  type RendererToMainIpcChannel,
   type RendererToMainIpcChannelName,
 } from "../../ipc/contract";
 import { AppSettings, type NoControllerSaved } from "../app-settings";
@@ -75,6 +76,13 @@ const IPC_HANDLERS: {
     AppSettings.use((settings) => settings.saveFirstRunProgress(progress)).pipe(
       Effect.catchTag("PlatformError", Effect.die),
     ),
+  "appearance.read": () => AppSettings.use((settings) => settings.readAppearance),
+  // As for the first run's progress, a write that fails is a defect.
+  "appearance.save": (appearance) =>
+    AppSettings.use((settings) => settings.saveAppearance(appearance)).pipe(
+      Effect.catchTag("PlatformError", Effect.die),
+      Effect.andThen(MainWindow.use((window) => window.paintBackground)),
+    ),
   "link.open": ({ url }) => openInBrowser(url),
 };
 
@@ -83,21 +91,41 @@ const IPC_HANDLERS: {
  * message runs on `runtime`: main checks its sender, decodes its request, runs
  * the channel's handler and encodes the response (see `answerIpcMessage`).
  *
+ * A synchronous channel's message runs synchronously, and its reply is the
+ * event's `returnValue`: the page is blocked until main sets it. Its handler
+ * answers from memory, so it never waits. A defect is logged and replied as
+ * a refusal rather than thrown: a listener that throws sets no
+ * `returnValue`, and the page would stay blocked.
+ *
  * Call it once, before the window loads its page.
  */
 export const registerIpcHandlers = (
   runtime: ManagedRuntime.ManagedRuntime<IpcHandlerServices, never>,
 ): void => {
-  const registerIpcHandler = <Name extends RendererToMainIpcChannelName>(name: Name) =>
-    ipcMain.handle(name, (event, ...args) =>
-      runtime.runPromise(
-        answerIpcMessage(name, IPC_HANDLERS[name], {
-          senderFrame: event.senderFrame,
-          mainFrame: event.sender.mainFrame,
-          args,
-        }),
-      ),
-    );
+  const registerIpcHandler = <Name extends RendererToMainIpcChannelName>(name: Name) => {
+    const answer = (event: IpcMainEvent | IpcMainInvokeEvent, args: ReadonlyArray<unknown>) =>
+      answerIpcMessage(name, IPC_HANDLERS[name], {
+        senderFrame: event.senderFrame,
+        mainFrame: event.sender.mainFrame,
+        args,
+      });
+    const channel: RendererToMainIpcChannel = RENDERER_TO_MAIN_IPC_CHANNELS[name];
+    if (channel.synchronous === true) {
+      ipcMain.on(name, (event, ...args) => {
+        const exit = runtime.runSyncExit(answer(event, args));
+        if (Exit.isSuccess(exit)) {
+          event.returnValue = exit.value;
+          return;
+        }
+        // The cause stays in main's log: the page needs only to know that
+        // the read failed, and a stack trace would tell it about main.
+        runtime.runSync(Effect.logError(`Main failed to answer ${name}.`, exit.cause));
+        event.returnValue = { refusal: `Main failed to answer ${name}.` };
+      });
+    } else {
+      ipcMain.handle(name, (event, ...args) => runtime.runPromise(answer(event, args)));
+    }
+  };
   for (const name of Object.keys(
     RENDERER_TO_MAIN_IPC_CHANNELS,
   ) as Array<RendererToMainIpcChannelName>) {

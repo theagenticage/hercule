@@ -27,6 +27,13 @@ export class MainWindow extends Context.Service<
     readonly reload: Effect.Effect<void>;
 
     /**
+     * Paints the window's background with the `--bg` of the theme in use,
+     * after the Appearance has changed. The window repaints itself when
+     * macOS's appearance changes.
+     */
+    readonly paintBackground: Effect.Effect<void>;
+
+    /**
      * Shows the window and focuses it. Does nothing before the window has
      * shown for the first time.
      */
