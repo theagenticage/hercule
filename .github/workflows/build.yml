@@ -1,12 +1,13 @@
 name: Build
 
-# A pull request that changes Markdown files alone builds nothing: the
-# binary holds none of them. A tag always builds.
+# A pull request that changes only Markdown files or agent skills and settings
+# (.agents/, .claude/) builds nothing: the binary holds none of them. A tag
+# always builds.
 on:
   push:
     tags: ["v*"]
   pull_request:
-    paths-ignore: ["**/*.md"]
+    paths-ignore: ["**/*.md", ".agents/**", ".claude/**"]
   workflow_dispatch:
 
 concurrency:
