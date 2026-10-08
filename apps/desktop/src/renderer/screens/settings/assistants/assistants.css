@@ -80,12 +80,6 @@
   color: var(--ink);
 }
 
-/* Not in the book, whose rows show values rather than controls. The Name
-   field is as wide as the selects under it. */
-.assistant-settings .set-row > span.field:not(.field--select) {
-  width: 214px;
-}
-
 /* Not in the book, which always has assistants: the section with none. */
 .empty-assistants {
   display: grid;
@@ -102,10 +96,4 @@
 }
 .empty-assistants span {
   max-width: 380px;
-}
-
-@container (width < 520px) {
-  .assistant-settings .set-row > span.field:not(.field--select) {
-    width: auto;
-  }
 }

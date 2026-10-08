@@ -1,8 +1,8 @@
 /**
  * What Settings > Permission profiles needs to interpret: the words for the
  * grant families, the order of the profile list, a free name for a new
- * profile, which profile is unrestricted, who uses each profile, and the
- * grant list after one grant is switched on or off.
+ * profile, which profile is unrestricted, which agents carry each profile,
+ * and the grant list after one grant is switched on or off.
  */
 import { ALL_GRANTS } from "@hercule/contract";
 import type { Agent, Assistant, Grant, GrantFamily, Profile } from "@hercule/contract";
@@ -64,91 +64,121 @@ export const chooseNewProfileName = (profiles: ReadonlyArray<Pick<Profile, "name
   return name;
 };
 
-/** An agent or an assistant that carries a permission profile. */
-export interface ProfileUser {
+/**
+ * An agent that carries a permission profile. An assistant is a kind of
+ * agent, so `kind` tells the two apart.
+ */
+export interface ProfileAgent {
   readonly id: string;
   readonly name: string;
   readonly kind: "agent" | "assistant";
 }
 
+/** Orders two ids as text, which for UUIDv7 is the order they were made in. */
+const compareById = (a: { readonly id: string }, b: { readonly id: string }): number =>
+  a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+
 /**
- * Returns the users of each profile, by profile id. A profile nobody uses has
- * no entry.
+ * Orders two records by name, and by id when the names are equal, so a list
+ * sorted with it has the same order on every read.
+ */
+const compareByNameThenId = (
+  a: { readonly id: string; readonly name: string },
+  b: { readonly id: string; readonly name: string },
+): number => a.name.localeCompare(b.name) || compareById(a, b);
+
+/**
+ * Returns the agents of each profile, by profile id. A profile no agent
+ * carries has no entry.
  *
  * `agent.query` never returns an assistant (an assistant is an agent row of
- * its own kind, listed by `assistant.query`), so a user appears once. Within
- * a profile the assistants come first and the agents after them, each group
- * by name and then by id, so the order is the same on every read.
+ * its own kind, listed by `assistant.query`), so an agent appears once.
+ * Within a profile the assistants come first and the plain agents after
+ * them, each group by name and then by id, so the order is the same on every
+ * read.
  */
-export const groupProfileUsers = (
+export const groupAgentsByProfile = (
   agents: ReadonlyArray<Pick<Agent, "id" | "name" | "permissionProfileId">>,
   assistants: ReadonlyArray<Pick<Assistant, "id" | "name" | "permissionProfileId">>,
-): ReadonlyMap<string, ReadonlyArray<ProfileUser>> => {
-  const compare = (a: ProfileUser, b: ProfileUser): number =>
-    a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-  const listUsers = (
-    holders: ReadonlyArray<Pick<Agent, "id" | "name" | "permissionProfileId">>,
-    kind: ProfileUser["kind"],
-  ): ReadonlyArray<readonly [string, ProfileUser]> =>
-    holders
+): ReadonlyMap<string, ReadonlyArray<ProfileAgent>> => {
+  const listAgents = (
+    records: ReadonlyArray<Pick<Agent, "id" | "name" | "permissionProfileId">>,
+    kind: ProfileAgent["kind"],
+  ): ReadonlyArray<readonly [string, ProfileAgent]> =>
+    records
       .map((each) => [each.permissionProfileId, { id: each.id, name: each.name, kind }] as const)
-      .sort(([, a], [, b]) => compare(a, b));
-  const grouped = new Map<string, ProfileUser[]>();
-  for (const [profileId, user] of [
-    ...listUsers(assistants, "assistant"),
-    ...listUsers(agents, "agent"),
+      .sort(([, a], [, b]) => compareByNameThenId(a, b));
+  const grouped = new Map<string, ProfileAgent[]>();
+  for (const [profileId, agent] of [
+    ...listAgents(assistants, "assistant"),
+    ...listAgents(agents, "agent"),
   ]) {
-    const users = grouped.get(profileId);
-    if (users === undefined) grouped.set(profileId, [user]);
-    else users.push(user);
+    const inProfile = grouped.get(profileId);
+    if (inProfile === undefined) grouped.set(profileId, [agent]);
+    else inProfile.push(agent);
   }
   return grouped;
 };
 
-/** The most users a profile row names; the rest are counted. */
-const NAMED_USER_LIMIT = 2;
+/** The most agents a profile row names; the rest are counted. */
+const NAMED_AGENT_LIMIT = 2;
+
+/** Returns the names of the first `NAMED_AGENT_LIMIT` agents, and how many agents come after them. */
+const splitNamedAgents = (
+  agents: ReadonlyArray<ProfileAgent>,
+): { readonly names: ReadonlyArray<string>; readonly rest: number } => {
+  const names = agents.slice(0, NAMED_AGENT_LIMIT).map((agent) => agent.name);
+  return { names, rest: agents.length - names.length };
+};
 
 /**
- * Returns the users' names as the profile list shows them: "Nothing" for no
- * users, the names joined with ", " for one or two, and the first two names
+ * Returns the agents' names as the profile list shows them: "Nothing" for no
+ * agents, the names joined with ", " for one or two, and the first two names
  * followed by " and N more" for more ("Milo, pr-review and 3 more").
  */
-export const describeProfileUsers = (users: ReadonlyArray<ProfileUser>): string => {
-  if (users.length === 0) return "Nothing";
-  const names = users.slice(0, NAMED_USER_LIMIT).map((user) => user.name);
-  const rest = users.length - names.length;
+export const describeProfileAgents = (agents: ReadonlyArray<ProfileAgent>): string => {
+  if (agents.length === 0) return "Nothing";
+  const { names, rest } = splitNamedAgents(agents);
   return rest > 0 ? `${names.join(", ")} and ${rest} more` : names.join(", ");
 };
 
 /**
  * Returns the sentence that explains why a profile cannot be deleted while
- * `users` carry it, or `null` when nobody does. Up to two users are named,
- * as in the list ("Milo and pr-review use it. Move them to another profile
- * first."), and any others are counted ("Milo, pr-review and 3 more use it.").
+ * `agents` carry it, or `null` when no agent does. Up to two agents are
+ * named ("Milo and pr-review use it. Move them to another profile first."),
+ * and any others are counted ("Milo, pr-review and 3 more use it.").
  */
-export const describeProfileDeleteBlock = (users: ReadonlyArray<ProfileUser>): string | null => {
-  if (users.length === 0) return null;
-  const names = users.slice(0, NAMED_USER_LIMIT).map((user) => user.name);
-  const rest = users.length - names.length;
+export const describeProfileInUse = (agents: ReadonlyArray<ProfileAgent>): string | null => {
+  if (agents.length === 0) return null;
+  const { names, rest } = splitNamedAgents(agents);
   const who = formatNameList(rest > 0 ? [...names, `${rest} more`] : names, "and");
-  return users.length === 1
+  return agents.length === 1
     ? `${who} uses it. Move it to another profile first.`
     : `${who} use it. Move them to another profile first.`;
 };
 
+/** One grant put into a profile or taken out of it. */
+export interface GrantChange {
+  readonly grant: Grant;
+  /** Whether the profile holds `grant` after the change. */
+  readonly held: boolean;
+}
+
+/** Returns the family a grant belongs to: "task" for "task.delete". */
+export const readGrantFamily = (grant: Grant): GrantFamily => grant.split(".")[0] as GrantFamily;
+
 /**
- * Returns `grants` with `grant` added when `held` is true, or removed when it
- * is false. The result is in `ALL_GRANTS` order and holds no repeats, so the
- * list sent to `profile.update`, which replaces the whole list, is the same
- * for the same set of grants.
+ * Returns `grants` with `change.grant` added when `change.held` is true, or
+ * removed when it is false. The result is in `ALL_GRANTS` order and holds no
+ * repeats, so the list sent to `profile.update`, which replaces the whole
+ * list, is the same for the same set of grants.
  */
-export const setGrantHeld = (
+export const applyGrantChange = (
   grants: ReadonlyArray<Grant>,
-  grant: Grant,
-  held: boolean,
+  change: GrantChange,
 ): ReadonlyArray<Grant> => {
   const current = new Set(grants);
-  return ALL_GRANTS.filter((each) => (each === grant ? held : current.has(each)));
+  return ALL_GRANTS.filter((each) => (each === change.grant ? change.held : current.has(each)));
 };
 
 /**
@@ -159,12 +189,7 @@ export const setGrantHeld = (
 export const sortProfiles = <P extends Pick<Profile, "id" | "name" | "shipped">>(
   profiles: ReadonlyArray<P>,
 ): ReadonlyArray<P> =>
-  profiles.toSorted(
-    (a, b) =>
-      Number(b.shipped) - Number(a.shipped) ||
-      a.name.localeCompare(b.name) ||
-      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-  );
+  profiles.toSorted((a, b) => Number(b.shipped) - Number(a.shipped) || compareByNameThenId(a, b));
 
 /** The name of the shipped profile that is meant to hold every grant. */
 const UNRESTRICTED_PROFILE_NAME = "unrestricted";
@@ -174,21 +199,28 @@ const UNRESTRICTED_PROFILE_NAME = "unrestricted";
  * threads run on unless the user picks another one.
  *
  * The profile is found by its shipped name, so a rename makes this return
- * `false`. A profile id that stays the same for it is tracked in issue #496.
+ * `false`. Issue #496 tracks giving it a fixed id, so a rename no longer hides it.
  */
 export const isUnrestrictedProfile = (profile: Pick<Profile, "name" | "shipped">): boolean =>
   profile.shipped && profile.name === UNRESTRICTED_PROFILE_NAME;
 
 /**
- * Returns the first line of the question that asks before a grant of the
- * profile `profileName` changes: "This takes Delete on Tasks away from
- * unrestricted." when `held` is false, and "This gives Delete on Tasks back
- * to unrestricted." when it is true.
+ * Returns the first line of the dialog that asks before a grant of the
+ * unrestricted profile `profileName` changes: "This takes Delete on Tasks
+ * away from unrestricted." when `change.held` is false, and "This gives
+ * Delete on Tasks back to unrestricted." when it is true.
+ *
+ * The "gives ... back" wording assumes the profile is meant to hold every
+ * grant, so it fits the unrestricted profile only.
  */
-export const describeGrantChange = (profileName: string, grant: Grant, held: boolean): string => {
-  const [family, verb = ""] = grant.split(".") as [GrantFamily, string?];
+export const describeUnrestrictedGrantChange = (
+  profileName: string,
+  change: GrantChange,
+): string => {
+  const family = readGrantFamily(change.grant);
+  const verb = change.grant.slice(family.length + 1);
   const what = `${formatGrantVerb(verb)} on ${GRANT_FAMILY_TEXT[family].label}`;
-  return held
+  return change.held
     ? `This gives ${what} back to ${profileName}.`
     : `This takes ${what} away from ${profileName}.`;
 };

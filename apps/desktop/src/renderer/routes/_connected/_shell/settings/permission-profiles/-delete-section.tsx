@@ -1,34 +1,37 @@
 import { useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { describeProfileDeleteBlock, readErrorMessage } from "@hercule/client-core";
+import { describeProfileInUse, readErrorMessage } from "@hercule/client-core";
 import type { Profile } from "@hercule/contract";
-import { profilesQuery } from "../../../../../app/queries";
-import { GlassDialog } from "../../../../../screens/glass-dialog";
-import type { PosedProfileUser } from "../../../../../screens/settings/permission-profiles/profile-user-face";
+import { agentsQuery, profilesQuery } from "../../../../../app/queries";
+import { ConfirmDialog } from "../../../../../screens/confirm-dialog";
+import type { PosedProfileAgent } from "../../../../../screens/settings/permission-profiles/profile-agent-face";
 import { SettingRow } from "../../../../../screens/settings/setting-row";
 
 /**
- * Renders the Delete section of a profile (spec 17 §Settings, Permission
- * profiles):
+ * Renders the Delete section of the profile `profile`, which is shown as
+ * `profileName` (spec 17 §Settings, Permission profiles):
  *
- * - A shipped profile has no button, only a line that says why.
- * - A profile that `users` carry has a disabled button, and a hint that
- *   names its users.
+ * - A shipped profile has no button, only a line that explains why.
+ * - A profile that `agents` carry has a disabled button, and a hint that
+ *   names those agents.
  * - Any other profile has a button that asks for a confirmation in a dialog
  *   before anything is deleted. The controller can still refuse, for
- *   example while a live session uses the profile, and the dialog then
- *   stays open and shows why.
+ *   example while a live session uses the profile. The dialog then stays
+ *   open and shows why, and the profiles and agents are read again, so the
+ *   page shows what the controller knows.
  *
  * Once the controller has deleted the profile, it is removed from the cached
  * list, which takes the profile's page away.
  */
 export function DeleteSection({
   profile,
-  users,
+  profileName,
+  agents,
 }: {
   readonly profile: Profile;
-  readonly users: ReadonlyArray<PosedProfileUser>;
+  readonly profileName: string;
+  readonly agents: ReadonlyArray<PosedProfileAgent>;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
@@ -44,25 +47,33 @@ export function DeleteSection({
       // the profile back.
       await queryClient.invalidateQueries({ queryKey });
     },
+    // The refusal may mean the lists on screen are out of date: an agent that
+    // now uses the profile, or a profile that is already gone.
+    onError: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: agentsQuery(client).queryKey }),
+        queryClient.invalidateQueries({ queryKey: profilesQuery(client).queryKey }),
+      ]);
+    },
   });
-  const deleteBlock = describeProfileDeleteBlock(users);
+  const inUseHint = describeProfileInUse(agents);
   return (
     <section className="set-sec">
-      <h2>{`Delete ${profile.name}`}</h2>
+      <h2>{`Delete ${profileName}`}</h2>
       {profile.shipped ? (
         <div className="profile-fixed">
-          {`${profile.name} is shipped with Hercule, so it cannot be deleted. Edit its grants instead.`}
+          {`${profileName} is shipped with Hercule, so it cannot be deleted. Edit its grants instead.`}
         </div>
       ) : (
         <SettingRow
           label="Delete profile"
-          hint={deleteBlock ?? "Removes it and its grants."}
+          hint={inUseHint ?? "Removes it and its grants."}
           control={(labels) => (
             <button
               type="button"
               className="btn btn--danger"
-              // A profile that is in use cannot be deleted. The hint says why.
-              disabled={deleteBlock !== null}
+              // A profile that is in use cannot be deleted. The hint gives the reason.
+              disabled={inUseHint !== null}
               {...labels}
               onClick={() => {
                 remove.reset();
@@ -75,43 +86,22 @@ export function DeleteSection({
         />
       )}
       {confirming && (
-        <GlassDialog
+        <ConfirmDialog
           dialogRef={dialogRef}
-          className="confirm-dialog"
-          label={`Delete ${profile.name}?`}
+          title={`Delete ${profileName}?`}
+          actionLabel={remove.isPending ? "Deleting…" : "Delete"}
+          actionClass="danger"
+          pending={remove.isPending}
+          error={
+            remove.error === null ? null : `Could not delete: ${readErrorMessage(remove.error)}`
+          }
+          onConfirm={() => {
+            remove.mutate();
+          }}
           onClose={() => setConfirming(false)}
         >
-          <div className="pop-h">
-            <b>{`Delete ${profile.name}?`}</b>
-          </div>
-          <div className="pop-sec confirm-dialog-body">
-            <p>{`This removes ${profile.name} and its grants. This cannot be undone.`}</p>
-            {remove.error !== null && (
-              <p className="fl-err" role="alert">
-                {`Could not delete: ${readErrorMessage(remove.error)}`}
-              </p>
-            )}
-            <div className="confirm-dialog-acts">
-              <button
-                type="button"
-                className="btn btn--quiet"
-                onClick={() => dialogRef.current?.close()}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn--danger"
-                aria-disabled={remove.isPending}
-                onClick={() => {
-                  if (!remove.isPending) remove.mutate();
-                }}
-              >
-                {remove.isPending ? "Deleting…" : "Delete"}
-              </button>
-            </div>
-          </div>
-        </GlassDialog>
+          <p>{`This removes ${profileName} and its grants. This cannot be undone.`}</p>
+        </ConfirmDialog>
       )}
     </section>
   );

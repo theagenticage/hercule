@@ -285,17 +285,19 @@ export {
 export { formatControllerAddress, isLoopbackOrigin } from "./controller-origin";
 export { formatNameList } from "./name-list";
 export {
+  applyGrantChange,
   chooseNewProfileName,
-  describeGrantChange,
-  describeProfileDeleteBlock,
-  describeProfileUsers,
+  describeProfileAgents,
+  describeProfileInUse,
+  describeUnrestrictedGrantChange,
   formatGrantVerb,
   GRANT_FAMILY_TEXT,
-  groupProfileUsers,
+  groupAgentsByProfile,
   isUnrestrictedProfile,
-  setGrantHeld,
+  readGrantFamily,
   sortProfiles,
-  type ProfileUser,
+  type GrantChange,
+  type ProfileAgent,
 } from "./permission-profiles";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
 export {

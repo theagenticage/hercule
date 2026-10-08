@@ -10,8 +10,9 @@ import { useSavedRecordField } from "../../../../../app/saved-record-field";
  * `assistant.update` payload that applies the change to `latest`, the
  * assistant as the cache holds it when the save starts.
  *
- * Six fields of an assistant's settings call it with the same list, record
- * kind and update, so they pass only what differs between fields.
+ * Six fields of an assistant's settings call it with the same list and
+ * update, so they pass only what differs between fields. The cached list is
+ * current enough to build on, because the live connection keeps it so.
  */
 export function useSavedAssistantField<Value, Change>(
   client: HerculeClient,
@@ -22,7 +23,6 @@ export function useSavedAssistantField<Value, Change>(
 ): SavedField<Value, Change> {
   return useSavedRecordField({
     listKey: assistantsQuery(client).queryKey,
-    recordKind: "assistant",
     id: assistantId,
     stored,
     applyChange,

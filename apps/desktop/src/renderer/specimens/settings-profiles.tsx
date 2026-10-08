@@ -22,9 +22,9 @@
 import { mountPermissionProfilesSettingsSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
 import {
+  PERMISSION_PROFILES_SETTINGS_RECORDS,
+  PERMISSION_PROFILES_SIDEBAR_RECORDS,
   REVIEWER_PROFILE,
-  SETTINGS_PROFILES_RECORDS,
-  SETTINGS_PROFILES_SCREEN,
   UNRESTRICTED_PROFILE,
 } from "./settings-profiles-fixture";
 
@@ -47,9 +47,9 @@ function chooseAddress(bookState: string | null): string {
 }
 
 await mountPermissionProfilesSettingsSpecimen(
-  SETTINGS_PROFILES_RECORDS,
+  PERMISSION_PROFILES_SIDEBAR_RECORDS,
   chooseAddress(state),
-  SETTINGS_PROFILES_SCREEN,
+  PERMISSION_PROFILES_SETTINGS_RECORDS,
 );
 const style = document.createElement("style");
 style.textContent = "* { animation: none !important; }";

@@ -1,20 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { ALL_GRANTS, GRANT_FAMILIES, type Grant } from "@hercule/contract";
 import {
+  applyGrantChange,
   chooseNewProfileName,
-  describeProfileDeleteBlock,
-  describeProfileUsers,
+  describeProfileAgents,
+  describeProfileInUse,
+  describeUnrestrictedGrantChange,
   formatGrantVerb,
   GRANT_FAMILY_TEXT,
-  describeGrantChange,
-  groupProfileUsers,
+  groupAgentsByProfile,
   isUnrestrictedProfile,
-  setGrantHeld,
+  readGrantFamily,
   sortProfiles,
-  type ProfileUser,
+  type ProfileAgent,
 } from "./permission-profiles";
 
-const user = (name: string, kind: ProfileUser["kind"] = "agent", id = name): ProfileUser => ({
+const agent = (name: string, kind: ProfileAgent["kind"] = "agent", id = name): ProfileAgent => ({
   id,
   name,
   kind,
@@ -65,9 +66,9 @@ describe("chooseNewProfileName", () => {
   });
 });
 
-describe("groupProfileUsers", () => {
+describe("groupAgentsByProfile", () => {
   it("groups agents and assistants by profile, assistants first, each by name", () => {
-    const grouped = groupProfileUsers(
+    const grouped = groupAgentsByProfile(
       [
         { id: "a2", name: "pr-review", permissionProfileId: "p1" },
         { id: "a1", name: "fix-step", permissionProfileId: "p1" },
@@ -88,13 +89,16 @@ describe("groupProfileUsers", () => {
   });
 
   it("has no entry for a profile nobody uses", () => {
-    const grouped = groupProfileUsers([], [{ id: "s1", name: "Ada", permissionProfileId: "p1" }]);
+    const grouped = groupAgentsByProfile(
+      [],
+      [{ id: "s1", name: "Ada", permissionProfileId: "p1" }],
+    );
     expect([...grouped.keys()]).toEqual(["p1"]);
-    expect(groupProfileUsers([], []).size).toBe(0);
+    expect(groupAgentsByProfile([], []).size).toBe(0);
   });
 
-  it("orders two users with the same name by id", () => {
-    const grouped = groupProfileUsers(
+  it("orders two agents with the same name by id", () => {
+    const grouped = groupAgentsByProfile(
       [
         { id: "b", name: "same", permissionProfileId: "p1" },
         { id: "a", name: "same", permissionProfileId: "p1" },
@@ -105,83 +109,94 @@ describe("groupProfileUsers", () => {
   });
 });
 
-describe("describeProfileUsers", () => {
-  it("says Nothing for no users", () => {
-    expect(describeProfileUsers([])).toBe("Nothing");
+describe("describeProfileAgents", () => {
+  it("returns Nothing for no agents", () => {
+    expect(describeProfileAgents([])).toBe("Nothing");
   });
 
   it("joins one or two names with a comma", () => {
-    expect(describeProfileUsers([user("Milo")])).toBe("Milo");
-    expect(describeProfileUsers([user("Milo"), user("pr-review")])).toBe("Milo, pr-review");
+    expect(describeProfileAgents([agent("Milo")])).toBe("Milo");
+    expect(describeProfileAgents([agent("Milo"), agent("pr-review")])).toBe("Milo, pr-review");
   });
 
   it("names the first two and counts the rest", () => {
-    expect(describeProfileUsers([user("Milo"), user("pr-review"), user("a")])).toBe(
+    expect(describeProfileAgents([agent("Milo"), agent("pr-review"), agent("a")])).toBe(
       "Milo, pr-review and 1 more",
     );
     expect(
-      describeProfileUsers([user("Milo"), user("pr-review"), user("a"), user("b"), user("c")]),
+      describeProfileAgents([
+        agent("Milo"),
+        agent("pr-review"),
+        agent("a"),
+        agent("b"),
+        agent("c"),
+      ]),
     ).toBe("Milo, pr-review and 3 more");
   });
 });
 
-describe("describeProfileDeleteBlock", () => {
-  it("returns null when nobody uses the profile", () => {
-    expect(describeProfileDeleteBlock([])).toBeNull();
+describe("describeProfileInUse", () => {
+  it("returns null when no agent carries the profile", () => {
+    expect(describeProfileInUse([])).toBeNull();
   });
 
-  it("reads naturally for one user", () => {
-    expect(describeProfileDeleteBlock([user("Milo")])).toBe(
+  it("names one agent and says it uses the profile", () => {
+    expect(describeProfileInUse([agent("Milo")])).toBe(
       "Milo uses it. Move it to another profile first.",
     );
   });
 
-  it("reads naturally for two users", () => {
-    expect(describeProfileDeleteBlock([user("Milo"), user("pr-review")])).toBe(
+  it("joins two agents with 'and' and says they use the profile", () => {
+    expect(describeProfileInUse([agent("Milo"), agent("pr-review")])).toBe(
       "Milo and pr-review use it. Move them to another profile first.",
     );
   });
 
-  it("names two users and counts the rest", () => {
+  it("names two agents and counts the rest", () => {
     expect(
-      describeProfileDeleteBlock([
-        user("Milo"),
-        user("pr-review"),
-        user("a"),
-        user("b"),
-        user("c"),
-      ]),
+      describeProfileInUse([agent("Milo"), agent("pr-review"), agent("a"), agent("b"), agent("c")]),
     ).toBe("Milo, pr-review and 3 more use it. Move them to another profile first.");
-    expect(describeProfileDeleteBlock([user("Milo"), user("pr-review"), user("a")])).toBe(
+    expect(describeProfileInUse([agent("Milo"), agent("pr-review"), agent("a")])).toBe(
       "Milo, pr-review and 1 more use it. Move them to another profile first.",
     );
   });
 });
 
-describe("setGrantHeld", () => {
+describe("readGrantFamily", () => {
+  it("returns the part of the grant before the dot", () => {
+    expect(readGrantFamily("task.delete")).toBe("task");
+    expect(readGrantFamily("infra.write")).toBe("infra");
+  });
+});
+
+describe("applyGrantChange", () => {
   it("adds a grant in the contract's order", () => {
-    expect(setGrantHeld(["task.read", "run.read"], "task.update", true)).toEqual([
-      "task.read",
-      "task.update",
-      "run.read",
-    ]);
+    expect(
+      applyGrantChange(["task.read", "run.read"], { grant: "task.update", held: true }),
+    ).toEqual(["task.read", "task.update", "run.read"]);
   });
 
   it("removes a grant and keeps the others in order", () => {
-    expect(setGrantHeld(["task.read", "task.update", "run.read"], "task.update", false)).toEqual([
-      "task.read",
-      "run.read",
-    ]);
+    expect(
+      applyGrantChange(["task.read", "task.update", "run.read"], {
+        grant: "task.update",
+        held: false,
+      }),
+    ).toEqual(["task.read", "run.read"]);
   });
 
   it("holds no repeats when the grant is already held or already absent", () => {
-    expect(setGrantHeld(["task.read"], "task.read", true)).toEqual(["task.read"]);
-    expect(setGrantHeld(["task.read"], "run.read", false)).toEqual(["task.read"]);
+    expect(applyGrantChange(["task.read"], { grant: "task.read", held: true })).toEqual([
+      "task.read",
+    ]);
+    expect(applyGrantChange(["task.read"], { grant: "run.read", held: false })).toEqual([
+      "task.read",
+    ]);
   });
 
   it("puts a list in any order, with repeats, into the contract's order", () => {
     const shuffled: Grant[] = ["secret.read", "task.read", "secret.read"];
-    expect(setGrantHeld(shuffled, "workflow.read", true)).toEqual([
+    expect(applyGrantChange(shuffled, { grant: "workflow.read", held: true })).toEqual([
       "task.read",
       "workflow.read",
       "secret.read",
@@ -190,11 +205,13 @@ describe("setGrantHeld", () => {
 
   it("can grow to every grant and back to none", () => {
     const all = ALL_GRANTS.reduce<ReadonlyArray<Grant>>(
-      (held, grant) => setGrantHeld(held, grant, true),
+      (held, grant) => applyGrantChange(held, { grant, held: true }),
       [],
     );
     expect(all).toEqual(ALL_GRANTS);
-    expect(ALL_GRANTS.reduce((held, grant) => setGrantHeld(held, grant, false), all)).toEqual([]);
+    expect(
+      ALL_GRANTS.reduce((held, grant) => applyGrantChange(held, { grant, held: false }), all),
+    ).toEqual([]);
   });
 });
 
@@ -226,16 +243,16 @@ describe("isUnrestrictedProfile", () => {
   });
 });
 
-describe("describeGrantChange", () => {
+describe("describeUnrestrictedGrantChange", () => {
   it("says a removed grant is taken away from the profile", () => {
-    expect(describeGrantChange("unrestricted", "task.delete", false)).toBe(
-      "This takes Delete on Tasks away from unrestricted.",
-    );
+    expect(
+      describeUnrestrictedGrantChange("unrestricted", { grant: "task.delete", held: false }),
+    ).toBe("This takes Delete on Tasks away from unrestricted.");
   });
 
   it("says a grant put back is given back to the profile", () => {
-    expect(describeGrantChange("unrestricted", "infra.write", true)).toBe(
-      "This gives Write on Machines back to unrestricted.",
-    );
+    expect(
+      describeUnrestrictedGrantChange("unrestricted", { grant: "infra.write", held: true }),
+    ).toBe("This gives Write on Machines back to unrestricted.");
   });
 });

@@ -140,6 +140,11 @@
 .set-row > .field--select > select {
   field-sizing: content;
 }
+/* Not in the book, whose rows show values rather than controls. A text field
+   in a row, such as a name, is as wide as the selects. */
+.set-row > span.field:not(.field--select) {
+  width: 214px;
+}
 
 /* The book's Assistants page sets this inline on a row that follows a
    heading with no lead under it. */
@@ -247,6 +252,9 @@
   }
   .set-row > .field--select {
     min-width: 0;
+  }
+  .set-row > span.field:not(.field--select) {
+    width: auto;
   }
   .set-value {
     text-align: start;

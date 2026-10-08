@@ -13,6 +13,7 @@ import {
 } from "@hercule/client-core";
 import {
   ACCESS_MODE_CHAIN,
+  MAX_AGENT_NAME_LENGTH,
   type AccessMode,
   type Assistant,
   type AssistantReply,
@@ -66,7 +67,11 @@ export function HowItWorksSection({ assistant }: { readonly assistant: Assistant
     profiles.map(({ id, name: label }) => ({ id, label })),
     profile.value,
   );
-  const nameInput = useTextDraft(name.value, name.save);
+  // A name that is empty or only spaces is not saved, and the field shows the
+  // saved name again, as it does for Esc.
+  const nameInput = useTextDraft(name.value, (text) => {
+    if (text.trim() !== "") name.save(text);
+  });
   return (
     <section className="set-sec">
       <h2>How {assistant.name} works</h2>
@@ -77,7 +82,7 @@ export function HowItWorksSection({ assistant }: { readonly assistant: Assistant
         error={name.error}
         control={(labels) => (
           <span className="field">
-            <input type="text" {...labels} {...nameInput} />
+            <input type="text" maxLength={MAX_AGENT_NAME_LENGTH} {...labels} {...nameInput} />
           </span>
         )}
       />

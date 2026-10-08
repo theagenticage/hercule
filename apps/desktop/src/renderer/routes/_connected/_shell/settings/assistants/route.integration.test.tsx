@@ -360,6 +360,17 @@ describe("Settings > Assistants", () => {
     expect(error.previousElementSibling?.contains(segments)).toBe(true);
   });
 
+  it("saves nothing for a name that is empty or only spaces, and shows the saved name again", async () => {
+    const { calls } = await openAssistants();
+    const name = screen.getByRole("textbox", { name: "Name" });
+
+    await userEvent.clear(name);
+    await userEvent.type(name, "   {Enter}");
+
+    expect(name).toHaveProperty("value", "Ada");
+    expect(listUpdates(calls, ADA)).toEqual([]);
+  });
+
   it("shows a failed prompt save under the Prompt row", async () => {
     await openAssistants({
       [`PATCH /api/v1/assistants/${ADA.id}`]: {

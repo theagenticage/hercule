@@ -12,7 +12,7 @@ import {
 import { PlusIcon } from "../../../../../icons/plus";
 import { ProfileList } from "../../../../../screens/settings/permission-profiles/profile-list";
 import { SettingsHeaderActions } from "../../../../../screens/settings/settings-frame";
-import { useProfileUsers } from "./-profile-users";
+import { useAgentsByProfile } from "./-agents-by-profile";
 
 /**
  * Settings > Permission profiles, the list: one row per profile, shipped
@@ -21,7 +21,7 @@ import { useProfileUsers } from "./-profile-users";
  * §Settings, Permission profiles).
  *
  * The profiles and the agents have no live topic, so the loader reads them
- * each time the section opens. The assistants are the shell's read, which the
+ * each time the section opens. A failed create reads the profiles again. The assistants are the shell's read, which the
  * live connection keeps current.
  */
 export const Route = createFileRoute("/_connected/_shell/settings/permission-profiles/")({
@@ -45,7 +45,7 @@ function PermissionProfiles(): JSX.Element {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const profiles = useSuspenseQuery(profilesQuery(client)).data;
-  const usersByProfile = useProfileUsers();
+  const agentsByProfile = useAgentsByProfile();
 
   const create = useMutation({
     mutationFn: () =>
@@ -60,6 +60,11 @@ function PermissionProfiles(): JSX.Element {
       // Read again, so a read that started before the create cannot leave
       // the list without the new profile.
       await queryClient.invalidateQueries({ queryKey });
+    },
+    // A refusal, such as a name that is taken, may mean the list on screen is
+    // out of date. Reading it again lets a retry choose a name that is free.
+    onError: async () => {
+      await queryClient.invalidateQueries({ queryKey: profilesQuery(client).queryKey });
     },
   });
 
@@ -86,7 +91,7 @@ function PermissionProfiles(): JSX.Element {
       <ProfileList
         entries={sortProfiles(profiles).map((profile) => ({
           profile,
-          users: usersByProfile.get(profile.id) ?? [],
+          agents: agentsByProfile.get(profile.id) ?? [],
         }))}
       />
     </>

@@ -165,7 +165,7 @@ const AGENTS: ReadonlyArray<Agent> = [
  * is not compared, so, as in the Appearance specimen, it holds just the first
  * four threads.
  */
-export const SETTINGS_PROFILES_RECORDS: SidebarRecords = {
+export const PERMISSION_PROFILES_SIDEBAR_RECORDS: SidebarRecords = {
   ...SETTINGS_ASSISTANTS_RECORDS,
   threads: SETTINGS_ASSISTANTS_RECORDS.threads.slice(0, 4),
   assistants: SETTINGS_ASSISTANTS_RECORDS.assistants.map((entry) =>
@@ -180,7 +180,7 @@ export const SETTINGS_PROFILES_RECORDS: SidebarRecords = {
  * the order the controller lists them, by name, so the list's own order
  * (shipped first) is the app's, not the fixture's.
  */
-export const SETTINGS_PROFILES_SCREEN: PermissionProfilesSettingsRecords = {
+export const PERMISSION_PROFILES_SETTINGS_RECORDS: PermissionProfilesSettingsRecords = {
   profiles: [
     RELEASER_PROFILE,
     REVIEWER_PROFILE,

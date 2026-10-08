@@ -172,7 +172,7 @@ export interface AssistantsSettingsRecords {
 export interface PermissionProfilesSettingsRecords {
   /** Every permission profile, in the order the controller lists them. */
   readonly profiles: ReadonlyArray<Profile>;
-  /** The plain agents, whose permission profiles the section shows as users. */
+  /** The plain agents, whose permission profiles the section shows. */
   readonly agents: ReadonlyArray<Agent>;
   /** The Connections the Settings list reads for its Connections row's dot. */
   readonly connections: ReadonlyArray<Connection>;

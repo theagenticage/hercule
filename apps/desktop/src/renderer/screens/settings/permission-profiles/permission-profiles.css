@@ -131,9 +131,6 @@
 .profile-faces > * + * {
   margin-left: -9px;
 }
-.profile-faces > .cr {
-  --badge-ring: var(--surface);
-}
 .profile-row > .ic {
   color: var(--faint);
 }
@@ -177,11 +174,6 @@
    which settings.css gives the Assistants page's rows. */
 .profile-record .set-sec > h2 + .set-row {
   margin-top: 0;
-}
-/* Not in the book, whose rows show values rather than controls. The Name
-   field is as wide as the selects on Assistants. The book sets this inline. */
-.profile-record .set-row > span.field {
-  width: 214px;
 }
 .profile-record .set-sec h2 small {
   margin-left: auto;
@@ -228,13 +220,9 @@
     inset 0 0 0 1px var(--line-soft),
     var(--shadow-1);
 }
-/* The row stacks its control under the label (settings.css). The Name field
-   takes the row's width, and the verbs share the track's width, so a wrapped
-   line has no gap at its end. */
+/* The row stacks its control under the label (settings.css). The verbs share
+   the track's width, so a wrapped line has no gap at its end. */
 @container (width < 520px) {
-  .profile-record .set-row > span.field {
-    width: auto;
-  }
   .profile-verbs button {
     flex: 1 0 auto;
   }
@@ -258,14 +246,14 @@
 }
 
 /* The book's `.user`, `.none` and `.fixed`. */
-.profile-user {
+.profile-agent {
   display: flex;
   align-items: center;
   gap: 12px;
   min-height: 48px;
   border-top: 1px solid var(--line-soft);
 }
-.profile-user .set-label span {
+.profile-agent .set-label span {
   font-size: var(--t-12);
 }
 .profile-none,

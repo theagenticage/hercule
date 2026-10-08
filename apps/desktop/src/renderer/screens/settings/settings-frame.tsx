@@ -15,14 +15,16 @@ import "./settings.css";
 const SettingsHeaderSlot = createContext<HTMLElement | null>(null);
 
 /** The crumb and title a section draws in the header in place of the frame's own. */
-interface HeaderTitle {
+interface SettingsHeaderTitleProps {
   /** The section the crumb links back to, such as the list a record belongs to. */
   readonly parent: { readonly title: string; readonly to: SettingsSectionPath };
   readonly title: string;
 }
 
 /** Sets the header's title, or clears it with `null`. It is the frame's state setter. */
-const SettingsHeaderTitleSetter = createContext<(title: HeaderTitle | null) => void>(() => {});
+const SettingsHeaderTitleSetter = createContext<(title: SettingsHeaderTitleProps | null) => void>(
+  () => {},
+);
 
 /**
  * Renders Settings in the main pane (spec 17 §Settings, The frame):
@@ -47,7 +49,7 @@ export function SettingsFrame({
   readonly children: ReactNode;
 }): JSX.Element {
   const [actions, setActions] = useState<HTMLElement | null>(null);
-  const [headerTitle, setHeaderTitle] = useState<HeaderTitle | null>(null);
+  const [headerTitle, setHeaderTitle] = useState<SettingsHeaderTitleProps | null>(null);
   return (
     <>
       <header className="bar">
@@ -98,10 +100,14 @@ export function SettingsHeaderActions({
  * "Settings / `parent.title` /", where `parent.title` links to `parent.to`.
  * A section that shows one record of a list uses it, so the header names the
  * record and leads back to the list. The title is the section's state, such
- * as a name the user is editing, so it follows the edit. It returns to the
- * section's own title when the component unmounts. Draws nothing itself.
+ * as a name the user is editing, so it follows the edit. The header goes back
+ * to the section's own title when this component unmounts. Draws nothing
+ * itself.
+ *
+ * Only one `SettingsHeaderTitle` may be mounted at a time: two would set the
+ * title in turn, and the later one would win.
  */
-export function SettingsHeaderTitle({ parent, title }: HeaderTitle): null {
+export function SettingsHeaderTitle({ parent, title }: SettingsHeaderTitleProps): null {
   const setHeaderTitle = useContext(SettingsHeaderTitleSetter);
   const { title: parentTitle, to } = parent;
   // A layout effect, so the header never paints the section's own title first.

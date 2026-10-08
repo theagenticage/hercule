@@ -1,6 +1,6 @@
 /**
  * One stored value whose control saves on every change (spec 17 §Settings,
- * The frame, Saving): a setting, or a field of an assistant. `Change` is
+ * The frame, Saving): a setting, or a field of a listed record. `Change` is
  * what a save sends, which is the whole value unless the field saves only
  * the part of it that changed.
  */

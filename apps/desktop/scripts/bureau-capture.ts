@@ -519,12 +519,27 @@ const PROFILES_SETTINGS_PARTS = [
   ".verbs, .profile-verbs",
   ".verbs > button, .profile-verbs > button",
   ".verbs > button > svg, .profile-verbs > button > svg",
-  ".user, .profile-user",
-  ".user > svg, .profile-user > svg",
+  ".user, .profile-agent",
+  ".user > svg, .profile-agent > svg",
   ".none, .profile-none",
   ".fixed, .profile-fixed",
   ".set-row > .btn",
 ];
+
+/** Returns the pair that compares one state of Settings > Permission profiles, `view` being the book's `?state=` and whether the page is scrolled. */
+const buildProfilesPair = (
+  name: string,
+  view: { readonly state?: string; readonly scrolled?: true } = {},
+): RegionPair => ({
+  name,
+  bookPage: "settings-profiles.html",
+  referenceModule: "settings-profiles-reference.ts",
+  specimenPage: "settings-profiles.html",
+  ...view,
+  region: MAIN_PANE_REGION,
+  scope: "main.main",
+  parts: PROFILES_SETTINGS_PARTS,
+});
 
 /** The regions of book pages compared with an app specimen, in the order they are compared. */
 const REGION_PAIRS: ReadonlyArray<RegionPair> = [
@@ -622,67 +637,12 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
     scope: "main.main",
     parts: APPEARANCE_SETTINGS_PARTS,
   },
-  {
-    name: "settings-profiles",
-    bookPage: "settings-profiles.html",
-    referenceModule: "settings-profiles-reference.ts",
-    specimenPage: "settings-profiles.html",
-    region: MAIN_PANE_REGION,
-    scope: "main.main",
-    parts: PROFILES_SETTINGS_PARTS,
-  },
-  {
-    name: "settings-profiles-reviewer",
-    bookPage: "settings-profiles.html",
-    referenceModule: "settings-profiles-reference.ts",
-    specimenPage: "settings-profiles.html",
-    state: "reviewer",
-    region: MAIN_PANE_REGION,
-    scope: "main.main",
-    parts: PROFILES_SETTINGS_PARTS,
-  },
-  {
-    name: "scrolled-settings-profiles-reviewer",
-    bookPage: "settings-profiles.html",
-    referenceModule: "settings-profiles-reference.ts",
-    specimenPage: "settings-profiles.html",
-    state: "reviewer",
-    scrolled: true,
-    region: MAIN_PANE_REGION,
-    scope: "main.main",
-    parts: PROFILES_SETTINGS_PARTS,
-  },
-  {
-    name: "settings-profiles-shipped",
-    bookPage: "settings-profiles.html",
-    referenceModule: "settings-profiles-reference.ts",
-    specimenPage: "settings-profiles.html",
-    state: "shipped",
-    region: MAIN_PANE_REGION,
-    scope: "main.main",
-    parts: PROFILES_SETTINGS_PARTS,
-  },
-  {
-    name: "scrolled-settings-profiles-shipped",
-    bookPage: "settings-profiles.html",
-    referenceModule: "settings-profiles-reference.ts",
-    specimenPage: "settings-profiles.html",
-    state: "shipped",
-    scrolled: true,
-    region: MAIN_PANE_REGION,
-    scope: "main.main",
-    parts: PROFILES_SETTINGS_PARTS,
-  },
-  {
-    name: "settings-profiles-confirm",
-    bookPage: "settings-profiles.html",
-    referenceModule: "settings-profiles-reference.ts",
-    specimenPage: "settings-profiles.html",
-    state: "confirm",
-    region: MAIN_PANE_REGION,
-    scope: "main.main",
-    parts: PROFILES_SETTINGS_PARTS,
-  },
+  buildProfilesPair("settings-profiles"),
+  buildProfilesPair("settings-profiles-reviewer", { state: "reviewer" }),
+  buildProfilesPair("scrolled-settings-profiles-reviewer", { state: "reviewer", scrolled: true }),
+  buildProfilesPair("settings-profiles-shipped", { state: "shipped" }),
+  buildProfilesPair("scrolled-settings-profiles-shipped", { state: "shipped", scrolled: true }),
+  buildProfilesPair("settings-profiles-confirm", { state: "confirm" }),
 ];
 
 /**
@@ -840,9 +800,7 @@ async function compareRegion(
 ): Promise<RegionResult> {
   const { name, bookPage, referenceModule, specimenPage, state, scrolled, region, scope, parts } =
     pair;
-  const query =
-    `?theme=${theme}${state === undefined ? "" : `&state=${state}`}` +
-    (scrolled === undefined ? "" : "&scrolled=1");
+  const query = buildPageQuery({ theme, state, scrolled });
   const [reference, specimen] = await Promise.all([
     openSheet(
       new URL(`/design/crew-bureau-2/desktop/${bookPage}${query}`, sheetsUrl).href,
@@ -947,13 +905,23 @@ async function compareTheme(sheetsUrl: string, theme: string): Promise<ThemeResu
   }
 }
 
-/** Returns the part of a book page's address that follows its name in the report: `?state=reviewer&scrolled=1`, or "". */
-function buildPageQuery(state: string | undefined, scrolled: true | undefined): string {
-  const params = [
-    ...(state === undefined ? [] : [`state=${state}`]),
-    ...(scrolled === undefined ? [] : ["scrolled=1"]),
-  ];
-  return params.length === 0 ? "" : `?${params.join("&")}`;
+/**
+ * Returns the query string of a book page's address, such as
+ * `?theme=orient-express&state=reviewer&scrolled=1`, or "" when no parameter
+ * is given. The report leaves the theme out, because it names a page for
+ * every theme.
+ */
+function buildPageQuery(page: {
+  readonly theme?: string | undefined;
+  readonly state?: string | undefined;
+  readonly scrolled?: true | undefined;
+}): string {
+  const params = new URLSearchParams();
+  if (page.theme !== undefined) params.set("theme", page.theme);
+  if (page.state !== undefined) params.set("state", page.state);
+  if (page.scrolled !== undefined) params.set("scrolled", "1");
+  const query = params.toString();
+  return query === "" ? "" : `?${query}`;
 }
 
 /** Returns the table of `differences`, one line per cell or item, as the report prints it under a theme. */
@@ -994,7 +962,7 @@ function buildReport(results: ReadonlyArray<ThemeResult>): string {
     lines.push(
       `${words.slice(0, 1).toUpperCase()}${words.slice(1)} comparison: ${String(first.regions[index]!.items)} items, ` +
         `x ${String(region.x)}-${String(region.x + region.width)} of ${bookPage}` +
-        buildPageQuery(state, scrolled),
+        buildPageQuery({ state, scrolled }),
     );
     for (const { theme, regions } of results) {
       const { differences } = regions[index]!;

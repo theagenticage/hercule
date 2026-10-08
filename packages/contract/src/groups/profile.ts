@@ -22,8 +22,11 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 
+/** The longest profile name. */
+export const MAX_PROFILE_NAME_LENGTH = 128;
+
 /** What a user may call a profile. */
-const ProfileName = bounded(1, 128);
+const ProfileName = bounded(1, MAX_PROFILE_NAME_LENGTH);
 
 /**
  * The longest grant list a profile may carry: the size of the grant
@@ -46,6 +49,14 @@ export const Profile = Schema.Struct({
 });
 
 export type Profile = Schema.Schema.Type<typeof Profile>;
+
+/** The payload of `profile.update`. A field left out is not changed. */
+export const ProfileUpdateInput = Schema.Struct({
+  name: Schema.optionalKey(ProfileName),
+  grants: Schema.optionalKey(Grants),
+});
+
+export type ProfileUpdateInput = Schema.Schema.Type<typeof ProfileUpdateInput>;
 
 /** What a profile listing may be sorted by. People look for a profile by its name. */
 export const PROFILE_SORT_FIELDS = ["name"] as const;
@@ -72,10 +83,7 @@ export const profile = HttpApiGroup.make("profile")
     }),
     HttpApiEndpoint.patch("update", "/profiles/:id", {
       params: { id: Id },
-      payload: Schema.Struct({
-        name: Schema.optionalKey(ProfileName),
-        grants: Schema.optionalKey(Grants),
-      }),
+      payload: ProfileUpdateInput,
       success: Profile,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, Internal],
     }),

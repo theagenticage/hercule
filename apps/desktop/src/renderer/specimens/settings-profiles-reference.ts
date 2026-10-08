@@ -18,13 +18,13 @@
  *
  * 1. stops every animation, so the working faces show the frame the app
  *    draws;
- * 2. puts the users of each profile in the app's order: assistants first,
+ * 2. puts the agents of each profile in the app's order: assistants first,
  *    then agents, each by name. The book lists them in the order it was
  *    written, such as triage-step before fix-step on `worker`;
  * 3. draws every agent in the idle pose, because an agent has no state the
  *    app could pose it from: only an assistant's session has a status. The
  *    book poses pr-review as working;
- * 4. draws each face in the look the app takes from the user's id, where the
+ * 4. draws each face in the look the app takes from the agent's id, where the
  *    book casts or hashes it from the name;
  * 5. puts the names after a list row's faces in a `span`, as the app does so
  *    that a long name can end in an ellipsis. The book gives the `span` no
@@ -40,11 +40,18 @@
  * An edit that finds nothing to edit fails, because the book has changed and
  * the comparison would no longer compare what it claims to.
  */
-import { describeProfileUsers, groupProfileUsers, type ProfileUser } from "@hercule/client-core";
+import {
+  describeProfileAgents,
+  groupAgentsByProfile,
+  type ProfileAgent,
+} from "@hercule/client-core";
 import { buildLook } from "../faces/look";
 import { findElement, findElements } from "./book-page";
 import { markSheetReady, readCrew, stillBookPage } from "./sheet-page";
-import { SETTINGS_PROFILES_RECORDS, SETTINGS_PROFILES_SCREEN } from "./settings-profiles-fixture";
+import {
+  PERMISSION_PROFILES_SETTINGS_RECORDS,
+  PERMISSION_PROFILES_SIDEBAR_RECORDS,
+} from "./settings-profiles-fixture";
 
 /**
  * The pose each assistant is drawn in, from its session's status in the
@@ -56,25 +63,25 @@ const ASSISTANT_POSES: Readonly<Record<string, string>> = {
   Juno: "asleep",
 };
 
-/** Returns the pose the app draws `user` in. Fails for an assistant the fixture does not pose. */
-function decidePose(user: ProfileUser): string {
-  if (user.kind === "agent") return "idle";
-  const pose = ASSISTANT_POSES[user.name];
-  if (pose === undefined) throw new Error(`The fixture poses no assistant named ${user.name}.`);
+/** Returns the pose the app draws `agent` in. Fails for an assistant the fixture does not pose. */
+function decidePose(agent: ProfileAgent): string {
+  if (agent.kind === "agent") return "idle";
+  const pose = ASSISTANT_POSES[agent.name];
+  if (pose === undefined) throw new Error(`The fixture poses no assistant named ${agent.name}.`);
   return pose;
 }
 
 /**
- * Returns `user`'s face, at `size`, drawn by crew.js in the look the app
- * gives the user's id. The app takes the whole look from the id, while the
+ * Returns `agent`'s face, at `size`, drawn by crew.js in the look the app
+ * gives the agent's id. The app takes the whole look from the id, while the
  * book casts or hashes it from the name, so the two differ unless the look is
  * passed in.
  */
-function buildFace(user: ProfileUser, size: number): Element {
-  const { hue, shape, accessories } = buildLook(user.id);
+function buildFace(agent: ProfileAgent, size: number): Element {
+  const { hue, shape, accessories } = buildLook(agent.id);
   const look = { hue, shape, acc: accessories.join("+") || "none" };
   const template = document.createElement("template");
-  template.innerHTML = readCrew().face(user.name, { pose: decidePose(user), size, look });
+  template.innerHTML = readCrew().face(agent.name, { pose: decidePose(agent), size, look });
   return template.content.firstElementChild!;
 }
 
@@ -89,48 +96,48 @@ popStyle.textContent = `
 `;
 document.head.append(popStyle);
 
-const users = groupProfileUsers(
-  SETTINGS_PROFILES_SCREEN.agents,
-  SETTINGS_PROFILES_RECORDS.assistants.map(({ assistant }) => assistant),
+const agentsByProfile = groupAgentsByProfile(
+  PERMISSION_PROFILES_SETTINGS_RECORDS.agents,
+  PERMISSION_PROFILES_SIDEBAR_RECORDS.assistants.map(({ assistant }) => assistant),
 );
-const profiles = SETTINGS_PROFILES_SCREEN.profiles;
+const profiles = PERMISSION_PROFILES_SETTINGS_RECORDS.profiles;
 
-/** Returns the users of the profile named `name`, in the app's order. */
-function findUsers(name: string): ReadonlyArray<ProfileUser> {
+/** Returns the agents of the profile named `name`, in the app's order. */
+function findAgents(name: string): ReadonlyArray<ProfileAgent> {
   const profile = profiles.find((each) => each.name === name);
   if (profile === undefined) throw new Error(`The fixture has no profile named ${name}.`);
-  return users.get(profile.id) ?? [];
+  return agentsByProfile.get(profile.id) ?? [];
 }
 
 // 2 to 5. The list's rows: the stack of faces, and the names after it.
 const rows = findElements(document, "[data-rows] .prof", profiles.length);
 for (const row of rows) {
-  const rowUsers = findUsers(findElement(row, ".nm > b").textContent);
+  const rowAgents = findAgents(findElement(row, ".nm > b").textContent);
   const used = findElement(row, ".used");
-  if (rowUsers.length === 0) {
+  if (rowAgents.length === 0) {
     // The "Nothing" row has no stack, and the book already says "Nothing".
     continue;
   }
   const stack = document.createElement("span");
   stack.className = "stack";
-  stack.append(...rowUsers.map((user) => buildFace(user, 24)));
+  stack.append(...rowAgents.map((agent) => buildFace(agent, 24)));
   const names = document.createElement("span");
   names.className = "used-names";
-  names.textContent = describeProfileUsers(rowUsers);
+  names.textContent = describeProfileAgents(rowAgents);
   used.replaceChildren(stack, names);
 }
 
-// 2 to 4. A profile's page: its users, one row each.
+// 2 to 4. A profile's page: its agents, one row each.
 const record = findElement(document, "[data-record]") as HTMLElement;
 if (!record.hidden) {
-  const pageUsers = findUsers(findElement(document, ".bar .title").textContent);
-  const userRows = findElements(record, "[data-users] .user", pageUsers.length);
-  userRows.forEach((row, index) => {
-    const user = pageUsers[index]!;
-    findElement(row, ":scope > svg").replaceWith(buildFace(user, 30));
-    findElement(row, ".set-label > b").textContent = user.name;
+  const pageAgents = findAgents(findElement(document, ".bar .title").textContent);
+  const agentRows = findElements(record, "[data-users] .user", pageAgents.length);
+  agentRows.forEach((row, index) => {
+    const agent = pageAgents[index]!;
+    findElement(row, ":scope > svg").replaceWith(buildFace(agent, 30));
+    findElement(row, ".set-label > b").textContent = agent.name;
     findElement(row, ".set-label > span").textContent =
-      user.kind === "agent" ? "Agent" : "Assistant";
+      agent.kind === "agent" ? "Agent" : "Assistant";
   });
 }
 

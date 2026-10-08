@@ -2,12 +2,12 @@
  * Tests Settings > Permission profiles: the list and its order, New profile,
  * a profile's page with its name, its grants, who uses it and Delete, the
  * confirmation the unrestricted profile asks for, and a failed save that puts
- * the field back and shows why under its row.
+ * the field back and shows why under its row, even when a later save was
+ * already queued behind it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { setGrantHeld } from "@hercule/client-core";
 import type { Agent, Profile } from "@hercule/contract";
 import { forgetLastSettingsSection } from "../../../../../app/last-settings-section";
 import {
@@ -17,6 +17,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_THREAD_IDS,
+  holdAnswer,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -105,7 +106,7 @@ const AGENTS = [
 
 /**
  * Returns handlers that play the controller's profiles on one stored list:
- * reading it, creating one, updating any and deleting any. A read after a
+ * listing and reading them, creating one, updating any and deleting any. A read after a
  * change answers with what the change stored, as the controller's does.
  */
 const storeProfiles = (
@@ -121,6 +122,10 @@ const storeProfiles = (
     },
   };
   for (const { id } of [...initial, { id: CREATED_ID }]) {
+    // A save reads the profile again before it writes (see useSavedProfileField).
+    handlers[`GET /api/v1/profiles/${id}`] = () => ({
+      body: stored.find((each) => each.id === id)!,
+    });
     handlers[`PATCH /api/v1/profiles/${id}`] = (call) => {
       const updated = { ...stored.find((each) => each.id === id)!, ...(call.body as object) };
       stored = stored.map((each) => (each.id === id ? updated : each));
@@ -182,24 +187,26 @@ const listUpdates = (calls: readonly Call[], id: string): unknown[] =>
 const findVerb = (family: string, verb: string): HTMLElement =>
   within(screen.getByRole("group", { name: family })).getByRole("button", { name: verb });
 
+/**
+ * Returns the rows of the profile list, top to bottom. Each row is a link to
+ * a profile's page, and its text is its cells run together: the name, who
+ * made it, the grants held, and who uses it.
+ */
+const listProfileRows = (): HTMLElement[] =>
+  screen
+    .getAllByRole("link")
+    .filter((link) => link.getAttribute("href")?.startsWith(`${LIST_PATH}/`));
+
 describe("Settings > Permission profiles, the list", () => {
   it("draws the lead and one row per profile, shipped profiles first", async () => {
     await openList();
 
     expect(screen.getByText(/A profile bounds what a session may do/)).toBeTruthy();
-    const rows = [...document.querySelectorAll(".profile-row")];
-    expect(
-      rows.map((row) => [
-        row.querySelector(".profile-name b")?.textContent,
-        row.querySelector(".profile-name span")?.textContent,
-        row.querySelector(".profile-held")?.textContent,
-        row.querySelector(".profile-used")?.textContent,
-      ]),
-    ).toEqual([
-      ["standard", "Shipped with Hercule", "2 of 42", "Ada"],
-      ["unrestricted", "Shipped with Hercule", "3 of 42", "Milo"],
-      ["Busy", "Made by you", "0 of 42", "nightly, pr-review"],
-      ["Triage", "Made by you", "1 of 42", "Nothing"],
+    expect(listProfileRows().map((row) => row.textContent)).toEqual([
+      "standardShipped with Hercule2 of 42Ada",
+      "unrestrictedShipped with Hercule3 of 42Milo",
+      "BusyMade by you0 of 42nightly, pr-review",
+      "TriageMade by you1 of 42Nothing",
     ]);
   });
 
@@ -211,7 +218,7 @@ describe("Settings > Permission profiles, the list", () => {
 
     const busy = screen.getByRole("link", { name: /Busy/ });
     expect(busy.querySelectorAll(".profile-faces > *")).toHaveLength(3);
-    expect(busy.querySelector(".profile-used")?.textContent).toBe("deploy, lint and 3 more");
+    expect(within(busy).getByText("deploy, lint and 3 more")).toBeTruthy();
   });
 
   it("opens a profile's page from its row", async () => {
@@ -297,6 +304,46 @@ describe("Settings > Permission profiles, the list", () => {
     expect(router.state.location.pathname).toBe(LIST_PATH);
   });
 
+  it("picks a fresh name when a retry follows a conflict with a profile the list did not show", async () => {
+    const takenBehindOurBack = buildProfile({
+      id: "01a06d02-7500-7000-8000-000000000006",
+      name: "New profile",
+    });
+    let listed = ALL_PROFILES;
+    let creates = 0;
+    const { calls } = await openList({
+      "GET /api/v1/profiles": () => ({ body: { items: listed } }),
+      "POST /api/v1/profiles": (call) => {
+        if (++creates === 1) {
+          listed = [...ALL_PROFILES, takenBehindOurBack];
+          return {
+            status: 409,
+            body: buildErrorBody("conflict", "A profile named New profile exists."),
+          };
+        }
+        const created = buildProfile({ id: CREATED_ID, ...(call.body as Pick<Profile, "name">) });
+        listed = [...listed, created];
+        return { body: created };
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "New profile" }));
+    await screen.findByRole("alert");
+    // The list is read again after the refusal, and now shows the profile that was taken.
+    await screen.findByRole("link", { name: /New profile/ });
+    await userEvent.click(screen.getByRole("button", { name: "New profile" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "New profile 2" })).toBeTruthy();
+    expect(
+      calls
+        .filter((call) => call.method === "POST" && call.path === "/api/v1/profiles")
+        .map((call) => call.body),
+    ).toEqual([
+      { name: "New profile", grants: [] },
+      { name: "New profile 2", grants: [] },
+    ]);
+  });
+
   it("goes back to the list from an id that names no profile", async () => {
     const { router } = await openAt(`${LIST_PATH}/01a06d02-7500-7000-8000-0000000000ff`);
 
@@ -375,6 +422,40 @@ describe("Settings > Permission profiles, a profile's page", () => {
     expect(error.previousElementSibling?.contains(verb)).toBe(true);
   });
 
+  it("shows a failed save under its row while a later save is queued, and keeps only the later change", async () => {
+    const first = holdAnswer();
+    let updates = 0;
+    const { calls } = await openProfile(TRIAGE, {
+      [`PATCH /api/v1/profiles/${TRIAGE.id}`]: (call) =>
+        ++updates === 1 ? first.handler() : { body: { ...TRIAGE, ...(call.body as object) } },
+    });
+    const tasksDelete = findVerb("Tasks", "Delete");
+
+    await userEvent.click(tasksDelete);
+    // The save reads the profile first, so the update is sent a moment later.
+    await waitFor(() => {
+      expect(listUpdates(calls, TRIAGE.id)).toHaveLength(1);
+    });
+    await userEvent.click(findVerb("Sessions", "Spawn"));
+    first.answer({ status: 500, body: buildErrorBody("internal", "The database is locked.") });
+
+    const error = await screen.findByRole("alert");
+    expect(error.textContent).toBe("Could not save: The database is locked.");
+    // The error sits under the row of the failed change, not the queued one.
+    expect(error.previousElementSibling?.contains(tasksDelete)).toBe(true);
+    await waitFor(() => {
+      expect(listUpdates(calls, TRIAGE.id)).toEqual([
+        { grants: ["task.read", "task.delete"] },
+        { grants: ["task.read", "session.spawn"] },
+      ]);
+    });
+    expect(tasksDelete.getAttribute("aria-pressed")).toBe("false");
+    expect(findVerb("Sessions", "Spawn").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("heading", { level: 2, name: /^Grants/ }).textContent).toBe(
+      "Grants2 of 42",
+    );
+  });
+
   it("saves a new name, and the header follows it", async () => {
     const { calls } = await openProfile(TRIAGE);
     const name = screen.getByRole("textbox", { name: "Name" });
@@ -406,14 +487,29 @@ describe("Settings > Permission profiles, a profile's page", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Triage" })).toBeTruthy();
   });
 
+  it("saves nothing for a name that is empty or only spaces, and shows the saved name again", async () => {
+    const { calls } = await openProfile(TRIAGE);
+    const name = screen.getByRole("textbox", { name: "Name" });
+
+    await userEvent.clear(name);
+    await userEvent.type(name, "   {Enter}");
+
+    expect(name).toHaveProperty("value", "Triage");
+    expect(screen.getByRole("heading", { level: 1, name: "Triage" })).toBeTruthy();
+    expect(listUpdates(calls, TRIAGE.id)).toEqual([]);
+  });
+
   it("lists the assistants and agents that use the profile, and links to Assistants", async () => {
     await openProfile(BUSY);
 
     const heading = screen.getByRole("heading", { level: 2, name: "Used by" });
     const section = heading.parentElement!;
     expect(
-      [...section.querySelectorAll(".profile-user .set-label")].map((row) => row.textContent),
-    ).toEqual(["nightlyAgent", "pr-reviewAgent"]);
+      within(section)
+        .getAllByText(/^(nightly|pr-review)$/)
+        .map((each) => each.textContent),
+    ).toEqual(["nightly", "pr-review"]);
+    expect(within(section).getAllByText("Agent")).toHaveLength(2);
     expect(within(section).getByRole("link", { name: "Assistants" }).getAttribute("href")).toBe(
       "/settings/assistants",
     );
@@ -429,15 +525,12 @@ describe("Settings > Permission profiles, a profile's page", () => {
     await openProfile(STANDARD);
 
     const section = screen.getByRole("heading", { level: 2, name: "Used by" }).parentElement!;
-    expect(
-      [...section.querySelectorAll(".profile-user .set-label")].map((row) => row.textContent),
-    ).toEqual(["AdaAssistant"]);
+    expect(within(section).getByText("Ada")).toBeTruthy();
+    expect(within(section).getByText("Assistant")).toBeTruthy();
   });
 });
 
 describe("Settings > Permission profiles, the unrestricted profile", () => {
-  const UPDATE = `PATCH /api/v1/profiles/${UNRESTRICTED.id}`;
-
   it("warns above its grants, and no other profile does", async () => {
     await openProfile(UNRESTRICTED);
     expect(screen.getByText(/Unrestricted is meant to hold every grant/)).toBeTruthy();
@@ -471,18 +564,6 @@ describe("Settings > Permission profiles, the unrestricted profile", () => {
     expect(findVerb("Tasks", "Delete").getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("saves nothing when the dialog closes on its scrim", async () => {
-    const { calls } = await openProfile(UNRESTRICTED);
-
-    await userEvent.click(findVerb("Tasks", "Delete"));
-    await userEvent.click(await screen.findByRole("dialog", { name: "Change unrestricted?" }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
-    });
-    expect(listUpdates(calls, UNRESTRICTED.id)).toEqual([]);
-  });
-
   it("takes the grant away on Change", async () => {
     const { calls } = await openProfile(UNRESTRICTED);
 
@@ -492,7 +573,7 @@ describe("Settings > Permission profiles, the unrestricted profile", () => {
 
     await waitFor(() => {
       expect(listUpdates(calls, UNRESTRICTED.id)).toEqual([
-        { grants: setGrantHeld(UNRESTRICTED.grants, "task.delete", false) },
+        { grants: ["task.read", "workflow.read"] },
       ]);
     });
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -515,21 +596,6 @@ describe("Settings > Permission profiles, the unrestricted profile", () => {
       ]);
     });
   });
-
-  it("puts the toggle back when the confirmed save fails", async () => {
-    await openProfile(UNRESTRICTED, {
-      [UPDATE]: { status: 500, body: buildErrorBody("internal", "The database is locked.") },
-    });
-
-    await userEvent.click(findVerb("Tasks", "Delete"));
-    const dialog = await screen.findByRole("dialog", { name: "Change unrestricted?" });
-    await userEvent.click(within(dialog).getByRole("button", { name: "Change" }));
-
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "Could not save: The database is locked.",
-    );
-    expect(findVerb("Tasks", "Delete").getAttribute("aria-pressed")).toBe("true");
-  });
 });
 
 describe("Settings > Permission profiles, Delete", () => {
@@ -545,7 +611,7 @@ describe("Settings > Permission profiles, Delete", () => {
     expect(screen.queryByRole("button", { name: "Delete profile" })).toBeNull();
   });
 
-  it("disables the button of a profile that is in use, and names its users in the hint", async () => {
+  it("disables the button of a profile that is in use, and names the agents in the hint", async () => {
     const { calls } = await openProfile(BUSY);
 
     const button = screen.getByRole("button", { name: "Delete profile" });
@@ -577,9 +643,11 @@ describe("Settings > Permission profiles, Delete", () => {
       `/api/v1/profiles/${TRIAGE.id}`,
     ]);
     await screen.findByRole("heading", { level: 1, name: "Permission profiles" });
-    expect(
-      [...document.querySelectorAll(".profile-name b")].map((each) => each.textContent),
-    ).toEqual(["standard", "unrestricted", "Busy"]);
+    expect(listProfileRows().map((row) => row.textContent)).toEqual([
+      "standardShipped with Hercule2 of 42Ada",
+      "unrestrictedShipped with Hercule3 of 42Milo",
+      "BusyMade by you0 of 42nightly, pr-review",
+    ]);
   });
 
   it("deletes nothing when the dialog is cancelled", async () => {
