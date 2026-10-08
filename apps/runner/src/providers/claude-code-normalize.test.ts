@@ -20,7 +20,6 @@ import {
   isAnyAgentWorking,
 } from "./claude-code-normalize";
 import { measureFrameBytes } from "../frame-size";
-import { fitEventToFrame } from "../sessions/fit-event";
 import { deferUntilTurnOpens, type RequestOpened } from "./claude-code-subagents";
 import {
   BRIEF,
@@ -1677,7 +1676,9 @@ describe("a tool result too large for one frame", () => {
   const measureEventBytes = (event: Event): number =>
     measureFrameBytes({ _tag: "sessionEvent", seq: 1, event });
 
-  it("is normalized to an item.completed larger than a frame, which fitting sends with a warning", () => {
+  // Before sending, the supervisor shrinks an event like this one to fit in a
+  // frame. The tests in sessions/fit-event.test.ts cover that step.
+  it("is normalized to an item.completed larger than a frame", () => {
     const running = buildTestState();
     normalize(running, ASSISTANT_TOOL_USE as unknown as SDKMessage);
     const events = normalize(running, IMAGE_RESULT as unknown as SDKMessage);
@@ -1687,15 +1688,5 @@ describe("a tool result too large for one frame", () => {
     // the runner's socket.
     expect(completed).toBeDefined();
     expect(measureEventBytes(completed!)).toBeGreaterThan(MAX_FRAME_BYTES);
-
-    const fitted = fitEventToFrame(completed!);
-    expect(fitted.map(formatEvent)).toEqual([
-      `item.completed command_execution ${TOOL} completed`,
-      "runtime.warning",
-    ]);
-    for (const event of fitted)
-      expect(measureEventBytes(event)).toBeLessThanOrEqual(MAX_FRAME_BYTES);
-    const warning = fitted[1];
-    expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain(`Item ${TOOL}.`);
   });
 });
