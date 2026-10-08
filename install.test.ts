@@ -400,35 +400,32 @@ describe("install.sh", () => {
     expect(readdirSync(home)).toEqual([]);
   });
 
-  it.runIf(isLinux)(
-    "installs the binary on a first install on Linux, and starts nothing",
-    () => {
-      const release = writeInstallableRelease();
+  it.runIf(isLinux)("installs the binary on a first install on Linux, and starts nothing", () => {
+    const release = writeInstallableRelease();
 
-      const { status, stdout, home, applicationsDir } = runInstall(release.dir, {
-        buildHerculeHome: (home) => join(home, "scratch-home"),
-      });
+    const { status, stdout, home, applicationsDir } = runInstall(release.dir, {
+      buildHerculeHome: (home) => join(home, "scratch-home"),
+    });
 
-      expect(status).toBe(0);
-      expect(existsSync(join(home, ".local", "bin", "hercule"))).toBe(true);
-      // No app is installed on Linux.
-      expect(readdirSync(applicationsDir)).toEqual([]);
-      // No unit is written and none is installed: the binary only printed
-      // its version.
-      expect(release.readBinaryCalls().map((call) => call.args)).toEqual(["--version"]);
-      expect(existsSync(join(home, ".config"))).toBe(false);
-      // The next steps carry the Home this run was given, and the binary's
-      // full path, because its folder is not on PATH. Both are quoted, so a
-      // path with a space pastes as one word.
-      expect(stdout).toContain("Nothing is running yet");
-      expect(stdout).toContain(
-        `HERCULE_HOME='${join(home, "scratch-home")}' '${join(home, ".local", "bin", "hercule")}' service install\n`,
-      );
-      expect(stdout).toContain('"Add machine"');
-      // The app is never named on Linux.
-      expect(stdout).not.toContain("Applications folder");
-    },
-  );
+    expect(status).toBe(0);
+    expect(existsSync(join(home, ".local", "bin", "hercule"))).toBe(true);
+    // No app is installed on Linux.
+    expect(readdirSync(applicationsDir)).toEqual([]);
+    // No unit is written and none is installed: the binary only printed
+    // its version.
+    expect(release.readBinaryCalls().map((call) => call.args)).toEqual(["--version"]);
+    expect(existsSync(join(home, ".config"))).toBe(false);
+    // The next steps carry the Home this run was given, and the binary's
+    // full path, because its folder is not on PATH. Both are quoted, so a
+    // path with a space pastes as one word.
+    expect(stdout).toContain("Nothing is running yet");
+    expect(stdout).toContain(
+      `HERCULE_HOME='${join(home, "scratch-home")}' '${join(home, ".local", "bin", "hercule")}' service install\n`,
+    );
+    expect(stdout).toContain('"Add machine"');
+    // The app is never named on Linux.
+    expect(stdout).not.toContain("Applications folder");
+  });
 
   it.runIf(isLinux)(
     "updates the installed service with `hercule service install` and the Home it names on Linux",
