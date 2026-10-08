@@ -51,7 +51,14 @@ async function downloadEdgeBinary(targetDir: string): Promise<string | undefined
     // Check if this is a missing asset or a missing release by trying the base release URL
     const releaseCheckResponse = await fetch(EDGE_RELEASE_URL, { method: "HEAD" });
     if (releaseCheckResponse.status === 404) {
-      // No edge release exists yet - skip the test
+      // No edge release exists yet
+      if (process.env.CI) {
+        // In CI, fail loudly if there's no baseline rather than silently skipping
+        throw new Error(
+          "No edge release found. CI requires an edge release baseline to validate migrations.",
+        );
+      }
+      // Outside CI, skip the test
       return undefined;
     }
     // Edge release exists but the binary asset is missing - fail loudly
