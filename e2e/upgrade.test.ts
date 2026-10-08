@@ -203,22 +203,21 @@ describe("upgrading from the previous edge release", () => {
       };
 
       // Send several messages to the assistant's conversation to create turns
-      // Note: This creates the conversation message structure without running an agent,
-      // which would require credentials and cost tokens
+      // Note: conversation send reads the message from stdin directly (no --text-stdin flag)
       const msg1Result = await runCli(
-        ["conversation", "send", assistant.mainConversationId, "--text-stdin", "--json"],
+        ["conversation", "send", assistant.mainConversationId, "--json"],
         { home: state!.home, stdin: "Test message 1" },
       );
       expect(msg1Result.code).toBe(0);
 
       const msg2Result = await runCli(
-        ["conversation", "send", assistant.mainConversationId, "--text-stdin", "--json"],
+        ["conversation", "send", assistant.mainConversationId, "--json"],
         { home: state!.home, stdin: "Test message 2" },
       );
       expect(msg2Result.code).toBe(0);
 
       const msg3Result = await runCli(
-        ["conversation", "send", assistant.mainConversationId, "--text-stdin", "--json"],
+        ["conversation", "send", assistant.mainConversationId, "--json"],
         { home: state!.home, stdin: "Test message 3" },
       );
       expect(msg3Result.code).toBe(0);
@@ -297,7 +296,7 @@ describe("upgrading from the previous edge release", () => {
 
       // List messages in the conversation - should have 3 user messages
       const messagesRead = await runCli(
-        ["conversation", "query-messages", testData.conversationId, "--json"],
+        ["conversation", "message", "list", testData.conversationId, "--json"],
         { home: state!.home, env: { HERCULE_API_URL: controller.url, HERCULE_TOKEN: apiKey } },
       );
       expect(messagesRead.code).toBe(0);
