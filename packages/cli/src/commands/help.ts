@@ -155,6 +155,7 @@ export const buildShellExample = (
 };
 
 const buildPlaceholder = (field: Field): string => {
+  if (field.uploads) return "<path>";
   if (field.choices !== undefined) return `<${field.spelling}>`;
   // A field that takes a shorthand word shows `<word>`, whatever type its
   // decoded value has: `<json>` would make the reader think it needs braces.
@@ -296,11 +297,14 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
     // said once. For a single field, "There is no --<flag> flag" gets a line of
     // its own, so wrapping can never split it.
     const one = onStdin.length === 1 ? onStdin[0]! : undefined;
+    const upload = command.payload.find((field) => field.uploads);
     const rule =
       one !== undefined
         ? one.optional
           ? `Read only with --${one.spelling}-stdin: the whole of stdin, with one trailing newline removed.`
-          : "Required, always read: the whole of stdin, with one trailing newline removed."
+          : upload === undefined
+            ? "Required, always read: the whole of stdin, with one trailing newline removed."
+            : `Required, always read: the whole of stdin, with one trailing newline removed. With --${upload.spelling} it may be empty, and when stdin is a terminal it is not read and the text is empty.`
         : `${onStdin.length} lines, one per field, in this order: ${onStdin
             .map((field) => field.name)
             .join(", then ")}. The markers ${onStdin

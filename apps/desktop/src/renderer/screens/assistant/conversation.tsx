@@ -31,7 +31,7 @@ import {
   type ConversationBlock,
   type Pose,
 } from "@hercule/client-core";
-import type { Assistant, Session, TranscriptRow } from "@hercule/contract";
+import type { Assistant, Attachment, Session, TranscriptRow } from "@hercule/contract";
 import { conversationMessagesQuery } from "../../app/queries";
 import { Face, type Look } from "../../faces";
 import {
@@ -65,6 +65,8 @@ const OWNER_CHARS_PER_LINE = 80;
 const REPLY_LINE_HEIGHT = 22.4;
 /** The height of one line of the owner's bubble, in CSS pixels: 14px text at a line height of 1.55. */
 const OWNER_LINE_HEIGHT = 21.7;
+/** A Conversation's owner message is drawn without images: a `ConversationMessage` holds text only. */
+const NO_ATTACHMENTS: readonly Attachment[] = [];
 
 /** The height of a day stamp: one line of 11px text, as the book lays it out. */
 const STAMP_HEIGHT = 15;
@@ -316,6 +318,7 @@ function ConversationList({
         return (
           <UserMessage
             text={block.message.text}
+            attachments={NO_ATTACHMENTS}
             at={block.message.createdAt}
             timezone={timezone}
             today={today}

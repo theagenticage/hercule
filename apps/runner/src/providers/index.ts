@@ -13,6 +13,7 @@ import type {
   SendResult,
   SessionBinding,
   SessionSpec,
+  AttachmentReference,
   SubagentId,
   TurnInput,
 } from "@hercule/protocol";
@@ -69,7 +70,31 @@ export interface ProviderRunnerContext {
    * so their adapters keep the harness isolated.
    */
   readonly userMaterial?: UserMaterial;
+  /**
+   * The directory the runner caches this session's attached images in, one
+   * file per image. It sits outside the workspace, so git never sees the
+   * files, and it is removed when the session exits. The Claude adapter gives
+   * its harness read access to it when the harness starts, because Claude
+   * takes extra directories only as a start option. `null` only for
+   * operations that run no session: a probe, an install or a login.
+   */
+  readonly attachmentsDir: string | null;
 }
+
+/**
+ * One image of an input, as an adapter receives it: the reference the frame
+ * carried, and the path of the copy the runner fetched and checked. An
+ * adapter reads the file at `path` and never talks to the controller.
+ */
+export type LocalAttachment = AttachmentReference & { readonly path: string };
+
+/**
+ * The input an adapter delivers: the frame's `TurnInput`, with each image
+ * reference replaced by the runner's local copy of the image.
+ */
+export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
+  readonly attachments?: ReadonlyArray<LocalAttachment>;
+};
 
 /**
  * The paths of the user's own material that an adapter passes to its harness
@@ -141,7 +166,10 @@ export interface ProviderAdapter {
    * may work it out from the order events arrive in (ADR 0007). Never turns
    * input away because the session is busy.
    */
-  readonly sendInput: (sessionId: string, input: TurnInput) => Effect.Effect<SendResult, string>;
+  readonly sendInput: (
+    sessionId: string,
+    input: AdapterTurnInput,
+  ) => Effect.Effect<SendResult, string>;
 
   /**
    * Stops work in a session. The only report is each stopped turn completing

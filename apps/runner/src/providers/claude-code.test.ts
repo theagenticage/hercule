@@ -4,8 +4,9 @@
  * are not invented.
  */
 import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Fiber, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
@@ -44,12 +45,15 @@ const HERCULE_TOOL = {
 
 const CONTEXT: ProviderRunnerContext = {
   cwd: null,
+  attachmentsDir: null,
   home: "/var/hercule/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin" },
   secrets: {},
   herculeTool: HERCULE_TOOL,
 };
+
+afterAll(testing.cleanupHomes);
 
 const AUTHENTICATED = {
   email: "rogier@example.com",
@@ -752,6 +756,50 @@ describe("a Claude Code session", () => {
     expect(completed?.detail).toEqual({ text: "hello" });
     expect(started?.turnId).toBe(sent.turnId);
     expect(run.sent.map((message) => message.message.content)).toEqual(["hello"]);
+  });
+
+  it("sends attached images as base64 blocks after the text, and lets the harness read their directory", async () => {
+    const run = createDriving();
+    const image = testing.writeTestImage();
+    const attachmentsDir = dirname(image.path);
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, SPEC, { ...WORKING, attachmentsDir }),
+    );
+
+    await Effect.runPromise(
+      run.adapter.sendInput(SESSION, { text: "what is this?", attachments: [image] }),
+    );
+
+    // Without the directory, a session that asks before reading outside its
+    // workspace would ask the user before it reads its own image.
+    expect(run.options[0]?.additionalDirectories).toEqual([attachmentsDir]);
+    await waitUntil("sent the turn", () => run.sent.length === 1);
+    expect(run.sent[0]?.message.content).toEqual([
+      {
+        type: "text",
+        text: `what is this?\n\n[Attached image "screenshot.png" is saved at: ${image.path}]`,
+      },
+      {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: "image/png",
+          data: testing.PNG_BYTES.toString("base64"),
+        },
+      },
+    ]);
+    // The transcript keeps the user's own text and lists the image by its
+    // reference: never its path on this machine or its checksum.
+    await waitUntil(
+      "published the user's own message",
+      () => filterItems(run.seen, "user_message").length === 2,
+    );
+    expect(filterItems(run.seen, "user_message")[1]?.detail).toEqual({
+      text: "what is this?",
+      attachments: [
+        { id: image.id, name: image.name, mimeType: image.mimeType, sizeBytes: image.sizeBytes },
+      ],
+    });
   });
 
   it("steers input on a busy session into the turn already running", async () => {

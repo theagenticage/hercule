@@ -14,14 +14,17 @@ import {
   buildRecentModel,
   buildSubmission,
   findDraftSubject,
+  findExpiredShelfKeys,
   isMutationRunning,
   joinPhraseText,
   listProjectRepos,
   listWorkspaceThreads,
+  markShelfItemsExpired,
   queryKeys,
   readErrorMessage,
   type ComposerPick,
   type LoginTarget,
+  type ShelfItem,
   type ThreadPicks,
 } from "@hercule/client-core";
 import type { SessionSpawnInput, Workspace } from "@hercule/contract";
@@ -30,6 +33,7 @@ import { buildDraftKey } from "../../app/pending-submissions";
 import { threadsQuery } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
 import { buildLook, Face } from "../../faces";
+import { useComposerImages } from "../attachments/use-composer-images";
 import { useSendOnMenuCommand } from "../session/send-key";
 import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
 import { DraftComposer } from "./draft-composer";
@@ -48,6 +52,7 @@ const ProviderLoginDialog = lazy(() =>
 interface SentDraft {
   readonly input: SessionSpawnInput;
   readonly text: string;
+  readonly attachments: readonly ShelfItem[];
   readonly picks: ThreadPicks;
   /** The account the thread runs on, which a picked model is remembered with. */
   readonly instanceId: string | null;
@@ -75,7 +80,7 @@ interface SentDraft {
  * why under the composer's row, also when the user left while it ran and
  * came back.
  *
- * What the draft holds, the text and the picks, is kept in memory for as
+ * What the draft holds, the text, the images and the picks, is kept in memory for as
  * long as the app runs, in the pending submissions under the draft's project
  * and workspace, so it is still there when the user comes back to the same
  * place. The route mounts the screen keyed by that place, so every other
@@ -142,8 +147,13 @@ export function DraftScreen({
     // Kept in the draft rather than read from `spawn.error`: a screen mounted
     // again, after the user left and came back, has a mutation of its own,
     // which never saw this start fail.
-    onError: (error) => {
+    onError: (error, sent) => {
       pendingSubmissions.recordFailure(key, readErrorMessage(error));
+      // An image the controller swept before the start is marked on its
+      // tile, so the user sees which one to attach again.
+      const expired = findExpiredShelfKeys(error, sent.attachments);
+      if (expired.length > 0)
+        pendingSubmissions.updateAttachments(key, (shelf) => markShelfItemsExpired(shelf, expired));
     },
   });
   // Whether the column is scrolled away from its top, so part of it is under
@@ -153,7 +163,18 @@ export function DraftScreen({
   const [login, setLogin] = useState<LoginTarget | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const showsScrollbar = useShowsClassicScrollbar(scrollRef);
-  const canSend = fields.blocked === null && pending.message.text.trim() !== "" && !starting;
+  const images = useComposerImages({
+    storeKey: key,
+    shelf: pending.message.attachments,
+    acceptsImages: fields.model.acceptsImages,
+    modelName: fields.model.modelName,
+    readOnly: false,
+  });
+  const canSend =
+    fields.blocked === null &&
+    !starting &&
+    !images.sendBlocked &&
+    (pending.message.text.trim() !== "" || pending.message.attachments.length > 0);
 
   // Each pick is compared with the draft's own configuration, not with the
   // picks before it, so picking the configured value again removes the pick.
@@ -169,10 +190,12 @@ export function DraftScreen({
       pending.message,
     );
     pendingSubmissions.clearFailure(key);
+    images.clearRefusal();
     spawn.mutate(
       {
         input: submission.input,
         text: pending.message.text,
+        attachments: pending.message.attachments,
         picks: pending.picks,
         instanceId: view.config.instanceId,
       },
@@ -249,6 +272,8 @@ export function DraftScreen({
               pending.failure ??
               (inspection.error === null ? null : readErrorMessage(inspection.error))
             }
+            notice={images.notice}
+            attachments={images.attachments}
             readRecent={() => readRecentModels(controller.url)}
             fieldRef={fieldRef}
             onTextChange={(text) => {

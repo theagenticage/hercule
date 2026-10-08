@@ -8,10 +8,13 @@ import { describeAgent, findModelName } from "./model-name";
 
 /** An instance with a catalog on two runners; only the second lists Opus. */
 const CLAUDE = buildInstance("claude-code", "Claude Code", [
-  buildSnapshot({ runnerId: "atlas", models: [{ slug: "default", name: "Default", options: [] }] }),
+  buildSnapshot({
+    runnerId: "atlas",
+    models: [{ slug: "default", name: "Default", acceptsImages: true, options: [] }],
+  }),
   buildSnapshot({
     runnerId: "bare",
-    models: [{ slug: "claude-opus-5-5", name: "Opus 5.5", options: [] }],
+    models: [{ slug: "claude-opus-5-5", name: "Opus 5.5", acceptsImages: true, options: [] }],
   }),
 ]);
 

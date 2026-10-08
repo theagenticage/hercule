@@ -24,6 +24,7 @@ import {
   makeRemote,
   runGitOrThrow,
 } from "./testing";
+import { makeAttachmentCache } from "../attachments";
 
 afterAll(cleanTemporaries);
 
@@ -35,6 +36,11 @@ const refuseSessionPlacement = async (
   const machine: Machine = {
     providersDir: join(storageDir, "providers"),
     scratchDir: join(storageDir, "scratch"),
+    attachmentsDir: join(storageDir, "attachments"),
+    attachments: makeAttachmentCache({
+      controllerUrl: "https://controller.example:4938",
+      credential: "test",
+    }),
     binDir: join(storageDir, "bin"),
     herculeTool: { skill: "# fixture", claudePluginDir: join(storageDir, "claude-plugin") },
     controllerUrl: "http://controller.invalid",

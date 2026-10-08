@@ -15,14 +15,15 @@ import {
   EMPTY_REQUEST_DRAFT,
   changeRequestDraft,
   dropClosedRequestDrafts,
+  type MessageDraft,
   type RequestDraft,
   type ThreadPicks,
 } from "@hercule/client-core";
 import type { SessionRequest } from "@hercule/contract";
 
-/** The composer's unsent input: the Message Draft and the picks not yet sent. */
+/** The composer's unsent input: the Message Draft, with its text and images, and the picks not yet sent. */
 export interface ComposerDraft {
-  readonly message: string;
+  readonly message: MessageDraft;
   readonly picks: ThreadPicks;
 }
 
@@ -37,7 +38,10 @@ interface ThreadDraftsStore {
   readonly update: (change: (drafts: ThreadDrafts) => ThreadDrafts) => void;
 }
 
-const EMPTY_COMPOSER_DRAFT: ComposerDraft = { message: "", picks: {} };
+const EMPTY_COMPOSER_DRAFT: ComposerDraft = {
+  message: { text: "", attachments: [] },
+  picks: {},
+};
 
 const ThreadDraftsContext = createContext<ThreadDraftsStore | null>(null);
 

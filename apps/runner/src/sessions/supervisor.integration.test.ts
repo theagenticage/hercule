@@ -5,7 +5,7 @@ import { makeTestWorkspaces } from "../workspaces/testing";
  * tests are about the runner's own bookkeeping (the sequence numbers, the
  * `live` table, the scratch directory), not about any harness.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -42,6 +42,7 @@ import {
   runGitOrThrow,
 } from "../workspaces/testing";
 import { makeSupervising } from "./supervisor";
+import { makeAttachmentCache, type AttachmentCache } from "../attachments";
 
 const roots: Array<string> = [];
 /** Scopes that attach each test's workspace steps to its list of sent frames. */
@@ -252,14 +253,25 @@ const createFake = (): Fake => {
   return fake;
 };
 
-/** Builds one connection that records every frame the supervisor sends, in order, on a fresh machine. */
-const buildConnection = (fake: Fake) => {
+/**
+ * Builds one connection that records every frame the supervisor sends, in
+ * order, on a fresh machine. `cache` replaces the machine's cache of attached
+ * images, which otherwise fetches from a controller that does not exist.
+ */
+const buildConnection = (fake: Fake, cache?: AttachmentCache) => {
   const under = mkdtempSync(join(tmpdir(), "hercule-supervisor-"));
   roots.push(under);
   const sent: Array<RunnerToController> = [];
   const machine: Machine = {
     providersDir: join(under, "providers"),
     scratchDir: join(under, "scratch"),
+    attachmentsDir: join(under, "attachments"),
+    attachments:
+      cache ??
+      makeAttachmentCache({
+        controllerUrl: "https://controller.example:4938",
+        credential: "test",
+      }),
     binDir: join(under, "bin"),
     herculeTool: { skill: "# hercule", claudePluginDir: join(under, "claude-plugin") },
     controllerUrl: "https://controller.example:4938",
@@ -500,6 +512,113 @@ describe("the input a start carries", () => {
     // that is still running, so the runner must not end it.
     const reports = sent.filter((frame) => frame._tag === "sessionsReport");
     expect(reports[0]?.sessions.map((binding) => binding.sessionId)).toEqual([SESSION]);
+  });
+});
+
+describe("the images of an input", () => {
+  const IMAGE = {
+    id: "0199e0e7-0000-7000-8000-0000000000a1",
+    name: "screenshot.png",
+    mimeType: "image/png",
+    sizeBytes: 68,
+    sha256: "0".repeat(64),
+  } as const;
+
+  it("are handed to the adapter as files in the session's own directory, which goes when the session exits", async () => {
+    const fake = createFake();
+    const fetched: Array<{ readonly dir: string; readonly existed: boolean }> = [];
+    const cache: AttachmentCache = {
+      fetch: (dir, references) =>
+        Effect.sync(() => {
+          fetched.push({ dir, existed: existsSync(dir) });
+          return references.map((reference) => ({ ...reference, path: join(dir, reference.id) }));
+        }),
+    };
+    const { supervisor, sent, machine } = buildConnection(fake, cache);
+    const dir = join(machine.attachmentsDir, SESSION);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: REQUEST,
+          sessionId: SESSION,
+          input: { text: "what is this?", attachments: [IMAGE] },
+        });
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* waitUntil("sent the exit", () => listSessionEvents(sent).length === 2);
+      }),
+    );
+
+    // The harness learns the directory at start, so Claude can be allowed to
+    // read it before any image arrives.
+    expect(fake.contexts[0]?.attachmentsDir).toBe(dir);
+    expect(fetched).toEqual([{ dir, existed: true }]);
+    expect(fake.inputs[1]).toEqual({
+      text: "what is this?",
+      attachments: [{ ...IMAGE, path: join(dir, IMAGE.id) }],
+    });
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("do not stop a session from ending when their directory cannot be removed", async () => {
+    // An image download that outlived its input can still be writing into
+    // the directory when the session ends, and removal then fails. A parent
+    // the runner may not write to makes removal fail the same way, every time.
+    const fake = createFake();
+    const { supervisor, sent, machine } = buildConnection(fake);
+    const dir = join(machine.attachmentsDir, SESSION);
+
+    try {
+      await runWithRelay(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* supervisor.start(START);
+          chmodSync(machine.attachmentsDir, 0o500);
+          yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+          yield* waitUntil("sent the exit", () => listSessionEvents(sent).length === 2);
+          // The session is gone, so the same id starts again.
+          yield* supervisor.start(START);
+          yield* waitUntil("sent the second start", () => listSessionEvents(sent).length === 3);
+        }),
+      );
+    } finally {
+      chmodSync(machine.attachmentsDir, 0o700);
+    }
+
+    expect(existsSync(dir)).toBe(true);
+    expect(fake.contexts).toHaveLength(2);
+  });
+
+  it("refuse the input without reaching the adapter when one cannot be fetched", async () => {
+    const fake = createFake();
+    const reason = 'the image "screenshot.png" could not be fetched from the controller: HTTP 404';
+    const { supervisor, sent } = buildConnection(fake, { fetch: () => Effect.fail(reason) });
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: REQUEST,
+          sessionId: SESSION,
+          input: { text: "what is this?", attachments: [IMAGE] },
+        });
+      }),
+    );
+
+    expect(fake.inputs).toEqual([START_INPUT]);
+    expect(listInputResults(sent).at(-1)).toMatchObject({
+      requestId: REQUEST,
+      ok: false,
+      message: expect.stringContaining(reason) as unknown,
+    });
   });
 });
 

@@ -492,6 +492,16 @@ const TABLE = {
     method: "GET",
     path: "/api/v1/sessions/:id/transcript",
   },
+  "attachment.create": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/attachments",
+  },
+  "attachment.readContent": {
+    requires: "session.read",
+    method: "GET",
+    path: "/api/v1/attachments/:id/content",
+  },
 
   "controller.read": { requires: "infra.read", method: "GET", path: "/api/v1/controller" },
   "controller.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/controller" },

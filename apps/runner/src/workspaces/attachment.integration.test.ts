@@ -25,6 +25,7 @@ import {
   makeRemote,
   runGitOrThrow,
 } from "./testing";
+import { makeAttachmentCache } from "../attachments";
 
 afterAll(cleanTemporaries);
 
@@ -280,6 +281,11 @@ describe("recovering attachment availability", () => {
     const machine: Machine = {
       providersDir: join(fixture.storageDir, "providers"),
       scratchDir: join(fixture.storageDir, "scratch"),
+      attachmentsDir: join(fixture.storageDir, "attachments"),
+      attachments: makeAttachmentCache({
+        controllerUrl: "https://controller.example:4938",
+        credential: "test",
+      }),
       binDir: join(fixture.storageDir, "bin"),
       herculeTool: {
         skill: "# fixture",

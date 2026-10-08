@@ -99,7 +99,7 @@ export const FACTS: RunnerFacts = {
 };
 
 export const MODELS: ReadonlyArray<ModelDescriptor> = [
-  { slug: "fast", name: "Fast", isDefault: true, options: [] },
+  { slug: "fast", name: "Fast", acceptsImages: true, isDefault: true, options: [] },
 ];
 
 export const buildPlugins = (): ReadonlyArray<Plugin> => [

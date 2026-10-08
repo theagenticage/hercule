@@ -44,9 +44,15 @@ const buildSnapshotOn = (
   models: ProviderInstance["snapshots"][number]["models"],
 ): ProviderInstance["snapshots"][number] => buildSnapshot({ runnerId, models });
 
-const SONNET = { slug: "claude-sonnet-5", name: "Sonnet", isDefault: true, options: [] };
-const OPUS = { slug: "claude-opus-5", name: "Opus", options: [] };
-const HAIKU = { slug: "claude-haiku-5", name: "Haiku", options: [] };
+const SONNET = {
+  slug: "claude-sonnet-5",
+  name: "Sonnet",
+  acceptsImages: true,
+  isDefault: true,
+  options: [],
+};
+const OPUS = { slug: "claude-opus-5", name: "Opus", acceptsImages: true, options: [] };
+const HAIKU = { slug: "claude-haiku-5", name: "Haiku", acceptsImages: true, options: [] };
 
 const NO_SETTINGS: SettingsState["user"] = {};
 

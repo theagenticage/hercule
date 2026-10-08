@@ -17,10 +17,22 @@ const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
 
 const LOCAL = buildRunner({ id: "r-local", name: "moss" });
 
-const SONNET = { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [] };
-const OPUS = { slug: "claude-opus-5", name: "Claude Opus 5", options: [] };
-const LEGACY = { slug: "claude-sonnet-3", name: "Claude Sonnet 3", isLegacy: true, options: [] };
-const GPT = { slug: "gpt-5", name: "GPT-5", options: [] };
+const SONNET = {
+  slug: "claude-sonnet-5",
+  name: "Claude Sonnet 5",
+  acceptsImages: true,
+  isDefault: true,
+  options: [],
+};
+const OPUS = { slug: "claude-opus-5", name: "Claude Opus 5", acceptsImages: true, options: [] };
+const LEGACY = {
+  slug: "claude-sonnet-3",
+  name: "Claude Sonnet 3",
+  acceptsImages: true,
+  isLegacy: true,
+  options: [],
+};
+const GPT = { slug: "gpt-5", name: "GPT-5", acceptsImages: true, options: [] };
 
 const withModels = (
   base: ProviderInstance,
@@ -87,6 +99,7 @@ const buildCountedInstance = (id: string, name: string, count: number): Provider
     Array.from({ length: count }, (_, index) => ({
       slug: `model-${id}-${index}`,
       name: `Model ${index}`,
+      acceptsImages: true,
       options: [],
     })),
   );

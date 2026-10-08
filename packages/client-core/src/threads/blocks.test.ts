@@ -207,7 +207,14 @@ describe("buildThreadBlocks", () => {
     ];
 
     expect(buildThreadBlocks(rows, buildSessionAgentState(IDLE))).toEqual([
-      { kind: "user", key: "user:u1", itemId: "u1", text: "Say hi", at: buildInstant(0) },
+      {
+        kind: "user",
+        key: "user:u1",
+        itemId: "u1",
+        text: "Say hi",
+        attachments: [],
+        at: buildInstant(0),
+      },
       {
         kind: "agent",
         key: "agent:a1",
@@ -220,6 +227,33 @@ describe("buildThreadBlocks", () => {
         live: false,
       },
     ]);
+  });
+
+  it("carries the images a user message lists, and skips an entry that is not an image reference", () => {
+    const screenshot = {
+      id: "01920000-0000-7000-8000-000000000001",
+      name: "error.png",
+      mimeType: "image/png",
+      sizeBytes: 2048,
+    };
+    const rows = [
+      buildTurnStarted("t1", 0),
+      buildRow({
+        _tag: "item.started",
+        ...buildEnvelope(0),
+        turnId: "t1",
+        itemId: "u1",
+        kind: "user_message",
+        detail: { text: "", attachments: [screenshot, { id: "img-2" }] },
+      }),
+    ];
+
+    expect(
+      findBlock(buildThreadBlocks(rows, buildSessionAgentState(BUSY)), "user", "user:u1"),
+    ).toMatchObject({
+      text: "",
+      attachments: [screenshot],
+    });
   });
 
   it("gives each stretch of work between two messages a block of its own", () => {

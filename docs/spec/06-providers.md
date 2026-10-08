@@ -86,6 +86,7 @@ interface CapabilitySnapshot {
 interface ModelDescriptor {
   slug: string; name: string
   isDefault?: boolean; isLegacy?: boolean
+  acceptsImages: boolean                      // required; added 2026-10-08, #465: section 3.3
   options: OptionDescriptor[]                 // select | boolean, with per-model choices and defaults
 }
 
@@ -128,6 +129,15 @@ Probe-first, curated overlay where introspection falls short:
 - **pi**: models come from RPC `get_available_models` for the authenticated upstream providers, treated as probed.
 - **Custom-model entries** are the user's escape hatch on every provider: a user-typed slug with no descriptor, rendered generically.
 
+*(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465).)* **`acceptsImages` is required on every model.** It is required so that every adapter must answer, and "unknown" never passes as yes. Each adapter sets it in its probe:
+
+- **Codex**: true when the model's `inputModalities` includes `"image"`. Every current Codex model reports `["text", "image"]`.
+- **pi**: true when the model's `input` from `get_available_models` includes `"image"`. pi reports no `"image"` for `glm-5.3`, so it is text-only.
+- **Claude Code**: the CLI reports no such field, so the adapter declares `true` for every model, each `LEGACY_MODELS` entry included. Every current Claude model accepts images.
+- **Custom-model entries** have no descriptor, so a prompt with images on one fails closed: the controller refuses it because the model is not in the snapshot ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2).
+
+The composer reads `acceptsImages` to disable Attach and refuse pasted images; the controller reads it to refuse input with images ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2).
+
 **Well-known option ids** are documented conventions, not an enum: `effort`, `thinking`, `contextWindow`, `fastMode`. The composer renders dedicated controls for them and workflows can reference them portably across providers; unknown ids render generically from the descriptor. Reasoning effort is a per-model `effort` option: probed per model for Codex, curated per model for Claude.
 
 ## 4. ProviderAdapter
@@ -167,6 +177,7 @@ interface ProviderRunnerContext {             // the facts the runner resolved f
   env: Record<string, string>                 // session env: HERCULE_*, GH_TOKEN, GIT_CONFIG_*, PATH prepend (§9.3)
   home: string                                // this instance's provider home on this runner (CLAUDE_CONFIG_DIR / CODEX_HOME / PI_CODING_AGENT_DIR)
   binary: string                              // resolved harness binary path on this runner (§11)
+  attachmentsDir: string | null               // added 2026-10-08, #465: this session's attachment cache, below; null outside a session
 }
 
 interface SendResult { turnId: string; delivery: "opened" | "steered" }
@@ -194,7 +205,14 @@ Rules:
 
 *(Amended 2026-09-10, [#67](https://github.com/theagenticage/hercule/issues/67).)* `stopSession(sessionId: string): Effect<void>` becomes `stopSession(sessionId, reason: ExitReason): Effect<void>`: the caller - a controller `SessionStop`, the runner's inactivity or absolute timer, or an announced shutdown - names why, and the adapter emits exactly that reason on `session.exited`. First reason wins where a session is stopped twice.
 
-**Open:** `TurnInput` is pinned only as "the user input for one turn" (text). Whether it carries attachments or images in v1 is not decided.
+~~**Open:** `TurnInput` is pinned only as "the user input for one turn" (text). Whether it carries attachments or images in v1 is not decided.~~ *(Resolved 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465).)* **`TurnInput` carries images as references.** `TurnInput.attachments?: AttachmentReference[]` lists the images of the turn in order, each `{ id, name, mimeType, sizeBytes, sha256 }`; the frame never carries bytes ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). An input with images may have empty text.
+
+- **The supervisor fetches, the adapter never does.** The runner's session supervisor fetches each image into the session's attachment cache before it calls `startSession` with a first input or `sendInput`. The adapter never talks to the controller.
+- **The adapter receives local files, not references.** `sendInput` takes an `AdapterTurnInput`: the `TurnInput` with `attachments?: LocalAttachment[]` in place of the references, where a `LocalAttachment` is `AttachmentReference & { path }`: the reference as the frame carried it, plus `path`, which points at the cached copy. The wire type and the adapter's type stay separate.
+- **`ProviderRunnerContext.attachmentsDir`** is the session's cache directory, `<runner storage>/attachments/<sessionId>/`. The session context resolver (`apps/runner/src/sessions/context.ts`) creates it before `startSession`. It is `null` in the contexts of a probe, an install and a login, which have no session and so no images. It is a field of the context because Claude Code's `--add-dir` is a spawn flag (section 10.1). It is never in the workspace, so git stays clean.
+- **Each adapter maps the files to its harness's image input** (section 10) and adds one path line per image after the text, separated by a blank line: `[Attached image "image.png" is saved at: <path>]`. The line lets the agent use the file itself, for example to copy a screenshot into the repository. One shared helper, `appendAttachmentPaths`, writes the lines for all three adapters. The line is added only when the adapter sends the prompt: the stored input and the user's bubble keep the original text.
+- **An image over a harness's limit refuses the turn before anything is sent**, with `"<name>" is <size>; <harness> accepts images up to <limit>.`, for example `"photo.png" is 4 MB; pi accepts images up to 3.375 MB.` Only pi declares a per-image limit (section 10.3); Claude Code and Codex rely on the controller's 10 MiB cap ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1.5).
+- **No resizing in v1.** The client uploads the original bytes and the adapter hands those bytes to the harness. Claude Code and Codex shrink large images themselves, and pi resizes some (section 10.3).
 
 Amended 2026-09-01 ([Prototype: the app shell and navigation](https://github.com/theagenticage/hercule/issues/51)): `TurnInput` carries an optional `modelSelection: { model, options }` that replaces the session's selection from that turn on - Claude `setModel()` on the live `query()` before the turn, Codex the per-turn `model` on `turn/start`, pi `set_model` / `set_thinking_level`. ~~It applies only when the input **opens** a turn; a steered turn keeps its model (the controller holds the change as Queued Input until `turn.completed`, section 5). The Session row's `modelSelection` is updated on delivery, so resume and fork carry the new value.~~ This is the one live setting of a running thread; every other field of `SessionSpec` is fixed at start.
 
@@ -349,7 +367,7 @@ State mapping: `interrupted` <- Codex `interrupted`, Claude abort terminal reaso
 
 | Kind | Meaning | Notes |
 |---|---|---|
-| `user_message { steered?: true }` | user input | `steered` set from `SendResult`, never inferred |
+| `user_message { steered?: true }` | user input | `steered` set from `SendResult`, never inferred. *(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465).)* `detail.attachments` lists the turn's images as `Attachment`s `{ id, name, mimeType, sizeBytes }`, in order, and is absent when there are none. It holds references only, never bytes, so replay and the client's bubble work from the stream alone. `detail.text` is the original text, without the path lines |
 | `assistant_message` | assistant text | |
 | `reasoning` | thinking / reasoning | |
 | `command_execution` | shell command | Claude: `Bash`/`Shell` tool-name inference; pi: `bash` tool |
@@ -620,6 +638,7 @@ Whether the channel stays skill-shaped or becomes an MCP server is the follow-up
 - **hercule-as-a-tool** *(2026-09-15, [#68](https://github.com/theagenticage/hercule/issues/68))*: `plugins: [{ type: "local", path: <runner storage>/claude-plugin }]` on every session. `settingSources: []` above still holds and the plugin loads independently of it: a plugin named by path is not discovered through a setting source. Verified live against CLI 2.1.272 - a session with no setting source at all read the plugin's `SKILL.md` and answered with a marker only that file carried.
 - **Sharp edges**: the SDK's eight per-platform packages bundle a 196 MB CLI and are excluded from the build; single-shot `query()` throws after yielding an error result (wrap iteration); `env` replaces the subprocess env; MCP tools need explicit allow rules (`acceptEdits` does not auto-approve them); `AskUserQuestion` and `ExitPlanMode` are intercepted in `canUseTool` and mapped to `question` / `plan`.
 - **Stability**: 0.x semver, weekly releases version-locked to the CLI, several breaking changes shipped. Pin the exact SDK version; the installed CLI floats above the floor (version policy in [./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12); treat CLI-version-gated behaviour as part of the adapter contract; keep the SDK entirely behind the adapter seam.
+- **Images** *(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465).)* Verified against CLI 2.1.292 through the Agent SDK. The user message's `content` becomes `[{ type: "text" }, { type: "image", source: { type: "base64", media_type, data } }, ...]`, on a first prompt and on a steer. The adapter starts the session with `--add-dir <ctx.attachmentsDir>`, so the agent can read the cached files the path lines name. Claude Code shrinks large images itself (a 26 MB PNG worked), so the adapter declares no per-image limit. A bad image does not fail the turn: Claude Code emits a synthetic assistant message (`model: "<synthetic>"`, text "API Error: an image in the conversation could not be processed...") and then succeeds. That message stays visible in the transcript and is never filtered. Every Claude model accepts images, so a switch to a text-only model with images in history cannot happen.
 
 ### 10.2 Codex (app server)
 
@@ -632,6 +651,7 @@ Whether the channel stays skill-shaped or becomes an MCP server is the follow-up
 - **Errors**: `-32001` overload -> retry with exponential backoff and jitter; mid-turn `error` notifications with `codexErrorInfo` feed `runtime.error { class }`.
 - **Auth**: ChatGPT OAuth or API key via `account/*`; credentials in `$CODEX_HOME/auth.json` (file store default); tokens auto-refresh. `cli_auth_credentials_store` stays `file` on runners.
 - **Stability**: no cross-version protocol guarantee. Pin the CLI release, generate types with `codex app-server generate-ts` for that release, regenerate and re-verify on every upgrade.
+- **Images** *(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465).)* Verified against `codex` 0.160.1. Each image is an input item `{ type: "localImage", path }` pointing at the cached file, on `turn/start` and on `turn/steer`. Codex shrinks large images itself, so the adapter declares no per-image limit. A bad image does not fail the turn: Codex puts placeholder text in its place. A switch to a text-only model with images in history works: Codex swaps the images for placeholder text.
 
 ### 10.3 pi (standalone binary, RPC mode)
 
@@ -641,6 +661,7 @@ Whether the channel stays skill-shaped or becomes an MCP server is the follow-up
 - **Absent by design**: ~~subagents,~~ plan mode, MCP (verify). Declared, not emulated. *(Amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355).)* pi has no subagents of its own, but Hercule's pi extension gives a session a subagent tool, so a pi session has subagents like the other two (section 13.6). *(Amended 2026-10-07, [#438](https://github.com/theagenticage/hercule/issues/438).)* pi itself still has none: the subagents are Hercule's extension's `subagent` tool, and each running child is a `pi --mode rpc` process of its own that the runner spawns at the extension's request. So a session runs one pi process plus one per running subagent.
 - **Auth**: multi-provider. The pinned v1 path is API-key auth - z.ai coding plan: provider `zai` (or `zai-coding-cn`), the key a `provider-instance` secret injected as `ZAI_API_KEY`. OAuth logins exist but are TUI-only (`/login`, no headless command); the fleet UI shows the copy-paste command as the fallback ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12). `auth.json` in the instance dir holds raw vendor tokens (plain file on every OS); Hercule never touches it. Probe: `pi auth check --provider <id> --json`.
 - **Stability**: pre-1.0 (0.84.x), repeated RPC breaking changes, no protocol version on the wire (0.84.0 changed `message_update` to deltas, 0.43.0 renamed `branch` to `fork`, 0.32.0 split the queue commands). The tested-max version policy ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12) matters most here; gate on `pi --version`, and regression-test the awaited `tool_call` park and `terminate` handling on every bump.
+- **Images** *(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465).)* Each image is `{ type: "image", data, mimeType }` in the `images` array of `prompt` and `steer`, with `data` in base64. The adapter sends no input as `follow_up`. pi's own cap is 4.5 MB of base64 per image, about 3.375 MB raw. pi checks nothing on `steer` or on a prompt sent while the agent runs, and forwards the raw bytes, so the adapter applies the limit itself on every RPC call and refuses the turn with the over-limit message (section 4) before anything is sent. On a prompt sent while the agent is idle, pi silently resizes an image to at most 2000 px on its longest side; that is accepted. A switch to a text-only model with images in history works: on each request pi swaps each image for "(image omitted: model does not support images)".
 
 **Verify at build time:** the Hercule extension file against the pinned pi version (`tool_call` hook and `registerTool` API churn), and the strict LF JSONL framing.
 

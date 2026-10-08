@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
+import { addFilesToShelf, markShelfItemUploaded } from "../attachments/shelf";
 import { buildSubmission } from "./submission";
 
 const CONFIG = {
@@ -48,7 +49,7 @@ const SESSION: Session = {
 
 const DRAFT = { kind: "draft" as const, config: CONFIG };
 const ACTIVE = { kind: "active" as const, session: SESSION };
-const MESSAGE = { text: "ship it" };
+const MESSAGE = { text: "ship it", attachments: [] };
 
 describe("buildSubmission: a draft thread", () => {
   it("spawns with the draft's config, no workspace and the config's profile", () => {
@@ -274,5 +275,34 @@ describe("buildSubmission: the project and the workspace", () => {
     expect(
       buildSubmission(ACTIVE, { workspace: { kind: "none" }, projectId: "p-webshop" }, MESSAGE),
     ).toEqual({ kind: "input", sessionId: SESSION.id, payload: { text: "ship it" } });
+  });
+});
+
+describe("buildSubmission: images", () => {
+  // Two images on the shelf: the first uploaded, the second still uploading.
+  const { shelf } = addFilesToShelf(
+    [],
+    ["one.png", "two.png"].map((name) =>
+      Object.assign(new Blob([new Uint8Array(4)], { type: "image/png" }), { name }),
+    ),
+    { acceptsImages: true, modelName: "Claude Sonnet 5" },
+  );
+  const attachments = markShelfItemUploaded(shelf, shelf[0]!.key, {
+    id: "att-1",
+    name: "one.png",
+    mimeType: "image/png",
+    sizeBytes: 4,
+  });
+
+  it("sends the ids of the uploaded images, with or without text", () => {
+    expect(buildSubmission(ACTIVE, {}, { text: "", attachments })).toEqual({
+      kind: "input",
+      sessionId: SESSION.id,
+      payload: { text: "", attachments: ["att-1"] },
+    });
+    expect(buildSubmission(DRAFT, {}, { text: "look", attachments }).input).toMatchObject({
+      prompt: "look",
+      attachments: ["att-1"],
+    });
   });
 });

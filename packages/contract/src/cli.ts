@@ -77,6 +77,17 @@ export type FieldRow =
        */
       readonly required?: true;
     }
+  | {
+      /**
+       * Makes `--<flag> <path>` name an image file, repeatable. The CLI
+       * uploads each file with `attachment.create` and sends the returned
+       * ids in this field, in the order the flags were given. A field holds
+       * ids, which nobody types, so this is how a command takes images.
+       */
+      readonly upload: true;
+      readonly flag: string;
+      readonly help: string;
+    }
   /**
    * Leaves the field off the command line. Give the reason in a comment, as
    * for a hidden operation.
@@ -2579,6 +2590,10 @@ export const CLI = {
     examples: [
       { args: [], stdin: "Look at the failing login test and tell me what you find." },
       {
+        args: ["--image", "login-error.png"],
+        stdin: "This is what the login page shows. Find the cause.",
+      },
+      {
         args: [
           "--agent",
           "1f3a9c2e-0000-7000-8000-000000000001",
@@ -2616,7 +2631,16 @@ export const CLI = {
       },
     ],
     fields: {
-      prompt: { stdin: true, flag: "prompt", help: "The opening prompt." },
+      prompt: {
+        stdin: true,
+        flag: "prompt",
+        help: "The opening prompt. It may be empty when --image is given.",
+      },
+      attachments: {
+        upload: true,
+        flag: "image",
+        help: "An image file to send with the prompt (PNG, JPEG, GIF or WebP, at most 10 MiB); repeat it for up to 10 images, in the order the agent should see them.",
+      },
       agentId: {
         flag: "agent",
         help: "The Agent to spawn from, by its id or a tail of eight or more characters; --instance and --profile are not allowed with it, because those come from the Agent.",
@@ -2691,6 +2715,10 @@ export const CLI = {
     examples: [
       { args: ["1f3a9c2e"], stdin: "Carry on, and run the tests when you are done." },
       { args: ["1f3a9c2e", "--model", "claude-opus-4"], stdin: "Try that again with more care." },
+      {
+        args: ["1f3a9c2e", "--image", "before.png", "--image", "after.png"],
+        stdin: "The second screenshot shows the regression. Fix it.",
+      },
     ],
     fields: {
       id: {
@@ -2698,7 +2726,16 @@ export const CLI = {
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
       },
-      text: { stdin: true, flag: "text", help: "What to say to the session." },
+      text: {
+        stdin: true,
+        flag: "text",
+        help: "What to say to the session. It may be empty when --image is given.",
+      },
+      attachments: {
+        upload: true,
+        flag: "image",
+        help: "An image file to send with the text (PNG, JPEG, GIF or WebP, at most 10 MiB); repeat it for up to 10 images, in the order the agent should see them.",
+      },
       model: { flag: "model", help: "Switch the session to this model from this turn on." },
       options: {
         flag: "options",
@@ -2810,6 +2847,10 @@ export const CLI = {
         args: ["1f3a9c2e", "--mode", "fork"],
         stdin: "Take the same diagnosis and write the fix instead.",
       },
+      {
+        args: ["1f3a9c2e", "--mode", "fork", "--image", "mockup.png"],
+        stdin: "Build it to match this mockup instead.",
+      },
     ],
     fields: {
       id: {
@@ -2821,7 +2862,12 @@ export const CLI = {
       prompt: {
         stdin: true,
         flag: "prompt",
-        help: "The opening prompt of the forked session.",
+        help: "The opening prompt of the forked session. It may be empty when --image is given.",
+      },
+      attachments: {
+        upload: true,
+        flag: "image",
+        help: "An image file to send with the prompt (PNG, JPEG, GIF or WebP, at most 10 MiB); repeat it for up to 10 images, in the order the agent should see them.",
       },
     },
     errors: {
@@ -2866,6 +2912,9 @@ export const CLI = {
         help: "The input's full id, as `hercule input list` reports it; no tail is resolved here.",
       },
       text: { stdin: true, flag: "text", help: "The replacement text." },
+      // Editing a queued input's images is done in the composer; from the
+      // command line, the input keeps the images it has.
+      attachments: { hidden: true },
     },
     errors: {
       invalid_state:
@@ -2933,6 +2982,14 @@ export const CLI = {
       },
     },
   },
+
+  // Images are uploaded through `--image` on `session spawn`, `session input`
+  // and `session continue`, which call this for each file, so it has no
+  // command of its own.
+  "attachment.create": { hidden: true },
+  // Returns an image's bytes, which a terminal cannot show. A client reads it
+  // to draw an image of a transcript or a queued input.
+  "attachment.readContent": { hidden: true },
 
   "controller.read": {
     command: "controller read",

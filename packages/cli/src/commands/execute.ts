@@ -9,8 +9,13 @@
  *   subagents, is read with the command's own path parameters.
  * - **`--all`** follows `nextCursor` to the last page, so a caller who wants
  *   everything writes one flag instead of a loop.
+ * - **`--image <path>`** names an image file. The API takes an image's id,
+ *   which nobody has before the upload, so the CLI uploads each file with
+ *   `attachment.create` and sends the returned ids.
  */
-import { ApiError, type HerculeClient } from "@hercule/client-core";
+import { basename } from "node:path";
+import { ApiError, checkImageFile, type HerculeClient } from "@hercule/client-core";
+import { MAX_ATTACHMENTS_PER_INPUT } from "@hercule/contract";
 import { UsageError } from "../exit";
 import { coerceFieldValue, formatFieldName, type Arguments } from "./args";
 import { findCommandById, type Command, type Field } from "./tree";
@@ -222,6 +227,89 @@ const resolveTails = async (
   return resolved;
 };
 
+/** One `--image` argument: the path as written, and the file it names, not yet read. */
+interface ImageArgument {
+  readonly path: string;
+  readonly file: Bun.BunFile;
+}
+
+/**
+ * Checks every image file the command line names, for each upload field, in
+ * the order the flags were given, and returns them unread. Throws a
+ * `UsageError` when there are more files than one input carries, or when a
+ * file does not exist, is not a PNG, JPEG, GIF or WebP image by its name, is
+ * empty, or is larger than an upload accepts.
+ *
+ * It runs before any request, so a command line that cannot work exits with a
+ * usage error and sends nothing. Only the file's size and name are looked at
+ * here; the bytes are read one file at a time when each is uploaded, so ten
+ * images never sit in memory together. The controller still checks each
+ * file's bytes, which are the only proof of its type.
+ */
+const checkImageArguments = async (
+  command: Command,
+  payload: Record<string, unknown>,
+): Promise<
+  ReadonlyArray<{ readonly field: Field; readonly images: ReadonlyArray<ImageArgument> }>
+> => {
+  const checked = [];
+  for (const field of command.payload) {
+    const paths = payload[field.name];
+    if (!field.uploads || !Array.isArray(paths)) continue;
+    const flag = formatFieldName(field);
+    if (paths.length > MAX_ATTACHMENTS_PER_INPUT) {
+      throw new UsageError(
+        `${flag}: ${paths.length} images given, but one input carries at most ${MAX_ATTACHMENTS_PER_INPUT}`,
+        command.spelling,
+      );
+    }
+    const images: Array<ImageArgument> = [];
+    for (const path of paths as ReadonlyArray<string>) {
+      const file = Bun.file(path);
+      if (!(await file.exists())) {
+        throw new UsageError(`${flag}: ${path} does not exist`, command.spelling);
+      }
+      const refusal = checkImageFile({ name: path, type: file.type, size: file.size });
+      if (refusal !== undefined) throw new UsageError(`${flag}: ${refusal}`, command.spelling);
+      images.push({ path, file });
+    }
+    checked.push({ field, images });
+  }
+  return checked;
+};
+
+/**
+ * Uploads every image, one at a time and in order, and puts the returned ids
+ * in each upload field of `payload`. Each upload is named after the file
+ * alone, never its whole path. A refused upload fails with the controller's
+ * `ApiError`, its message prefixed with the file's path so the caller knows
+ * which file it was. Images uploaded before the failure are never used, and
+ * the controller deletes them after 24 hours.
+ */
+const uploadImages = async (
+  client: HerculeClient,
+  checked: Awaited<ReturnType<typeof checkImageArguments>>,
+  payload: Record<string, unknown>,
+): Promise<void> => {
+  for (const { field, images } of checked) {
+    const ids: Array<string> = [];
+    for (const { path, file } of images) {
+      const named = new File([file], basename(path), { type: file.type });
+      const attachment = await client.uploadAttachment(named).catch((error: unknown) => {
+        throw error instanceof ApiError
+          ? new ApiError(
+              error.code,
+              `${formatFieldName(field)} ${path}: ${error.message}`,
+              error.details,
+            )
+          : error;
+      });
+      ids.push(attachment.id);
+    }
+    payload[field.name] = ids;
+  }
+};
+
 /** The result of a command: an operation's output, or every item of an `--all` read. */
 export type Outcome =
   | { readonly kind: "value"; readonly value: unknown }
@@ -236,6 +324,7 @@ export const execute = async (
   command: Command,
   args: Arguments,
 ): Promise<Outcome> => {
+  const images = await checkImageArguments(command, args.payload);
   const inPath = command.positionals.filter((field) => field.carriedIn === "path");
   const writtenParams: Record<string, unknown> = {};
   const writtenPayload: Record<string, unknown> = { ...args.payload };
@@ -261,6 +350,9 @@ export const execute = async (
     ...command.positionals.filter((field) => field.carriedIn === "payload"),
   ];
   const payload = await resolveTails(client, command, payloadFields, writtenPayload, params);
+  // Upload only once every id tail has resolved, so a mistyped session id
+  // fails before any image is sent.
+  await uploadImages(client, images, payload);
   const query: Record<string, unknown> = await resolveTails(
     client,
     command,

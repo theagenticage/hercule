@@ -357,6 +357,34 @@ describe("normalizing SDK messages one at a time", () => {
       ],
     },
     {
+      // When an attached image cannot be processed, the harness writes this
+      // message itself instead of failing the turn. It is the only sign the
+      // user gets that the model never saw the image, so it must be shown.
+      name: "shows the message the harness writes itself when an image could not be processed",
+      messages: [
+        {
+          ...ASSISTANT_TEXT,
+          message: {
+            id: MESSAGE,
+            role: "assistant",
+            model: "<synthetic>",
+            content: [
+              {
+                type: "text",
+                text: "API Error: an image in the conversation could not be processed",
+              },
+            ],
+          },
+        },
+      ],
+      events: [
+        "turn.started",
+        "item.started assistant_message id-3",
+        'content.delta assistant_text "API Error: an image in the conversation could not be processed"',
+        "item.completed assistant_message id-3 completed",
+      ],
+    },
+    {
       // The harness can leave a thinking block's text out and send only its
       // signature, which would make a blank transcript entry.
       name: "emits no item for an empty block of a message that never streamed",

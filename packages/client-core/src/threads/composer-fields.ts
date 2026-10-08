@@ -103,7 +103,17 @@ export interface ComposerFields {
     readonly value: AccessMode;
     readonly rows: readonly AccessModeMenuItem[];
   };
-  readonly model: { readonly pill: ModelPill };
+  readonly model: {
+    readonly pill: ModelPill;
+    /**
+     * Whether the selected model takes images. A model the runner's snapshot
+     * does not list counts as one that does not, because the controller
+     * refuses images for it too.
+     */
+    readonly acceptsImages: boolean;
+    /** The selected model's name, for a sentence such as "glm-5.3 does not accept images". */
+    readonly modelName: string;
+  };
   /** The current model's options, or `null` when it has none and there is no selector. */
   readonly options: readonly ModelOption[] | null;
   /** Where the thread works: the current pick, and whether it can still change. */
@@ -257,6 +267,8 @@ export const buildComposerFields = (
         // the pill shows the slug rather than going blank.
         name: descriptor?.name ?? config.model,
       },
+      acceptsImages: descriptor?.acceptsImages === true,
+      modelName: descriptor?.name ?? config.model ?? "The model",
     },
     options:
       descriptor === undefined || descriptor.options.length === 0 ? null : descriptor.options,

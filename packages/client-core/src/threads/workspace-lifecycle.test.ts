@@ -80,7 +80,8 @@ it("keeps the actual main branch when a Thread shares its files", () => {
     expect(field.locked).not.toBeNull();
   }
   expect(
-    buildSubmission(draft, { workspace: pick }, { text: "Share these files" }).input.workspace,
+    buildSubmission(draft, { workspace: pick }, { text: "Share these files", attachments: [] })
+      .input.workspace,
   ).toEqual(pick);
 });
 
@@ -94,7 +95,8 @@ it.each<StartingRevision>([
     checkouts: [{ resourceId: WEBSHOP.id, startingRevision }],
   };
   expect(
-    buildSubmission(draft, { workspace }, { text: "Use the chosen revision" }).input.workspace,
+    buildSubmission(draft, { workspace }, { text: "Use the chosen revision", attachments: [] })
+      .input.workspace,
   ).toEqual(workspace);
 });
 

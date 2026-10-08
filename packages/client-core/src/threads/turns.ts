@@ -8,11 +8,12 @@
  * only arrives as `content.delta` events (spec 06 §6.3-6.4). So:
  *
  * - the user's message comes from `detail.text` on the `user_message` item's
- *   `item.started`;
+ *   `item.started`, and its images from `detail.attachments` there;
  * - the assistant's text is the turn's `assistant_text` deltas joined in
  *   transcript order.
  */
-import type { SessionStatus, TranscriptRow } from "@hercule/contract";
+import { Schema } from "effect";
+import { Attachment, type SessionStatus, type TranscriptRow } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
 import type { AgentState } from "./agent-state";
 
@@ -36,9 +37,25 @@ export interface ThreadItem {
   readonly result: "completed" | "failed" | "declined" | "running" | "awaiting approval";
 }
 
+const isAttachment = Schema.is(Attachment);
+
+/**
+ * Returns the images a `user_message` item's detail lists in `attachments`:
+ * references to uploaded images, never their bytes. Returns `[]` when the
+ * message had no images. An entry that is not a well-formed attachment is
+ * skipped, so a transcript written by an older or newer controller still
+ * renders.
+ */
+export const readUserAttachments = (detail: unknown): readonly Attachment[] => {
+  const attachments = readJsonObject(detail)?.attachments;
+  return Array.isArray(attachments) ? (attachments as readonly unknown[]).filter(isAttachment) : [];
+};
+
 export interface ThreadTurn {
   readonly turnId: string;
   readonly user: string;
+  /** The images the user sent in this turn, across every message steered into it. */
+  readonly userAttachments: readonly Attachment[];
   readonly items: readonly ThreadItem[];
   readonly assistantText: string;
   readonly startedAt: string;
@@ -124,6 +141,7 @@ interface Building {
   completedAt: string | null;
   endState: TurnEndState | null;
   user: string;
+  userAttachments: Attachment[];
   items: ThreadItem[];
   itemIndex: Map<string, number>;
   assistantText: string;
@@ -170,6 +188,7 @@ export const buildTurns = (
       completedAt: null,
       endState: null,
       user: "",
+      userAttachments: [],
       items: [],
       itemIndex: new Map(),
       assistantText: "",
@@ -200,6 +219,7 @@ export const buildTurns = (
           const detail = event.detail as { text?: string } | undefined;
           const text = detail?.text ?? "";
           turn.user = turn.user === "" ? text : `${turn.user}\n\n${text}`;
+          turn.userAttachments.push(...readUserAttachments(event.detail));
         } else if (event.kind !== "assistant_message") {
           turn.itemIndex.set(event.itemId, turn.items.length);
           turn.items.push(buildThreadItem(event));
@@ -236,6 +256,7 @@ export const buildTurns = (
   return Array.from(turns.values()).map((turn) => ({
     turnId: turn.turnId,
     user: turn.user,
+    userAttachments: turn.userAttachments,
     // Only a running item can be waiting for an open Request. An item the
     // harness already finished keeps its result, even if a Request still
     // refers to it.

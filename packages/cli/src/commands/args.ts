@@ -249,11 +249,18 @@ export function* tokenize(tokens: ReadonlyArray<string>, help: string): Generato
  * `readStdin` is called at most once, and only when the command has a field
  * to read from it, so a command that reads nothing from stdin never waits on
  * a pipe.
+ *
+ * A command given at least one `--image` may send empty text with its
+ * images. So when `stdinIsTerminal` is true, it does not call `readStdin` at
+ * all: each stdin field is sent empty, because a person at a terminal who
+ * gave only images has no text to type. Piped stdin is read as usual, and an
+ * empty pipe also sends empty text.
  */
 export const parseArguments = async (
   command: Command,
   tokens: ReadonlyArray<string>,
   readStdin: () => Promise<string>,
+  stdinIsTerminal = false,
 ): Promise<Arguments> => {
   const help = command.spelling;
   const payloadFields = new Map(command.payload.map((field) => [field.spelling, field]));
@@ -359,7 +366,10 @@ export const parseArguments = async (
     throw new UsageError(`missing required ${missing.join(", ")}`, help);
   }
 
-  if (reading.length > 0) {
+  const sendsImages = command.payload.some((field) => field.uploads && field.name in payload);
+  if (reading.length > 0 && sendsImages && stdinIsTerminal) {
+    for (const field of reading) payload[field.name] = coerceFieldValue(field, "", help);
+  } else if (reading.length > 0) {
     // Strip one trailing newline, because heredocs and editors add one. Files
     // saved on Windows end with `\r\n`, which counts as that newline.
     const text = (await readStdin()).replace(/\r?\n$/, "");

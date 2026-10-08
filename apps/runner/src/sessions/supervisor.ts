@@ -37,7 +37,7 @@ import {
   type SubagentId,
   type WorkspaceStepKey,
 } from "@hercule/protocol";
-import { describeMissingAdapter, type ProviderAdapter } from "../providers";
+import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } from "../providers";
 import { now, describeCause } from "../report";
 import type { WorkspaceSteps } from "../workspace-steps";
 import { resolveSessionContext, type Machine, type Resolved } from "./context";
@@ -97,6 +97,8 @@ interface Live {
   readonly harnessReady: Deferred.Deferred<void>;
   readonly adapter: ProviderAdapter;
   readonly scratch: string | undefined;
+  /** The directory the session's attached images are cached in. Removed with the entry. */
+  readonly attachmentsDir: string;
   /** The workspace this session works in. It is read again and reported when the session exits. */
   readonly workspaceId: string | null;
   /** How long this session may sit with no event while a turn is open. */
@@ -399,9 +401,20 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         bindings.some((binding) => binding.sessionId === sessionId),
       );
 
-    const discardScratch = (scratch: string | undefined): void => {
-      if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
-    };
+    /**
+     * Removes a directory a session used, and logs a failure instead of
+     * failing. Removal can fail while a file is still being written into the
+     * directory, such as an image download that outlived its input; the
+     * session has ended either way, and its teardown must still finish.
+     */
+    const removeSessionDirectory = (path: string | undefined): Effect.Effect<void> =>
+      path === undefined
+        ? Effect.void
+        : Effect.try(() => rmSync(path, { recursive: true, force: true })).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning(`could not remove ${path}: ${String(error.cause)}`),
+            ),
+          );
 
     /**
      * Sends a frame and ignores any failure, not only a failed write. A frame
@@ -414,7 +427,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
 
     /**
      * Interrupts every timer fiber of a removed session entry, removes its
-     * scratch directory, and completes its `gone`. Call it after the entry
+     * scratch and image directories, and completes its `gone`. Call it after the entry
      * has left `live`.
      */
     const tearDownSession = (held: Live): Effect.Effect<void> =>
@@ -422,7 +435,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         if (held.inactivity !== undefined) yield* Fiber.interrupt(held.inactivity);
         if (held.absolute !== undefined) yield* Fiber.interrupt(held.absolute);
         yield* cancelIdleUnload(held);
-        discardScratch(held.scratch);
+        yield* removeSessionDirectory(held.scratch);
+        yield* removeSessionDirectory(held.attachmentsDir);
         yield* Deferred.succeed(held.gone, undefined);
       });
 
@@ -740,6 +754,24 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       );
 
     /**
+     * Returns the input an adapter delivers: the frame's input, with each
+     * image reference replaced by the session's cached copy of the image.
+     * Fetches the images that are not cached yet. Fails with a message naming
+     * the image when one cannot be fetched or does not match its checksum.
+     */
+    const buildAdapterInput = (
+      held: Live,
+      frame: SessionInput | SessionStart,
+    ): Effect.Effect<AdapterTurnInput, string> => {
+      const { attachments, ...rest } = frame.input;
+      if (attachments === undefined || attachments.length === 0) return Effect.succeed(rest);
+      return Effect.map(
+        connection.machine.attachments.fetch(held.attachmentsDir, attachments),
+        (local) => ({ ...rest, attachments: local }),
+      );
+    };
+
+    /**
      * Hands one input to the harness of a session this runner holds, and
      * answers it: delivered, with the adapter's report of what the input did,
      * or refused, with the reason. Never fails. Both a `sessionInput` and the
@@ -805,11 +837,24 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             return isIdle(held) ? armIdleUnload(held, frame.sessionId) : Effect.void;
           }),
         );
+      const isCancelled = (): boolean => cancellation.generation !== generation;
+      // The images are fetched before the harness is asked, and the input is
+      // refused if any of them cannot be: the harness never gets the text
+      // without the images the user attached. The fetch can take a while, so
+      // an interrupt or a stop of the session that arrives during it is
+      // checked for again after it.
       const deliverInput = Effect.suspend(() =>
-        cancellation.generation !== generation
+        isCancelled()
           ? Effect.fail("the input was stopped before delivery")
-          : held.adapter.sendInput(frame.sessionId, frame.input),
+          : buildAdapterInput(held, frame),
       ).pipe(
+        Effect.flatMap((input) => {
+          if (isCancelled()) return Effect.fail("the input was stopped before delivery");
+          if (held.pendingStop !== undefined) {
+            return Effect.fail(`session ${frame.sessionId} is stopping on this runner`);
+          }
+          return held.adapter.sendInput(frame.sessionId, input);
+        }),
         Effect.tap((sent) =>
           Effect.sync(() => {
             // Unless the turn has already ended and finished the step.
@@ -992,6 +1037,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           harnessReady: arrived.harnessReady,
           adapter,
           scratch: resolved.scratch,
+          attachmentsDir: resolved.attachmentsDir,
           workspaceId: frame.spec.workspaceId,
           inactivityMs: frame.spec.timeouts.inactivityMs,
           // Not used until the session is watched: `sendSequenced` sets it
@@ -1083,7 +1129,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
      * one step, with nothing between them that waits. So a stop requested
      * before that step is saved in `pendingStop` and found here, and a stop
      * requested after it goes to the adapter, where it races the input
-     * (spec 06 section 4.2).
+     * (spec 06 section 4.2). An input with images is the exception: it waits
+     * for its images to be fetched between the move to `running` and the
+     * call to the adapter, and a stop that arrives during that wait goes to
+     * the adapter and refuses the input.
      */
     const handOverStartInput = (
       held: Live,
@@ -1168,6 +1217,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       // - Claude Code: `CONTROL_DEADLINE`, 5 seconds, for a change of model
       //   before the input. Its start and the input itself do not wait on
       //   the harness.
+      //
+      // Before any of these, an input with images waits for them to be
+      // fetched from the controller: `ATTACHMENT_DOWNLOAD_TIMEOUT`, two
+      // minutes for all the images of the input together.
       start: (frame: SessionStart): Effect.Effect<void> => {
         const arrived: ArrivedStart = {
           sessionId: frame.sessionId,

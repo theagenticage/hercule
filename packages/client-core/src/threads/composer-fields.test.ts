@@ -51,10 +51,11 @@ const EFFORT: ModelOption = {
 const SONNET = {
   slug: "claude-sonnet-5",
   name: "Claude Sonnet 5",
+  acceptsImages: true,
   isDefault: true,
   options: [EFFORT],
 };
-const HAIKU = { slug: "claude-haiku-5", name: "Claude Haiku 5", options: [] };
+const HAIKU = { slug: "claude-haiku-5", name: "Claude Haiku 5", acceptsImages: true, options: [] };
 
 const CLAUDE = buildInstance("claude-code", "Claude Code", [
   buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, HAIKU] }),
@@ -190,6 +191,27 @@ describe("buildComposerFields", () => {
     expect(
       buildComposerFields(buildCatalogs([CLAUDE]), buildConfig(), "draft").options,
     ).not.toBeNull();
+  });
+
+  it("says whether the selected model takes images, and fails closed on a model it cannot find", () => {
+    const TEXT_ONLY = { slug: "glm-5.3", name: "GLM 5.3", acceptsImages: false, options: [] };
+    const catalogs = buildCatalogs([
+      buildInstance("claude-code", "Claude Code", [
+        buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, TEXT_ONLY] }),
+      ]),
+    ]);
+    const readModel = (model: string) =>
+      buildComposerFields(catalogs, buildConfig({ model }), "draft").model;
+
+    expect(readModel(SONNET.slug)).toMatchObject({
+      acceptsImages: true,
+      modelName: "Claude Sonnet 5",
+    });
+    expect(readModel("glm-5.3")).toMatchObject({ acceptsImages: false, modelName: "GLM 5.3" });
+    expect(readModel("gone-model")).toMatchObject({
+      acceptsImages: false,
+      modelName: "gone-model",
+    });
   });
 
   it("names no account in the pill when the provider has one instance", () => {

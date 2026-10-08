@@ -1,10 +1,19 @@
 /**
  * Tests the open Request a session record carries: the request as the harness
- * opened it, and the subagent that asked it, by id and by name.
+ * opened it, and the subagent that asked it, by id and by name. Also tests
+ * that every session prompt and input takes text, images, or both, never
+ * neither.
  */
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { SessionRequest, SessionSpawnInput } from "./session";
+import { InputUpdatePayload } from "./input";
+import {
+  SessionContinueInput,
+  SessionInputCall,
+  SessionInputPayload,
+  SessionRequest,
+  SessionSpawnInput,
+} from "./session";
 
 const request = {
   requestId: "r-1",
@@ -90,5 +99,72 @@ describe("starting revisions in session.spawn", () => {
           ._tag,
       ).toBe("Failure");
     }
+  });
+});
+
+describe("text and images in a session prompt or input", () => {
+  const sessionId = "0199e0e7-1111-7000-8000-000000000001";
+  const image = "0199e0e7-1111-7000-8000-000000000003";
+  const payloads = [
+    { name: "session.spawn", schema: SessionSpawnInput, base: {}, field: "prompt" },
+    { name: "session.input", schema: SessionInputPayload, base: {}, field: "text" },
+    { name: "a bound answer", schema: SessionInputCall, base: { sessionId }, field: "text" },
+    {
+      name: "session.continue",
+      schema: SessionContinueInput,
+      base: { mode: "fork" },
+      field: "prompt",
+    },
+  ] as const;
+
+  it.each(payloads)("$name takes text alone, images alone, or both", ({ schema, base, field }) => {
+    const decode = Schema.decodeUnknownSync(schema);
+    for (const payload of [
+      { ...base, [field]: "Look at this" },
+      { ...base, [field]: "", attachments: [image] },
+      { ...base, [field]: "Look at this", attachments: [image] },
+    ])
+      expect(decode(payload)).toEqual(payload);
+  });
+
+  it.each(payloads)(
+    "$name refuses empty text with no images, at the text field",
+    ({ schema, base, field }) => {
+      const decode = Schema.decodeUnknownExit(schema);
+      for (const payload of [
+        { ...base, [field]: "" },
+        { ...base, [field]: "", attachments: [] },
+      ]) {
+        const exit = decode(payload);
+        expect(exit._tag).toBe("Failure");
+        expect(String(exit)).toContain("A prompt needs text or at least one image.");
+        expect(String(exit)).toContain(`["${field}"]`);
+      }
+    },
+  );
+
+  it("input.update takes empty text without `attachments`, which keeps the input's images", () => {
+    const decode = Schema.decodeUnknownSync(InputUpdatePayload);
+    for (const payload of [
+      { text: "" },
+      { text: "Look at this" },
+      { text: "", attachments: [image] },
+      { text: "Look at this", attachments: [] },
+    ])
+      expect(decode(payload)).toEqual(payload);
+  });
+
+  it("input.update refuses empty text that removes every image, at the text field", () => {
+    const exit = Schema.decodeUnknownExit(InputUpdatePayload)({ text: "", attachments: [] });
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("A prompt needs text or at least one image.");
+    expect(String(exit)).toContain(`["text"]`);
+  });
+
+  it("refuses more than ten images on one input", () => {
+    const eleven = Array.from({ length: 11 }, () => image);
+    expect(
+      Schema.decodeUnknownExit(SessionInputPayload)({ text: "", attachments: eleven })._tag,
+    ).toBe("Failure");
   });
 });

@@ -11,11 +11,11 @@
  * So each message is placed by its `item.started` row, and its text is
  * gathered from its rows wherever they sit.
  */
-import type { TranscriptRow } from "@hercule/contract";
+import type { Attachment, TranscriptRow } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
 import type { AgentState } from "./agent-state";
 import { findOpenItem } from "./open-item";
-import { buildThreadItem, type ThreadItem } from "./turns";
+import { buildThreadItem, readUserAttachments, type ThreadItem } from "./turns";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
@@ -33,6 +33,8 @@ export interface UserBlock {
   readonly key: string;
   readonly itemId: string;
   readonly text: string;
+  /** The images sent with the message, in the order they were attached. Empty when none were. */
+  readonly attachments: readonly Attachment[];
   readonly at: string;
 }
 
@@ -303,6 +305,7 @@ export const buildThreadBlocks = (
             key: `user:${event.itemId}`,
             itemId: event.itemId,
             text,
+            attachments: readUserAttachments(detail),
             at: event.at,
           });
           turn.boundary = event.at;

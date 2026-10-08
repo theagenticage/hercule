@@ -35,6 +35,8 @@ interface PiModel {
   readonly id?: unknown;
   readonly name?: unknown;
   readonly provider?: unknown;
+  /** The input types the model takes, such as `["text", "image"]`. */
+  readonly input?: unknown;
   /** The model's thinking levels; a level the model does not support maps to `null`. */
   readonly thinkingLevelMap?: Readonly<Record<string, string | null>>;
 }
@@ -112,6 +114,9 @@ const buildCatalog = (models: ReadonlyArray<PiModel>): ReadonlyArray<ModelDescri
     .map((model) => ({
       slug: truncateFact(model.id as string),
       name: truncateFact(model.name as string),
+      // A catalog entry with no input list is read as text only, so a missing
+      // list never lets images through.
+      acceptsImages: Array.isArray(model.input) && model.input.includes("image"),
       options: buildThinkingOption(model),
     }));
 

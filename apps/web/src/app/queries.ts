@@ -220,6 +220,21 @@ export const inputsQuery = (client: HerculeClient, sessionId: string) =>
   });
 
 /**
+ * Reads an uploaded image's bytes as a `Blob`, for a thumbnail in the
+ * transcript or the queued list. An image never changes once uploaded, so
+ * the entry never goes stale. An image can be up to 10 MB, so the entry is
+ * dropped a minute after no screen shows it, rather than after TanStack
+ * Query's default of five minutes.
+ */
+export const attachmentContentQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.attachmentContent(id),
+    queryFn: () => client.readAttachmentContent(id),
+    staleTime: Infinity,
+    gcTime: 60_000,
+  });
+
+/**
  * Reads the join tokens that are still unused. A token lasts an hour and is
  * used by one machine, so there are a handful at most.
  */

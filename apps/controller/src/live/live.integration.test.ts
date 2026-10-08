@@ -1361,7 +1361,9 @@ const SESSION_TOPIC_FACTS: RunnerFacts = {
   identityPort: 4939,
 };
 
-const SESSION_TOPIC_MODELS = [{ slug: "fast", name: "Fast", isDefault: true, options: [] }];
+const SESSION_TOPIC_MODELS = [
+  { slug: "fast", name: "Fast", acceptsImages: true, isDefault: true, options: [] },
+];
 
 const buildSessionTopicPlugins = (): ReadonlyArray<Plugin> => [
   createPluginFixture({

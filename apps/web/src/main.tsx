@@ -6,6 +6,8 @@ import {
   createClient,
   createLive,
   createTokenStore,
+  createUploadQueue,
+  UPLOAD_CONCURRENCY,
   buildFetchIdentityProbe,
   detectLocalRunner,
 } from "@hercule/client-core";
@@ -19,6 +21,10 @@ const baseUrl = window.location.origin;
 
 const client = createClient({ baseUrl, tokenStore: createTokenStore(baseUrl) });
 const live = createLive({ client, baseUrl });
+const uploads = createUploadQueue({
+  upload: client.uploadAttachment,
+  concurrency: UPLOAD_CONCURRENCY,
+});
 // Reads and writes are sent even when the browser reports no network. The
 // controller often runs on this machine, where it is still reachable then, and
 // by default TanStack Query would hold every request until the browser is
@@ -32,6 +38,7 @@ const router = createAppRouter(
     client,
     queryClient,
     live,
+    uploads,
     detectLocalRunner: (runners) =>
       detectLocalRunner(
         runners,

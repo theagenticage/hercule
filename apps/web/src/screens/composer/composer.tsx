@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX } from "react";
+import { useRef, useState, type DragEvent, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -15,6 +15,7 @@ import {
   type Thread,
   readErrorMessage,
 } from "@hercule/client-core";
+import { ImageLightbox } from "@hercule/ui";
 import {
   localRunnerQuery,
   projectsQuery,
@@ -25,6 +26,7 @@ import {
   workspacesQuery,
 } from "../../app/queries";
 import { AccessModeSelector } from "./access-mode-selector";
+import { AttachmentShelf, DropOverlay } from "./attachment-shelf";
 import { ComposerCard } from "./composer-card";
 import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
 import { AttachButton, SendButton, VoiceButton } from "./controls";
@@ -37,6 +39,9 @@ import { MessageBox } from "./message-box";
 import { useComposerModel } from "./use-composer-model";
 
 type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "branch" | "machine";
+
+/** Checks whether a drag carries files, rather than text or a link. */
+const isFileDrag = (event: DragEvent): boolean => event.dataTransfer.types.includes("Files");
 
 /**
  * The composer: the thread's settings, and the message about to be sent to it.
@@ -52,7 +57,7 @@ export function Composer({
   /** Called after a message is sent; an active thread uses it to scroll back to the bottom. */
   readonly onSend?: () => void;
 }): JSX.Element {
-  const { client, live, detectLocalRunner } = useRouteContext({ from: "/_shell" });
+  const { client, live, uploads, detectLocalRunner } = useRouteContext({ from: "/_shell" });
   const queryClient = useQueryClient();
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
@@ -76,7 +81,10 @@ export function Composer({
   // The model pill's element. The lip's branch menu measures it to stay clear of the pill.
   const pill = useRef<HTMLSpanElement>(null);
   const [filter, setFilter] = useState("");
-  const model = useComposerModel(thread, catalogs, client, onSend);
+  const [dragging, setDragging] = useState(false);
+  // The position of the shelf image shown large, or null when none is.
+  const [preview, setPreview] = useState<number | null>(null);
+  const model = useComposerModel(thread, catalogs, client, uploads, onSend);
   const fields = model.fields;
   const pending = buildPendingModelNote(model.kind, model.picks);
   const login = buildLoginSlot(client, live, () => {
@@ -108,7 +116,15 @@ export function Composer({
   });
   const branch = buildBranchField(pick, { workspaces, runnerId: fields.machine.runnerId });
   const cannotSend = fields.blocked !== null || model.readOnly !== null || model.sending;
-  const canSend = !cannotSend && model.message.trim() !== "";
+  const shelf = model.message.attachments;
+  const canSend =
+    !cannotSend &&
+    model.attachmentBlock === null &&
+    (model.message.text.trim() !== "" || shelf.length > 0);
+  const attachDisabledReason =
+    model.readOnly ??
+    (fields.model.acceptsImages ? null : `${fields.model.modelName} does not accept images`);
+  const notice = model.refusal ?? model.attachmentBlock;
   return (
     // A draft shows its sentence above the card, and the sentence takes the free space.
     <div className={fields.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
@@ -120,76 +136,129 @@ export function Composer({
           loginSlot={login}
         />
       )}
-      <ComposerCard>
-        <MessageBox
-          value={model.message}
-          placeholder={model.placeholder}
-          disabled={model.readOnly !== null}
-          onChange={model.setMessage}
-          onSubmit={() => {
-            if (canSend) model.submit();
-          }}
-        />
-        <div className="flex items-center gap-1.5">
-          <AttachButton />
-          <AccessModeSelector
-            mode={fields.accessMode.value}
-            items={fields.accessMode.rows}
-            locked={fields.accessMode.locked}
-            open={open === "accessMode"}
-            onOpenChange={(next) => {
-              handleOpenChange("accessMode", next);
-            }}
-            onPick={(mode) => {
-              model.pick({ kind: "accessMode", value: mode });
+      <div
+        onPaste={(event) => {
+          const files = [...event.clipboardData.files];
+          if (files.length === 0 || model.readOnly !== null) return;
+          event.preventDefault();
+          model.attachFiles(files);
+        }}
+        onDragEnter={(event) => {
+          if (isFileDrag(event) && model.readOnly === null) setDragging(true);
+        }}
+        onDragOver={(event) => {
+          // Without this the browser refuses the drop and opens the file instead.
+          if (isFileDrag(event) && model.readOnly === null) event.preventDefault();
+        }}
+        onDragLeave={(event) => {
+          // A drag moving between the card's own children leaves one of them,
+          // not the card.
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+        }}
+        onDrop={(event) => {
+          setDragging(false);
+          if (!isFileDrag(event) || model.readOnly !== null) return;
+          event.preventDefault();
+          model.attachFiles([...event.dataTransfer.files]);
+        }}
+      >
+        <ComposerCard>
+          {dragging ? <DropOverlay /> : null}
+          <AttachmentShelf
+            shelf={shelf}
+            model={fields.model}
+            onPreview={setPreview}
+            onRemove={model.removeAttachment}
+            onRetry={model.retryAttachment}
+          />
+          <MessageBox
+            value={model.message.text}
+            placeholder={model.placeholder}
+            disabled={model.readOnly !== null}
+            onChange={model.setMessage}
+            onSubmit={() => {
+              if (canSend) model.submit();
             }}
           />
-          {pending === null ? null : (
-            <span className="ml-1 font-mono text-[11px] text-attn">{pending}</span>
-          )}
-          <div className="ml-auto flex min-w-0 items-center gap-1.5">
-            {fields.options === null ? null : (
-              <ModelOptionsSelector
-                descriptors={fields.options}
-                selected={model.config.options}
-                label={buildOptionsLabel(fields.options, model.config.options)}
-                modelName={fields.model.pill.name}
-                disabled={model.readOnly !== null}
-                open={open === "options"}
-                onOpenChange={(next) => {
-                  handleOpenChange("options", next);
-                }}
-                onPick={(id, value) => {
-                  model.pick({ kind: "option", id, value });
-                }}
-              />
+          <div className="flex items-center gap-1.5">
+            <AttachButton disabledReason={attachDisabledReason} onFiles={model.attachFiles} />
+            <AccessModeSelector
+              mode={fields.accessMode.value}
+              items={fields.accessMode.rows}
+              locked={fields.accessMode.locked}
+              open={open === "accessMode"}
+              onOpenChange={(next) => {
+                handleOpenChange("accessMode", next);
+              }}
+              onPick={(mode) => {
+                model.pick({ kind: "accessMode", value: mode });
+              }}
+            />
+            {pending === null ? null : (
+              <span className="ml-1 font-mono text-[11px] text-attn">{pending}</span>
             )}
-            <span ref={pill} className="inline-flex min-w-0">
-              <ModelSelector
-                menu={models}
-                filter={filter}
-                onFilter={setFilter}
-                pill={fields.model.pill}
-                disabled={model.readOnly !== null}
-                open={open === "model"}
-                onOpenChange={(next) => {
-                  handleOpenChange("model", next);
-                }}
-                onPick={model.pick}
-                loginSlot={login}
-              />
-            </span>
+            <div className="ml-auto flex min-w-0 items-center gap-1.5">
+              {fields.options === null ? null : (
+                <ModelOptionsSelector
+                  descriptors={fields.options}
+                  selected={model.config.options}
+                  label={buildOptionsLabel(fields.options, model.config.options)}
+                  modelName={fields.model.pill.name}
+                  disabled={model.readOnly !== null}
+                  open={open === "options"}
+                  onOpenChange={(next) => {
+                    handleOpenChange("options", next);
+                  }}
+                  onPick={(id, value) => {
+                    model.pick({ kind: "option", id, value });
+                  }}
+                />
+              )}
+              <span ref={pill} className="inline-flex min-w-0">
+                <ModelSelector
+                  menu={models}
+                  filter={filter}
+                  onFilter={setFilter}
+                  pill={fields.model.pill}
+                  disabled={model.readOnly !== null}
+                  open={open === "model"}
+                  onOpenChange={(next) => {
+                    handleOpenChange("model", next);
+                  }}
+                  onPick={model.pick}
+                  loginSlot={login}
+                />
+              </span>
+            </div>
+            <VoiceButton />
+            {model.busy ? <StopButton title={SESSION_STOP_TITLE} onStop={model.stop} /> : null}
+            <SendButton tip={model.sendTip} disabled={!canSend} onSend={model.submit} />
           </div>
-          <VoiceButton />
-          {model.busy ? <StopButton title={SESSION_STOP_TITLE} onStop={model.stop} /> : null}
-          <SendButton tip={model.sendTip} disabled={!canSend} onSend={model.submit} />
-        </div>
-        {model.error === null ? null : (
-          <p className="text-fine text-fail" role="alert">
-            {readErrorMessage(model.error)}
-          </p>
-        )}
-      </ComposerCard>
+          {model.error === null ? null : (
+            <p className="text-fine text-fail" role="alert">
+              {readErrorMessage(model.error)}
+            </p>
+          )}
+          {notice === null ? null : (
+            <p
+              className={model.refusal === null ? "text-fine text-muted" : "text-fine text-fail"}
+              role="status"
+            >
+              {notice}
+            </p>
+          )}
+        </ComposerCard>
+      </div>
+      {preview === null ? null : (
+        <ImageLightbox
+          images={shelf.map((item) => ({ key: item.key, name: item.name, blob: item.file }))}
+          index={Math.min(preview, shelf.length - 1)}
+          onIndexChange={setPreview}
+          onClose={() => {
+            setPreview(null);
+          }}
+        />
+      )}
       <Lip
         workspace={fields.workspace}
         menu={menu}

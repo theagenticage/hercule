@@ -8,7 +8,7 @@
  * derived from `api`, so an operation added to the contract appears here with
  * no edit.
  */
-import { api } from "@hercule/contract";
+import { api, type Attachment } from "@hercule/contract";
 import { Context, Effect, Result } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
@@ -16,6 +16,7 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import type * as HttpApi from "effect/unstable/httpapi/HttpApi";
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 import type * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import type { ImageFile } from "./attachments/files";
 import { ApiError, toClientError } from "./errors";
 import type { TokenStore } from "./token-store";
 
@@ -48,6 +49,19 @@ export type HerculeClient = Operations & {
   readonly presentToken: (token: string | null) => void;
   /** Returns the current bearer token, or `null` when there is none. */
   readonly getToken: () => string | null;
+  /**
+   * Uploads one image with `attachment.create` and returns its record. The
+   * file's bytes are the request body; the controller reads the image type
+   * from them. Fails with the same errors as any other call.
+   */
+  readonly uploadAttachment: (file: ImageFile) => Promise<Attachment>;
+  /**
+   * Reads an image's bytes with `attachment.readContent`, as a `Blob` whose
+   * type is the image's type, ready for `URL.createObjectURL`. The bearer
+   * token goes in a header, as on every call, never in a URL. Fails with the
+   * same errors as any other call.
+   */
+  readonly readAttachmentContent: (id: string) => Promise<Blob>;
 };
 
 /**
@@ -242,10 +256,28 @@ export const createClient = (options: ClientOptions): HerculeClient => {
     });
   };
 
+  let readContentCall: Call | undefined;
+
   const client: Record<string, unknown> = {
     setToken,
     presentToken,
     getToken: () => token,
+    uploadAttachment: async (file: ImageFile) =>
+      (client as Operations).attachment.create({
+        query: { name: file.name },
+        payload: new Uint8Array(await file.arrayBuffer()),
+      }),
+    // The promise methods drop `responseMode`, but the `Blob` needs the
+    // response's content type, so this call asks the derived client for the
+    // response beside the decoded bytes.
+    readAttachmentContent: async (id: string) => {
+      readContentCall ??= buildCall("attachment", "readContent");
+      const [bytes, response] = (await run(
+        readContentCall({ params: { id }, responseMode: "decoded-and-response" }),
+        undefined,
+      )) as [Uint8Array<ArrayBuffer>, { readonly headers: Readonly<Record<string, string>> }];
+      return new Blob([bytes], { type: response.headers["content-type"] ?? "" });
+    },
   };
 
   for (const group of Object.values(api.groups)) {

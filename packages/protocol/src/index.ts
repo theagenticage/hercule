@@ -9,7 +9,7 @@
  * This package sits on the runner's import path, so it depends on nothing but
  * `effect`.
  */
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 import {
   Fact,
@@ -52,6 +52,7 @@ import {
   WorkspaceStepSettle,
 } from "./workspace-steps";
 
+export * from "./attachments";
 export * from "./output-schema";
 export * from "./remote";
 export * from "./sessions";
@@ -335,6 +336,15 @@ export const ModelDescriptor = Schema.Struct({
   isDefault: Schema.optionalKey(Schema.Boolean),
   /** A model the harness no longer lists but still forwards to the API. */
   isLegacy: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Whether the model takes images as input. The composer and the controller
+   * refuse images for a model that does not, and a missing answer must never
+   * count as yes. So the field is required on the decoded type, and every
+   * adapter sets it. A descriptor without it decodes as `false`: a runner on
+   * an older build sends none, and neither do the snapshots the controller
+   * stored before the field existed.
+   */
+  acceptsImages: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   options: Schema.Array(ModelOption).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
 });
 

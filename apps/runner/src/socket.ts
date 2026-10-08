@@ -31,6 +31,7 @@ import * as Socket from "effect/unstable/socket/Socket";
 import { VERSION } from "@hercule/home/version";
 import {
   AGENT_STEPS_CAPABILITY,
+  ATTACHMENTS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   ControllerToRunner,
   PeerVersion,
@@ -53,6 +54,7 @@ import {
   MAX_WORKSPACE_STEPS,
   type WorkspaceReport,
 } from "@hercule/protocol";
+import type { AttachmentCache } from "./attachments";
 import type { CredentialRelay } from "./credentials";
 import { refreshFacts } from "./probe";
 import { describeCause } from "./report";
@@ -83,12 +85,15 @@ const NONCE_BYTES = 16;
  * - `LOGIN_ENDED_CAPABILITY`: this runner reports the end of a device login.
  * - `AGENT_STEPS_CAPABILITY`: this runner runs an agent step's turn, sends
  *   how it ended, and answers a start sent again for the step.
+ * - `ATTACHMENTS_CAPABILITY`: this runner fetches the images an input refers
+ *   to and gives them to the harness.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
   LOGIN_ENDED_CAPABILITY,
   AGENT_STEPS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
+  ATTACHMENTS_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;
@@ -131,6 +136,13 @@ export interface ConnectOptions {
    * (spec 06 section 9.1).
    */
   readonly scratchDir: string;
+  /**
+   * The directory that holds the cached images of each session, one
+   * directory per session, removed when its session exits.
+   */
+  readonly attachmentsDir: string;
+  /** Fetches the images of an input from the controller. It outlives this connection. */
+  readonly attachments: AttachmentCache;
   /** The workspaces on this machine. Creates new ones when the controller asks. */
   readonly workspaces: Workspaces;
   /** The workspace steps on this machine. They outlive this connection. */
@@ -349,6 +361,7 @@ export const connect = (
         // Required by the shared context type, although a probe, an install and
         // a login never load the skill.
         herculeTool: options.herculeTool,
+        attachmentsDir: null,
       };
     };
 
@@ -362,6 +375,8 @@ export const connect = (
       machine: {
         providersDir: options.providersDir,
         scratchDir: options.scratchDir,
+        attachmentsDir: options.attachmentsDir,
+        attachments: options.attachments,
         binDir: options.binDir,
         herculeTool: options.herculeTool,
         controllerUrl: pin.controllerUrl,

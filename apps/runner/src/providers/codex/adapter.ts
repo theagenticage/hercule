@@ -27,10 +27,15 @@ import type {
   SessionBinding,
   SessionSpec,
   SubagentId,
-  TurnInput,
 } from "@hercule/protocol";
 import type { LoginCommand } from "../login";
-import type { ProviderAdapter, ProviderRunnerContext, UserMaterial } from "../index";
+import type {
+  AdapterTurnInput,
+  ProviderAdapter,
+  ProviderRunnerContext,
+  UserMaterial,
+} from "../index";
+import { appendAttachmentPaths } from "../attachments";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { runProcess, spawnAppServer, type Run } from "../process";
@@ -249,10 +254,18 @@ const readUserInstructions = (
 };
 
 /**
- * Builds a text-only turn input. Turn input is text only for now; attachments
- * can be added later (spec 16 section B).
+ * Builds the items Codex takes as a turn's input: the text first, with a line
+ * per image naming the file it is saved in, then one `localImage` item per
+ * image. Codex reads each image from that file itself, so its bytes never
+ * cross the app-server's pipe.
  */
-const buildTextInput = (text: string): UserInput => ({ type: "text", text, text_elements: [] });
+const buildUserInput = (input: AdapterTurnInput): Array<UserInput> => [
+  { type: "text", text: appendAttachmentPaths(input.text, input.attachments), text_elements: [] },
+  ...(input.attachments ?? []).map((attachment): UserInput => ({
+    type: "localImage",
+    path: attachment.path,
+  })),
+];
 
 /** Matches the code the device login prints for the user to type: four characters, a dash, five. */
 const USER_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/;
@@ -696,7 +709,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * the session's selection, so the selection is sent on every turn rather
    * than tracked here.
    */
-  const startTurn = (held: Held, input: TurnInput): Effect.Effect<SendResult, string> =>
+  const startTurn = (held: Held, input: AdapterTurnInput): Effect.Effect<SendResult, string> =>
     Effect.gen(function* () {
       // Codex takes the schema per turn, not per thread, so every turn of the
       // session sends it. If it were sent only once, the second turn of an
@@ -704,7 +717,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       const schema = held.threads.root.state.outputSchema;
       const params: TurnStartParams = {
         threadId: held.binding.nativeSessionId,
-        input: [buildTextInput(input.text)],
+        input: buildUserInput(input),
         ...buildModelParams(input.modelSelection),
         // The cast is safe because nothing here reads the value back. The
         // schema crosses the wire as the JSON the controller stored, and
@@ -737,14 +750,14 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    */
   const steerTurn = (
     held: Held,
-    text: string,
+    input: AdapterTurnInput,
     expectedTurnId: string,
   ): Effect.Effect<SendResult | undefined> =>
     Effect.match(
       retryWhileOverloaded(
         held.host.rpc.request("turn/steer", {
           threadId: held.binding.nativeSessionId,
-          input: [buildTextInput(text)],
+          input: buildUserInput(input),
           expectedTurnId,
         } satisfies TurnSteerParams),
       ),
@@ -912,7 +925,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         return binding;
       }),
 
-    sendInput: (sessionId: string, input: TurnInput): Effect.Effect<SendResult, string> =>
+    sendInput: (sessionId: string, input: AdapterTurnInput): Effect.Effect<SendResult, string> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
         const ticket = held.threads.beginInput();
@@ -922,7 +935,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
             const running = held.threads.root.turnId;
             yield* held.threads.submitInput(ticket, running);
             const steered =
-              running === undefined ? undefined : yield* steerTurn(held, input.text, running);
+              running === undefined ? undefined : yield* steerTurn(held, input, running);
             if (steered !== undefined) return steered;
             yield* held.threads.submitInput(ticket);
             return yield* startTurn(held, input);
@@ -939,6 +952,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
               sessionId,
               turnId: sent.turnId,
               text: input.text,
+              attachments: input.attachments,
               steered: sent.delivery === "steered",
               providerRefs: { threadId: held.binding.nativeSessionId },
             })) {

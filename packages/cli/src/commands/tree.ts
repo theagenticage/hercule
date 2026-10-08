@@ -67,6 +67,11 @@ export interface Field {
   /** Whether the value is read from stdin; there is no flag that takes it inline. */
   readonly stdin: boolean;
   /**
+   * Whether each value given is the path of an image file, which the CLI
+   * uploads before the call and replaces with the returned attachment id.
+   */
+  readonly uploads: boolean;
+  /**
    * The list operation that resolves an id tail given here; absent when only a
    * full id is accepted.
    */
@@ -250,6 +255,7 @@ const buildField = (
     choices: readStringLiterals(stripNull(value)),
     holdsAnId: holdsAnId(value),
     stdin: "stdin" in row && row.stdin === true,
+    uploads: "upload" in row && row.upload === true,
     resolves: "resolves" in row ? row.resolves : undefined,
     help: row.help,
   };

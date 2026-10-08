@@ -68,6 +68,23 @@ describe("fetchWithTimeout", () => {
     expect(failure).toBe("TimeoutError");
   });
 
+  it.each([
+    ["an image's upload", "POST", "/api/v1/attachments"],
+    ["an image's download", "GET", "/api/v1/attachments/a-1/content"],
+  ])("gives %s 120 seconds", async (_case, method, path) => {
+    stubFetch((signal) => Promise.resolve(new Response(buildStalledBody(signal))));
+    const response = await fetchWithTimeout(`http://127.0.0.1:4937${path}`, { method });
+    let failure: string | undefined;
+    response.text().catch((error: unknown) => {
+      failure = (error as DOMException).name;
+    });
+
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(failure).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(failure).toBe("TimeoutError");
+  });
+
   it("gives another operation on a steer's path 5 seconds", async () => {
     stubFetch((signal) => Promise.resolve(new Response(buildStalledBody(signal))));
     const response = await fetchWithTimeout(

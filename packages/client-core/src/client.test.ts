@@ -349,6 +349,58 @@ describe("createClient", () => {
     await client.session.query({ query: { status: "exited" } });
     assert.deepStrictEqual(new URL(sent(1).url).searchParams.getAll("status"), ["exited"]);
   });
+
+  const IMAGE = {
+    id: "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+    name: "screenshot.png",
+    mimeType: "image/png",
+    sizeBytes: 4,
+  };
+
+  it("uploads an image as raw bytes, named in the query", async () => {
+    const { fetch, sent } = stubFetch(() => buildJsonResponse(IMAGE, 201));
+    const client = createClient({ baseUrl: BASE, token: "tok_1", fetch });
+    const file = Object.assign(new Blob([new Uint8Array([137, 80, 78, 71])]), {
+      name: "screenshot.png",
+    });
+
+    assert.deepStrictEqual(await client.uploadAttachment(file), IMAGE);
+    const request = sent(0);
+    assert.strictEqual(request.method, "POST");
+    assert.strictEqual(new URL(request.url).pathname, "/api/v1/attachments");
+    assert.strictEqual(new URL(request.url).searchParams.get("name"), "screenshot.png");
+    assert.strictEqual(request.headers.get("content-type"), "application/octet-stream");
+    assert.strictEqual(request.headers.get("authorization"), "Bearer tok_1");
+    assert.deepStrictEqual([...new Uint8Array(await request.arrayBuffer())], [137, 80, 78, 71]);
+  });
+
+  it("reads an image as a Blob of its type, with the token in a header and never in the URL", async () => {
+    const { fetch, sent } = stubFetch(
+      () =>
+        new Response(new Uint8Array([71, 73, 70, 56]), {
+          headers: { "content-type": "image/gif" },
+        }),
+    );
+    const client = createClient({ baseUrl: BASE, token: "tok_1", fetch });
+
+    const blob = await client.readAttachmentContent(IMAGE.id);
+    assert.strictEqual(blob.type, "image/gif");
+    assert.deepStrictEqual([...new Uint8Array(await blob.arrayBuffer())], [71, 73, 70, 56]);
+    assert.strictEqual(new URL(sent(0).url).pathname, `/api/v1/attachments/${IMAGE.id}/content`);
+    assert.notInclude(sent(0).url, "tok_1");
+    assert.strictEqual(sent(0).headers.get("authorization"), "Bearer tok_1");
+  });
+
+  it("turns a failed image read into an ApiError like any other call", async () => {
+    const { fetch } = stubFetch(() =>
+      buildJsonResponse({ error: { code: "not_found", message: "No such attachment." } }, 404),
+    );
+    const client = createClient({ baseUrl: BASE, fetch });
+
+    const error: unknown = await client.readAttachmentContent(IMAGE.id).catch((e: unknown) => e);
+    assert.instanceOf(error, ApiError);
+    assert.strictEqual(error.code, "not_found");
+  });
 });
 
 /** A token store backed by a plain variable, so a test can read what it stored. */

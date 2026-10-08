@@ -108,6 +108,11 @@ export const queryKeys = {
   subagents: (sessionId?: string): LiveQueryKey =>
     sessionId === undefined ? ["subagents"] : ["subagents", sessionId],
   /** A session's input history, including queued inputs. The composer's queued list reads it. */
+  /**
+   * Not a live topic: an uploaded image's bytes never change, so the cached
+   * `Blob` is kept for as long as the page shows it.
+   */
+  attachmentContent: (id: string): LiveQueryKey => ["attachment-content", id],
   inputs: (sessionId?: string): LiveQueryKey =>
     sessionId === undefined ? ["inputs"] : ["inputs", sessionId],
   joinTokens: (): LiveQueryKey => ["join-tokens"],

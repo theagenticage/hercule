@@ -99,6 +99,7 @@ const probeResult = {
       slug: "default",
       name: "Default",
       isDefault: true,
+      acceptsImages: true,
       options: [
         {
           id: "effort",
@@ -376,6 +377,21 @@ describe("the runner-to-controller catalogue", () => {
       })._tag;
     expect(device(MAX_LOGIN_CODE_SECONDS)).toBe("Success");
     expect(device(MAX_LOGIN_CODE_SECONDS + 1)).toBe("Failure");
+  });
+
+  it("reads a probed model that does not say whether it accepts images as one that does not", () => {
+    // A runner on an older build sends no answer, and a missing answer must
+    // never count as yes.
+    const [model] = probeResult.models;
+    const report = {
+      _tag: "probeReport",
+      requestId: REQUEST_ID,
+      instanceId: INSTANCE_ID,
+      result: { ...probeResult, models: [omitKey(model, "acceptsImages")] },
+    };
+    expect(Schema.decodeUnknownSync(RunnerToController)(report)).toMatchObject({
+      result: { models: [{ acceptsImages: false }] },
+    });
   });
 
   it("rejects a tag outside the union, including one from the other direction", () => {

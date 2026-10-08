@@ -69,12 +69,13 @@ const FACTS: RunnerFacts = {
  * come from a setting or an Agent, and `swift` only from the spawn call.
  */
 const MODELS: ReadonlyArray<ModelDescriptor> = [
-  { slug: "clever", name: "Clever", isDefault: true, options: [] },
+  { slug: "clever", name: "Clever", acceptsImages: true, isDefault: true, options: [] },
   // The only model with an option, so tests can check that options stay with
   // their model when a call picks another model.
   {
     slug: "fast",
     name: "Fast",
+    acceptsImages: true,
     options: [
       {
         id: "effort",
@@ -88,7 +89,7 @@ const MODELS: ReadonlyArray<ModelDescriptor> = [
       },
     ],
   },
-  { slug: "swift", name: "Swift", options: [] },
+  { slug: "swift", name: "Swift", acceptsImages: true, options: [] },
 ];
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });

@@ -3,7 +3,7 @@
  * than events it reads from the harness's output. Also the helper that makes an
  * id valid for the protocol.
  */
-import type { ProviderEvent, SubagentId } from "@hercule/protocol";
+import type { AttachmentReference, ProviderEvent, SubagentId } from "@hercule/protocol";
 import { now } from "../report";
 import { truncateFact } from "./text";
 
@@ -22,6 +22,10 @@ export const ensureId = (given: string): string =>
  * than from the harness's echo of the message, because only the adapter knows
  * whether the input steered a running turn. The echo does not identify which
  * input it belongs to.
+ *
+ * The images of the input go in `detail.attachments` as references: id, name,
+ * type and size. Never their bytes, and never the runner's path, so the
+ * stream stays small and the transcript reads the same on every client.
  */
 export const buildUserMessage = (input: {
   readonly sessionId: string;
@@ -30,6 +34,8 @@ export const buildUserMessage = (input: {
   readonly turnId: string;
   readonly text: string;
   readonly steered: boolean;
+  /** The images of the input, in order. */
+  readonly attachments?: ReadonlyArray<AttachmentReference> | undefined;
   /** The harness's own ids for the item, if the adapter has any. */
   readonly providerRefs?: Readonly<Record<string, string>>;
 }): readonly [ProviderEvent, ProviderEvent] => {
@@ -40,7 +46,20 @@ export const buildUserMessage = (input: {
     turnId: input.turnId,
     itemId: crypto.randomUUID(),
     kind: "user_message",
-    detail: { text: input.text, ...(input.steered ? { steered: true } : {}) },
+    detail: {
+      text: input.text,
+      ...(input.steered ? { steered: true } : {}),
+      ...(input.attachments === undefined || input.attachments.length === 0
+        ? {}
+        : {
+            attachments: input.attachments.map(({ id, name, mimeType, sizeBytes }) => ({
+              id,
+              name,
+              mimeType,
+              sizeBytes,
+            })),
+          }),
+    },
     ...(input.providerRefs === undefined ? {} : { providerRefs: input.providerRefs }),
   } as const;
   return [

@@ -133,10 +133,11 @@ const INSTANCE_A = buildProviderInstance(
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
+        acceptsImages: true,
         isDefault: true,
         options: [EFFORT, THINKING],
       },
-      { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
+      { slug: "claude-opus-5", name: "Claude Opus 5", acceptsImages: true, options: [] },
     ]),
   ],
 );
@@ -148,7 +149,13 @@ const INSTANCE_B = buildProviderInstance(
   "Claude Code",
   [
     buildSnapshot(RUNNER.id, "work@example.com", "Claude Pro", [
-      { slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] },
+      {
+        slug: "claude-haiku-5",
+        name: "Claude Haiku 5",
+        acceptsImages: true,
+        isDefault: true,
+        options: [],
+      },
     ]),
   ],
 );
@@ -258,8 +265,8 @@ describe("Composer: draft defaults", () => {
 
     expect(screen.getByRole("textbox")).toBeDefined();
 
-    const attach = screen.getByTitle<HTMLButtonElement>("Attachments are not built yet");
-    expect(attach.disabled).toBe(true);
+    const attach = screen.getByRole<HTMLButtonElement>("button", { name: "Attach images" });
+    expect(attach.disabled).toBe(false);
 
     const voice = screen.getByTitle<HTMLButtonElement>("Dictation is not built yet");
     expect(voice.disabled).toBe(true);
@@ -596,8 +603,14 @@ describe("Composer: sending", () => {
       "Claude Code",
       [RUNNER.id, cove.id].map((runnerId) =>
         buildSnapshot(runnerId, "work@example.com", "Claude Pro", [
-          { slug: "claude-haiku-5", name: "Claude Haiku 5", isDefault: true, options: [] },
-          { slug: "claude-opus-5", name: "Claude Opus 5", options: [] },
+          {
+            slug: "claude-haiku-5",
+            name: "Claude Haiku 5",
+            acceptsImages: true,
+            isDefault: true,
+            options: [],
+          },
+          { slug: "claude-opus-5", name: "Claude Opus 5", acceptsImages: true, options: [] },
         ]),
       ),
     );
@@ -757,7 +770,13 @@ const LOGGED_IN: ProviderInstance = {
   ...LOGGED_OUT,
   snapshots: [
     buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
-      { slug: "claude-sonnet-5", name: "Claude Sonnet 5", isDefault: true, options: [] },
+      {
+        slug: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        acceptsImages: true,
+        isDefault: true,
+        options: [],
+      },
     ]),
   ],
 };
@@ -840,6 +859,7 @@ describe("Composer: a login updates the open draft", () => {
 const buildModel = (slug: string, name: string, extra: Record<string, unknown> = {}) => ({
   slug,
   name,
+  acceptsImages: true,
   options: [],
   ...extra,
 });
@@ -1129,6 +1149,7 @@ const WITH_OPTIONS = buildProviderInstance(
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
+        acceptsImages: true,
         isDefault: true,
         options: [EFFORT, FAST_MODE],
       },
@@ -2266,5 +2287,190 @@ describe("The New project dialog", () => {
     const text = readPageText(menu);
     expect(text).not.toContain("Add a repo");
     expect(text).not.toContain("Adopt a folder");
+  });
+});
+
+/** A model that takes no images, as pi reports a text-only model. */
+const INSTANCE_TEXT_ONLY = buildProviderInstance(
+  "01a06d02-1000-7000-8000-000000000004",
+  "pi",
+  "pi",
+  [
+    buildSnapshot(RUNNER.id, "rogier@example.com", "Pi", [
+      { slug: "glm-5.3", name: "GLM 5.3", acceptsImages: false, isDefault: true, options: [] },
+    ]),
+  ],
+);
+
+const buildImage = (name: string, type = "image/png"): File =>
+  new File([`bytes of ${name}`], name, { type });
+
+/** Returns the attachment record the controller answers an upload of `name` with. */
+const buildUploaded = (name: string, index: number) => ({
+  id: `01a06d02-5000-7000-8000-00000000000${String(index)}`,
+  name,
+  mimeType: "image/png",
+  sizeBytes: 12,
+});
+
+const readFilePicker = (): HTMLInputElement => {
+  const picker = document.querySelector<HTMLInputElement>('input[type="file"]');
+  if (picker === null) throw new Error("The composer has no file picker.");
+  return picker;
+};
+
+const readTileStrip = (name: string): string =>
+  screen.getByRole("button", { name: `Preview ${name}` }).parentElement!.textContent;
+
+describe("Composer: images", () => {
+  it("uploads picked images at once, holds Send until they finish, and spawns with their ids in shelf order", async () => {
+    const user = userEvent.setup();
+    let finishSecond: (() => void) | undefined;
+    const { api, router } = await openApp(
+      [INSTANCE_A],
+      {},
+      {
+        "POST /api/v1/attachments": (call) =>
+          call.search.includes("first.png")
+            ? { status: 201, body: buildUploaded("first.png", 1) }
+            : new Promise((resolve) => {
+                finishSecond = () => {
+                  resolve({ status: 201, body: buildUploaded("second.png", 2) });
+                };
+              }),
+        "POST /api/v1/sessions": { body: NEW_SESSION },
+      },
+    );
+
+    await user.upload(readFilePicker(), [buildImage("first.png"), buildImage("second.png")]);
+
+    await waitFor(() => {
+      expect(readTileStrip("first.png")).toBe("");
+    });
+    expect(readTileStrip("second.png")).toBe("Uploading…");
+    expect(screen.getByRole("status").textContent).toBe("Wait for the image to finish uploading.");
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: /send/i }).disabled).toBe(true);
+
+    finishSecond?.();
+    await waitFor(() => {
+      expect(readTileStrip("second.png")).toBe("");
+    });
+    expect(screen.queryByRole("status")).toBeNull();
+
+    // Images alone are a message: Send works with no text.
+    await user.click(screen.getByRole("button", { name: /send/i }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${NEW_SESSION.id}`);
+    });
+    const spawn = api.calls.find(
+      (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+    );
+    expect(spawn?.body).toMatchObject({
+      prompt: "",
+      attachments: [buildUploaded("first.png", 1).id, buildUploaded("second.png", 2).id],
+    });
+  });
+
+  it("marks a failed upload, and a retry uploads it again", async () => {
+    const user = userEvent.setup();
+    let attempts = 0;
+    await openApp(
+      [INSTANCE_A],
+      {},
+      {
+        "POST /api/v1/attachments": () => {
+          attempts += 1;
+          return attempts === 1
+            ? { status: 500, body: buildErrorBody("internal", "The disk is full.") }
+            : { status: 201, body: buildUploaded("shot.png", 1) };
+        },
+      },
+    );
+
+    await user.upload(readFilePicker(), [buildImage("shot.png")]);
+
+    await waitFor(() => {
+      expect(readTileStrip("shot.png")).toBe("Failed");
+    });
+    expect(screen.getByRole("status").textContent).toBe(
+      "An image failed to upload. Retry it or remove it.",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Retry upload for shot.png" }));
+
+    await waitFor(() => {
+      expect(readTileStrip("shot.png")).toBe("");
+    });
+    expect(attempts).toBe(2);
+  });
+
+  it("marks the image the controller swept when a send refuses it as expired", async () => {
+    const user = userEvent.setup();
+    await openApp(
+      [INSTANCE_A],
+      {},
+      {
+        "POST /api/v1/attachments": { status: 201, body: buildUploaded("old.png", 1) },
+        "POST /api/v1/sessions": {
+          status: 400,
+          body: {
+            error: {
+              code: "validation",
+              message: "This image expired; attach it again.",
+              details: {
+                issues: [
+                  { path: ["attachments", "0"], message: "This image expired; attach it again." },
+                ],
+              },
+            },
+          },
+        },
+      },
+    );
+
+    await user.upload(readFilePicker(), [buildImage("old.png")]);
+    await waitFor(() => {
+      expect(readTileStrip("old.png")).toBe("");
+    });
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(readTileStrip("old.png")).toBe("Expired");
+    });
+    expect(screen.getByRole("status").textContent).toBe("This image expired; attach it again.");
+  });
+
+  it("refuses images for a model that does not accept them, and says why", async () => {
+    const { api } = await openApp([INSTANCE_TEXT_ONLY]);
+
+    const attach = await screen.findByRole<HTMLButtonElement>("button", { name: "Attach images" });
+    await waitFor(() => {
+      expect(attach.title).toBe("GLM 5.3 does not accept images");
+    });
+    expect(attach.disabled).toBe(true);
+
+    fireEvent.paste(screen.getByRole("textbox"), {
+      clipboardData: { files: [buildImage("pasted.png")] },
+    });
+
+    expect(screen.getByRole("status").textContent).toContain("does not accept images");
+    expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
+    expect(api.calls.some((call) => call.path === "/api/v1/attachments")).toBe(false);
+  });
+
+  it("shows the drop target while files are dragged over the card, and refuses a file that is not an image", async () => {
+    await openApp([INSTANCE_A]);
+    const box = screen.getByRole("textbox");
+    const dataTransfer = { types: ["Files"], files: [buildImage("notes.txt", "text/plain")] };
+
+    fireEvent.dragEnter(box, { dataTransfer });
+    expect(screen.getByText("Drop images to attach")).toBeDefined();
+
+    fireEvent.drop(box, { dataTransfer });
+
+    expect(screen.queryByText("Drop images to attach")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe(
+      '"notes.txt" is not an image Hercule can send. Attach a PNG, JPEG, GIF or WebP image.',
+    );
   });
 });

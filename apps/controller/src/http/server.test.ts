@@ -17,7 +17,7 @@ import {
   USERNAME,
   withServer,
 } from "./testing";
-import { MAX_REQUEST_BODY_BYTES } from "./server";
+import { MAX_REQUEST_BODY_BYTES, MAX_UPLOAD_BODY_BYTES } from "./server";
 
 describe("before setup completes", () => {
   it("serves setup.read without a credential, so the web app knows where to route", async () => {
@@ -298,6 +298,92 @@ describe("the body size limit", () => {
       expect(await audit("auth.login.failed")).toEqual([]);
     });
   });
+
+  it("refuses a body sent without a length with a 411, except an image upload", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const chunked = await fetch(`${base}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: streamBody(new TextEncoder().encode("{}")),
+      });
+      expect(chunked.status).toBe(411);
+
+      const upload = await fetch(`${base}/api/v1/attachments?name=a.png`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream", authorization: `Bearer ${token}` },
+        body: streamBody(PNG_SIGNATURE),
+      });
+      expect(upload.status, await upload.clone().text()).toBe(201);
+    });
+  });
+
+  it("refuses an image upload sent without a length once it passes the upload limit", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const bytes = new Uint8Array(MAX_UPLOAD_BODY_BYTES + 1);
+      bytes.set(PNG_SIGNATURE);
+      const response = await fetch(`${base}/api/v1/attachments?name=big.png`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream", authorization: `Bearer ${token}` },
+        body: streamBody(bytes),
+      });
+
+      expect(response.status).toBe(413);
+    });
+  });
+
+  it("takes an image upload up to the upload limit, which is above the general one", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const bytes = new Uint8Array(MAX_UPLOAD_BODY_BYTES);
+      bytes.set(PNG_SIGNATURE);
+      const response = await uploadBytes(base, token, "/api/v1/attachments?name=big.png", bytes);
+
+      expect(response.status, await response.clone().text()).toBe(201);
+      expect(await response.json()).toMatchObject({ sizeBytes: MAX_UPLOAD_BODY_BYTES });
+    });
+  });
+
+  it("holds only the exact upload path to the upload limit, not a look-alike", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const bytes = new Uint8Array(MAX_REQUEST_BODY_BYTES + 1);
+      bytes.set(PNG_SIGNATURE);
+
+      const lookAlike = await uploadBytes(base, token, "/api/v1/Attachments?name=a.png", bytes);
+      expect(lookAlike.status).toBe(413);
+    });
+  });
+});
+
+describe("a body of the wrong type", () => {
+  it("names raw bytes for an image upload, and JSON everywhere else", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const upload = await fetch(`${base}/api/v1/attachments?name=a.png`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: "{}",
+      });
+      const login = await fetch(`${base}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: "not json",
+      });
+
+      expect(upload.status).toBe(400);
+      expect(await upload.json()).toMatchObject({
+        error: {
+          code: "validation",
+          details: { issues: [{ message: "the request body must be application/octet-stream" }] },
+        },
+      });
+      expect(await login.json()).toMatchObject({
+        error: { details: { issues: [{ message: "the request body must be application/json" }] } },
+      });
+    });
+  });
 });
 
 describe("a body that is not JSON", () => {
@@ -339,3 +425,32 @@ describe("recording a credential's use", () => {
     });
   });
 });
+
+/** The eight bytes every PNG file starts with, which is all the controller checks. */
+const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/**
+ * Returns `bytes` as a stream, in chunks of 1 MiB. A stream body makes fetch
+ * send it with `Transfer-Encoding: chunked` and no `content-length`.
+ */
+const streamBody = (bytes: Uint8Array): ReadableStream<Uint8Array> =>
+  new ReadableStream({
+    start(controller) {
+      for (let offset = 0; offset < bytes.byteLength; offset += 1024 * 1024)
+        controller.enqueue(bytes.subarray(offset, offset + 1024 * 1024));
+      controller.close();
+    },
+  });
+
+/** Sends `bytes` as the raw body of a POST to `path`, as an image upload does. */
+const uploadBytes = (
+  base: string,
+  token: string,
+  path: string,
+  bytes: Uint8Array,
+): Promise<Response> =>
+  fetch(`${base}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream", authorization: `Bearer ${token}` },
+    body: bytes,
+  });

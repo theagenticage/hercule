@@ -25,7 +25,9 @@ import {
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { Prompt, SessionInputOutcome } from "./session";
+import { atMost } from "../strings";
+import { Attachment, AttachmentId, MAX_ATTACHMENTS_PER_INPUT } from "./attachment";
+import { EMPTY_PROMPT_MESSAGE, PromptText, SessionInputOutcome } from "./session";
 
 /**
  * Where an input came from:
@@ -72,6 +74,8 @@ export const Input = Schema.Struct({
   source: InputSource,
   actor: Schema.String,
   text: Schema.String,
+  /** The images sent with the text, in the order the user attached them. */
+  attachments: Schema.Array(Attachment),
   status: InputStatus,
   /** What the runner reported this input did, once it was delivered. */
   delivery: Schema.NullOr(Delivery),
@@ -88,10 +92,33 @@ export const Input = Schema.Struct({
 
 export type Input = Schema.Schema.Type<typeof Input>;
 
-/** Declared separately from the payload, so a service can spread these fields next to the two ids. */
-export const INPUT_UPDATE_FIELDS = { text: Prompt } as const;
+/**
+ * Declared separately from the payload, so a service can spread these fields
+ * next to the two ids. `attachments`, when given, replaces the input's images;
+ * when left out, the input keeps them. Whether an empty text leaves the input
+ * with no images depends on the stored input, so the service checks that
+ * case; the payload refuses only the case it can see (`refuseEmptyInputUpdate`).
+ */
+export const INPUT_UPDATE_FIELDS = {
+  text: PromptText,
+  attachments: Schema.optionalKey(atMost(AttachmentId, MAX_ATTACHMENTS_PER_INPUT)),
+} as const;
 
-export const InputUpdatePayload = closedStruct(INPUT_UPDATE_FIELDS);
+/**
+ * Refuses an input update that would leave the input with no text and no
+ * images: empty text with an empty `attachments`. Empty text without
+ * `attachments` passes, because the input keeps the images it has; the
+ * service refuses it when the input has none. The issue is at `text`, with
+ * the same message as `refuseEmptyPrompt`.
+ */
+export const refuseEmptyInputUpdate = Schema.makeFilter(
+  (update: { readonly text: string; readonly attachments?: ReadonlyArray<string> }) =>
+    update.text.length > 0 || update.attachments === undefined || update.attachments.length > 0
+      ? undefined
+      : { path: ["text"], issue: EMPTY_PROMPT_MESSAGE },
+);
+
+export const InputUpdatePayload = closedStruct(INPUT_UPDATE_FIELDS).check(refuseEmptyInputUpdate);
 
 export type InputUpdatePayload = Schema.Schema.Type<typeof InputUpdatePayload>;
 

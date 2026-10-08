@@ -12,7 +12,14 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import type userEvent from "@testing-library/user-event";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createClient, createLive, type FetchLike, type Live } from "@hercule/client-core";
+import {
+  createClient,
+  createLive,
+  createUploadQueue,
+  UPLOAD_CONCURRENCY,
+  type FetchLike,
+  type Live,
+} from "@hercule/client-core";
 import type { Runner } from "@hercule/contract";
 import {
   createApiStub,
@@ -284,7 +291,16 @@ export const renderApp = async ({
   };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createAppRouter(
-    { client, queryClient, live, detectLocalRunner },
+    {
+      client,
+      queryClient,
+      live,
+      uploads: createUploadQueue({
+        upload: client.uploadAttachment,
+        concurrency: UPLOAD_CONCURRENCY,
+      }),
+      detectLocalRunner,
+    },
     createMemoryHistory({ initialEntries: [path] }),
   );
 

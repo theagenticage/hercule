@@ -22,6 +22,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  ATTACHMENT_DOWNLOAD_TIMEOUT,
   SessionSpec,
   type SubagentId,
   type ControllerToRunner,
@@ -34,6 +35,7 @@ import {
   Id,
   InvalidState,
   NotFound,
+  refuseEmptyPrompt,
   SESSION_INPUT_FIELDS,
   SESSION_RESPOND_TO_APPROVAL_REQUEST_FIELDS,
   SESSION_RESPOND_TO_QUESTION_FIELDS,
@@ -55,6 +57,7 @@ import { providerRepository, resolvedInstance } from "../../providers";
 import { RunnerConnections } from "../../runners";
 import {
   buildContinuingSpec,
+  findAttachmentRefusal,
   isResumeHeld,
   readSessionOrFail,
   sessionRecordComposer,
@@ -72,7 +75,7 @@ import { makeForkAfterCommit } from "./after-commit";
 import { Dispatch } from "./dispatch";
 import { resumable } from "./resuming";
 
-const InputInput = Schema.Struct({ id: Id, ...SESSION_INPUT_FIELDS });
+const InputInput = Schema.Struct({ id: Id, ...SESSION_INPUT_FIELDS }).check(refuseEmptyPrompt);
 
 type InputInput = Schema.Schema.Type<typeof InputInput>;
 
@@ -229,10 +232,27 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<SessionInputOutcome, InvalidState | NotFound | SqlError> =>
     Effect.gen(function* () {
       const session = yield* readSession(row.sessionId);
+      // Checked again here, because the runner or its models may have
+      // changed since the input was stored.
+      const refusal = yield* findAttachmentRefusal({
+        runnerId: session.runnerId,
+        instanceId: session.instanceId,
+        model: session.modelSelection.model,
+        attachmentCount: row.attachments.length,
+      }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+      if (refusal !== undefined) {
+        yield* sessions.refuseClaimedInput(row, refusal);
+        return yield* Effect.fail(createInvalidStateError(refusal));
+      }
+      // The runner answers only after it has downloaded the input's images,
+      // so an input with images is given that download time on top.
+      const deadline = yield* SessionInputDeadline;
       const sent = yield* connections.sendFrameCarryingInput(
         session.runnerId,
         sessions.inputFrame(session, row),
-        yield* SessionInputDeadline,
+        row.attachments.length === 0
+          ? deadline
+          : Duration.sum(deadline, ATTACHMENT_DOWNLOAD_TIMEOUT),
       );
       const recorded = yield* sessions.recordInputAnswer(row, sent, session.runnerId);
       switch (recorded._tag) {
@@ -483,7 +503,7 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<{ readonly session: StoredSession; readonly row: StoredInput }, InputError> =>
     Effect.gen(function* () {
       yield* requireGrant("session.input");
-      const { id, text, ...picks } = yield* Effect.mapError(
+      const { id, text, attachments, ...picks } = yield* Effect.mapError(
         decodeInput(input),
         createDecodeValidationError,
       );
@@ -509,6 +529,7 @@ const make = Effect.gen(function* () {
                 ? undefined
                 : (now: StoredSession) => buildResumeSpec(now, modelSelection, nativeSessionId),
             text,
+            attachments: attachments ?? [],
             at,
             claimWhenIdle: true,
           });
@@ -848,6 +869,7 @@ const make = Effect.gen(function* () {
               ? undefined
               : (now: StoredSession) => buildConversationResumeSpec(now, nativeSessionId),
           text,
+          attachments: [],
           at: yield* nowIso,
           claimWhenIdle: false,
         });
@@ -876,7 +898,7 @@ const make = Effect.gen(function* () {
       iteration: number,
     ): Effect.Effect<
       Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError>,
-      InvalidState | NotFound | SqlError | SettingError | Schema.SchemaError
+      InvalidState | Validation | NotFound | SqlError | SettingError | Schema.SchemaError
     > =>
       Effect.gen(function* () {
         const session = yield* readSession(sessionId);
@@ -890,6 +912,7 @@ const make = Effect.gen(function* () {
               ? undefined
               : (now: StoredSession) => buildResumeSpec(now, now.modelSelection, nativeSessionId),
           text,
+          attachments: [],
           at: yield* nowIso,
           claimWhenIdle: false,
           stepIteration: iteration,

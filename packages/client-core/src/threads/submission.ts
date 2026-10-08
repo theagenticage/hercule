@@ -3,8 +3,11 @@
  * input for an active one. An active thread's placement, access mode and
  * account are fixed, so its input has the text and only the picks the user
  * actually made. A key that is left out keeps the session's current value.
+ * Either request carries the ids of the draft's uploaded images, and leaves
+ * `attachments` out when there are none.
  */
 import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
+import { listUploadedAttachmentIds } from "../attachments/shelf";
 import {
   computeEffectiveConfig,
   readThreadConfig,
@@ -55,6 +58,8 @@ export function buildSubmission(
   picks: ThreadPicks,
   message: MessageDraft,
 ): Submission {
+  const attachmentIds = listUploadedAttachmentIds(message.attachments);
+  const attachments = attachmentIds.length === 0 ? {} : { attachments: attachmentIds };
   if (thread.kind === "active") {
     const { model, options } = picks;
     return {
@@ -62,6 +67,7 @@ export function buildSubmission(
       sessionId: thread.session.id,
       payload: {
         text: message.text,
+        ...attachments,
         ...(model === undefined || model === null ? {} : { model }),
         ...(options === undefined ? {} : { options }),
       },
@@ -80,6 +86,7 @@ export function buildSubmission(
     kind: "spawn",
     input: {
       prompt: message.text,
+      ...attachments,
       ...(config.instanceId === null ? {} : { instanceId: config.instanceId }),
       ...(config.model === null ? {} : { model: config.model }),
       options: config.options,

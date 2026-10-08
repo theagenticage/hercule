@@ -114,12 +114,16 @@ What a thread runs with: provider instance, model and its options, access mode, 
 _Avoid_: settings (reserved for the settings store), spec (reserved for the session spec), setup
 
 **Message Draft**:
-The unsent content the composer holds for one thread or one assistant's Conversation: text today, attachments and context later. One per thread, draft or active, and one per assistant.
+The unsent content the composer holds for one thread or one assistant's Conversation: its text, and on a thread the Attachments on its shelf; context later. One per thread, draft or active, and one per assistant. It lives in the client's memory only, so a reload loses it.
 _Avoid_: prompt (the first message as the spawn carries it), composer state
 
 **Submission**:
 What the composer hands the system when the user sends: the message draft plus every config pick made since the last submission. On a draft thread it starts the thread; on an active thread it is one input, the picks applied to the session before the input is stored.
 _Avoid_: send, payload, message (bare)
+
+**Attachment**:
+An image the user attaches to a prompt: stored on the controller, referenced by id. Its bytes are a file in the Data Root and its metadata a row; an input, a fork and the stream carry only its id and metadata, never its bytes. An upload no input references is swept after 24 hours; one an input references lives as long as the session. PNG, JPEG, GIF or WebP, at most 10 MiB, at most 10 per input.
+_Avoid_: file, upload (the act, not the thing), blob, image chip (there is no chip; images sit on the composer's shelf); attachment for a checkout registered with `workspace.attach` (that is an adopted checkout)
 
 ### Actors
 
@@ -224,8 +228,8 @@ A provisioned working area on a runner in which sessions do their work, containi
 
 The user-facing word for a primary is **main workspace**: `primary` is the kind in code, on the wire and in the database, and "main workspace" is what every label, menu row, help text and sentence a person reads calls it. It uses either an existing checkout explicitly registered by the user or a managed working copy. That choice belongs to one resource on one runner; it never transfers files or local commits to another runner.
 
-**Workspace ownership** is `managed` or `adopted`. An adopted workspace registers an existing checkout; adoption does not transfer ownership of its files to Hercule. `workspace.attach` is the registration operation. **Repository mode** is the separate choice of `managed` or `existing` storage for one Resource/Runner pair. A managed workspace may be a generated worktree of an existing repository, so ownership and repository mode are not interchangeable.
-_Avoid_: worktree (reserved for the git mechanism), playground; current checkout, shared checkout, main checkout (all three named the primary before; "main workspace" replaced them)
+**Workspace ownership** is `managed` or `adopted`. An adopted workspace registers an existing checkout, its **adopted checkout**; adoption does not transfer ownership of its files to Hercule. `workspace.attach` is the registration operation; the operation keeps its name, but the act is called adoption, never attachment. **Repository mode** is the separate choice of `managed` or `existing` storage for one Resource/Runner pair. A managed workspace may be a generated worktree of an existing repository, so ownership and repository mode are not interchangeable.
+_Avoid_: worktree (reserved for the git mechanism), playground; current checkout, shared checkout, main checkout (all three named the primary before; "main workspace" replaced them); attachment, attached checkout (an Attachment is an image in a prompt; say adopted checkout and adoption)
 
 **Workspace Lease**:
 A holder's use of a workspace - a session or a run - recorded on the workspace when the holder opens or joins it. It is active until the holder releases it. At release the holder picks a retention window, fixed then. Active leases protect current use; a workspace's separate retention policy decides whether automatic cleanup is allowed. A Thread makes its workspace manually retained, including after the Thread exits.

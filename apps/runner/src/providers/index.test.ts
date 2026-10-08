@@ -12,6 +12,7 @@ import type { Machine } from "../sessions/context";
 
 import { makeSupervising } from "../sessions/supervisor";
 import { ADAPTER_IDS, findAdapter, adapters } from "./index";
+import { makeAttachmentCache } from "../attachments";
 
 describe("the adapters in this runner build", () => {
   it("finds Codex by the provider id and binary name its plugin declares", () => {
@@ -37,6 +38,11 @@ describe("the adapters in this runner build", () => {
     const machine: Machine = {
       providersDir: "/var/hercule/runner/providers",
       scratchDir: "/var/hercule/runner/scratch",
+      attachmentsDir: "/var/hercule/runner/attachments",
+      attachments: makeAttachmentCache({
+        controllerUrl: "https://controller.example:4938",
+        credential: "test",
+      }),
       binDir: "/var/hercule/runner/bin",
       herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
       controllerUrl: "https://controller.example:4938",

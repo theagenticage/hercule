@@ -36,6 +36,7 @@ import {
   makeRemote,
   buildProvisionFrame,
 } from "../workspaces/testing";
+import { makeAttachmentCache } from "../attachments";
 
 const roots: Array<string> = [];
 
@@ -58,6 +59,11 @@ const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
   return {
     providersDir: join(under, "providers"),
     scratchDir: join(under, "scratch"),
+    attachmentsDir: join(under, "attachments"),
+    attachments: makeAttachmentCache({
+      controllerUrl: "https://controller.example:4938",
+      credential: "test",
+    }),
     binDir: join(under, "runner", "bin"),
     herculeTool: { skill: "# hercule", claudePluginDir: join(under, "claude-plugin") },
     controllerUrl: "https://controller.example:4938",

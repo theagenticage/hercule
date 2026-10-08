@@ -16,7 +16,9 @@
  */
 import { memo, useState, type JSX } from "react";
 import { formatMessageTime, splitStreamingText, type Pose } from "@hercule/client-core";
+import type { Attachment } from "@hercule/contract";
 import { Face, type Look } from "../../faces";
+import { SentImages } from "../attachments/sent-images";
 import { Markdown } from "./markdown";
 import type { AttachOpenParagraph } from "./use-session-live";
 import "./messages.css";
@@ -47,14 +49,20 @@ export function AgentFace({
   return <Face look={look} pose={pose} size={FACE_SIZE} animated={pose === "working"} />;
 }
 
-/** Renders a message the user sent: the bubble, as markdown with its line breaks kept, and its time under it. */
+/**
+ * Renders a message the user sent: the images sent with it, then the bubble,
+ * as markdown with its line breaks kept, and its time under it. A message
+ * sent with images and no text draws no bubble.
+ */
 export const UserMessage = memo(function UserMessage({
   text,
+  attachments,
   at,
   timezone,
   today,
 }: {
   readonly text: string;
+  readonly attachments: readonly Attachment[];
   readonly at: string;
   readonly timezone: string;
   readonly today: number;
@@ -62,9 +70,12 @@ export const UserMessage = memo(function UserMessage({
   return (
     <div className="msg--me">
       <div>
-        <div className="bubble">
-          <Markdown text={text} breaks />
-        </div>
+        {attachments.length === 0 ? null : <SentImages attachments={attachments} />}
+        {text === "" ? null : (
+          <div className="bubble">
+            <Markdown text={text} breaks />
+          </div>
+        )}
         <div className="bubble-meta">{formatBlockTime(at, timezone, today)}</div>
       </div>
     </div>

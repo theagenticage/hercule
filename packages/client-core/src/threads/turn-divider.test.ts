@@ -30,6 +30,7 @@ const ITEM: ThreadItem = {
 const buildTurn = (over: Partial<ThreadTurn> = {}): ThreadTurn => ({
   turnId: "t1",
   user: "Fix the login bug",
+  userAttachments: [],
   items: [],
   assistantText: "Done.",
   startedAt: STARTED_AT,

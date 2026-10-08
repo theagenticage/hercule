@@ -45,6 +45,7 @@ export const buildContext = (
   secrets: Readonly<Record<string, string>> = { zaiApiKey: TEST_ZAI_KEY },
 ): ProviderRunnerContext => ({
   cwd,
+  attachmentsDir: null,
   home,
   binary: "/usr/local/bin/pi",
   env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },

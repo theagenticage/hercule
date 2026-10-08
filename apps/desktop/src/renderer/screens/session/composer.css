@@ -258,3 +258,17 @@ button.pick:not([aria-disabled="true"]):hover,
 .workspace-details-trigger:focus-visible {
   color: var(--ink);
 }
+/* Not in the book. A quiet line in the error's place, such as why Send is
+   off while images upload. */
+.composer-notice {
+  color: var(--muted);
+}
+/* Not in the book. Attach is off while the picked model takes no images:
+   it fades, and reacts to no hover, so it does not look like it would open
+   the picker. Its tooltip says why. */
+.icon-btn--blocked,
+.icon-btn--blocked:hover {
+  background: none;
+  color: var(--faint);
+  opacity: 0.6;
+}

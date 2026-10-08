@@ -28,6 +28,7 @@ import {
   createInvalidStateError,
   createNotFoundError,
   findNearestSupportedAccessMode,
+  refuseEmptyPrompt,
   SESSION_CONTINUE_FIELDS,
   SessionSpawnInput,
   createValidationError,
@@ -76,7 +77,9 @@ import { buildThreadBranch, WorkspaceService } from "../../workspaces";
 import { Dispatch } from "./dispatch";
 import { resumable } from "./resuming";
 
-const ContinueInput = Schema.Struct({ id: Id, ...SESSION_CONTINUE_FIELDS });
+const ContinueInput = Schema.Struct({ id: Id, ...SESSION_CONTINUE_FIELDS }).check(
+  refuseEmptyPrompt,
+);
 
 type ContinueInput = Schema.Schema.Type<typeof ContinueInput>;
 
@@ -191,6 +194,8 @@ interface Placing {
   /** The spec the runner receives. Its workspace id is filled in while placing. */
   readonly spec: SessionSpec;
   readonly prompt: string;
+  /** The ids of the prompt's images, from `attachment.create`, in order. */
+  readonly attachments: ReadonlyArray<string>;
   /** The session's title, or undefined to take it from the prompt. */
   readonly title: string | undefined;
   readonly kind: "session.spawned" | "session.continued";
@@ -544,6 +549,7 @@ const make = Effect.gen(function* () {
             parentSessionId: open.parentSessionId,
             spec: { ...open.spec, workspaceId: opened.workspaceId },
             prompt: open.prompt,
+            attachments: open.attachments,
             title: open.title,
             kind: open.kind,
             payload: open.payload,
@@ -676,6 +682,7 @@ const make = Effect.gen(function* () {
           parentSessionId: undefined,
           spec,
           prompt: request.text,
+          attachments: [],
           title: undefined,
           kind: "session.spawned",
           projectId: undefined,
@@ -785,6 +792,7 @@ const make = Effect.gen(function* () {
           parentSessionId: undefined,
           spec,
           prompt: request.prompt,
+          attachments: [],
           title: request.title,
           kind: "session.spawned",
           projectId: undefined,
@@ -939,6 +947,7 @@ const make = Effect.gen(function* () {
           parentSessionId: undefined,
           spec,
           prompt: decoded.prompt,
+          attachments: decoded.attachments ?? [],
           title: undefined,
           kind: "session.spawned",
           projectId: decoded.projectId,
@@ -979,7 +988,7 @@ const make = Effect.gen(function* () {
     continueSession: (input: ContinueInput): Effect.Effect<Session, ContinueError> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("session.continue");
-        const { id, mode, prompt } = yield* Effect.mapError(
+        const { id, mode, prompt, attachments } = yield* Effect.mapError(
           decodeContinue(input),
           createDecodeValidationError,
         );
@@ -1025,6 +1034,7 @@ const make = Effect.gen(function* () {
             { conversationId: null, runId: null },
           ),
           prompt,
+          attachments: attachments ?? [],
           title: undefined,
           kind: "session.continued",
           projectId: parent.projectId ?? undefined,

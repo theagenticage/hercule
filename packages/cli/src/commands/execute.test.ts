@@ -1,7 +1,10 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createClient } from "@hercule/client-core";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { UsageError } from "../exit";
-import { buildId, stubFetch, type Handler } from "../testing";
+import { buildErrorEnvelope, buildId, stubFetch, type Handler } from "../testing";
 import { parseArguments } from "./args";
 import { execute } from "./execute";
 import { findCommandByWords } from "./tree";
@@ -57,6 +60,7 @@ const buildInput = (inputId: string, sessionId: string) => ({
   source: "user",
   actor: "user",
   text: "Actually, start with the test that fails least often.",
+  attachments: [],
   status: "queued",
   delivery: null,
   createdAt: "2026-09-15T10:00:00.000Z",
@@ -336,5 +340,137 @@ describe("session respond-to-question", () => {
       requestId: "req-1",
       answers: { Storage: "localStorage" },
     });
+  });
+});
+
+// Tests that `--image` uploads each file and sends the returned ids.
+describe("an upload field", () => {
+  const command = lookUpCommand("session", "input");
+  const sessionId = buildId("ccccccc3");
+  let directory: string;
+
+  beforeEach(() => {
+    directory = mkdtempSync(join(tmpdir(), "hercule-cli-images-"));
+  });
+
+  afterEach(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  /** Writes a file into the test's directory and returns its path. */
+  const writeImage = (name: string, content: string | Uint8Array): string => {
+    const path = join(directory, name);
+    writeFileSync(path, content);
+    return path;
+  };
+
+  /** Answers each upload with the next id, and the input with its outcome. */
+  const answerUploads = (ids: ReadonlyArray<string>): Handler => {
+    let uploaded = 0;
+    return (request) =>
+      request.path === "/api/v1/attachments"
+        ? Response.json(
+            {
+              id: ids[uploaded++],
+              name: request.query.get("name"),
+              mimeType: "image/png",
+              sizeBytes: 4,
+            },
+            { status: 201 },
+          )
+        : { inputId: buildId("ddddddd4"), result: "queued" };
+  };
+
+  it("uploads each file in order, then sends the ids in the same order", async () => {
+    const second = writeImage("second.png", "BBBB");
+    const first = writeImage("first.png", "AAAA");
+    const ids = [buildId("eeeeeee5"), buildId("fffffff6")];
+    const { fetch, client } = stubClient(answerUploads(ids));
+    const args = await parseArguments(
+      command,
+      [sessionId, "--image", second, "--image", first],
+      () => Promise.resolve("Compare these."),
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls.map((call) => [call.method, call.path, call.query.get("name")])).toEqual([
+      ["POST", "/api/v1/attachments", "second.png"],
+      ["POST", "/api/v1/attachments", "first.png"],
+      ["POST", `/api/v1/sessions/${sessionId}/input`, null],
+    ]);
+    expect(fetch.calls[0]!.body).toBe("BBBB");
+    expect(fetch.calls[2]!.body).toEqual({ text: "Compare these.", attachments: ids });
+  });
+
+  it("refuses a file it cannot read before sending anything", async () => {
+    const { fetch, client } = stubClient(answerUploads([]));
+    const args = await parseArguments(
+      command,
+      [sessionId, "--image", join(directory, "missing.png")],
+      () => Promise.resolve("x"),
+    );
+
+    const failure = execute(client, command, args);
+    await expect(failure).rejects.toBeInstanceOf(UsageError);
+    await expect(failure).rejects.toThrow(/--image: .*missing\.png does not exist/);
+    expect(fetch.calls).toEqual([]);
+  });
+
+  it("refuses more images than one input carries before sending anything", async () => {
+    const path = writeImage("a.png", "AAAA");
+    const { fetch, client } = stubClient(answerUploads([]));
+    const args = await parseArguments(
+      command,
+      [sessionId, ...Array.from({ length: 11 }, () => ["--image", path]).flat()],
+      () => Promise.resolve("x"),
+    );
+
+    await expect(execute(client, command, args)).rejects.toThrow(
+      "--image: 11 images given, but one input carries at most 10",
+    );
+    expect(fetch.calls).toEqual([]);
+  });
+
+  it("refuses a file whose name is not an accepted image type before sending anything", async () => {
+    const path = writeImage("notes.txt", "plain text");
+    const { fetch, client } = stubClient(answerUploads([]));
+    const args = await parseArguments(command, [sessionId, "--image", path], () =>
+      Promise.resolve("x"),
+    );
+
+    await expect(execute(client, command, args)).rejects.toThrow(
+      /--image: ".*notes\.txt" is not an image Hercule can send/,
+    );
+    expect(fetch.calls).toEqual([]);
+  });
+
+  it("refuses a file larger than an upload accepts before sending anything", async () => {
+    const path = writeImage("huge.png", new Uint8Array(10 * 1024 * 1024 + 1));
+    const { fetch, client } = stubClient(answerUploads([]));
+    const args = await parseArguments(command, [sessionId, "--image", path], () =>
+      Promise.resolve("x"),
+    );
+
+    await expect(execute(client, command, args)).rejects.toThrow(
+      /huge\.png" is 10\.0 MB; an image can be up to 10\.0 MB\./,
+    );
+    expect(fetch.calls).toEqual([]);
+  });
+
+  it("names the file in the controller's refusal of an upload", async () => {
+    const path = writeImage("notes.png", "plain text");
+    const { client } = stubClient(() =>
+      buildErrorEnvelope("validation", 400, "This file is not a PNG, JPEG, GIF or WebP image.", {
+        issues: [],
+      }),
+    );
+    const args = await parseArguments(command, [sessionId, "--image", path], () =>
+      Promise.resolve("x"),
+    );
+
+    await expect(execute(client, command, args)).rejects.toThrow(
+      `--image ${path}: This file is not a PNG, JPEG, GIF or WebP image.`,
+    );
   });
 });

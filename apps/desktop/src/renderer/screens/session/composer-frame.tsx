@@ -1,8 +1,12 @@
 import { useRef, type FocusEvent, type JSX, type ReactNode, type Ref } from "react";
+import type { ShelfItem, ShelfModel } from "@hercule/client-core";
+import { IMAGE_MIME_TYPES } from "@hercule/contract";
 import { MicIcon } from "../../icons/mic";
 import { PlusIcon } from "../../icons/plus";
 import { SendIcon } from "../../icons/send";
 import { StopIcon } from "../../icons/stop";
+import { AttachmentShelf } from "../attachments/attachment-shelf";
+import { useFileDrop } from "../attachments/use-file-drop";
 import { REQUEST_PAGER_CLASS } from "./request-pager";
 import { isSendKey } from "./send-key";
 import "./composer.css";
@@ -24,6 +28,32 @@ const keepsComposerShrunk = (target: EventTarget): boolean =>
   target instanceof Element &&
   target.closest(`.dock-mini button, .${REQUEST_PAGER_CLASS}`) !== null;
 
+/**
+ * What a composer that takes images adds to its card:
+ *
+ * - `shelf`, drawn above the message field: the attached images, each tile
+ *   marked for `model`, see `AttachmentShelf`;
+ * - `onRemove` and `onRetry`, called with an image's key when the user
+ *   removes it or retries its upload;
+ * - `attachBlockedReason`, when not `null`, draws Attach as off, with the
+ *   reason as its tooltip, such as a model that takes no images;
+ * - `onFiles`, called with the files the user picked with Attach, pasted
+ *   into the field or dropped on the card. Pasted and dropped files reach it
+ *   even while Attach is off, so the caller can say why it refuses them
+ *   rather than drop them without a word.
+ */
+export interface ComposerAttachments {
+  readonly shelf: readonly ShelfItem[];
+  readonly model: ShelfModel;
+  readonly onRemove: (key: string) => void;
+  readonly onRetry: (key: string) => void;
+  readonly attachBlockedReason: string | null;
+  readonly onFiles: (files: readonly File[]) => void;
+}
+
+/** The types the file picker offers: the image types the controller takes. */
+const PICKER_ACCEPT = IMAGE_MIME_TYPES.join(",");
+
 /** Stop, drawn in Send's place while a turn runs. */
 export interface ComposerStop {
   /** True while a Stop is on its way, which draws Stop as off. */
@@ -44,8 +74,13 @@ export interface ComposerStop {
  * decides; `canSend` only draws Send as off. A `readOnly` field takes no
  * text.
  *
- * Attach and Dictate are drawn but do nothing yet, and carry
- * `aria-disabled`.
+ * `error` is drawn in the app's error colour and announced; `notice`, shown
+ * only when there is no `error`, is a quiet line, such as why Send is off.
+ *
+ * With `attachments`, Attach opens the file picker, and images can be pasted
+ * into the field or dropped on the card (see `ComposerAttachments`). Without
+ * it, and on a `readOnly` field, Attach does nothing and carries
+ * `aria-disabled`. Dictate is drawn but does nothing yet.
  */
 export function ComposerCard({
   text,
@@ -56,6 +91,8 @@ export function ComposerCard({
   onSend,
   stop,
   error,
+  notice = null,
+  attachments,
   start,
   note,
   end,
@@ -73,6 +110,10 @@ export function ComposerCard({
   /** Given while a turn runs, which draws Stop in Send's place. */
   readonly stop?: ComposerStop | undefined;
   readonly error: string | null;
+  /** A quiet line under the row, shown when there is no `error`. */
+  readonly notice?: string | null;
+  /** Given when the composer takes images. */
+  readonly attachments?: ComposerAttachments | undefined;
   /** The controls after Attach. */
   readonly start?: ReactNode;
   /** The text that fills the space between `start` and `end`, so no control moves when it shows. */
@@ -87,8 +128,27 @@ export function ComposerCard({
   /** The tooltip of Send, which names what sending does. */
   readonly sendTitle?: string;
 }): JSX.Element {
+  const pickerRef = useRef<HTMLInputElement>(null);
+  // A read-only field takes no images either.
+  const taking = readOnly ? undefined : attachments;
+  const { dragging, handlers } = useFileDrop(taking !== undefined, (files) => {
+    taking?.onFiles(files);
+  });
+  const attachOff = taking === undefined || taking.attachBlockedReason !== null;
+  const attachTitle =
+    taking === undefined ? "Attach" : (taking.attachBlockedReason ?? "Attach images");
   return (
-    <div className="composer-card">
+    <div className="composer-card" {...handlers}>
+      {taking === undefined ? null : (
+        <div className="fold">
+          <AttachmentShelf
+            shelf={taking.shelf}
+            model={taking.model}
+            onRemove={taking.onRemove}
+            onRetry={taking.onRetry}
+          />
+        </div>
+      )}
       <textarea
         ref={fieldRef}
         id={fieldId}
@@ -108,12 +168,48 @@ export function ComposerCard({
           event.preventDefault();
           onSend();
         }}
+        onPaste={(event) => {
+          if (taking === undefined || event.clipboardData.files.length === 0) return;
+          // The files are attached rather than pasted. A copied file also
+          // carries its name as text, which would land in the field.
+          event.preventDefault();
+          taking.onFiles([...event.clipboardData.files]);
+        }}
       />
+      {dragging ? <div className="drop-overlay">Drop images to attach</div> : null}
       <div className="fold">
         <div className="composer-row">
-          <button type="button" className="icon-btn" title="Attach" aria-disabled="true">
+          <button
+            type="button"
+            className={
+              taking === undefined || taking.attachBlockedReason === null
+                ? "icon-btn"
+                : "icon-btn icon-btn--blocked"
+            }
+            title={attachTitle}
+            aria-label="Attach"
+            aria-disabled={attachOff || undefined}
+            onClick={() => {
+              if (!attachOff) pickerRef.current?.click();
+            }}
+          >
             <PlusIcon />
           </button>
+          {taking === undefined ? null : (
+            <input
+              ref={pickerRef}
+              type="file"
+              multiple
+              accept={PICKER_ACCEPT}
+              hidden
+              onChange={(event) => {
+                const files = [...(event.target.files ?? [])];
+                // Cleared, so picking the same file again fires `change`.
+                event.target.value = "";
+                if (files.length > 0) taking.onFiles(files);
+              }}
+            />
+          )}
           {start}
           <span className="spacer composer-note">{note}</span>
           {end}
@@ -142,11 +238,13 @@ export function ComposerCard({
             </button>
           )}
         </div>
-        {error === null ? null : (
+        {error !== null ? (
           <p className="composer-error" role="alert">
             {error}
           </p>
-        )}
+        ) : notice !== null ? (
+          <p className="composer-error composer-notice">{notice}</p>
+        ) : null}
       </div>
     </div>
   );
@@ -176,6 +274,7 @@ export function ComposerCard({
  *   is what the composer covers of the messages, less the 18px the stack
  *   sits above the pane's bottom edge.
  * - `error` is the line under the row, when the last send or Stop failed.
+ * - `notice` and `attachments` are the card's, see `ComposerCard`.
  */
 export function ComposerFrame({
   text,
@@ -186,6 +285,8 @@ export function ComposerFrame({
   onSend,
   stop,
   error,
+  notice = null,
+  attachments,
   start,
   note,
   end,
@@ -204,6 +305,8 @@ export function ComposerFrame({
   readonly onSend: () => void;
   readonly stop?: ComposerStop | undefined;
   readonly error: string | null;
+  readonly notice?: string | null;
+  readonly attachments?: ComposerAttachments | undefined;
   /** The controls after Attach. */
   readonly start?: ReactNode;
   /** The text that fills the space between `start` and `end`, so no control moves when it shows. */
@@ -269,6 +372,8 @@ export function ComposerFrame({
           onSend={onSend}
           stop={stop}
           error={error}
+          notice={notice}
+          attachments={attachments}
           start={start}
           note={note}
           end={end}

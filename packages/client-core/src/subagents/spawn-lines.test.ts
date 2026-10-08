@@ -21,6 +21,7 @@ const buildItem = (itemId: string, kind: ThreadItem["kind"]): ThreadItem => ({
 const TURN: ThreadTurn = {
   turnId: "t-1",
   user: "Fix the redirect",
+  userAttachments: [],
   items: [
     buildItem("spawn-b", "subagent"),
     buildItem("cmd", "command_execution"),

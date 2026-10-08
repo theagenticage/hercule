@@ -16,6 +16,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { afterAll, describe, expect, it } from "vitest";
 import { ALL_GRANTS, type Session, type Workspace } from "@hercule/contract";
 import type { SessionStart, WorkspaceProvision } from "@hercule/protocol";
+import { makeAttachmentCache } from "../../../../runner/src/attachments";
 import { resolveSessionContext } from "../../../../runner/src/sessions/context";
 import {
   makeTestWorkspaces,
@@ -249,7 +250,7 @@ const withLegacyController = async (
     try {
       expect(
         reader.query("SELECT max(migration_id) AS version FROM effect_sql_migrations").get(),
-      ).toEqual({ version: 54 });
+      ).toEqual({ version: 55 });
       expect(reader.query("SELECT * FROM controller_identity").all()).toEqual(
         fixture.before.identity,
       );
@@ -359,6 +360,11 @@ describe("pre-change controller and provider-state upgrade", () => {
             {
               providersDir: join(fixture.storageDir, "providers"),
               scratchDir: join(fixture.storageDir, "scratch"),
+              attachmentsDir: join(fixture.storageDir, "attachments"),
+              attachments: makeAttachmentCache({
+                controllerUrl: "https://controller.example:4938",
+                credential: "test",
+              }),
               binDir: join(fixture.storageDir, "bin"),
               herculeTool: {
                 skill: "# fixture",

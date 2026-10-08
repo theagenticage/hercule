@@ -10,7 +10,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
-import { NO_USER_MATERIAL_PATHS } from "../testing";
+import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
 import { AGENT_FILE_VARIABLE, OUTPUT_SCHEMA_VARIABLE, SUBMIT_RESULT_TOOL } from "./extension";
 import {
@@ -351,6 +351,48 @@ describe("sending an input to a pi session", () => {
     ]);
     // The one prompt came from the first input; the steer sent no second prompt.
     expect(listSentCommands(run.sent, "prompt")).toHaveLength(1);
+  });
+
+  // pi takes the bytes inline, on a prompt and on a steer alike. The text
+  // names each image's file too, so the agent can use the file itself.
+  for (const [command, start] of [
+    ["prompt", startTestSession],
+    ["steer", startBusySession],
+  ] as const) {
+    it(`sends attached images as base64 on ${command}, after the text that names their files`, async () => {
+      const run = await start();
+      const image = writeTestImage();
+
+      await Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "what is this?", attachments: [image] }),
+      );
+
+      expect(listSentCommands(run.sent, command).at(-1)).toMatchObject({
+        message: `what is this?\n\n[Attached image "screenshot.png" is saved at: ${image.path}]`,
+        images: [{ type: "image", data: PNG_BYTES.toString("base64"), mimeType: "image/png" }],
+      });
+    });
+  }
+
+  it("refuses an image over pi's size limit before sending pi anything, naming the image", async () => {
+    const run = await startTestSession();
+    const before = run.sent.length;
+    const image = writeTestImage({ name: "photo.png", sizeBytes: 4 * 1024 * 1024 });
+
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.sendInput(SESSION, {
+          text: "what is this?",
+          attachments: [image],
+          modelSelection: { model: "glm-5.3-flash", options: { thinking: "low" } },
+        }),
+      ),
+    );
+
+    // pi drops a larger image from the prompt without saying so, and the
+    // model would answer as if no image was attached.
+    expect(refused).toBe('"photo.png" is 4 MB; pi accepts images up to 3.375 MB.');
+    expect(run.sent).toHaveLength(before);
   });
 
   it("reports the user's message as an item of the turn it opened", async () => {

@@ -1,22 +1,56 @@
-import type { JSX } from "react";
+import { useRef, type JSX } from "react";
 import type { ModelPill } from "@hercule/client-core";
+import { IMAGE_MIME_TYPES } from "@hercule/contract";
 import { cn, ProviderLogo } from "@hercule/ui";
 
 const GLYPH =
   "inline-flex size-[26px] shrink-0 items-center justify-center rounded-[7px] text-muted";
 
-/** The attach button. Like every button in this file, it holds no state and knows no domain. */
-export function AttachButton(): JSX.Element {
+/**
+ * The attach button: opens the file picker for PNG, JPEG, GIF and WebP
+ * images, several at once, and calls `onFiles` with the files picked. Like
+ * every button in this file, it holds no state and knows no domain.
+ */
+export function AttachButton({
+  disabledReason,
+  onFiles,
+}: {
+  /** Why no image can be attached, shown as the tooltip; `null` when the button works. */
+  readonly disabledReason: string | null;
+  readonly onFiles: (files: readonly File[]) => void;
+}): JSX.Element {
+  const picker = useRef<HTMLInputElement>(null);
   return (
-    <button
-      type="button"
-      disabled
-      title="Attachments are not built yet"
-      aria-label="Attach"
-      className={cn(GLYPH, "text-[17px]")}
-    >
-      +
-    </button>
+    <>
+      <button
+        type="button"
+        disabled={disabledReason !== null}
+        title={disabledReason ?? "Attach images"}
+        aria-label="Attach images"
+        onClick={() => picker.current?.click()}
+        className={cn(
+          GLYPH,
+          "cursor-pointer text-[17px] enabled:hover:bg-line-soft enabled:hover:text-ink disabled:cursor-default disabled:text-faint",
+          "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
+        )}
+      >
+        +
+      </button>
+      <input
+        ref={picker}
+        type="file"
+        multiple
+        accept={IMAGE_MIME_TYPES.join(",")}
+        hidden
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event) => {
+          onFiles([...(event.target.files ?? [])]);
+          // Cleared so picking the same file again still reports a change.
+          event.target.value = "";
+        }}
+      />
+    </>
   );
 }
 

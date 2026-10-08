@@ -142,7 +142,7 @@ const FACTS: RunnerFacts = {
 };
 
 const MODELS: ReadonlyArray<ModelDescriptor> = [
-  { slug: "fast", name: "Fast", isDefault: true, options: [] },
+  { slug: "fast", name: "Fast", acceptsImages: true, isDefault: true, options: [] },
 ];
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [

@@ -5,7 +5,33 @@ import { canSteerOrCancelQueuedInputs, queryKeys, readErrorMessage } from "@herc
 import type { Input } from "@hercule/contract";
 import { queuedInputsQuery, sessionQuery } from "../../app/queries";
 import { ClockIcon } from "../../icons/clock";
+import { QueuedImages, QUEUED_IMAGE_SIZE } from "../attachments/queued-images";
 import "./queued-inputs.css";
+
+declare module "react" {
+  interface CSSProperties {
+    /** How far a queued input's note is indented, as `<n>px`, to line up with its text. */
+    "--queued-note-indent"?: string;
+  }
+}
+
+/** The gap between a queued input's clock, its images and its text, in pixels, as `.queued` sets it. */
+const QUEUED_ROW_GAP = 10;
+/** The gap between two image tiles in a queued input, in pixels, as `.queued-images` sets it. */
+const QUEUED_IMAGE_GAP = 4;
+
+/**
+ * Returns how far a queued input's note is indented so it starts under the
+ * input's text: past the 14px clock and, when the input has images, past
+ * their tiles, each with the gap after it.
+ */
+const computeNoteIndent = (imageCount: number): number => {
+  const clock = 14 + QUEUED_ROW_GAP;
+  if (imageCount === 0) return clock;
+  return (
+    clock + imageCount * QUEUED_IMAGE_SIZE + (imageCount - 1) * QUEUED_IMAGE_GAP + QUEUED_ROW_GAP
+  );
+};
 
 /**
  * Renders the thread's queued inputs above the dock and the composer, one
@@ -42,7 +68,7 @@ export function QueuedInputs({ sessionId }: { readonly sessionId: string }): JSX
 }
 
 /**
- * Renders one queued input: the clock, its text on one line, how soon it
+ * Renders one queued input: the clock, its images, its text on one line, how soon it
  * runs, and Steer and Cancel when `offersActions` is true. Below them, the
  * row shows why its last delivery failed, when one did, and why Steer or
  * Cancel failed, when one does.
@@ -81,8 +107,12 @@ function QueuedInputRow({
   const failure = steer.error ?? cancel.error;
 
   return (
-    <div className="queued">
+    <div
+      className="queued"
+      style={{ "--queued-note-indent": `${String(computeNoteIndent(input.attachments.length))}px` }}
+    >
       <ClockIcon size={14} />
+      {input.attachments.length === 0 ? null : <QueuedImages attachments={input.attachments} />}
       <span className="queued-text" title={input.text}>
         {input.text}
       </span>

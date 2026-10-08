@@ -1684,7 +1684,7 @@ const buildProbeResult = (version: string): ProbeResult => ({
     planLabel: "Claude Max",
     backend: "firstParty",
   },
-  models: [{ slug: "default", name: "Default", options: [] }],
+  models: [{ slug: "default", name: "Default", acceptsImages: true, options: [] }],
 });
 
 describe("probing a runner's provider instances", () => {

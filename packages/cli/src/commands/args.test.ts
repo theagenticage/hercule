@@ -196,3 +196,60 @@ describe("parseArguments", () => {
     expect(args.payload["projectId"]).toBe(full);
   });
 });
+
+// Tests `--image`, and how it changes the reading of the prompt from stdin.
+describe("--image", () => {
+  const sessionSpawn = lookUpCommand("session", "spawn");
+  const sessionContinue = lookUpCommand("session", "continue");
+
+  it("collects the paths in the order the flags were given", async () => {
+    const args = await parseArguments(
+      sessionInput,
+      [ID, "--image", "b.png", "--image=a.jpg"],
+      stubStdin("Look at these.\n"),
+    );
+    expect(args.payload).toEqual({ text: "Look at these.", attachments: ["b.png", "a.jpg"] });
+  });
+
+  it("is taken by session spawn and session continue too", async () => {
+    const spawned = await parseArguments(sessionSpawn, ["--image", "a.png"], stubStdin("x"));
+    expect(spawned.payload["attachments"]).toEqual(["a.png"]);
+    const forked = await parseArguments(
+      sessionContinue,
+      [ID, "--mode", "fork", "--image", "a.png"],
+      stubStdin("x"),
+    );
+    expect(forked.payload["attachments"]).toEqual(["a.png"]);
+  });
+
+  it("is unknown on input update, which keeps the images an input has", async () => {
+    await expect(
+      parseArguments(
+        lookUpCommand("input", "update"),
+        [ID, "0193f3a9-2e5c-7b41-9a6d-1f3a9c2e77b0", "--image", "a.png"],
+        stubStdin("x"),
+      ),
+    ).rejects.toThrow("unknown flag --image");
+  });
+
+  it("sends empty text without reading stdin when stdin is a terminal", async () => {
+    const args = await parseArguments(
+      sessionInput,
+      [ID, "--image", "a.png"],
+      refuseStdinRead,
+      true,
+    );
+    expect(args.payload).toEqual({ text: "", attachments: ["a.png"] });
+  });
+
+  it("still reads a pipe, and an empty pipe sends empty text", async () => {
+    const args = await parseArguments(sessionInput, [ID, "--image", "a.png"], stubStdin(""));
+    expect(args.payload).toEqual({ text: "", attachments: ["a.png"] });
+  });
+
+  it("leaves a terminal without --image to the reader, which refuses it", async () => {
+    await expect(parseArguments(sessionInput, [ID], refuseStdinRead, true)).rejects.toThrow(
+      "stdin was read",
+    );
+  });
+});

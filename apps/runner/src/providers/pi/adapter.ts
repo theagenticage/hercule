@@ -27,10 +27,16 @@ import type {
   SessionBinding,
   SessionSpec,
   SubagentId,
-  TurnInput,
   TurnState,
 } from "@hercule/protocol";
-import type { ProviderAdapter, ProviderRunnerContext, UserMaterial } from "../index";
+import type {
+  AdapterTurnInput,
+  LocalAttachment,
+  ProviderAdapter,
+  ProviderRunnerContext,
+  UserMaterial,
+} from "../index";
+import { appendAttachmentPaths, readAttachmentBase64 } from "../attachments";
 import { buildUserMessage } from "../events";
 import { buildFailedProbe } from "../probe";
 import { killProcessesHolding, runProcess, spawnPi, type Run } from "../process";
@@ -179,6 +185,41 @@ const MAX_RUNNING_SUBAGENTS = 4;
  * start another (spec 06 section 13.7).
  */
 const MAX_SUBAGENT_DEPTH = 2;
+
+/**
+ * The largest image pi takes, in bytes before base64. pi drops an image whose
+ * base64 is over 4.5 MiB from the prompt, and 4.5 MiB of base64 holds
+ * 3.375 MiB of bytes. The runner refuses a larger image instead, so the user
+ * learns the image was not sent.
+ */
+const PI_MAX_IMAGE_BYTES = 3_538_944;
+
+/** Formats a size in bytes as megabytes, with up to three decimals: "3.375 MB". */
+const formatMegabytes = (bytes: number): string =>
+  `${String(Number((bytes / (1024 * 1024)).toFixed(3)))} MB`;
+
+/**
+ * Checks every image against pi's size limit, then reads each one as base64,
+ * in pi's `images` shape. Fails before reading anything when an image is too
+ * large, with a message naming it, its size and the limit.
+ */
+const readPiImages = (
+  attachments: ReadonlyArray<LocalAttachment>,
+): Effect.Effect<ReadonlyArray<Record<string, string>>, string> => {
+  const tooLarge = attachments.find((attachment) => attachment.sizeBytes > PI_MAX_IMAGE_BYTES);
+  if (tooLarge !== undefined) {
+    return Effect.fail(
+      `"${tooLarge.name}" is ${formatMegabytes(tooLarge.sizeBytes)}; pi accepts images up to ${formatMegabytes(PI_MAX_IMAGE_BYTES)}.`,
+    );
+  }
+  return Effect.forEach(attachments, (attachment) =>
+    Effect.map(readAttachmentBase64(attachment), (data) => ({
+      type: "image",
+      data,
+      mimeType: attachment.mimeType,
+    })),
+  );
+};
 
 /** A session this adapter hosts, and the adapter's state for its pi processes. */
 interface Held {
@@ -1397,9 +1438,10 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         return binding;
       }),
 
-    sendInput: (sessionId: string, input: TurnInput): Effect.Effect<SendResult, string> =>
+    sendInput: (sessionId: string, input: AdapterTurnInput): Effect.Effect<SendResult, string> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
+        const images = yield* readPiImages(input.attachments ?? []);
         const generation = held.inputGeneration;
         if (input.modelSelection !== undefined)
           yield* selectModel(held, input.modelSelection, generation);
@@ -1415,7 +1457,11 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         // whatever turn id the state holds at that moment.
         const turnId = (root.state.turnId ??= crypto.randomUUID());
         yield* Effect.tapError(
-          root.rpc.send({ type: steered ? "steer" : "prompt", message: input.text }),
+          root.rpc.send({
+            type: steered ? "steer" : "prompt",
+            message: appendAttachmentPaths(input.text, input.attachments),
+            ...(images.length === 0 ? {} : { images }),
+          }),
           () =>
             // A prompt pi rejected opened no turn. Leaving its id would make
             // the next input steer a turn that never started.
@@ -1432,6 +1478,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           sessionId,
           turnId,
           text: input.text,
+          attachments: input.attachments,
           steered,
           providerRefs: { nativeSessionId: held.binding.nativeSessionId },
         })) {

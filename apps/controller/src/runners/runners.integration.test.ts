@@ -1258,7 +1258,7 @@ const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =
       }).plugin,
     ],
     facts: FLEET_FACTS,
-    models: [{ slug: "clever", name: "Clever", isDefault: true, options: [] }],
+    models: [{ slug: "clever", name: "Clever", acceptsImages: true, isDefault: true, options: [] }],
   });
 
 const readSession = async (arranged: Arranged, id: string): Promise<Session> => {

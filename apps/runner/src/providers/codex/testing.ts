@@ -30,6 +30,7 @@ export const createCodexHome = (): string => createScratchHome("codex");
 
 export const buildContext = (home: string, cwd: string | null = null): ProviderRunnerContext => ({
   cwd,
+  attachmentsDir: null,
   home,
   binary: "/usr/local/bin/codex",
   env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },

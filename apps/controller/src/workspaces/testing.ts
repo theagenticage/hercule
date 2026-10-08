@@ -47,7 +47,7 @@ export const FACTS: RunnerFacts = {
 
 /** The models the runner's probe returns, so a session has a model to be placed against. */
 export const MODELS: ReadonlyArray<ModelDescriptor> = [
-  { slug: "clever", name: "Clever", isDefault: true, options: [] },
+  { slug: "clever", name: "Clever", acceptsImages: true, isDefault: true, options: [] },
 ];
 
 export interface WorkspaceFleetOptions {

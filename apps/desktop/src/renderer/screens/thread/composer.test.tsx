@@ -16,7 +16,7 @@ import { createRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Session, SessionRequest } from "@hercule/contract";
+import type { Attachment, ProviderInstance, Session, SessionRequest } from "@hercule/contract";
 import {
   buildErrorBody,
   CONTROLLER_URL,
@@ -62,6 +62,36 @@ const buildInterruptOperation = (thread: ThreadRecords): string =>
 const OPENED: Answer = {
   body: { inputId: "01a06d02-7700-7000-8000-000000000099", result: "opened" },
 };
+
+/** The operation that uploads an image. */
+const UPLOAD_OPERATION = "POST /api/v1/attachments";
+
+/** The image the controller stores for "screen.png". */
+const SCREEN_ATTACHMENT: Attachment = {
+  id: "01a06d02-7700-7000-8000-0000000000a1",
+  name: "screen.png",
+  mimeType: "image/png",
+  sizeBytes: 4,
+};
+
+/** `FIXTURE_INSTANCE` with models that take no images. */
+const WITHOUT_IMAGES: ProviderInstance = {
+  ...FIXTURE_INSTANCE,
+  snapshots: FIXTURE_INSTANCE.snapshots.map((snapshot) => ({
+    ...snapshot,
+    models: snapshot.models.map((model) => ({ ...model, acceptsImages: false })),
+  })),
+};
+
+/** Returns a small PNG file named `name`. */
+const buildImage = (name: string): File =>
+  new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], name, { type: "image/png" });
+
+/** Returns the card's hidden file picker. */
+const readPicker = (): HTMLInputElement => document.querySelector("input[type=file]")!;
+
+/** Returns the line in the composer's notice slot, or "" when there is none. */
+const readNotice = (): string => document.querySelector(".composer-notice")?.textContent ?? "";
 
 /** What the composer told the thread screen, oldest first. */
 interface ScreenReports {
@@ -431,16 +461,147 @@ describe("the composer", () => {
     expect(calls).toHaveLength(sent);
   });
 
-  it("draws Attach and Dictate, which do nothing yet", async () => {
+  it("draws Dictate, which does nothing yet, and Attach, which takes images", async () => {
     const user = userEvent.setup();
     const { calls } = await renderComposer(IDLE);
     const sent = calls.length;
 
-    for (const name of ["Attach", "Dictate"]) {
-      const button = screen.getByRole("button", { name });
-      expect(button.getAttribute("aria-disabled")).toBe("true");
-      await user.click(button);
-    }
+    const dictate = screen.getByRole("button", { name: "Dictate" });
+    expect(dictate.getAttribute("aria-disabled")).toBe("true");
+    await user.click(dictate);
+    expect(calls).toHaveLength(sent);
+    expect(screen.getByRole("button", { name: "Attach" }).hasAttribute("aria-disabled")).toBe(
+      false,
+    );
+  });
+
+  it("uploads a picked image, holds the send until it is uploaded, then sends it alone", async () => {
+    const user = userEvent.setup();
+    const held = holdAnswer();
+    const { calls } = await renderComposer(IDLE, {
+      handlers: { [UPLOAD_OPERATION]: held.handler },
+    });
+
+    await user.upload(readPicker(), buildImage("screen.png"));
+    const tile = await screen.findByTitle(/^screen\.png/);
+    expect(tile.textContent).toContain("Uploading…");
+    const upload = calls.find((call) => `${call.method} ${call.path}` === UPLOAD_OPERATION);
+    expect(upload?.search).toBe("?name=screen.png");
+    expect(readNotice()).toBe("Wait for the image to finish uploading.");
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send.className).toBe("send send--off");
+
+    await act(async () => {
+      held.answer({ status: 201, body: SCREEN_ATTACHMENT });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(tile.textContent).not.toContain("Uploading…");
+    });
+    expect(readNotice()).toBe("");
+
+    await user.click(send);
+    await waitFor(() => {
+      expect(readSent(calls, IDLE)).toHaveLength(1);
+    });
+    expect(readSent(calls, IDLE)[0]).toMatchObject({ attachments: [SCREEN_ATTACHMENT.id] });
+    await waitFor(() => {
+      expect(screen.queryByTitle(/^screen\.png/)).toBeNull();
+    });
+  });
+
+  it("marks a failed upload, and retries it", async () => {
+    const user = userEvent.setup();
+    let attempts = 0;
+    await renderComposer(IDLE, {
+      handlers: {
+        [UPLOAD_OPERATION]: () => {
+          attempts += 1;
+          return attempts === 1
+            ? { status: 500, body: buildErrorBody("internal", "The disk is full.") }
+            : { status: 201, body: SCREEN_ATTACHMENT };
+        },
+      },
+    });
+
+    await user.upload(readPicker(), buildImage("screen.png"));
+    const tile = await screen.findByTitle(/^screen\.png/);
+    await waitFor(() => {
+      expect(tile.getAttribute("data-status")).toBe("failed");
+    });
+    expect(readNotice()).toBe("An image failed to upload. Retry it or remove it.");
+
+    await user.click(screen.getByRole("button", { name: "Retry upload for screen.png" }));
+    await waitFor(() => {
+      expect(tile.getAttribute("data-status")).toBe("uploaded");
+    });
+    expect(attempts).toBe(2);
+    expect(readNotice()).toBe("");
+  });
+
+  it("marks the images a send was refused for as expired, and keeps them on the shelf", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderComposer(IDLE, {
+      handlers: {
+        [UPLOAD_OPERATION]: { status: 201, body: SCREEN_ATTACHMENT },
+        [buildInputOperation(IDLE)]: {
+          status: 400,
+          body: {
+            error: {
+              code: "validation",
+              message: "screen.png expired; attach it again.",
+              details: {
+                issues: [{ path: ["attachments", "0"], message: "screen.png expired" }],
+              },
+            },
+          },
+        },
+      },
+    });
+
+    await user.upload(readPicker(), buildImage("screen.png"));
+    const tile = await screen.findByTitle(/^screen\.png/);
+    await waitFor(() => {
+      expect(tile.getAttribute("data-status")).toBe("uploaded");
+    });
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(tile.getAttribute("data-status")).toBe("expired");
+    });
+    expect(readSent(calls, IDLE)).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Send" }).className).toBe("send send--off");
+  });
+
+  it("keeps Attach off for a model that takes no images, and holds the images already attached", async () => {
+    const user = userEvent.setup();
+    const { calls, pendingSubmissions } = await renderComposer(IDLE, {
+      handlers: { "GET /api/v1/providers": { body: [WITHOUT_IMAGES] } },
+    });
+    const sent = calls.length;
+
+    const attach = screen.getByRole("button", { name: "Attach" });
+    expect(attach.getAttribute("aria-disabled")).toBe("true");
+    expect(attach.getAttribute("title")).toBe("Claude Sonnet 5 does not accept images");
+
+    act(() => {
+      pendingSubmissions.updateAttachments(IDLE.session.id, () => [
+        {
+          key: "image-kept",
+          name: "screen.png",
+          sizeBytes: 4,
+          file: buildImage("screen.png"),
+          status: "uploaded",
+          attachment: SCREEN_ATTACHMENT,
+        },
+      ]);
+    });
+    const tile = await screen.findByTitle(/^screen\.png/);
+    expect(tile.textContent).toContain("Unsupported");
+    expect(readNotice()).toBe(
+      "Claude Sonnet 5 does not accept images. Remove the image or pick a model that accepts them.",
+    );
+    await user.type(readField(), "Look{Enter}");
     expect(calls).toHaveLength(sent);
   });
 
@@ -504,7 +665,10 @@ describe("the composer", () => {
     const sessionId = IDLE.session.id;
 
     await user.type(readField(), "Half a thought");
-    expect(pendingSubmissions.read(sessionId).message).toEqual({ text: "Half a thought" });
+    expect(pendingSubmissions.read(sessionId).message).toEqual({
+      text: "Half a thought",
+      attachments: [],
+    });
 
     act(() => {
       pendingSubmissions.writeText(sessionId, "Written elsewhere");
