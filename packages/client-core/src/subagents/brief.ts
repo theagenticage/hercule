@@ -36,19 +36,23 @@ export interface SubagentBriefSplit {
 /**
  * Splits the brief off a subagent's transcript `blocks`, as
  * `buildThreadBlocks` returns them. The brief is the user message the
- * subagent's first turn opens with, which is the first block when the
- * harness handed the subagent a brief. The page draws it in the brief card,
- * so that message is left out of the blocks. When the first block is not a
- * user message with text, the brief is undefined and the blocks are
- * returned as they are.
+ * subagent's first turn opens with, which is the first block other than a
+ * warning when the harness handed the subagent a brief. Warnings can come
+ * first: the runner may warn about a subagent before its first turn starts,
+ * for example when it renames the subagent's id. The page draws the brief in
+ * the brief card, so that message is left out of the blocks, and any warning
+ * before it stays. When the first block other than a warning is not a user
+ * message with text, the brief is undefined and the blocks are returned as
+ * they are.
  *
  * This is `findSubagentBrief` for a screen that draws blocks rather than
  * turns.
  */
 export const splitSubagentBrief = (blocks: readonly ThreadBlock[]): SubagentBriefSplit => {
-  const first = blocks[0];
+  const index = blocks.findIndex((block) => block.kind !== "warning");
+  const first = blocks[index];
   if (first?.kind !== "user" || first.text === "") return { brief: undefined, blocks };
-  return { brief: first.text, blocks: blocks.slice(1) };
+  return { brief: first.text, blocks: blocks.toSpliced(index, 1) };
 };
 
 /**

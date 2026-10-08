@@ -94,3 +94,35 @@ button.worked:hover b {
   font-size: var(--t-12);
   font-weight: var(--w-medium);
 }
+
+/* A runtime warning, such as a retried request. The book draws none, so the
+   note is built from its parts: the waiting note's place and size, and the
+   book's `.dot` in a 14px box like the waiting note's mark, so both notes'
+   words start at one edge. The dot and the words are muted, quieter than
+   the waiting note's marigold, because a warning asks nothing of the user.
+   The book has no caution colour: its tomato (`--fail`) means something
+   failed, and its marigold (`--you`) means it is the user's move, and a
+   warning is neither, so the dot takes the words' colour. A long warning
+   wraps, and the dot stays on its first line. */
+.warning-note {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  column-gap: 8px;
+  margin-left: 46px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.warning-note .dot {
+  justify-self: center;
+  background: currentColor;
+  margin-top: calc((1lh - 7px) / 2);
+}
+.warning-note p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.warning-note .time {
+  margin-left: 6px;
+  user-select: none;
+}

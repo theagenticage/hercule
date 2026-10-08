@@ -15,13 +15,14 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import type {
-  ActionStepStart,
-  AgentStepResultRequest,
-  WorkspaceStepKey,
-  WorkspaceStepOutcome,
-  WorkspaceStepResult,
-  WorkspaceStepStart,
+import {
+  type ActionStepStart,
+  type AgentStepResultRequest,
+  MAX_FRAME_BYTES,
+  type WorkspaceStepKey,
+  type WorkspaceStepOutcome,
+  type WorkspaceStepResult,
+  type WorkspaceStepStart,
 } from "@hercule/protocol";
 import type { Workspaces } from "../workspaces";
 import {
@@ -35,6 +36,7 @@ import {
   runGitOrThrow,
   type Remote,
 } from "../workspaces/testing";
+import { readStepResult } from "./results";
 import { makeWorkspaceSteps, type WorkspaceSteps } from "./steps";
 
 afterAll(cleanTemporaries);
@@ -839,6 +841,42 @@ describe("an agent step", { timeout: TEST_TIMEOUT_MS }, () => {
 
     expect(runner.sent).toEqual([]);
     expect(runner.steps.listInFlight()).toEqual([]);
+  });
+
+  it("fails with output_too_large, on the wire and in its result file, when its output does not fit in one frame", async () => {
+    const runner = makeRunner();
+    const workspaceId = createId();
+    const frame = buildAgentStart(workspaceId);
+    await beginAgentStep(runner, frame);
+
+    await finishAgentStep(runner, frame, {
+      status: "completed",
+      output: { text: "x".repeat(MAX_FRAME_BYTES) },
+    });
+
+    const tooLarge = {
+      status: "failed",
+      code: "output_too_large",
+      message: "The step's output was 2.01 MiB, too large to send (the limit is 2 MiB).",
+    };
+    expect(listResults(runner, frame)).toEqual([tooLarge]);
+    expect(readStepResult(runner.storageDir, workspaceId, frame)).toEqual(tooLarge);
+    await startStep(runner, frame);
+    expect(listResults(runner, frame)).toEqual([tooLarge, tooLarge]);
+  });
+
+  it("sends an output that fits in one frame as it is", async () => {
+    const runner = makeRunner();
+    const frame = buildAgentStart(createId());
+    await beginAgentStep(runner, frame);
+    const fits: WorkspaceStepOutcome = {
+      status: "completed",
+      output: { text: "x".repeat(MAX_FRAME_BYTES - 1024) },
+    };
+
+    await finishAgentStep(runner, frame, fits);
+
+    expect(listResults(runner, frame)).toEqual([fits]);
   });
 
   it("takes no workspace lock: a commit in its workspace runs while its turn runs", async () => {

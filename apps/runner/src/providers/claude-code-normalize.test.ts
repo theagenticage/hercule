@@ -7,13 +7,19 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { ProviderEvent, type ContinuedSubagent, type OutputSchema } from "@hercule/protocol";
+import {
+  MAX_FRAME_BYTES,
+  ProviderEvent,
+  type ContinuedSubagent,
+  type OutputSchema,
+} from "@hercule/protocol";
 import {
   CLAUDE_SDK_MESSAGE,
   normalize,
   buildNormalizingState,
   isAnyAgentWorking,
 } from "./claude-code-normalize";
+import { measureFrameBytes } from "../frame-size";
 import { deferUntilTurnOpens, type RequestOpened } from "./claude-code-subagents";
 import {
   BRIEF,
@@ -1636,5 +1642,51 @@ describe("two agents streaming at once", () => {
       'content.delta assistant_text "from the main loop"',
       "item.completed assistant_message msg_main#0 completed",
     ]);
+  });
+});
+
+describe("a tool result too large for one frame", () => {
+  /** The size of a 1.2 MiB PNG once the SDK has written it as base64. */
+  const IMAGE_BASE64_LENGTH = 1.6 * 1024 * 1024;
+
+  /** What the SDK reports after `Read` opens a large PNG: the image as a base64 block. */
+  const IMAGE_RESULT = {
+    ...TOOL_RESULT,
+    message: {
+      role: "user",
+      content: [
+        {
+          tool_use_id: TOOL,
+          type: "tool_result",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: "A".repeat(IMAGE_BASE64_LENGTH),
+              },
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const measureEventBytes = (event: Event): number =>
+    measureFrameBytes({ _tag: "sessionEvent", seq: 1, event });
+
+  // Before sending, the supervisor shrinks an event like this one to fit in a
+  // frame. The tests in sessions/fit-event.test.ts cover that step.
+  it("is normalized to an item.completed larger than a frame", () => {
+    const running = buildTestState();
+    normalize(running, ASSISTANT_TOOL_USE as unknown as SDKMessage);
+    const events = normalize(running, IMAGE_RESULT as unknown as SDKMessage);
+    const completed = events.find((event) => event._tag === "item.completed");
+
+    // The image is in `detail` and again in `raw`, so the frame would close
+    // the runner's socket.
+    expect(completed).toBeDefined();
+    expect(measureEventBytes(completed!)).toBeGreaterThan(MAX_FRAME_BYTES);
   });
 });

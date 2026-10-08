@@ -188,7 +188,10 @@ export type WorkspaceStepSettle = Schema.Schema.Type<typeof WorkspaceStepSettle>
  *   the step's output schema;
  * - `session_failed`: an agent step's turn failed or was interrupted, or its
  *   session exited, crashed, timed out or was stopped while the turn ran. The
- *   message names which.
+ *   message names which;
+ * - `output_too_large`: the step completed, but its output was too large to
+ *   send in one frame (`MAX_FRAME_BYTES`), so the runner sent this failure in
+ *   its place. The message gives the output's size.
  */
 export const WorkspaceStepFailureCode = Schema.Literals([
   "action_failed",
@@ -197,6 +200,7 @@ export const WorkspaceStepFailureCode = Schema.Literals([
   "interrupted",
   "schema_failure",
   "session_failed",
+  "output_too_large",
 ]);
 
 export type WorkspaceStepFailureCode = Schema.Schema.Type<typeof WorkspaceStepFailureCode>;

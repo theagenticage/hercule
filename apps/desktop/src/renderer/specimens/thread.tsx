@@ -7,12 +7,14 @@
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`.
  * With `?state=scrolled`, it scrolls the transcript to where the book's
  * `?state=scrolled` page has it, and the composer shrinks as it does when
- * the user scrolls there.
+ * the user scrolls there. With `?state=warning`, the thread shows two
+ * runtime warnings among its work, which the book never draws, so
+ * `pnpm compare:bureau` does not compare that state.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
 import "./fixed-clock";
-import { FIX_THREAD, THREAD_PAGE_RECORDS } from "./thread-fixture";
+import { FIX_THREAD, FIX_THREAD_WITH_WARNINGS, THREAD_PAGE_RECORDS } from "./thread-fixture";
 import { mountThreadSpecimen } from "./shell-page";
 import { computeScrolledTop, markSheetReady } from "./sheet-page";
 
@@ -37,8 +39,12 @@ async function scrollTranscriptAway(): Promise<void> {
   }
 }
 
-await mountThreadSpecimen(THREAD_PAGE_RECORDS, FIX_THREAD);
-if (new URLSearchParams(location.search).get("state") === "scrolled") {
+const state = new URLSearchParams(location.search).get("state");
+await mountThreadSpecimen(
+  THREAD_PAGE_RECORDS,
+  state === "warning" ? FIX_THREAD_WITH_WARNINGS : FIX_THREAD,
+);
+if (state === "scrolled") {
   await scrollTranscriptAway();
 }
 await markSheetReady();

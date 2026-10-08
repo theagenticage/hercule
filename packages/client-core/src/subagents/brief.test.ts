@@ -53,6 +53,19 @@ describe("splitSubagentBrief", () => {
     });
   });
 
+  it("finds the brief behind a warning that came first, and keeps the warning", () => {
+    const warning: ThreadBlock = {
+      kind: "warning",
+      key: "warning:0",
+      message: "the harness named a subagent",
+      at: "2026-10-05T09:00:00.000Z",
+    };
+    expect(splitSubagentBrief([warning, user("Read the docs"), live])).toEqual({
+      brief: "Read the docs",
+      blocks: [warning, live],
+    });
+  });
+
   it("returns no brief and every block when the first block is not a user message with text", () => {
     const empty = user("");
     expect(splitSubagentBrief([])).toEqual({ brief: undefined, blocks: [] });

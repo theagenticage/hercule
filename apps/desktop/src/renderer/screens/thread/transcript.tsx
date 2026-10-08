@@ -47,7 +47,7 @@ import {
 import { UserMessage } from "../session/messages";
 import { useStartOfToday } from "../session/start-of-today";
 import type { AttachOpenParagraph } from "../session/use-session-live";
-import { AgentMessage, LiveRow, TurnEnding, WaitingNote, WorkDivider } from "./blocks";
+import { AgentMessage, LiveRow, TurnEnding, WaitingNote, WarningNote, WorkDivider } from "./blocks";
 
 /** The space between two blocks: the book's `.tx { gap: 22px }`. Each block but the first includes it. */
 const BLOCK_GAP = 22;
@@ -62,6 +62,9 @@ const SPAWN_LINE_HEIGHT_ESTIMATE = 32;
 const AGENT_CHARS_PER_LINE = 100;
 const USER_CHARS_PER_LINE = 80;
 
+/** Roughly how many characters fit on one line of a warning: 12px text, beside its dot. */
+const WARNING_CHARS_PER_LINE = 110;
+
 /** The height of one line of an agent message, in CSS pixels: 14px text at a line height of 1.6. */
 const AGENT_LINE_HEIGHT = 22.4;
 /** The height of one line of a user's bubble, in CSS pixels: 14px text at a line height of 1.55. */
@@ -75,8 +78,9 @@ const SENT_IMAGE_ROW_HEIGHT = 166;
 /**
  * Estimates a block's height before it is measured, from the book's
  * measurements: the lines of text, a meta line 20.4px with its margin, a
- * divider or a note 17.4px, a bubble's padding and time 40px, and the spawn
- * lines under a divider. Only blocks that were never mounted use the estimate.
+ * divider or a note 17.4px (a warning, 17.4px a line), a bubble's padding and
+ * time 40px, and the spawn lines under a divider. Only blocks that were never
+ * mounted use the estimate.
  */
 const estimateBlockHeight = (block: ThreadBlock): number => {
   switch (block.kind) {
@@ -103,6 +107,8 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
     case "ending":
     case "waiting":
       return 17.4;
+    case "warning":
+      return 17.4 * Math.max(1, Math.ceil(block.message.length / WARNING_CHARS_PER_LINE));
   }
 };
 
@@ -277,6 +283,10 @@ export function Transcript({
             today={today}
             onScreen={onScreen}
           />
+        );
+      case "warning":
+        return (
+          <WarningNote message={block.message} at={block.at} timezone={timezone} today={today} />
         );
     }
   };

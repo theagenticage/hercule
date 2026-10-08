@@ -309,8 +309,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 4, the version that distinguishes incomplete usage", () => {
-    expect(PROTOCOL_VERSION).toBe(4);
+  it("is 5, the version that reports an output too large to send", () => {
+    expect(PROTOCOL_VERSION).toBe(5);
   });
 });
 

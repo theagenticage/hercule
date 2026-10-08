@@ -27,6 +27,7 @@ import type {
   WorkspaceStepResult,
   WorkspaceReport,
 } from "@hercule/protocol";
+import { MAX_FRAME_BYTES } from "@hercule/protocol";
 import { FIXTURE_SCHEMA } from "@hercule/protocol/testing";
 import type { ProviderAdapter, ProviderRunnerContext } from "../providers";
 import type { Machine } from "./context";
@@ -464,6 +465,53 @@ describe("one session, start to exit", () => {
     expect(reports[1]?.sessions).toEqual([]);
     // The scratch directory dies with the session it was made for.
     expect(existsSync(scratch)).toBe(false);
+  });
+});
+
+describe("an event too large for one frame", () => {
+  it("leaves as frames that each fit, numbered one after another, followed by the warning", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    const text = "x".repeat(MAX_FRAME_BYTES + 1);
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() =>
+          fake.emit({
+            _tag: "content.delta",
+            eventId: "e-delta",
+            sessionId: SESSION,
+            at,
+            turnId: "t-1",
+            itemId: "i-1",
+            streamKind: "assistant_text",
+            delta: text,
+            raw: { source: "fake", payload: text },
+          }),
+        );
+        yield* waitUntil("sent the warning", () =>
+          listSessionEvents(sent).some((frame) => frame.event._tag === "runtime.warning"),
+        );
+      }),
+    );
+
+    const frames = listSessionEvents(sent);
+    const tags = frames.map((frame) => frame.event._tag);
+    expect(tags[0]).toBe("session.started");
+    expect(tags.at(-1)).toBe("runtime.warning");
+    expect(tags.slice(1, -1).length).toBeGreaterThan(1);
+    expect(tags.slice(1, -1).every((tag) => tag === "content.delta")).toBe(true);
+    expect(frames.map((frame) => frame.seq)).toEqual(frames.map((_, index) => index + 1));
+    for (const frame of frames) {
+      expect(Buffer.byteLength(JSON.stringify(frame))).toBeLessThanOrEqual(MAX_FRAME_BYTES);
+    }
+    const pieces = frames.flatMap((frame) =>
+      frame.event._tag === "content.delta" ? [frame.event.delta] : [],
+    );
+    expect(pieces.join("")).toBe(text);
   });
 });
 
@@ -2811,8 +2859,42 @@ describe("an agent step's turn", () => {
     expect(listStepResults(sent)[0]?.outcome).toEqual({
       status: "failed",
       code: "schema_failure",
-      message: "The turn's result did not match the step's output schema: missing property verdict",
+      message:
+        "The turn gave no valid result for the step's output schema: missing property verdict",
     });
+  });
+
+  it("fails the step with schema_failure, naming the size, when the result is too large for one frame", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    const verdict = { verdict: "accept", confidence: 0.9, summary: "x".repeat(MAX_FRAME_BYTES) };
+
+    await runWithRelay(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(SCHEMA_START);
+        yield* supervisor.input(STEP_INPUT);
+        yield* Effect.sync(() =>
+          emitStepTurnEnd(fake, {
+            state: "completed",
+            structuredResult: { outcome: "ok", value: verdict },
+          }),
+        );
+        yield* waitUntil("sent the warning", () => findEventIndex(sent, "runtime.warning") >= 0);
+      }),
+    );
+
+    const outcome = listStepResults(sent)[0]?.outcome;
+    expect(outcome).toMatchObject({ status: "failed", code: "schema_failure" });
+    expect(outcome?.status === "failed" ? outcome.message : "").toMatch(
+      /^The turn gave no valid result for the step's output schema: The turn's structured result was 2\.\d\d MiB, too large to send \(the limit is 2 MiB\)\.$/,
+    );
+    // The turn still ends, for the controller as for the supervisor, and the
+    // warning follows it.
+    expect(findEventIndex(sent, "turn.completed")).toBeLessThan(
+      findEventIndex(sent, "runtime.warning"),
+    );
   });
 
   it("fails the step with session_failed when its turn fails", async () => {

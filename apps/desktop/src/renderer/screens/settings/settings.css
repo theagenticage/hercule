@@ -29,14 +29,6 @@
   margin-left: -6px;
 }
 
-/* The book's own .time class (system.css), a quiet note at the end of the
-   header, such as Appearance's "Saved on this Mac". */
-.time {
-  color: var(--faint);
-  font-size: var(--t-12);
-  white-space: nowrap;
-}
-
 /* Not in the book, whose button sits in the header itself. The open section
    draws its actions into this element, which adds no box of its own. */
 .bar-actions {
@@ -76,16 +68,6 @@
   flex-direction: column;
   gap: 1px;
   padding-top: 8px;
-}
-.dot {
-  width: 7px;
-  height: 7px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--faint);
-}
-.dot--fail {
-  background: var(--fail);
 }
 
 /* The section's body: one centred column, which scrolls on its own. The

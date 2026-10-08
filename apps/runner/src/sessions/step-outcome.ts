@@ -51,9 +51,10 @@ const appendDetail = (text: string, detail: string | undefined): string =>
  * - the session ended during the turn: failed with `session_failed`, naming
  *   why it ended;
  * - the turn reported a schema failure: failed with `schema_failure` and the
- *   harness's reason. This comes before the turn's state, because Codex
- *   reports a schema it cannot satisfy on a failed turn, and the schema
- *   failure is the more precise of the two;
+ *   reason: the harness's, or the runner's for a result too large to send.
+ *   This comes before the turn's state, because Codex reports a schema it
+ *   cannot satisfy on a failed turn, and the schema failure is the more
+ *   precise of the two;
  * - the turn failed or was interrupted: failed with `session_failed`;
  * - the turn returned a structured result: completed with that value;
  * - the session has an output schema but the turn returned no result: failed
@@ -82,7 +83,7 @@ export const buildAgentStepOutcome = (
       status: "failed",
       code: "schema_failure",
       message: appendDetail(
-        "The turn's result did not match the step's output schema",
+        "The turn gave no valid result for the step's output schema",
         result.reason,
       ),
     };

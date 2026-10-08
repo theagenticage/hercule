@@ -337,6 +337,17 @@ interface ProviderEventBase {
 }
 ```
 
+*(Amended 2026-10-08, [#476](https://github.com/theagenticage/hercule/issues/476).)* **No event the runner sends is larger than one frame.** The runner's socket carries at most `MAX_FRAME_BYTES` (2 MiB) per message, and the controller closes the socket on a bigger one, which would end the stream of every session on that runner ([./13-security.md](./13-security.md) section 1). Adapters already truncate the fields the protocol bounds (section 6.5), but `raw`, the native ids in `providerRefs`, an item's `detail`, a `content.delta` and a turn's structured result have no bound of their own: a Claude `Read` of a large image puts its bytes in `detail` and again in `raw`. So the runner's supervisor checks every event before it numbers it, and shrinks one that would not fit, in this order, stopping as soon as it fits:
+
+1. It drops `raw`. This overrides "every event may carry `raw`" above for an oversized event: its `raw` is not untouched but gone.
+2. It splits a `content.delta` into consecutive deltas, each of which fits. The stream is append-only, so nothing is lost.
+3. It drops the `detail` of an `item.started` or `item.completed`.
+4. It replaces the `structuredResult` of a `turn.completed` with a `schema-failure` whose reason gives the result's size and the limit, so an agent step fails with a reason instead of never finishing (section 7).
+5. It drops `providerRefs`.
+6. It drops the event. Every field left on a `turn.completed` or a `session.exited` after step 5 is bounded, so neither reaches this step: a turn or a session left open would never end.
+
+Whenever something is left out, the runner sends a `runtime.warning` right after the event, on the same turn and subagent, that says in plain words what the event was, its size, the limit and what was left out, with the item's id at the end, for example "A tool call result was 4.03 MiB, too large to send (the limit is 2 MiB), so its output and raw data were left out. Item toolu_01." The loss is never silent: the warning is stored in the transcript like any other event, and the desktop draws it in the thread (spec 17). A step's result frame is held to the same limit by its own failure code, `output_too_large` ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). Image tool results by reference ([#478](https://github.com/theagenticage/hercule/issues/478)) remove the most likely trigger; this rule is the guard for every other oversized event.
+
 *(Amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355); decided by [#351](https://github.com/theagenticage/hercule/issues/351) and [#377](https://github.com/theagenticage/hercule/issues/377).)* **An event names the subagent it belongs to.** `turn.started`, `turn.completed`, `item.started`, `item.updated`, `item.completed`, `content.delta`, `request.opened`, `request.resolved`, `session.usage.updated`, `runtime.warning` and `runtime.error` carry an optional `subagentId`: the harness's own id for the subagent whose event it is. Absent means the session's own agent. `session.started` and `session.exited` never carry it. One more event, `subagent.started`, introduces a subagent before any of its events. Section 13 owns both.
 
 ### 6.1 Session
@@ -418,7 +429,7 @@ A request stays open until ~~`respondToRequest`~~ `respondToApprovalRequest` or 
 ### 6.6 Usage and ops
 
 - `session.usage.updated { ... }` - a cumulative token snapshot for the session, taken from Claude `context_usage`, Codex `thread/tokenUsage/updated` and pi `message_end.usage`. Cadence differs per harness; the snapshot shape absorbs that. The field set is below.
-- `runtime.warning` - retries (Claude `api_retry`, pi `auto_retry_*`), model rerouting or drift mid-turn, mirror errors.
+- `runtime.warning` - retries (Claude `api_retry`, pi `auto_retry_*`), model rerouting or drift mid-turn, mirror errors, and an event the runner shrank or dropped because it was larger than a frame (section 6, amended 2026-10-08, [#476](https://github.com/theagenticage/hercule/issues/476)).
 - `runtime.error { class }` - Codex `codexErrorInfo` is the reference class enum (`ContextWindowExceeded`, `UsageLimitExceeded`, `Unauthorized`, `SandboxError`, ...); other adapters map to the same classes where they can, else `unknown`.
 
 ~~**Open:** the exact field set of the `session.usage.updated` snapshot is not pinned beyond "token snapshot plus context usage".~~ *(Resolved 2026-09-07, [#65](https://github.com/theagenticage/hercule/issues/65).)* The snapshot is `{ inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens?, costUsd? }`, cumulative for the session, with the three optional fields present only where the harness reports them. Context usage against the model's window is **not** in the v1 shape: no consumer reads it yet, and the assistant rotation threshold (section 9.2) adds the field it needs when it ships, rather than the shape carrying a number nothing checks.

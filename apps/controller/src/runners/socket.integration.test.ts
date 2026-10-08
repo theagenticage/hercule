@@ -31,6 +31,7 @@ import { Duration, Effect, Schema } from "effect";
 import {
   ControllerToRunner,
   LOGIN_ENDED_CAPABILITY,
+  MAX_FRAME_BYTES,
   PROTOCOL_VERSION,
   encodeChallengeBytes,
   type ControllerHello,
@@ -362,6 +363,11 @@ const readStateTransitions = async (harness: ServerHarness): Promise<ReadonlyArr
 /** The close codes the controller uses: for a rejected frame, and for a connection it is done with. */
 const PROTOCOL_ERROR = 1002;
 const GOING_AWAY = 1001;
+/**
+ * RFC 6455's "abnormal closure": the connection ended without a close frame.
+ * Bun ends a connection that way when a frame exceeds its `maxPayloadLength`.
+ */
+const ABNORMAL_CLOSURE = 1006;
 
 /** A short ping interval a test can wait for, with a silence limit it will not reach. */
 const FAST = { interval: Duration.millis(40), silence: Duration.seconds(30) };
@@ -530,17 +536,17 @@ describe("the hello exchange", () => {
   });
 
   // Version 3 cannot distinguish incomplete usage from exact counts.
-  it("refuses a runner on protocol version 3 and says to upgrade it", async () => {
+  it("refuses a runner on protocol version 4 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dial(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 3 }));
+      wire.send(buildHello({ protocolVersion: 4 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(4);
+      expect(PROTOCOL_VERSION).toBe(5);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 4 and the runner does not; " +
-          "upgrade the runner to a build that uses version 4",
+        "this controller uses runner protocol version 5 and the runner does not; " +
+          "upgrade the runner to a build that uses version 5",
       );
       expect(wire.frames).toEqual([]);
     });
@@ -602,6 +608,39 @@ describe("what a connection leaves behind", () => {
         );
         expect(row.connectivity).toBe("unreachable");
         expect(await readStateTransitions(harness)).toEqual(["online", "unreachable"]);
+      },
+      { pings: FAST },
+    );
+  });
+
+  it("closes the connection of a runner that sends a frame larger than MAX_FRAME_BYTES", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetupWithNoProviderInstance(harness);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+
+        // A frame the controller could otherwise read: a pong with one field
+        // it ignores, padded one byte past the limit.
+        const pong = JSON.stringify({ _tag: "pong", padding: "" });
+        const padding = "x".repeat(MAX_FRAME_BYTES - Buffer.byteLength(pong) + 1);
+        wire.send({ _tag: "pong", padding } as unknown as RunnerMessage);
+
+        const ending = await wire.closed();
+        expect(ending.code, "the transport dropped the connection").toBe(ABNORMAL_CLOSURE);
+        const row = await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "unreachable",
+        );
+        expect(row.connectivity).toBe("unreachable");
       },
       { pings: FAST },
     );
