@@ -68,9 +68,9 @@ it.each([null, "primary", "ephemeral"] as const)(
   },
 );
 
-it("uses the existing workspace + as explicit sharing even when the project default is separate files", async () => {
+it("uses the thread header's + as explicit sharing of its workspace even when the project default is separate files", async () => {
   const { calls, router } = await openDraft("ephemeral", `/threads/${started.session.id}`);
-  await userEvent.click(await screen.findByRole("link", { name: "New thread in webshop · moss" }));
+  await userEvent.click(await screen.findByRole("link", { name: "New thread in this workspace" }));
   await waitFor(() =>
     expect(router.state.location.search).toEqual({ project: project.id, workspace: main.id }),
   );

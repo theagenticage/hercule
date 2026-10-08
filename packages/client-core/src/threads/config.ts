@@ -52,6 +52,14 @@ export interface MessageDraft {
   readonly attachments: readonly ShelfItem[];
 }
 
+/**
+ * Checks whether `message` holds something to send: text that is not blank,
+ * or at least one image. The composer sends only such a message, and the
+ * sidebar marks a thread whose composer holds one as having unsent work.
+ */
+export const holdsMessageContent = (message: MessageDraft): boolean =>
+  message.text.trim() !== "" || message.attachments.length > 0;
+
 /** A thread the user is still composing, or one that exists as a session. */
 export type Thread =
   | { readonly kind: "draft"; readonly config: ThreadConfig }

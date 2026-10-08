@@ -32,6 +32,7 @@ import {
   type SidebarRecords,
 } from "../app/testing";
 import { buildDraftKey } from "../app/pending-submissions";
+import { ITEM_HEIGHTS } from "./sidebar-items";
 
 // Every thread row names its thread with `describePose`, so its calls count
 // the rows that drew. The function itself is the real one.
@@ -92,17 +93,21 @@ const APPROVAL = SIDEBAR_FIXTURE.threads[0]!.openRequests[0]!;
 
 /**
  * Returns `count` threads titled "Thread 1" to "Thread <count>", the last the
- * newest, each with `over` applied. Their ids are UUIDv7s the contract
- * accepts.
+ * newest, each created when it was last active, and each with `over` applied.
+ * Their ids are UUIDv7s the contract accepts.
  */
 const buildThreads = (count: number, over: Partial<Session> = {}): Session[] =>
-  Array.from({ length: count }, (_, index) => ({
-    ...PLAIN_THREAD,
-    id: `01a06d02-7400-7000-8000-${String(1000 + index).padStart(12, "0")}`,
-    title: `Thread ${String(index + 1)}`,
-    lastActivityAt: new Date(Date.UTC(2026, 8, 10, 8, 0, index)).toISOString(),
-    ...over,
-  })).reverse();
+  Array.from({ length: count }, (_, index) => {
+    const at = new Date(Date.UTC(2026, 8, 10, 8, 0, index)).toISOString();
+    return {
+      ...PLAIN_THREAD,
+      id: `01a06d02-7400-7000-8000-${String(1000 + index).padStart(12, "0")}`,
+      title: `Thread ${String(index + 1)}`,
+      createdAt: at,
+      lastActivityAt: at,
+      ...over,
+    };
+  }).reverse();
 
 /** Returns the text of the sidebar's thread counts, such as "1 working · 1 waiting · 2 idle". */
 const readCounts = (): string | null => document.querySelector(".side-sum")?.textContent ?? null;
@@ -119,14 +124,7 @@ describe("the sidebar", () => {
       within(nav)
         .getAllByRole("heading")
         .map((heading) => heading.textContent),
-    ).toEqual([
-      "Waiting on you 1",
-      "webshop",
-      "hercule/thread-3f1",
-      "webshop · moss",
-      "ops",
-      "No project",
-    ]);
+    ).toEqual(["Waiting on you 1", "webshop", "ops", "No project"]);
     expect(
       within(nav)
         .getAllByRole("link")
@@ -134,10 +132,8 @@ describe("the sidebar", () => {
     ).toEqual([
       "Write the retry runbook, waiting on you",
       "New thread in webshop",
-      "New thread in hercule/thread-3f1",
       "Write the retry runbook, waiting on you",
       "Fix flaky webhook tests, working",
-      "New thread in webshop · moss",
       "Bump the Bun pin, idle",
       "New thread in ops",
       "Rotate the backups key, can't be reached",
@@ -165,7 +161,7 @@ describe("the sidebar", () => {
     });
   });
 
-  it("describes each row by its question, or by its model and its age", async () => {
+  it("describes each row by its question, or by its model, its project, workspace, machine and branch, and its age", async () => {
     vi.useFakeTimers({ now: new Date("2026-09-10T09:25:00.000Z"), toFake: ["Date"] });
     const { nav } = await startSidebar();
 
@@ -180,22 +176,27 @@ describe("the sidebar", () => {
       }),
     ).toBe(waitingRow);
     // In its project the row ends with the waiting mark, which the name
-    // already says, so only the model describes it.
+    // already says, so the end does not describe it. A worktree's name is its
+    // branch, so the branch is not named again.
     expect(
       within(nav).getByRole("link", {
         name: "Write the retry runbook, waiting on you",
-        description: "claude-sonnet-5",
+        description: "claude-sonnet-5 in webshop, workspace hercule/thread-3f1, on moss",
       }),
     ).toBe(projectRow);
     expect(
       within(nav).getByRole("link", {
         name: "Bump the Bun pin, idle",
-        description: "claude-sonnet-5 22 minutes ago",
+        description:
+          "claude-sonnet-5 in webshop, webshop main workspace, on moss, branch main 22 minutes ago",
       }),
     ).toBeTruthy();
-    expect(within(nav).getByRole("link", { name: "Bump the Bun pin, idle" }).textContent).toBe(
-      "Bump the Bun pinclaude-sonnet-522m22 minutes ago",
-    );
+    expect(
+      within(nav).getByRole("link", {
+        name: "Rotate the backups key, can't be reached",
+        description: "claude-sonnet-5 in ops, no workspace, on moss 23 minutes ago",
+      }),
+    ).toBeTruthy();
   });
 
   it("hides every face, mark and avatar from assistive technology", async () => {
@@ -219,20 +220,13 @@ describe("the sidebar", () => {
     for (const link of current) expect(link.classList.contains("is-on")).toBe(true);
   });
 
-  it("opens a new thread in a project, or joining a workspace, from their +", async () => {
+  it("opens a new thread in a project from its +", async () => {
     const { nav, router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
     const [webshop, ops] = SIDEBAR_FIXTURE.projects;
-    const [primary, thread3f1] = SIDEBAR_FIXTURE.workspaces;
 
     const readHref = (name: string) => within(nav).getByRole("link", { name }).getAttribute("href");
     expect(readHref("New thread in webshop")).toBe(`/?project=${webshop!.id}`);
     expect(readHref("New thread in ops")).toBe(`/?project=${ops!.id}`);
-    expect(readHref("New thread in hercule/thread-3f1")).toBe(
-      `/?project=${webshop!.id}&workspace=${thread3f1!.id}`,
-    );
-    expect(readHref("New thread in webshop · moss")).toBe(
-      `/?project=${webshop!.id}&workspace=${primary!.id}`,
-    );
 
     await userEvent.click(within(nav).getByRole("link", { name: "New thread in webshop" }));
     await waitFor(() => {
@@ -331,19 +325,22 @@ describe("the sidebar", () => {
     expect(await screen.findByRole("dialog", { name: "New thread in" })).toBeTruthy();
   });
 
-  it("draws the Draft Thread as the current row of the group it will join, and moves it with the pick", async () => {
+  it("draws the Draft Thread as the current, first row of its project, saying where it will work, and follows the pick", async () => {
     const [webshop] = SIDEBAR_FIXTURE.projects;
     const [, thread3f1] = SIDEBAR_FIXTURE.workspaces;
     const { nav, router } = await startSidebar({
       path: `/?project=${webshop!.id}&workspace=${thread3f1!.id}`,
     });
 
-    /** Returns the key of each item from the draft's project heading down to the draft's row. */
-    const readDraftGroup = (): readonly (string | null)[] => {
+    /** Returns the key of each item from the draft's project heading to its last thread row. */
+    const readDraftProject = (): readonly (string | null)[] => {
       const keys = [...nav.querySelectorAll(".side-item")].map((item) =>
         item.getAttribute("data-key"),
       );
-      return keys.slice(keys.indexOf(`header:project:${webshop!.id}`), keys.indexOf("draft") + 1);
+      return keys.slice(
+        keys.indexOf(`header:project:${webshop!.id}`),
+        keys.indexOf(`thread:${FIXTURE_THREAD_IDS.bunPin}`) + 1,
+      );
     };
     const draft = await waitFor(() => {
       const row = nav.querySelector<HTMLElement>('[data-key="draft"]');
@@ -352,18 +349,15 @@ describe("the sidebar", () => {
     });
     expect(draft.getAttribute("aria-current")).toBe("page");
     expect(draft.textContent).toBe("New thread" + "hercule/thread-3f1 · moss" + "draft");
-    // The draft's project comes first, and the draft is the last row of the
-    // workspace it joins.
-    expect(readDraftGroup()).toEqual([
+    // The draft's project comes first, and the draft is its first row.
+    expect(readDraftProject()).toEqual([
       `header:project:${webshop!.id}`,
-      `workspace:project:${webshop!.id}:${thread3f1!.id}`,
+      "draft",
       `thread:${FIXTURE_THREAD_IDS.runbook}`,
       `thread:${FIXTURE_THREAD_IDS.flaky}`,
-      "draft",
+      `thread:${FIXTURE_THREAD_IDS.bunPin}`,
     ]);
 
-    // A new workspace does not exist until the thread starts, so the draft
-    // sits right under its project's heading.
     const { pendingSubmissions } = router.options.context.controller!;
     const key = buildDraftKey(webshop!.id, thread3f1!.id);
     act(() => {
@@ -374,34 +368,55 @@ describe("the sidebar", () => {
         },
       });
     });
-    expect(readDraftGroup()).toEqual([`header:project:${webshop!.id}`, "draft"]);
     expect(nav.querySelector('[data-key="draft"]')?.textContent).toBe(
       "New thread" + "New workspace · moss" + "draft",
     );
+    expect(readDraftProject()[1]).toBe("draft");
   });
 
-  it("draws a Draft Thread in no project as the last row, under No project", async () => {
+  it(`draws a Draft Thread in no project as the first row under "No project", which stays last`, async () => {
     const { nav } = await startSidebar();
 
-    // No project stays the last group even while its draft is open.
     expect(
       within(nav)
         .getAllByRole("heading")
         .map((heading) => heading.textContent),
-    ).toEqual([
-      "Waiting on you 1",
-      "webshop",
-      "hercule/thread-3f1",
-      "webshop · moss",
-      "ops",
-      "No project",
-    ]);
+    ).toEqual(["Waiting on you 1", "webshop", "ops", "No project"]);
     const heading = within(nav).getByRole("heading", { name: "No project" });
     const items = [...nav.querySelectorAll(".side-item")];
     expect(items.slice(items.indexOf(heading) + 1).map((item) => item.textContent)).toEqual([
-      expect.stringContaining("Sketch the pricing page"),
       "New thread" + "No workspace · moss" + "draft",
+      expect.stringContaining("Sketch the pricing page"),
     ]);
+  });
+
+  it("tints the draft's row, and a thread's row while its composer holds unsent text, with a pencil before the title", async () => {
+    const { nav, router } = await startSidebar();
+    const { pendingSubmissions } = router.options.context.controller!;
+    /** Returns whether `row` is tinted and has a pencil before its title. */
+    const isMarkedUnsent = (row: Element): boolean =>
+      row.classList.contains("is-unsent") && row.querySelector(".side-name svg") !== null;
+    const draft = await waitFor(() => {
+      const row = nav.querySelector('[data-key="draft"]');
+      expect(row).not.toBeNull();
+      return row!;
+    });
+    const bunPin = () => within(nav).getByRole("link", { name: /^Bump the Bun pin/ });
+
+    expect(isMarkedUnsent(draft)).toBe(true);
+    expect(isMarkedUnsent(bunPin())).toBe(false);
+
+    act(() => {
+      pendingSubmissions.writeText(FIXTURE_THREAD_IDS.bunPin, "Also bump Node");
+    });
+    expect(isMarkedUnsent(bunPin())).toBe(true);
+    expect(bunPin().getAttribute("aria-label")).toBe("Bump the Bun pin, idle, unsent message");
+
+    act(() => {
+      pendingSubmissions.writeText(FIXTURE_THREAD_IDS.bunPin, "");
+    });
+    expect(isMarkedUnsent(bunPin())).toBe(false);
+    expect(bunPin().getAttribute("aria-label")).toBe("Bump the Bun pin, idle");
   });
 
   it("draws Hide the sidebar and Search as buttons that do nothing yet", async () => {
@@ -455,9 +470,9 @@ describe("the sidebar", () => {
     const drawn = vi.mocked(describePose);
     drawn.mockClear();
 
-    // A new approval in webshop's main workspace: a row at the top of
-    // Waiting on you and a row above "Bump the Bun pin", with every row
-    // below each of them moving down.
+    // A new thread in webshop waits on an approval: a row at the top of
+    // Waiting on you and a row at the top of webshop, with every row below
+    // each of them moving down.
     const [primary] = SIDEBAR_FIXTURE.workspaces;
     const [arrived] = buildThreads(1, {
       title: "Pin the lockfile",
@@ -465,6 +480,7 @@ describe("the sidebar", () => {
       openRequests: [APPROVAL],
       projectId: SIDEBAR_FIXTURE.projects[0]!.id,
       workspaceId: primary!.id,
+      createdAt: "2026-09-10T09:06:00.000Z",
       lastActivityAt: "2026-09-10T09:06:00.000Z",
     });
     threads = [arrived!, ...threads];
@@ -528,14 +544,17 @@ describe("the sidebar", () => {
     expect(readFocusedKey()).toBe(focused);
     expect(nav.querySelectorAll("[data-key]").length).toBeLessThanOrEqual(45);
 
-    // Scroll far down the list: the rows there mount, and the focused row,
-    // far above them, stays.
+    // Scroll far down the list, to about the 235th row: the rows there
+    // mount, and the focused row, far above them, stays.
     act(() => {
-      Object.defineProperty(nav, "scrollTop", { configurable: true, value: 12_000 });
+      Object.defineProperty(nav, "scrollTop", {
+        configurable: true,
+        value: 235 * ITEM_HEIGHTS["thread-row"],
+      });
       fireEvent.scroll(nav);
     });
     await waitFor(() => {
-      expect(within(nav).queryByRole("link", { name: "Thread 160, idle" })).not.toBeNull();
+      expect(within(nav).queryByRole("link", { name: "Thread 260, idle" })).not.toBeNull();
     });
     expect(nav.querySelectorAll("[data-key]").length).toBeLessThanOrEqual(45);
     expect(readFocusedKey()).toBe(focused);
@@ -662,5 +681,195 @@ describe("the sidebar's assistants", () => {
   it("draws no section when there are no assistants", async () => {
     await startSidebar();
     expect(screen.queryByRole("navigation", { name: "Assistants" })).toBeNull();
+  });
+});
+
+describe("the sidebar's card of thread details", () => {
+  /** Returns the text of the card beside the sidebar, empty while it is hidden. */
+  const readCard = (): string => document.querySelector(".thread-hover")?.textContent ?? "";
+
+  /**
+   * Starts the sidebar, with the controller answering the thread list from
+   * `readThreads` when given, then fakes the timers, so the hover delay runs
+   * only when a test advances it. Returns the list, the live connection, and
+   * the rows of "Bump the Bun pin" and "Fix flaky webhook tests".
+   *
+   * With `readThreads`, it first waits for the live connection to subscribe
+   * to the threads, so a test can push a change to them.
+   */
+  const startHovering = async (readThreads?: () => readonly Session[]) => {
+    const { nav, live } = await startSidebar(readThreads === undefined ? {} : { readThreads });
+    if (readThreads !== undefined) {
+      await waitFor(() => {
+        expect(live.readTopics()).toContain("session");
+      });
+    }
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    return {
+      nav,
+      live,
+      bunPin: within(nav).getByRole("link", { name: "Bump the Bun pin, idle" }),
+      flaky: within(nav).getByRole("link", { name: "Fix flaky webhook tests, working" }),
+    };
+  };
+
+  /** Returns the card's `top` style, such as "140px". */
+  const readCardTop = (): string =>
+    document.querySelector<HTMLElement>(".thread-hover")?.style.top ?? "";
+
+  /** Moves the pointer onto `row`, and rests it there until the card shows. */
+  const restOn = (row: HTMLElement): void => {
+    fireEvent.pointerOver(row);
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+  };
+
+  it("shows a thread's details once the pointer rests on its row for 400ms, and switches at once to another row", async () => {
+    const { bunPin, flaky } = await startHovering();
+
+    fireEvent.pointerOver(bunPin);
+    act(() => {
+      vi.advanceTimersByTime(399);
+    });
+    expect(readCard()).toBe("");
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(readCard()).toBe("Bump the Bun pin" + "webshop" + "moss" + "main" + "claude-sonnet-5");
+
+    fireEvent.pointerOver(flaky);
+    expect(readCard()).toContain("Fix flaky webhook tests");
+  });
+
+  it("shows no card when the pointer leaves the row before 400ms", async () => {
+    const { bunPin } = await startHovering();
+
+    fireEvent.pointerOver(bunPin);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    fireEvent.pointerOut(bunPin, { relatedTarget: document.body });
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(readCard()).toBe("");
+  });
+
+  it.each<[string, (rows: { nav: HTMLElement; bunPin: HTMLElement }) => void]>([
+    [
+      "the pointer leaves the list",
+      ({ bunPin }) => fireEvent.pointerOut(bunPin, { relatedTarget: document.body }),
+    ],
+    [
+      "the pointer moves to a project's header",
+      ({ nav }) => fireEvent.pointerOver(within(nav).getByRole("heading", { name: "ops" })),
+    ],
+    ["the row is pressed", ({ bunPin }) => fireEvent.pointerDown(bunPin)],
+    ["the list scrolls", ({ nav }) => fireEvent.scroll(nav)],
+    ["the window is resized", () => fireEvent(window, new Event("resize"))],
+  ])("hides the card at once when %s", async (_, hide) => {
+    const rows = await startHovering();
+    restOn(rows.bunPin);
+    expect(readCard()).toContain("Bump the Bun pin");
+
+    hide(rows);
+    expect(readCard()).toBe("");
+  });
+
+  it("keeps a card that shows in the space between two rows, and cancels one that waits for the delay", async () => {
+    const { nav, bunPin } = await startHovering();
+    const gap = nav.querySelector(".side-list")!;
+
+    restOn(bunPin);
+    fireEvent.pointerOver(gap);
+    expect(readCard()).toContain("Bump the Bun pin");
+
+    fireEvent.pointerOut(bunPin, { relatedTarget: document.body });
+    fireEvent.pointerOver(bunPin);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    fireEvent.pointerOver(gap);
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(readCard()).toBe("");
+  });
+
+  it("does not show the card again after a press while the pointer stays on the pressed row", async () => {
+    const { bunPin, flaky } = await startHovering();
+    restOn(bunPin);
+
+    fireEvent.pointerDown(bunPin);
+    // The pointer moves from the row's title to its second line, and rests.
+    restOn(bunPin.querySelector(".side-name")!);
+    restOn(bunPin.querySelector(".side-meta")!);
+    expect(readCard()).toBe("");
+
+    restOn(flaky);
+    expect(readCard()).toContain("Fix flaky webhook tests");
+  });
+
+  it("hides the card when its thread leaves the list", async () => {
+    let threads: readonly Session[] = SIDEBAR_FIXTURE.threads;
+    const { bunPin, live } = await startHovering(() => threads);
+    restOn(bunPin);
+    expect(readCard()).toContain("Bump the Bun pin");
+    vi.useRealTimers();
+
+    threads = threads.filter((session) => session.id !== FIXTURE_THREAD_IDS.bunPin);
+    act(() => {
+      live.pushInvalidation("session", [FIXTURE_THREAD_IDS.bunPin]);
+    });
+
+    await waitFor(() => {
+      expect(readCard()).toBe("");
+    });
+  });
+
+  it("keeps the card beside its row when a new thread arrives above the row", async () => {
+    // jsdom lays nothing out, so each list item reports a top from its place
+    // among the items, 51px apart, and the card reports a height that fits
+    // the window, so its top is not moved to keep it inside.
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: Element,
+    ) {
+      const index = this.hasAttribute("data-key")
+        ? [...this.parentElement!.children].indexOf(this)
+        : 0;
+      return DOMRect.fromRect({ x: 0, y: index * 59, width: 272, height: 59 });
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.classList.contains("thread-hover") ? 100 : 800;
+    });
+    const bunPinThread = SIDEBAR_FIXTURE.threads.find(
+      (session) => session.id === FIXTURE_THREAD_IDS.bunPin,
+    )!;
+    let threads: readonly Session[] = SIDEBAR_FIXTURE.threads;
+    const { nav, bunPin, live } = await startHovering(() => threads);
+    restOn(bunPin);
+    const topBefore = readCardTop();
+    expect(topBefore).toBe(`${String(bunPin.getBoundingClientRect().top)}px`);
+    vi.useRealTimers();
+
+    const [newest] = buildThreads(1, {
+      projectId: bunPinThread.projectId,
+      createdAt: "2026-09-10T09:10:00.000Z",
+    });
+    threads = [newest!, ...threads];
+    act(() => {
+      live.pushInvalidation("session", [newest!.id]);
+    });
+
+    await waitFor(() => {
+      expect(within(nav).getByRole("link", { name: "Thread 1, idle" })).toBeTruthy();
+    });
+    const row = within(nav).getByRole("link", { name: "Bump the Bun pin, idle" });
+    expect(readCardTop()).toBe(`${String(row.getBoundingClientRect().top)}px`);
+    expect(readCardTop()).not.toBe(topBefore);
+    expect(readCard()).toContain("Bump the Bun pin");
   });
 });

@@ -135,6 +135,35 @@ describe("createPendingSubmissions", () => {
   });
 });
 
+describe("readUnsentKeys", () => {
+  it("lists the keys with text or an image, and not those with only picks or a failure", () => {
+    const store = createPendingSubmissions();
+    store.writeText(THREAD, "Also the tests");
+    store.updateAttachments(OTHER, () => [buildImage("one")]);
+    store.writePicks("picks", { model: "opus" });
+    store.recordFailure("failure", "The runner is offline");
+    expect([...store.readUnsentKeys()].sort()).toEqual([OTHER, THREAD].sort());
+
+    store.writeText(THREAD, "");
+    store.updateAttachments(OTHER, () => []);
+    expect(store.readUnsentKeys().size).toBe(0);
+  });
+
+  it("returns the same set while the user types, until a key joins or leaves it", () => {
+    const store = createPendingSubmissions();
+    store.writeText(THREAD, "A");
+    const unsent = store.readUnsentKeys();
+    store.writeText(THREAD, "Al");
+    store.writePicks(THREAD, { model: "opus" });
+    store.writePicks(OTHER, { model: "opus" });
+    expect(store.readUnsentKeys()).toBe(unsent);
+
+    store.writeText(OTHER, "B");
+    expect(store.readUnsentKeys()).not.toBe(unsent);
+    expect(store.readUnsentKeys()).toEqual(new Set([THREAD, OTHER]));
+  });
+});
+
 describe("buildDraftKey", () => {
   it("gives each place a thread can start from its own key, apart from every session id", () => {
     const keys = [

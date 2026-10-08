@@ -9,7 +9,13 @@
  * rather than in the composer, because the composer unmounts when the user
  * leaves the thread.
  */
-import type { MessageDraft, ShelfItem, ThreadPicks } from "@hercule/client-core";
+import { useSyncExternalStore } from "react";
+import {
+  holdsMessageContent,
+  type MessageDraft,
+  type ShelfItem,
+  type ThreadPicks,
+} from "@hercule/client-core";
 
 /** What one thread's composer holds and has not sent. */
 export interface PendingSubmission {
@@ -75,6 +81,16 @@ export interface PendingSubmissions {
       readonly picks: ThreadPicks;
     },
   ) => void;
+  /**
+   * Returns the keys whose composer holds unsent work: a message that
+   * `holdsMessageContent` accepts. Picks alone and a failure alone are not
+   * unsent work, because nothing the user wrote would be lost.
+   *
+   * The same set comes back until a key joins or leaves it, so a component
+   * that reads it with `useSyncExternalStore` draws again only then, and not
+   * on every keystroke.
+   */
+  readonly readUnsentKeys: () => ReadonlySet<string>;
   /** Calls `listener` after every change, until the returned function is called. */
   readonly subscribe: (listener: () => void) => () => void;
 }
@@ -103,6 +119,9 @@ export const buildAssistantDraftKey = (assistantId: string): string => `assistan
 export const createPendingSubmissions = (): PendingSubmissions => {
   const entries = new Map<string, PendingSubmission>();
   const listeners = new Set<() => void>();
+  // Replaced, never changed in place, so its identity changes exactly when
+  // its keys do.
+  let unsentKeys: ReadonlySet<string> = new Set();
   const read = (key: string): PendingSubmission => entries.get(key) ?? EMPTY;
   const write = (key: string, pending: PendingSubmission): void => {
     if (
@@ -114,6 +133,13 @@ export const createPendingSubmissions = (): PendingSubmissions => {
       entries.delete(key);
     } else {
       entries.set(key, pending);
+    }
+    const unsent = holdsMessageContent(pending.message);
+    if (unsent !== unsentKeys.has(key)) {
+      const next = new Set(unsentKeys);
+      if (unsent) next.add(key);
+      else next.delete(key);
+      unsentKeys = next;
     }
     for (const listener of listeners) listener();
   };
@@ -150,6 +176,7 @@ export const createPendingSubmissions = (): PendingSubmissions => {
         picks: picks === sent.picks ? {} : picks,
       });
     },
+    readUnsentKeys: () => unsentKeys,
     subscribe: (listener) => {
       listeners.add(listener);
       return () => {
@@ -158,3 +185,11 @@ export const createPendingSubmissions = (): PendingSubmissions => {
     },
   };
 };
+
+/**
+ * Returns the keys of `pendingSubmissions` whose composer holds unsent work,
+ * as `readUnsentKeys` returns them. The component draws again only when a
+ * key joins or leaves the set.
+ */
+export const useUnsentKeys = (pendingSubmissions: PendingSubmissions): ReadonlySet<string> =>
+  useSyncExternalStore(pendingSubmissions.subscribe, pendingSubmissions.readUnsentKeys);

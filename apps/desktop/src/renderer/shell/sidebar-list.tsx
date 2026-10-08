@@ -15,6 +15,9 @@
  * The focused item is always mounted, even when it scrolls far out of view,
  * so keyboard focus is never lost to the page. When the focused item leaves
  * the list, focus moves to the item `pickFocusFallback` picks.
+ *
+ * While the pointer rests on a thread row, one card beside the sidebar shows
+ * the thread's details (`useThreadHover`).
  */
 import {
   useCallback,
@@ -40,8 +43,9 @@ import {
   WaitingAssistantRow,
   WaitingHeader,
   WaitingThreadRow,
-  WorkspaceLabel,
 } from "./sidebar-rows";
+import { ThreadHoverCard } from "./thread-hover-card";
+import { useThreadHover } from "./use-thread-hover";
 
 /**
  * How many items the list mounts beyond each end of the visible part, so a
@@ -124,19 +128,6 @@ const renderItem = (
           tint={item.tint}
         />
       );
-    case "workspace-label":
-      return (
-        <WorkspaceLabel
-          key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          projectId={item.projectId}
-          workspaceId={item.workspaceId}
-          joinableWorkspaceId={item.joinableWorkspaceId}
-          clip={item.clip}
-          keep={item.keep}
-        />
-      );
     case "thread-row":
       return (
         <ThreadRow
@@ -149,12 +140,25 @@ const renderItem = (
           pose={item.pose}
           end={item.end}
           activityAt={item.activityAt}
+          workspaceClip={item.workspaceClip}
+          workspaceKeep={item.workspaceKeep}
+          placeDescription={item.placeDescription}
+          unsent={item.unsent}
           onScreen={onScreen}
           officeOpen={officeOpen}
         />
       );
     case "draft-row":
-      return <DraftRow key={item.key} itemKey={item.key} leading={item.leading} meta={item.meta} />;
+      return (
+        <DraftRow
+          key={item.key}
+          itemKey={item.key}
+          leading={item.leading}
+          model={item.model}
+          workspaceClip={item.workspaceClip}
+          workspaceKeep={item.workspaceKeep}
+        />
+      );
     case "more":
       return (
         <MoreRow
@@ -191,6 +195,7 @@ export function SidebarList({
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement>(null);
   const [focus, setFocus] = useState<Focus>(NO_FOCUS);
+  const { listHandlers, placement, details } = useThreadHover(items, scrollRef);
 
   // When the focused item leaves the list, the next item to focus is picked
   // while rendering the new list, not in an effect after it, so the item is
@@ -294,20 +299,24 @@ export function SidebarList({
   }
 
   return (
-    <nav
-      ref={scrollRef}
-      className="side-scroll"
-      aria-label="Threads"
-      onFocus={noteFocus}
-      onBlur={noteBlur}
-    >
-      {items.length === 0 ? (
-        <p className="side-meta side-empty">No threads yet</p>
-      ) : (
-        <div className="side-list" style={{ height: virtualizer.getTotalSize() }}>
-          {drawn}
-        </div>
-      )}
-    </nav>
+    <>
+      <nav
+        ref={scrollRef}
+        className="side-scroll"
+        aria-label="Threads"
+        onFocus={noteFocus}
+        onBlur={noteBlur}
+        {...listHandlers}
+      >
+        {items.length === 0 ? (
+          <p className="side-meta side-empty">No threads yet</p>
+        ) : (
+          <div className="side-list" style={{ height: virtualizer.getTotalSize() }}>
+            {drawn}
+          </div>
+        )}
+      </nav>
+      <ThreadHoverCard placement={placement} details={details} />
+    </>
   );
 }

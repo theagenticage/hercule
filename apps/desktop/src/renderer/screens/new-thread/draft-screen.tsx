@@ -15,6 +15,7 @@ import {
   buildSubmission,
   findDraftSubject,
   findExpiredShelfKeys,
+  holdsMessageContent,
   isMutationRunning,
   joinPhraseText,
   listProjectRepos,
@@ -174,7 +175,7 @@ export function DraftScreen({
     fields.blocked === null &&
     !starting &&
     !images.sendBlocked &&
-    (pending.message.text.trim() !== "" || pending.message.attachments.length > 0);
+    holdsMessageContent(pending.message);
 
   // Each pick is compared with the draft's own configuration, not with the
   // picks before it, so picking the configured value again removes the pick.

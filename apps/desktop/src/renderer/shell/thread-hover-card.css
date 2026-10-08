@@ -1,0 +1,71 @@
+/* The details card beside the sidebar. Not in the book; it takes the glass of
+   the composer's menus (`.pop` in menus.css), and its layout follows T3 Code's
+   card: the title in bold, then one line per detail, each with its icon.
+   It shows and moves in one frame, with no transition, because it follows
+   the pointer.
+
+   The glass is written out here rather than taken from `.pop`: importing
+   menus.css from the sidebar would load it with the first screen, ahead of
+   the stylesheets that follow it today, and change which of two equally
+   specific rules wins on other screens. */
+.thread-hover {
+  /* The browser centres a popover in the window and draws it with a border
+     and the system's colours. The card is placed by its `left` and `top`,
+     which the list sets beside the hovered row. */
+  inset: auto;
+  margin: 0;
+  border: 0;
+  color: var(--ink);
+  font-size: var(--t-13);
+  border-radius: var(--r-lg);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-3);
+  width: max-content;
+  min-width: 240px;
+  max-width: 300px;
+  padding: 10px 12px;
+  pointer-events: none;
+}
+/* Only while it shows: a `display` on the card itself would beat the
+   browser's rule that hides a closed popover. */
+.thread-hover:popover-open {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.thread-hover-title {
+  margin: 0;
+  font-weight: var(--w-bold);
+  overflow-wrap: anywhere;
+}
+.thread-hover-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* Every icon takes a slot of the same width, so the texts line up, also when
+   a provider has no mark. */
+.thread-hover-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 12px;
+}
+.thread-hover-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* The project's tile draws its swatch 11px wide, 6px before its name. One
+   more pixel puts the name where the other details' text starts. */
+.thread-hover .proj {
+  gap: 7px;
+  font-weight: inherit;
+}

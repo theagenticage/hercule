@@ -385,7 +385,7 @@ export {
   type MachineRow,
   type ModelPill,
 } from "./threads/composer-fields";
-export { computeEffectiveConfig, readThreadConfig } from "./threads/config";
+export { computeEffectiveConfig, holdsMessageContent, readThreadConfig } from "./threads/config";
 export { countThreadsByPose, type ThreadCounts } from "./threads/counts";
 export { buildDraftView, type DraftAddress, type DraftView } from "./threads/draft-view";
 export type {
@@ -462,6 +462,12 @@ export {
   type WorkspaceGroup,
 } from "./threads/groups";
 export {
+  holdsDraft,
+  listProjectRows,
+  sortProjectsByNewestThread,
+  type ProjectRow,
+} from "./threads/project-rows";
+export {
   buildSidebarSections,
   type ExpandedSections,
   type ProjectSection,
@@ -516,6 +522,7 @@ export {
   setWorkspaceStartingRevision,
   formatWorkspaceLabel,
   type Phrase,
+  type WorkspaceLabel,
   type WorkspacePick,
 } from "./threads/workspaces";
 export { buildSubmission } from "./threads/submission";

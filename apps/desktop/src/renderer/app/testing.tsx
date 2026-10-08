@@ -513,6 +513,7 @@ const FIXTURE_THREADS = {
     openRequests: [APPROVAL_REQUEST],
     projectId: WORLD.WEBSHOP_PROJECT.id,
     workspaceId: WORLD.THREAD_3F1.id,
+    createdAt: "2026-09-10T09:05:00.000Z",
     lastActivityAt: "2026-09-10T09:05:00.000Z",
   }),
   flaky: buildFixtureThread({
@@ -521,6 +522,7 @@ const FIXTURE_THREADS = {
     status: "busy",
     projectId: WORLD.WEBSHOP_PROJECT.id,
     workspaceId: WORLD.THREAD_3F1.id,
+    createdAt: "2026-09-10T09:04:00.000Z",
     lastActivityAt: "2026-09-10T09:04:00.000Z",
   }),
   bunPin: buildFixtureThread({
@@ -528,6 +530,7 @@ const FIXTURE_THREADS = {
     title: "Bump the Bun pin",
     projectId: WORLD.WEBSHOP_PROJECT.id,
     workspaceId: WORLD.PRIMARY.id,
+    createdAt: "2026-09-10T09:03:00.000Z",
     lastActivityAt: "2026-09-10T09:03:00.000Z",
   }),
   backupsKey: buildFixtureThread({
@@ -536,11 +539,13 @@ const FIXTURE_THREADS = {
     status: "exited",
     projectId: WORLD.OPS_PROJECT.id,
     exitedAt: "2026-09-10T09:02:00.000Z",
+    createdAt: "2026-09-10T09:02:00.000Z",
     lastActivityAt: "2026-09-10T09:02:00.000Z",
   }),
   pricingPage: buildFixtureThread({
     id: FIXTURE_THREAD_IDS.pricingPage,
     title: "Sketch the pricing page",
+    createdAt: "2026-09-10T09:01:00.000Z",
     lastActivityAt: "2026-09-10T09:01:00.000Z",
   }),
 };
@@ -549,8 +554,8 @@ const FIXTURE_THREADS = {
  * A sidebar with something in every place: two projects, a worktree two
  * threads share, a main workspace, a thread with no workspace, and a thread
  * in no project. One thread waits on an approval, one works, two are idle and
- * one has exited. The threads are listed most recent first, as the controller
- * lists them.
+ * one has exited. Each was created when it was last active, so they are
+ * listed most recent first by either time, as the controller lists them.
  */
 export const SIDEBAR_FIXTURE: SidebarRecords = {
   threads: [

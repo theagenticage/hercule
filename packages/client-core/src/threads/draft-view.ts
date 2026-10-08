@@ -13,9 +13,10 @@ import {
   type ThreadPicks,
 } from "./config";
 import { decideDraftPlaceForPick, type DraftPlace } from "./groups";
+import { findModelName } from "./model-name";
 import { buildDraftConfig } from "./thread-defaults";
 import { buildWorkspaceMenu, type WorkspaceMenu } from "./workspace-menu";
-import { findWorkspaceInspectionIds, listProjectRepos } from "./workspaces";
+import { findWorkspaceInspectionIds, listProjectRepos, type WorkspaceLabel } from "./workspaces";
 
 /**
  * The records a Draft Thread is built from, as the app's queries return them:
@@ -54,8 +55,14 @@ export interface DraftView {
   readonly workspaceInspectionIds: readonly string[];
   /** The sidebar group the draft will belong to once it starts, which the sidebar draws it in. */
   readonly place: DraftPlace;
-  /** Where the draft will work and on which machine, as its sidebar row says: "New workspace · studio-mac". */
-  readonly rowMeta: string;
+  /**
+   * Where the draft will work and on which machine, as its sidebar row's
+   * third line shows it: the workspace, which may be cut short, then the
+   * machine, which never is, such as `{ clip: "New workspace", keep: " · studio-mac" }`.
+   */
+  readonly rowWorkspace: WorkspaceLabel;
+  /** The display name of the model the draft will run with, such as "Opus 5.5", or `null` while it has none. */
+  readonly rowModel: string | null;
 }
 
 /**
@@ -124,6 +131,13 @@ export const buildDraftView = (
       address.projectId === null
         ? { projectId: null, workspaceId: null, createsWorkspace: false }
         : decideDraftPlaceForPick({ projectId: address.projectId, pick, workspaces, runnerId }),
-    rowMeta: `${workspaceLabel} · ${machine}`,
+    rowWorkspace: { clip: workspaceLabel, keep: ` · ${machine}` },
+    rowModel:
+      config.model === null
+        ? null
+        : findModelName(
+            instances.find((each) => each.id === config.instanceId),
+            config.model,
+          ),
   };
 };

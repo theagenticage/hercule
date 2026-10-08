@@ -3,11 +3,18 @@
  * with, and `computeEffectiveConfig(base, picks)`, which returns what the
  * composer shows and what a draft spawns with. The model options survive a
  * pick that does not change the model, and are dropped when another model or
- * account is picked.
+ * account is picked. It also tests `holdsMessageContent(message)`, which
+ * decides whether a message draft holds anything to send.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
-import { computeEffectiveConfig, readThreadConfig, type ThreadConfig } from "./config";
+import type { ShelfItem } from "../attachments/shelf";
+import {
+  computeEffectiveConfig,
+  holdsMessageContent,
+  readThreadConfig,
+  type ThreadConfig,
+} from "./config";
 
 const BASE: ThreadConfig = {
   instanceId: "i-claude",
@@ -95,5 +102,24 @@ describe("readThreadConfig", () => {
     expect(
       readThreadConfig({ kind: "active", session: { ...SESSION, workspaceId: null } }),
     ).toMatchObject({ workspace: { kind: "none" } });
+  });
+});
+
+describe("holdsMessageContent", () => {
+  const IMAGE: ShelfItem = {
+    key: "one",
+    name: "one.png",
+    sizeBytes: 1,
+    file: Object.assign(new Blob(["x"]), { name: "one.png" }),
+    status: "uploading",
+  };
+
+  it.each<[string, string, readonly ShelfItem[], boolean]>([
+    ["no text and no image", "", [], false],
+    ["blank text", "  \n", [], false],
+    ["text", "Also the tests", [], true],
+    ["an image with no text", "", [IMAGE], true],
+  ])("returns whether a draft with %s holds something to send", (_, text, attachments, holds) => {
+    expect(holdsMessageContent({ text, attachments })).toBe(holds);
   });
 });
