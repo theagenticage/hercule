@@ -380,7 +380,7 @@ describe("buildThreadBlocks", () => {
 
     const working = [...thinking, buildItemStarted("t1", "c1", "command_execution", 2)];
     const blocks = buildThreadBlocks(working, buildSessionAgentState(BUSY));
-    expect(listKeys(blocks)).toEqual(["user:u1", "work:r1", "live"]);
+    expect(listKeys(blocks)).toEqual(["user:u1", "work:r1"]);
     const work = findBlock(blocks, "work", "work:r1");
     expect(work.items.map((item) => item.kind)).toEqual(["reasoning", "command_execution"]);
     expect(work.endedAt).toBeNull();
@@ -446,7 +446,7 @@ describe("buildThreadBlocks", () => {
     expect(findBlock(ended, "agent", "agent:a1").live).toBe(false);
   });
 
-  it("moves the working face to a live row when a tool starts after the last message", () => {
+  it("shows no live row when a tool starts after the last message, because the running divider shows the work", () => {
     const rows = [
       buildTurnStarted("t1", 0),
       ...buildUserMessage("t1", "u1", 0, "Hi"),
@@ -456,7 +456,7 @@ describe("buildThreadBlocks", () => {
 
     const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
 
-    expect(listKeys(blocks)).toEqual(["user:u1", "agent:a1", "work:c1", "live"]);
+    expect(listKeys(blocks)).toEqual(["user:u1", "agent:a1", "work:c1"]);
     expect(findBlock(blocks, "agent", "agent:a1").live).toBe(false);
   });
 
@@ -747,7 +747,7 @@ describe("buildThreadBlocks", () => {
 
     const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
 
-    expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "live"]);
+    expect(listKeys(blocks)).toEqual(["user:u1", "work:c1"]);
     const work = findBlock(blocks, "work", "work:c1");
     expect(work.endedAt).toBeNull();
     expect(work.items[0]!.result).toBe("running");
