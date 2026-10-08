@@ -284,6 +284,16 @@ export {
 } from "./first-run";
 export { formatControllerAddress, isLoopbackOrigin } from "./controller-origin";
 export { formatNameList } from "./name-list";
+export {
+  chooseNewProfileName,
+  describeProfileDeleteBlock,
+  describeProfileUsers,
+  formatGrantVerb,
+  GRANT_FAMILY_TEXT,
+  groupProfileUsers,
+  setGrantHeld,
+  type ProfileUser,
+} from "./permission-profiles";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
 export {
   decideOfficeSeating,
