@@ -90,8 +90,16 @@ describe("Transcript", () => {
   });
 
   it("animates the live row's face only while the thread works", () => {
-    const blocks = buildThreadBlocks(ROWS, buildSessionAgentState(THREAD.session));
-    // No message holds the face while the command runs, so the live row does.
+    // The turn has started and no step or message has followed the user's
+    // message yet: no message holds the face and no divider shows, so the
+    // live row does.
+    const rowsBeforeFirstStep = THREAD.transcript.slice(
+      0,
+      THREAD.transcript.findIndex(
+        (row) => "itemId" in row.event && row.event.itemId === "turn-1-rerun",
+      ),
+    );
+    const blocks = buildThreadBlocks(rowsBeforeFirstStep, buildSessionAgentState(THREAD.session));
     expect(blocks.at(-1)?.kind).toBe("live");
     const renderTranscript = (pose: Pose) => (
       <Transcript
