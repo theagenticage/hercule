@@ -97,15 +97,94 @@ jobs:
           path: apps/desktop/out/bureau-compare
           retention-days: 7
 
+  # Cross-compiles the Linux binaries for edge: x64 natively, arm64 under QEMU,
+  # both smoke-tested with --version. Runs on pull requests so the edge pipeline
+  # can be tested before merge, but uploads artifacts only on main.
+  edge-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup
+
+      - name: Cross-compile Linux binaries
+        run: |
+          bun run scripts/gen-version.ts
+          pnpm --filter @hercule/web build
+          bun run scripts/check-bundle-budget.ts
+          bun run scripts/gen-web-bundle.ts
+          for target in bun-linux-x64 bun-linux-arm64; do
+            bun build packages/hercule/src/main.ts \
+              --compile --target="$target" \
+              --outfile "dist-binary/hercule-${target#bun-}"
+          done
+
+      - name: Run hercule --version (linux-x64, native)
+        run: ./dist-binary/hercule-linux-x64 --version
+
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Run hercule --version (linux-arm64, under QEMU)
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD/dist-binary:/out" \
+            debian:bookworm-slim /out/hercule-linux-arm64 --version
+
+      - uses: actions/upload-artifact@v7
+        if: github.ref == 'refs/heads/main'
+        with:
+          retention-days: 1
+          name: hercule-linux
+          path: |
+            dist-binary/hercule-linux-x64
+            dist-binary/hercule-linux-arm64
+          if-no-files-found: error
+
+  # Tests install.sh on Linux x64 with the binaries edge-linux built. Runs on
+  # pull requests so the installer can be tested before merge.
+  edge-linux-install:
+    needs: [edge-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup
+
+      - name: Cross-compile Linux x64 binary
+        run: |
+          bun run scripts/gen-version.ts
+          pnpm --filter @hercule/web build
+          bun run scripts/check-bundle-budget.ts
+          bun run scripts/gen-web-bundle.ts
+          bun build packages/hercule/src/main.ts \
+            --compile --target=bun-linux-x64 \
+            --outfile dist-binary/hercule-linux-x64
+
+      - name: Assemble release directory for install.sh test
+        run: |
+          mkdir test-release
+          cp dist-binary/hercule-linux-x64 test-release/
+          cd test-release
+          sha256sum hercule-linux-x64 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Test install.sh on Linux x64
+        run: |
+          HERCULE_RELEASE_URL="file://$PWD/test-release" sh install.sh
+          ~/.local/bin/hercule --version
+          # Verify no app was installed (Linux has no app).
+          [ ! -d /Applications ]
+
   # Builds the rolling `edge` prerelease: the binary and the desktop app for
-  # macOS on Apple silicon, plus the Linux x64 and arm64 binaries, from the
-  # commit that just passed the jobs above (spec 15 section 1). `edge-publish`
-  # then publishes what it built.
+  # macOS on Apple silicon, from the commit that just passed the jobs above
+  # (spec 15 section 1). `edge-publish` then publishes what it built.
   #
   # The asset names and the format of SHA256SUMS are what `install.sh` reads;
   # change them together.
   edge-build:
-    needs: [check, desktop]
+    needs: [check, desktop, edge-linux]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
     timeout-minutes: 30
@@ -210,7 +289,7 @@ jobs:
       # timing, which a CI runner cannot match (see the desktop job).
       - run: pnpm exec vitest run --project desktop e2e/desktop/package.test.ts
 
-      # Download the Linux binaries that the compile job built.
+      # Download the Linux binaries that edge-linux built (same workflow run).
       - uses: actions/download-artifact@v8
         with:
           name: hercule-linux
@@ -238,22 +317,6 @@ jobs:
         env:
           HERCULE_HOME: ${{ runner.temp }}/hercule-home
         run: HERCULE_RELEASE_URL="file://$PWD/edge-assets" sh install.sh
-
-      # Test install.sh on Linux in a container: x64 only, since the runner is
-      # x64 and testing arm64 under QEMU would be slow. This tests that the
-      # Linux branch downloads the right binary, checks SHA256SUMS, and
-      # installs to ~/.local/bin/hercule.
-      - name: Install the assets with install.sh (Linux x64)
-        run: |
-          docker run --rm \
-            -v "$PWD/edge-assets:/release:ro" \
-            -v "$PWD/install.sh:/install.sh:ro" \
-            debian:bookworm-slim sh -c '
-              apt-get update -qq && apt-get install -y -qq curl > /dev/null
-              HERCULE_RELEASE_URL="file:///release" sh /install.sh
-              ~/.local/bin/hercule --version
-              [ ! -d /Applications ]
-            '
 
       # The next step install.sh prints: the installed binary installs the
       # service unit for the same scratch Home, and returns once the
