@@ -243,6 +243,11 @@ describe("upgrading from the previous edge release", () => {
       const newControllerRead = await runCli(["controller", "read", "--json"], {
         home: state!.home,
       });
+      if (newControllerRead.code !== 0) {
+        throw new Error(
+          `controller read failed with exit code ${newControllerRead.code}:\nstdout: ${newControllerRead.stdout}\nstderr: ${newControllerRead.stderr}\ncontroller output: ${controller.output()}`,
+        );
+      }
       expect(newControllerRead.code).toBe(0);
 
       // 6. Read every record back and verify it exists
