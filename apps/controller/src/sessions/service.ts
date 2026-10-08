@@ -723,7 +723,7 @@ const make = Effect.gen(function* () {
         if (!session.inputWaiting) return false;
         if (yield* inputs.holdsInputOnTheWire(sessionId)) return false;
         if (isResumeHeld(session)) return false;
-        yield* sessions.resume(sessionId, yield* buildSpec(session), at);
+        yield* sessions.resume(sessionId, yield* buildSpec(session));
         if (session.workspaceId !== null) {
           yield* workspaces.acquire({ kind: "session", id: sessionId }, session.workspaceId, at);
         }

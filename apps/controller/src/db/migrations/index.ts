@@ -63,6 +63,7 @@ import workspaceRepositorySelection from "./0052-workspace-repository-selection"
 import workspaceObservations from "./0053-workspace-observations";
 import workspaceDisposalAndRetention from "./0054-workspace-disposal-and-retention";
 import attachments from "./0055-attachments";
+import exitIsNotActivity from "./0056-exit-is-not-activity";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -120,6 +121,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [53, "workspace-observations", Effect.succeed(workspaceObservations)],
   [54, "workspace-disposal-and-retention", Effect.succeed(workspaceDisposalAndRetention)],
   [55, "attachments", Effect.succeed(attachments)],
+  [56, "exit-is-not-activity", Effect.succeed(exitIsNotActivity)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

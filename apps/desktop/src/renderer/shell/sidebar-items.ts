@@ -46,7 +46,7 @@ import type { ThreadHoverDetails } from "./thread-hover-card";
  *
  * - `working` or `waiting`: that state's mark;
  * - `queued` or `offline`: the word;
- * - `age`: how long ago the thread was last active.
+ * - `age`: how long ago the thread was created.
  */
 export type RowEnd = "working" | "waiting" | "queued" | "offline" | "age";
 
@@ -93,7 +93,7 @@ export type SidebarItemContent =
       readonly secondLine: string | null;
       readonly pose: Pose;
       readonly end: RowEnd;
-      readonly activityAt: string;
+      readonly createdAt: string;
       /**
        * The row's third line, the thread's workspace, in two parts: the
        * part that may be cut short, such as "hercule/thread-3f1", "webshop"
@@ -373,7 +373,7 @@ const buildProjectContents = (
       secondLine: row.secondLine,
       pose,
       end,
-      activityAt: row.activityAt,
+      createdAt: row.createdAt,
       workspaceClip: row.workspace.clip,
       workspaceKeep: row.workspace.keep,
       placeDescription: row.placeDescription,

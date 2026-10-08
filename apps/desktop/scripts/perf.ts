@@ -23,7 +23,7 @@
  *    read with a section open; each section in `SETTINGS_SECTIONS` adds one
  *    launch.
  *    Before each of them the fixture restarts the controller with every idle
- *    thread's last activity set hours back. Then the script starts the app
+ *    thread's creation and last activity set hours back. Then the script starts the app
  *    through Playwright, signed in, to warm it up (see `warmUpApp`), and
  *    then as a plain process, signed in, for the measured launch. From each
  *    measured launch the script reads, in this order:

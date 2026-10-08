@@ -27,8 +27,7 @@ export interface ThreadRow {
 /**
  * Compares two entries, each a session's last activity and its session id,
  * so that sorting puts the most recently active first, and two entries
- * active at the same moment in session id order. Ties are common: ending many
- * sessions at once stamps one time on all of them. Every list of thread rows,
+ * active at the same moment in session id order. Every list of thread rows,
  * and Waiting on you, sorts with this, so two lists that show the same
  * sessions show them in the same order.
  */

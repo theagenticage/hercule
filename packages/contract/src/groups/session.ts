@@ -215,6 +215,12 @@ export const Session = Schema.Struct({
   startedAt: Schema.NullOr(Timestamp),
   /** The time of the last exit. Kept while the session is resumed, and overwritten when it exits again. */
   exitedAt: Schema.NullOr(Timestamp),
+  /**
+   * The last time the session did something: it started, its status changed,
+   * or its harness reported an event. Ending the session is not activity, so
+   * an exited session keeps the time of what it did last; `exitedAt` holds the
+   * exit.
+   */
   lastActivityAt: Timestamp,
   /**
    * The fields this session was spawned with that its provider ignores.

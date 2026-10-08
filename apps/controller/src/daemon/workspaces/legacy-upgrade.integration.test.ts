@@ -27,7 +27,7 @@ import {
   runGitOrThrow,
 } from "../../../../runner/src/workspaces/testing";
 import { hashToken, mintToken } from "../../credentials";
-import { mintUuid, uuidFromString, uuidToString } from "../../db";
+import { binaryVersion, mintUuid, uuidFromString, uuidToString } from "../../db";
 import { buildHomePaths, HerculeHome } from "../../config";
 import { ControllerIdentity, controllerIdentityLayer } from "../../identity";
 import { masterKeyLayer } from "../../secrets/masterKey";
@@ -249,7 +249,7 @@ const withLegacyController = async (
     try {
       expect(
         reader.query("SELECT max(migration_id) AS version FROM effect_sql_migrations").get(),
-      ).toEqual({ version: 55 });
+      ).toEqual({ version: binaryVersion });
       expect(reader.query("SELECT * FROM controller_identity").all()).toEqual(
         fixture.before.identity,
       );
