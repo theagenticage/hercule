@@ -35,7 +35,7 @@ const isIteration = !/^[a-z]0-/.test(id);
 const SCREENS = {
   desktop: [
     "session-empty", "session-active", "intake", "assistant", "settings-appearance",
-    "settings-assistants", "settings-connections", "office", "glance",
+    "settings-assistants", "settings-connections", "settings-profiles", "office", "glance",
   ],
   web: ["session-empty", "session-active", "intake", "decision", "assistant", "settings-providers"],
   mobile: ["intake", "decision", "session-empty", "session-active", "assistant", "settings", "lock"],

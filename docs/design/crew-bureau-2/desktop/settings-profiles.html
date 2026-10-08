@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Permission profiles · Settings · Hercule</title>
+    <style>
+      .set-body {
+        padding-top: 22px;
+      }
+      .set-col[hidden],
+      .note[hidden] {
+        display: none;
+      }
+      .rec {
+        display: flex;
+        flex-direction: column;
+        gap: 30px;
+      }
+      .crumb a:hover {
+        color: var(--ink);
+      }
+      .lead {
+        margin: 0;
+        color: var(--muted);
+      }
+      /* The list: one row per profile, in the Connections page's table. */
+      .tbl-h,
+      .prof {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr) 156px 200px 16px;
+        align-items: center;
+        gap: 14px;
+      }
+      .tbl-h {
+        padding: 0 8px 8px;
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-weight: var(--w-medium);
+      }
+      .prof {
+        min-height: 52px;
+        padding: 6px 8px;
+        border-top: 1px solid var(--line-soft);
+        border-radius: var(--r-md);
+      }
+      .prof:hover {
+        background: var(--hover);
+      }
+      .prof:hover,
+      .prof:hover + .prof {
+        border-top-color: transparent;
+      }
+      .mk {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border-radius: var(--r-sm);
+        background: var(--sunken);
+        color: var(--muted);
+      }
+      .nm {
+        display: grid;
+        gap: 1px;
+        min-width: 0;
+      }
+      .nm b {
+        overflow: hidden;
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .nm span,
+      .used {
+        overflow: hidden;
+        color: var(--muted);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .held {
+        display: grid;
+        gap: 6px;
+        color: var(--muted);
+        font-size: var(--t-12);
+        font-variant-numeric: tabular-nums;
+      }
+      .used {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .used .stack {
+        flex: none;
+      }
+      .used.is-none {
+        color: var(--faint);
+      }
+      .prof > .ic {
+        color: var(--faint);
+      }
+      /* A narrow column drops Used by, which the profile's own page shows in full. */
+      [data-list] {
+        container-type: inline-size;
+      }
+      @container (max-width: 600px) {
+        .tbl-h,
+        .prof {
+          grid-template-columns: 34px minmax(0, 1fr) 80px 16px;
+        }
+        .tbl-h > :nth-child(4),
+        .used {
+          display: none;
+        }
+      }
+      /* Narrower still, the name keeps the room the shield took. */
+      @container (max-width: 400px) {
+        .tbl-h,
+        .prof {
+          grid-template-columns: minmax(0, 1fr) 72px 16px;
+        }
+        .tbl-h > :first-child,
+        .prof > .mk {
+          display: none;
+        }
+      }
+      .set-row {
+        min-height: 50px;
+      }
+      .rec {
+        display: flex;
+        flex-direction: column;
+        gap: 30px;
+      }
+      .set-sec h2 small {
+        margin-left: auto;
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+        font-variant-numeric: tabular-nums;
+      }
+      /* The verbs of one grant family. Any number may be pressed: the track of the segmented
+         control, with each verb its own switch. */
+      .verbs {
+        display: inline-flex;
+        flex: none;
+        padding: 2px;
+        gap: 2px;
+        border-radius: var(--r-sm);
+        background: var(--sunken);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+      }
+      .verbs button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        min-width: 64px;
+        height: 26px;
+        padding: 0 10px;
+        border-radius: var(--r-btn);
+        color: var(--faint);
+        font-weight: var(--w-medium);
+      }
+      .verbs button:hover {
+        color: var(--muted);
+      }
+      .verbs button[aria-pressed="true"] {
+        background: var(--raised);
+        color: var(--ink);
+        box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+      }
+      .verbs button .ic {
+        margin-left: -3px;
+        color: var(--ok);
+      }
+      .verbs button[aria-pressed="false"] .ic {
+        display: none;
+      }
+      .note {
+        margin: 0 0 12px;
+        padding-left: 11px;
+        border-left: 2px solid var(--you);
+        color: var(--muted);
+        font-size: var(--t-12);
+        line-height: 1.5;
+      }
+      .user {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 48px;
+        border-top: 1px solid var(--line-soft);
+      }
+      .user .set-label span {
+        font-size: var(--t-12);
+      }
+      .none {
+        padding: 14px 0 2px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      /* The app's .link: accent ink, underlined on hover. */
+      .set-sec > p a {
+        color: var(--accent-ink);
+        font-weight: var(--w-medium);
+      }
+      .set-sec > p a:hover {
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      .btn[aria-disabled="true"] {
+        opacity: 0.5;
+        pointer-events: none;
+      }
+      /* The dialog that confirms a change to unrestricted, on the glass of the app's other dialogs. */
+      .scrim {
+        position: fixed;
+        z-index: 20;
+        inset: 0;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        padding-top: 18vh;
+        background: var(--scrim);
+      }
+      .scrim[hidden] {
+        display: none;
+      }
+      .dialog {
+        width: 400px;
+        border-radius: var(--r-lg);
+      }
+      .dialog .pop-h {
+        padding: 12px 14px 10px;
+      }
+      .dialog .pop-h b {
+        font-weight: var(--w-bold);
+      }
+      .dialog .pop-sec {
+        padding: 14px;
+        border-top: 1px solid var(--line-soft);
+      }
+      .dialog p {
+        margin: 0 0 10px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .dialog .acts {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      .fixed {
+        padding: 14px 0 2px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="settings"></aside>
+      <main class="main">
+        <header class="bar">
+          <span class="crumb" data-crumb>Settings /</span>
+          <h1 class="title" style="margin-left: -6px" data-title>Permission profiles</h1>
+          <span class="spacer"></span>
+          <button class="btn btn--sm" data-new><i data-i="plus" data-size="14"></i>New profile</button>
+        </header>
+
+        <div class="settings">
+          <nav data-setnav="profiles"></nav>
+          <div class="set-body">
+            <div class="set-col" data-list>
+              <p class="lead">A profile bounds what a session may do through the API. Every agent and assistant runs on one.</p>
+              <section>
+                <div class="tbl-h"><span></span><span>Profile</span><span>Grants</span><span>Used by</span><span></span></div>
+                <div data-rows></div>
+              </section>
+            </div>
+
+            <div class="set-col" data-record hidden>
+              <div class="rec">
+                <section class="set-sec">
+                  <h2>Profile</h2>
+                  <div class="set-row">
+                    <div class="set-label"><b>Name</b><span>Shown wherever a profile is picked.</span></div>
+                    <span class="field" style="min-width: 214px" data-name-field></span>
+                  </div>
+                </section>
+
+                <section class="set-sec">
+                  <h2>Grants<small data-count></small></h2>
+                  <p>What a session on this profile may do through the API. A change reaches its sessions on their next call.</p>
+                  <p class="note" data-warn hidden>Unrestricted holds every grant, so a session on it can do anything you can. Give it only to work you would do yourself.</p>
+                  <div data-grants></div>
+                </section>
+
+                <section class="set-sec">
+                  <h2>Used by</h2>
+                  <p>Change an assistant's profile on <a href="settings-assistants.html">Assistants</a>.</p>
+                  <div data-users></div>
+                </section>
+
+                <section class="set-sec">
+                  <h2 data-delete-title></h2>
+                  <div data-delete></div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <div class="scrim" data-confirm hidden>
+      <div class="pop dialog" role="dialog" aria-label="Change unrestricted?">
+        <div class="pop-h"><b>Change unrestricted?</b></div>
+        <div class="pop-sec">
+          <p>This takes Delete on Tasks away from unrestricted.</p>
+          <p>Threads run on unrestricted unless you pick another profile, so the change reaches them on their next call.</p>
+          <div class="acts">
+            <button class="btn btn--quiet">Cancel</button>
+            <button class="btn btn--accent">Change</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      // The grant families, in the contract's order, each with what it covers and its verbs.
+      var FAMILIES = [
+        ["task", "Tasks", "Tasks in Intake and on projects.", ["read", "create", "update", "delete"]],
+        ["workflow", "Workflows", "Workflows and their triggers.", ["read", "write"]],
+        ["run", "Runs", "Start begins a run. Write follows and cancels runs.", ["read", "start", "write"]],
+        ["session", "Sessions", "Spawn starts a session. Steer sends it input or stops it.", ["read", "spawn", "steer"]],
+        ["subscription", "Subscriptions", "What wakes a session when something happens.", ["read", "write"]],
+        ["notification", "Notifications", "Notifications to you. Only you act on one.", ["read", "write"]],
+        ["settings", "Settings", "Your time zone, topic order and mutes.", ["read", "write"]],
+        ["event", "Events", "The event log. Audit adds its security entries.", ["read", "emit", "audit"]],
+        ["connection", "Connections", "Manage adds and edits them. Use acts through them.", ["read", "manage", "use"]],
+        ["infra", "Machines", "Machines, providers, plugins and the controller.", ["read", "write"]],
+        ["workspace", "Workspaces", "Write creates and disposes of them.", ["read", "write"]],
+        ["agent", "Agents", "Agents, assistants and their Conversations.", ["read", "write"]],
+        ["memory", "Memory", "An assistant's own memory, never another's.", ["read", "write"]],
+        ["permission", "Permissions", "These profiles, and deciding a permission request.", ["read", "write"]],
+        ["project", "Projects", "Projects and what belongs to them.", ["read", "write"]],
+        ["resource", "Resources", "Repositories, folders and mailboxes.", ["read", "write"]],
+        ["secret", "Secrets", "Read sees their names, never their values.", ["read", "write"]],
+        ["credential", "Credentials", "Your API keys and your password.", ["read", "write"]],
+      ];
+      var ALL = FAMILIES.reduce(function (n, f) { return n + f[3].length; }, 0);
+
+      // Every profile, in the list's order: by name, the shipped ones first.
+      var PROFILES = {
+        assistant: { name: "assistant", shipped: true, count: 28, users: [["Ada", "working", "Assistant"], ["Juno", "asleep", "Assistant"]] },
+        unrestricted: { name: "unrestricted", shipped: true, grants: "all", users: [] },
+        worker: { name: "worker", shipped: true, count: 9, users: [["triage-step", "idle", "Agent"], ["fix-step", "working", "Agent"]] },
+        releaser: { name: "Releaser", shipped: false, count: 11, users: [] },
+        reviewer: {
+          name: "Reviewer",
+          shipped: false,
+          grants: ["task.read", "task.create", "task.update", "workflow.read", "run.read", "session.read", "subscription.read", "subscription.write", "notification.read", "notification.write", "event.read", "connection.read", "connection.use", "workspace.read", "project.read", "resource.read"],
+          users: [["Milo", "idle", "Assistant"], ["pr-review", "working", "Agent"]],
+        },
+      };
+      var countOf = function (p) { return p.grants === "all" ? ALL : p.grants ? p.grants.length : p.count; };
+      var usersText = function (p) {
+        if (p.users.length === 0) return "Nothing";
+        var agents = p.users.every(function (u) { return u[2] === "Agent"; });
+        return agents && p.users.length > 1 ? p.users.length + " agents" : p.users.map(function (u) { return u[0]; }).join(", ");
+      };
+
+      // ?state=reviewer opens Reviewer's page; ?state=shipped opens unrestricted, a shipped profile nothing uses;
+      // ?state=confirm opens unrestricted with the dialog that asks before a grant changes.
+      var state = document.documentElement.dataset.state;
+      var key = state === "shipped" || state === "confirm" ? "unrestricted" : state === "reviewer" ? "reviewer" : null;
+      document.querySelector("[data-confirm]").hidden = state !== "confirm";
+
+      document.querySelector("[data-rows]").innerHTML = Object.keys(PROFILES).map(function (k) {
+        var p = PROFILES[k];
+        var n = countOf(p);
+        var href = k === "unrestricted" ? "?state=shipped" : k === "reviewer" ? "?state=reviewer" : "#";
+        return (
+          '<a class="prof" href="' + href + '"><span class="mk"><i data-i="shield" data-size="16"></i></span>' +
+          '<span class="nm"><b>' + p.name + "</b><span>" + (p.shipped ? "Shipped with Hercule" : "Made by you") + "</span></span>" +
+          '<span class="held">' + n + " of " + ALL + '<span class="meter"><i style="width:' + (n / ALL) * 100 + '%"></i></span></span>' +
+          '<span class="used' + (p.users.length === 0 ? " is-none" : "") + '">' +
+          (p.users.length === 0 ? "" : '<span class="stack">' + p.users.map(function (u) { return '<i data-face="' + u[0] + '" data-pose="' + u[1] + '" data-size="24"></i>'; }).join("") + "</span>") +
+          usersText(p) + "</span>" +
+          '<i data-i="chev-r" data-size="14"></i></a>'
+        );
+      }).join("");
+
+      if (key !== null) {
+      var p = PROFILES[key];
+      var held = function (g) { return p.grants === "all" || p.grants.indexOf(g) !== -1; };
+      var count = countOf(p);
+      document.title = p.name + " · Permission profiles · Settings · Hercule";
+      document.querySelector("[data-list]").hidden = true;
+      document.querySelector("[data-record]").hidden = false;
+      document.querySelector("[data-new]").remove();
+      document.querySelector("[data-crumb]").innerHTML = 'Settings / <a href="settings-profiles.html">Permission profiles</a> /';
+      document.querySelector("[data-title]").textContent = p.name;
+      document.querySelector("[data-count]").textContent = count + " of " + ALL;
+      document.querySelector("[data-name-field]").textContent = p.name;
+      document.querySelector("[data-warn]").hidden = key !== "unrestricted";
+
+      document.querySelector("[data-grants]").innerHTML = FAMILIES.map(function (f) {
+        return (
+          '<div class="set-row"><div class="set-label"><b>' + f[1] + "</b><span>" + f[2] + "</span></div>" +
+          '<div class="verbs" role="group" aria-label="' + f[1] + '">' +
+          f[3].map(function (v) {
+            var g = f[0] + "." + v;
+            return '<button aria-pressed="' + held(g) + '" title="' + g + '"><i data-i="check" data-size="12"></i>' + v[0].toUpperCase() + v.slice(1) + "</button>";
+          }).join("") +
+          "</div></div>"
+        );
+      }).join("");
+
+      document.querySelector("[data-users]").innerHTML = p.users.length === 0
+        ? '<div class="none">No agent or assistant uses ' + p.name + ".</div>"
+        : p.users.map(function (u) {
+            return '<div class="user"><i data-face="' + u[0] + '" data-pose="' + u[1] + '" data-size="30"></i><div class="set-label"><b>' + u[0] + "</b><span>" + u[2] + "</span></div></div>";
+          }).join("");
+
+      document.querySelector("[data-delete-title]").textContent = "Delete " + p.name;
+      document.querySelector("[data-delete]").innerHTML = p.shipped
+        ? '<div class="fixed">' + p.name + " is shipped with Hercule, so it cannot be deleted. Edit its grants instead.</div>"
+        : '<div class="set-row"><div class="set-label"><b>Delete profile</b><span>Milo and pr-review use it. Move them to another profile first.</span></div>' +
+          '<button class="btn btn--danger" aria-disabled="true">Delete…</button></div>';
+      }
+    </script>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

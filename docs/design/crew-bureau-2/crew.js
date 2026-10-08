@@ -637,7 +637,7 @@
   function setnav(el) {
     var active = el.dataset.setnav;
     var web = location.pathname.indexOf("/web/") !== -1;
-    var pages = web ? { providers: 1 } : { appearance: 1, assistants: 1, connections: 1 };
+    var pages = web ? { providers: 1 } : { appearance: 1, assistants: 1, connections: 1, profiles: 1 };
     el.classList.add("set-nav");
     el.innerHTML = SETTINGS.map(function (group) {
       return (
