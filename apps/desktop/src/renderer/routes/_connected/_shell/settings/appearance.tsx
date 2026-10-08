@@ -12,6 +12,7 @@ import { FollowSystemRow } from "../../../../screens/settings/appearance/follow-
 import { GlassSection } from "../../../../screens/settings/appearance/glass-section";
 import { ThemeSection } from "../../../../screens/settings/appearance/theme-section";
 import { SettingsHeaderActions } from "../../../../screens/settings/settings-frame";
+import { useSavedAppearance } from "./-saved-appearance";
 
 /**
  * Settings > Appearance: how the app looks on this Mac (spec 17 §Settings,
@@ -20,7 +21,8 @@ import { SettingsHeaderActions } from "../../../../screens/settings/settings-fra
  *
  * Every change shows in the window at once and is saved on this Mac, in
  * main's settings file, with one exception: while the Glass slider is
- * dragged, each step shows and only the level it ends on is saved.
+ * dragged, each step shows and only the level it ends on is saved. A save
+ * that fails shows its error under its own row.
  *
  * The page reads nothing from the controller, so it has no loader.
  */
@@ -38,6 +40,10 @@ function Appearance(): JSX.Element {
   const darkAppearance = useMediaQueryMatch(DARK_APPEARANCE_QUERY);
   const systemReducesTransparency = useMediaQueryMatch(REDUCED_TRANSPARENCY_QUERY);
   const themeInUse = decideThemeInUse(appearance, darkAppearance);
+  const theme = useSavedAppearance(store);
+  const followSystem = useSavedAppearance(store);
+  const glass = useSavedAppearance(store);
+  const reduceTransparency = useSavedAppearance(store);
   return (
     <>
       <SettingsHeaderActions>
@@ -45,8 +51,9 @@ function Appearance(): JSX.Element {
       </SettingsHeaderActions>
       <ThemeSection
         themeInUse={themeInUse}
-        onPick={(theme) => {
-          store.save({ followSystem: false, theme });
+        error={theme.error}
+        onPick={(picked) => {
+          theme.save({ followSystem: false, theme: picked });
         }}
       />
       <section className="set-sec">
@@ -57,18 +64,19 @@ function Appearance(): JSX.Element {
           onToggle={() => {
             // Turning Follow the system off keeps the theme the window shows
             // now, rather than one picked long ago.
-            store.save(
+            followSystem.save(
               appearance.followSystem
                 ? { followSystem: false, theme: themeInUse }
                 : { followSystem: true },
             );
           }}
           onDayThemeChange={(dayTheme) => {
-            store.save({ dayTheme });
+            followSystem.save({ dayTheme });
           }}
           onNightThemeChange={(nightTheme) => {
-            store.save({ nightTheme });
+            followSystem.save({ nightTheme });
           }}
+          error={followSystem.error}
         />
       </section>
       <GlassSection
@@ -79,11 +87,13 @@ function Appearance(): JSX.Element {
           store.show({ glassPercent });
         }}
         onGlassCommit={(glassPercent) => {
-          store.save({ glassPercent });
+          glass.save({ glassPercent });
         }}
         onReduceTransparencyToggle={() => {
-          store.save({ reduceTransparency: !appearance.reduceTransparency });
+          reduceTransparency.save({ reduceTransparency: !appearance.reduceTransparency });
         }}
+        glassError={glass.error}
+        reduceTransparencyError={reduceTransparency.error}
       />
     </>
   );

@@ -77,11 +77,18 @@ const IPC_HANDLERS: {
       Effect.catchTag("PlatformError", Effect.die),
     ),
   "appearance.read": () => AppSettings.use((settings) => settings.readAppearance),
-  // As for the first run's progress, a write that fails is a defect.
+  // Unlike the first run's progress, a write that fails is shown to the user
+  // under the row that changed, so it is an outcome rather than a defect.
   "appearance.save": (appearance) =>
     AppSettings.use((settings) => settings.saveAppearance(appearance)).pipe(
-      Effect.catchTag("PlatformError", Effect.die),
       Effect.andThen(MainWindow.use((window) => window.paintBackground)),
+      Effect.as({ _tag: "Saved" } as const),
+      Effect.catchTag("PlatformError", (error) =>
+        Effect.as(Effect.logError("Main could not write the Appearance.", error), {
+          _tag: "NotSaved",
+          reason: "the settings file could not be written",
+        } as const),
+      ),
     ),
   "link.open": ({ url }) => openInBrowser(url),
 };

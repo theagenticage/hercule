@@ -21,7 +21,8 @@ import "./appearance.css";
  *   `onDayThemeChange` and `onNightThemeChange`. They stay enabled while the
  *   switch is off, so the user can set up the pair before turning it on.
  *
- * The hint names the two themes the row switches between.
+ * The hint names the two themes the row switches between. `error` is why
+ * the row's last save failed, shown under the row, or `null`.
  */
 export function FollowSystemRow({
   followSystem,
@@ -30,6 +31,7 @@ export function FollowSystemRow({
   onToggle,
   onDayThemeChange,
   onNightThemeChange,
+  error,
 }: {
   readonly followSystem: boolean;
   readonly dayTheme: DayTheme;
@@ -37,10 +39,12 @@ export function FollowSystemRow({
   readonly onToggle: () => void;
   readonly onDayThemeChange: (theme: DayTheme) => void;
   readonly onNightThemeChange: (theme: NightTheme) => void;
+  readonly error: string | null;
 }): JSX.Element {
   return (
     <SettingRow
       label="Follow the system"
+      error={error}
       hint={`Switches with macOS: ${THEME_NAMES[dayTheme]} by day, ${THEME_NAMES[nightTheme]} by night.`}
       control={(labels) => (
         <>

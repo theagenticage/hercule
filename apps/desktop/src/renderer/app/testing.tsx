@@ -48,6 +48,7 @@ import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
 import type { Bridge } from "../../ipc/bridge";
 import type {
   Appearance,
+  AppearanceSaveOutcome,
   ControllerUrlSaveOutcome,
   EncodedIpcPayload,
   EncodedIpcRequest,
@@ -110,7 +111,8 @@ export interface FakeBridge {
  *
  * `appearance` is the Appearance main keeps at launch, the defaults unless a
  * test passes its own. A save of the Appearance replaces what a later read
- * returns.
+ * returns, unless `saveAppearance` answers it as `NotSaved`. Every save is
+ * recorded either way.
  */
 export const createFakeBridge = ({
   controllerUrl = null,
@@ -123,6 +125,7 @@ export const createFakeBridge = ({
   pickFolder = () => Promise.resolve({ _tag: "Cancelled" }),
   firstRun = null,
   appearance = DEFAULT_APPEARANCE,
+  saveAppearance = () => Promise.resolve({ _tag: "Saved" }),
 }: {
   readonly controllerUrl?: string | null;
   readonly token?: string | null;
@@ -134,6 +137,7 @@ export const createFakeBridge = ({
   readonly pickFolder?: () => Promise<FolderPickOutcome>;
   readonly firstRun?: FirstRunProgress | null;
   readonly appearance?: Appearance;
+  readonly saveAppearance?: (next: Appearance) => Promise<AppearanceSaveOutcome>;
 } = {}): FakeBridge => {
   const tokenWrites: (string | null)[] = [];
   const savedUrls: string[] = [];
@@ -214,10 +218,11 @@ export const createFakeBridge = ({
       },
       appearance: {
         read: () => keptAppearance,
-        save: (next) => {
+        save: async (next) => {
           appearanceWrites.push(next);
-          keptAppearance = next;
-          return Promise.resolve(undefined);
+          const outcome = await saveAppearance(next);
+          if (outcome._tag === "Saved") keptAppearance = next;
+          return outcome;
         },
       },
       link: {

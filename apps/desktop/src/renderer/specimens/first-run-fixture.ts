@@ -290,7 +290,10 @@ const createScriptedBridge = ({
         return done();
       },
     },
-    appearance: { read: () => DEFAULT_APPEARANCE, save: done },
+    appearance: {
+      read: () => DEFAULT_APPEARANCE,
+      save: () => Promise.resolve({ _tag: "Saved" }),
+    },
     link: { open: done },
     menu: { onCommand: () => () => undefined },
     destination: { onOpen: () => () => undefined },

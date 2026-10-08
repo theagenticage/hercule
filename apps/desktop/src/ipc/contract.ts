@@ -71,6 +71,20 @@ const ControllerRefusalCases = {
 };
 
 /**
+ * The outcomes of saving the Appearance in main's settings file.
+ *
+ * - `Saved`: the file holds the new Appearance.
+ * - `NotSaved`: the file could not be written, for example because the disk
+ *   is full. `reason` is a sentence for the user. The file still holds the
+ *   Appearance saved before.
+ */
+export const AppearanceSaveOutcome = Schema.TaggedUnion({
+  Saved: {},
+  NotSaved: { reason: Schema.String },
+});
+export type AppearanceSaveOutcome = typeof AppearanceSaveOutcome.Type;
+
+/**
  * What happened when main was asked to save the controller URL the user
  * typed. Only `Saved` saves anything.
  *
@@ -485,7 +499,7 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
    */
   "appearance.save": {
     request: Appearance,
-    response: Schema.Void,
+    response: AppearanceSaveOutcome,
   },
   /** Opens an `http:` or `https:` URL in the default browser. Refuses any other URL. */
   "link.open": {

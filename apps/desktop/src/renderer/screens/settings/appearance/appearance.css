@@ -10,6 +10,12 @@
   grid-template-columns: repeat(5, 1fr);
   gap: 12px;
 }
+/* Not in the book, which draws no failed save. A row ends in 10px of
+   padding above its error; the cards have none, so the error under them
+   takes the same 10px as its margin. */
+.set-sec > .themes + .set-err {
+  margin-top: 10px;
+}
 .tp {
   display: grid;
   gap: 8px;

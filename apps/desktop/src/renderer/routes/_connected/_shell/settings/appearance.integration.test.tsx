@@ -2,13 +2,14 @@
  * Tests Settings > Appearance: the theme cards, Follow the system with its
  * day and night themes, the Glass slider, and Reduce transparency, alone
  * and under macOS's own setting. Each change must be saved through the
- * bridge, except the steps of a Glass drag, which are only shown.
+ * bridge, except the steps of a Glass drag, which are only shown. A save
+ * that fails shows its error under its own row.
  */
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DEFAULT_APPEARANCE } from "../../../../../ipc/appearance";
-import type { Appearance } from "../../../../../ipc/contract";
+import type { Appearance, AppearanceSaveOutcome } from "../../../../../ipc/contract";
 import { forgetLastSettingsSection } from "../../../../app/last-settings-section";
 import {
   buildSidebarHandlers,
@@ -38,14 +39,47 @@ const matchMediaQueries = (matching: readonly string[]): void => {
 
 /**
  * Opens Settings > Appearance signed in, with `appearance` as the Appearance
- * main keeps.
+ * main keeps, and `saveAppearance` answering each save.
  */
-const openAppearance = async (appearance: Appearance = DEFAULT_APPEARANCE) => {
+const openAppearance = async (
+  appearance: Appearance = DEFAULT_APPEARANCE,
+  saveAppearance: (next: Appearance) => Promise<AppearanceSaveOutcome> = () =>
+    Promise.resolve({ _tag: "Saved" }),
+) => {
   stubApi(buildSidebarHandlers(SIDEBAR_FIXTURE));
-  const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer", appearance });
+  const fake = createFakeBridge({
+    controllerUrl: CONTROLLER_URL,
+    token: "bearer",
+    appearance,
+    saveAppearance,
+  });
   const app = await renderApp(fake, { path: "/settings/appearance" });
   await screen.findByRole("heading", { level: 1, name: "Appearance" });
   return { fake, ...app };
+};
+
+/** Answers the next save as main does when the settings file could not be written. */
+const failNextSave = (): ((next: Appearance) => Promise<AppearanceSaveOutcome>) => {
+  let failed = false;
+  return () => {
+    const outcome: AppearanceSaveOutcome = failed
+      ? { _tag: "Saved" }
+      : { _tag: "NotSaved", reason: "the settings file could not be written" };
+    failed = true;
+    return Promise.resolve(outcome);
+  };
+};
+
+/** The error a row shows when its save fails. */
+const SAVE_ERROR = "Could not save: the settings file could not be written";
+
+/**
+ * Checks that `error` is shown right under the row or cards that hold
+ * `control`, and that no other row shows an error.
+ */
+const expectErrorUnder = (error: HTMLElement, control: HTMLElement): void => {
+  expect(error.previousElementSibling?.contains(control)).toBe(true);
+  expect(screen.getAllByRole("alert")).toEqual([error]);
 };
 
 /** Returns the theme cards, in the page's order. */
@@ -162,7 +196,9 @@ describe("Settings > Appearance", () => {
 
     fireEvent.change(slider);
 
-    expect(fake.appearanceWrites).toEqual([{ ...DEFAULT_APPEARANCE, glassPercent: 70 }]);
+    await waitFor(() => {
+      expect(fake.appearanceWrites).toEqual([{ ...DEFAULT_APPEARANCE, glassPercent: 70 }]);
+    });
   });
 
   it("saves each key step of the Glass slider once its key is released, or when focus leaves", async () => {
@@ -178,29 +214,37 @@ describe("Settings > Appearance", () => {
     pressKey("41");
     pressKey("42");
 
+    await Promise.resolve();
     expect(fake.appearanceWrites).toEqual([]);
     fireEvent.keyUp(slider, { key: "ArrowRight" });
-    expect(fake.appearanceWrites).toEqual([{ ...DEFAULT_APPEARANCE, glassPercent: 42 }]);
+    await waitFor(() => {
+      expect(fake.appearanceWrites).toEqual([{ ...DEFAULT_APPEARANCE, glassPercent: 42 }]);
+    });
 
     // Tab's keyup lands on the next element, so only the blur saves.
     pressKey("43");
     fireEvent.blur(slider);
-    expect(fake.appearanceWrites).toEqual([
-      { ...DEFAULT_APPEARANCE, glassPercent: 42 },
-      { ...DEFAULT_APPEARANCE, glassPercent: 43 },
-    ]);
+    await waitFor(() => {
+      expect(fake.appearanceWrites).toEqual([
+        { ...DEFAULT_APPEARANCE, glassPercent: 42 },
+        { ...DEFAULT_APPEARANCE, glassPercent: 43 },
+      ]);
+    });
   });
 
-  it("keeps the Glass level a drag shows when a theme is picked before the drag ends", async () => {
+  it("saves a theme picked during a Glass drag without the Glass level, and keeps showing it", async () => {
     const { fake } = await openAppearance();
     const slider = screen.getByRole<HTMLInputElement>("slider", { name: "Glass" });
 
     fireEvent.input(slider, { target: { value: "70" } });
     await userEvent.click(screen.getByRole("button", { name: "Nile dark" }));
 
-    expect(fake.appearanceWrites).toEqual([
-      { ...DEFAULT_APPEARANCE, followSystem: false, theme: "nile", glassPercent: 70 },
-    ]);
+    await waitFor(() => {
+      expect(fake.appearanceWrites).toEqual([
+        { ...DEFAULT_APPEARANCE, followSystem: false, theme: "nile" },
+      ]);
+    });
+    expect(slider.value).toBe("70");
   });
 
   it("saves Reduce transparency", async () => {
@@ -225,5 +269,55 @@ describe("Settings > Appearance", () => {
     expect(document.getElementById(reduce.getAttribute("aria-describedby")!)?.textContent).toMatch(
       /^macOS has Reduce transparency on/,
     );
+  });
+
+  it("shows a failed theme save under the theme cards, puts the card back, and clears it on the next save", async () => {
+    await openAppearance(DEFAULT_APPEARANCE, failNextSave());
+
+    await userEvent.click(screen.getByRole("button", { name: "End House dark" }));
+
+    expectErrorUnder(
+      await screen.findByText(SAVE_ERROR),
+      screen.getByRole("button", { name: "End House dark" }),
+    );
+    expect(listPressedCards()).toEqual(["Whitehaven light"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Nile dark" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(SAVE_ERROR)).toBeNull();
+    });
+    expect(listPressedCards()).toEqual(["Nile dark"]);
+  });
+
+  it("shows a failed Follow the system save under its row, and turns the switch back", async () => {
+    await openAppearance(DEFAULT_APPEARANCE, failNextSave());
+    const follow = screen.getByRole("switch", { name: "Follow the system" });
+
+    await userEvent.click(follow);
+
+    expectErrorUnder(await screen.findByText(SAVE_ERROR), follow);
+    expect(follow.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("shows a failed Glass save under the slider, and puts the slider back where it was saved", async () => {
+    await openAppearance(DEFAULT_APPEARANCE, failNextSave());
+    const slider = screen.getByRole<HTMLInputElement>("slider", { name: "Glass" });
+
+    fireEvent.input(slider, { target: { value: "70" } });
+    fireEvent.change(slider);
+
+    expectErrorUnder(await screen.findByText(SAVE_ERROR), slider);
+    expect(slider.value).toBe("40");
+  });
+
+  it("shows a failed Reduce transparency save under its row, and turns the switch back", async () => {
+    await openAppearance(DEFAULT_APPEARANCE, failNextSave());
+    const reduce = screen.getByRole("switch", { name: "Reduce transparency" });
+
+    await userEvent.click(reduce);
+
+    expectErrorUnder(await screen.findByText(SAVE_ERROR), reduce);
+    expect(reduce.getAttribute("aria-checked")).toBe("false");
   });
 });

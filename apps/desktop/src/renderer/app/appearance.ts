@@ -24,7 +24,18 @@ export const REDUCED_TRANSPARENCY_QUERY = "(prefers-reduced-transparency: reduce
  * the Appearance page is open, and main is asked for the saved Appearance
  * once per page load.
  *
- * Every change tells every subscriber.
+ * The Appearance it shows is built from three parts, applied in order:
+ *
+ * - the Appearance saved on this Mac;
+ * - the changes being saved, in the order they were made;
+ * - the changes only shown, such as the Glass level while the slider is
+ *   dragged.
+ *
+ * So a change whose save fails disappears from the screen, and the field
+ * shows its saved value again, unless a later change to that field is still
+ * being saved.
+ *
+ * Every change to what it shows tells every subscriber.
  */
 export interface AppearanceStore {
   /**
@@ -36,20 +47,21 @@ export interface AppearanceStore {
   /** Calls `listener` after every change, until the returned function is called. */
   readonly subscribe: (listener: () => void) => () => void;
   /**
-   * Merges `change` into the Appearance the page shows now, and shows the
-   * result in the window at once without saving it, as the Glass slider does
-   * while it is dragged.
-   *
-   * The merge starts from what the page shows, not from what was last saved,
-   * so a theme picked while the slider is dragged keeps the level it shows.
+   * Shows `change` in the window at once without saving it, as the Glass
+   * slider does while it is dragged.
    */
   readonly show: (change: Partial<Appearance>) => void;
   /**
-   * Merges and shows `change` as `show` does, then saves the result on this
-   * Mac. If the save fails, the page goes back to the Appearance it showed
-   * before, so it never shows one that was not saved.
+   * Shows `change` at once, and saves it on this Mac after every earlier
+   * save has finished. The save writes `change` over the saved Appearance,
+   * never over what is only shown, so a Glass level being dragged is not
+   * saved with another field.
+   *
+   * Resolves once the change is saved. Fails with an Error whose message is
+   * the reason for the user when it is not saved; the change then leaves the
+   * screen.
    */
-  readonly save: (change: Partial<Appearance>) => void;
+  readonly save: (change: Partial<Appearance>) => Promise<void>;
 }
 
 /**
@@ -60,22 +72,39 @@ export interface AppearanceStore {
  * `theme-init.js` has already read it once before the first paint, and a
  * second read at launch would add a second synchronous message to it.
  *
- * A failed save is logged, not thrown, and the page goes back to the
- * Appearance it showed before. A failed save means main refused the message
- * or failed, which is a bug the user cannot act on.
+ * Saves run one after another, in the order they were made, so each one
+ * writes over what the save before it stored.
  */
 export const createAppearanceStore = (bridge: Pick<Bridge, "appearance">): AppearanceStore => {
+  let saved: Appearance | null = null;
+  const saving: Partial<Appearance>[] = [];
+  let shownOnly: Partial<Appearance> = {};
   let shown: Appearance | null = null;
+  let lastSave: Promise<unknown> = Promise.resolve();
   const listeners = new Set<() => void>();
-  const read = (): Appearance => (shown ??= bridge.appearance.read());
-  const show = (change: Partial<Appearance>): void => {
-    const next = { ...read(), ...change };
+
+  const readSaved = (): Appearance => (saved ??= bridge.appearance.read());
+  const read = (): Appearance => (shown ??= readSaved());
+  const showAgain = (): void => {
+    const next = Object.assign({}, readSaved(), ...saving, shownOnly) as Appearance;
     shown = next;
     // `public/theme-init.js` listens for this same event name, and applies
     // the Appearance in its `detail` to the document.
     document.dispatchEvent(new CustomEvent("appearancechange", { detail: next }));
     for (const listener of listeners) listener();
   };
+  const write = async (change: Partial<Appearance>): Promise<void> => {
+    const next = { ...readSaved(), ...change };
+    const outcome = await bridge.appearance.save(next).catch((error: unknown) => {
+      // A refusal or a defect is a bug in the app, and its message is not
+      // for the user.
+      console.error("Could not save the Appearance:", error);
+      throw new Error("the app failed to save it");
+    });
+    if (outcome._tag === "NotSaved") throw new Error(outcome.reason);
+    saved = next;
+  };
+
   return {
     read,
     subscribe: (listener) => {
@@ -84,16 +113,22 @@ export const createAppearanceStore = (bridge: Pick<Bridge, "appearance">): Appea
         listeners.delete(listener);
       };
     },
-    show,
+    show: (change) => {
+      shownOnly = { ...shownOnly, ...change };
+      showAgain();
+    },
     save: (change) => {
-      const previous = read();
-      show(change);
-      const next = read();
-      bridge.appearance.save(next).catch((error: unknown) => {
-        console.error("Could not save the Appearance:", error);
-        // If the page already shows a later change, that change stays: its
-        // own save keeps it or takes it back.
-        if (shown === next) show(previous);
+      // The saved change replaces what was only shown of the same fields.
+      shownOnly = Object.fromEntries(
+        Object.entries(shownOnly).filter(([field]) => !(field in change)),
+      );
+      saving.push(change);
+      showAgain();
+      const done = lastSave.then(() => write(change));
+      lastSave = done.catch(() => {});
+      return done.finally(() => {
+        saving.splice(saving.indexOf(change), 1);
+        showAgain();
       });
     },
   };

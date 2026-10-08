@@ -21,6 +21,8 @@ import "./appearance.css";
  *   `onReduceTransparencyToggle`. While `systemReducesTransparency` is true,
  *   macOS's own Reduce transparency is on: the switch shows as on and is
  *   disabled, because turning it off would change nothing.
+ * - `glassError` and `reduceTransparencyError` are why the last save of each
+ *   row failed, shown under the row, or `null`.
  */
 export function GlassSection({
   glassPercent,
@@ -29,6 +31,8 @@ export function GlassSection({
   onGlassInput,
   onGlassCommit,
   onReduceTransparencyToggle,
+  glassError,
+  reduceTransparencyError,
 }: {
   readonly glassPercent: number;
   readonly reduceTransparency: boolean;
@@ -36,6 +40,8 @@ export function GlassSection({
   readonly onGlassInput: (percent: number) => void;
   readonly onGlassCommit: (percent: number) => void;
   readonly onReduceTransparencyToggle: () => void;
+  readonly glassError: string | null;
+  readonly reduceTransparencyError: string | null;
 }): JSX.Element {
   const sliderRef = useRef<HTMLInputElement>(null);
   const commitGlass = useEffectEvent(onGlassCommit);
@@ -82,6 +88,7 @@ export function GlassSection({
       <GlassDemo />
       <SettingRow
         label="Glass"
+        error={glassError}
         hint="0% is fully solid. Text on glass always stays readable."
         control={(labels) => (
           <>
@@ -110,6 +117,7 @@ export function GlassSection({
       />
       <SettingRow
         label="Reduce transparency"
+        error={reduceTransparencyError}
         hint={
           systemReducesTransparency
             ? "macOS has Reduce transparency on, so every floating layer is already solid. Turn it off in System Settings to use the Glass level."

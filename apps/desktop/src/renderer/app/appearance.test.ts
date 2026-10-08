@@ -5,17 +5,25 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
-import type { Appearance } from "../../ipc/contract";
+import type { Appearance, AppearanceSaveOutcome } from "../../ipc/contract";
 import { createAppearanceStore } from "./appearance";
 
 /** The Appearance main keeps in these tests: Nile, not following the system. */
 const SAVED: Appearance = { ...DEFAULT_APPEARANCE, followSystem: false, theme: "nile" };
 
+/** The answer main gives when the settings file could not be written. */
+const NOT_SAVED: AppearanceSaveOutcome = {
+  _tag: "NotSaved",
+  reason: "the settings file could not be written",
+};
+
 /** Returns a bridge whose `appearance` channels answer with `SAVED` and record each save. */
 const createAppearanceBridge = () => ({
   appearance: {
     read: vi.fn(() => SAVED),
-    save: vi.fn<(next: Appearance) => Promise<undefined>>(() => Promise.resolve(undefined)),
+    save: vi.fn<(next: Appearance) => Promise<AppearanceSaveOutcome>>(() =>
+      Promise.resolve({ _tag: "Saved" }),
+    ),
   },
 });
 
@@ -66,30 +74,55 @@ describe("the Appearance store", () => {
     expect(bridge.appearance.save).not.toHaveBeenCalled();
   });
 
-  it("shows a saved change, then saves it on this Mac", () => {
+  it("shows a saved change, then saves it on this Mac", async () => {
     const bridge = createAppearanceBridge();
     const store = createAppearanceStore(bridge);
     const changes = recordAppearanceChanges();
 
-    store.save({ theme: "styles" });
+    const saving = store.save({ theme: "styles" });
 
     const next = { ...SAVED, theme: "styles" };
     expect(store.read()).toEqual(next);
     expect(changes).toEqual([next]);
+    await saving;
     expect(bridge.appearance.save).toHaveBeenCalledWith(next);
+    expect(store.read()).toEqual(next);
   });
 
-  it("merges a change into the Appearance it shows, not the one last saved", () => {
+  it("saves a change over the saved Appearance, not over a change only shown", async () => {
     const bridge = createAppearanceBridge();
     const store = createAppearanceStore(bridge);
 
     store.show({ glassPercent: 70 });
-    store.save({ theme: "styles" });
+    await store.save({ theme: "styles" });
 
-    expect(bridge.appearance.save).toHaveBeenCalledWith({
+    expect(bridge.appearance.save).toHaveBeenCalledWith({ ...SAVED, theme: "styles" });
+    expect(store.read()).toEqual({ ...SAVED, glassPercent: 70, theme: "styles" });
+  });
+
+  it("saves changes one after another, each over the one saved before it", async () => {
+    const bridge = createAppearanceBridge();
+    let finishFirst = (): void => {};
+    bridge.appearance.save.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFirst = () => resolve({ _tag: "Saved" });
+        }),
+    );
+    const store = createAppearanceStore(bridge);
+
+    const first = store.save({ theme: "styles" });
+    const second = store.save({ glassPercent: 10 });
+    await vi.waitFor(() => {
+      expect(bridge.appearance.save).toHaveBeenCalledTimes(1);
+    });
+    finishFirst();
+    await Promise.all([first, second]);
+
+    expect(bridge.appearance.save).toHaveBeenLastCalledWith({
       ...SAVED,
-      glassPercent: 70,
       theme: "styles",
+      glassPercent: 10,
     });
   });
 
@@ -104,36 +137,66 @@ describe("the Appearance store", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it("logs a save main refuses, and shows the Appearance it showed before", async () => {
+  it("fails with main's reason when a change is not saved, and shows the saved value again", async () => {
     const bridge = createAppearanceBridge();
-    bridge.appearance.save.mockRejectedValueOnce(new Error("refused"));
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    bridge.appearance.save.mockResolvedValueOnce(NOT_SAVED);
     const store = createAppearanceStore(bridge);
     const changes = recordAppearanceChanges();
 
-    store.save({ glassPercent: 0 });
+    store.show({ glassPercent: 70 });
+    await expect(store.save({ glassPercent: 70 })).rejects.toThrow(
+      "the settings file could not be written",
+    );
 
-    await vi.waitFor(() => {
-      expect(logged).toHaveBeenCalledWith("Could not save the Appearance:", new Error("refused"));
-    });
     expect(store.read()).toEqual(SAVED);
-    expect(changes).toEqual([{ ...SAVED, glassPercent: 0 }, SAVED]);
-    logged.mockRestore();
+    expect(changes.at(-1)).toEqual(SAVED);
   });
 
-  it("keeps a later change on screen when an earlier save fails", async () => {
+  it("shows the saved theme after two failed saves, not the theme picked before the last", async () => {
+    const bridge = createAppearanceBridge();
+    bridge.appearance.save.mockResolvedValue(NOT_SAVED);
+    const store = createAppearanceStore(bridge);
+
+    const first = store.save({ theme: "styles" });
+    const second = store.save({ theme: "end-house" });
+
+    await expect(first).rejects.toThrow();
+    await expect(second).rejects.toThrow();
+    expect(store.read()).toEqual(SAVED);
+  });
+
+  it("keeps a later change to the same field on screen while it is saved", async () => {
+    const bridge = createAppearanceBridge();
+    bridge.appearance.save.mockResolvedValueOnce(NOT_SAVED);
+    let finishSecond = (): void => {};
+    bridge.appearance.save.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSecond = () => resolve({ _tag: "Saved" });
+        }),
+    );
+    const store = createAppearanceStore(bridge);
+
+    const first = store.save({ theme: "styles" });
+    const second = store.save({ theme: "end-house" });
+    await expect(first).rejects.toThrow();
+
+    expect(store.read()).toEqual({ ...SAVED, theme: "end-house" });
+    finishSecond();
+    await second;
+    expect(store.read()).toEqual({ ...SAVED, theme: "end-house" });
+  });
+
+  it("logs a save main refuses, and fails with a reason for the user", async () => {
     const bridge = createAppearanceBridge();
     bridge.appearance.save.mockRejectedValueOnce(new Error("refused"));
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const store = createAppearanceStore(bridge);
 
-    store.save({ glassPercent: 0 });
-    store.save({ theme: "styles" });
+    await expect(store.save({ glassPercent: 0 })).rejects.toThrow("the app failed to save it");
 
-    await vi.waitFor(() => {
-      expect(logged).toHaveBeenCalledTimes(1);
-    });
-    expect(store.read()).toEqual({ ...SAVED, glassPercent: 0, theme: "styles" });
+    expect(logged).toHaveBeenCalledWith("Could not save the Appearance:", new Error("refused"));
+    expect(store.read()).toEqual(SAVED);
     logged.mockRestore();
   });
 });

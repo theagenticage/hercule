@@ -15,6 +15,8 @@ const WORKING_LOOK: Look = { hue: "iris", shape: "egg", accessories: [] };
  * Renders the Theme section of Settings > Appearance: a card for each of
  * Bureau's five themes, each with a preview drawn in its theme. The card of
  * `themeInUse` is pressed. Pressing a card calls `onPick` with its theme.
+ * `error` is why the last pick failed to save, shown under the cards as a
+ * row shows its own, or `null`.
  *
  * A card's accessible name is the theme's name and whether it is light or
  * dark, such as "Whitehaven light".
@@ -22,9 +24,11 @@ const WORKING_LOOK: Look = { hue: "iris", shape: "egg", accessories: [] };
 export function ThemeSection({
   themeInUse,
   onPick,
+  error,
 }: {
   readonly themeInUse: Theme;
   readonly onPick: (theme: Theme) => void;
+  readonly error: string | null;
 }): JSX.Element {
   return (
     <section className="set-sec">
@@ -52,6 +56,11 @@ export function ThemeSection({
           </button>
         ))}
       </div>
+      {error !== null && (
+        <p className="set-err" role="alert">
+          {error}
+        </p>
+      )}
     </section>
   );
 }
