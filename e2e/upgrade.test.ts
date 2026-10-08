@@ -303,9 +303,10 @@ describe("upgrading from the previous edge release", () => {
       const messages = parseJsonOutput(messagesRead) as {
         items: Array<{ id: string; senderRole: string; text: string }>;
       };
-      expect(messages.items).toHaveLength(3);
-      expect(messages.items.every((m) => m.senderRole === "owner")).toBe(true);
-      expect(messages.items.map((m) => m.text).sort()).toEqual([
+      // Filter to just the user messages (sender sent 3, assistant may have replied with notices)
+      const userMessages = messages.items.filter((m) => m.senderRole === "owner");
+      expect(userMessages).toHaveLength(3);
+      expect(userMessages.map((m) => m.text).sort()).toEqual([
         "Test message 1",
         "Test message 2",
         "Test message 3",
