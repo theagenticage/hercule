@@ -186,15 +186,15 @@ const readChangedPaths = (event: ItemStarted): readonly string[] => {
  * - A `waiting` block where one of the agent's open Requests opened, once its
  *   `request.opened` row has landed.
  * - A `live` block at the end while the agent has no open Request, no agent
- *   message holds the working face, the last block is not a `work` block,
- *   and either the last turn has not finished or, before any turn, the agent
- *   is working.
+ *   message holds the working face, the last block is not the running
+ *   turn's running `work` block, and either the last turn has not finished
+ *   or, before any turn, the agent is working.
  *
  * The working face is on one block at most: the agent message the agent is
  * writing; else the running turn's last agent message, when nothing started
  * after it (its turn's end is about to land); else the `live` block. While
- * a running work stretch is the last block, the face is on none: the
- * stretch's divider shows the agent is busy.
+ * the running turn's running work stretch is the last block, the face is on
+ * none: the stretch's divider shows the agent is busy.
  *
  * Each block's key is built from an item id, a turn id or a request id, so it
  * stays the same as rows are appended.
@@ -450,10 +450,16 @@ export const buildThreadBlocks = (
         break;
     }
   }
-  // A running work stretch ends the list: its "Working for" divider already
-  // shows the agent is busy, and a face row under it would look like a
-  // response that has started when it has not.
-  if (hasFace && faceAgent === undefined && blocks.at(-1)?.kind !== "work")
+  // A running work stretch of the running turn ends the list: its "Working
+  // for" divider already shows the agent is busy, and a face row under it
+  // would look like a response that has started when it has not. A finished
+  // stretch of an earlier turn shows no such divider, so it does not count.
+  const lastBlock = blocks.at(-1);
+  const endsOnRunningWork =
+    lastBlock?.kind === "work" &&
+    lastBlock.endedAt === null &&
+    lastBlock.turnId === running?.turnId;
+  if (hasFace && faceAgent === undefined && !endsOnRunningWork)
     blocks.push({ kind: "live", key: "live", model: model(running) });
   return blocks;
 };
