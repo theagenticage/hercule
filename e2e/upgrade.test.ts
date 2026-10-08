@@ -25,7 +25,10 @@ import {
 import { createTemporaryHome, parseJsonOutput, type TemporaryHome } from "./harness";
 
 const EDGE_RELEASE_URL = "https://github.com/theagenticage/hercule/releases/download/edge";
-const BINARY_NAME = "hercule-linux-x64";
+
+// The upgrade test runs on the same platform as CI: macOS arm64 for now.
+// Once Linux edge binaries are published, the test can select by platform.
+const BINARY_NAME = "hercule-darwin-arm64";
 
 let state: TemporaryHome | undefined;
 let edgeBinary: string | undefined;
@@ -195,13 +198,37 @@ describe("upgrading from the previous edge release", () => {
       expect(instanceResult.code).toBe(0);
       const instance = parseJsonOutput(instanceResult) as { id: string };
 
-      // Create an assistant with a thread
+      // Create an assistant (which automatically creates its main conversation)
       const assistantResult = await runCli(
         ["assistant", "create", "--name", "test-assistant", "--json"],
         { home: state!.home },
       );
       expect(assistantResult.code).toBe(0);
-      const assistant = parseJsonOutput(assistantResult) as { id: string };
+      const assistant = parseJsonOutput(assistantResult) as {
+        id: string;
+        mainConversationId: string;
+      };
+
+      // Send several messages to the assistant's conversation to create turns
+      // Note: This creates the conversation message structure without running an agent,
+      // which would require credentials and cost tokens
+      const msg1Result = await runCli(
+        ["conversation", "send", assistant.mainConversationId, "--text-stdin", "--json"],
+        { home: state!.home, stdin: "Test message 1" },
+      );
+      expect(msg1Result.code).toBe(0);
+
+      const msg2Result = await runCli(
+        ["conversation", "send", assistant.mainConversationId, "--text-stdin", "--json"],
+        { home: state!.home, stdin: "Test message 2" },
+      );
+      expect(msg2Result.code).toBe(0);
+
+      const msg3Result = await runCli(
+        ["conversation", "send", assistant.mainConversationId, "--text-stdin", "--json"],
+        { home: state!.home, stdin: "Test message 3" },
+      );
+      expect(msg3Result.code).toBe(0);
 
       // Update settings
       const settingsResult = await runCli(
@@ -217,6 +244,7 @@ describe("upgrading from the previous edge release", () => {
         connectionId: connection.id,
         instanceId: instance.id,
         assistantId: assistant.id,
+        conversationId: assistant.mainConversationId,
       };
 
       // 3. Stop the edge binary
@@ -274,6 +302,36 @@ describe("upgrading from the previous edge release", () => {
       const readAssistant = parseJsonOutput(assistantRead) as { id: string; name: string };
       expect(readAssistant.id).toBe(testData.assistantId);
       expect(readAssistant.name).toBe("test-assistant");
+
+      // Read the conversation and its messages
+      const conversationRead = await runCli(
+        ["conversation", "read", testData.conversationId, "--json"],
+        { home: state!.home },
+      );
+      expect(conversationRead.code).toBe(0);
+      const readConversation = parseJsonOutput(conversationRead) as {
+        id: string;
+        assistantId: string;
+      };
+      expect(readConversation.id).toBe(testData.conversationId);
+      expect(readConversation.assistantId).toBe(testData.assistantId);
+
+      // List messages in the conversation - should have 3 user messages
+      const messagesRead = await runCli(
+        ["conversation", "query-messages", testData.conversationId, "--json"],
+        { home: state!.home },
+      );
+      expect(messagesRead.code).toBe(0);
+      const messages = parseJsonOutput(messagesRead) as {
+        items: Array<{ id: string; senderRole: string; text: string }>;
+      };
+      expect(messages.items).toHaveLength(3);
+      expect(messages.items.every((m) => m.senderRole === "owner")).toBe(true);
+      expect(messages.items.map((m) => m.text).sort()).toEqual([
+        "Test message 1",
+        "Test message 2",
+        "Test message 3",
+      ]);
 
       const settingsRead = await runCli(["settings", "read", "--json"], { home: state!.home });
       expect(settingsRead.code).toBe(0);

@@ -53,9 +53,24 @@ jobs:
 
       # The Vite config, the React Compiler Babel pass, the bundle budget and
       # the embedded file list are only exercised by an actual build; the
-      # binary suite then runs what that build produced.
+      # binary suite then runs what that build produced. The upgrade test is
+      # excluded here because it needs macOS (see the upgrade job below).
       - run: pnpm build:binary
-      - run: pnpm test:binary
+      - run: bun --bun run vitest run --project binary --exclude='**/upgrade.test.ts'
+
+  # Tests that a database filled by the previous edge release upgrades cleanly
+  # to the new binary. Runs on macOS because the edge release currently only
+  # publishes macOS arm64 binaries. Once Linux edge binaries are published,
+  # this can run on Linux too or be folded into the check job above.
+  upgrade:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
+      - run: pnpm build:binary
+      - run: bun --bun run vitest run --project binary e2e/upgrade.test.ts
 
   # The desktop app is macOS only (spec 17), so it is packaged and compared
   # with the Bureau book on a macOS runner.

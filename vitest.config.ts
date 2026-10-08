@@ -85,6 +85,9 @@ const binaryTests = [
   "e2e/binary-size.test.ts",
   "e2e/logs.test.ts",
   "e2e/home-in-session.test.ts",
+  // upgrade.test.ts downloads the edge binary and runs it, so it needs the
+  // same platform as the edge release: macOS arm64. Once Linux edge binaries
+  // are published, it can run on both platforms.
   "e2e/upgrade.test.ts",
 ];
 
