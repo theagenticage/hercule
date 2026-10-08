@@ -192,10 +192,19 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 4 + 10_000 });
 
 /**
  * How long the controller waits for a runner to answer an input frame. The
- * default ten seconds is too long for a test, and one test below has to wait
- * for it to time out.
+ * default ten seconds is too long for a test. This is still long enough that
+ * an answer the fake runner sends never misses it, even on a busy machine.
+ * A test that keeps an input unanswered while it runs other steps answers
+ * the input itself at the end, rather than waiting for this to pass.
  */
 const INPUT_DEADLINE = Duration.seconds(2);
+
+/**
+ * The deadline for a test that waits for an unanswered input to time out.
+ * Such a test answers nothing in time on purpose, so a short deadline cannot
+ * make it miss an answer; it only makes the test finish sooner.
+ */
+const EXPIRING_INPUT_DEADLINE = Duration.millis(300);
 
 /**
  * Longer than any test here runs, so the pipeline never ticks and a test sees
@@ -210,6 +219,7 @@ const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
   options: {
     readonly eventRoutingInterval?: Duration.Duration;
+    readonly inputDeadline?: Duration.Duration;
     readonly firstRunnerIsLocal?: true;
   } = {},
 ): Promise<void> =>
@@ -1188,7 +1198,7 @@ describe("session.input", () => {
       // The session is still idle and the input is still waiting, so a tick
       // would send it again. The tick is stopped so the test can read the
       // input as the unanswered delivery left it.
-      { eventRoutingInterval: NO_TICK },
+      { eventRoutingInterval: NO_TICK, inputDeadline: EXPIRING_INPUT_DEADLINE },
     );
   });
 });
@@ -1552,16 +1562,19 @@ describe("input.steer", () => {
   });
 
   it("leaves the input queued and the session busy when the runner never answers the steer", async () => {
-    await withFleet(async (arranged) => {
-      const { session, inputId } = await makeBusyWithQueuedInput(arranged);
-      arranged.wire.answering(() => undefined);
+    await withFleet(
+      async (arranged) => {
+        const { session, inputId } = await makeBusyWithQueuedInput(arranged);
+        arranged.wire.answering(() => undefined);
 
-      const response = await steerInput(arranged, session.id, inputId);
+        const response = await steerInput(arranged, session.id, inputId);
 
-      expect(response.status, await response.clone().text()).toBe(409);
-      const row = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
-      expect(row).toMatchObject({ status: "queued", delivery: null });
-    });
+        expect(response.status, await response.clone().text()).toBe(409);
+        const row = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
+        expect(row).toMatchObject({ status: "queued", delivery: null });
+      },
+      { inputDeadline: EXPIRING_INPUT_DEADLINE },
+    );
   });
 
   it("interrupts the running turn and sends the input as the next turn, on a provider that does not steer natively", async () => {
@@ -1769,26 +1782,31 @@ describe("the queue at the transition to idle", () => {
   });
 
   it("sends an input the runner never answered again when the session is next idle", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startIdleSession(arranged, "zero");
-      arranged.wire.answering(() => undefined);
-      const unanswered = sendInput(arranged, session.id, { text: "one" });
-      const first = await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
-      // The send gives up once the deadline passes, and the input goes back
-      // to waiting.
-      expect((await unanswered).status).toBe(409);
+    await withFleet(
+      async (arranged) => {
+        const session = await startIdleSession(arranged, "zero");
+        arranged.wire.answering(() => undefined);
+        const unanswered = sendInput(arranged, session.id, { text: "one" });
+        const first = await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
+        // The send gives up once the deadline passes, and the input goes back
+        // to waiting.
+        expect((await unanswered).status).toBe(409);
 
-      reportTurnStarted(arranged, session.id, 4);
-      await waitForSession(arranged, session.id, (one) => one.status === "busy");
-      reportTurnCompleted(arranged, session.id, 5);
+        reportTurnStarted(arranged, session.id, 4);
+        await waitForSession(arranged, session.id, (one) => one.status === "busy");
+        reportTurnCompleted(arranged, session.id, 5);
 
-      const again = await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 2);
-      expect(again.map((frame) => frame.requestId)).toEqual([
-        first[0]!.requestId,
-        first[0]!.requestId,
-      ]);
-      expect((await listInputs(arranged, session.id))[1]).toMatchObject({ status: "queued" });
-    });
+        const again = await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 2);
+        expect(again.map((frame) => frame.requestId)).toEqual([
+          first[0]!.requestId,
+          first[0]!.requestId,
+        ]);
+        expect((await listInputs(arranged, session.id))[1]).toMatchObject({ status: "queued" });
+      },
+      // The tick is stopped so that only the change to idle can send the
+      // input again, not a tick while the session is still idle.
+      { eventRoutingInterval: NO_TICK, inputDeadline: EXPIRING_INPUT_DEADLINE },
+    );
   });
 
   it("cancels every input still queued when the session exits", async () => {
@@ -1813,8 +1831,8 @@ describe("the queue at the transition to idle", () => {
     await withFleet(async (arranged) => {
       const session = await startIdleSession(arranged, "zero");
       arranged.wire.answering(() => undefined);
-      // Awaited at the end: the send waits for an answer that never comes.
-      const unanswered = sendInput(arranged, session.id, { text: "one" });
+      // Answered at the end, so the first input stays on the wire meanwhile.
+      const held = sendInput(arranged, session.id, { text: "one" });
       await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
 
       // The session still reads idle, but the runner takes one input per
@@ -1828,7 +1846,8 @@ describe("the queue at the transition to idle", () => {
         sentAt: null,
       });
       expect(listInputFrames(arranged.wire).map((frame) => frame.input.text)).toEqual(["one"]);
-      expect((await unanswered).status).toBe(409);
+      arranged.wire.release("opened");
+      expect((await held).status).toBe(200);
     });
   });
 
@@ -1836,8 +1855,8 @@ describe("the queue at the transition to idle", () => {
     await withFleet(async (arranged) => {
       const session = await startIdleSession(arranged, "zero");
       arranged.wire.answering((frame) => (frame.input.text === "one" ? undefined : "opened"));
-      // Awaited at the end: the send waits for an answer that never comes.
-      const unanswered = sendInput(arranged, session.id, { text: "one" });
+      // Answered at the end, so the input stays on the wire for the whole turn.
+      const held = sendInput(arranged, session.id, { text: "one" });
       await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
       const sentAt = (await listInputs(arranged, session.id))[1]!.sentAt;
       expect(sentAt).not.toBeNull();
@@ -1857,7 +1876,8 @@ describe("the queue at the transition to idle", () => {
         { text: "one", status: "queued", sentAt },
       ]);
       expect(listInputFrames(arranged.wire).map((frame) => frame.input.text)).toEqual(["one"]);
-      expect((await unanswered).status).toBe(409);
+      arranged.wire.release("opened");
+      expect((await held).status).toBe(200);
     });
   });
 
@@ -1865,8 +1885,8 @@ describe("the queue at the transition to idle", () => {
     await withFleet(async (arranged) => {
       const session = await startIdleSession(arranged, "zero");
       arranged.wire.answering(() => undefined);
-      // Awaited at the end: the send waits for an answer that never comes.
-      const unanswered = sendInput(arranged, session.id, { text: "one" });
+      // Answered at the end, so the input stays on the wire while it is cancelled.
+      const held = sendInput(arranged, session.id, { text: "one" });
       const sent = (await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1))[0]!;
 
       // The input still reads `queued`, because it is waiting for an answer,
@@ -1875,7 +1895,8 @@ describe("the queue at the transition to idle", () => {
 
       expect(response.status).toBe(409);
       expect(await response.text()).toContain("already been sent");
-      expect((await unanswered).status).toBe(409);
+      arranged.wire.release("opened");
+      expect((await held).status).toBe(200);
     });
   });
 
@@ -2895,7 +2916,7 @@ describe("the queue when the session becomes idle, one input at a time", () => {
       // After the deadline the input is waiting on an idle session, which a
       // tick would send again. The tick is stopped so the test can read the
       // input as the deadline left it.
-      { eventRoutingInterval: NO_TICK },
+      { eventRoutingInterval: NO_TICK, inputDeadline: EXPIRING_INPUT_DEADLINE },
     );
   });
 
