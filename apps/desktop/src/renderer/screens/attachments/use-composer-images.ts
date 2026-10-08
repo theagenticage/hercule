@@ -8,6 +8,7 @@ import {
   markShelfItemUploading,
   removeShelfItem,
   type ShelfItem,
+  type ShelfModel,
 } from "@hercule/client-core";
 import { attachmentContentQuery } from "../../app/queries";
 import type { ComposerAttachments } from "../session/composer-frame";
@@ -21,7 +22,10 @@ export interface ComposerImages {
    * refused, or else why the images stop the send. `null` when neither.
    */
   readonly notice: string | null;
-  /** Whether the images stop the send: an upload running, failed or expired, or a model that takes none. */
+  /**
+   * Whether the images stop the send: an upload running, failed or expired,
+   * a model that takes none, or an image over the model's size limit.
+   */
   readonly sendBlocked: boolean;
   /** Removes the refusal line, as a send starts. */
   readonly clearRefusal: () => void;
@@ -29,7 +33,8 @@ export interface ComposerImages {
 
 /**
  * Runs the shelf of the composer whose pending submission is at `storeKey`,
- * for a model that takes images when `acceptsImages` is true:
+ * for a model that takes the images `imageInput` describes, or none when it
+ * is `null`:
  *
  * - pasted, dropped and picked files go on the shelf and start uploading
  *   in the app's upload queue, and refused files are named in the notice;
@@ -37,21 +42,22 @@ export interface ComposerImages {
  *   unmounted, because the shelf lives in the pending submissions;
  * - an uploaded file is put in the query cache as the attachment's content,
  *   so the bubble of the message that sends it does not read it back;
- * - remove cancels an upload still on its way, and retry starts it again.
+ * - remove cancels an upload still on its way, or deletes the image from
+ *   the controller once it is uploaded, and retry starts it again.
  *
  * A read-only composer takes no files, and its Attach stays off.
  */
 export function useComposerImages({
   storeKey,
   shelf,
-  acceptsImages,
+  imageInput,
   modelName,
   readOnly,
 }: {
   readonly storeKey: string;
   /** The images on the shelf: the pending submission's `message.attachments`. */
   readonly shelf: readonly ShelfItem[];
-  readonly acceptsImages: boolean;
+  readonly imageInput: ShelfModel["imageInput"];
   readonly modelName: string;
   readonly readOnly: boolean;
 }): ComposerImages {
@@ -59,7 +65,7 @@ export function useComposerImages({
   const { client, pendingSubmissions, uploads } = controller;
   const queryClient = useQueryClient();
   const [refusal, setRefusal] = useState<string | null>(null);
-  const model = { acceptsImages, modelName };
+  const model: ShelfModel = { imageInput, modelName };
 
   const startUpload = (item: ShelfItem): void => {
     void uploads.add(item.key, item.file).then((outcome) => {
@@ -91,7 +97,9 @@ export function useComposerImages({
       shelf,
       model,
       onRemove: (key) => {
-        uploads.cancel(key);
+        const item = shelf.find((each) => each.key === key);
+        if (item === undefined) return;
+        uploads.discard(item);
         pendingSubmissions.updateAttachments(storeKey, (current) => removeShelfItem(current, key));
       },
       onRetry: (key) => {
@@ -102,7 +110,8 @@ export function useComposerImages({
         );
         startUpload(item);
       },
-      attachBlockedReason: readOnly || acceptsImages ? null : `${modelName} does not accept images`,
+      attachBlockedReason:
+        readOnly || imageInput !== null ? null : `${modelName} does not accept images`,
       onFiles: addFiles,
     },
     notice: refusal ?? sendBlock,

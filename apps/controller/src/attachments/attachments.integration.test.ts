@@ -5,13 +5,13 @@
  * the sweep of images nobody claimed.
  */
 import { createHash } from "node:crypto";
-import { existsSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type { Attachment, Input, RunnerDetail, Session } from "@hercule/contract";
-import type { SessionInput, SessionStart } from "@hercule/protocol";
+import type { ImageInputCapability, SessionInput, SessionStart } from "@hercule/protocol";
 import { get, post, send } from "../http/testing";
 import {
   at,
@@ -79,12 +79,21 @@ const startSessionWithAttachment = async (
   return waitForSession(arranged, session.id, (one) => one.status === "busy");
 };
 
-/** Makes every model the runner reported refuse images, as if the runner had probed again. */
-const refuseAttachmentsOnEveryModel = (arranged: Arranged): Promise<unknown> =>
+/**
+ * Sets what every model the runner reported takes as image input, as if the
+ * runner had probed again: `null` for no images.
+ */
+const setImageInputOnEveryModel = (
+  arranged: Arranged,
+  imageInput: ImageInputCapability | null,
+): Promise<unknown> =>
   Effect.runPromise(
     arranged.harness.sql`
       UPDATE capability_snapshots
-      SET models = replace(models, '"acceptsImages":true', '"acceptsImages":false')
+      SET models = (
+        SELECT json_group_array(json_set(model.value, '$.imageInput', json(${JSON.stringify(imageInput)})))
+        FROM json_each(capability_snapshots.models) AS model
+      )
     `,
   );
 
@@ -113,14 +122,42 @@ const expectAttachmentHeaders = (response: Response): void => {
   expect(response.headers.get("cache-control")).toBe("private, no-store");
 };
 
-/** Makes every model the runner reported take images again, as if the runner had probed again. */
-const acceptAttachmentsOnEveryModel = (arranged: Arranged): Promise<unknown> =>
+/** The quota of unsent images per uploader, as the controller holds it. */
+const MAX_UNCLAIMED_BYTES = 200 * 1024 * 1024;
+
+/** Inserts a row for an upload by the user that no input references, with no file behind it. */
+const insertUploadRow = (
+  arranged: Arranged,
+  sizeBytes: number,
+  createdAt: string,
+): Promise<unknown> =>
   Effect.runPromise(
     arranged.harness.sql`
-      UPDATE capability_snapshots
-      SET models = replace(models, '"acceptsImages":false', '"acceptsImages":true')
+      INSERT INTO attachments (id, name, mime_type, size_bytes, sha256, created_at, actor)
+      VALUES (randomblob(16), 'big.png', 'image/png', ${sizeBytes}, ${"0".repeat(64)},
+              ${createdAt}, 'user')
     `,
   );
+
+/** Returns the names in the directory, sorted, or none when it does not exist. */
+const listFiles = (directory: string): ReadonlyArray<string> =>
+  existsSync(directory) ? readdirSync(directory).sort() : [];
+
+/** Returns a PNG of `sizeBytes` bytes: the PNG signature, then zeros. */
+const buildPng = (sizeBytes: number): Uint8Array => {
+  const bytes = new Uint8Array(sizeBytes);
+  bytes.set(PNG);
+  return bytes;
+};
+
+const deleteAttachment = (
+  arranged: Arranged,
+  id: string,
+  token = arranged.token,
+): Promise<Response> =>
+  send("DELETE", arranged.harness.base, `/api/v1/attachments/${id}`, { token });
+
+const MEBIBYTE = 1024 * 1024;
 
 /** An id in the right format that no upload has. */
 const NO_SUCH_ATTACHMENT = "0199e0e7-0000-7000-8000-0000000000aa";
@@ -201,16 +238,17 @@ describe("uploading and reading an image", () => {
   );
 
   it(
-    "refuses an upload that would take the uploader's unsent images past 200 MiB, and no one else's",
+    "refuses an upload past the uploader's 200 MiB of unsent images, says when room frees up, and keeps no file",
     async () => {
       await withAgentFleet(async (arranged) => {
-        await Effect.runPromise(
-          arranged.harness.sql`
-            INSERT INTO attachments (id, name, mime_type, size_bytes, sha256, created_at, actor)
-            VALUES (randomblob(16), 'big.png', 'image/png', ${200 * 1024 * 1024},
-                    ${"0".repeat(64)}, ${new Date().toISOString()}, 'user')
-          `,
-        );
+        const hours = (count: number): string =>
+          new Date(Date.now() - count * 60 * 60 * 1000).toISOString();
+        // A full quota uploaded 21 hours ago frees up in 3 hours. An upload
+        // past the lifetime no longer counts, even before the sweep runs.
+        await insertUploadRow(arranged, MAX_UNCLAIMED_BYTES, hours(21));
+        await insertUploadRow(arranged, MAX_UNCLAIMED_BYTES, hours(25));
+        const directory = join(arranged.harness.home, "data", "attachments");
+        const filesBefore = listFiles(directory);
 
         const refused = await upload(arranged, "one-more.png");
         expect(refused.status).toBe(400);
@@ -222,14 +260,36 @@ describe("uploading and reading an image", () => {
                 {
                   message:
                     '"one-more.png" would take your images that are not sent yet past 200 MB. ' +
-                    "Send or remove some of them first.",
+                    "Remove some images, or try again in about 3 hours.",
                 },
               ],
             },
           },
         });
+        expect(listFiles(directory)).toEqual(filesBefore);
         const agent = await spawnThreadWithGrants(arranged, "uploader", ["session.steer"]);
         expect((await upload(arranged, "theirs.png", PNG, agent.token)).status).toBe(201);
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "lets exactly one of several uploads at once take the last room under the quota",
+    async () => {
+      await withAgentFleet(async (arranged) => {
+        await insertUploadRow(
+          arranged,
+          MAX_UNCLAIMED_BYTES - PNG.byteLength,
+          new Date().toISOString(),
+        );
+
+        const responses = await Promise.all(
+          Array.from({ length: 8 }, (_, index) => upload(arranged, `${String(index)}.png`)),
+        );
+        expect(responses.map((response) => response.status).sort()).toEqual([
+          201, 400, 400, 400, 400, 400, 400, 400,
+        ]);
       });
     },
     TEST_TIMEOUT_MS,
@@ -323,6 +383,29 @@ describe("an input with images", () => {
           error: {
             details: {
               issues: [{ path: ["attachments", "1"], message: EXPIRED_ATTACHMENT_MESSAGE }],
+            },
+          },
+        });
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "refuses an upload older than a day, even before the sweep deletes it",
+    async () => {
+      await withAgentFleet(async (arranged) => {
+        const image = await uploadOrFail(arranged, "old.png");
+        const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+        await Effect.runPromise(
+          arranged.harness.sql`UPDATE attachments SET created_at = ${dayAgo}`,
+        );
+        const response = await spawnSession(arranged, { prompt: "", attachments: [image.id] });
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({
+          error: {
+            details: {
+              issues: [{ path: ["attachments", "0"], message: EXPIRED_ATTACHMENT_MESSAGE }],
             },
           },
         });
@@ -508,7 +591,7 @@ describe("an input with images", () => {
           );
           expect(await queued.json()).toMatchObject({ result: "queued" });
 
-          await refuseAttachmentsOnEveryModel(arranged);
+          await setImageInputOnEveryModel(arranged, null);
           reportTurnCompleted(arranged, session.id, 2);
 
           const waiting = await waitUntil("returned the input with a reason", async () => {
@@ -543,7 +626,7 @@ describe("an input with images", () => {
           expect((await listInputs(arranged, session.id))[1]?.reason).toBe(MODEL_REFUSAL);
           expect(listFrames<SessionInput>(arranged.wire, "sessionInput")).toEqual([]);
 
-          await acceptAttachmentsOnEveryModel(arranged);
+          await setImageInputOnEveryModel(arranged, { maxBytes: null });
           const [sent] = await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
           expect(sent!.input.attachments?.map((one) => one.id)).toEqual([image.id]);
         },
@@ -573,7 +656,7 @@ describe("an input with images", () => {
         });
         expect(queued.status).toBe("queued");
 
-        await refuseAttachmentsOnEveryModel(arranged);
+        await setImageInputOnEveryModel(arranged, null);
         reportEvent(arranged.wire, 1, {
           eventId: crypto.randomUUID(),
           sessionId: first.id,
@@ -592,6 +675,121 @@ describe("an input with images", () => {
             (frame) => frame.sessionId,
           ),
         ).toEqual([first.id]);
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+describe("an image's own size limit on a model", () => {
+  const LIMIT_REFUSAL =
+    '"big.png" is 2 MB; this model accepts images up to 1.5 MB. ' +
+    "Send a smaller image or pick another model.";
+
+  it(
+    "refuses an image over the model's limit when the input is created, and holds a queued one when the limit shrinks",
+    async () => {
+      await withAgentFleet(
+        async (arranged) => {
+          const session = await startSessionWithAttachment(
+            arranged,
+            await uploadOrFail(arranged, "a.png"),
+          );
+          const big = await upload(arranged, "big.png", buildPng(2 * MEBIBYTE));
+          expect(big.status, await big.clone().text()).toBe(201);
+          const image = (await big.json()) as Attachment;
+          const queued = await post(
+            arranged.harness.base,
+            `/api/v1/sessions/${session.id}/input`,
+            { text: "and this", attachments: [image.id] },
+            arranged.token,
+          );
+          expect(await queued.json()).toMatchObject({ result: "queued" });
+
+          await setImageInputOnEveryModel(arranged, { maxBytes: 1.5 * MEBIBYTE });
+          // Refused at once when the input is created, on a new session or an
+          // existing one.
+          const spawned = await spawnSession(arranged, { prompt: "", attachments: [image.id] });
+          expect(spawned.status).toBe(400);
+          expect(await spawned.json()).toMatchObject({
+            error: { details: { issues: [{ path: ["attachments"], message: LIMIT_REFUSAL }] } },
+          });
+          const another = await post(
+            arranged.harness.base,
+            `/api/v1/sessions/${session.id}/input`,
+            { text: "again", attachments: [image.id] },
+            arranged.token,
+          );
+          expect(another.status).toBe(400);
+
+          // Held, not sent, when the input was queued before the limit shrank.
+          reportTurnCompleted(arranged, session.id, 2);
+          await waitUntil("returned the input with a reason", async () => {
+            const input = (await listInputs(arranged, session.id))[1];
+            return input?.reason === LIMIT_REFUSAL ? input : undefined;
+          });
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          expect((await listInputs(arranged, session.id))[1]).toMatchObject({
+            status: "queued",
+            sentAt: null,
+            reason: LIMIT_REFUSAL,
+          });
+          expect(listFrames<SessionInput>(arranged.wire, "sessionInput")).toEqual([]);
+        },
+        { eventRoutingInterval: Duration.millis(20) },
+      );
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+describe("deleting an upload", () => {
+  it(
+    "deletes the caller's own unsent upload with its file, and nothing else",
+    async () => {
+      await withAgentFleet(async (arranged) => {
+        const directory = join(arranged.harness.home, "data", "attachments");
+        const own = await uploadOrFail(arranged, "own.png");
+        expect(existsSync(join(directory, own.id))).toBe(true);
+        const deleted = await deleteAttachment(arranged, own.id);
+        expect(deleted.status, await deleted.clone().text()).toBe(200);
+        expect(existsSync(join(directory, own.id))).toBe(false);
+        const read = await get(
+          arranged.harness.base,
+          `/api/v1/attachments/${own.id}/content`,
+          arranged.token,
+        );
+        expect(read.status).toBe(404);
+
+        // Someone else's upload.
+        const agent = await spawnThreadWithGrants(arranged, "uploader", [
+          "session.steer",
+          "session.read",
+        ]);
+        const theirs = (await (
+          await upload(arranged, "theirs.png", PNG, agent.token)
+        ).json()) as Attachment;
+        expect((await deleteAttachment(arranged, theirs.id)).status).toBe(404);
+        expect(
+          (
+            await get(
+              arranged.harness.base,
+              `/api/v1/attachments/${theirs.id}/content`,
+              agent.token,
+            )
+          ).status,
+        ).toBe(200);
+
+        // An upload an input references.
+        const sent = await uploadOrFail(arranged, "sent.png");
+        await spawnSessionOrFail(arranged, { prompt: "", attachments: [sent.id] });
+        expect((await deleteAttachment(arranged, sent.id)).status).toBe(404);
+        expect(existsSync(join(directory, sent.id))).toBe(true);
+
+        // An id no upload has.
+        const missing = await deleteAttachment(arranged, NO_SUCH_ATTACHMENT);
+        expect(missing.status).toBe(404);
+        expect(await missing.json()).toMatchObject({ error: { code: "not_found" } });
       });
     },
     TEST_TIMEOUT_MS,

@@ -187,39 +187,21 @@ const MAX_RUNNING_SUBAGENTS = 4;
 const MAX_SUBAGENT_DEPTH = 2;
 
 /**
- * The largest image pi takes, in bytes before base64. pi drops an image whose
- * base64 is over 4.5 MiB from the prompt, and 4.5 MiB of base64 holds
- * 3.375 MiB of bytes. The runner refuses a larger image instead, so the user
- * learns the image was not sent.
- */
-const PI_MAX_IMAGE_BYTES = 3_538_944;
-
-/** Formats a size in bytes as megabytes, with up to three decimals: "3.375 MB". */
-const formatMegabytes = (bytes: number): string =>
-  `${String(Number((bytes / (1024 * 1024)).toFixed(3)))} MB`;
-
-/**
- * Checks every image against pi's size limit, then reads each one as base64,
- * in pi's `images` shape. Fails before reading anything when an image is too
- * large, with a message naming it, its size and the limit.
+ * Reads each image as base64, in pi's `images` shape. Fails with a message
+ * naming the image when a cached file cannot be read. pi's size limit is not
+ * checked here: the probe declares it, and the controller never sends a
+ * larger image.
  */
 const readPiImages = (
   attachments: ReadonlyArray<LocalAttachment>,
-): Effect.Effect<ReadonlyArray<Record<string, string>>, string> => {
-  const tooLarge = attachments.find((attachment) => attachment.sizeBytes > PI_MAX_IMAGE_BYTES);
-  if (tooLarge !== undefined) {
-    return Effect.fail(
-      `"${tooLarge.name}" is ${formatMegabytes(tooLarge.sizeBytes)}; pi accepts images up to ${formatMegabytes(PI_MAX_IMAGE_BYTES)}.`,
-    );
-  }
-  return Effect.forEach(attachments, (attachment) =>
+): Effect.Effect<ReadonlyArray<Record<string, string>>, string> =>
+  Effect.forEach(attachments, (attachment) =>
     Effect.map(readAttachmentBase64(attachment), (data) => ({
       type: "image",
       data,
       mimeType: attachment.mimeType,
     })),
   );
-};
 
 /** A session this adapter hosts, and the adapter's state for its pi processes. */
 interface Held {

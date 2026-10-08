@@ -1,10 +1,5 @@
 /** Attachments: the images a user attaches to an input. */
-export {
-  AttachmentService,
-  AttachmentServiceLayer,
-  AttachmentSweepInterval,
-  type AttachmentFile,
-} from "./service";
+export { AttachmentService, AttachmentServiceLayer, type AttachmentFile } from "./service";
 export {
   excludeDigest,
   claimAttachments,

@@ -1,7 +1,8 @@
 /**
- * The attachment operations of the API, `attachment.create` and
- * `attachment.readContent`, plus what the rest of the controller needs from
- * attachments: the runner's fetch, the claim an input makes, and the sweep.
+ * The attachment operations of the API, `attachment.create`,
+ * `attachment.readContent` and `attachment.delete`, plus what the rest of the
+ * controller needs from attachments: the runner's fetch and one pass of the
+ * sweep, which the controller daemon repeats.
  *
  * An attachment's bytes are one immutable file at `<dataDir>/attachments/<id>`
  * and its metadata is a row in `attachments`. The two are written in this
@@ -10,16 +11,17 @@
  * - An upload is written to a temp file, which is renamed to the id, and only
  *   then is the row inserted. A rename is atomic, so a half-written file never
  *   sits under a real id. If the insert fails, the file is removed.
- * - The sweep deletes rows in its own transaction, and removes their files
- *   after that transaction commits.
+ * - The sweep and `attachment.delete` delete rows in their own transaction,
+ *   and remove the files after that transaction commits.
  *
  * A crash between the disk and the database leaves a file with no row. The
  * sweep removes such files, and leftover temp files, once they are older than
  * a day.
  *
  * An attachment is "claimed" when an input references it. An attachment no
- * input references is deleted by the sweep a day after its upload, which
- * also covers one that `input.update` removed from a queued input.
+ * input references can no longer be claimed a day after its upload
+ * (`UNCLAIMED_LIFETIME`), and the sweep deletes it. That also covers one that
+ * `input.update` removed from a queued input.
  */
 import { createHash } from "node:crypto";
 import { readdir, rename, rm, stat, writeFile, mkdir } from "node:fs/promises";
@@ -46,8 +48,8 @@ import {
 import { currentStamp, requireGrant } from "../actor";
 import { HerculeHome } from "../config";
 import { mintUuid, nowIso, UUID_PATTERN, uuidToString, withTransaction } from "../db";
-import { excludeDigest } from "./claims";
-import { attachmentRepository, type StoredAttachment } from "./repository";
+import { excludeDigest, readUnclaimedCutoff, UNCLAIMED_LIFETIME } from "./claims";
+import { attachmentRepository, type StoredAttachment, type UnclaimedUpload } from "./repository";
 import { detectImageMimeType } from "./sniff";
 
 /** A disk operation on an attachment file failed. `action` is the verb the message uses. */
@@ -69,9 +71,6 @@ export interface AttachmentFile {
   readonly mimeType: ImageMimeType;
 }
 
-/** How long an attachment no input references is kept, and how old a stray file must be to go. */
-const UNCLAIMED_LIFETIME: Duration.Duration = Duration.hours(24);
-
 /**
  * The most bytes of attachments one actor may hold that no input claims yet.
  * Without it, an actor could fill the disk with uploads it never sends,
@@ -79,14 +78,37 @@ const UNCLAIMED_LIFETIME: Duration.Duration = Duration.hours(24);
  */
 const MAX_UNCLAIMED_BYTES = 200 * 1024 * 1024;
 
-/** How often the sweep runs. A day's lifetime makes up to an hour more of no consequence. */
-const SWEEP_INTERVAL: Duration.Duration = Duration.hours(1);
+/**
+ * Returns how long until enough of `counted` expires that `sizeBytes` more
+ * fits under `MAX_UNCLAIMED_BYTES`, in milliseconds. `counted` is sorted
+ * oldest first, and is the actor's uploads that still count.
+ */
+const computeQuotaWait = (
+  counted: ReadonlyArray<UnclaimedUpload>,
+  sizeBytes: number,
+  now: number,
+): number => {
+  let held = counted.reduce((total, upload) => total + upload.sizeBytes, 0);
+  for (const upload of counted) {
+    held -= upload.sizeBytes;
+    if (held + sizeBytes <= MAX_UNCLAIMED_BYTES)
+      return Date.parse(upload.createdAt) + Duration.toMillis(UNCLAIMED_LIFETIME) - now;
+  }
+  // Not reached: one upload is at most `MAX_ATTACHMENT_BYTES`, far below the quota.
+  return Duration.toMillis(UNCLAIMED_LIFETIME);
+};
 
-/** The sweep interval. Tests override it with a shorter one. */
-export const AttachmentSweepInterval = Context.Reference<Duration.Duration>(
-  "hercule/controller/attachments/AttachmentSweepInterval",
-  { defaultValue: (): Duration.Duration => SWEEP_INTERVAL },
-);
+/**
+ * Describes a wait as "about 3 hours" or "about 25 minutes". Rounded up, so
+ * the user who waits that long finds the room there. The wait is relative
+ * because the controller does not know the user's time zone.
+ */
+const describeWait = (millis: number): string => {
+  const minutes = Math.max(1, Math.ceil(millis / 60_000));
+  if (minutes < 60) return minutes === 1 ? "about a minute" : `about ${String(minutes)} minutes`;
+  const hours = Math.ceil(minutes / 60);
+  return hours === 1 ? "about an hour" : `about ${String(hours)} hours`;
+};
 
 const NOT_FOUND = "no attachment with that id";
 
@@ -163,80 +185,98 @@ const make = Effect.gen(function* () {
       yield* Effect.forEach(stray, (name) => removeFile(buildPath(name)), { discard: true });
     });
 
+  /** Fails with `Validation` with one issue, at no field, that has this message. */
+  const failValidation = (message: string): Effect.Effect<never, Validation> =>
+    Effect.fail(createValidationError([{ path: [], message }]));
+
   /**
-   * Deletes the attachments nobody claimed within a day and their files,
-   * then the stray files older than a day.
+   * Inserts the attachment's row unless the actor's uploads that still count
+   * would pass `MAX_UNCLAIMED_BYTES` with it. An upload counts while no input
+   * references it and it is younger than `UNCLAIMED_LIFETIME`: an older one
+   * can no longer be claimed, so it holds no room even before the sweep
+   * deletes it. Fails with `Validation` when the quota refuses, with a
+   * message that says how long until enough room is free.
+   *
+   * The read and the insert are one transaction, which holds SQLite's one
+   * write lock, so two uploads at once cannot both see the same room.
    */
-  const sweep: Effect.Effect<void, AttachmentFileError | SqlError> = Effect.gen(function* () {
-    const now = yield* Clock.currentTimeMillis;
-    const cutoffMillis = now - Duration.toMillis(UNCLAIMED_LIFETIME);
-    const deleted = yield* withTransaction(
+  const insertWithinQuota = (
+    stored: StoredAttachment,
+  ): Effect.Effect<void, Validation | SqlError> =>
+    withTransaction(
       sql,
-      attachments.deleteUnreferenced(new Date(cutoffMillis).toISOString()),
+      Effect.gen(function* () {
+        const counted = yield* attachments.listUnclaimed(stored.actor, yield* readUnclaimedCutoff);
+        const held = counted.reduce((total, upload) => total + upload.sizeBytes, 0);
+        if (held + stored.sizeBytes > MAX_UNCLAIMED_BYTES) {
+          const wait = computeQuotaWait(counted, stored.sizeBytes, yield* Clock.currentTimeMillis);
+          return yield* failValidation(
+            `"${stored.name}" would take your images that are not sent yet past 200 MB. ` +
+              `Remove some images, or try again in ${describeWait(wait)}.`,
+          );
+        }
+        yield* attachments.insert(stored);
+      }),
     );
-    // After the commit, so a rolled-back delete never loses a file.
-    yield* Effect.forEach(deleted, (id) => removeFile(buildPath(id)), { discard: true });
-    yield* removeStrayFiles(cutoffMillis);
-  });
 
   return {
+    /**
+     * Deletes the attachments nobody claimed within `UNCLAIMED_LIFETIME` and
+     * their files, then the stray files older than that. One pass; the
+     * controller daemon repeats it.
+     */
+    sweep: Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      const cutoffMillis = now - Duration.toMillis(UNCLAIMED_LIFETIME);
+      const deleted = yield* withTransaction(
+        sql,
+        attachments.deleteUnreferenced(new Date(cutoffMillis).toISOString()),
+      );
+      // After the commit, so a rolled-back delete never loses a file.
+      yield* Effect.forEach(deleted, (id) => removeFile(buildPath(id)), { discard: true });
+      yield* removeStrayFiles(cutoffMillis);
+    }),
+
     /**
      * Stores one uploaded image and returns its record (`attachment.create`).
      * The type is read from the bytes, never from the name. Fails with
      * `Forbidden` without the grant, and with `Validation` when:
      *
      * - the bytes are more than `MAX_ATTACHMENT_BYTES`;
-     * - the actor's attachments that no input claims yet would pass
-     *   `MAX_UNCLAIMED_BYTES` with this one;
-     * - the bytes are not a PNG, JPEG, GIF or WebP image.
+     * - the bytes are not a PNG, JPEG, GIF or WebP image;
+     * - the actor's uploads that still count would pass `MAX_UNCLAIMED_BYTES`
+     *   with this one (`insertWithinQuota`).
+     *
+     * The file is written before the row, outside the transaction, so no
+     * transaction waits on the disk. When the row is not inserted, the file
+     * is removed.
      */
     create: (
       upload: NewAttachment,
     ): Effect.Effect<Attachment, Forbidden | Validation | AttachmentFileError | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("attachment.create");
-        const actor = yield* currentStamp;
         const sizeBytes = upload.bytes.byteLength;
         if (sizeBytes > MAX_ATTACHMENT_BYTES)
-          return yield* Effect.fail(
-            createValidationError([
-              {
-                path: [],
-                message: `"${upload.name}" is larger than 10 MB, the most an image may be`,
-              },
-            ]),
-          );
-        if ((yield* attachments.sumUnclaimedBytes(actor)) + sizeBytes > MAX_UNCLAIMED_BYTES)
-          return yield* Effect.fail(
-            createValidationError([
-              {
-                path: [],
-                message:
-                  `"${upload.name}" would take your images that are not sent yet past 200 MB. ` +
-                  "Send or remove some of them first.",
-              },
-            ]),
+          return yield* failValidation(
+            `"${upload.name}" is larger than 10 MB, the most an image may be`,
           );
         const mimeType = detectImageMimeType(upload.bytes);
         if (mimeType === undefined)
-          return yield* Effect.fail(
-            createValidationError([
-              { path: [], message: `"${upload.name}" is not a PNG, JPEG, GIF or WebP image` },
-            ]),
-          );
+          return yield* failValidation(`"${upload.name}" is not a PNG, JPEG, GIF or WebP image`);
         const stored: StoredAttachment = {
           id: uuidToString(mintUuid()),
           name: upload.name,
           mimeType,
           sizeBytes,
           sha256: createHash("sha256").update(upload.bytes).digest("hex"),
-          actor,
+          actor: yield* currentStamp,
           createdAt: yield* nowIso,
         };
         yield* writeFileAtomically(stored.id, upload.bytes);
-        yield* attachments
-          .insert(stored)
-          .pipe(Effect.tapError(() => Effect.ignore(removeFile(buildPath(stored.id)))));
+        yield* insertWithinQuota(stored).pipe(
+          Effect.tapError(() => Effect.ignore(removeFile(buildPath(stored.id)))),
+        );
         return excludeDigest(stored);
       }),
 
@@ -256,6 +296,29 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Deletes an image the caller uploaded that no input references yet, and
+     * its file (`attachment.delete`). A client calls it when the user removes
+     * an image before sending, so the upload stops counting against the
+     * quota at once. Fails with `Forbidden` without the grant, and with
+     * `NotFound` for any other image, by the same rule as `readContent`.
+     */
+    delete: (
+      id: string,
+    ): Effect.Effect<
+      Record<string, never>,
+      Forbidden | NotFound | AttachmentFileError | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("attachment.delete");
+        const actor = yield* currentStamp;
+        if (!(yield* withTransaction(sql, attachments.deleteUnclaimed(id, actor))))
+          return yield* Effect.fail(createNotFoundError(NOT_FOUND));
+        // After the commit, so a rolled-back delete never loses a file.
+        yield* removeFile(buildPath(id));
+        return {};
+      }),
+
+    /**
      * Returns where the image's bytes are and their type, for the runner
      * with that id. A runner may fetch only an image that an input of a
      * session placed on it references. Fails with `NotFound` for any other
@@ -272,20 +335,6 @@ const make = Effect.gen(function* () {
         if (Option.isNone(found)) return yield* Effect.fail(createNotFoundError(NOT_FOUND));
         return { path: buildPath(id), mimeType: found.value.mimeType };
       }),
-
-    /**
-     * Runs the sweep, then repeats it every `AttachmentSweepInterval`. Never
-     * returns. A pass that fails is logged and the next one runs.
-     */
-    runSweepLoop: Effect.gen(function* () {
-      const interval = yield* AttachmentSweepInterval;
-      while (true) {
-        yield* Effect.catchCause(sweep, (cause) =>
-          Effect.logError("Sweeping unclaimed attachments failed", cause),
-        );
-        yield* Effect.sleep(interval);
-      }
-    }),
   };
 });
 

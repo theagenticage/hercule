@@ -47,12 +47,17 @@ const buildSnapshotOn = (
 const SONNET = {
   slug: "claude-sonnet-5",
   name: "Sonnet",
-  acceptsImages: true,
+  imageInput: { maxBytes: null },
   isDefault: true,
   options: [],
 };
-const OPUS = { slug: "claude-opus-5", name: "Opus", acceptsImages: true, options: [] };
-const HAIKU = { slug: "claude-haiku-5", name: "Haiku", acceptsImages: true, options: [] };
+const OPUS = { slug: "claude-opus-5", name: "Opus", imageInput: { maxBytes: null }, options: [] };
+const HAIKU = {
+  slug: "claude-haiku-5",
+  name: "Haiku",
+  imageInput: { maxBytes: null },
+  options: [],
+};
 
 const NO_SETTINGS: SettingsState["user"] = {};
 

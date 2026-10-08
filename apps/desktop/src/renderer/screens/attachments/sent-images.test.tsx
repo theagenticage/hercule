@@ -1,15 +1,41 @@
 /**
  * Tests a sent message's images against the stubbed controller: each image
- * is read from the controller and drawn above the bubble, a message with no
- * text draws no bubble, and a click opens the image in the lightbox.
+ * is read from the controller and drawn above the bubble as its thumbnail, a
+ * tile whose thumbnail cannot be built stays empty, a message with no text
+ * draws no bubble, and a click opens the image in the lightbox.
+ *
+ * jsdom cannot decode images, so the thumbnail builder is stubbed; the
+ * desktop end-to-end test `e2e/desktop/thread.test.ts` decodes a real one.
  */
-import { describe, expect, it } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Attachment } from "@hercule/contract";
 import { THREAD_FIXTURES } from "../../app/testing";
 import { UserMessage } from "../session/messages";
 import { renderThreadPart } from "../thread/testing";
+
+const { buildThumbnail } = vi.hoisted(() => ({ buildThumbnail: vi.fn() }));
+vi.mock("../../app/thumbnails", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../app/thumbnails")>()),
+  buildThumbnail,
+}));
+
+/** The thumbnail the stubbed builder returns for every image. */
+const THUMBNAIL = new Blob(["thumbnail"], { type: "image/webp" });
+
+beforeEach(() => {
+  buildThumbnail.mockResolvedValue(THUMBNAIL);
+  // jsdom has no object URLs.
+  vi.spyOn(URL, "createObjectURL").mockImplementation((blob) =>
+    blob === THUMBNAIL ? "blob:thumbnail" : "blob:other",
+  );
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  buildThumbnail.mockReset();
+});
 
 const IMAGES: readonly Attachment[] = [
   {
@@ -63,6 +89,38 @@ describe("a sent message's images", () => {
         expect.arrayContaining(IMAGES.map((image) => `/api/v1/attachments/${image.id}/content`)),
       );
     });
+  });
+
+  it("draws each image as its thumbnail, built at the tile's size", async () => {
+    await renderMessage("");
+
+    await waitFor(() => {
+      expect(
+        screen
+          .getAllByRole("button", { name: /^Preview / })
+          .map((tile) => tile.querySelector("img")?.getAttribute("src")),
+      ).toEqual(["blob:thumbnail", "blob:thumbnail"]);
+    });
+    // jsdom's device pixel ratio is 1, so device pixels equal CSS pixels.
+    expect(buildThumbnail).toHaveBeenCalledWith(
+      expect.any(Blob),
+      210,
+      158,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("leaves a tile empty when its thumbnail cannot be built", async () => {
+    buildThumbnail.mockRejectedValue(new Error("The image cannot be decoded."));
+    await renderMessage("");
+
+    await waitFor(() => {
+      expect(buildThumbnail).toHaveBeenCalledTimes(2);
+    });
+    // Lets the failed builds reach the tiles before they are checked.
+    await act(async () => {});
+    const tiles = screen.getAllByRole("button", { name: /^Preview / });
+    expect(tiles.map((tile) => tile.querySelector("img"))).toEqual([null, null]);
   });
 
   it("draws no bubble for a message with images and no text", async () => {

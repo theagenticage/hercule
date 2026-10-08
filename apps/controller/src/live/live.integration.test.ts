@@ -1362,7 +1362,7 @@ const SESSION_TOPIC_FACTS: RunnerFacts = {
 };
 
 const SESSION_TOPIC_MODELS = [
-  { slug: "fast", name: "Fast", acceptsImages: true, isDefault: true, options: [] },
+  { slug: "fast", name: "Fast", imageInput: { maxBytes: null }, isDefault: true, options: [] },
 ];
 
 const buildSessionTopicPlugins = (): ReadonlyArray<Plugin> => [

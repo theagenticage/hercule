@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ShelfItem, ShelfItemStatus } from "@hercule/client-core";
+import type { ShelfItem, ShelfItemStatus, ShelfModel } from "@hercule/client-core";
 import { AttachmentShelf } from "./attachment-shelf";
 
 const ATTACHMENT = { name: "x.png", mimeType: "image/png", sizeBytes: 446_464 } as const;
@@ -21,13 +21,16 @@ const buildItem = (key: string, status: ShelfItemStatus): ShelfItem => ({
 
 const UPLOADED: ShelfItemStatus = { status: "uploaded", attachment: { id: "a-1", ...ATTACHMENT } };
 
-const renderShelf = (shelf: readonly ShelfItem[], acceptsImages = true) => {
+const renderShelf = (
+  shelf: readonly ShelfItem[],
+  imageInput: ShelfModel["imageInput"] = { maxBytes: null },
+) => {
   const onRemove = vi.fn();
   const onRetry = vi.fn();
   const view = render(
     <AttachmentShelf
       shelf={shelf}
-      model={{ acceptsImages, modelName: "glm-5.3" }}
+      model={{ imageInput, modelName: "glm-5.3" }}
       onRemove={onRemove}
       onRetry={onRetry}
     />,
@@ -63,7 +66,7 @@ describe("the attachment shelf", () => {
         buildItem("c", { status: "expired" }),
         buildItem("d", UPLOADED),
       ],
-      false,
+      null,
     );
     const strips = [...document.querySelectorAll(".shelf-strip-text")].map(
       (strip) => strip.textContent,

@@ -195,14 +195,14 @@ const LEGACY_MODELS: ReadonlyArray<ModelDescriptor> = [
     slug: "claude-opus-4-8",
     name: "Opus 4.8",
     isLegacy: true,
-    acceptsImages: true,
+    imageInput: { maxBytes: null },
     options: [buildEffortOption(["low", "medium", "high"])],
   },
   {
     slug: "claude-fable-5",
     name: "Fable 5",
     isLegacy: true,
-    acceptsImages: true,
+    imageInput: { maxBytes: null },
     options: [buildEffortOption(["low", "medium", "high"])],
   },
 ];
@@ -225,7 +225,7 @@ const buildModelDescriptor = (model: Model): ModelDescriptor => {
     ...(model.value === "default" ? { isDefault: true } : {}),
     // The CLI's model list has no field for input types, and every Claude
     // model takes images.
-    acceptsImages: true,
+    imageInput: { maxBytes: null },
     options,
   };
 };

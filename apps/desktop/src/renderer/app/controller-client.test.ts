@@ -1,4 +1,4 @@
-import { ConnectionError } from "@hercule/client-core";
+import { ConnectionError, MAX_INPUT_ANSWER_WAIT_MS } from "@hercule/client-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createControllerClient, fetchWithTimeout } from "./controller-client";
 
@@ -54,7 +54,7 @@ describe("fetchWithTimeout", () => {
   it.each([
     ["a steer", "/api/v1/sessions/s-1/inputs/i-1/steer"],
     ["a message sent to a session", "/api/v1/sessions/s-1/input"],
-  ])("gives %s, which waits on the runner, 15 seconds", async (_case, path) => {
+  ])("gives %s, which waits on the runner, 2 minutes and 15 seconds", async (_case, path) => {
     stubFetch((signal) => Promise.resolve(new Response(buildStalledBody(signal))));
     const response = await fetchWithTimeout(`http://127.0.0.1:4937${path}`, { method: "POST" });
     let failure: string | undefined;
@@ -62,7 +62,10 @@ describe("fetchWithTimeout", () => {
       failure = (error as DOMException).name;
     });
 
-    await vi.advanceTimersByTimeAsync(14_999);
+    // The controller waits up to 2 minutes and 10 seconds for an input with
+    // images (`MAX_INPUT_ANSWER_WAIT_MS`); the limit sits 5 seconds above it.
+    expect(MAX_INPUT_ANSWER_WAIT_MS).toBe(130_000);
+    await vi.advanceTimersByTimeAsync(134_999);
     expect(failure).toBeUndefined();
     await vi.advanceTimersByTimeAsync(1);
     expect(failure).toBe("TimeoutError");

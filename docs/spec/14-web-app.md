@@ -356,7 +356,7 @@ The web keeps its existing routes and workspace controls compatible; complete wo
 
 **Refusals are said, never silent.** A file of another type, a file over 10 MiB, an eleventh image, or an image for a model that does not accept images is refused with one inline line in the composer's notice slot, naming the file. The line goes away on the next successful add or send.
 
-**The model decides.** When the picked model's `acceptsImages` is false ([./06-providers.md](./06-providers.md) §3.3), `+` attach is disabled and its tooltip says why, and a pasted or dropped image is refused with the notice. If images are already on the shelf when the user picks such a model, the shelf stays: each tile's strip shows "Unsupported", its tooltip "Not supported by <model>", and Send is disabled until the images are removed or the model is switched back.
+**The model decides.** When the picked model's `imageInput` is `null` ([./06-providers.md](./06-providers.md) §3.3), `+` attach is disabled and its tooltip says why, and a pasted or dropped image is refused with the notice. If images are already on the shelf when the user picks such a model, the shelf stays: each tile's strip shows "Unsupported", its tooltip "Not supported by <model>", and Send is disabled until the images are removed or the model is switched back.
 
 **Send waits.** Send is disabled, with the reason shown, while an upload runs, while one has failed, while one has expired, or while the model refuses images. A message may be images alone, with no text. The Draft Thread's first message may carry images too, and its title falls back to the first image's name.
 

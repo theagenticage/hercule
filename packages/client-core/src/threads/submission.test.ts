@@ -285,7 +285,7 @@ describe("buildSubmission: images", () => {
     ["one.png", "two.png"].map((name) =>
       Object.assign(new Blob([new Uint8Array(4)], { type: "image/png" }), { name }),
     ),
-    { acceptsImages: true, modelName: "Claude Sonnet 5" },
+    { imageInput: { maxBytes: null }, modelName: "Claude Sonnet 5" },
   );
   const attachments = markShelfItemUploaded(shelf, shelf[0]!.key, {
     id: "att-1",

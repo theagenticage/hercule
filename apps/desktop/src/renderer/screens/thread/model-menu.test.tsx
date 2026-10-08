@@ -34,7 +34,7 @@ const WORK_INSTANCE: ProviderInstance = {
         {
           slug: "claude-haiku-5",
           name: "Claude Haiku 5",
-          acceptsImages: true,
+          imageInput: { maxBytes: null },
           isDefault: true,
           options: [],
         },
@@ -54,7 +54,7 @@ const MANY_INSTANCE: ProviderInstance = {
         ...["4.1", "4.2", "4.3", "4.4", "4.5"].map((version) => ({
           slug: `claude-haiku-${version}`,
           name: `Claude Haiku ${version}`,
-          acceptsImages: true,
+          imageInput: { maxBytes: null },
           options: [],
         })),
       ],

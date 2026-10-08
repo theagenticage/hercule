@@ -668,11 +668,11 @@ const make = Effect.gen(function* () {
    */
   const holdInputWithRefusedAttachments = (
     input: StoredInput,
-    turn: Omit<AttachmentTurn, "attachmentCount">,
+    turn: Omit<AttachmentTurn, "attachments">,
   ): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
       const refusal = yield* provideSql(
-        findAttachmentRefusal({ ...turn, attachmentCount: input.attachments.length }),
+        findAttachmentRefusal({ ...turn, attachments: input.attachments }),
       );
       if (refusal === undefined) return false;
       if (input.reason !== refusal) {
@@ -1509,7 +1509,7 @@ const make = Effect.gen(function* () {
             runnerId: open.runnerId,
             instanceId: open.spec.instanceId,
             model: open.spec.modelSelection.model,
-            attachmentCount: references.length,
+            attachments: references,
           }),
         );
         yield* sessions.insert({
@@ -2071,7 +2071,7 @@ const make = Effect.gen(function* () {
               runnerId: session.runnerId,
               instanceId: session.instanceId,
               model: taking.modelSelection.model,
-              attachmentCount: references.length,
+              attachments: references,
             }),
           );
         }
@@ -2719,7 +2719,7 @@ const make = Effect.gen(function* () {
                 runnerId: session.runnerId,
                 instanceId: session.instanceId,
                 model: session.modelSelection.model,
-                attachmentCount: references.length,
+                attachments: references,
               }),
             );
             yield* provideSql(claimAttachments(inputId, references));

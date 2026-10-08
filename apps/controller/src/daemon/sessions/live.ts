@@ -23,6 +23,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   ATTACHMENT_DOWNLOAD_TIMEOUT,
+  SESSION_INPUT_DEADLINE,
   SessionSpec,
   type SubagentId,
   type ControllerToRunner,
@@ -101,14 +102,7 @@ const decodeRespondToQuestion = Schema.decodeUnknownEffect(RespondToQuestionInpu
 const decodeInterrupt = Schema.decodeUnknownEffect(SessionInterruptInput);
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 
-/**
- * How long the controller waits for a runner to report what it did with an
- * input. Long enough for a harness to accept a message, short enough that a
- * caller waiting on the reply is not left hanging.
- */
-const SESSION_INPUT_DEADLINE: Duration.Duration = Duration.seconds(10);
-
-/** The input deadline. Tests override it with a shorter one. */
+/** The input deadline, `SESSION_INPUT_DEADLINE` by default. Tests override it with a shorter one. */
 export const SessionInputDeadline = Context.Reference<Duration.Duration>(
   "hercule/controller/daemon/SessionInputDeadline",
   { defaultValue: (): Duration.Duration => SESSION_INPUT_DEADLINE },
@@ -238,7 +232,7 @@ const make = Effect.gen(function* () {
         runnerId: session.runnerId,
         instanceId: session.instanceId,
         model: session.modelSelection.model,
-        attachmentCount: row.attachments.length,
+        attachments: row.attachments,
       }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
       if (refusal !== undefined) {
         yield* sessions.refuseClaimedInput(row, refusal);

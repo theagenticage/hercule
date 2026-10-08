@@ -401,6 +401,15 @@ describe("createClient", () => {
     assert.instanceOf(error, ApiError);
     assert.strictEqual(error.code, "not_found");
   });
+
+  it("deletes an unsent image by its id", async () => {
+    const { fetch, sent } = stubFetch(() => buildJsonResponse({}));
+    const client = createClient({ baseUrl: BASE, token: "tok_1", fetch });
+
+    await client.deleteAttachment(IMAGE.id);
+    assert.strictEqual(sent(0).method, "DELETE");
+    assert.strictEqual(new URL(sent(0).url).pathname, `/api/v1/attachments/${IMAGE.id}`);
+  });
 });
 
 /** A token store backed by a plain variable, so a test can read what it stored. */

@@ -16,7 +16,9 @@
  *   expands it again;
  * - with the transcript scrolled up, none of it shows below the full
  *   composer's card, where the lip is, and it shows below the shrunk one;
- * - the field grows with its text up to eight lines, then scrolls.
+ * - the field grows with its text up to eight lines, then scrolls;
+ * - a picked PNG is sent with the message, and the sent bubble draws it,
+ *   decoded by Chromium itself.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
@@ -192,6 +194,16 @@ async function showsTranscriptBelowCard(page: Page): Promise<boolean> {
   return !drawn.equals(hidden);
 }
 
+/**
+ * A real PNG, 4 × 3 pixels of one colour, that Chromium decodes. The unit
+ * tests run in jsdom, which decodes no image, so only this suite proves that
+ * a sent image's thumbnail is built and drawn.
+ */
+const PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGOwybsERww4OQBUhhHRUMjhlgAAAABJRU5ErkJggg==",
+  "base64",
+);
+
 /** Returns `count` lines of text, numbered from 1, joined by newlines. */
 const buildLines = (count: number): string =>
   Array.from({ length: count }, (_, index) => `Line ${index + 1}`).join("\n");
@@ -230,6 +242,42 @@ describe("the composer", () => {
     await page.locator(".msg--me .bubble", { hasText: "Add a retry" }).waitFor();
     expect(await composer.field.inputValue()).toBe("");
     await fleet.waitForTurn(thread.id, 2, "running");
+  });
+
+  it("sends a picked PNG with the message, and the sent bubble draws it", async () => {
+    const { url, fleet, waitForStatus } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
+    const { thread, played } = await fleet.spawnScriptedThread(
+      { runner, prompt: "Why does the checkout test fail?" },
+      [{ kind: "end", state: "completed" }],
+    );
+    await played;
+    await waitForStatus(thread.id, "idle");
+    const { app, page } = await openSignedIn(url);
+    await keepWindowOnTop(app);
+    await openThread(page, "Why does the checkout test fail?");
+    const composer = locateComposer(page);
+
+    const uploaded = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/v1/attachments" &&
+        response.request().method() === "POST",
+    );
+    await page
+      .locator('.composer input[type="file"]')
+      .setInputFiles({ name: "screen.png", mimeType: "image/png", buffer: PNG });
+    expect((await uploaded).status()).toBe(201);
+    await page.locator(".shelf-strip").waitFor({ state: "detached" });
+    await composer.field.fill("What is on this screen?");
+    await composer.field.press("Enter");
+
+    const sent = page.locator(".msg--me", { hasText: "What is on this screen?" });
+    await sent.getByRole("button", { name: "Preview screen.png" }).waitFor();
+    await expect
+      .poll(() =>
+        sent.locator(".bubble-image img").evaluate((image: HTMLImageElement) => image.naturalWidth),
+      )
+      .toBeGreaterThan(0);
   });
 
   it("draws Stop in Send's place while a turn runs, queues a message sent with ⏎, and stops the turn", async () => {

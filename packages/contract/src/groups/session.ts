@@ -6,8 +6,9 @@
  * `requestedAccessMode` and `accessMode` are both on the record because the
  * access-mode fallback of [06-providers section 8.4] must never be silent.
  */
-import { Schema, SchemaGetter, Tuple } from "effect";
+import { Duration, Schema, SchemaGetter, Tuple } from "effect";
 import {
+  ATTACHMENT_DOWNLOAD_TIMEOUT,
   AccessMode,
   ApprovalDecision,
   type ApprovalRequest,
@@ -16,6 +17,7 @@ import {
   OpenRequest,
   OutputSchema,
   QuestionAnswers,
+  SESSION_INPUT_DEADLINE,
   SubagentId,
   Usage,
   UsageReport,
@@ -475,6 +477,18 @@ export const SessionInputOutcome = Schema.Struct({
 });
 
 export type SessionInputOutcome = Schema.Schema.Type<typeof SessionInputOutcome>;
+
+/**
+ * The longest the controller takes to answer `session.input` or `input.steer`:
+ * its wait for the runner's report, plus the time the runner may spend
+ * downloading the input's images first. A client sets its own request time
+ * limit above this, so it never gives up on a request the controller is still
+ * working on.
+ */
+export const MAX_INPUT_ANSWER_WAIT: Duration.Duration = Duration.sum(
+  SESSION_INPUT_DEADLINE,
+  ATTACHMENT_DOWNLOAD_TIMEOUT,
+);
 
 /**
  * The decision on an approval one of a session's agents is parked on.

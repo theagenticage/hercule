@@ -10,11 +10,13 @@ import { describeAgent, findModelName } from "./model-name";
 const CLAUDE = buildInstance("claude-code", "Claude Code", [
   buildSnapshot({
     runnerId: "atlas",
-    models: [{ slug: "default", name: "Default", acceptsImages: true, options: [] }],
+    models: [{ slug: "default", name: "Default", imageInput: { maxBytes: null }, options: [] }],
   }),
   buildSnapshot({
     runnerId: "bare",
-    models: [{ slug: "claude-opus-5-5", name: "Opus 5.5", acceptsImages: true, options: [] }],
+    models: [
+      { slug: "claude-opus-5-5", name: "Opus 5.5", imageInput: { maxBytes: null }, options: [] },
+    ],
   }),
 ]);
 

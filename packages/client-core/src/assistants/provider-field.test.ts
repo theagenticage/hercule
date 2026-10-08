@@ -41,11 +41,16 @@ const buildInstance = (
               {
                 slug: "claude-sonnet-5",
                 name: "Sonnet 5",
-                acceptsImages: true,
+                imageInput: { maxBytes: null },
                 isDefault: true,
                 options: [],
               },
-              { slug: "claude-opus-5", name: "Opus 5", acceptsImages: true, options: [] },
+              {
+                slug: "claude-opus-5",
+                name: "Opus 5",
+                imageInput: { maxBytes: null },
+                options: [],
+              },
             ],
           },
         ],

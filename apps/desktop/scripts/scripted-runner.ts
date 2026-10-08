@@ -120,11 +120,16 @@ const PROBE_RESULT: ProbeResult = {
     {
       slug: "scripted",
       name: "Scripted",
-      acceptsImages: true,
+      imageInput: { maxBytes: null },
       isDefault: true,
       options: MODEL_OPTIONS,
     },
-    { slug: "scripted-large", name: "Scripted Large", acceptsImages: true, options: MODEL_OPTIONS },
+    {
+      slug: "scripted-large",
+      name: "Scripted Large",
+      imageInput: { maxBytes: null },
+      options: MODEL_OPTIONS,
+    },
   ],
 };
 

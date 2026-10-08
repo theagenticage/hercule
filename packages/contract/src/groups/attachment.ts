@@ -5,7 +5,7 @@
  * the raw bytes of one image and returns its record, and the input then lists
  * the ids in `attachments`. The controller reads the type from the file's
  * first bytes, so a caller never declares it. An attachment no input
- * references is deleted after 24 hours.
+ * references is deleted after 24 hours, or sooner with `attachment.delete`.
  */
 import { Schema } from "effect";
 import { ImageMimeType } from "@hercule/protocol";
@@ -79,6 +79,15 @@ export const attachment = HttpApiGroup.make("attachment")
       params: { id: AttachmentId },
       // The response's `content-type` is the attachment's `mimeType`.
       success: ImageBytes,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    // Deletes an upload the caller's actor made and no input references yet,
+    // such as an image the user removed before sending. Any other id is
+    // `not_found`, by the same rule as `readContent`, so a caller cannot tell
+    // someone else's upload from an id that does not exist.
+    HttpApiEndpoint.delete("delete", "/attachments/:id", {
+      params: { id: AttachmentId },
+      success: Schema.Struct({}),
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
   )

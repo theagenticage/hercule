@@ -184,6 +184,18 @@ describe("what the Codex adapter reports about a machine", () => {
     expect(findModelOption(probed.models, "gpt-5.5", "serviceTier")).toBeUndefined();
   });
 
+  it("takes images only on a model that lists image input, with no limit of its own", async () => {
+    const { result } = runProbe();
+
+    const probed = await result;
+    expect(probed.models.map((model) => [model.slug, model.imageInput])).toEqual([
+      ["gpt-6-astra", { maxBytes: null }],
+      // No `inputModalities`, as an older app-server sends: text only.
+      ["gpt-5.6-sol", null],
+      ["gpt-5.5", null],
+    ]);
+  });
+
   it("reports an app-server that exits before replying to initialize as an error, not as a blank row", async () => {
     const { result } = runProbe({ initialize: SILENT }, { dies: true });
 

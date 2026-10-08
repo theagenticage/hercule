@@ -123,7 +123,7 @@ export function Composer({
     (model.message.text.trim() !== "" || shelf.length > 0);
   const attachDisabledReason =
     model.readOnly ??
-    (fields.model.acceptsImages ? null : `${fields.model.modelName} does not accept images`);
+    (fields.model.imageInput !== null ? null : `${fields.model.modelName} does not accept images`);
   const notice = model.refusal ?? model.attachmentBlock;
   return (
     // A draft shows its sentence above the card, and the sentence takes the free space.

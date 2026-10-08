@@ -41,7 +41,7 @@ const CLAUDE = buildInstance("claude-code", "Claude Code", [
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
-        acceptsImages: true,
+        imageInput: { maxBytes: null },
         isDefault: true,
         options: [],
       },

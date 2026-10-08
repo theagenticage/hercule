@@ -141,6 +141,18 @@ describe("the pi adapter's probe", () => {
     ]);
   });
 
+  it("declares pi's image size limit on the models that take images, and no images on the rest", async () => {
+    const { result } = runProbe();
+
+    const probed = await result;
+    const imageInputs = Object.fromEntries(
+      probed.models.map((model) => [model.slug, model.imageInput]),
+    );
+    // 3,538,944 bytes is 3.375 MiB, the most that fits in pi's 4.5 MiB of base64.
+    expect(imageInputs["glm-5.3-flash"]).toEqual({ maxBytes: 3_538_944 });
+    expect(imageInputs["glm-5.3"]).toBeNull();
+  });
+
   it("offers only the thinking levels each model supports", async () => {
     const { result } = runProbe();
 

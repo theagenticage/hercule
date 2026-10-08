@@ -174,7 +174,7 @@ const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescript
       ...(model.isDefault === true ? { isDefault: true } : {}),
       // An app-server too old to list input types is read as text only, so a
       // missing list never lets images through.
-      acceptsImages: (model.inputModalities ?? []).includes("image"),
+      imageInput: (model.inputModalities ?? []).includes("image") ? { maxBytes: null } : null,
       options: buildModelOptions(model),
     }));
 

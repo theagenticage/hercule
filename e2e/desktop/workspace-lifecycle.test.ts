@@ -83,7 +83,7 @@ const handle = async (frame) => {
   switch (frame._tag) {
     case "ping": return send({ _tag: "pong" });
     case "probeRequest": return send({ _tag: "probeReport", requestId: frame.requestId, instanceId: frame.instanceId,
-      result: { harnessVersion: "fixture", auth: { status: "ok" }, models: [{ slug: "fixture", name: "Fixture", acceptsImages: true, isDefault: true, options: [] }] } });
+      result: { harnessVersion: "fixture", auth: { status: "ok" }, models: [{ slug: "fixture", name: "Fixture", imageInput: { maxBytes: null }, isDefault: true, options: [] }] } });
     case "workspaceProvision": {
       const report = await Effect.runPromise(workspaces.provision(frame));
       log({ kind: "workspace", id: frame.workspaceId, cwd: Effect.runSync(workspaces.resolve(frame.workspaceId))?.cwd });

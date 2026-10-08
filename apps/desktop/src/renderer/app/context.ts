@@ -74,6 +74,7 @@ const buildSavedController = (
     pendingSubmissions: createPendingSubmissions(),
     uploads: createUploadQueue({
       upload: client.uploadAttachment,
+      deleteAttachment: client.deleteAttachment,
       concurrency: UPLOAD_CONCURRENCY,
     }),
   };

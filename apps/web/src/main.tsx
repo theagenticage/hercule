@@ -23,6 +23,7 @@ const client = createClient({ baseUrl, tokenStore: createTokenStore(baseUrl) });
 const live = createLive({ client, baseUrl });
 const uploads = createUploadQueue({
   upload: client.uploadAttachment,
+  deleteAttachment: client.deleteAttachment,
   concurrency: UPLOAD_CONCURRENCY,
 });
 // Reads and writes are sent even when the browser reports no network. The

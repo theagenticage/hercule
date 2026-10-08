@@ -596,20 +596,20 @@ export const FIXTURE_INSTANCE: ProviderInstance = {
         {
           slug: "claude-sonnet-5",
           name: "Claude Sonnet 5",
-          acceptsImages: true,
+          imageInput: { maxBytes: null },
           isDefault: true,
           options: [EFFORT_OPTION],
         },
         {
           slug: "claude-opus-5",
           name: "Claude Opus 5",
-          acceptsImages: true,
+          imageInput: { maxBytes: null },
           options: [EFFORT_OPTION],
         },
         {
           slug: "claude-sonnet-4",
           name: "Claude Sonnet 4",
-          acceptsImages: true,
+          imageInput: { maxBytes: null },
           isLegacy: true,
           options: [],
         },

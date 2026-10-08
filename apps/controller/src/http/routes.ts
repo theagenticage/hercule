@@ -565,7 +565,8 @@ const attachmentRoutes = HttpApiBuilder.group(api, "attachment", (handlers) =>
       )
       .handle("readContent", ({ params }) =>
         withApiErrors(Effect.flatMap(attachments.readContent(params.id), buildAttachmentResponse)),
-      );
+      )
+      .handle("delete", ({ params }) => withApiErrors(attachments.delete(params.id)));
   }),
 );
 

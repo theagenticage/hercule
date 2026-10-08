@@ -8,7 +8,11 @@
  * and reports the result back with `applyUploadOutcome`. Thumbnails and
  * object URLs are the screen's concern, not the shelf's.
  */
-import { MAX_ATTACHMENTS_PER_INPUT, type Attachment } from "@hercule/contract";
+import {
+  MAX_ATTACHMENTS_PER_INPUT,
+  type Attachment,
+  type ModelDescriptor,
+} from "@hercule/contract";
 import { readValidationIssues } from "../errors";
 import { checkImageFile, type ImageFile } from "./files";
 import type { UploadOutcome } from "./upload-queue";
@@ -20,11 +24,41 @@ import type { UploadOutcome } from "./upload-queue";
  */
 export const EXPIRED_ATTACHMENT_MESSAGE = "This image expired; attach it again.";
 
-/** The selected model, as far as the shelf needs it: whether it accepts images, and its name for messages. */
+/**
+ * The selected model, as far as the shelf needs it:
+ *
+ * - `imageInput`: the images the model takes, with its own size limit if it
+ *   has one, or `null` when it takes none;
+ * - `modelName`: its name, for messages.
+ */
 export interface ShelfModel {
-  readonly acceptsImages: boolean;
+  readonly imageInput: ModelDescriptor["imageInput"];
   readonly modelName: string;
 }
+
+/**
+ * Formats a size in bytes as megabytes (of 1024 * 1024 bytes) with up to
+ * three decimals and no trailing zeros, such as "4 MB" or "3.375 MB". `round`
+ * picks the direction of the last decimal: a limit is rounded down and an
+ * image's size up, so an image the text calls no larger than the limit is
+ * never the one refused. The controller formats its refusal the same way.
+ */
+const formatMegabytes = (bytes: number, round: (value: number) => number): string =>
+  `${String(round((bytes / (1024 * 1024)) * 1000) / 1000)} MB`;
+
+/**
+ * Returns why `image` is over `model`'s own size limit, or `undefined` when it
+ * is not, or when the model sets no limit. The controller refuses such an
+ * image with the same words.
+ */
+const describeOverModelLimit = (
+  image: { readonly name: string; readonly size: number },
+  model: ShelfModel,
+): string | undefined => {
+  const maxBytes = model.imageInput?.maxBytes ?? null;
+  if (maxBytes === null || image.size <= maxBytes) return undefined;
+  return `"${image.name}" is ${formatMegabytes(image.size, Math.ceil)}; this model accepts images up to ${formatMegabytes(maxBytes, Math.floor)}. Send a smaller image or pick another model.`;
+};
 
 /**
  * Where an image's upload stands:
@@ -56,7 +90,8 @@ let lastKey = 0;
  * shelf and a refusal for each file left out:
  *
  * - every file, when the model does not accept images;
- * - a file of the wrong type, an empty one, or one that is too large;
+ * - a file of the wrong type, an empty one, or one that is too large for
+ *   the controller or for the model;
  * - the files past `MAX_ATTACHMENTS_PER_INPUT`, in one refusal.
  */
 export const addFilesToShelf = (
@@ -65,7 +100,7 @@ export const addFilesToShelf = (
   model: ShelfModel,
 ): { readonly shelf: readonly ShelfItem[]; readonly refusals: readonly string[] } => {
   if (files.length === 0) return { shelf, refusals: [] };
-  if (!model.acceptsImages)
+  if (model.imageInput === null)
     return {
       shelf,
       refusals: [`${model.modelName} does not accept images. Pick a model that accepts them.`],
@@ -74,7 +109,7 @@ export const addFilesToShelf = (
   const added: ShelfItem[] = [];
   let tooMany = 0;
   for (const file of files) {
-    const refusal = checkImageFile(file);
+    const refusal = checkImageFile(file) ?? describeOverModelLimit(file, model);
     if (refusal !== undefined) refusals.push(refusal);
     else if (shelf.length + added.length >= MAX_ATTACHMENTS_PER_INPUT) tooMany += 1;
     else {
@@ -193,6 +228,7 @@ export const findExpiredShelfKeys = (
  * when the images do not stop it. Checks, in this order:
  *
  * - the model, which must accept images while there are any;
+ * - an uploaded image over the model's own size limit;
  * - an expired image, which must be attached again;
  * - a failed upload, which must be retried or removed;
  * - an upload still running.
@@ -202,10 +238,17 @@ export const describeSendBlock = (
   model: ShelfModel,
 ): string | null => {
   if (shelf.length === 0) return null;
-  if (!model.acceptsImages)
+  if (model.imageInput === null)
     return `${model.modelName} does not accept images. Remove ${
       shelf.length === 1 ? "the image" : `the ${String(shelf.length)} images`
     } or pick a model that accepts them.`;
+  for (const item of shelf) {
+    const tooLarge =
+      item.status === "uploaded"
+        ? describeOverModelLimit({ name: item.name, size: item.sizeBytes }, model)
+        : undefined;
+    if (tooLarge !== undefined) return tooLarge;
+  }
   if (shelf.some((item) => item.status === "expired")) return EXPIRED_ATTACHMENT_MESSAGE;
   if (shelf.some((item) => item.status === "failed"))
     return "An image failed to upload. Retry it or remove it.";
@@ -224,15 +267,19 @@ export const describeSendBlock = (
  * - `reason`: the longer explanation for the tile's tooltip, or `null`.
  */
 export interface ShelfTileState {
-  readonly name: "uploading" | "uploaded" | "failed" | "expired" | "unsupported";
+  readonly name: "uploading" | "uploaded" | "failed" | "expired" | "unsupported" | "too-large";
   readonly strip: string | null;
   readonly reason: string | null;
 }
 
 /**
  * Returns what the tile of `item` shows. A failed or expired image outranks
- * the model, because the user must deal with it first; an uploaded image is
- * marked unsupported when `model` does not accept images.
+ * the model, because the user must deal with it first. An uploaded image is
+ * then judged against `model`, so a tile changes when the user picks another
+ * model:
+ *
+ * - unsupported, when the model takes no images;
+ * - too large, when it is over the model's own size limit.
  */
 export const decideShelfTileState = (item: ShelfItem, model: ShelfModel): ShelfTileState => {
   switch (item.status) {
@@ -242,13 +289,17 @@ export const decideShelfTileState = (item: ShelfItem, model: ShelfModel): ShelfT
       return { name: "failed", strip: "Failed", reason: item.reason };
     case "expired":
       return { name: "expired", strip: "Expired", reason: EXPIRED_ATTACHMENT_MESSAGE };
-    case "uploaded":
-      return model.acceptsImages
+    case "uploaded": {
+      if (model.imageInput === null)
+        return {
+          name: "unsupported",
+          strip: "Unsupported",
+          reason: `Not supported by ${model.modelName}`,
+        };
+      const tooLarge = describeOverModelLimit({ name: item.name, size: item.sizeBytes }, model);
+      return tooLarge === undefined
         ? { name: "uploaded", strip: null, reason: null }
-        : {
-            name: "unsupported",
-            strip: "Unsupported",
-            reason: `Not supported by ${model.modelName}`,
-          };
+        : { name: "too-large", strip: "Too large", reason: tooLarge };
+    }
   }
 };

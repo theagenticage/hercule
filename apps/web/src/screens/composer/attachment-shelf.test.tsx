@@ -11,7 +11,7 @@ import {
 } from "@hercule/client-core";
 import { AttachmentShelf } from "./attachment-shelf";
 
-const IMAGES: ShelfModel = { acceptsImages: true, modelName: "Claude Sonnet 5" };
+const IMAGES: ShelfModel = { imageInput: { maxBytes: null }, modelName: "Claude Sonnet 5" };
 
 /** Returns a shelf of one image of 436 KB per name, each with the status beside it. */
 const buildShelf = (
@@ -86,7 +86,7 @@ describe("AttachmentShelf", () => {
 
   it("marks every uploaded image when the model does not accept images, and names the model in the tooltip", () => {
     renderShelf(buildShelf(["a.png", "uploaded"], ["b.png", "failed"]), {
-      acceptsImages: false,
+      imageInput: null,
       modelName: "glm-5.3",
     });
 
@@ -94,6 +94,18 @@ describe("AttachmentShelf", () => {
     expect(readStrip("b.png")).toBe("Failed");
     const item = screen.getByRole("button", { name: "Preview a.png" }).parentElement!;
     expect(item.title).toBe("a.png · 436 KB\nNot supported by glm-5.3");
+  });
+
+  it("marks an uploaded image over the model's size limit as too large, with the reason in the tooltip", () => {
+    renderShelf(buildShelf(["a.png", "uploaded"]), {
+      imageInput: { maxBytes: 400 * 1024 },
+      modelName: "glm-5v",
+    });
+
+    expect(readStrip("a.png")).toBe("Too large");
+    expect(screen.getByRole("button", { name: "Preview a.png" }).parentElement!.title).toBe(
+      'a.png · 436 KB\n"a.png" is 0.426 MB; this model accepts images up to 0.39 MB. Send a smaller image or pick another model.',
+    );
   });
 
   it("previews by position and removes and retries by key", async () => {

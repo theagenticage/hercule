@@ -143,7 +143,7 @@ const MODELS: ReadonlyArray<ModelDescriptor> = [
   {
     slug: "fast",
     name: "Fast",
-    acceptsImages: true,
+    imageInput: { maxBytes: null },
     options: [
       {
         id: "effort",
@@ -160,7 +160,7 @@ const MODELS: ReadonlyArray<ModelDescriptor> = [
   {
     slug: "clever",
     name: "Clever",
-    acceptsImages: true,
+    imageInput: { maxBytes: null },
     isDefault: true,
     options: [
       {

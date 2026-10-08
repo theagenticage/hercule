@@ -70,7 +70,6 @@ import { withCors } from "./cors";
 import { buildErrorResponse, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
-import { AttachmentService } from "../attachments";
 import { OAuthCallbackRouteLayer } from "../connections";
 import {
   Arrival,
@@ -78,6 +77,7 @@ import {
   Pipeline,
   Provisioning,
   checkSchedulerInterval,
+  runAttachmentSweepLoop,
   runIngestReconciler,
   runScheduler,
   sweepSessionsOnLostRunners,
@@ -331,9 +331,7 @@ export const serve = (bundle: WebBundle | undefined) =>
     // Workspaces nothing needs any more are removed from their runner's disk.
     yield* Effect.forkScoped(Effect.flatMap(Provisioning, (provisioning) => provisioning.driving));
     // Images nobody sent within a day of their upload are deleted, with their files.
-    yield* Effect.forkScoped(
-      Effect.flatMap(AttachmentService, (attachments) => attachments.runSweepLoop),
-    );
+    yield* Effect.forkScoped(runAttachmentSweepLoop);
     // The controller daemon's two inbound drivers, also before the listener:
     // the queues they read are created with the layer, so nothing a runner
     // reports while these fibers start is missed. Each has its own fiber, so a

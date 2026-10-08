@@ -57,6 +57,14 @@ export const AttachmentReference = Schema.Struct({
 export type AttachmentReference = Schema.Schema.Type<typeof AttachmentReference>;
 
 /**
+ * How long the controller waits for a runner to report what it did with an
+ * input (`sessionInput`, and a steer). Long enough for a harness to accept a
+ * message, short enough that a caller waiting on the reply is not left
+ * hanging. An input with images gets `ATTACHMENT_DOWNLOAD_TIMEOUT` on top.
+ */
+export const SESSION_INPUT_DEADLINE: Duration.Duration = Duration.seconds(10);
+
+/**
  * The longest a runner spends downloading the images of one input before it
  * gives up on that input. The controller adds this to its usual wait for the
  * runner's answer when an input carries images, because the runner answers

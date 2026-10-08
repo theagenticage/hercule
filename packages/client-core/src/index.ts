@@ -87,7 +87,12 @@ export {
   type UploadOutcome,
   type UploadQueue,
 } from "./attachments/upload-queue";
-export { createClient, type FetchLike, type HerculeClient } from "./client";
+export {
+  createClient,
+  MAX_INPUT_ANSWER_WAIT_MS,
+  type FetchLike,
+  type HerculeClient,
+} from "./client";
 export {
   buildConfigDraft,
   buildConfigFields,

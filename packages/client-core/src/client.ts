@@ -8,8 +8,8 @@
  * derived from `api`, so an operation added to the contract appears here with
  * no edit.
  */
-import { api, type Attachment } from "@hercule/contract";
-import { Context, Effect, Result } from "effect";
+import { api, MAX_INPUT_ANSWER_WAIT, type Attachment } from "@hercule/contract";
+import { Context, Duration, Effect, Result } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
@@ -19,6 +19,15 @@ import type * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import type { ImageFile } from "./attachments/files";
 import { ApiError, toClientError } from "./errors";
 import type { TokenStore } from "./token-store";
+
+/**
+ * The longest the controller takes to answer `session.input` or `input.steer`,
+ * in milliseconds: the contract's `MAX_INPUT_ANSWER_WAIT` as a plain number,
+ * for a client that writes no Effect code. A client gives those two requests
+ * a time limit above this, so it never gives up on a request the controller
+ * is still working on.
+ */
+export const MAX_INPUT_ANSWER_WAIT_MS = Duration.toMillis(MAX_INPUT_ANSWER_WAIT);
 
 /** The derived client, with every Effect method turned into a promise method. */
 type Promisified<T> = {
@@ -62,6 +71,13 @@ export type HerculeClient = Operations & {
    * same errors as any other call.
    */
   readonly readAttachmentContent: (id: string) => Promise<Blob>;
+  /**
+   * Deletes an image the user uploaded and no message has used yet, with
+   * `attachment.delete`. Fails with `not_found` for an image that a message
+   * uses, that someone else uploaded, or that is already gone, and with the
+   * same errors as any other call.
+   */
+  readonly deleteAttachment: (id: string) => Promise<void>;
 };
 
 /**
@@ -267,6 +283,9 @@ export const createClient = (options: ClientOptions): HerculeClient => {
         query: { name: file.name },
         payload: new Uint8Array(await file.arrayBuffer()),
       }),
+    deleteAttachment: async (id: string) => {
+      await (client as Operations).attachment.delete({ params: { id } });
+    },
     // The promise methods drop `responseMode`, but the `Blob` needs the
     // response's content type, so this call asks the derived client for the
     // response beside the decoded bytes.

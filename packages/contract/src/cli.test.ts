@@ -61,6 +61,7 @@ const HIDDEN = [
   "auth.wsTicket",
   "attachment.create",
   "attachment.readContent",
+  "attachment.delete",
 ];
 
 /** The command spelling of every visible operation, as the spec's command table lists it. */

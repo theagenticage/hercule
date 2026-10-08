@@ -1,5 +1,6 @@
 /**
- * Runs image uploads a few at a time, in the order they were added.
+ * Runs image uploads a few at a time, in the order they were added, and
+ * deletes the uploads the user removes from the shelf.
  *
  * Ten pasted screenshots would otherwise start ten 10 MB uploads at once and
  * hold up every other request to the controller. A failed upload is not tried
@@ -7,6 +8,7 @@
  */
 import type { Attachment } from "@hercule/contract";
 import type { ImageFile } from "./files";
+import type { ShelfItem } from "./shelf";
 
 /** How many images upload at once, across the whole app. */
 export const UPLOAD_CONCURRENCY = 3;
@@ -24,12 +26,19 @@ export interface UploadQueue {
    */
   readonly add: (key: string, file: ImageFile) => Promise<UploadOutcome>;
   /**
-   * Cancels the upload with `key`: a waiting one never starts, and a running
-   * one's result is dropped. Its promise resolves `cancelled` at once. A
-   * running request is not aborted, so it keeps its slot until it ends, and
-   * the controller deletes the unsent upload after 24 hours.
+   * Lets go of the upload of an image the user removed from the shelf:
+   *
+   * - an image still uploading is cancelled. A waiting upload never starts,
+   *   and a running one's promise resolves `cancelled` at once. The running
+   *   request is not aborted, so it keeps its slot until it ends, and the
+   *   upload it made is then deleted;
+   * - an uploaded image is deleted from the controller;
+   * - a failed or expired image has nothing to delete.
+   *
+   * A delete is not waited for, and a failed one is only logged: the
+   * controller deletes any unsent upload after 24 hours anyway.
    */
-  readonly cancel: (key: string) => void;
+  readonly discard: (item: ShelfItem) => void;
 }
 
 interface Job {
@@ -45,11 +54,25 @@ interface Job {
  */
 export const createUploadQueue = (options: {
   readonly upload: (file: ImageFile) => Promise<Attachment>;
+  readonly deleteAttachment: (id: string) => Promise<unknown>;
   readonly concurrency: number;
 }): UploadQueue => {
   const waiting: Job[] = [];
   const running = new Map<string, Job>();
   let active = 0;
+
+  const deleteUpload = (id: string): void => {
+    options.deleteAttachment(id).catch((error: unknown) => {
+      console.warn(`Could not delete the removed image ${id}.`, error);
+    });
+  };
+
+  const cancel = (key: string): void => {
+    const index = waiting.findIndex((job) => job.key === key);
+    const job = index === -1 ? running.get(key) : waiting.splice(index, 1)[0];
+    running.delete(key);
+    job?.settle({ status: "cancelled" });
+  };
 
   const startNext = (): void => {
     while (active < options.concurrency) {
@@ -72,6 +95,9 @@ export const createUploadQueue = (options: {
           if (running.get(job.key) === job) {
             running.delete(job.key);
             job.settle(outcome);
+          } else if (outcome.status === "uploaded") {
+            // The image was removed while it uploaded, so nothing will send it.
+            deleteUpload(outcome.attachment.id);
           }
           startNext();
         });
@@ -84,11 +110,9 @@ export const createUploadQueue = (options: {
         waiting.push({ key, file, settle });
         startNext();
       }),
-    cancel: (key) => {
-      const index = waiting.findIndex((job) => job.key === key);
-      const job = index === -1 ? running.get(key) : waiting.splice(index, 1)[0];
-      running.delete(key);
-      job?.settle({ status: "cancelled" });
+    discard: (item) => {
+      if (item.status === "uploading") cancel(item.key);
+      else if (item.status === "uploaded") deleteUpload(item.attachment.id);
     },
   };
 };

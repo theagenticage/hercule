@@ -57,7 +57,7 @@ const FACTS: RunnerFacts = {
 };
 
 const MODELS: ReadonlyArray<ModelDescriptor> = [
-  { slug: "clever", name: "Clever", acceptsImages: true, isDefault: true, options: [] },
+  { slug: "clever", name: "Clever", imageInput: { maxBytes: null }, isDefault: true, options: [] },
 ];
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });

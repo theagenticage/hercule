@@ -20,19 +20,24 @@ const LOCAL = buildRunner({ id: "r-local", name: "moss" });
 const SONNET = {
   slug: "claude-sonnet-5",
   name: "Claude Sonnet 5",
-  acceptsImages: true,
+  imageInput: { maxBytes: null },
   isDefault: true,
   options: [],
 };
-const OPUS = { slug: "claude-opus-5", name: "Claude Opus 5", acceptsImages: true, options: [] };
+const OPUS = {
+  slug: "claude-opus-5",
+  name: "Claude Opus 5",
+  imageInput: { maxBytes: null },
+  options: [],
+};
 const LEGACY = {
   slug: "claude-sonnet-3",
   name: "Claude Sonnet 3",
-  acceptsImages: true,
+  imageInput: { maxBytes: null },
   isLegacy: true,
   options: [],
 };
-const GPT = { slug: "gpt-5", name: "GPT-5", acceptsImages: true, options: [] };
+const GPT = { slug: "gpt-5", name: "GPT-5", imageInput: { maxBytes: null }, options: [] };
 
 const withModels = (
   base: ProviderInstance,
@@ -99,7 +104,7 @@ const buildCountedInstance = (id: string, name: string, count: number): Provider
     Array.from({ length: count }, (_, index) => ({
       slug: `model-${id}-${index}`,
       name: `Model ${index}`,
-      acceptsImages: true,
+      imageInput: { maxBytes: null },
       options: [],
     })),
   );

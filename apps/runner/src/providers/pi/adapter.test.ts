@@ -374,27 +374,6 @@ describe("sending an input to a pi session", () => {
     });
   }
 
-  it("refuses an image over pi's size limit before sending pi anything, naming the image", async () => {
-    const run = await startTestSession();
-    const before = run.sent.length;
-    const image = writeTestImage({ name: "photo.png", sizeBytes: 4 * 1024 * 1024 });
-
-    const refused = await Effect.runPromise(
-      Effect.flip(
-        run.adapter.sendInput(SESSION, {
-          text: "what is this?",
-          attachments: [image],
-          modelSelection: { model: "glm-5.3-flash", options: { thinking: "low" } },
-        }),
-      ),
-    );
-
-    // pi drops a larger image from the prompt without saying so, and the
-    // model would answer as if no image was attached.
-    expect(refused).toBe('"photo.png" is 4 MB; pi accepts images up to 3.375 MB.');
-    expect(run.sent).toHaveLength(before);
-  });
-
   it("reports the user's message as an item of the turn it opened", async () => {
     const run = await startTestSession();
 

@@ -2990,6 +2990,9 @@ export const CLI = {
   // Returns an image's bytes, which a terminal cannot show. A client reads it
   // to draw an image of a transcript or a queued input.
   "attachment.readContent": { hidden: true },
+  // Clients call it when an image is removed from the shelf before the input
+  // is sent, so the upload does not wait 24 hours for the sweep.
+  "attachment.delete": { hidden: true },
 
   "controller.read": {
     command: "controller read",

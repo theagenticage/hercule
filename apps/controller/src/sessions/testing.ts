@@ -465,7 +465,7 @@ const AGENT_FACTS = {
 } as const;
 
 const AGENT_MODELS = [
-  { slug: "fast", name: "Fast", acceptsImages: true, isDefault: true, options: [] },
+  { slug: "fast", name: "Fast", imageInput: { maxBytes: null }, isDefault: true, options: [] },
 ];
 
 /**

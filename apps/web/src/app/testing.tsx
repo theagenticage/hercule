@@ -297,6 +297,7 @@ export const renderApp = async ({
       live,
       uploads: createUploadQueue({
         upload: client.uploadAttachment,
+        deleteAttachment: client.deleteAttachment,
         concurrency: UPLOAD_CONCURRENCY,
       }),
       detectLocalRunner,

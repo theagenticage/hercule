@@ -6,6 +6,8 @@
  * These run inside the caller's transaction, so the claim and the input row
  * are written together or not at all.
  */
+import * as Clock from "effect/Clock";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -19,16 +21,35 @@ import type { AttachmentReference } from "@hercule/protocol";
 import { currentStamp } from "../actor";
 import { attachmentRepository, type StoredAttachment } from "./repository";
 
-/** The message of the issue for an attachment that is gone, or that someone else uploaded. */
+/**
+ * How long an upload no input references stays claimable. After that it
+ * counts as gone, and the sweep deletes it on its next pass.
+ */
+export const UNCLAIMED_LIFETIME: Duration.Duration = Duration.hours(24);
+
+/**
+ * Returns the oldest upload time, as an ISO string, of an upload no input
+ * references that is still claimable now.
+ */
+export const readUnclaimedCutoff: Effect.Effect<string> = Effect.map(
+  Clock.currentTimeMillis,
+  (now) => new Date(now - Duration.toMillis(UNCLAIMED_LIFETIME)).toISOString(),
+);
+
+/**
+ * The message of the issue for an attachment that is gone, that someone else
+ * uploaded, or that waited longer than `UNCLAIMED_LIFETIME` to be sent.
+ */
 export const EXPIRED_ATTACHMENT_MESSAGE = "This image expired; attach it again.";
 
 /**
  * Returns the references of the images with these ids, in the same order,
  * for an input about to claim them with `claimAttachments`.
  *
- * Each image must exist and must have been uploaded by the current actor,
- * unless it is in `carried`, the images the input already carries: an edit
- * that sends those back keeps them, whoever uploaded them. Fails with
+ * Each image must exist, must have been uploaded by the current actor, and
+ * must be younger than `UNCLAIMED_LIFETIME`, unless it is in `carried`, the
+ * images the input already carries: an edit that sends those back keeps
+ * them, whoever uploaded them and whenever. Fails with
  * `Validation` otherwise, with an issue at `["attachments", "<i>"]`
  * for each image that fails, so a client can mark the one to attach again.
  * An image someone else uploaded gets the same message as one the sweep
@@ -47,18 +68,23 @@ export const readClaimableAttachments = (
     if (ids.length === 0) return [];
     const attachments = yield* attachmentRepository;
     const actor = yield* currentStamp;
-    const found = new Map((yield* attachments.listByIds(ids)).map((row) => [row.id, row]));
+    const rows = new Map((yield* attachments.listByIds(ids)).map((row) => [row.id, row]));
     const carriedIds = new Set(carried.map((reference) => reference.id));
-    const claimable: Array<StoredAttachment> = [];
+    const cutoff = yield* readUnclaimedCutoff;
+    const accepted: Array<StoredAttachment> = [];
     const issues: Array<Issue> = [];
     ids.forEach((id, index) => {
-      const row = found.get(id);
-      if (row === undefined || (row.actor !== actor && !carriedIds.has(id)))
+      const row = rows.get(id);
+      if (
+        row !== undefined &&
+        (carriedIds.has(id) || (row.actor === actor && row.createdAt >= cutoff))
+      )
+        accepted.push(row);
+      else
         issues.push({ path: ["attachments", String(index)], message: EXPIRED_ATTACHMENT_MESSAGE });
-      else claimable.push(row);
     });
     if (issues.length > 0) return yield* Effect.fail(createValidationError(issues));
-    return claimable.map(buildReference);
+    return accepted.map(buildReference);
   });
 
 /**

@@ -18,7 +18,7 @@ const MODELS: ReadonlyArray<ModelDescriptor> = [
   {
     slug: "clever",
     name: "Clever",
-    acceptsImages: true,
+    imageInput: { maxBytes: null },
     options: [
       {
         id: "effort",

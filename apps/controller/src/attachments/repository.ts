@@ -17,6 +17,12 @@ export interface StoredAttachment extends AttachmentReference {
   readonly createdAt: string;
 }
 
+/** The part of an unclaimed upload the quota reads. */
+export interface UnclaimedUpload {
+  readonly sizeBytes: number;
+  readonly createdAt: string;
+}
+
 interface AttachmentRow {
   readonly id: Uint8Array;
   readonly name: string;
@@ -155,15 +161,37 @@ const make = Effect.gen(function* () {
         rows.map((row) => uuidToString(row.id)),
       ),
 
-    /** Returns the total size of the attachments `actor` uploaded that no input references yet. */
-    sumUnclaimedBytes: (actor: string): Effect.Effect<number, SqlError> =>
+    /**
+     * Returns the size and upload time of each attachment `actor` uploaded at
+     * or after `since` that no input references yet, oldest first.
+     */
+    listUnclaimed: (
+      actor: string,
+      since: string,
+    ): Effect.Effect<ReadonlyArray<UnclaimedUpload>, SqlError> =>
       Effect.map(
-        sql<{ readonly total: number }>`
-          SELECT COALESCE(SUM(size_bytes), 0) AS total FROM attachments a
-          WHERE a.actor = ${actor} AND NOT EXISTS (
+        sql<{ readonly size_bytes: number; readonly created_at: string }>`
+          SELECT size_bytes, created_at FROM attachments a
+          WHERE a.actor = ${actor} AND a.created_at >= ${since} AND NOT EXISTS (
             SELECT 1 FROM session_input_attachments r WHERE r.attachment_id = a.id)
+          ORDER BY a.created_at
         `,
-        (rows) => rows[0]?.total ?? 0,
+        (rows) => rows.map((row) => ({ sizeBytes: row.size_bytes, createdAt: row.created_at })),
+      ),
+
+    /**
+     * Deletes the attachment when `actor` uploaded it and no input references
+     * it, and returns whether it did.
+     */
+    deleteUnclaimed: (id: string, actor: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          DELETE FROM attachments
+          WHERE id = ${uuidFromString(id)} AND actor = ${actor} AND NOT EXISTS (
+            SELECT 1 FROM session_input_attachments r WHERE r.attachment_id = attachments.id)
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
       ),
 
     /**

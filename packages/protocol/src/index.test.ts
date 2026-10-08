@@ -99,7 +99,7 @@ const probeResult = {
       slug: "default",
       name: "Default",
       isDefault: true,
-      acceptsImages: true,
+      imageInput: { maxBytes: 5 * 1024 * 1024 },
       options: [
         {
           id: "effort",
@@ -379,7 +379,7 @@ describe("the runner-to-controller catalogue", () => {
     expect(device(MAX_LOGIN_CODE_SECONDS + 1)).toBe("Failure");
   });
 
-  it("reads a probed model that does not say whether it accepts images as one that does not", () => {
+  it("reads a probed model that does not say whether it takes images as one that takes none", () => {
     // A runner on an older build sends no answer, and a missing answer must
     // never count as yes.
     const [model] = probeResult.models;
@@ -387,11 +387,30 @@ describe("the runner-to-controller catalogue", () => {
       _tag: "probeReport",
       requestId: REQUEST_ID,
       instanceId: INSTANCE_ID,
-      result: { ...probeResult, models: [omitKey(model, "acceptsImages")] },
+      result: { ...probeResult, models: [omitKey(model, "imageInput")] },
     };
     expect(Schema.decodeUnknownSync(RunnerToController)(report)).toMatchObject({
-      result: { models: [{ acceptsImages: false }] },
+      result: { models: [{ imageInput: null }] },
     });
+  });
+
+  it("keeps a model that takes images with no limit of its own apart from one that takes none", () => {
+    const [model] = probeResult.models;
+    const reportWith = (imageInput: unknown) => ({
+      _tag: "probeReport",
+      requestId: REQUEST_ID,
+      instanceId: INSTANCE_ID,
+      result: { ...probeResult, models: [{ ...model, imageInput }] },
+    });
+    expect(
+      Schema.decodeUnknownSync(RunnerToController)(reportWith({ maxBytes: null })),
+    ).toMatchObject({
+      result: { models: [{ imageInput: { maxBytes: null } }] },
+    });
+    expect(Schema.decodeUnknownSync(RunnerToController)(reportWith(null))).toMatchObject({
+      result: { models: [{ imageInput: null }] },
+    });
+    expect(decodeFromRunner(reportWith({ maxBytes: 0 }))._tag).toBe("Failure");
   });
 
   it("rejects a tag outside the union, including one from the other direction", () => {

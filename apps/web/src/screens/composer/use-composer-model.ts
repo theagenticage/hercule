@@ -253,7 +253,9 @@ export function useComposerModel(
       fresh.forEach(startUpload);
     },
     removeAttachment: (key) => {
-      uploads.cancel(key);
+      const item = message.attachments.find((candidate) => candidate.key === key);
+      if (item === undefined) return;
+      uploads.discard(item);
       changeShelf((shelf) => removeShelfItem(shelf, key));
     },
     retryAttachment: (key) => {

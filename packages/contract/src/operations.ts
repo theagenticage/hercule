@@ -502,6 +502,11 @@ const TABLE = {
     method: "GET",
     path: "/api/v1/attachments/:id/content",
   },
+  "attachment.delete": {
+    requires: "session.steer",
+    method: "DELETE",
+    path: "/api/v1/attachments/:id",
+  },
 
   "controller.read": { requires: "infra.read", method: "GET", path: "/api/v1/controller" },
   "controller.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/controller" },

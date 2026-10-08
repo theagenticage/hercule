@@ -329,6 +329,17 @@ export const ModelOption = Schema.Struct({
 
 export type ModelOption = Schema.Schema.Type<typeof ModelOption>;
 
+/**
+ * What a model takes as image input. `maxBytes` is the largest image the
+ * model accepts, or `null` when it sets no limit of its own beyond the
+ * controller's 10 MiB per upload.
+ */
+export const ImageInputCapability = Schema.Struct({
+  maxBytes: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
+});
+
+export type ImageInputCapability = Schema.Schema.Type<typeof ImageInputCapability>;
+
 /** One model a harness offers, and the per-model choices that come with it. */
 export const ModelDescriptor = Schema.Struct({
   slug: Fact,
@@ -337,14 +348,27 @@ export const ModelDescriptor = Schema.Struct({
   /** A model the harness no longer lists but still forwards to the API. */
   isLegacy: Schema.optionalKey(Schema.Boolean),
   /**
-   * Whether the model takes images as input. The composer and the controller
-   * refuse images for a model that does not, and a missing answer must never
-   * count as yes. So the field is required on the decoded type, and every
-   * adapter sets it. A descriptor without it decodes as `false`: a runner on
-   * an older build sends none, and neither do the snapshots the controller
-   * stored before the field existed.
+   * Whether the model takes images as input, and how large, or `null` when it
+   * takes none. The composer and the controller refuse images for a model
+   * whose value is `null`.
+   *
+   * The capability is one field per kind of input, not one flag for all
+   * attachments, for two reasons:
+   *
+   * - harnesses declare input support per modality (text, image, and so on);
+   * - the limits differ per kind, so each kind carries its own.
+   *
+   * A later kind, such as documents, gets a field of its own beside this one
+   * (`documentInput`).
+   *
+   * A missing answer must never count as yes, so the field is required on the
+   * decoded type and every adapter sets it. A descriptor without it decodes as
+   * `null`: a runner on an older build sends none, and neither do the
+   * snapshots the controller stored before the field existed.
    */
-  acceptsImages: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+  imageInput: Schema.NullOr(ImageInputCapability).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
   options: Schema.Array(ModelOption).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
 });
 

@@ -79,7 +79,7 @@ const WITHOUT_IMAGES: ProviderInstance = {
   ...FIXTURE_INSTANCE,
   snapshots: FIXTURE_INSTANCE.snapshots.map((snapshot) => ({
     ...snapshot,
-    models: snapshot.models.map((model) => ({ ...model, acceptsImages: false })),
+    models: snapshot.models.map((model) => ({ ...model, imageInput: null })),
   })),
 };
 

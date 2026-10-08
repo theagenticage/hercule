@@ -30,19 +30,36 @@ export interface AttachmentRecipient {
   readonly model: string;
 }
 
-/** Where one turn runs, and how many attachments it carries. */
+/** The part of one attachment the check reads: its name for the message, and its size. */
+export interface AttachmentSize {
+  readonly name: string;
+  readonly sizeBytes: number;
+}
+
+/** Where one turn runs, and the attachments it carries. */
 export interface AttachmentTurn {
   readonly runnerId: string;
   readonly instanceId: string;
   /** The slug of the model the turn runs on. */
   readonly model: string;
-  readonly attachmentCount: number;
+  readonly attachments: ReadonlyArray<AttachmentSize>;
 }
 
+const MEBIBYTE = 1024 * 1024;
+
 /**
- * Returns why a turn with `attachmentCount` attachments cannot go to
- * `recipient`, or `undefined` when it can. A turn without attachments is
- * never refused.
+ * Formats a byte count in MB (of 1024 * 1024 bytes) with up to three
+ * decimals and no trailing zeros: `4 MB`, `3.375 MB`. `round` picks the
+ * direction of the last decimal. A limit is rounded down and an image's size
+ * up, so an image the message calls no larger than the limit is never the
+ * one refused.
+ */
+const formatMegabytes = (bytes: number, round: (value: number) => number): string =>
+  `${String(round((bytes / MEBIBYTE) * 1000) / 1000)} MB`;
+
+/**
+ * Returns why a turn with `attachments` cannot go to `recipient`, or
+ * `undefined` when it can. A turn without attachments is never refused.
  *
  * The checks run in this order, because each makes the next moot:
  *
@@ -50,13 +67,15 @@ export interface AttachmentTurn {
  *   older build that would drop the images;
  * - the model is not among those the runner reported, so nothing says it
  *   takes images, and an unknown answer never counts as yes;
- * - the model reported that it takes no images.
+ * - the model reported that it takes no images;
+ * - an image is larger than the model's own limit. The message names the
+ *   first such image.
  */
 export const describeAttachmentRefusal = (
   recipient: AttachmentRecipient,
-  attachmentCount: number,
+  attachments: ReadonlyArray<AttachmentSize>,
 ): string | undefined => {
-  if (attachmentCount === 0) return undefined;
+  if (attachments.length === 0) return undefined;
   if (!recipient.capabilities.includes(ATTACHMENTS_CAPABILITY))
     return (
       `Runner \`${recipient.runnerName}\` runs an older Hercule that can't take images. ` +
@@ -69,11 +88,21 @@ export const describeAttachmentRefusal = (
       "so Hercule can't tell whether it accepts images. " +
       "Send the prompt without images or pick another model."
     );
-  if (model.acceptsImages) return undefined;
-  const images = attachmentCount === 1 ? "the image" : `the ${attachmentCount} images`;
+  if (model.imageInput === null) {
+    const images = attachments.length === 1 ? "the image" : `the ${attachments.length} images`;
+    return (
+      `\`${recipient.model}\` does not accept images. ` +
+      `Remove ${images} or pick a model that accepts them.`
+    );
+  }
+  const { maxBytes } = model.imageInput;
+  const tooLarge =
+    maxBytes === null ? undefined : attachments.find((one) => one.sizeBytes > maxBytes);
+  if (tooLarge === undefined || maxBytes === null) return undefined;
   return (
-    `\`${recipient.model}\` does not accept images. ` +
-    `Remove ${images} or pick a model that accepts them.`
+    `"${tooLarge.name}" is ${formatMegabytes(tooLarge.sizeBytes, Math.ceil)}; ` +
+    `this model accepts images up to ${formatMegabytes(maxBytes, Math.floor)}. ` +
+    "Send a smaller image or pick another model."
   );
 };
 
@@ -93,7 +122,7 @@ export const findAttachmentRefusal = (
   turn: AttachmentTurn,
 ): Effect.Effect<string | undefined, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
-    if (turn.attachmentCount === 0) return undefined;
+    if (turn.attachments.length === 0) return undefined;
     // A session's runner row is never deleted while the session exists.
     const runner = Option.getOrThrow(yield* (yield* runnerRepository).read(turn.runnerId));
     const snapshot = yield* (yield* providerRepository)
@@ -106,7 +135,7 @@ export const findAttachmentRefusal = (
         models: Option.match(snapshot, { onNone: () => [], onSome: (found) => found.models }),
         model: turn.model,
       },
-      turn.attachmentCount,
+      turn.attachments,
     );
   });
 

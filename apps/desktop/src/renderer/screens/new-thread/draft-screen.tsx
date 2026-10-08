@@ -166,7 +166,7 @@ export function DraftScreen({
   const images = useComposerImages({
     storeKey: key,
     shelf: pending.message.attachments,
-    acceptsImages: fields.model.acceptsImages,
+    imageInput: fields.model.imageInput,
     modelName: fields.model.modelName,
     readOnly: false,
   });

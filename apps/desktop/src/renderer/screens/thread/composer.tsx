@@ -202,7 +202,7 @@ export function ThreadComposer({
   const images = useComposerImages({
     storeKey: sessionId,
     shelf: pending.message.attachments,
-    acceptsImages: fields.model.acceptsImages,
+    imageInput: fields.model.imageInput,
     modelName: fields.model.modelName,
     readOnly: readOnly !== null,
   });

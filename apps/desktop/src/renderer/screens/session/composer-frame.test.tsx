@@ -34,7 +34,7 @@ const buildAttachments = (
   attachBlockedReason: string | null = null,
 ): ComposerAttachments & { readonly onFiles: Mock<(files: readonly File[]) => void> } => ({
   shelf: SHELF,
-  model: { acceptsImages: true, modelName: "Opus 5.5" },
+  model: { imageInput: { maxBytes: null }, modelName: "Opus 5.5" },
   onRemove: () => {},
   onRetry: () => {},
   attachBlockedReason,

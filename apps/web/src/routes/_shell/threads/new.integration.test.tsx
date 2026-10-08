@@ -133,11 +133,11 @@ const INSTANCE_A = buildProviderInstance(
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
-        acceptsImages: true,
+        imageInput: { maxBytes: null },
         isDefault: true,
         options: [EFFORT, THINKING],
       },
-      { slug: "claude-opus-5", name: "Claude Opus 5", acceptsImages: true, options: [] },
+      { slug: "claude-opus-5", name: "Claude Opus 5", imageInput: { maxBytes: null }, options: [] },
     ]),
   ],
 );
@@ -152,7 +152,7 @@ const INSTANCE_B = buildProviderInstance(
       {
         slug: "claude-haiku-5",
         name: "Claude Haiku 5",
-        acceptsImages: true,
+        imageInput: { maxBytes: null },
         isDefault: true,
         options: [],
       },
@@ -606,11 +606,16 @@ describe("Composer: sending", () => {
           {
             slug: "claude-haiku-5",
             name: "Claude Haiku 5",
-            acceptsImages: true,
+            imageInput: { maxBytes: null },
             isDefault: true,
             options: [],
           },
-          { slug: "claude-opus-5", name: "Claude Opus 5", acceptsImages: true, options: [] },
+          {
+            slug: "claude-opus-5",
+            name: "Claude Opus 5",
+            imageInput: { maxBytes: null },
+            options: [],
+          },
         ]),
       ),
     );
@@ -773,7 +778,7 @@ const LOGGED_IN: ProviderInstance = {
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
-        acceptsImages: true,
+        imageInput: { maxBytes: null },
         isDefault: true,
         options: [],
       },
@@ -859,7 +864,7 @@ describe("Composer: a login updates the open draft", () => {
 const buildModel = (slug: string, name: string, extra: Record<string, unknown> = {}) => ({
   slug,
   name,
-  acceptsImages: true,
+  imageInput: { maxBytes: null },
   options: [],
   ...extra,
 });
@@ -1149,7 +1154,7 @@ const WITH_OPTIONS = buildProviderInstance(
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
-        acceptsImages: true,
+        imageInput: { maxBytes: null },
         isDefault: true,
         options: [EFFORT, FAST_MODE],
       },
@@ -2297,7 +2302,7 @@ const INSTANCE_TEXT_ONLY = buildProviderInstance(
   "pi",
   [
     buildSnapshot(RUNNER.id, "rogier@example.com", "Pi", [
-      { slug: "glm-5.3", name: "GLM 5.3", acceptsImages: false, isDefault: true, options: [] },
+      { slug: "glm-5.3", name: "GLM 5.3", imageInput: null, isDefault: true, options: [] },
     ]),
   ],
 );

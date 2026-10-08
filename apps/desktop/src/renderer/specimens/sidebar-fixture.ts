@@ -15,6 +15,7 @@
  * same model catalogs.
  */
 import type {
+  ModelDescriptor,
   ModelOption,
   OpenRequest,
   Project,
@@ -54,7 +55,7 @@ export interface SpecimenModel {
   readonly instanceId: string;
   readonly slug: string;
   readonly name: string;
-  readonly acceptsImages: boolean;
+  readonly imageInput: ModelDescriptor["imageInput"];
   readonly options: ReadonlyArray<ModelOption>;
 }
 
@@ -62,7 +63,7 @@ export const CLAUDE_SONNET: SpecimenModel = {
   instanceId: "i-claude",
   slug: "claude-sonnet-5",
   name: "Claude Sonnet 5",
-  acceptsImages: true,
+  imageInput: { maxBytes: null },
   options: [],
 };
 
@@ -71,7 +72,7 @@ export const CLAUDE_OPUS: SpecimenModel = {
   instanceId: "i-claude",
   slug: "claude-opus-5-5",
   name: "Opus 5.5",
-  acceptsImages: true,
+  imageInput: { maxBytes: null },
   options: [
     {
       id: "effort",
@@ -91,7 +92,7 @@ export const GPT: SpecimenModel = {
   instanceId: "i-codex",
   slug: "gpt-5.4",
   name: "GPT-5.4",
-  acceptsImages: true,
+  imageInput: { maxBytes: null },
   options: [],
 };
 
@@ -264,10 +265,10 @@ const buildInstance = (
       harnessVersion: null,
       versionVerdict: "unknown",
       auth: { status: "ok" },
-      models: models.map(({ slug, name, acceptsImages, options }) => ({
+      models: models.map(({ slug, name, imageInput, options }) => ({
         slug,
         name,
-        acceptsImages,
+        imageInput,
         options,
       })),
     },

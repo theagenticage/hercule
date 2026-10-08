@@ -39,7 +39,6 @@ import {
 } from "@hercule/contract";
 import type { Plugin } from "@hercule/plugin-host";
 import { buildHomePaths } from "@hercule/home";
-import { AttachmentSweepInterval } from "../attachments";
 import { HerculeHome } from "../config";
 import { ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
@@ -53,6 +52,7 @@ import {
   LostRunnerSweepInterval,
   RunFibers,
   SchedulerInterval,
+  AttachmentSweepInterval,
   SessionInputDeadline,
   RunServiceReferenceLayer,
   SessionObserverLayer,

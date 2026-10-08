@@ -110,11 +110,11 @@ const INSTANCE_STARTED: ProviderInstance = {
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
-        acceptsImages: true,
+        imageInput: { maxBytes: null },
         isDefault: true,
         options: [],
       },
-      { slug: "claude-opus-5", name: "Claude Opus 5", acceptsImages: true, options: [] },
+      { slug: "claude-opus-5", name: "Claude Opus 5", imageInput: { maxBytes: null }, options: [] },
     ]),
   ],
   createdAt: "2026-09-08T09:00:00.000Z",
@@ -147,11 +147,16 @@ const INSTANCE_OPTIONS: ProviderInstance = {
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
-        acceptsImages: true,
+        imageInput: { maxBytes: null },
         isDefault: true,
         options: [EFFORT],
       },
-      { slug: "claude-opus-5", name: "Claude Opus 5", acceptsImages: true, options: [EFFORT] },
+      {
+        slug: "claude-opus-5",
+        name: "Claude Opus 5",
+        imageInput: { maxBytes: null },
+        options: [EFFORT],
+      },
     ]),
   ],
 };
@@ -165,7 +170,7 @@ const INSTANCE_OTHER: ProviderInstance = {
       {
         slug: "claude-haiku-5",
         name: "Claude Haiku 5",
-        acceptsImages: true,
+        imageInput: { maxBytes: null },
         isDefault: true,
         options: [],
       },

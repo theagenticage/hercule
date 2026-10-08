@@ -18,6 +18,7 @@ const STRIP_TONE: Record<ShelfTileState["name"], string> = {
   failed: "text-fail",
   expired: "text-attn",
   unsupported: "text-attn",
+  "too-large": "text-attn",
 };
 
 /**

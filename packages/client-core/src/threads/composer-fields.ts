@@ -14,6 +14,7 @@
 import type {
   AccessMode,
   CapabilitySnapshot,
+  ModelDescriptor,
   ModelOption,
   ProviderInstance,
   Runner,
@@ -106,11 +107,12 @@ export interface ComposerFields {
   readonly model: {
     readonly pill: ModelPill;
     /**
-     * Whether the selected model takes images. A model the runner's snapshot
-     * does not list counts as one that does not, because the controller
-     * refuses images for it too.
+     * The images the selected model takes, with its own size limit if it has
+     * one, or `null` when it takes none. A model the runner's snapshot does
+     * not list counts as one that takes none, because the controller refuses
+     * images for it too.
      */
-    readonly acceptsImages: boolean;
+    readonly imageInput: ModelDescriptor["imageInput"];
     /** The selected model's name, for a sentence such as "glm-5.3 does not accept images". */
     readonly modelName: string;
   };
@@ -267,7 +269,7 @@ export const buildComposerFields = (
         // the pill shows the slug rather than going blank.
         name: descriptor?.name ?? config.model,
       },
-      acceptsImages: descriptor?.acceptsImages === true,
+      imageInput: descriptor?.imageInput ?? null,
       modelName: descriptor?.name ?? config.model ?? "The model",
     },
     options:
