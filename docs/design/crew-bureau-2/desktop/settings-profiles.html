@@ -299,7 +299,7 @@
                 <section class="set-sec">
                   <h2>Grants<small data-count></small></h2>
                   <p>What a session on this profile may do through the API. A change reaches its sessions on their next call.</p>
-                  <p class="note" data-warn hidden>Unrestricted holds every grant, so a session on it can do anything you can. Give it only to work you would do yourself.</p>
+                  <p class="note" data-warn hidden>Unrestricted is meant to hold every grant, so a session on it can do anything you can. Give it only to work you would do yourself.</p>
                   <div data-grants></div>
                 </section>
 
@@ -370,10 +370,11 @@
         },
       };
       var countOf = function (p) { return p.grants === "all" ? ALL : p.grants ? p.grants.length : p.count; };
+      // Up to two users by name; more as the first two and a count of the rest.
       var usersText = function (p) {
         if (p.users.length === 0) return "Nothing";
-        var agents = p.users.every(function (u) { return u[2] === "Agent"; });
-        return agents && p.users.length > 1 ? p.users.length + " agents" : p.users.map(function (u) { return u[0]; }).join(", ");
+        var names = p.users.slice(0, 2).map(function (u) { return u[0]; }).join(", ");
+        return p.users.length > 2 ? names + " and " + (p.users.length - 2) + " more" : names;
       };
 
       // ?state=reviewer opens Reviewer's page; ?state=shipped opens unrestricted, a shipped profile nothing uses;
