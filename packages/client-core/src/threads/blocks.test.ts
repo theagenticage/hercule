@@ -492,6 +492,19 @@ describe("buildThreadBlocks", () => {
     expect(findBlock(blocks, "agent", "agent:a1").live).toBe(false);
   });
 
+  it("shows no live row when a warning follows the running work, because the divider above it still shows the work", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Hi"),
+      buildItemStarted("t1", "c1", "command_execution", 1),
+      buildWarning(2, "t1", "retrying after a 529"),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+
+    expect(blocks.map((block) => block.kind)).toEqual(["user", "work", "warning"]);
+  });
+
   it("ends a stopped turn with its duration", () => {
     const rows = [
       buildTurnStarted("t1", 0),

@@ -202,15 +202,15 @@ const readChangedPaths = (event: ItemStarted): readonly string[] => {
  *   not end the work stretch it falls in: the stretch's divider stays one,
  *   above the warning, and items that start after the warning still join it.
  * - A `live` block at the end while the agent has no open Request, no agent
- *   message holds the working face, the last block is not the running
- *   turn's running `work` block, and either the last turn has not finished
- *   or, before any turn, the agent is working.
+ *   message holds the working face, the last block other than a warning is
+ *   not the running turn's running `work` block, and either the last turn has
+ *   not finished or, before any turn, the agent is working.
  *
  * The working face is on one block at most: the agent message the agent is
  * writing; else the running turn's last agent message, when nothing started
  * after it (its turn's end is about to land); else the `live` block. While
- * the running turn's running work stretch is the last block, the face is on
- * none: the stretch's divider shows the agent is busy.
+ * the running turn's running work stretch is the last block other than a
+ * warning, the face is on none: the stretch's divider shows the agent is busy.
  *
  * Each block's key is built from an item id, a turn id, a request id or, for
  * a warning, its row's position, so it stays the same as rows are appended.
@@ -483,7 +483,9 @@ export const buildThreadBlocks = (
   // for" divider already shows the agent is busy, and a face row under it
   // would look like a response that has started when it has not. A finished
   // stretch of an earlier turn shows no such divider, so it does not count.
-  const lastBlock = blocks.at(-1);
+  // A warning reports on the work and is not a step of it, so a running
+  // stretch above a warning still shows the agent is busy.
+  const lastBlock = blocks.findLast((block) => block.kind !== "warning");
   const endsOnRunningWork =
     lastBlock?.kind === "work" &&
     lastBlock.endedAt === null &&
