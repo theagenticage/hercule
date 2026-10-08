@@ -90,8 +90,17 @@ const HOUR_MS = 3_600_000;
  */
 const AGE_HOURS = 6;
 
-/** How far back a thread's last activity is set for the one row that shows minutes. */
+/** How far back a thread is set for the one row that shows minutes. */
 const TWO_MINUTES_MS = 120_000;
+
+/**
+ * How far back the threads that show no age, outside the first project, are
+ * created. The sidebar lists projects by the creation time of their newest
+ * thread, and the first project must stay the first one listed. The first
+ * project's busy thread is created last, so it is the newest, as long as
+ * these are older than any idle thread (at most 6 hours and 31 minutes).
+ */
+const OTHER_PROJECTS_BACK_MS = 7 * HOUR_MS;
 
 /** The controller's database, inside its Hercule Home. */
 const DATABASE_PATH = ["data", "hercule.db"] as const;
@@ -159,8 +168,10 @@ export interface ThreadFixture {
   readonly growTo: (count: number) => Promise<void>;
   /**
    * Readies the controller for a launch: closes the open Requests, restarts
-   * the controller with every idle thread's last activity set hours back,
-   * and opens the Requests again. With `twoMinuteRow`, one idle thread in the
+   * the controller with every idle thread's creation and last activity set
+   * hours back, and opens the Requests again. A row's age is the time since
+   * the thread was created, and a header tab's the time since its last
+   * activity, so both are set. With `twoMinuteRow`, one idle thread in the
    * first project is set only two minutes back instead, so exactly one row on
    * screen shows minutes. Fails when a thread is not in its expected state
    * afterwards.
@@ -335,7 +346,13 @@ export async function runWithThreadFixture<T>(
         if (stopped !== 0) {
           throw new Error(`the controller exited with ${String(stopped)}:\n${controller.output()}`);
         }
-        setLastActivity(home, idleIds, twoMinuteRow ? firstProjectIdle[0]! : null);
+        backdateThreads(
+          home,
+          idleIds,
+          twoMinuteRow ? firstProjectIdle[0]! : null,
+          // The busy and waiting threads of every project but the first.
+          [...busyIds.slice(1), ...waitingIds.slice(1)],
+        );
         controller = await startController({ home, binary: findCompiledBinary(), port });
         await Promise.all(runners.map((runner) => runner.reconnect()));
         for (const runner of runners) {
@@ -355,7 +372,9 @@ export async function runWithThreadFixture<T>(
 
         // The second project's Request is opened first, and has landed before
         // the first project's opens, so the first project holds the newest
-        // activity and is listed first, with the two-minute row in it.
+        // activity. It is listed first in the sidebar because of its busy
+        // thread's creation time (see `OTHER_PROJECTS_BACK_MS`), with the
+        // two-minute row in it.
         for (const id of waitingIds.toReversed()) {
           openRequests.set(id, runnerBySessionId.get(id)!.openRequest(id, "command_approval"));
           await waitForThreads(
@@ -446,27 +465,38 @@ export async function runWithThreadFixture<T>(
 }
 
 /**
- * Writes the last activity of every thread in `idleIds` into the stopped
- * controller's database in the Home `home`.
+ * Writes the creation time and the last activity of the threads into the
+ * stopped controller's database in the Home `home`, and fails when a thread
+ * is not found.
  *
- * The thread at position `i` is set `(1 + i mod 6)` hours, 30 minutes and
- * `i mod 60` seconds back. Every idle row then shows hours, and each
- * age is at least 29 minutes from the moment its label next changes, so no
- * label changes during a launch. `twoMinuteThreadId`, when given, is set two
- * minutes back instead, so its label changes once a minute.
+ * The thread at position `i` of `idleIds` is set `(1 + i mod 6)` hours, 30
+ * minutes and `i mod 60` seconds back, for both times. Every idle row then
+ * shows hours, and each age is at least 29 minutes from the moment its label
+ * next changes, so no label changes during a launch. `twoMinuteThreadId`,
+ * when given, is set two minutes back instead, so its label changes once a
+ * minute. A row shows the time since its thread was created, and the header's
+ * tab the time since its last activity, so both are set to the same time.
+ *
+ * `otherProjectIds` are threads outside the first project that show no age.
+ * Only their creation time is set, to `OTHER_PROJECTS_BACK_MS` back, so the
+ * first project is the first one the sidebar lists.
  *
  * A session's id is stored as 16 bytes, so each row is found by the hex form
- * of the id without its dashes. Fails when a thread is not found.
+ * of the id without its dashes.
  */
-function setLastActivity(
+function backdateThreads(
   home: string,
   idleIds: readonly string[],
   twoMinuteThreadId: string | null,
+  otherProjectIds: readonly string[],
 ): void {
   const database = new DatabaseSync(join(home, ...DATABASE_PATH));
   try {
     const update = database.prepare(
-      "UPDATE sessions SET last_activity_at = ? WHERE hex(id) = upper(replace(?, '-', ''))",
+      "UPDATE sessions SET created_at = ?, last_activity_at = ? WHERE hex(id) = upper(replace(?, '-', ''))",
+    );
+    const updateCreation = database.prepare(
+      "UPDATE sessions SET created_at = ? WHERE hex(id) = upper(replace(?, '-', ''))",
     );
     const now = Date.now();
     database.exec("BEGIN");
@@ -475,7 +505,15 @@ function setLastActivity(
         id === twoMinuteThreadId
           ? TWO_MINUTES_MS
           : (1 + (index % AGE_HOURS)) * HOUR_MS + HOUR_MS / 2 + (index % 60) * 1_000;
-      const { changes } = update.run(new Date(now - backMs).toISOString(), id);
+      const time = new Date(now - backMs).toISOString();
+      const { changes } = update.run(time, time, id);
+      if (changes !== 1) throw new Error(`the database has no session ${id}`);
+    }
+    for (const id of otherProjectIds) {
+      const { changes } = updateCreation.run(
+        new Date(now - OTHER_PROJECTS_BACK_MS).toISOString(),
+        id,
+      );
       if (changes !== 1) throw new Error(`the database has no session ${id}`);
     }
     database.exec("COMMIT");
