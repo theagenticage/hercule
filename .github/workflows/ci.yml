@@ -2,13 +2,14 @@ name: CI
 
 # A change to Markdown files alone runs nothing: no check reads them, and
 # prettier skips them. The book's HTML and CSS in docs/design/ still run it,
-# because the desktop job compares the app with them.
+# because the desktop job compares the app with them. Agent skills and settings
+# (.agents/, .claude/) are not part of the product, so they run nothing either.
 on:
   push:
     branches: [main]
-    paths-ignore: ["**/*.md"]
+    paths-ignore: ["**/*.md", ".agents/**", ".claude/**"]
   pull_request:
-    paths-ignore: ["**/*.md"]
+    paths-ignore: ["**/*.md", ".agents/**", ".claude/**"]
 
 # Every job's token can only read the repository, unless the job asks for more.
 permissions:
