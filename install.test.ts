@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, onTestFinished } from "vitest";
+import { buildServiceUnit, renderSystemdUnit } from "./packages/service/src/unit";
 
 const script = fileURLToPath(new URL("install.sh", import.meta.url));
 
@@ -98,35 +99,19 @@ function buildLaunchAgent(environment: Readonly<Record<string, string>>): string
 }
 
 /**
- * Builds the content of an installed systemd unit whose environment holds
- * `environment`. Uses the real renderer from packages/service/src/unit.ts
- * to ensure install.sh decodes what the renderer produces.
+ * Renders an installed systemd unit for the Hercule Home `home` with the same
+ * renderer `hercule service install` writes, so install.sh is tested against
+ * that encoding rather than a copy of it.
  */
-function buildSystemdUnit(environment: Readonly<Record<string, string>>): string {
-  // Escape specifiers: % -> %%
-  const escapeSpecifiers = (text: string): string => text.replaceAll("%", "%%");
-  // Quote a value: wrap in quotes, escape \ and "
-  const quoteSystemdValue = (text: string): string =>
-    `"${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
-  // Quote an assignment
-  const quoteAssignment = (name: string, value: string): string =>
-    quoteSystemdValue(escapeSpecifiers(`${name}=${value}`));
-
-  const entries = Object.entries(environment)
-    .map(([key, value]) => `Environment=${quoteAssignment(key, value)}`)
-    .join("\n");
-  return `[Unit]
-Description=Hercule
-
-[Service]
-Type=simple
-${entries}
-ExecStart=/home/user/.local/bin/hercule runner
-Restart=always
-
-[Install]
-WantedBy=default.target
-`;
+function buildSystemdUnit(home: string): string {
+  return renderSystemdUnit(
+    buildServiceUnit({
+      role: "runner",
+      program: "/usr/local/bin/hercule",
+      home,
+      path: "/usr/bin:/bin",
+    }),
+  );
 }
 
 /** Creates a temporary folder that is deleted when the test finishes. */
@@ -444,7 +429,7 @@ describe("install.sh", () => {
 
       const { status, stdout } = runInstall(release.dir, {
         buildHerculeHome: () => undefined,
-        systemdUnit: buildSystemdUnit({ HERCULE_HOME: "/home/someone/other-home" }),
+        systemdUnit: buildSystemdUnit("/home/someone/other-home"),
       });
 
       expect(status).toBe(0);
@@ -461,7 +446,8 @@ describe("install.sh", () => {
     const release = writeInstallableRelease(1);
 
     const { status, stdout, stderr } = runInstall(release.dir, {
-      systemdUnit: buildSystemdUnit({ PATH: "/usr/bin:/bin" }),
+      buildHerculeHome: () => undefined,
+      systemdUnit: buildSystemdUnit("/tmp/hercule-update-home"),
     });
 
     expect(status).toBe(1);
@@ -478,7 +464,7 @@ describe("install.sh", () => {
 
       const { status, stdout } = runInstall(release.dir, {
         buildHerculeHome: () => undefined,
-        systemdUnit: buildSystemdUnit({ HERCULE_HOME: homeWithSpecialChars }),
+        systemdUnit: buildSystemdUnit(homeWithSpecialChars),
       });
 
       expect(status).toBe(0);
@@ -502,7 +488,7 @@ describe("install.sh", () => {
       mkdirSync(join(home, ".config", "systemd", "user"), { recursive: true });
       writeFileSync(
         join(home, ".config", "systemd", "user", "hercule.service"),
-        buildSystemdUnit({ HERCULE_HOME: join(home, "other-home") }),
+        buildSystemdUnit(join(home, "other-home")),
       );
 
       const result = spawnSync("sh", [script], {

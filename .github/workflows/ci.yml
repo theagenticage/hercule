@@ -99,7 +99,8 @@ jobs:
 
   # Cross-compiles the Linux binaries for edge: x64 natively, arm64 under QEMU,
   # both smoke-tested with --version. Runs on pull requests so the edge pipeline
-  # can be tested before merge, but uploads artifacts only on main.
+  # can be tested before merge. Uploads the binaries so edge-linux-install can
+  # test the same artifact, and so edge-build can publish it on main.
   edge-linux:
     runs-on: ubuntu-latest
     steps:
@@ -132,11 +133,12 @@ jobs:
             -v "$PWD/dist-binary:/out" \
             debian:bookworm-slim /out/hercule-linux-arm64 --version
 
-      # Upload artifacts on both main and PRs. On PRs, short retention for testing;
-      # on main, 1 day for edge-build to consume.
+      # One day is enough for edge-linux-install on the same run, and for
+      # edge-build on main. Uploading on pull requests too lets the installer
+      # check consume this artifact instead of rebuilding.
       - uses: actions/upload-artifact@v7
         with:
-          retention-days: ${{ github.ref == 'refs/heads/main' && 1 || 1 }}
+          retention-days: 1
           name: hercule-linux
           path: |
             dist-binary/hercule-linux-x64
