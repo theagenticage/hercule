@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findMigrationProblems, parseNameStatusLine } from "./check-migrations.ts";
+import { findMigrationProblems, parseNameStatusLine } from "./check-migrations";
 
 const DIR = "apps/controller/src/db/migrations";
 
