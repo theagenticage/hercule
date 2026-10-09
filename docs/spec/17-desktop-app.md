@@ -1178,7 +1178,8 @@ These rules keep the budgets:
    - the React Compiler
    - selector-based external stores, and never Context for changing data
    - every unbounded list virtualized
-     - *(Amended 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453).)* The sidebar's Assistants section is the one exception: a plain list, at most 40% of the sidebar's height, that scrolls on its own. A user has a handful of assistants, so every row is drawn. Revisit this once people run many.
+     - *(Amended 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453).)* The sidebar's Assistants section is an exception: a plain list, at most 40% of the sidebar's height, that scrolls on its own. A user has a handful of assistants, so every row is drawn. Revisit this once people run many.
+     - *(Amended 2026-10-09, [#494](https://github.com/theagenticage/hercule/issues/494).)* Settings › Permission profiles is another: the profile list, and the Used by list on a profile's page, are plain lists. A user keeps a handful of profiles, and each profile is carried by a handful of agents, so every row is drawn. Revisit this once people run many.
    - token deltas flushed at most once per animation frame
    - route-level code splitting with a CI bundle budget
    - TanStack Query for every HTTP read
