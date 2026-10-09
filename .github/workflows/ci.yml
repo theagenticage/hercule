@@ -58,16 +58,17 @@ jobs:
       # The Vite config, the React Compiler Babel pass, the bundle budget and
       # the embedded file list are only exercised by an actual build; the
       # binary suite then runs what that build produced. The upgrade test is
-      # excluded here because it needs macOS (see the upgrade job below).
+      # excluded here: it downloads the previous edge binary and lives in the
+      # `upgrade` job, so this job does not pay for that download twice.
       - run: pnpm build:binary
       - run: bun --bun run vitest run --project binary --exclude='**/upgrade.test.ts'
 
   # Tests that a database filled by the previous edge release upgrades cleanly
-  # to the new binary. Runs on macOS because the edge release currently only
-  # publishes macOS arm64 binaries — the same platform `edge-build` publishes.
-  # A failed upgrade must not publish (see `edge-build.needs`).
+  # to the new binary. Runs on Linux x64, the same platform as the
+  # `hercule-linux-x64` edge asset it downloads. A failed upgrade must not
+  # publish (see `edge-build.needs`).
   upgrade:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       # The GitHub API download uses the job token to read this repository's
