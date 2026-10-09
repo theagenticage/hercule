@@ -23,11 +23,12 @@
  * at all, so a sidebar row keeps its own keys. After clicking a sidebar row,
  * a test clicks into the drawer before it presses Escape, as a user does.
  *
- * With `HERCULE_OFFICE_EVIDENCE=<dir>` set, the journey test also records a
- * video of itself at 1440 × 900 into `<dir>`, and takes a light and a dark
- * screenshot at each step: `overview`, `secretariat`, `card`, `drawer` and
- * `waiting`, such as `card-dark.png`. Without it, the journey runs and
- * checks the same steps, and writes nothing.
+ * With `HERCULE_OFFICE_EVIDENCE=<dir>` set, one more test walks through the
+ * Secretariat for a reviewer: it records a video of itself at 1440 × 900
+ * into `<dir>`, and takes a light and a dark screenshot at each step:
+ * `overview`, `secretariat`, `card`, `drawer` and `waiting`, such as
+ * `card-dark.png`. Without it, that test is skipped, because the tests above
+ * already check every step it shows.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
@@ -295,6 +296,9 @@ describe("the Office", () => {
   });
 });
 
+/** The folder the Secretariat's evidence is written to, when one is asked for. */
+const evidence = process.env["HERCULE_OFFICE_EVIDENCE"];
+
 describe("the Secretariat", () => {
   it("is in the Rooms directory with every assistant, and the top bar counts the assistants at work", async () => {
     const { url } = await arrangeSecretariat();
@@ -391,116 +395,118 @@ describe("the Secretariat", () => {
     expect(await readCardFact(card, "Room")).toBe("The Secretariat");
   });
 
-  it("walks through the Secretariat: the overview, the room, a card, the drawer and the queue", async () => {
-    const evidence = process.env["HERCULE_OFFICE_EVIDENCE"];
-    if (evidence !== undefined) mkdirSync(evidence, { recursive: true });
-    const { url } = await arrangeSecretariat();
-    const userDataDir = createUserDataDirForTest();
-    writeSettings(userDataDir, {
-      controllerUrl: url,
-      window: { bounds: { x: 0, y: 0, width: 1440, height: 940 }, fullScreen: false },
-    });
-    const { app, page, close } = await launchForTest(
-      userDataDir,
-      async (application) => {
-        await application.evaluate(({ BrowserWindow }) => {
-          BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900);
-        });
-      },
-      evidence === undefined ? undefined : { dir: evidence, size: { width: 1440, height: 900 } },
-    );
-    onTestFinished(async () => {
-      await close();
-      const videoPath = page.video()?.path();
-      if (videoPath !== undefined) console.log("Office journey recording:", await videoPath);
-    });
-    await signInAndReadToken(page, url);
-    await page.getByRole("navigation", { name: "Threads", exact: true }).waitFor();
-    // The Office draws frames only while its window is on screen, and the
-    // video records only frames that are drawn.
-    await keepWindowOnTop(app);
-    const capture = async (name: string) => {
-      if (evidence === undefined) return;
-      for (const theme of ["light", "dark"] as const) {
-        await app.evaluate(({ nativeTheme }, chosen) => {
-          nativeTheme.themeSource = chosen;
-        }, theme);
-        await page.waitForFunction(
-          (dark) => matchMedia("(prefers-color-scheme: dark)").matches === dark,
-          theme === "dark",
-        );
-        // The scene draws the new theme's light on its next frame.
-        await sleep(THEME_SETTLE_MS);
-        await page.screenshot({ path: join(evidence, `${name}-${theme}.png`) });
-      }
-      await app.evaluate(({ nativeTheme }) => {
-        nativeTheme.themeSource = "light";
+  it.skipIf(evidence === undefined)(
+    "walks through the Secretariat for the evidence: the overview, the room, a card, the drawer and the queue",
+    async () => {
+      mkdirSync(evidence!, { recursive: true });
+      const { url } = await arrangeSecretariat();
+      const userDataDir = createUserDataDirForTest();
+      writeSettings(userDataDir, {
+        controllerUrl: url,
+        window: { bounds: { x: 0, y: 0, width: 1440, height: 940 }, fullScreen: false },
       });
-    };
-    // The sidebar, with every assistant in its pose, before the Office opens.
-    await expect.poll(() => readAssistantRows(page)).toEqual(SECRETARIAT_ROWS);
-    await sleep(CAMERA_SETTLE_MS);
+      const { app, page, close } = await launchForTest(
+        userDataDir,
+        async (application) => {
+          await application.evaluate(({ BrowserWindow }) => {
+            BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900);
+          });
+        },
+        { dir: evidence!, size: { width: 1440, height: 900 } },
+      );
+      onTestFinished(async () => {
+        await close();
+        const videoPath = page.video()?.path();
+        if (videoPath !== undefined) console.log("Office journey recording:", await videoPath);
+      });
+      await signInAndReadToken(page, url);
+      await page.getByRole("navigation", { name: "Threads", exact: true }).waitFor();
+      // The Office draws frames only while its window is on screen, and the
+      // video records only frames that are drawn.
+      await keepWindowOnTop(app);
+      const capture = async (name: string) => {
+        for (const theme of ["light", "dark"] as const) {
+          await app.evaluate(({ nativeTheme }, chosen) => {
+            nativeTheme.themeSource = chosen;
+          }, theme);
+          await page.waitForFunction(
+            (dark) => matchMedia("(prefers-color-scheme: dark)").matches === dark,
+            theme === "dark",
+          );
+          // The scene draws the new theme's light on its next frame.
+          await sleep(THEME_SETTLE_MS);
+          await page.screenshot({ path: join(evidence!, `${name}-${theme}.png`) });
+        }
+        await app.evaluate(({ nativeTheme }) => {
+          nativeTheme.themeSource = "light";
+        });
+      };
+      // The sidebar, with every assistant in its pose, before the Office opens.
+      await expect.poll(() => readAssistantRows(page)).toEqual(SECRETARIAT_ROWS);
+      await sleep(CAMERA_SETTLE_MS);
 
-    await openOffice(page);
-    await expect
-      .poll(() => readPoseCounts(page))
-      .toEqual(["1 working", "1 waiting on you", "2 idle"]);
-    await sleep(CAMERA_SETTLE_MS);
-    await capture("overview");
+      await openOffice(page);
+      await expect
+        .poll(() => readPoseCounts(page))
+        .toEqual(["1 working", "1 waiting on you", "2 idle"]);
+      await sleep(CAMERA_SETTLE_MS);
+      await capture("overview");
 
-    const directory = await openRoomDirectory(page);
-    await expect
-      .poll(async () => (await readOfficeRooms(directory)).map((each) => each.room))
-      .toContain("The Secretariat");
-    await sleep(CAMERA_SETTLE_MS / 2);
-    await directory.locator("button.line", { hasText: "The Secretariat" }).click();
-    await findOfficePill(page)
-      .getByRole("button", { name: "Room: The Secretariat", exact: true })
-      .waitFor();
-    await sleep(CAMERA_SETTLE_MS);
-    await capture("secretariat");
+      const directory = await openRoomDirectory(page);
+      await expect
+        .poll(async () => (await readOfficeRooms(directory)).map((each) => each.room))
+        .toContain("The Secretariat");
+      await sleep(CAMERA_SETTLE_MS / 2);
+      await directory.locator("button.line", { hasText: "The Secretariat" }).click();
+      await findOfficePill(page)
+        .getByRole("button", { name: "Room: The Secretariat", exact: true })
+        .waitFor();
+      await sleep(CAMERA_SETTLE_MS);
+      await capture("secretariat");
 
-    // A pass of the mouse over the room, for the video only: the colleague
-    // under it is drawn in the scene, where the page cannot read it.
-    const stage = await page.locator(".office-stage").boundingBox();
-    await page.mouse.move(stage!.x + stage!.width * 0.4, stage!.y + stage!.height * 0.5, {
-      steps: 20,
-    });
-    await page.mouse.move(stage!.x + stage!.width * 0.6, stage!.y + stage!.height * 0.5, {
-      steps: 20,
-    });
-    await page
-      .getByRole("group", { name: "Who is doing what" })
-      .getByRole("button", { name: "1 working" })
-      .click();
-    const card = findOpenCard(page);
-    await card.waitFor();
-    expect(await card.getAttribute("aria-label")).toBe("Ada");
-    expect(await readCardFact(card, "Room")).toBe("The Secretariat");
-    await sleep(CAMERA_SETTLE_MS);
-    await capture("card");
+      // A pass of the mouse over the room, for the video only: the colleague
+      // under it is drawn in the scene, where the page cannot read it.
+      const stage = await page.locator(".office-stage").boundingBox();
+      await page.mouse.move(stage!.x + stage!.width * 0.4, stage!.y + stage!.height * 0.5, {
+        steps: 20,
+      });
+      await page.mouse.move(stage!.x + stage!.width * 0.6, stage!.y + stage!.height * 0.5, {
+        steps: 20,
+      });
+      await page
+        .getByRole("group", { name: "Who is doing what" })
+        .getByRole("button", { name: "1 working" })
+        .click();
+      const card = findOpenCard(page);
+      await card.waitFor();
+      expect(await card.getAttribute("aria-label")).toBe("Ada");
+      expect(await readCardFact(card, "Room")).toBe("The Secretariat");
+      await sleep(CAMERA_SETTLE_MS);
+      await capture("card");
 
-    await card.getByRole("button", { name: /^Open conversation/ }).click();
-    await findOpenDrawer(page).waitFor();
-    expect(await readDrawerName(page)).toBe("Ada");
-    await sleep(CAMERA_SETTLE_MS);
-    await capture("drawer");
+      await card.getByRole("button", { name: /^Open conversation/ }).click();
+      await findOpenDrawer(page).waitFor();
+      expect(await readDrawerName(page)).toBe("Ada");
+      await sleep(CAMERA_SETTLE_MS);
+      await capture("drawer");
 
-    await pressEscapeInDrawer(page);
-    await findOpenDrawer(page).waitFor({ state: "detached" });
-    await card.waitFor();
-    await page.keyboard.press("Escape");
-    await card.waitFor({ state: "detached" });
-    await sleep(CAMERA_SETTLE_MS / 2);
+      await pressEscapeInDrawer(page);
+      await findOpenDrawer(page).waitFor({ state: "detached" });
+      await card.waitFor();
+      await page.keyboard.press("Escape");
+      await card.waitFor({ state: "detached" });
+      await sleep(CAMERA_SETTLE_MS / 2);
 
-    await page
-      .getByRole("group", { name: "Who is doing what" })
-      .getByRole("button", { name: "1 waiting on you" })
-      .click();
-    await card.waitFor();
-    expect(await card.getAttribute("aria-label")).toBe("Basil");
-    expect(await card.locator(".office-card-ask .next-of").textContent()).toBe("1 of 1");
-    await sleep(CAMERA_SETTLE_MS);
-    await capture("waiting");
-  }, 180_000);
+      await page
+        .getByRole("group", { name: "Who is doing what" })
+        .getByRole("button", { name: "1 waiting on you" })
+        .click();
+      await card.waitFor();
+      expect(await card.getAttribute("aria-label")).toBe("Basil");
+      expect(await card.locator(".office-card-ask .next-of").textContent()).toBe("1 of 1");
+      await sleep(CAMERA_SETTLE_MS);
+      await capture("waiting");
+    },
+    180_000,
+  );
 });
