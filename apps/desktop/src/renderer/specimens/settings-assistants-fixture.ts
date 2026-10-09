@@ -97,7 +97,7 @@ export const SETTINGS_ASSISTANTS_RECORDS: SidebarRecords = {
 };
 
 /** The permission profile every assistant uses: the shipped "assistant" profile. */
-const ASSISTANT_PROFILE: Profile = {
+export const ASSISTANT_PROFILE: Profile = {
   id: ADA.permissionProfileId,
   name: "assistant",
   grants: ["task.read", "event.emit", "connection.read"],

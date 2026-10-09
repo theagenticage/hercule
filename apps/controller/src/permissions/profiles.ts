@@ -18,7 +18,7 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { GrantSchema, type Grant } from "@hercule/contract";
+import { ProfileGrants, type Grant } from "@hercule/contract";
 import {
   decodeCursor,
   encodeCursor,
@@ -34,8 +34,8 @@ import {
   type PageRequest,
 } from "../db";
 
-/** The stored form of a profile's grants: a JSON array of grant strings. */
-const GrantsJson = Schema.fromJsonString(Schema.Array(GrantSchema));
+/** The stored form of a profile's grants: a JSON array of grant strings, each one once. */
+const GrantsJson = Schema.fromJsonString(ProfileGrants);
 
 /** A profile as the rest of the controller sees it. */
 export interface PermissionProfile {

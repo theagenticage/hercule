@@ -20,10 +20,13 @@ import { ALL_GRANTS, GrantSchema } from "../grants";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { atMost, bounded } from "../strings";
+import { bounded } from "../strings";
+
+/** The longest profile name. */
+export const MAX_PROFILE_NAME_LENGTH = 128;
 
 /** What a user may call a profile. */
-const ProfileName = bounded(1, 128);
+const ProfileName = bounded(1, MAX_PROFILE_NAME_LENGTH);
 
 /**
  * The longest grant list a profile may carry: the size of the grant
@@ -32,13 +35,21 @@ const ProfileName = bounded(1, 128);
  */
 export const MAX_PROFILE_GRANTS = ALL_GRANTS.length;
 
-/** The grants of a profile, in a request and in a response. */
-const Grants = atMost(GrantSchema, MAX_PROFILE_GRANTS);
+/**
+ * The grants of a profile, in a request and in a response. A profile either
+ * has a grant or not, so the list holds each grant once, and a client can
+ * count the grants by the list's length. The repeat check runs first, so a
+ * list longer than the bound fails with the message that says why.
+ */
+export const ProfileGrants = Schema.Array(GrantSchema).check(
+  Schema.isUnique({ message: "A profile holds each grant once; remove the repeated grant." }),
+  Schema.isMaxLength(MAX_PROFILE_GRANTS),
+);
 
 export const Profile = Schema.Struct({
   id: Id,
   name: ProfileName,
-  grants: Grants,
+  grants: ProfileGrants,
   /** A shipped profile is seeded at first run and cannot be deleted. */
   shipped: Schema.Boolean,
   createdAt: Timestamp,
@@ -46,6 +57,14 @@ export const Profile = Schema.Struct({
 });
 
 export type Profile = Schema.Schema.Type<typeof Profile>;
+
+/** The payload of `profile.update`. A field left out is not changed. */
+export const ProfileUpdateInput = Schema.Struct({
+  name: Schema.optionalKey(ProfileName),
+  grants: Schema.optionalKey(ProfileGrants),
+});
+
+export type ProfileUpdateInput = Schema.Schema.Type<typeof ProfileUpdateInput>;
 
 /** What a profile listing may be sorted by. People look for a profile by its name. */
 export const PROFILE_SORT_FIELDS = ["name"] as const;
@@ -65,17 +84,14 @@ export const profile = HttpApiGroup.make("profile")
     HttpApiEndpoint.post("create", "/profiles", {
       payload: Schema.Struct({
         name: ProfileName,
-        grants: Grants,
+        grants: ProfileGrants,
       }),
       success: Profile,
       error: [Unauthenticated, Forbidden, Validation, Conflict, Internal],
     }),
     HttpApiEndpoint.patch("update", "/profiles/:id", {
       params: { id: Id },
-      payload: Schema.Struct({
-        name: Schema.optionalKey(ProfileName),
-        grants: Schema.optionalKey(Grants),
-      }),
+      payload: ProfileUpdateInput,
       success: Profile,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, Internal],
     }),

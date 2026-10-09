@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares eleven pairs of
+ * For each theme, Whitehaven and Orient Express, it compares seventeen pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -41,7 +41,15 @@
  *   window. Both pages are opened with `?state=scrolled`;
  * - Settings > Appearance (the main pane) of settings-appearance.html: the
  *   book's page edited by specimens/settings-appearance-reference.ts, and
- *   the Settings > Appearance specimen (settings-appearance.html).
+ *   the Settings > Appearance specimen (settings-appearance.html);
+ * - Settings > Permission profiles (the main pane) of settings-profiles.html,
+ *   in the four states the book draws with `?state=`: the list, Reviewer's
+ *   page (`reviewer`), `unrestricted`'s page (`shipped`) and `unrestricted`'s
+ *   page with the confirmation open (`confirm`). The book's page is edited by
+ *   specimens/settings-profiles-reference.ts, and the specimen is
+ *   settings-profiles.html. The two profile pages are taller than the
+ *   window, so each is compared again scrolled to the end of its body, with
+ *   `?scrolled=1` added to both pages' addresses.
  *
  * Each reference module edits the book's page to show its fixture's data.
  * For each region pair, the capture:
@@ -111,6 +119,12 @@ interface RegionPair {
   readonly specimenPage: string;
   /** The book's `?state=`, which the specimen page is opened with too, or none. */
   readonly state?: string;
+  /**
+   * Whether both pages are opened with `?scrolled=1`, which makes each scroll
+   * its section's body to the end. A page that needs `?state=` for something
+   * else cannot use `?state=scrolled`.
+   */
+  readonly scrolled?: true;
   readonly region: Rect;
   /** The element both pages' items are looked for in. */
   readonly scope: string;
@@ -460,6 +474,73 @@ const APPEARANCE_SETTINGS_PARTS = [
   ".gd-comp",
 ];
 
+// Every part of Settings > Permission profiles whose box is compared, as a
+// selector inside `main.main`: the header, the Settings list, and the list
+// of profiles or one profile's page. The app prefixes the classes it owns
+// with `profile-`, so a part names the book's class, then the app's.
+const PROFILES_SETTINGS_PARTS = [
+  ".bar",
+  ".bar > .crumb",
+  ".bar > .crumb a",
+  ".bar > .title",
+  ".bar .btn",
+  ".bar .btn > svg",
+  ".set-nav",
+  ".set-nav .side-h",
+  ".set-nav .nav-row",
+  ".set-nav .nav-row > svg",
+  ".set-body",
+  ".lead, .profile-lead",
+  ".tbl-h, .profile-list-head",
+  ".tbl-h > span, .profile-list-head > span",
+  ".prof, .profile-row",
+  ".prof > .mk, .profile-row > .profile-mark",
+  ".prof > .mk > svg, .profile-row > .profile-mark > svg",
+  ".prof .nm, .profile-row .profile-name",
+  ".prof .nm > b, .profile-row .profile-name > b",
+  ".prof .nm > span, .profile-row .profile-name > span",
+  ".prof .held, .profile-row .profile-held",
+  ".prof .meter, .profile-row .profile-meter",
+  ".prof .meter > i, .profile-row .profile-meter > i",
+  ".prof .used, .profile-row .profile-used",
+  ".prof .used .stack, .profile-row .profile-used .profile-faces",
+  ".prof .used .stack > svg, .profile-row .profile-used .profile-faces > svg",
+  ".prof > .ic, .profile-row > svg",
+  ".set-sec",
+  ".set-sec > h2",
+  ".set-sec > h2 > small",
+  ".set-sec > p",
+  ".note, .profile-note",
+  ".set-row",
+  ".set-label",
+  ".set-label > b",
+  ".set-label > span",
+  ".set-row > .field",
+  ".verbs, .profile-verbs",
+  ".verbs > button, .profile-verbs > button",
+  ".verbs > button > svg, .profile-verbs > button > svg",
+  ".user, .profile-agent",
+  ".user > svg, .profile-agent > svg",
+  ".none, .profile-none",
+  ".fixed, .profile-fixed",
+  ".set-row > .btn",
+];
+
+/** Returns the pair that compares one state of Settings > Permission profiles, `view` being the book's `?state=` and whether the page is scrolled. */
+const buildProfilesPair = (
+  name: string,
+  view: { readonly state?: string; readonly scrolled?: true } = {},
+): RegionPair => ({
+  name,
+  bookPage: "settings-profiles.html",
+  referenceModule: "settings-profiles-reference.ts",
+  specimenPage: "settings-profiles.html",
+  ...view,
+  region: MAIN_PANE_REGION,
+  scope: "main.main",
+  parts: PROFILES_SETTINGS_PARTS,
+});
+
 /** The regions of book pages compared with an app specimen, in the order they are compared. */
 const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   {
@@ -556,6 +637,12 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
     scope: "main.main",
     parts: APPEARANCE_SETTINGS_PARTS,
   },
+  buildProfilesPair("settings-profiles"),
+  buildProfilesPair("settings-profiles-reviewer", { state: "reviewer" }),
+  buildProfilesPair("scrolled-settings-profiles-reviewer", { state: "reviewer", scrolled: true }),
+  buildProfilesPair("settings-profiles-shipped", { state: "shipped" }),
+  buildProfilesPair("scrolled-settings-profiles-shipped", { state: "shipped", scrolled: true }),
+  buildProfilesPair("settings-profiles-confirm", { state: "confirm" }),
 ];
 
 /**
@@ -711,8 +798,9 @@ async function compareRegion(
   themeDir: string,
   pair: RegionPair,
 ): Promise<RegionResult> {
-  const { name, bookPage, referenceModule, specimenPage, state, region, scope, parts } = pair;
-  const query = `?theme=${theme}${state === undefined ? "" : `&state=${state}`}`;
+  const { name, bookPage, referenceModule, specimenPage, state, scrolled, region, scope, parts } =
+    pair;
+  const query = buildPageQuery({ theme, state, scrolled });
   const [reference, specimen] = await Promise.all([
     openSheet(
       new URL(`/design/crew-bureau-2/desktop/${bookPage}${query}`, sheetsUrl).href,
@@ -817,6 +905,25 @@ async function compareTheme(sheetsUrl: string, theme: string): Promise<ThemeResu
   }
 }
 
+/**
+ * Returns the query string of a book page's address, such as
+ * `?theme=orient-express&state=reviewer&scrolled=1`, or "" when no parameter
+ * is given. The report leaves the theme out, because it names a page for
+ * every theme.
+ */
+function buildPageQuery(page: {
+  readonly theme?: string | undefined;
+  readonly state?: string | undefined;
+  readonly scrolled?: true | undefined;
+}): string {
+  const params = new URLSearchParams();
+  if (page.theme !== undefined) params.set("theme", page.theme);
+  if (page.state !== undefined) params.set("state", page.state);
+  if (page.scrolled !== undefined) params.set("scrolled", "1");
+  const query = params.toString();
+  return query === "" ? "" : `?${query}`;
+}
+
 /** Returns the table of `differences`, one line per cell or item, as the report prints it under a theme. */
 function buildDifferenceTable(
   heading: string,
@@ -850,12 +957,12 @@ function buildReport(results: ReadonlyArray<ThemeResult>): string {
     lines.push(`${theme.padEnd(17)}${String(differingCells)} of ${String(cells)} cells differ`);
     if (differences.length > 0) lines.push(...buildDifferenceTable("cell", differences));
   }
-  REGION_PAIRS.forEach(({ name, bookPage, state, region }, index) => {
+  REGION_PAIRS.forEach(({ name, bookPage, state, scrolled, region }, index) => {
     const words = name.replaceAll("-", " ");
     lines.push(
       `${words.slice(0, 1).toUpperCase()}${words.slice(1)} comparison: ${String(first.regions[index]!.items)} items, ` +
         `x ${String(region.x)}-${String(region.x + region.width)} of ${bookPage}` +
-        (state === undefined ? "" : `?state=${state}`),
+        buildPageQuery({ state, scrolled }),
     );
     for (const { theme, regions } of results) {
       const { differences } = regions[index]!;

@@ -24,6 +24,8 @@ import { Route as ConnectedShellSettingsAssistantsRouteRouteImport } from './rou
 import { Route as ConnectedShellSettingsProfileRouteImport } from './routes/_connected/_shell/settings/profile'
 import { Route as ConnectedShellSettingsSystemRouteImport } from './routes/_connected/_shell/settings/system'
 import { Route as ConnectedShellThreadsSessionIdRouteRouteImport } from './routes/_connected/_shell/threads/$sessionId/route'
+import { Route as ConnectedShellSettingsPermissionProfilesIndexRouteImport } from './routes/_connected/_shell/settings/permission-profiles/index'
+import { Route as ConnectedShellSettingsPermissionProfilesIdRouteImport } from './routes/_connected/_shell/settings/permission-profiles/$id'
 import { Route as ConnectedShellThreadsSessionIdIndexRouteImport } from './routes/_connected/_shell/threads/$sessionId/index'
 import { Route as ConnectedShellThreadsSessionIdSubagentsSubagentIdRouteImport } from './routes/_connected/_shell/threads/$sessionId/subagents/$subagentId'
 
@@ -108,6 +110,18 @@ const ConnectedShellThreadsSessionIdRouteRoute =
     path: '/threads/$sessionId',
     getParentRoute: () => ConnectedShellRoute,
   } as any)
+const ConnectedShellSettingsPermissionProfilesIndexRoute =
+  ConnectedShellSettingsPermissionProfilesIndexRouteImport.update({
+    id: '/permission-profiles/',
+    path: '/permission-profiles/',
+    getParentRoute: () => ConnectedShellSettingsRouteRoute,
+  } as any)
+const ConnectedShellSettingsPermissionProfilesIdRoute =
+  ConnectedShellSettingsPermissionProfilesIdRouteImport.update({
+    id: '/permission-profiles/$id',
+    path: '/permission-profiles/$id',
+    getParentRoute: () => ConnectedShellSettingsRouteRoute,
+  } as any)
 const ConnectedShellThreadsSessionIdIndexRoute =
   ConnectedShellThreadsSessionIdIndexRouteImport.update({
     id: '/',
@@ -135,6 +149,8 @@ export interface FileRoutesByFullPath {
   '/settings/profile': typeof ConnectedShellSettingsProfileRoute
   '/settings/system': typeof ConnectedShellSettingsSystemRoute
   '/settings/': typeof ConnectedShellSettingsIndexRoute
+  '/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
+  '/settings/permission-profiles/': typeof ConnectedShellSettingsPermissionProfilesIndexRoute
   '/threads/$sessionId/': typeof ConnectedShellThreadsSessionIdIndexRoute
   '/threads/$sessionId/subagents/$subagentId': typeof ConnectedShellThreadsSessionIdSubagentsSubagentIdRoute
 }
@@ -150,6 +166,8 @@ export interface FileRoutesByTo {
   '/settings/profile': typeof ConnectedShellSettingsProfileRoute
   '/settings/system': typeof ConnectedShellSettingsSystemRoute
   '/settings': typeof ConnectedShellSettingsIndexRoute
+  '/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
+  '/settings/permission-profiles': typeof ConnectedShellSettingsPermissionProfilesIndexRoute
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdIndexRoute
   '/threads/$sessionId/subagents/$subagentId': typeof ConnectedShellThreadsSessionIdSubagentsSubagentIdRoute
 }
@@ -170,6 +188,8 @@ export interface FileRoutesById {
   '/_connected/_shell/settings/profile': typeof ConnectedShellSettingsProfileRoute
   '/_connected/_shell/settings/system': typeof ConnectedShellSettingsSystemRoute
   '/_connected/_shell/settings/': typeof ConnectedShellSettingsIndexRoute
+  '/_connected/_shell/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
+  '/_connected/_shell/settings/permission-profiles/': typeof ConnectedShellSettingsPermissionProfilesIndexRoute
   '/_connected/_shell/threads/$sessionId/': typeof ConnectedShellThreadsSessionIdIndexRoute
   '/_connected/_shell/threads/$sessionId/subagents/$subagentId': typeof ConnectedShellThreadsSessionIdSubagentsSubagentIdRoute
 }
@@ -189,6 +209,8 @@ export interface FileRouteTypes {
     | '/settings/profile'
     | '/settings/system'
     | '/settings/'
+    | '/settings/permission-profiles/$id'
+    | '/settings/permission-profiles/'
     | '/threads/$sessionId/'
     | '/threads/$sessionId/subagents/$subagentId'
   fileRoutesByTo: FileRoutesByTo
@@ -204,6 +226,8 @@ export interface FileRouteTypes {
     | '/settings/profile'
     | '/settings/system'
     | '/settings'
+    | '/settings/permission-profiles/$id'
+    | '/settings/permission-profiles'
     | '/threads/$sessionId'
     | '/threads/$sessionId/subagents/$subagentId'
   id:
@@ -223,6 +247,8 @@ export interface FileRouteTypes {
     | '/_connected/_shell/settings/profile'
     | '/_connected/_shell/settings/system'
     | '/_connected/_shell/settings/'
+    | '/_connected/_shell/settings/permission-profiles/$id'
+    | '/_connected/_shell/settings/permission-profiles/'
     | '/_connected/_shell/threads/$sessionId/'
     | '/_connected/_shell/threads/$sessionId/subagents/$subagentId'
   fileRoutesById: FileRoutesById
@@ -340,6 +366,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectedShellThreadsSessionIdRouteRouteImport
       parentRoute: typeof ConnectedShellRoute
     }
+    '/_connected/_shell/settings/permission-profiles/': {
+      id: '/_connected/_shell/settings/permission-profiles/'
+      path: '/permission-profiles'
+      fullPath: '/settings/permission-profiles/'
+      preLoaderRoute: typeof ConnectedShellSettingsPermissionProfilesIndexRouteImport
+      parentRoute: typeof ConnectedShellSettingsRouteRoute
+    }
+    '/_connected/_shell/settings/permission-profiles/$id': {
+      id: '/_connected/_shell/settings/permission-profiles/$id'
+      path: '/permission-profiles/$id'
+      fullPath: '/settings/permission-profiles/$id'
+      preLoaderRoute: typeof ConnectedShellSettingsPermissionProfilesIdRouteImport
+      parentRoute: typeof ConnectedShellSettingsRouteRoute
+    }
     '/_connected/_shell/threads/$sessionId/': {
       id: '/_connected/_shell/threads/$sessionId/'
       path: '/'
@@ -363,6 +403,8 @@ interface ConnectedShellSettingsRouteRouteChildren {
   ConnectedShellSettingsProfileRoute: typeof ConnectedShellSettingsProfileRoute
   ConnectedShellSettingsSystemRoute: typeof ConnectedShellSettingsSystemRoute
   ConnectedShellSettingsIndexRoute: typeof ConnectedShellSettingsIndexRoute
+  ConnectedShellSettingsPermissionProfilesIdRoute: typeof ConnectedShellSettingsPermissionProfilesIdRoute
+  ConnectedShellSettingsPermissionProfilesIndexRoute: typeof ConnectedShellSettingsPermissionProfilesIndexRoute
 }
 
 const ConnectedShellSettingsRouteRouteChildren: ConnectedShellSettingsRouteRouteChildren =
@@ -374,6 +416,10 @@ const ConnectedShellSettingsRouteRouteChildren: ConnectedShellSettingsRouteRoute
     ConnectedShellSettingsProfileRoute: ConnectedShellSettingsProfileRoute,
     ConnectedShellSettingsSystemRoute: ConnectedShellSettingsSystemRoute,
     ConnectedShellSettingsIndexRoute: ConnectedShellSettingsIndexRoute,
+    ConnectedShellSettingsPermissionProfilesIdRoute:
+      ConnectedShellSettingsPermissionProfilesIdRoute,
+    ConnectedShellSettingsPermissionProfilesIndexRoute:
+      ConnectedShellSettingsPermissionProfilesIndexRoute,
   }
 
 const ConnectedShellSettingsRouteRouteWithChildren =

@@ -56,7 +56,7 @@ const SETTINGS_GROUPS: ReadonlyArray<{
     heading: "Safety",
     rows: [
       { label: "Identities", Icon: IdIcon, to: null },
-      { label: "Permission profiles", Icon: ShieldIcon, to: null },
+      { label: "Permission profiles", Icon: ShieldIcon, to: "/settings/permission-profiles" },
       { label: "Secrets", Icon: KeyIcon, to: null },
       { label: "Bounds", Icon: BoundIcon, to: null },
     ],

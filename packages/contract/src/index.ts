@@ -141,7 +141,14 @@ export {
   PluginRefusalReason,
   PluginStatus,
 } from "./groups/plugin";
-export { MAX_PROFILE_GRANTS, PROFILE_SORT_FIELDS, Profile } from "./groups/profile";
+export {
+  MAX_PROFILE_GRANTS,
+  MAX_PROFILE_NAME_LENGTH,
+  PROFILE_SORT_FIELDS,
+  Profile,
+  ProfileGrants,
+  ProfileUpdateInput,
+} from "./groups/profile";
 export {
   CapabilitySnapshot,
   DeclaredCapabilities,
@@ -165,6 +172,7 @@ export {
   AgentFilter,
   AgentUpdateInput,
   DisallowedTool,
+  MAX_AGENT_NAME_LENGTH,
   TOOL_FAMILIES,
   UnenforcedSpecField,
 } from "./groups/agent";

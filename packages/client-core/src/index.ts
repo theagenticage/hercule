@@ -284,6 +284,21 @@ export {
 } from "./first-run";
 export { formatControllerAddress, isLoopbackOrigin } from "./controller-origin";
 export { formatNameList } from "./name-list";
+export {
+  applyGrantChange,
+  chooseNewProfileName,
+  describeProfileAgents,
+  describeProfileInUse,
+  describeUnrestrictedGrantChange,
+  formatGrantVerb,
+  GRANT_FAMILY_TEXT,
+  groupAgentsByProfile,
+  isUnrestrictedProfile,
+  readGrantFamily,
+  sortProfiles,
+  type GrantChange,
+  type ProfileAgent,
+} from "./permission-profiles";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
 export {
   decideOfficeSeating,

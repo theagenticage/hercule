@@ -4,7 +4,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
 import type { Assistant } from "@hercule/contract";
 import { assistantsQuery } from "../../../../../app/queries";
-import { GlassDialog } from "../../../../../screens/glass-dialog";
+import { ConfirmDialog } from "../../../../../screens/confirm-dialog";
 import { SettingRow } from "../../../../../screens/settings/setting-row";
 
 /**
@@ -57,46 +57,25 @@ export function DeleteSection({
         )}
       />
       {confirming && (
-        <GlassDialog
+        <ConfirmDialog
           dialogRef={dialogRef}
-          className="delete-assistant-dialog"
-          label={`Delete ${assistant.name}?`}
+          title={`Delete ${assistant.name}?`}
+          actionLabel={remove.isPending ? "Deleting…" : "Delete"}
+          actionClass="danger"
+          pending={remove.isPending}
+          error={
+            remove.error === null ? null : `Could not delete: ${readErrorMessage(remove.error)}`
+          }
+          onConfirm={() => {
+            remove.mutate();
+          }}
           onClose={() => setConfirming(false)}
         >
-          <div className="pop-h">
-            <b>Delete {assistant.name}?</b>
-          </div>
-          <div className="pop-sec delete-assistant-body">
-            <p>
-              This removes {assistant.name}’s Conversation and every message in it, and stops any
-              session it is running. Its sessions stay in the history. This cannot be undone.
-            </p>
-            {remove.error !== null && (
-              <p className="fl-err" role="alert">
-                Could not delete: {readErrorMessage(remove.error)}
-              </p>
-            )}
-            <div className="delete-assistant-acts">
-              <button
-                type="button"
-                className="btn btn--quiet"
-                onClick={() => dialogRef.current?.close()}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn--danger"
-                aria-disabled={remove.isPending}
-                onClick={() => {
-                  if (!remove.isPending) remove.mutate();
-                }}
-              >
-                {remove.isPending ? "Deleting…" : "Delete"}
-              </button>
-            </div>
-          </div>
-        </GlassDialog>
+          <p>
+            This removes {assistant.name}’s Conversation and every message in it, and stops any
+            session it is running. Its sessions stay in the history. This cannot be undone.
+          </p>
+        </ConfirmDialog>
       )}
     </section>
   );

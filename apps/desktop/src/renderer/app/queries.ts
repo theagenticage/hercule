@@ -214,6 +214,18 @@ export const settingsQuery = (client: HerculeClient) =>
     ...READ_ON_OPEN_OPTIONS,
   });
 
+/**
+ * Reads every plain agent. `agent.query` does not list assistants;
+ * `assistantsQuery` reads those. No live topic covers agents, so a screen
+ * reads it with `readOnOpen`.
+ */
+export const agentsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.agents(),
+    queryFn: () => readEveryPage((page) => client.agent.query({ query: page })),
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
 /** Reads every permission profile, one of which a new thread runs under. */
 export const profilesQuery = (client: HerculeClient) =>
   queryOptions({

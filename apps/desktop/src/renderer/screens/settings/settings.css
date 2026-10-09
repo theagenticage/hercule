@@ -18,10 +18,22 @@
   font-weight: var(--w-bold);
   letter-spacing: -0.01em;
   white-space: nowrap;
+  /* Not in the book. A record's name is the title and can be 128
+     characters, so a name too long for the header ends in an ellipsis rather
+     than pushing the header's actions out of the window. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .crumb {
+  flex: none;
   color: var(--faint);
   font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+/* The link in the crumb of a section that shows one record, back to its list. */
+.crumb a:hover {
+  color: var(--ink);
 }
 /* The book's pages set this inline on the title: the crumb ends in a slash,
    which sits closer to the title than the bar's gap. */
@@ -128,6 +140,11 @@
 .set-row > .field--select > select {
   field-sizing: content;
 }
+/* Not in the book, whose rows show values rather than controls. A text field
+   in a row, such as a name, is as wide as the selects. */
+.set-row > span.field:not(.field--select) {
+  width: 214px;
+}
 
 /* The book's Assistants page sets this inline on a row that follows a
    heading with no lead under it. */
@@ -141,6 +158,15 @@
    extra class makes it win. */
 .set-sec > .set-err {
   margin: 0 0 10px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+/* Not in the book: a failed create, above the section's records, such as
+   Assistants' tabs and Permission profiles' list. */
+.set-col > .set-err {
+  margin: 0;
   color: var(--fail-ink);
   font-size: var(--t-12);
   line-height: 1.45;
@@ -226,6 +252,9 @@
   }
   .set-row > .field--select {
     min-width: 0;
+  }
+  .set-row > span.field:not(.field--select) {
+    width: auto;
   }
   .set-value {
     text-align: start;

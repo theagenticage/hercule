@@ -80,20 +80,6 @@
   color: var(--ink);
 }
 
-/* Not in the book, whose rows show values rather than controls. The Name
-   field is as wide as the selects under it. */
-.assistant-settings .set-row > span.field:not(.field--select) {
-  width: 214px;
-}
-
-/* Not in the book: a failed create, above the tabs. */
-.set-col > .set-err {
-  margin: 0;
-  color: var(--fail-ink);
-  font-size: var(--t-12);
-  line-height: 1.45;
-}
-
 /* Not in the book, which always has assistants: the section with none. */
 .empty-assistants {
   display: grid;
@@ -110,30 +96,4 @@
 }
 .empty-assistants span {
   max-width: 380px;
-}
-
-/* Not in the book: the dialog that confirms Delete, on the glass of the
-   app's other dialogs. */
-.delete-assistant-dialog {
-  width: 400px;
-}
-.pop-sec.delete-assistant-body {
-  padding: 14px;
-}
-.delete-assistant-body > p {
-  margin: 0 0 10px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-.delete-assistant-acts {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-@container (width < 520px) {
-  .assistant-settings .set-row > span.field:not(.field--select) {
-    width: auto;
-  }
 }

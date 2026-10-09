@@ -33,7 +33,7 @@ import { bounded } from "../strings";
 export { DisallowedTool, TOOL_FAMILIES };
 
 /** The longest agent name. */
-const MAX_AGENT_NAME_LENGTH = 128;
+export const MAX_AGENT_NAME_LENGTH = 128;
 
 /** The longest system prompt. The prompt travels on the `SessionSpec`. */
 const MAX_SYSTEM_PROMPT_LENGTH = 64 * 1024;

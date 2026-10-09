@@ -1,0 +1,270 @@
+/* Settings > Permission profiles, from the Bureau book's page
+   (desktop/settings-profiles.html), with the book's `.stack` and `.meter`
+   from system.css. As in assistants.css, the book's short class names, such
+   as `.prof` and `.user`, would reach any element of the app that uses them,
+   so each rule here carries a name of its own and says which of the book's
+   rules it follows. The values are the book's. */
+
+/* The book's page starts its body 22px from the header, not 28px. */
+.set-body:has(> .set-col > .profile-list),
+.set-body:has(> .set-col > .profile-record) {
+  padding-top: 22px;
+}
+
+/* The book's `.lead`. */
+.profile-lead {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* The list: one row per profile, in the Connections page's table. The book's
+   `[data-list]` is the section's column, which is the container its width
+   queries read. The app's column belongs to the Settings frame, so the list
+   is a box of its own inside it, as wide as the column, with the column's gap. */
+.profile-list {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+/* The book's `.tbl-h` and `.prof`. */
+.profile-list-head,
+.profile-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 156px 200px 16px;
+  align-items: center;
+  gap: 14px;
+}
+.profile-list-head {
+  padding: 0 8px 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.profile-row {
+  min-height: 52px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+}
+.profile-row:hover {
+  background: var(--hover);
+}
+.profile-row:hover,
+.profile-row:hover + .profile-row {
+  border-top-color: transparent;
+}
+/* The book's `.mk`. */
+.profile-mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--muted);
+}
+/* The book's `.nm`. */
+.profile-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.profile-name b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.profile-name span,
+.profile-used {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The book's `.held`. */
+.profile-held {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+/* The book's `.meter` (system.css). */
+.profile-meter {
+  position: relative;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.profile-meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--who, var(--ink));
+}
+/* The book's `.used`. */
+.profile-used {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Not in the book, whose names are bare text in the flex row. Text in a flex
+   row cannot end in an ellipsis, so a long name needs a box of its own. */
+.profile-used-names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.profile-used.is-none {
+  color: var(--faint);
+}
+/* The book's `.stack` (system.css): faces that overlap. */
+.profile-faces {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+.profile-faces > * + * {
+  margin-left: -9px;
+}
+.profile-row > .ic {
+  color: var(--faint);
+}
+/* A narrow column drops Used by, which the profile's own page shows in full. */
+@container (max-width: 600px) {
+  .profile-list-head,
+  .profile-row {
+    grid-template-columns: 34px minmax(0, 1fr) 80px 16px;
+  }
+  .profile-list-head > :nth-child(4),
+  .profile-used {
+    display: none;
+  }
+}
+/* Narrower still, the name keeps the room the shield took. */
+@container (max-width: 400px) {
+  .profile-list-head,
+  .profile-row {
+    grid-template-columns: minmax(0, 1fr) 72px 16px;
+  }
+  .profile-list-head > :first-child,
+  .profile-row > .profile-mark {
+    display: none;
+  }
+}
+
+/* A profile's page. The book's `.rec`. A name can be 128 characters with no
+   space, in the headings, the hints and the sentences, so, as on Assistants,
+   text breaks anywhere rather than pushing the section wider than the window. */
+.profile-record {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.profile-record .set-row {
+  min-height: 50px;
+}
+/* The book's page puts no space between a heading and a row that follows it,
+   which settings.css gives the Assistants page's rows. */
+.profile-record .set-sec > h2 + .set-row {
+  margin-top: 0;
+}
+.profile-record .set-sec h2 small {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The verbs of one grant family. Any number may be pressed: the track of the
+   segmented control, with each verb its own switch. The book's `.verbs`. */
+.profile-verbs {
+  display: inline-flex;
+  flex: none;
+  /* Not in the book. In a narrow body the four verbs of Tasks are wider than
+     the row, so the verbs wrap onto a second line. */
+  flex-wrap: wrap;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.profile-verbs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 64px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-btn);
+  color: var(--faint);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.profile-verbs button:hover {
+  color: var(--muted);
+}
+.profile-verbs button[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-1);
+}
+/* The row stacks its control under the label (settings.css). The verbs share
+   the track's width, so a wrapped line has no gap at its end. */
+@container (width < 520px) {
+  .profile-verbs button {
+    flex: 1 0 auto;
+  }
+}
+.profile-verbs button .ic {
+  margin-left: -3px;
+  color: var(--ok);
+}
+.profile-verbs button[aria-pressed="false"] .ic {
+  display: none;
+}
+
+/* The book's `.note`. */
+.profile-note {
+  margin: 0 0 12px;
+  padding-left: 11px;
+  border-left: 2px solid var(--you);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+
+/* The book's `.user`, `.none` and `.fixed`. */
+.profile-agent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  border-top: 1px solid var(--line-soft);
+}
+.profile-agent .set-label span {
+  font-size: var(--t-12);
+}
+.profile-none,
+.profile-fixed {
+  padding: 14px 0 2px;
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--t-12);
+}
+.profile-none {
+  color: var(--faint);
+}
+.profile-fixed {
+  color: var(--muted);
+}
