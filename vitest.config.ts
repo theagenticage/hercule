@@ -85,6 +85,10 @@ const binaryTests = [
   "e2e/binary-size.test.ts",
   "e2e/logs.test.ts",
   "e2e/home-in-session.test.ts",
+  // upgrade.test.ts downloads the matching edge asset for this platform
+  // (linux-x64, linux-arm64, or darwin-arm64) and runs it. Other platforms
+  // fail in CI and skip locally.
+  "e2e/upgrade.test.ts",
 ];
 
 export default defineConfig({

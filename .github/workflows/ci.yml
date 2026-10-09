@@ -30,6 +30,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The migration immutability check diffs against the pull request's
+          # base. A shallow clone does not have that history.
+          fetch-depth: 0
 
       - uses: ./.github/actions/setup
 
@@ -41,15 +45,42 @@ jobs:
       # (spec 15 section 3, ADR 0018).
       - run: pnpm dep-lint
 
+      # A landed migration is never edited: editing one in place breaks every
+      # database that already ran the old version.
+      - run: bun run scripts/check-migrations.ts
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+
       # install.sh is the one shell script users run. The runner image ships
       # shellcheck.
       - run: shellcheck install.sh
 
       # The Vite config, the React Compiler Babel pass, the bundle budget and
       # the embedded file list are only exercised by an actual build; the
-      # binary suite then runs what that build produced.
+      # binary suite then runs what that build produced. The upgrade test is
+      # excluded here: it downloads the previous edge binary and lives in the
+      # `upgrade` job, so this job does not pay for that download twice.
       - run: pnpm build:binary
-      - run: pnpm test:binary
+      - run: bun --bun run vitest run --project binary --exclude='**/upgrade.test.ts'
+
+  # Tests that a database filled by the previous edge release upgrades cleanly
+  # to the new binary. Runs on Linux x64, the same platform as the
+  # `hercule-linux-x64` edge asset it downloads. A failed upgrade must not
+  # publish (see `edge-build.needs`).
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      # The GitHub API download uses the job token to read this repository's
+      # `edge` release.
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
+      - run: pnpm build:binary
+      - run: bun --bun run vitest run --project binary e2e/upgrade.test.ts
 
   # The desktop app is macOS only (spec 17), so it is packaged and compared
   # with the Bureau book on a macOS runner.
@@ -182,7 +213,9 @@ jobs:
   # The asset names and the format of SHA256SUMS are what `install.sh` reads;
   # change them together.
   edge-build:
-    needs: [check, desktop, edge-linux, edge-linux-install]
+    # A failed upgrade must not publish. `edge-linux` and `edge-linux-install`
+    # stay in this list; this job only adds `upgrade`.
+    needs: [check, desktop, edge-linux, edge-linux-install, upgrade]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
     timeout-minutes: 30
