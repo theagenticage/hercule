@@ -57,7 +57,7 @@ export function GrantsSection({
     <section className="set-sec">
       <h2>
         Grants
-        <small>{`${heldGrants.size} of ${MAX_PROFILE_GRANTS}`}</small>
+        <small>{`${grants.value.length} of ${MAX_PROFILE_GRANTS}`}</small>
       </h2>
       <p>
         What a session on this profile may do through the API. A change reaches its sessions on

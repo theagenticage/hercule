@@ -146,6 +146,7 @@ export {
   MAX_PROFILE_NAME_LENGTH,
   PROFILE_SORT_FIELDS,
   Profile,
+  ProfileGrants,
   ProfileUpdateInput,
 } from "./groups/profile";
 export {

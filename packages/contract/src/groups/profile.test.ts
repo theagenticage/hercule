@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import { ALL_GRANTS } from "../grants";
-import { MAX_PROFILE_GRANTS, Profile } from "./profile";
+import { MAX_PROFILE_GRANTS, Profile, ProfileUpdateInput } from "./profile";
 
 const decodeOutcome = <S extends Schema.Codec<unknown, unknown, never, never>>(
   schema: S,
@@ -20,6 +20,15 @@ const buildProfile = (grants: ReadonlyArray<string>) => ({
 describe("the bound on a profile's grant list", () => {
   it("is the size of the grant vocabulary", () => {
     expect(MAX_PROFILE_GRANTS).toBe(ALL_GRANTS.length);
+  });
+
+  it("rejects a grant that appears twice, in a request and in a response", () => {
+    expect(decodeOutcome(Profile, buildProfile(["task.read", "run.read", "task.read"]))).toBe(
+      "Failure",
+    );
+    expect(decodeOutcome(ProfileUpdateInput, { grants: ["task.read", "task.read"] })).toBe(
+      "Failure",
+    );
   });
 
   it("accepts every grant once, and rejects a list one longer", () => {
