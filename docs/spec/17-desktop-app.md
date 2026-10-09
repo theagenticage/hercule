@@ -1832,7 +1832,7 @@ The earlier sizes come from that commit's CI build; the final sizes come from th
 | The Office's chunk, gzipped | 241.5 kB | 219.3 kB | 223.8 kB |
 | Renderer JavaScript for the first screen, gzipped | 250 kB, a guide; unchanged by this change | 326.8 kB in 14 chunks | 327.3 kB in 14 chunks: the shell's sidebar and the client-core helpers it shares with the Office |
 | CPU, camera at rest, reference Office plus 3 assistants | renderer 17.9%, GPU process 12.3% | renderer 18.7 to 24.6%, GPU process 10.8 to 15.0%; 30 frames a second | renderer 21.4 to 24.6%, GPU process 11.1 to 14.6%; 30 frames a second |
-| Standing still | no frames, except state-change walks and the clock's one frame a minute | 175 to 263 frames in 60 s, all in its first 10 s, while colleagues out on an errand walk back; none after | 59 to 927 frames in 60 s, all in its first 40 s, for the same reason; none after |
+| Standing still | no frames, except state-change walks and the clock's one frame a minute | 175 to 263 frames in 60 s, all in its first 10 s, while colleagues out on an errand walk back; none after | 59, 89 and 927 frames in 60 s, for the same reason; none after. The first launch stopped within 10 s and the second within 30 s. The third caught a longer errand, and its frames stopped by 50 s |
 | Window hidden | no frames and no wakeups | 0 to 1 frames in 13 s, the one drawn as the window hides; renderer 3 wakeups a second, GPU process 0 | 0 to 1 frames in 13 s; renderer 3 wakeups a second, GPU process 0 |
 | Memory with the Office open | summed 1,602 MB, renderer 181 MB | summed 1,327 to 1,335 MB, renderer 144 to 154 MB | summed 1,357 to 1,421 MB, renderer 158 to 165 MB |
 
