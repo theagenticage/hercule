@@ -5,8 +5,10 @@
  *
  * This catches migrations that are correct on an empty database but fail on
  * real data. The fixture is one representative conversation of several owner
- * turns, one named Provider Instance, and one session with a few persisted
- * turns. After the upgrade the test checks that those records, their content,
+ * turns, one named Provider Instance, one session with a few persisted
+ * turns, the timezone first-run setup persisted, a project name and a
+ * repository remote.
+ * After the upgrade the test checks that those records, their content,
  * ordering and associations survived. It is not a matrix of session states or
  * provider behaviour.
  *
@@ -57,6 +59,8 @@ const TURNS = [
 ] as const;
 
 const PROVIDER_NAME = "upgrade-fixture";
+const PROJECT_NAME = "test-project";
+const REPO_REMOTE = "https://github.com/example/repo";
 
 interface SeededMessage {
   readonly id: string;
@@ -465,10 +469,16 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
-      const project = expectJson<{ id: string }>(
-        await runCli(["project", "create", "--name", "test-project", "--json"], edge),
+      const seededSettings = expectJson<{ user: { timezone: string } }>(
+        await runCli(["settings", "read", "--json"], edge),
       );
-      const resource = expectJson<{ id: string }>(
+      expect(seededSettings.user.timezone).toBe("Europe/Amsterdam");
+
+      const project = expectJson<{ id: string; name: string }>(
+        await runCli(["project", "create", "--name", PROJECT_NAME, "--json"], edge),
+      );
+      expect(project.name).toBe(PROJECT_NAME);
+      const resource = expectJson<{ id: string; remote: string }>(
         await runCli(
           [
             "resource",
@@ -478,12 +488,13 @@ describe("upgrading from the previous edge release", () => {
             "--kind",
             "repo",
             "--remote",
-            "https://github.com/example/repo",
+            REPO_REMOTE,
             "--json",
           ],
           edge,
         ),
       );
+      expect(resource.remote).toBe(REPO_REMOTE);
       const assistant = expectJson<{ id: string; mainConversationId: string }>(
         await runCli(["assistant", "create", "--name", "upgrade-assistant", "--json"], edge),
       );
@@ -549,8 +560,21 @@ describe("upgrading from the previous edge release", () => {
       const upgraded = { home, binary: newBinary };
 
       expectJson(await runCli(["controller", "read", "--json"], upgraded));
-      expectJson(await runCli(["project", "read", project.id, "--json"], upgraded));
-      expectJson(await runCli(["resource", "read", resource.id, "--json"], upgraded));
+
+      const readSettings = expectJson<{ user: { timezone: string } }>(
+        await runCli(["settings", "read", "--json"], upgraded),
+      );
+      expect(readSettings.user.timezone).toBe(seededSettings.user.timezone);
+
+      const readProject = expectJson<{ id: string; name: string }>(
+        await runCli(["project", "read", project.id, "--json"], upgraded),
+      );
+      expect(readProject).toMatchObject({ id: project.id, name: PROJECT_NAME });
+
+      const readResource = expectJson<{ id: string; remote: string }>(
+        await runCli(["resource", "read", resource.id, "--json"], upgraded),
+      );
+      expect(readResource).toMatchObject({ id: resource.id, remote: REPO_REMOTE });
 
       const readProvider = expectJson<SeededProvider>(
         await runCli(["provider", "read", createdProvider.id, "--json"], upgraded),
