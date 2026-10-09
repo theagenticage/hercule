@@ -70,10 +70,12 @@ export const setupGate = HttpRouter.middleware(
 );
 
 const SETUP_READ_PATH = OPERATIONS["setup.read"].path;
+const VALIDATE_PATH = OPERATIONS["workflow.validate"].path;
 
 /** Returns whether a request on this route only reads. The OAuth callback is a GET that writes. */
 const isReadOnly = (route: { readonly method: string; readonly path: string }): boolean =>
-  (route.method === "GET" || route.method === "HEAD") && route.path !== CALLBACK_PATH;
+  (route.method === "POST" && route.path === VALIDATE_PATH) ||
+  ((route.method === "GET" || route.method === "HEAD") && route.path !== CALLBACK_PATH);
 
 const isPromotionRefusal = (error: unknown): error is ControllerSealed | PromotionInProgress =>
   error instanceof ControllerSealed || error instanceof PromotionInProgress;

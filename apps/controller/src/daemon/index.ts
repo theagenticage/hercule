@@ -24,7 +24,8 @@
  * - `workspaces/`: provisioning and disposing workspaces, and the sweep that
  *   removes the ones nothing needs any more;
  * - `runners/`: sending a runner that connects the work owed to it, handling
- *   what runners report, and retiring a runner;
+ *   what runners report, retiring a runner, and the thaw timer of a
+ *   promotion freeze;
  * - `permissions/`: deleting a permission profile;
  * - `connections/`: what the connections domain reads from the resources and
  *   workflows domains;
@@ -72,6 +73,7 @@ export {
   ArrivalLayer,
   Inbound,
   InboundLayer,
+  PromotionExpiryLayer,
   PromotionFleet,
   PromotionFleetLayer,
   PromotionFleetRouteLayer,

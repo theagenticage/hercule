@@ -272,9 +272,35 @@ export const promote = (options: PromoteOptions): Effect.Effect<void, PromoteErr
         }),
       );
 
+    /**
+     * Reads the response body under the same deadline as the request headers.
+     * A body that never finishes would otherwise hang past `send`'s timeout.
+     */
+    const readText = (response: Response) =>
+      Effect.tryPromise({
+        try: (signal) =>
+          Promise.race([
+            response.text(),
+            new Promise<never>((_, reject) => {
+              signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+            }),
+          ]),
+        catch: (cause) => refuse(`Cannot reach ${from}: ${readErrorMessage(cause)}`),
+      }).pipe(
+        Effect.timeoutOrElse({
+          duration: Duration.seconds(ANSWER_TIMEOUT_SECONDS),
+          orElse: () =>
+            Effect.fail(
+              refuse(
+                `${from} did not answer within ${String(ANSWER_TIMEOUT_SECONDS)} seconds, so it cannot be reached`,
+              ),
+            ),
+        }),
+      );
+
     /** Reads a refusal from the old controller, or says what else answered. */
     const readRefusal = (response: Response) =>
-      Effect.promise(() => response.text()).pipe(
+      readText(response).pipe(
         Effect.flatMap(decodeRefusal),
         Effect.orElseSucceed(() => undefined),
         Effect.map((refusal) => ({
@@ -287,7 +313,7 @@ export const promote = (options: PromoteOptions): Effect.Effect<void, PromoteErr
 
     /** Reads a JSON answer from the old controller with `schema`. */
     const readAnswer = <S extends Schema.Top>(response: Response, schema: S) =>
-      Effect.promise(() => response.text()).pipe(
+      readText(response).pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(schema))),
         Effect.mapError(() => refuse(`${from} sent an answer this version of Hercule cannot read`)),
       );
@@ -320,7 +346,9 @@ export const promote = (options: PromoteOptions): Effect.Effect<void, PromoteErr
       const { refusal } = yield* readRefusal(response);
       return refusal instanceof ControllerSealed
         ? ({ _tag: "Sealed", newAddress: refusal.error.details.newAddress } as const)
-        : ({ _tag: "Unknown" } as const);
+        : refusal instanceof Unauthenticated
+          ? ({ _tag: "Serving" } as const)
+          : ({ _tag: "Unknown" } as const);
     }).pipe(Effect.orElseSucceed(() => ({ _tag: "Unknown" }) as const));
 
     /** Describes, for an error message, what a cancel did to the old controller. */
@@ -330,13 +358,6 @@ export const promote = (options: PromoteOptions): Effect.Effect<void, PromoteErr
         : outcome._tag === "Sealed"
           ? `${from} has moved to ${outcome.newAddress}.`
           : `${from} could not be told to serve again, so it stays read-only until the token expires, at most ${String(PROMOTION_TOKEN_LIFETIME_MS / 60_000)} minutes from when it was created.`;
-
-    // From here on the token is spent. The transfer has no time limit: its
-    // answer starts once the freeze has drained and the database is copied,
-    // which takes longer the more data there is.
-    out("Pulling the data...");
-    const transfer = yield* request("POST", TRANSFER_PATH);
-    if (!transfer.ok) return yield* refuse((yield* readRefusal(transfer)).message);
 
     // The old controller is now frozen until it seals or the transfer is
     // cancelled. This is true from the first switch request until the old
@@ -433,6 +454,15 @@ export const promote = (options: PromoteOptions): Effect.Effect<void, PromoteErr
      * second one into the same Home would collide on the database anyway.
      */
     const receiveAndSwitch = Effect.gen(function* () {
+      // From here on the token is spent. The transfer has no time limit: its
+      // answer starts once the freeze has drained and the database is copied,
+      // which takes longer the more data there is. The POST sits inside this
+      // region so an interrupt while the headers are still arriving still
+      // asks A to cancel.
+      out("Pulling the data...");
+      const transfer = yield* request("POST", TRANSFER_PATH);
+      if (!transfer.ok) return yield* refuse((yield* readRefusal(transfer)).message);
+
       const directory = paths.promotionTransferDir;
       const received = yield* Effect.acquireUseRelease(
         Effect.try({

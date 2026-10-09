@@ -45,6 +45,7 @@ import {
 } from "@hercule/plugin-host";
 import { buildRunActor, CurrentActor } from "../actor";
 import { connectionRepository, ConnectionTypes } from "../connections";
+import { PromotionState } from "../promotion";
 import { nowIso } from "../db";
 import { renderTemplates } from "../expressions";
 import {
@@ -280,6 +281,7 @@ export const makeStepExecution = ({
     const host = yield* PluginHost;
     const connections = yield* connectionRepository;
     const connectionTypes = yield* ConnectionTypes;
+    const promotion = yield* PromotionState;
 
     /**
      * The built-in actions, by id. Each but `wait` calls the same service
@@ -459,7 +461,7 @@ export const makeStepExecution = ({
           });
         }
         const credentials = yield* Effect.result(
-          connectionTypes.runtimeFor(action.owner).credentials(connectionId),
+          promotion.whenServing(connectionTypes.runtimeFor(action.owner).credentials(connectionId)),
         );
         if (Result.isFailure(credentials)) {
           return Result.fail<EngineStepError>({

@@ -33,6 +33,7 @@ import {
   type OAuthDeclaration,
 } from "@hercule/plugin-host";
 import { announce, nowIso, withTransaction } from "../db";
+import { PromotionState } from "../promotion";
 import { Secrets } from "../secrets";
 import {
   isStale,
@@ -75,6 +76,7 @@ const make = Effect.gen(function* () {
   const connections = yield* connectionRepository;
   const secrets = yield* Secrets;
   const findOAuthClient = yield* oauthClients;
+  const promotion = yield* PromotionState;
   const declared = yield* Ref.make<ReadonlyMap<string, RegisteredConnectionType>>(new Map());
 
   const toConnectionSummary = (row: StoredConnection): ConnectionSummary => ({
@@ -249,53 +251,55 @@ const make = Effect.gen(function* () {
     row: StoredConnection,
     oauth: OAuthDeclaration,
   ): Effect.Effect<TokenSet, ConnectionUnavailable> =>
-    Effect.gen(function* () {
-      const stored = yield* Effect.orDie(
-        secrets.get({ kind: "connection", id: row.id }, OAUTH_TOKENS),
-      );
-      // The caller found a token set before it waited for the semaphore, so
-      // finding none now means a reconnect swapped it for pasted credentials.
-      if (Option.isNone(stored)) {
-        return yield* Effect.fail(new ConnectionUnavailable({ message: CREDENTIALS_REPLACED }));
-      }
-      const held = Redacted.value(stored.value);
-      const tokens = yield* parseStoredTokens(row.id, held);
-      const millis = yield* Clock.currentTimeMillis;
-      if (!isStale(tokens, millis)) return tokens;
+    promotion.whenServing(
+      Effect.gen(function* () {
+        const stored = yield* Effect.orDie(
+          secrets.get({ kind: "connection", id: row.id }, OAUTH_TOKENS),
+        );
+        // The caller found a token set before it waited for the semaphore, so
+        // finding none now means a reconnect swapped it for pasted credentials.
+        if (Option.isNone(stored)) {
+          return yield* Effect.fail(new ConnectionUnavailable({ message: CREDENTIALS_REPLACED }));
+        }
+        const held = Redacted.value(stored.value);
+        const tokens = yield* parseStoredTokens(row.id, held);
+        const millis = yield* Clock.currentTimeMillis;
+        if (!isStale(tokens, millis)) return tokens;
 
-      const client = yield* Effect.orDie(findOAuthClient(row.pluginId));
-      if (tokens.refreshToken === undefined || Option.isNone(client)) {
-        return yield* markTokensNeedReauth(row.id, held, "this connection cannot be refreshed");
-      }
-      const answer = yield* refreshAccess({
-        tokenUrl: oauth.tokenUrl,
-        client: client.value,
-        refreshToken: tokens.refreshToken,
-      }).pipe(
-        Effect.provide(FetchHttpClient.layer),
-        Effect.catchTag("ProviderRefused", (error) =>
-          markTokensNeedReauth(row.id, held, error.message),
-        ),
-        Effect.catchTag("ProviderUnreachable", (error) =>
-          Effect.fail(new ConnectionUnavailable({ message: error.message })),
-        ),
-      );
-      // When the response has no refresh token, the old one is still valid.
-      const keep = answer.refreshToken ?? tokens.refreshToken;
-      const next: TokenSet = { ...answer, refreshToken: keep };
-      yield* writeWhileTokensHeld(
-        row.id,
-        held,
-        Effect.orDie(
-          secrets.set(
-            { kind: "connection", id: row.id },
-            OAUTH_TOKENS,
-            Redacted.make(serializeTokens(next)),
+        const client = yield* Effect.orDie(findOAuthClient(row.pluginId));
+        if (tokens.refreshToken === undefined || Option.isNone(client)) {
+          return yield* markTokensNeedReauth(row.id, held, "this connection cannot be refreshed");
+        }
+        const answer = yield* refreshAccess({
+          tokenUrl: oauth.tokenUrl,
+          client: client.value,
+          refreshToken: tokens.refreshToken,
+        }).pipe(
+          Effect.provide(FetchHttpClient.layer),
+          Effect.catchTag("ProviderRefused", (error) =>
+            markTokensNeedReauth(row.id, held, error.message),
           ),
-        ),
-      );
-      return next;
-    });
+          Effect.catchTag("ProviderUnreachable", (error) =>
+            Effect.fail(new ConnectionUnavailable({ message: error.message })),
+          ),
+        );
+        // When the response has no refresh token, the old one is still valid.
+        const keep = answer.refreshToken ?? tokens.refreshToken;
+        const next: TokenSet = { ...answer, refreshToken: keep };
+        yield* writeWhileTokensHeld(
+          row.id,
+          held,
+          Effect.orDie(
+            secrets.set(
+              { kind: "connection", id: row.id },
+              OAUTH_TOKENS,
+              Redacted.make(serializeTokens(next)),
+            ),
+          ),
+        );
+        return next;
+      }),
+    );
 
   /**
    * Returns the access token of a token connection, refreshing it first when
@@ -440,5 +444,5 @@ export class ConnectionTypes extends Context.Service<
 export const ConnectionTypesLayer: Layer.Layer<
   ConnectionTypes,
   never,
-  SqlClient.SqlClient | Secrets | PluginConfigs
+  SqlClient.SqlClient | Secrets | PluginConfigs | PromotionState
 > = Layer.effect(ConnectionTypes)(make);

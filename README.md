@@ -81,7 +81,7 @@ hercule promote --from <A-url> --token <token> --address <B-url>
 
 Promote while no agent is working: while A copies its data it refuses changes, and a session event a runner reports between the copy and its reconnect to B is lost.
 
-After the pull, A seals and tells every connected runner to reconnect to B. A runner that missed the announcement and dials A gets a signed forwarding pointer. If promote fails after the pull, it says what happened to both machines. Usually A serves again and B's Home is emptied, so you create a new token and run promote again.
+After the pull, A seals and tells every connected runner to reconnect to B. A runner that missed the announcement and dials A gets a signed forwarding pointer. Point the CLI at B with `hercule login <B-url> --username <name>`. Change the desktop app's controller address to B by hand. A login that was near expiry on A is not renewed while A is frozen, so you may need to sign in again on B. If promote fails after the pull, it says what happened to both machines. Usually A serves again and B's Home is emptied, so you create a new token and run promote again.
 
 To serve on A again after a promotion (disaster recovery only):
 

@@ -175,7 +175,7 @@ describe("bootWith", () => {
       bootWith({ argv: ["--home", home], env: {}, masterKeyBackend: "file" }, () =>
         Effect.gen(function* () {
           const promotion = yield* PromotionState;
-          yield* promotion.freeze(tokenId, new Date(Date.now() + 60_000));
+          yield* promotion.freeze(tokenId);
           yield* promotion.seal(tokenId, "http://b.example:9");
         }),
       ),

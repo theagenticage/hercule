@@ -160,16 +160,19 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
 
     const greet = (hello: RunnerHello) =>
       Effect.gen(function* () {
-        const phase = yield* promotion.phase;
-        if (phase._tag === "Sealed") {
-          // A sealed controller does not prove itself as a live peer: it
-          // tells the runner where the live controller is, and the runner
-          // verifies that pointer against the identity it already trusts.
-          yield* write(encodeFrameText(buildForwardingPointer(phase.seal)));
-          return;
-        }
+        // Sign first: the wait is long enough that the controller can seal
+        // while it runs. The phase is checked after the signature, and again
+        // after the fleet records the greeting, so a runner that is still
+        // signing when A seals gets a forwarding pointer, not a live hello.
         const controller = yield* identity.readOrDie;
         const signature = yield* identity.sign(encodeChallengeBytes(runnerId, hello.nonce));
+        const writePointerIfSealed = Effect.gen(function* () {
+          const phase = yield* promotion.phase;
+          if (phase._tag !== "Sealed") return false;
+          yield* write(encodeFrameText(buildForwardingPointer(phase.seal)));
+          return true;
+        });
+        if (yield* writePointerIfSealed) return;
         const answer: ControllerHello = {
           _tag: "controllerHello",
           protocolVersion: PROTOCOL_VERSION,
@@ -200,6 +203,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             facts: hello.facts,
           },
         );
+        if (yield* writePointerIfSealed) return;
         yield* write(encodeFrameText(answer));
         // Set after the answer is written, so the ping loop never sends a
         // ping ahead of it. Frames are handled one at a time, so no other

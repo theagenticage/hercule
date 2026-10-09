@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { uuidFromString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { ControllerIdentity } from "../identity";
@@ -26,9 +27,6 @@ const StateDependencies = Layer.mergeAll(
   }),
   AuditLogLayer,
 );
-
-/** Returns a deadline far enough away that no test reaches it. */
-const inAnHour = (): Date => new Date(Date.now() + 3_600_000);
 
 /**
  * Runs `body` against a fresh promotion state over an in-memory database, with
@@ -63,7 +61,7 @@ describe("PromotionState", () => {
       Effect.gen(function* () {
         const state = yield* PromotionState;
         const serving = yield* state.admit(Effect.succeed("ran"));
-        yield* state.freeze(TOKEN, inAnHour());
+        yield* state.freeze(TOKEN);
         const frozen = yield* readErrorCode(state.admit(Effect.void));
         yield* state.seal(TOKEN, NEW_ADDRESS);
         const sealed = yield* readErrorCode(state.admit(Effect.void));
@@ -94,7 +92,7 @@ describe("PromotionState", () => {
         yield* settle;
         const freeze = yield* Effect.forkChild(
           Effect.andThen(
-            state.freeze(TOKEN, inAnHour()),
+            state.freeze(TOKEN),
             Effect.sync(() => order.push("frozen")),
           ),
         );
@@ -115,7 +113,7 @@ describe("PromotionState", () => {
         const state = yield* PromotionState;
         yield* Effect.forkChild(state.admit(Effect.never));
         yield* settle;
-        const code = yield* readErrorCode(state.freeze(TOKEN, inAnHour()));
+        const code = yield* readErrorCode(state.freeze(TOKEN));
         const phase = yield* state.phase;
         return { code, phase: phase._tag };
       }),
@@ -134,7 +132,7 @@ describe("PromotionState", () => {
           ),
         );
         yield* settle;
-        const freeze = yield* Effect.forkChild(state.freeze(TOKEN, inAnHour()));
+        const freeze = yield* Effect.forkChild(state.freeze(TOKEN));
         yield* settle;
         yield* Deferred.succeed(release, undefined);
         const inner = yield* Fiber.join(request);
@@ -159,7 +157,7 @@ describe("PromotionState", () => {
             ),
           ),
         );
-        yield* state.freeze(TOKEN, inAnHour());
+        yield* state.freeze(TOKEN);
         yield* Deferred.succeed(release, undefined);
         yield* settle;
         const whileFrozen = ran;
@@ -187,7 +185,7 @@ describe("PromotionState", () => {
             Deferred.await(started),
           ),
         );
-        const freeze = yield* Effect.forkChild(state.freeze(TOKEN, inAnHour()));
+        const freeze = yield* Effect.forkChild(state.freeze(TOKEN));
         yield* settle;
         const frozenEarly = freeze.pollUnsafe() !== undefined;
         yield* Deferred.succeed(release, undefined);
@@ -202,7 +200,7 @@ describe("PromotionState", () => {
     const seen = await run(
       Effect.gen(function* () {
         const state = yield* PromotionState;
-        yield* state.freeze(TOKEN, inAnHour());
+        yield* state.freeze(TOKEN);
         let ran = false;
         const background = yield* Effect.forkChild(
           state.whenServing(Effect.sync(() => (ran = true))),
@@ -217,24 +215,47 @@ describe("PromotionState", () => {
     expect(seen).toEqual({ whileFrozen: false, afterThaw: true });
   });
 
-  it("thaws on its own at the deadline it was given", async () => {
+  it("stays frozen until something thaws it; freeze itself does not schedule a timer", async () => {
     const phase = await run(
       Effect.gen(function* () {
         const state = yield* PromotionState;
-        yield* state.freeze(TOKEN, new Date(Date.now() + 50));
+        yield* state.freeze(TOKEN);
         yield* Effect.sleep(Duration.millis(150));
         return (yield* state.phase)._tag;
       }),
     );
-    expect(phase).toBe("Serving");
+    expect(phase).toBe("Frozen");
+  });
+
+  it("refuses a thaw when a seal is already persisted, even if memory still says frozen", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const state = yield* PromotionState;
+        yield* state.freeze(TOKEN);
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`
+          INSERT INTO sealed_state (singleton, token_id, sealed_at, new_address, signature)
+          VALUES (
+            1,
+            ${uuidFromString(TOKEN)},
+            ${"2026-01-01T00:00:00.000Z"},
+            ${NEW_ADDRESS},
+            ${new Uint8Array(64)}
+          )
+        `;
+        const code = yield* readErrorCode(state.thaw(TOKEN));
+        return { code, phase: (yield* state.phase)._tag };
+      }),
+    );
+    expect(outcome).toEqual({ code: "controller_sealed", phase: "Sealed" });
   });
 
   it("refuses a second freeze, and a thaw for another token", async () => {
     const outcome = await run(
       Effect.gen(function* () {
         const state = yield* PromotionState;
-        yield* state.freeze(TOKEN, inAnHour());
-        const second = yield* readErrorCode(state.freeze(OTHER_TOKEN, inAnHour()));
+        yield* state.freeze(TOKEN);
+        const second = yield* readErrorCode(state.freeze(OTHER_TOKEN));
         yield* state.thaw(OTHER_TOKEN);
         return { second, phase: (yield* state.phase)._tag };
       }),
@@ -247,7 +268,7 @@ describe("PromotionState", () => {
       Effect.gen(function* () {
         const state = yield* PromotionState;
         const unfrozen = yield* readErrorCode(state.seal(TOKEN, NEW_ADDRESS));
-        yield* state.freeze(TOKEN, inAnHour());
+        yield* state.freeze(TOKEN);
         const otherToken = yield* readErrorCode(state.seal(OTHER_TOKEN, NEW_ADDRESS));
         const first = yield* state.seal(TOKEN, NEW_ADDRESS);
         const again = yield* state.seal(TOKEN, NEW_ADDRESS);
@@ -269,7 +290,7 @@ describe("PromotionState", () => {
     const phases = await run(
       Effect.gen(function* () {
         const before = yield* PromotionState;
-        yield* before.freeze(TOKEN, inAnHour());
+        yield* before.freeze(TOKEN);
         yield* before.seal(TOKEN, NEW_ADDRESS);
         // A second state over the same database stands in for the restarted controller.
         const restart = (forceUnseal: boolean) =>

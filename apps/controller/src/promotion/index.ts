@@ -9,6 +9,7 @@
  */
 export { PromotionService, PromotionServiceLayer } from "./service";
 export { PromotionTokens, PromotionTokensLayer } from "./tokens";
+export { PromotionExpiry } from "./expiry";
 export {
   PromotionState,
   PromotionStateLayer,

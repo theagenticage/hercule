@@ -15,6 +15,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { buildHomePaths, type HomePaths } from "@hercule/home";
 import { buildAttachmentPath } from "../attachments";
 import { HerculeHome } from "../config";
+import { STARTER_WORKFLOW_SOURCE } from "@hercule/contract";
 import { mintToken } from "../credentials";
 import { mintUuid, openDatabase, uuidToString } from "../db";
 import {
@@ -353,6 +354,45 @@ describe("promotion transfer", () => {
       });
       expect(read.status).toBe(200);
 
+      const validate = await post(
+        harness.base,
+        "/api/v1/workflows/validate",
+        { source: STARTER_WORKFLOW_SOURCE },
+        user,
+      );
+      expect(validate.status, await validate.clone().text()).toBe(200);
+
+      const beforeRenewal = await Effect.runPromise(
+        Effect.orDie(
+          harness.sql<{ readonly expires_at: string }>`
+            SELECT expires_at FROM login_tokens WHERE revoked_at IS NULL
+          `,
+        ),
+      );
+      const nearExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      await Effect.runPromise(
+        Effect.orDie(
+          harness.sql`
+            UPDATE login_tokens
+            SET last_used_at = ${"2000-01-01T00:00:00.000Z"}, expires_at = ${nearExpiry}
+            WHERE revoked_at IS NULL
+          `,
+        ),
+      );
+      const readAgain = await fetch(`${harness.base}/api/v1/controller`, {
+        headers: { authorization: `Bearer ${user}`, connection: "close" },
+      });
+      expect(readAgain.status).toBe(200);
+      const afterRead = await Effect.runPromise(
+        Effect.orDie(
+          harness.sql<{ readonly expires_at: string }>`
+            SELECT expires_at FROM login_tokens WHERE revoked_at IS NULL
+          `,
+        ),
+      );
+      expect(afterRead[0]?.expires_at).toBe(nearExpiry);
+      expect(beforeRenewal[0]?.expires_at).not.toBe(nearExpiry);
+
       const mutating = await send("PUT", harness.base, SECRET_PATH, {
         body: { value: SECRET_VALUE },
         token: user,
@@ -367,6 +407,8 @@ describe("promotion transfer", () => {
       expect(login.status).toBe(409);
       expect((await readErrorBody(login)).code).toBe("promotion_in_progress");
 
+      // Snapshot timing only: a row written on A after the copy is not in the
+      // bundle. Loss of live runner traffic is covered on the runner socket.
       const lostId = mintUuid();
       const now = new Date().toISOString();
       await Effect.runPromise(

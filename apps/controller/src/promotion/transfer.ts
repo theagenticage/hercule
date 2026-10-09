@@ -60,6 +60,7 @@ import {
   type TransferHeader,
 } from "./bundle";
 import { decodePromotionToken, deriveTransferKey, encodeBase64Url, SALT_BYTES } from "./crypto";
+import { PromotionExpiry } from "./expiry";
 import { PromotionState } from "./state";
 import { PromotionTokens } from "./tokens";
 
@@ -75,6 +76,7 @@ export const NO_PROMOTION_TOKEN =
 const make = Effect.gen(function* () {
   const tokens = yield* PromotionTokens;
   const promotion = yield* PromotionState;
+  const expiry = yield* PromotionExpiry;
   const audit = yield* AuditLog;
   const identity = yield* ControllerIdentity;
   const { dataDir, promotionTransferDir } = yield* HerculeHome;
@@ -223,7 +225,8 @@ const make = Effect.gen(function* () {
         // A thaw fails only once sealed, when the data has moved and the
         // freeze no longer matters.
         const thaw = Effect.ignore(promotion.thaw(tokenId));
-        const transfer = yield* promotion.freeze(tokenId, new Date(expiresAt)).pipe(
+        const transfer = yield* promotion.freeze(tokenId).pipe(
+          Effect.andThen(expiry.scheduleThaw(tokenId, new Date(expiresAt))),
           Effect.andThen(deriveTransferKey(tokenBytes, salt)),
           Effect.flatMap((transferKey) => buildTransfer(transferKey, salt)),
           Effect.onError(() => thaw),
@@ -266,6 +269,7 @@ export const PromotionTransferLayer: Layer.Layer<
   never,
   | PromotionTokens
   | PromotionState
+  | PromotionExpiry
   | ControllerIdentity
   | HerculeHome
   | MasterKey

@@ -7,7 +7,16 @@
  * whose secrets the Master Key opens, so the first boot never meets secrets
  * it cannot read.
  */
-import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  openSync,
+  rmSync,
+} from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import * as Effect from "effect/Effect";
@@ -76,6 +85,42 @@ const removeReceivedFiles = (paths: HomePaths): Effect.Effect<void> =>
   });
 
 /**
+ * Exclusively creates the destination database file and attachments
+ * directory. Fails with `PromotionReceiveError` when either already exists,
+ * without truncating them, and removes the database file it created when the
+ * attachments directory cannot be reserved.
+ */
+const reserveDestination = (paths: HomePaths): Effect.Effect<void, PromotionReceiveError> =>
+  Effect.try({
+    try: () => {
+      mkdirSync(paths.dataDir, { recursive: true, mode: 0o700 });
+      const fd = openSync(
+        paths.databaseFile,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+        0o600,
+      );
+      closeSync(fd);
+      try {
+        mkdirSync(buildAttachmentsDirectory(paths.dataDir), { mode: 0o700 });
+      } catch (cause) {
+        rmSync(paths.databaseFile, { force: true });
+        throw cause;
+      }
+    },
+    catch: (cause) => {
+      const err = cause as NodeJS.ErrnoException;
+      if (err.code === "EEXIST") {
+        return new PromotionReceiveError({
+          message: `${err.path ?? paths.databaseFile} already exists; promotion needs an empty Hercule Home`,
+        });
+      }
+      return new PromotionReceiveError({
+        message: `could not reserve the Home: ${readErrorMessage(cause)}`,
+      });
+    },
+  });
+
+/**
  * Removes everything a received transfer put in the Home at `paths`: the
  * database, the attachments, the promotion transfer directory and the Master
  * Key. Called when the switch fails after the transfer, so a retry starts
@@ -133,9 +178,10 @@ const copyRange = (from: string, range: ByteRange, to: string) =>
  *
  * `hercule promote` checks that the Home is empty before the transfer too,
  * so it can refuse before the token is spent. This function checks again,
- * right before it writes, because a long transfer or a confirmation prompt
- * left open leaves time for something else to start in the same Home, and
- * the database copy would overwrite it.
+ * then exclusively creates the destination database and attachments
+ * directory, because a long transfer or a confirmation prompt left open
+ * leaves time for something else to start in the same Home. An existing
+ * file is refused; it is never truncated.
  */
 export const receiveTransfer = (
   paths: HomePaths,
@@ -174,16 +220,10 @@ export const receiveTransfer = (
       });
     }
 
+    yield* reserveDestination(paths);
+
     let createdKey = false;
     const unpack = Effect.gen(function* () {
-      const attachmentsDirectory = buildAttachmentsDirectory(paths.dataDir);
-      yield* Effect.try({
-        try: () => mkdirSync(attachmentsDirectory, { recursive: true, mode: 0o700 }),
-        catch: (cause) =>
-          new PromotionReceiveError({
-            message: `could not create ${attachmentsDirectory}: ${readErrorMessage(cause)}`,
-          }),
-      });
       yield* copyRange(transferFile, layout.database, paths.databaseFile);
       for (const attachment of layout.attachments) {
         yield* copyRange(
@@ -193,10 +233,12 @@ export const receiveTransfer = (
         );
       }
 
-      const masterKey = yield* createMasterKey(openKeyStore(paths, backend)).pipe(
-        Effect.mapError((error) => new PromotionReceiveError({ message: error.message })),
-      );
-      createdKey = true;
+      const masterKey = yield* createMasterKey(
+        openKeyStore(paths, backend),
+        Effect.sync(() => {
+          createdKey = true;
+        }),
+      ).pipe(Effect.mapError((error) => new PromotionReceiveError({ message: error.message })));
       const transferKey = yield* deriveTransferKey(tokenBytes, salt);
       yield* rewrapSecrets(transferKey, masterKey).pipe(
         Effect.provide(openDatabaseCopy(paths.databaseFile)),

@@ -79,7 +79,9 @@ const make = Effect.gen(function* () {
       // Only an unconfirmed step prompt needs anything more: a refusal is
       // recorded on the input, where its reader sees it, and nobody waits on
       // this start to be told.
-      const recorded = yield* sessions.recordInputAnswer(start.input, sent, runnerId);
+      const recorded = yield* promotion.whenServing(
+        sessions.recordInputAnswer(start.input, sent, runnerId),
+      );
       if (recorded._tag === "unconfirmed") {
         yield* connections.tell(runnerId, recorded.resultRequest);
       }

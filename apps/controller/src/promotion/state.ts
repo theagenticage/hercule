@@ -176,14 +176,15 @@ export class PromotionState extends Context.Service<
 
     /**
      * Freezes the controller for the transfer of `tokenId`, then waits for
-     * the work that is running to finish. Thaws on its own at `until`. Fails
-     * with `PromotionInProgress` when another transfer holds the freeze, with
+     * the work that is running to finish. Does not schedule the token's
+     * expiry: the caller asks `PromotionExpiry` to thaw at that deadline, so
+     * the timer lives in the controller daemon (ADR 0033). Fails with
+     * `PromotionInProgress` when another transfer holds the freeze, with
      * `ControllerSealed` when sealed, and with `InvalidState` when the
      * running work did not finish within the drain timeout, after thawing.
      */
     readonly freeze: (
       tokenId: string,
-      until: Date,
     ) => Effect.Effect<void, PromotionInProgress | ControllerSealed | InvalidState>;
 
     /**
@@ -192,7 +193,7 @@ export class PromotionState extends Context.Service<
      * `ControllerSealed` once sealed, because the data has moved and a thaw
      * can no longer undo that.
      */
-    readonly thaw: (tokenId: string) => Effect.Effect<boolean, ControllerSealed>;
+    readonly thaw: (tokenId: string) => Effect.Effect<boolean, ControllerSealed | SqlError>;
 
     /**
      * Seals the controller for the transfer of `tokenId` and returns the seal.
@@ -235,9 +236,6 @@ export const PromotionStateLayer: Layer.Layer<
     // and a seal writes the database in between. One at a time, so a thaw at
     // the deadline cannot land between a seal's check and its write.
     const transitions = yield* Semaphore.make(1);
-    // The deadline timers run as long as the layer does, not as long as the
-    // request that froze the controller.
-    const scope = yield* Effect.scope;
 
     const setPhase = (phase: PromotionPhase) =>
       SubscriptionRef.update(gate, (current) => ({ ...current, phase }));
@@ -283,6 +281,13 @@ export const PromotionStateLayer: Layer.Layer<
     const thaw = (tokenId: string) =>
       transitions.withPermit(
         Effect.gen(function* () {
+          // A seal that persisted and then lost its in-memory write still
+          // owns the data. Memory may still say Frozen; the row wins.
+          const stored = yield* readSeal;
+          if (Option.isSome(stored)) {
+            yield* setPhase({ _tag: "Sealed", seal: stored.value });
+            return yield* createSealedError(stored.value);
+          }
           const { phase } = yield* SubscriptionRef.get(gate);
           if (phase._tag === "Sealed") return yield* createSealedError(phase.seal);
           if (phase._tag !== "Frozen" || phase.tokenId !== tokenId) return false;
@@ -365,7 +370,7 @@ export const PromotionStateLayer: Layer.Layer<
 
       whenServing,
 
-      freeze: (tokenId, until) =>
+      freeze: (tokenId) =>
         Effect.gen(function* () {
           yield* transitions.withPermit(
             Effect.gen(function* () {
@@ -375,14 +380,6 @@ export const PromotionStateLayer: Layer.Layer<
           );
           yield* Effect.logInfo(
             "A promotion transfer has started; this controller is read-only until it ends.",
-          );
-          // A controller sealed by then has nothing left to thaw.
-          yield* Effect.forkIn(
-            Effect.andThen(
-              Effect.sleep(Duration.millis(Math.max(0, until.getTime() - Date.now()))),
-              Effect.ignore(thaw(tokenId)),
-            ),
-            scope,
           );
           const timeout = yield* PromotionDrainTimeout;
           yield* awaitGateState((current) => current.running === 0).pipe(
@@ -422,23 +419,30 @@ export const PromotionStateLayer: Layer.Layer<
             }
             const signature = yield* identity.sign(encodeForwardingPointerBytes(newAddress));
             const at = yield* nowIso;
-            yield* withTransaction(
-              sql,
+            const seal: Seal = { tokenId, newAddress, signature };
+            // Persist and take effect together. An interrupt after the row
+            // commits and before memory updates would leave thaw able to
+            // serve again over a sealed database.
+            yield* Effect.uninterruptible(
               Effect.gen(function* () {
-                yield* sql`
-                  INSERT INTO sealed_state (singleton, token_id, sealed_at, new_address, signature)
-                  VALUES (1, ${uuidFromString(tokenId)}, ${at}, ${newAddress}, ${signature})
-                `;
-                yield* audit.append({
-                  kind: "controller.sealed",
-                  actor: SYSTEM_ACTOR,
-                  payload: { promotionTokenId: tokenId, newAddress },
-                  at,
-                });
+                yield* withTransaction(
+                  sql,
+                  Effect.gen(function* () {
+                    yield* sql`
+                      INSERT INTO sealed_state (singleton, token_id, sealed_at, new_address, signature)
+                      VALUES (1, ${uuidFromString(tokenId)}, ${at}, ${newAddress}, ${signature})
+                    `;
+                    yield* audit.append({
+                      kind: "controller.sealed",
+                      actor: SYSTEM_ACTOR,
+                      payload: { promotionTokenId: tokenId, newAddress },
+                      at,
+                    });
+                  }),
+                );
+                yield* setPhase({ _tag: "Sealed", seal });
               }),
             );
-            const seal: Seal = { tokenId, newAddress, signature };
-            yield* setPhase({ _tag: "Sealed", seal });
             yield* Effect.logInfo(`This controller is sealed; it has moved to ${newAddress}.`);
             return seal;
           }),

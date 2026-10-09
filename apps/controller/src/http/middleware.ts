@@ -37,6 +37,7 @@ import {
 import { CurrentActor, checkGrant, NO_CREDENTIAL, type Actor } from "../actor";
 import { Credentials, hashToken } from "../credentials";
 import { SessionTokens } from "../permissions";
+import { PromotionState } from "../promotion";
 import { Setup } from "../setup";
 
 /** Builds the operation id of a request by joining the group and endpoint identifiers. */
@@ -70,6 +71,7 @@ const parseOperationId = (id: string): Effect.Effect<OperationId> =>
 const resolveActor = (
   credentials: Credentials["Service"],
   sessions: SessionTokens["Service"],
+  promotion: PromotionState["Service"],
   token: string,
 ): Effect.Effect<Option.Option<Actor>> =>
   Effect.gen(function* () {
@@ -78,9 +80,12 @@ const resolveActor = (
     const session = yield* sessions.resolve(tokenHash);
     if (Option.isSome(session)) return session;
 
+    const serving = (yield* promotion.phase)._tag === "Serving";
     const login = yield* credentials.findLoginToken(tokenHash);
     if (Option.isSome(login)) {
-      yield* credentials.renewLoginToken(login.value);
+      // A freeze's copy would miss a renewal written after it. Skip the
+      // write so B keeps the expiry A had when it copied.
+      if (serving) yield* credentials.renewLoginToken(login.value);
       return Option.some<Actor>({
         _tag: "user",
         userId: login.value.userId,
@@ -90,7 +95,7 @@ const resolveActor = (
 
     const apiKey = yield* credentials.findApiKey(tokenHash);
     if (Option.isSome(apiKey)) {
-      yield* credentials.touchApiKey(apiKey.value);
+      if (serving) yield* credentials.touchApiKey(apiKey.value);
       return Option.some<Actor>({
         _tag: "user",
         userId: apiKey.value.userId,
@@ -102,31 +107,35 @@ const resolveActor = (
   }).pipe(Effect.orDie);
 
 /** Accepts a credential of any kind, then runs the operation's static grant check. */
-export const AuthenticatedLayer: Layer.Layer<Authenticated, never, Credentials | SessionTokens> =
-  Layer.effect(Authenticated)(
-    Effect.gen(function* () {
-      const credentials = yield* Credentials;
-      const sessions = yield* SessionTokens;
-      return {
-        bearer: (httpEffect, options) =>
-          Effect.gen(function* () {
-            const operation = yield* parseOperationId(buildOperationId(options));
+export const AuthenticatedLayer: Layer.Layer<
+  Authenticated,
+  never,
+  Credentials | SessionTokens | PromotionState
+> = Layer.effect(Authenticated)(
+  Effect.gen(function* () {
+    const credentials = yield* Credentials;
+    const sessions = yield* SessionTokens;
+    const promotion = yield* PromotionState;
+    return {
+      bearer: (httpEffect, options) =>
+        Effect.gen(function* () {
+          const operation = yield* parseOperationId(buildOperationId(options));
 
-            const token = Redacted.value(options.credential);
-            if (token === "") return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
+          const token = Redacted.value(options.credential);
+          if (token === "") return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
 
-            const actor = yield* resolveActor(credentials, sessions, token);
-            if (Option.isNone(actor))
-              return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
+          const actor = yield* resolveActor(credentials, sessions, promotion, token);
+          if (Option.isNone(actor))
+            return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
 
-            const refused = checkGrant(operation, actor.value);
-            if (refused !== undefined) return yield* Effect.fail(refused);
+          const refused = checkGrant(operation, actor.value);
+          if (refused !== undefined) return yield* Effect.fail(refused);
 
-            return yield* Effect.provideService(httpEffect, CurrentActor, actor.value);
-          }),
-      };
-    }),
-  );
+          return yield* Effect.provideService(httpEffect, CurrentActor, actor.value);
+        }),
+    };
+  }),
+);
 
 /** Accepts only the one-time setup token, compared with the hash written at boot. */
 export const SetupTokenLayer: Layer.Layer<SetupToken, never, Setup> = Layer.effect(SetupToken)(
