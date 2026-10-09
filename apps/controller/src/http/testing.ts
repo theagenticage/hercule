@@ -72,7 +72,13 @@ import { NotifierLayer } from "../notifications";
 import { readEventsOfKind, type LoggedEvent } from "../events/testing";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
-import { masterKeyLayer, Secrets, secretsLayer } from "../secrets";
+import {
+  masterKeyLayer,
+  Secrets,
+  secretsLayer,
+  type MasterKeyBackend,
+  type SecurityRunner,
+} from "../secrets";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
 import { createPluginFixture } from "../plugins/testing";
@@ -119,7 +125,11 @@ export const USERNAME = "rogier";
  * routes must share one instance: a request must read the status the boot's
  * activation wrote.
  */
-const buildServices = (home: string) =>
+const buildServices = (
+  home: string,
+  masterKeyBackend: MasterKeyBackend = "file",
+  securityRunner?: SecurityRunner,
+) =>
   // The routes' layer includes the controller daemon, which uses the session
   // and workspace services and the plugin host. So this block's output is
   // provided to it rather than merged next to it, just as the real boot
@@ -181,7 +191,15 @@ const buildServices = (home: string) =>
         PromotionTokensLayer,
       ),
     ),
-    Layer.provideMerge(secretsLayer.pipe(Layer.provideMerge(masterKeyLayer("file")))),
+    Layer.provideMerge(
+      secretsLayer.pipe(
+        Layer.provideMerge(
+          securityRunner === undefined
+            ? masterKeyLayer(masterKeyBackend)
+            : masterKeyLayer(masterKeyBackend, securityRunner),
+        ),
+      ),
+    ),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
     Layer.provideMerge(
@@ -368,6 +386,14 @@ export interface ServerOptions {
    * so a test can name a runner that joins after the server is up.
    */
   readonly readLocalRunnerId?: () => string | undefined;
+  /**
+   * Where this controller keeps its Master Key. Defaults to the file store,
+   * so a test never touches the developer's keychain. A promotion test that
+   * covers macOS-to-Linux puts `"keychain"` here and a fake `security` runner.
+   */
+  readonly masterKeyBackend?: MasterKeyBackend;
+  /** The `security` CLI the keychain store runs. Required with `"keychain"`. */
+  readonly securityRunner?: SecurityRunner;
 }
 
 /**
@@ -492,7 +518,7 @@ export const withServer = (
       }),
     ).pipe(
       Effect.provide(
-        buildServices(home).pipe(
+        buildServices(home, options.masterKeyBackend, options.securityRunner).pipe(
           // The same listener `hercule serve` builds, including the body size
           // limit. The limit is enforced by the transport, so without it the
           // tests would run a different server from the one that ships.

@@ -295,8 +295,11 @@ export const defaultBackend: MasterKeyBackend = process.platform === "darwin" ? 
 export const openKeyStore = (
   home: { readonly home: string; readonly masterKeyFile: string },
   backend: MasterKeyBackend,
+  run: SecurityRunner = spawnSecurity,
 ): KeyStore =>
-  backend === "keychain" ? createKeychainStore(home.home) : createFileStore(home.masterKeyFile);
+  backend === "keychain"
+    ? createKeychainStore(home.home, run)
+    : createFileStore(home.masterKeyFile);
 
 /**
  * Imports key bytes as a non-extractable AES-256-GCM key, then zeroes the
@@ -347,16 +350,19 @@ const secretCount: Effect.Effect<number, SqlError, SqlClient.SqlClient> = Effect
  * provides it as a non-extractable AES-256-GCM key.
  *
  * The backend is explicit so a test drives the file store in a temporary home
- * without ever touching the developer's real keychain.
+ * without ever touching the developer's real keychain. `run` is the `security`
+ * CLI the keychain store uses; tests pass a fake so Linux CI can cover a
+ * macOS-to-Linux promotion.
  */
 export const masterKeyLayer = (
   backend: MasterKeyBackend = defaultBackend,
+  run: SecurityRunner = spawnSecurity,
 ): Layer.Layer<MasterKey, MasterKeyError | SqlError, HerculeHome | SqlClient.SqlClient> =>
   Layer.effect(
     MasterKey,
     Effect.gen(function* () {
       const home = yield* HerculeHome;
-      const store = openKeyStore(home, backend);
+      const store = openKeyStore(home, backend, run);
 
       let bytes = yield* store.read;
       if (bytes === undefined) {

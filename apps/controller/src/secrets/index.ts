@@ -13,6 +13,7 @@ export {
   openKeyStore,
   type MasterKeyBackend,
   type MasterKeyError,
+  type SecurityRunner,
 } from "./masterKey";
 export {
   CORE_OWNER,

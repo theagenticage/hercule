@@ -27,7 +27,7 @@ import {
   withServer,
   type ServerHarness,
 } from "../http/testing";
-import { masterKeyLayer, Secrets, secretsLayer } from "../secrets";
+import { masterKeyLayer, Secrets, secretsLayer, type SecurityRunner } from "../secrets";
 import { decodePromotionToken } from "./crypto";
 import type { PromotionPreview } from "./exchange";
 import { receiveTransfer } from "./receive";
@@ -111,6 +111,41 @@ describe("promotion transfer", () => {
     const path = join(dir, "transfer");
     await Bun.write(path, response);
     return path;
+  };
+
+  /**
+   * A `security` CLI that stores items in memory. Linux CI has no Keychain;
+   * this is the command shape the macOS store sends, the same fake the
+   * master-key tests use.
+   */
+  const createFakeSecurityRunner = (): SecurityRunner => {
+    const items = new Map<string, string>();
+    return (argv) => {
+      const command = argv[1];
+      const account = argv[argv.indexOf("-a") + 1];
+      const fail = { exitCode: 1, stdout: "", stderr: "" };
+      const missing = { exitCode: 44, stdout: "", stderr: "" };
+      if (account === undefined) return Promise.resolve(fail);
+      if (command === "find-generic-password") {
+        const value = items.get(account);
+        return Promise.resolve(
+          value === undefined ? missing : { exitCode: 0, stdout: `${value}\n`, stderr: "" },
+        );
+      }
+      if (command === "add-generic-password") {
+        if (items.has(account)) return Promise.resolve({ exitCode: 45, stdout: "", stderr: "" });
+        const value = argv[argv.indexOf("-w") + 1];
+        if (value === undefined) return Promise.resolve(fail);
+        items.set(account, value);
+        return Promise.resolve({ exitCode: 0, stdout: "", stderr: "" });
+      }
+      if (command === "delete-generic-password") {
+        if (!items.has(account)) return Promise.resolve(missing);
+        items.delete(account);
+        return Promise.resolve({ exitCode: 0, stdout: "", stderr: "" });
+      }
+      return Promise.resolve(fail);
+    };
   };
 
   it("refuses a wrong token, an expired token, and a reused token", async () => {
@@ -247,6 +282,41 @@ describe("promotion transfer", () => {
 
       expect(await Effect.runPromise(readCiphertext)).toEqual(ciphertextBefore);
     });
+  });
+
+  it("copies a secret from a Keychain-backed controller onto a file-backed Home", async () => {
+    await withServer(
+      async (harness) => {
+        const user = await completeSetup(harness.base);
+        expect(await storeSecret(harness.base, user)).toBe(200);
+        expect(existsSync(join(harness.home, "master.key"))).toBe(false);
+
+        const token = await createPromotionToken(harness.base, user);
+        const controllerId = await readPreviewedControllerId(harness.base, token);
+        const transferFile = await saveTransfer(await requestTransfer(harness.base, token));
+
+        const paths = createHomeB();
+        await Effect.runPromise(
+          receiveTransfer(paths, decodeTokenOrThrow(token), controllerId, transferFile, "file"),
+        );
+        expect(existsSync(paths.masterKeyFile)).toBe(true);
+        expect((await Bun.file(paths.masterKeyFile).stat()).mode & 0o777).toBe(0o600);
+
+        const plaintext = await Effect.runPromise(
+          Effect.gen(function* () {
+            const secrets = yield* Secrets;
+            const value = yield* secrets.get({ kind: "runner", id: SECRET_OWNER }, "api-token");
+            return Option.isNone(value) ? "" : Redacted.value(value.value);
+          }).pipe(
+            Effect.provide(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
+            Effect.provide(openDatabase(paths.databaseFile)),
+            Effect.provide(Layer.succeed(HerculeHome, paths)),
+          ),
+        );
+        expect(plaintext).toBe(SECRET_VALUE);
+      },
+      { masterKeyBackend: "keychain", securityRunner: createFakeSecurityRunner() },
+    );
   });
 
   it("refuses a transfer the token was not made for, and leaves B's Home empty", async () => {
