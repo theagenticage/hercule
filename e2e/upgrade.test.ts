@@ -13,7 +13,7 @@
  * provider behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
- * sits outside the one-minute added-CI budget. The session and its transcript
+ * sits outside the two-minute added-CI budget. The session and its transcript
  * are therefore written into the database the edge binary created, using ids
  * that binary persisted, then read back through that binary's CLI before the
  * upgrade. That is the same store a spawn would have written; the CLI is the
