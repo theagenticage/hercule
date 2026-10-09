@@ -13,10 +13,16 @@
  * - the Lounge holds the idle threads;
  * - each desk's pose comes from `decideThreadPose`, with the thread's runner;
  * - asleep and away threads have no desk, so a project whose threads are all
- *   asleep has no room, but a waiting thread on an offline runner is seated.
+ *   asleep has no room, but a waiting thread on an offline runner is seated;
+ * - every assistant has a corner in the Secretariat in every pose, even with
+ *   no session, in the sidebar's order whatever order the rows come in, and
+ *   never joins a room or the Lounge;
+ * - a waiting assistant queues by its own id, among the waiting threads,
+ *   waiting longest first.
  */
 import { describe, expect, it } from "vitest";
 import type { OpenRequest, Session } from "@hercule/contract";
+import { buildAssistantRows, type AssistantRow } from "../assistants/rows";
 import { POSES } from "../threads/pose";
 import { decideOfficeSeating, isSeatedPose } from "./seating";
 import {
@@ -40,12 +46,26 @@ const REQUEST: OpenRequest = {
 const buildTimestamp = (minute: number): string => `2026-09-10T09:0${String(minute)}:00.000Z`;
 
 /** Returns the seating of `sessions` in the fixture world, with webshop listed before ops. */
-const seat = (sessions: readonly Session[], runners = [MOSS]) =>
+const seat = (
+  sessions: readonly Session[],
+  runners = [MOSS],
+  assistants: readonly AssistantRow[] = [],
+) =>
   decideOfficeSeating({
     sessions,
     projects: [WEBSHOP_PROJECT, OPS_PROJECT],
     workspaces: [PRIMARY, THREAD_3F1],
     runners,
+    assistants,
+  });
+
+/** Returns the current session of the main conversation of the assistant `assistantId`. */
+const buildAssistantSession = (assistantId: string, over: Partial<Session> = {}): Session =>
+  buildSession({
+    id: `s-${assistantId}`,
+    agentId: assistantId,
+    conversationId: `c-${assistantId}`,
+    ...over,
   });
 
 /** Returns each room's project id and the ids of its desks, in order. */
@@ -183,6 +203,104 @@ describe("decideOfficeSeating", () => {
     ]);
 
     expect(rooms).toEqual([{ projectId: WEBSHOP_PROJECT.id, name: "webshop", desks: ["s-bun"] }]);
+  });
+});
+
+describe("decideOfficeSeating with assistants", () => {
+  const cove = { ...buildRunner("r-cove", "cove"), connectivity: "offline" as const };
+  const ASSISTANTS = [
+    { id: "a-working", name: "Wren" },
+    { id: "a-waiting", name: "Ada" },
+    { id: "a-idle", name: "Otto" },
+    { id: "a-asleep", name: "Mila" },
+    { id: "a-away", name: "Bea" },
+    { id: "a-new", name: "Cleo" },
+  ];
+  const sessions = [
+    buildAssistantSession("a-working", { status: "busy" }),
+    buildAssistantSession("a-waiting", { status: "busy", openRequests: [REQUEST] }),
+    buildAssistantSession("a-idle", { status: "idle" }),
+    buildAssistantSession("a-asleep", { status: "exited", resumable: true }),
+    buildAssistantSession("a-away", { status: "idle", runnerId: cove.id }),
+  ];
+  const rows = buildAssistantRows(
+    ASSISTANTS,
+    new Map(sessions.map((session) => [session.agentId!, session])),
+    [MOSS, cove],
+  );
+
+  it("gives every assistant a corner in the Secretariat in every pose, in the sidebar's order", () => {
+    const { secretariat } = seat(sessions, [MOSS, cove], [...rows].reverse());
+
+    expect(secretariat.map((row) => [row.id, row.pose])).toEqual([
+      ["a-waiting", "waiting"],
+      ["a-away", "away"],
+      ["a-new", "idle"],
+      ["a-asleep", "asleep"],
+      ["a-idle", "idle"],
+      ["a-working", "working"],
+    ]);
+  });
+
+  it("seats an assistant with no session yet as idle, and does not queue it", () => {
+    const { secretariat, queue } = seat(
+      [],
+      [MOSS],
+      buildAssistantRows(ASSISTANTS.slice(-1), new Map(), [MOSS]),
+    );
+
+    expect(secretariat).toEqual([{ id: "a-new", name: "Cleo", pose: "idle", session: null }]);
+    expect(queue).toEqual([]);
+  });
+
+  it("gives an assistant no room and no place in the Lounge, whatever its pose", () => {
+    const { rooms, lounge } = seat(sessions, [MOSS, cove], rows);
+
+    expect(rooms).toEqual([]);
+    expect(lounge).toEqual([]);
+  });
+
+  it("queues a waiting assistant by its own id, among the waiting threads, waiting longest first", () => {
+    const assistantRows = buildAssistantRows(
+      [
+        { id: "a-ada", name: "Ada" },
+        { id: "a-bea", name: "Bea" },
+      ],
+      new Map([
+        [
+          "a-ada",
+          buildAssistantSession("a-ada", {
+            openRequests: [REQUEST],
+            lastActivityAt: buildTimestamp(2),
+          }),
+        ],
+        [
+          "a-bea",
+          buildAssistantSession("a-bea", {
+            openRequests: [REQUEST],
+            lastActivityAt: buildTimestamp(1),
+          }),
+        ],
+      ]),
+      [MOSS],
+    );
+
+    const { queue } = seat(
+      [
+        buildSession({
+          id: "s-recent",
+          openRequests: [REQUEST],
+          lastActivityAt: buildTimestamp(3),
+        }),
+        buildSession({ id: "s-long", openRequests: [REQUEST], lastActivityAt: buildTimestamp(0) }),
+        buildSession({ id: "s-tie", openRequests: [REQUEST], lastActivityAt: buildTimestamp(1) }),
+      ],
+      [MOSS],
+      assistantRows,
+    );
+
+    // The thread s-tie and the assistant a-bea waited equally long, so ids decide.
+    expect(queue).toEqual(["s-long", "a-bea", "s-tie", "a-ada", "s-recent"]);
   });
 });
 

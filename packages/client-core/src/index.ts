@@ -434,8 +434,10 @@ export {
   decideThreadPose,
   decideThreadRowEnd,
   describePose,
+  isAbsentPose,
   POSES,
   type Pose,
+  type SessionPose,
   type ThreadRowEnd,
 } from "./threads/pose";
 export { createTailBuffer } from "./threads/tail-buffer";
