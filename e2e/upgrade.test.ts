@@ -5,21 +5,23 @@
  *
  * This catches migrations that are correct on an empty database but fail on
  * real data. The fixture is one representative conversation of several owner
- * turns (and the notices the old binary writes beside them), plus a named
- * Provider Instance. After the upgrade the test checks that those records,
- * their content, ordering and associations survived. It is not a matrix of
- * session states or provider behaviour.
+ * turns, one named Provider Instance, and one session with a few persisted
+ * turns. After the upgrade the test checks that those records, their content,
+ * ordering and associations survived. It is not a matrix of session states or
+ * provider behaviour.
  *
- * A live session and its transcript need a logged-in harness. That install and
- * a real turn sit outside the one-minute added-CI budget, and CI has no vendor
- * login. When `session spawn` does place a Thread, the test also checks that
- * session and its transcript; when placement refuses, the conversation turns
- * are the persisted thread.
+ * A live session needs a logged-in harness, which CI does not have and which
+ * sits outside the one-minute added-CI budget. The session and its transcript
+ * are therefore written into the database the edge binary created, using ids
+ * that binary persisted, then read back through that binary's CLI before the
+ * upgrade. That is the same store a spawn would have written; the CLI is the
+ * proof the rows are real.
  *
  * In CI the previous `edge` release must exist: a missing baseline fails the
  * job rather than skipping it. Locally, with no `edge` release, the test is
- * skipped and says so.
+ * skipped and says so. An unsupported platform fails in CI and skips locally.
  */
+import { Database } from "bun:sqlite";
 import { chmodSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -61,17 +63,19 @@ interface SeededMessage {
   readonly position: number;
   readonly senderRole: string;
   readonly text: string;
-  readonly sessionId: string | null;
 }
 
 interface SeededSession {
   readonly id: string;
   readonly conversationId: string | null;
+  readonly agentId: string | null;
+  readonly instanceId: string;
 }
 
 interface SeededTranscriptRow {
   readonly position: number;
   readonly tag: string;
+  readonly text: string | undefined;
 }
 
 interface SeededProvider {
@@ -83,6 +87,8 @@ interface SeededProvider {
 let state: TemporaryHome | undefined;
 let edgeBinary: string | undefined;
 let newBinary: string;
+/** Why this run is not exercising the upgrade; unset when it should run. */
+let skipReason: string | undefined;
 
 /**
  * Returns the edge asset name for this process's platform, or `undefined`
@@ -189,14 +195,126 @@ function summarizeProvider(provider: SeededProvider): SeededProvider {
   return { id: provider.id, providerId: provider.providerId, name: provider.name };
 }
 
+function summarizeSession(session: SeededSession): SeededSession {
+  return {
+    id: session.id,
+    conversationId: session.conversationId,
+    agentId: session.agentId,
+    instanceId: session.instanceId,
+  };
+}
+
 function summarizeRow(row: Row): SeededTranscriptRow {
-  return { position: row.position, tag: row.event._tag };
+  const event = row.event;
+  return {
+    position: row.position,
+    tag: event._tag,
+    text: event._tag === "content.delta" ? String(event["delta"]) : undefined,
+  };
 }
 
 function sortByPosition<A extends { readonly position: number }>(
   rows: ReadonlyArray<A>,
 ): ReadonlyArray<A> {
   return [...rows].sort((left, right) => left.position - right.position);
+}
+
+/** Converts a canonical UUID to the 16 bytes the controller stores. */
+function uuidBlob(id: string): Buffer {
+  return Buffer.from(id.replaceAll("-", ""), "hex");
+}
+
+/**
+ * Writes one exited session and a few transcript turns into the database the
+ * edge binary created. `ids` are records that binary already persisted.
+ * Returns the new session's id.
+ */
+function persistRepresentativeSession(options: {
+  readonly home: string;
+  readonly conversationId: string;
+  readonly agentId: string;
+  readonly instanceId: string;
+  readonly runnerId: string;
+  readonly permissionProfileId: string;
+}): string {
+  const sessionId = Bun.randomUUIDv7();
+  const at = new Date().toISOString();
+  const spec = JSON.stringify({
+    instanceId: options.instanceId,
+    workspaceId: null,
+    modelSelection: { model: "sonnet", options: {} },
+    accessMode: "auto",
+    timeouts: { inactivityMs: 60_000, absoluteMs: 3_600_000 },
+  });
+  const events: Array<Record<string, unknown>> = [
+    { _tag: "session.started", eventId: "e-start", sessionId, at },
+  ];
+  for (const [index, text] of TURNS.entries()) {
+    const turnId = `turn-${String(index + 1)}`;
+    const itemId = `item-${String(index + 1)}`;
+    events.push(
+      { _tag: "turn.started", eventId: `${turnId}-start`, sessionId, at, turnId },
+      {
+        _tag: "content.delta",
+        eventId: `${turnId}-delta`,
+        sessionId,
+        at,
+        turnId,
+        itemId,
+        streamKind: "assistant_text",
+        delta: text,
+      },
+      {
+        _tag: "turn.completed",
+        eventId: `${turnId}-done`,
+        sessionId,
+        at,
+        turnId,
+        state: "completed",
+      },
+    );
+  }
+  events.push({ _tag: "session.exited", eventId: "e-exit", sessionId, at, reason: "stopped" });
+
+  const database = new Database(join(options.home, "data", "hercule.db"));
+  try {
+    database
+      .query(
+        `INSERT INTO sessions (
+           id, title, permission_profile_id, agent_id, conversation_id,
+           instance_id, runner_id, requested_access_mode, access_mode,
+           spec, model_selection, status, created_at, started_at, exited_at,
+           last_activity_at, native_session_id, exit_reason
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', 'auto', ?, ?, 'exited', ?, ?, ?, ?, ?, 'stopped')`,
+      )
+      .run(
+        uuidBlob(sessionId),
+        TURNS[0],
+        uuidBlob(options.permissionProfileId),
+        uuidBlob(options.agentId),
+        uuidBlob(options.conversationId),
+        uuidBlob(options.instanceId),
+        uuidBlob(options.runnerId),
+        spec,
+        JSON.stringify({ model: "sonnet", options: {} }),
+        at,
+        at,
+        at,
+        at,
+        "upgrade-fixture-native",
+      );
+    const insertEvent = database.query(
+      `INSERT INTO session_stream (session_id, position, runner_seq, at, event)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (const [index, event] of events.entries()) {
+      const position = index + 1;
+      insertEvent.run(uuidBlob(sessionId), position, position, at, JSON.stringify(event));
+    }
+  } finally {
+    database.close();
+  }
+  return sessionId;
 }
 
 /**
@@ -231,62 +349,6 @@ async function waitForConversationTurns(
   );
 }
 
-/**
- * Returns the conversation's first session and its transcript when a session
- * exists and has at least one row. Returns `undefined` when placement wrote
- * no session.
- */
-async function readPlacedSession(
-  options: { readonly home: string; readonly binary: string },
-  conversationId: string,
-): Promise<
-  | {
-      readonly session: SeededSession;
-      readonly transcript: ReadonlyArray<SeededTranscriptRow>;
-    }
-  | undefined
-> {
-  const sessions = readListedItems<SeededSession>(
-    await runCli(["session", "list", "--conversation", conversationId, "--json"], options),
-  );
-  const session = sessions[0];
-  if (session === undefined) return undefined;
-  const deadline = Date.now() + 10_000;
-  let lastTranscript: ReadonlyArray<Row> = [];
-  while (Date.now() < deadline) {
-    lastTranscript = await readTranscript({ ...options, id: session.id }).catch(() => []);
-    if (lastTranscript.length > 0) {
-      return { session, transcript: lastTranscript.map(summarizeRow) };
-    }
-    await sleep(200);
-  }
-  throw new Error(
-    `session ${session.id} was placed but never wrote transcript rows ` +
-      `(${String(lastTranscript.length)} rows). The baseline must be populated when a session exists.`,
-  );
-}
-
-/**
- * Spawns a Thread through the old CLI. Returns the session when the spawn
- * succeeds, or `undefined` when placement refuses (no logged-in provider).
- */
-async function trySpawnThread(options: {
-  readonly home: string;
-  readonly binary: string;
-}): Promise<SeededSession | undefined> {
-  const spawned = await runCli(["session", "spawn", "--json"], {
-    ...options,
-    stdin: TURNS[0],
-  });
-  if (spawned.code !== 0) {
-    console.log(
-      `session spawn refused (no logged-in provider):\n${spawned.stdout}\n${spawned.stderr}`,
-    );
-    return undefined;
-  }
-  return expectJson<SeededSession>(spawned);
-}
-
 /** Restarts the controller on the same port after a short wait for the bind to free. */
 async function startOnPort(options: {
   readonly home: string;
@@ -309,13 +371,14 @@ async function startOnPort(options: {
 beforeAll(async () => {
   const assetName = resolveEdgeAssetName();
   if (assetName === undefined) {
+    skipReason = `no edge asset for ${process.platform}-${process.arch}`;
     if (process.env["CI"]) {
       throw new Error(
         `Upgrade test has no edge asset for ${process.platform}-${process.arch}. ` +
           "Run it on linux-x64, linux-arm64, or darwin-arm64.",
       );
     }
-    console.log(`Skipping upgrade test: no edge asset for ${process.platform}-${process.arch}`);
+    console.log(`Skipping upgrade test: ${skipReason}`);
     return;
   }
 
@@ -330,10 +393,13 @@ beforeAll(async () => {
   const downloadDir = join(state.home, "edge-download");
   mkdirSync(downloadDir, { recursive: true });
   edgeBinary = await downloadEdgeBinary(downloadDir);
-  if (edgeBinary !== undefined) {
-    const bytes = statSync(edgeBinary).size;
-    console.log(`Downloaded ${assetName} (${String(bytes)} bytes) from the ${EDGE_TAG} release.`);
+  if (edgeBinary === undefined) {
+    skipReason = "no edge release exists yet";
+    console.log(`Skipping upgrade test: ${skipReason}`);
+    return;
   }
+  const bytes = statSync(edgeBinary).size;
+  console.log(`Downloaded ${assetName} (${String(bytes)} bytes) from the ${EDGE_TAG} release.`);
 }, 60_000);
 
 afterAll(() => {
@@ -342,13 +408,14 @@ afterAll(() => {
 
 describe("upgrading from the previous edge release", () => {
   it("fills a database with the edge binary, upgrades to the new binary, and reads every record back", async () => {
-    if (edgeBinary === undefined) {
+    if (skipReason !== undefined || edgeBinary === undefined) {
       if (process.env["CI"]) {
         throw new Error(
-          "No edge release found. CI requires an edge release baseline to validate migrations.",
+          skipReason ??
+            "No edge release found. CI requires an edge release baseline to validate migrations.",
         );
       }
-      console.log("Skipping upgrade test: no edge release exists yet");
+      console.log(`Skipping upgrade test: ${skipReason ?? "no edge release exists yet"}`);
       return;
     }
 
@@ -368,7 +435,7 @@ describe("upgrading from the previous edge release", () => {
       expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
       readApiKey(home);
 
-      await waitForEnrolledRunner(edge);
+      const runnerId = await waitForEnrolledRunner(edge);
 
       const createdProvider = expectJson<SeededProvider>(
         await runCli(
@@ -387,6 +454,16 @@ describe("upgrading from the previous edge release", () => {
         .map(summarizeProvider)
         .sort((left, right) => left.id.localeCompare(right.id));
       expect(seededProviders.some((row) => row.id === createdProvider.id)).toBe(true);
+
+      const profiles = readListedItems<{ readonly id: string; readonly name: string }>(
+        await runCli(["profile", "list", "--json"], edge),
+      );
+      const unrestricted = profiles.find((profile) => profile.name === "unrestricted");
+      if (unrestricted === undefined) {
+        throw new Error(
+          `no unrestricted permission profile (${profiles.map((profile) => profile.name).join(", ") || "none"})`,
+        );
+      }
 
       const project = expectJson<{ id: string }>(
         await runCli(["project", "create", "--name", "test-project", "--json"], edge),
@@ -425,42 +502,46 @@ describe("upgrading from the previous edge release", () => {
       ).toEqual([...TURNS]);
       expect(seededMessages.length).toBeGreaterThanOrEqual(TURNS.length);
 
-      const placed = await readPlacedSession(edge, assistant.mainConversationId);
-      const spawnedThread = placed === undefined ? await trySpawnThread(edge) : undefined;
-      let threadTranscript: ReadonlyArray<SeededTranscriptRow> | undefined;
-      if (spawnedThread !== undefined) {
-        for (const text of TURNS.slice(1)) {
-          const input = await runCli(["session", "input", spawnedThread.id, "--json"], {
-            ...edge,
-            stdin: text,
-          });
-          expect(input.code, `${input.stdout}\n${input.stderr}`).toBe(0);
-        }
-        const deadline = Date.now() + 10_000;
-        let rows: ReadonlyArray<Row> = [];
-        while (Date.now() < deadline) {
-          rows = await readTranscript({ ...edge, id: spawnedThread.id }).catch(() => []);
-          if (rows.length > 0) break;
-          await sleep(200);
-        }
-        if (rows.length === 0) {
-          throw new Error(`thread ${spawnedThread.id} was spawned but never wrote transcript rows`);
-        }
-        threadTranscript = rows.map(summarizeRow);
-      }
+      const port = controller.port;
+      expect(await controller.stop()).toBe(0);
+      controller = undefined;
+
+      const sessionId = persistRepresentativeSession({
+        home,
+        conversationId: assistant.mainConversationId,
+        agentId: assistant.id,
+        instanceId: createdProvider.id,
+        runnerId,
+        permissionProfileId: unrestricted.id,
+      });
+
+      controller = await startOnPort({ home, binary: edgeBinary, port });
+
+      const seededSession = summarizeSession(
+        expectJson<SeededSession>(await runCli(["session", "read", sessionId, "--json"], edge)),
+      );
+      expect(seededSession).toMatchObject({
+        id: sessionId,
+        conversationId: assistant.mainConversationId,
+        agentId: assistant.id,
+        instanceId: createdProvider.id,
+      });
+      const seededTranscript = (await readTranscript({ ...edge, id: sessionId })).map(summarizeRow);
+      expect(
+        seededTranscript.length,
+        "the baseline must contain transcript rows before the upgrade",
+      ).toBeGreaterThan(0);
+      expect(seededTranscript.map((row) => row.text).filter((text) => text !== undefined)).toEqual([
+        ...TURNS,
+      ]);
 
       console.log(
         `Seeded conversation ${assistant.mainConversationId}: ${String(seededMessages.length)} messages ` +
           `(${seededMessages.map((m) => m.senderRole).join(", ")}), ` +
           `provider ${createdProvider.id} (${createdProvider.name}), ` +
-          (placed !== undefined
-            ? `session ${placed.session.id} with ${String(placed.transcript.length)} transcript rows`
-            : spawnedThread !== undefined
-              ? `thread ${spawnedThread.id} with ${String(threadTranscript?.length ?? 0)} transcript rows`
-              : "no session (placement refused)"),
+          `session ${sessionId} with ${String(seededTranscript.length)} transcript rows`,
       );
 
-      const port = controller.port;
       expect(await controller.stop()).toBe(0);
       controller = undefined;
 
@@ -509,30 +590,14 @@ describe("upgrading from the previous edge release", () => {
         seededMessages.map(summarizeMessage),
       );
 
-      if (placed !== undefined) {
-        const readSession = expectJson<SeededSession>(
-          await runCli(["session", "read", placed.session.id, "--json"], upgraded),
-        );
-        expect(readSession).toMatchObject({
-          id: placed.session.id,
-          conversationId: assistant.mainConversationId,
-        });
-        const upgradedTranscript = (
-          await readTranscript({ ...upgraded, id: placed.session.id })
-        ).map(summarizeRow);
-        expect(upgradedTranscript).toEqual(placed.transcript);
-      }
-
-      if (spawnedThread !== undefined && threadTranscript !== undefined) {
-        const readThread = expectJson<SeededSession>(
-          await runCli(["session", "read", spawnedThread.id, "--json"], upgraded),
-        );
-        expect(readThread.id).toBe(spawnedThread.id);
-        const upgradedThreadTranscript = (
-          await readTranscript({ ...upgraded, id: spawnedThread.id })
-        ).map(summarizeRow);
-        expect(upgradedThreadTranscript).toEqual(threadTranscript);
-      }
+      const readSession = summarizeSession(
+        expectJson<SeededSession>(await runCli(["session", "read", sessionId, "--json"], upgraded)),
+      );
+      expect(readSession).toEqual(seededSession);
+      const upgradedTranscript = (await readTranscript({ ...upgraded, id: sessionId })).map(
+        summarizeRow,
+      );
+      expect(upgradedTranscript).toEqual(seededTranscript);
     } finally {
       await controller?.stop().catch(() => -1);
     }
