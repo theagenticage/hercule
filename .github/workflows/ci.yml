@@ -64,20 +64,18 @@ jobs:
 
   # Tests that a database filled by the previous edge release upgrades cleanly
   # to the new binary. Runs on macOS because the edge release currently only
-  # publishes macOS arm64 binaries. Once Linux edge binaries are published,
-  # this can run on Linux too or be folded into the check job above.
+  # publishes macOS arm64 binaries — the same platform `edge-build` publishes.
+  # A failed upgrade must not publish (see `edge-build.needs`).
   upgrade:
     runs-on: macos-latest
     timeout-minutes: 10
     env:
-      # `gh release download` reads this; the default job token can read the
-      # repository's own `edge` release.
+      # The GitHub API download uses the job token to read this repository's
+      # `edge` release.
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - uses: ./.github/actions/setup
 
       - run: pnpm build:binary
@@ -214,7 +212,9 @@ jobs:
   # The asset names and the format of SHA256SUMS are what `install.sh` reads;
   # change them together.
   edge-build:
-    needs: [check, desktop, edge-linux, edge-linux-install]
+    # A failed upgrade must not publish. `edge-linux` and `edge-linux-install`
+    # stay in this list; this job only adds `upgrade`.
+    needs: [check, desktop, edge-linux, edge-linux-install, upgrade]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
     timeout-minutes: 30

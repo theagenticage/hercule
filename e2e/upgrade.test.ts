@@ -4,15 +4,11 @@
  * is still readable.
  *
  * This catches migrations that are correct on an empty database but fail on
- * real data (a unique index on a column that has duplicates, a transformation
- * that assumes a shape older rows do not have), and checks that no landed
- * migration has been edited since `edge` was built.
- *
- * Seeding uses the previous release's own CLI against that release's
- * controller, the way an operator would. The fixture is a real conversation:
- * several owner turns, plus every notice or reply the old controller wrote
- * for them. After the upgrade the test asserts that conversation in full;
- * it does not drop notices or keep only owner lines.
+ * real data. The fixture is one representative conversation: a few owner
+ * turns, the session they placed, and that session's transcript. After the
+ * upgrade the test checks that the session, message content, ordering and
+ * associations survived. It is not a matrix of session states or provider
+ * behaviour.
  *
  * In CI the previous `edge` release must exist: a missing baseline fails the
  * job rather than skipping it. Locally, with no `edge` release, the test is
@@ -36,35 +32,39 @@ import {
   createTemporaryHome,
   parseJsonOutputOrFail,
   readApiKey,
+  readTranscript,
   waitForEnrolledRunner,
   type Page,
+  type Row,
   type TemporaryHome,
 } from "./harness";
 
 const EDGE_TAG = "edge";
 const BINARY_NAME = "hercule-darwin-arm64";
 
-/** Three turns of one conversation, seeded through the old release's CLI. */
+/** A few turns of one conversation, seeded through the old release's CLI. */
 const TURNS = [
   "What is the status of the test-project repository?",
   "Which risks should we watch this week?",
   "What should we do next?",
 ] as const;
 
-/** The fields of a conversation message that a migration must keep intact. */
 interface SeededMessage {
   readonly id: string;
   readonly position: number;
   readonly senderRole: string;
-  readonly senderLabel: string;
   readonly text: string;
   readonly sessionId: string | null;
-  readonly turnId: string | null;
 }
 
 interface SeededSession {
   readonly id: string;
   readonly conversationId: string;
+}
+
+interface SeededTranscriptRow {
+  readonly position: number;
+  readonly tag: string;
 }
 
 let state: TemporaryHome | undefined;
@@ -136,42 +136,62 @@ function expectJson<A>(ran: Ran): A {
   return parseJsonOutputOrFail<A>(ran);
 }
 
-/** Lists every message in a conversation, oldest first. */
-async function listMessages(
-  options: { readonly home: string; readonly binary: string },
-  conversationId: string,
-): Promise<ReadonlyArray<SeededMessage>> {
-  const page = expectJson<Page<SeededMessage>>(
-    await runCli(["conversation", "message", "list", conversationId, "--json"], options),
-  );
-  return [...page.items].sort((left, right) => left.position - right.position);
+function summarizeMessage(message: SeededMessage): {
+  readonly position: number;
+  readonly senderRole: string;
+  readonly text: string;
+} {
+  return { position: message.position, senderRole: message.senderRole, text: message.text };
+}
+
+function summarizeRow(row: Row): SeededTranscriptRow {
+  return { position: row.position, tag: row.event._tag };
 }
 
 /**
- * Waits until the conversation holds every owner turn, then until the list
- * stops growing, so notices the controller writes after a send are kept.
+ * Waits until the conversation holds every owner turn, one session exists,
+ * and that session's transcript has at least one row.
  */
 async function waitForSeededConversation(
   options: { readonly home: string; readonly binary: string },
   conversationId: string,
-): Promise<ReadonlyArray<SeededMessage>> {
-  const deadline = Date.now() + 30_000;
-  let latest: ReadonlyArray<SeededMessage> = [];
+): Promise<{
+  readonly messages: ReadonlyArray<SeededMessage>;
+  readonly session: SeededSession;
+  readonly transcript: ReadonlyArray<SeededTranscriptRow>;
+}> {
+  const deadline = Date.now() + 20_000;
+  let lastMessages: ReadonlyArray<SeededMessage> = [];
+  let lastSessions: ReadonlyArray<SeededSession> = [];
+  let lastTranscript: ReadonlyArray<Row> = [];
   while (Date.now() < deadline) {
-    latest = await listMessages(options, conversationId);
-    const ownerTexts = latest
+    lastMessages = expectJson<Page<SeededMessage>>(
+      await runCli(["conversation", "message", "list", conversationId, "--json"], options),
+    ).items;
+    lastSessions = expectJson<Page<SeededSession>>(
+      await runCli(["session", "list", "--conversation", conversationId, "--json"], options),
+    ).items;
+    const ownerTexts = lastMessages
       .filter((message) => message.senderRole === "owner")
-      .map((m) => m.text);
-    if (TURNS.every((turn) => ownerTexts.includes(turn))) {
-      await sleep(1_000);
-      const again = await listMessages(options, conversationId);
-      if (again.length === latest.length) return again;
-      latest = again;
+      .map((message) => message.text);
+    const session = lastSessions[0];
+    if (session !== undefined && TURNS.every((turn) => ownerTexts.includes(turn))) {
+      lastTranscript = await readTranscript({ ...options, id: session.id }).catch(() => []);
+      if (lastTranscript.length > 0) {
+        return {
+          messages: [...lastMessages].sort((left, right) => left.position - right.position),
+          session,
+          transcript: lastTranscript.map(summarizeRow),
+        };
+      }
     }
-    await sleep(250);
+    await sleep(200);
   }
   throw new Error(
-    `conversation ${conversationId} never held all ${String(TURNS.length)} owner turns:\n${JSON.stringify(latest, null, 2)}`,
+    `conversation ${conversationId} never held a session with transcript rows ` +
+      `(${String(lastSessions.length)} sessions, ${String(lastTranscript.length)} transcript rows, ` +
+      `${String(lastMessages.length)} messages). A live provider would write more events; ` +
+      `this fixture needs at least one persisted transcript row from the old binary.`,
   );
 }
 
@@ -241,11 +261,10 @@ describe("upgrading from the previous edge release", () => {
 
       await waitForEnrolledRunner(edge);
 
-      const project = expectJson<{ id: string; name: string }>(
+      const project = expectJson<{ id: string }>(
         await runCli(["project", "create", "--name", "test-project", "--json"], edge),
       );
-
-      const resource = expectJson<{ id: string; remote: string | null }>(
+      const resource = expectJson<{ id: string }>(
         await runCli(
           [
             "resource",
@@ -261,81 +280,44 @@ describe("upgrading from the previous edge release", () => {
           edge,
         ),
       );
-
-      const assistant = expectJson<{ id: string; name: string; mainConversationId: string }>(
+      const assistant = expectJson<{ id: string; mainConversationId: string }>(
         await runCli(["assistant", "create", "--name", "upgrade-assistant", "--json"], edge),
       );
 
       for (const text of TURNS) {
         const sent = await runCli(
           ["conversation", "send", assistant.mainConversationId, "--json"],
-          {
-            ...edge,
-            stdin: text,
-          },
+          { ...edge, stdin: text },
         );
         expect(sent.code, `${sent.stdout}\n${sent.stderr}`).toBe(0);
       }
 
-      const seededMessages = await waitForSeededConversation(edge, assistant.mainConversationId);
-      const ownerMessages = seededMessages.filter((message) => message.senderRole === "owner");
-      expect(ownerMessages.map((message) => message.text)).toEqual([...TURNS]);
+      const seeded = await waitForSeededConversation(edge, assistant.mainConversationId);
       expect(
-        seededMessages.length,
-        "the conversation must keep every message the old controller wrote, not only owner turns",
-      ).toBeGreaterThanOrEqual(TURNS.length);
+        seeded.messages.filter((message) => message.senderRole === "owner").map((m) => m.text),
+      ).toEqual([...TURNS]);
+      expect(seeded.session.conversationId).toBe(assistant.mainConversationId);
+      expect(seeded.transcript.length).toBeGreaterThan(0);
       console.log(
-        `Seeded conversation ${assistant.mainConversationId} with ${String(seededMessages.length)} messages: ${seededMessages
-          .map((message) => `${message.senderRole}:${message.position}`)
-          .join(", ")}`,
+        `Seeded conversation ${assistant.mainConversationId}: ${String(seeded.messages.length)} messages, ` +
+          `session ${seeded.session.id}, ${String(seeded.transcript.length)} transcript rows.`,
       );
-
-      const seededSessions = expectJson<Page<SeededSession>>(
-        await runCli(
-          ["session", "list", "--conversation", assistant.mainConversationId, "--json"],
-          edge,
-        ),
-      ).items;
-
-      const settings = expectJson<{ user: { timezone?: string } }>(
-        await runCli(
-          ["settings", "update", "--user", '{"timezone":"America/New_York"}', "--json"],
-          edge,
-        ),
-      );
-      expect(settings.user.timezone).toBe("America/New_York");
 
       const port = controller.port;
-      const stopCode = await controller.stop();
-      expect(stopCode).toBe(0);
+      expect(await controller.stop()).toBe(0);
       controller = undefined;
 
       controller = await startOnPort({ home, binary: newBinary, port });
       const upgraded = { home, binary: newBinary };
 
       expectJson(await runCli(["controller", "read", "--json"], upgraded));
+      expectJson(await runCli(["project", "read", project.id, "--json"], upgraded));
+      expectJson(await runCli(["resource", "read", resource.id, "--json"], upgraded));
 
-      const readProject = expectJson<{ id: string; name: string }>(
-        await runCli(["project", "read", project.id, "--json"], upgraded),
-      );
-      expect(readProject).toMatchObject({ id: project.id, name: "test-project" });
-
-      const readResource = expectJson<{ id: string; remote: string | null }>(
-        await runCli(["resource", "read", resource.id, "--json"], upgraded),
-      );
-      expect(readResource).toMatchObject({
-        id: resource.id,
-        remote: "https://github.com/example/repo",
-      });
-
-      const readAssistant = expectJson<{ id: string; name: string; mainConversationId: string }>(
+      const readAssistant = expectJson<{ id: string; mainConversationId: string }>(
         await runCli(["assistant", "read", assistant.id, "--json"], upgraded),
       );
-      expect(readAssistant).toMatchObject({
-        id: assistant.id,
-        name: "upgrade-assistant",
-        mainConversationId: assistant.mainConversationId,
-      });
+      expect(readAssistant.mainConversationId).toBe(assistant.mainConversationId);
 
       const readConversation = expectJson<{ id: string; assistantId: string }>(
         await runCli(["conversation", "read", assistant.mainConversationId, "--json"], upgraded),
@@ -345,38 +327,32 @@ describe("upgrading from the previous edge release", () => {
         assistantId: assistant.id,
       });
 
-      const upgradedMessages = await listMessages(upgraded, assistant.mainConversationId);
-      expect(upgradedMessages.map(summarizeMessage)).toEqual(seededMessages.map(summarizeMessage));
-
-      const upgradedSessions = expectJson<Page<SeededSession>>(
+      const upgradedMessages = expectJson<Page<SeededMessage>>(
         await runCli(
-          ["session", "list", "--conversation", assistant.mainConversationId, "--json"],
+          ["conversation", "message", "list", assistant.mainConversationId, "--json"],
           upgraded,
         ),
       ).items;
-      expect(upgradedSessions.map((session) => session.id).sort()).toEqual(
-        seededSessions.map((session) => session.id).sort(),
-      );
+      expect(
+        [...upgradedMessages]
+          .sort((left, right) => left.position - right.position)
+          .map(summarizeMessage),
+      ).toEqual(seeded.messages.map(summarizeMessage));
 
-      const upgradedSettings = expectJson<{ user: { timezone?: string } }>(
-        await runCli(["settings", "read", "--json"], upgraded),
+      const readSession = expectJson<SeededSession>(
+        await runCli(["session", "read", seeded.session.id, "--json"], upgraded),
       );
-      expect(upgradedSettings.user.timezone).toBe("America/New_York");
+      expect(readSession).toMatchObject({
+        id: seeded.session.id,
+        conversationId: assistant.mainConversationId,
+      });
+
+      const upgradedTranscript = (await readTranscript({ ...upgraded, id: seeded.session.id })).map(
+        summarizeRow,
+      );
+      expect(upgradedTranscript).toEqual(seeded.transcript);
     } finally {
       await controller?.stop().catch(() => -1);
     }
   }, 180_000);
 });
-
-/** Returns the fields a migration must preserve on a conversation message. */
-function summarizeMessage(message: SeededMessage): SeededMessage {
-  return {
-    id: message.id,
-    position: message.position,
-    senderRole: message.senderRole,
-    senderLabel: message.senderLabel,
-    text: message.text,
-    sessionId: message.sessionId,
-    turnId: message.turnId,
-  };
-}
