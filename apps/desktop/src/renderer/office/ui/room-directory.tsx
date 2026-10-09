@@ -78,12 +78,7 @@ function RoomList({
                   <b>{room.label}</b>
                 )}
               </span>
-              <span
-                className="count"
-                aria-label={`${String(counts.get(room.id)?.colleagues ?? 0)} colleagues`}
-              >
-                {counts.get(room.id)?.colleagues ?? 0}
-              </span>
+              <ColleagueCount count={counts.get(room.id)?.colleagues ?? 0} />
             </button>
           ))}
         </div>
@@ -131,5 +126,17 @@ export function RoomDirectory({
         )
       }
     </OfficeMenu>
+  );
+}
+
+/** Renders a room's colleague count, read aloud as "1 colleague" or "3 colleagues". */
+function ColleagueCount({ count }: { readonly count: number }): JSX.Element {
+  return (
+    <span
+      className="count"
+      aria-label={`${String(count)} ${count === 1 ? "colleague" : "colleagues"}`}
+    >
+      {count}
+    </span>
   );
 }

@@ -1,11 +1,12 @@
 /**
- * The office's seats: the club armchair and the waiting bench.
+ * The office's seats: the club armchair, the waiting bench and the picnic
+ * table on the lawn.
  *
  * Every seat follows one rule the colleagues rely on: a seat's centre stands
  * directly above its marker, and its top is at `SEAT_HEIGHT`, so a colleague
  * who stands on the marker and sits down lands on the cushion.
  */
-import { Group, Shape } from "three";
+import { Group, Shape, type Object3D } from "three";
 
 import { SEAT_HEIGHT, type SeatProp, type SeatsProp } from "../../engine/contracts";
 
@@ -17,6 +18,7 @@ import {
   buildExtrusion,
   buildLathe,
   buildMarker,
+  buildPropGroup,
   memoize,
   memoizeByKey,
   type Surface,
@@ -185,4 +187,76 @@ export function buildBench(seats: number): SeatsProp {
   );
   object.add(...seatMarkers);
   return { object, seatMarkers };
+}
+
+// ---------------------------------------------------------------------------
+// The picnic table.
+
+const PICNIC_TABLE_SURFACES = {
+  plank: { token: "room-wood", finish: "satin", shift: { dl: 0.03 }, shadow: true },
+  frame: { token: "room-wood", finish: "satin", shift: { dl: -0.07 }, shadow: true },
+} as const satisfies Record<string, Surface>;
+
+const PICNIC_TABLE_LENGTH = 1.8;
+const PICNIC_TABLE_HEIGHT = 0.75;
+/** How far each bench's centre stands from the table's middle, in z. */
+const PICNIC_BENCH_Z = 0.61;
+/** Where the A-frames stand, in x, either side of the middle. */
+const PICNIC_FRAME_X = 0.62;
+
+const readPicnicTableGeometry = memoize(() => {
+  const parts = new PartList(PICNIC_TABLE_SURFACES);
+  // The top: four planks with narrow gaps between them.
+  for (let plank = 0; plank < 4; plank++) {
+    parts.add("plank", buildBlock(PICNIC_TABLE_LENGTH, 0.04, 0.18, 0.008, 1), {
+      y: PICNIC_TABLE_HEIGHT - 0.04,
+      z: (plank - 1.5) * 0.193,
+    });
+  }
+  // Each bench is two planks, its top at the height every seat has.
+  for (const side of [-1, 1]) {
+    for (const plank of [-1, 1]) {
+      parts.add("plank", buildBlock(PICNIC_TABLE_LENGTH, 0.035, 0.13, 0.008, 1), {
+        y: SEAT_HEIGHT - 0.035,
+        z: side * PICNIC_BENCH_Z + plank * 0.071,
+      });
+    }
+  }
+  // Two A-frames. Each has two legs that lean in from the ground to the top,
+  // a cleat under the top, and a crossbar under both benches. The cleat and
+  // the crossbar are bolted to the legs' outer face.
+  const legRise = PICNIC_TABLE_HEIGHT - 0.04;
+  const legRun = 0.37;
+  const legLength = Math.hypot(legRise, legRun);
+  const legLean = Math.atan2(legRun, legRise);
+  for (const side of [-1, 1]) {
+    const x = side * PICNIC_FRAME_X;
+    const outside = x + side * 0.055;
+    for (const end of [-1, 1]) {
+      parts.add("frame", buildBlock(0.07, legLength, 0.09, 0.01, 1), {
+        x,
+        z: end * (legRun + 0.13),
+        rx: -end * legLean,
+      });
+    }
+    parts.add("frame", buildBlock(0.04, 0.05, 0.72, 0.008, 1), {
+      x: outside,
+      y: PICNIC_TABLE_HEIGHT - 0.09,
+    });
+    parts.add("frame", buildBlock(0.04, 0.06, 1.49, 0.008, 1), {
+      x: outside,
+      y: SEAT_HEIGHT - 0.095,
+    });
+  }
+  return parts.merge();
+});
+
+/**
+ * Builds a wooden picnic table with a plank bench along each long side, for
+ * the lawn. It is 1.8 long (x), 1.49 wide with its benches (z from -0.745 to
+ * 0.745) and 0.75 tall; the benches' tops are at `SEAT_HEIGHT`. It stands on
+ * two A-frames and is the same seen from either side.
+ */
+export function buildPicnicTable(): Object3D {
+  return buildPropGroup("picnic-table", readPicnicTableGeometry());
 }

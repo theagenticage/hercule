@@ -6,7 +6,7 @@ import { buildLook, Face, type Look } from ".";
 afterEach(cleanup);
 
 /** A look that wears nothing, so only the pose changes the face. */
-const PLAIN: Look = { hue: "iris", shape: "egg", accessories: [] };
+const PLAIN: Look = { hue: "iris", shape: "egg", accessories: [], headwear: null };
 
 /** Renders a face with the given props, `PLAIN` idle at 34 px otherwise, and returns its root element. */
 function renderFace({
@@ -123,6 +123,67 @@ describe("Face", () => {
         renderFace({ look: TACHE, pose: "idle" }).querySelector('path[d^="M21.6 "]'),
       ).toBeNull();
     });
+  });
+
+  // The headwear's markup from the Bureau book's `face` in crew.js, for an
+  // idle face of each shape: everything after the idle mouth.
+  const BOOK_HEADWEAR = [
+    [
+      "egg",
+      "cloche",
+      '<path d="M9.2 23.2C9.6 12.6 15.4 7.6 24 7.6S38.4 12.6 38.8 23.2C35 21 30 20.2 24 20.2S13 21 9.2 23.2z" fill="var(--hat)"/><path d="M10.2 19C15.6 16.6 32.4 16.6 37.8 19" fill="none" stroke="var(--who-shade)" stroke-width="2"/><circle cx="32.8" cy="17.5" r="2.4" fill="var(--who-shade)"/><circle cx="32.8" cy="17.5" r=".9" fill="var(--hat)"/>',
+    ],
+    [
+      "tall",
+      "cloche",
+      '<path d="M9.2 22C9.6 11.4 15.4 6.4 24 6.4S38.4 11.4 38.8 22C35 19.8 30 19 24 19S13 19.8 9.2 22z" fill="var(--hat)"/><path d="M10.2 17.8C15.6 15.4 32.4 15.4 37.8 17.8" fill="none" stroke="var(--who-shade)" stroke-width="2"/><circle cx="32.8" cy="16.3" r="2.4" fill="var(--who-shade)"/><circle cx="32.8" cy="16.3" r=".9" fill="var(--hat)"/>',
+    ],
+    [
+      "egg",
+      "beret",
+      '<ellipse cx="22.6" cy="11.4" rx="12.6" ry="4.6" transform="rotate(-9 22.6 11.4)" fill="var(--hat)"/><path d="M21.4 7.199999999999999l.6-2.6" stroke="var(--hat)" stroke-width="1.8" stroke-linecap="round"/>',
+    ],
+    [
+      "tall",
+      "beret",
+      '<ellipse cx="22.6" cy="10.200000000000001" rx="12.6" ry="4.6" transform="rotate(-9 22.6 10.200000000000001)" fill="var(--hat)"/><path d="M21.4 6l.6-2.6" stroke="var(--hat)" stroke-width="1.8" stroke-linecap="round"/>',
+    ],
+    [
+      "egg",
+      "headset",
+      '<path d="M9.4 26.4C9 8.6 39 8.6 38.6 26.4" fill="none" stroke="var(--hat)" stroke-width="1.9"/><rect x="6.2" y="23" width="5.6" height="9.2" rx="2.6" fill="var(--hat)"/><path d="M9.4 31.6c.6 3 3.2 4.8 7.4 5.2" fill="none" stroke="var(--hat)" stroke-width="1.5" stroke-linecap="round"/><circle cx="17.4" cy="36.8" r="1.7" fill="var(--hat)"/>',
+    ],
+    [
+      "tall",
+      "headset",
+      '<path d="M9.4 26.4C9 7.4 39 7.4 38.6 26.4" fill="none" stroke="var(--hat)" stroke-width="1.9"/><rect x="6.2" y="23" width="5.6" height="9.2" rx="2.6" fill="var(--hat)"/><path d="M9.4 31.6c.6 3 3.2 4.8 7.4 5.2" fill="none" stroke="var(--hat)" stroke-width="1.5" stroke-linecap="round"/><circle cx="17.4" cy="36.8" r="1.7" fill="var(--hat)"/>',
+    ],
+  ] as const;
+
+  it.each(BOOK_HEADWEAR)("draws the %s %s as the Bureau book does", (shape, headwear, book) => {
+    const face = renderFace({ look: { ...PLAIN, shape, headwear } });
+    const smile = face.querySelector('path[d^="M21.6 "]')!;
+    const drawn: Array<string> = [];
+    for (let next = smile.nextElementSibling; next !== null; next = next.nextElementSibling) {
+      drawn.push(next.outerHTML);
+    }
+    // The browser writes an empty element with a closing tag, where crew.js writes `/>`.
+    expect(drawn.join("")).toBe(book.replace(/<(\w+)([^>]*)\/>/g, "<$1$2></$1>"));
+  });
+
+  it("draws the headwear over the accessories and under the pose's extras, as the book does", () => {
+    const face = renderFace({
+      look: { ...PLAIN, accessories: ["glasses"], headwear: "beret" },
+      pose: "waiting",
+    });
+    const tags = [...face.children].slice(-6).map((element) => element.tagName);
+    // The glasses' group, the beret's ellipse and stalk, then the raised hand's arm, hand and thumb.
+    expect(tags).toEqual(["g", "ellipse", "path", "path", "rect", "ellipse"]);
+  });
+
+  it("draws no headwear for a look without any", () => {
+    const face = renderFace({});
+    expect(face.querySelector('[fill="var(--hat)"], [stroke="var(--hat)"]')).toBeNull();
   });
 
   it.each(POSES)("draws the %s pose without the book's animation classes", (pose) => {

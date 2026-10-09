@@ -815,3 +815,35 @@ export const ensureThreadData = async (
     queryClient.ensureQueryData(queuedInputsQuery(client, sessionId)),
   ]);
 };
+
+/**
+ * Reads what the Conversation of the assistant `assistantId` draws, unless
+ * the cache holds it already: the assistants, the runners, the current
+ * session of its main conversation, the newest page of its messages and,
+ * when a session has started, the rows of its running turn.
+ *
+ * Returns false, after reading the assistants, when no assistant has the
+ * id. Fails when one of the reads fails.
+ *
+ * The assistant's route calls it, and so does the Office, whose drawer shows
+ * the Conversation outside that route, so neither suspends while it draws.
+ */
+export const ensureConversationData = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  assistantId: string,
+): Promise<boolean> => {
+  const [assistants] = await Promise.all([
+    queryClient.ensureQueryData(assistantsQuery(client)),
+    queryClient.ensureQueryData(runnersQuery(client)),
+  ]);
+  const assistant = assistants.find((each) => each.id === assistantId);
+  if (assistant === undefined) return false;
+  const conversationId = assistant.mainConversationId;
+  const [session] = await Promise.all([
+    queryClient.ensureQueryData(currentConversationSessionQuery(client, conversationId)),
+    queryClient.ensureInfiniteQueryData(conversationMessagesQuery(client, conversationId)),
+  ]);
+  if (session !== null) await queryClient.ensureQueryData(runningTurnQuery(client, session.id));
+  return true;
+};

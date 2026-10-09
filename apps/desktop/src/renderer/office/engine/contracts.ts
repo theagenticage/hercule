@@ -14,7 +14,7 @@
  */
 import type { Box3, Object3D, Vector3 } from "three";
 import type { ProjectTint } from "../../screens/project-tile";
-import type { SeatedPose } from "@hercule/client-core";
+import type { SessionPose } from "@hercule/client-core";
 import type { Colleague, OfficeRequest, World } from "../world/types";
 import type { Frame, Stage } from "./stage";
 
@@ -31,6 +31,13 @@ export const WALL_HEIGHT = 2.6;
 export const CUTAWAY_HEIGHT = 0.55;
 /** The colleagues' walking speed, m/s. */
 export const WALK_SPEED = 1.1;
+/** How long `hop` takes, from the crouch to the landing; the rig then stands on its own. */
+export const HOP_SECONDS = 0.62;
+/**
+ * How long `stretch` takes, from the arms going up to the arms back down; the
+ * rig then stands on its own, ready to walk.
+ */
+export const STRETCH_SECONDS = 2.4;
 
 // ---------------------------------------------------------------------------
 // Places.
@@ -76,7 +83,11 @@ export type Action =
   /** Standing, nodding, as the other side of a conversation. */
   | "listen"
   /** One happy hop on the spot, then back to standing. */
-  | "hop";
+  | "hop"
+  /** Sitting back in an armchair, asleep: the head tilted, only the breathing moves. */
+  | "doze"
+  /** Standing, both arms up in a long stretch, after waking from a doze. */
+  | "stretch";
 
 /**
  * One colleague's 3D body. The root's origin sits between the feet on the
@@ -91,7 +102,7 @@ export interface ColleagueRig {
   readonly headHeight: number;
   setAction(action: Action): void;
   /** Draws the face the Bureau book gives a pose: its eyes, brows and mouth. */
-  setFace(pose: SeatedPose): void;
+  setFace(pose: SessionPose): void;
   /** Sets the gait's cadence to a walking speed in m/s. */
   setWalkSpeed(speed: number): void;
   /** Turns the head toward a world point, or back to straight ahead with null. */
@@ -194,7 +205,8 @@ export interface CameraView {
  * The kinds of rooms. A project room seats the threads of one project, or the
  * threads with no project; the others are the fixed rooms and the corridors.
  */
-export type RoomKind = "project" | "triage-room" | "your-office" | "lounge" | "lobby" | "hall";
+export type RoomKind =
+  "project" | "triage-room" | "your-office" | "secretariat" | "lounge" | "lobby" | "hall";
 
 /** A room the user can jump to. */
 export interface RoomInfo {
@@ -217,7 +229,8 @@ interface OfficeSpots {
   readonly queue: ReadonlyArray<Spot>;
   /**
    * Places to sit when idle away from the desk: the lounge's chairs. There is
-   * one for every colleague, so every idle colleague finds a free one.
+   * one for every thread, so every idle thread finds a free one. An idle
+   * assistant stays at its writing desk.
    */
   readonly lounge: ReadonlyArray<Seat>;
   /** Where a colleague fetches tea: in front of the tea trolley, facing it. */
@@ -230,6 +243,11 @@ export interface BuiltOffice {
   readonly rooms: ReadonlyArray<RoomInfo>;
   /** Every colleague's home seat, by colleague id. Every colleague of the world has one. */
   readonly homes: ReadonlyMap<string, Seat>;
+  /**
+   * Each assistant's armchair in its Secretariat corner, by assistant id,
+   * where it sits while it is asleep or away. Every assistant has one.
+   */
+  readonly armchairs: ReadonlyMap<string, Seat>;
   readonly spots: OfficeSpots;
   readonly nav: NavGraph;
   /** The view the office opens on, which shows all of it. */
@@ -238,6 +256,19 @@ export interface BuiltOffice {
   readonly bounds: Box3;
   /** Shows on the "now serving" sign how many colleagues wait on the user. */
   setWaitingCount?(count: number): void;
+  /**
+   * The longcase clock, when the office has one:
+   *
+   * - `hands` are the clock's hands, placed in world space. They are kept
+   *   out of `root` because the stage redraws the shadows whenever an object
+   *   under `root` moves, and the hands turn once a minute. The director adds
+   *   them to the scene beside `root`, as it adds the colleagues.
+   * - `setTime` turns the hands to the hour and minute of `now`, local time.
+   */
+  readonly clock?: {
+    readonly hands: Object3D;
+    readonly setTime: (now: Date) => void;
+  };
   dispose(): void;
 }
 
@@ -293,7 +324,7 @@ export interface NavGraph {
  * going back to work.
  */
 export interface ColleagueState {
-  readonly pose: SeatedPose;
+  readonly pose: SessionPose;
   /** The request the colleague waits on the user with, or null. */
   readonly request: OfficeRequest | null;
   /** The short state the name tag shows when there is no request, such as "typing" or "idle 2h". */
@@ -311,7 +342,8 @@ export interface Sim {
    * takes it:
    * - `waiting`: to the back of the queue, or beside its desk when the queue is full;
    * - `working`: back to its desk, with a hop first when it was waiting;
-   * - `idle`: to a free Lounge armchair when `inLounge` is true, else to its desk.
+   * - `idle`: to a free Lounge armchair when `inLounge` is true, else to its desk;
+   * - `asleep` and `away`, which only an assistant shows: to its own armchair, to doze.
    * Walks happen at every liveliness, because they show a real change.
    */
   setColleagueState(colleagueId: string, state: ColleagueState, inLounge: boolean): void;

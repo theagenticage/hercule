@@ -1,5 +1,5 @@
 import type { JSX, ReactNode } from "react";
-import { buildLook } from "../../faces";
+import { buildAssistantLook, buildLook } from "../../faces";
 import { GitHubMark } from "../../logos";
 import type { RoomContents } from "@hercule/client-core";
 import type { Project } from "@hercule/contract";
@@ -153,7 +153,7 @@ export function furnishRoom(contents: RoomContents, projects: readonly Project[]
       draw: (p) => (
         <>
           {drawSideTable(p, 20.0, 17.7)}
-          {drawClubChair(p, 21.4, 16.9, buildLook(assistant.id))}
+          {drawClubChair(p, 21.4, 16.9, buildAssistantLook(assistant.id))}
         </>
       ),
       placeLabel: (p) => ({

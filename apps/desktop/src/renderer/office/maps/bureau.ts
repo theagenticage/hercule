@@ -2,9 +2,11 @@
  * The Bureau floor: the whole Office on one storey. Each project has a room
  * of its own, the floor inlaid in the project's tint and a plaque at the
  * door, and the threads with no project share one more. The fixed rooms of
- * the Office Map (the Triage Room, the Lounge, Your Office) sit along the
- * Gallery, the main corridor, and the front door opens from the street into
- * the Lobby on the south-east corner.
+ * the Office Map (the Triage Room, the Lounge, Your Office and the Lobby) sit
+ * along the street south of the Gallery, the main corridor, and the front
+ * door opens from the street into the Lobby on the south-east corner. Once
+ * there are assistants, the Secretariat juts out south of Your Office, with a
+ * lawn either side of it.
  *
  * The plan, the arithmetic of where each room goes, is `bureau-plan.ts`; what
  * stands in each room is `bureau-rooms.ts`; the runners' tags and the Lobby's
@@ -26,12 +28,13 @@ import type { Token } from "../engine/palette";
 import {
   buildFloor,
   buildLamppost,
+  buildLawn,
   buildPath,
   buildPlaque,
   buildWall,
   WALL_THICKNESS,
 } from "../kit/architecture";
-import { buildFloorLamp, buildPlant, buildRug } from "../kit/props";
+import { buildFloorLamp, buildPicnicTable, buildPlant, buildRug } from "../kit/props";
 import { BUREAU_MAP } from "./office-map";
 import { buildDeskTags, buildDirectory } from "./bureau-fleet";
 import { HALL_IDS, planFloor, type FloorPlan, type PlannedWall, type Rect } from "./bureau-plan";
@@ -45,8 +48,12 @@ const FIELD_OF_VIEW = 28;
 const ASPECT = 1.3;
 /** How much room a framed view leaves around its box, for the bars that float over the canvas. */
 const FRAME_MARGIN = 1.12;
-/** The pavement in front of the building. */
+/** The pavement in front of the building, and the path across the lawn from the front door to it. */
 const PAVEMENT_DEPTH = 2.4;
+const FRONT_PATH_WIDTH = 1.4;
+/** The most picnic tables on a lawn, and the length of lawn each one needs. */
+const MAX_PICNIC_TABLES = 3;
+const PICNIC_PITCH = 3.4;
 /** A built wall, with the ornaments hung on it, which hide while it is lowered. */
 interface BuiltWall {
   readonly planned: PlannedWall;
@@ -66,6 +73,7 @@ export const buildBureau: BuildOffice = ({ world, nav }) => {
   const fitter = createFitter(root, walls, solids);
   const fittings: Fittings = {
     homes: new Map<string, Seat>(),
+    armchairs: new Map<string, Seat>(),
     lounge: [],
     queue: [],
     ownedDesks: [],
@@ -73,21 +81,29 @@ export const buildBureau: BuildOffice = ({ world, nav }) => {
     tea: null,
     entrance: null,
     nowServing: null,
+    clock: null,
   };
   for (const room of plan.rooms) designs.get(room.id)?.furnish(room, fitter, fittings);
   dressHalls(plan, walls, fitter);
   hangPlaques(plan, walls, fitter);
   buildStreet(plan, root);
+  layLawns(plan, root, fitter);
 
   root.updateMatrixWorld(true);
   const tags = buildDeskTags(fittings.ownedDesks, world);
   root.add(tags.object);
+  // The clock's hands turn, so they stay out of the still building: moved to the dial in world
+  // space here, and added to the scene by the office beside the root.
+  const clock = fittings.clock;
+  clock?.hands.applyMatrix4(clock.object.matrixWorld);
   fittings.nowServing?.setNumber(
     world.colleagues.filter((colleague) => colleague.pose === "waiting").length,
   );
 
-  // Walking: the whole storey, minus the walls, plus their doorways, minus the furniture.
+  // Walking: the whole storey, minus the lawns and the walls, plus their doorways, minus the
+  // furniture.
   nav.addFloor(0, 0, 0, 0, plan.width, plan.depth);
+  for (const lawn of plan.lawns) nav.block(0, lawn.minX, lawn.minZ, lawn.maxX, lawn.maxZ);
   for (const wall of plan.walls) {
     const rect = buildWallStretchRect(wall, wall.from - HALF_WALL, wall.to + HALF_WALL, HALF_WALL);
     nav.block(0, rect.minX, rect.minZ, rect.maxX, rect.maxZ);
@@ -107,7 +123,7 @@ export const buildBureau: BuildOffice = ({ world, nav }) => {
   const graph = nav.build();
 
   const entrance = fittings.entrance ?? {
-    position: new Vector3(plan.frontDoor.at, 0, plan.depth - 0.8),
+    position: new Vector3(plan.frontDoor.at, 0, plan.frontDoor.line - 0.8),
     facing: Math.PI,
     floor: 0,
   };
@@ -147,6 +163,7 @@ export const buildBureau: BuildOffice = ({ world, nav }) => {
     root,
     rooms,
     homes: fittings.homes,
+    armchairs: fittings.armchairs,
     spots,
     nav: graph,
     overview: frameView(building, 34, 54),
@@ -154,6 +171,7 @@ export const buildBureau: BuildOffice = ({ world, nav }) => {
     setWaitingCount(count) {
       fittings.nowServing?.setNumber(count);
     },
+    ...(clock === null ? {} : { clock: { hands: clock.hands, setTime: clock.setTime } }),
     dispose() {
       tags.dispose();
     },
@@ -335,21 +353,23 @@ function dressHalls(plan: FloorPlan, walls: ReadonlyArray<BuiltWall>, fitter: Fi
   }
 }
 
-/** Hangs a plaque with the room's name beside every door from a corridor into a room. */
+/**
+ * Hangs a plaque with the room's name beside every room's door, on the side
+ * the door is entered from: the corridor, or Your Office for the annex.
+ */
 function hangPlaques(plan: FloorPlan, walls: ReadonlyArray<BuiltWall>, fitter: Fitter): void {
   const rooms = new Map(plan.rooms.map((room) => [room.id, room]));
   for (const { planned } of walls) {
     const owner = rooms.get(planned.ownerId);
     const other = planned.otherId === null ? undefined : rooms.get(planned.otherId);
     if (owner === undefined || other === undefined) continue;
-    const hallIsOther = other.kind === "hall" && owner.kind !== "hall";
-    const hallIsOwner = owner.kind === "hall" && other.kind !== "hall";
-    if (!hallIsOther && !hallIsOwner) continue;
-    const room = hallIsOther ? owner : other;
-    if (room.doorSide === null) continue;
-    // The owner is north or west of the wall, so the corridor faces +z or +x when it is the other side.
-    const facing =
-      planned.axis === "x" ? (hallIsOther ? 0 : Math.PI) : hallIsOther ? Math.PI / 2 : -Math.PI / 2;
+    // The owner is north or west of the wall, so its door in this wall is on its south or east side.
+    const ownerHasDoor = owner.doorSide === (planned.axis === "x" ? "south" : "east");
+    const otherHasDoor = other.doorSide === (planned.axis === "x" ? "north" : "west");
+    if (!ownerHasDoor && !otherHasDoor) continue;
+    const room = ownerHasDoor ? owner : other;
+    // The plaque faces into the room the door is entered from: +z or +x when that is the other side.
+    const facing = (planned.axis === "x" ? 0 : Math.PI / 2) + (ownerHasDoor ? 0 : Math.PI);
     for (const door of planned.doors) {
       let along = door.at + door.width / 2 + 0.5;
       if (along > planned.to - 0.4) along = door.at - door.width / 2 - 0.5;
@@ -360,16 +380,52 @@ function hangPlaques(plan: FloorPlan, walls: ReadonlyArray<BuiltWall>, fitter: F
   }
 }
 
-/** Lays the pavement along the street front and a street lamp each side of the front door. */
+/**
+ * Lays the pavement in one straight line along the street front, a path to
+ * it from the front door when a lawn lies between them, and a street lamp
+ * each side of the front door.
+ */
 function buildStreet(plan: FloorPlan, root: Group): void {
   const pavement = buildPath(PAVEMENT_DEPTH, plan.width + 2);
   pavement.rotation.y = Math.PI / 2;
   pavement.position.set(plan.width / 2, 0, plan.depth + PAVEMENT_DEPTH / 2 + HALF_WALL);
   root.add(pavement);
+  const { frontDoor } = plan;
+  const pathLength = plan.depth - frontDoor.line;
+  if (pathLength > 0) {
+    const path = buildPath(FRONT_PATH_WIDTH, pathLength);
+    path.position.set(frontDoor.at, 0, (frontDoor.line + plan.depth) / 2 + HALF_WALL);
+    root.add(path);
+  }
   for (const side of [-1, 1]) {
     const lamppost = buildLamppost();
-    lamppost.position.set(plan.frontDoor.at + side * 1.7, 0, plan.depth + 0.55);
+    lamppost.position.set(frontDoor.at + side * 1.7, 0, frontDoor.line + 0.55);
     root.add(lamppost);
+  }
+}
+
+/**
+ * Lays grass over each lawn, from the building's walls to the pavement and
+ * out to the pavement's ends, and stands picnic tables in a row down the
+ * middle of every lawn long enough for one, apart from the lawn the front
+ * path crosses.
+ */
+function layLawns(plan: FloorPlan, root: Group, fitter: Fitter): void {
+  for (const lawn of plan.lawns) {
+    // A side on the building's outer edge runs on to the pavement's end; a side against the
+    // annex stops at its wall.
+    const minX = lawn.minX === 0 ? -1 : lawn.minX + HALF_WALL;
+    const maxX = lawn.maxX === plan.width ? plan.width + 1 : lawn.maxX - HALF_WALL;
+    const grass = buildLawn(maxX - minX, lawn.maxZ - lawn.minZ);
+    grass.position.set((minX + maxX) / 2, 0, (lawn.minZ + lawn.maxZ) / 2 + HALF_WALL);
+    root.add(grass);
+    if (lawn.minX < plan.frontDoor.at && plan.frontDoor.at < lawn.maxX) continue;
+    const count = Math.min(MAX_PICNIC_TABLES, Math.floor((lawn.maxX - lawn.minX) / PICNIC_PITCH));
+    const z = (lawn.minZ + lawn.maxZ) / 2 + HALF_WALL;
+    for (let index = 0; index < count; index++) {
+      const x = (lawn.minX + lawn.maxX) / 2 + (index - (count - 1) / 2) * PICNIC_PITCH;
+      fitter.place(buildPicnicTable(), x, z);
+    }
   }
 }
 

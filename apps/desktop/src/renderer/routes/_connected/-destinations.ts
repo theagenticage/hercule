@@ -45,9 +45,9 @@ export const buildWaitingRequest = (waiting: Waiting): WaitingRequest => {
  * - a thread opens in the Office's drawer while the Office is open and the
  *   thread has a colleague there, as its sidebar row does, and on its own
  *   screen otherwise;
- * - an assistant opens on its own screen, where its Request is answered. It
- *   has no colleague in the Office, so this holds while the Office is open
- *   too.
+ * - an assistant opens its Conversation, where its Request is answered: in
+ *   the Office's drawer while the Office is open, because an assistant
+ *   always has a colleague there, and on its own screen otherwise.
  *
  * The thread and its runner are read from the cache when the thread is
  * opened, so the function keeps its identity while the threads change.
@@ -80,12 +80,12 @@ export function useOpenDestination(): (destination: Destination) => void {
           }
           return;
         }
-        case "assistant":
-          void navigate({
-            to: "/assistants/$assistantId",
-            params: { assistantId: destination.assistantId },
-          });
+        case "assistant": {
+          const { assistantId } = destination;
+          if (officeOpen) void navigate({ to: "/office", search: { assistant: assistantId } });
+          else void navigate({ to: "/assistants/$assistantId", params: { assistantId } });
           return;
+        }
       }
     },
     [controller, navigate, officeOpen, queryClient],

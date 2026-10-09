@@ -2,17 +2,18 @@
  * The Office's keyboard, and the order in which the Office walks through its
  * colleagues:
  *
- * - Escape steps back one level: the thread drawer, then the selected
+ * - Escape steps back one level: the drawer, then the selected
  *   colleague and its card, then the room.
  * - Tab and Shift+Tab select the next and the previous colleague waiting on
- *   the user, the longest waiting first. They do so only while the focus is
+ *   the user, thread or assistant, the longest waiting first. They do so only while the focus is
  *   on the 3D view or on nothing at all. In the top bar, the card, the drawer
  *   and a menu, Tab moves the focus as usual, so every control stays in reach
  *   of the keyboard.
- * - Enter opens the selected colleague's thread in the drawer.
+ * - Enter opens the selected colleague's thread, or an assistant's
+ *   Conversation, in the drawer.
  * - Q and E turn the camera 45 degrees, = and - zoom it, and F finds the
- *   followed colleague again. These keys are left alone in the thread
- *   drawer, which is the thread screen and has keys of its own.
+ *   followed colleague again. These keys are left alone in the drawer,
+ *   which is the thread or Conversation screen and has keys of its own.
  *
  * The Office reads only keys pressed while the focus is in the Office or on
  * nothing at all, so keys in the sidebar keep their own meaning. Keys typed

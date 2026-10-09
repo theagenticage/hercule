@@ -147,7 +147,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
         </Link>
       </div>
       <SidebarList items={items} officeOpen={officeOpen} onExpand={expandSection} />
-      <AssistantsSection rows={assistantRows} />
+      <AssistantsSection rows={assistantRows} officeOpen={officeOpen} />
       <SidebarFoot
         working={counts.working}
         waiting={counts.waiting}

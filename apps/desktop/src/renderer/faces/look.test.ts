@@ -1,32 +1,41 @@
 import { describe, expect, it } from "vitest";
 import { buildHueStyle } from "./face";
-import { buildLook, HUES, hashSeed, SHAPES, WARDROBE, type Look } from "./look";
+import {
+  buildAssistantLook,
+  buildLook,
+  HEADWEAR,
+  HUES,
+  hashSeed,
+  SHAPES,
+  WARDROBE,
+  type Look,
+} from "./look";
 
 // Computed with the Bureau book's own `hash` and `lookFor` in crew.js.
 const VECTORS: ReadonlyArray<readonly [seed: string, hash: number, look: Look]> = [
-  ["", 1698511862, { hue: "mint", shape: "wide", accessories: ["tache"] }],
-  ["a", 2426549645, { hue: "peach", shape: "egg", accessories: ["watch"] }],
+  ["", 1698511862, { hue: "mint", shape: "wide", accessories: ["tache"], headwear: null }],
+  ["a", 2426549645, { hue: "peach", shape: "egg", accessories: ["watch"], headwear: null }],
   [
     "0199a3c2-7b41-7e2a-9c3d-5f1e2a8b4c60",
     2687217523,
-    { hue: "lime", shape: "wide", accessories: ["tache", "bowtie"] },
+    { hue: "lime", shape: "wide", accessories: ["tache", "bowtie"], headwear: null },
   ],
   [
     "0199a3c2-7b41-7e2a-9c3d-5f1e2a8b4c61",
     2737239707,
-    { hue: "lime", shape: "tall", accessories: ["glasses"] },
+    { hue: "lime", shape: "tall", accessories: ["glasses"], headwear: null },
   ],
   [
     "0199a3c4-0d12-7a55-8b10-3e9f7c21d0aa",
     301455944,
-    { hue: "iris", shape: "egg", accessories: ["bowtie"] },
+    { hue: "iris", shape: "egg", accessories: ["bowtie"], headwear: null },
   ],
   // The book's cast table gives this name peach, egg and a tache. The app
   // never uses the cast table: every seed is hashed.
   [
     "Fix 3-D Secure checkout for EU cards",
     1898525329,
-    { hue: "teal", shape: "tall", accessories: ["bowtie"] },
+    { hue: "teal", shape: "tall", accessories: ["bowtie"], headwear: null },
   ],
 ];
 
@@ -86,6 +95,47 @@ describe("buildLook", () => {
     }
     // At most 256 looks exist, so most of the 1000 seeds repeat a look.
     expect(firstByLook.size).toBeLessThanOrEqual(256);
+  });
+});
+
+describe("buildAssistantLook", () => {
+  const ids = buildSessionIds(1000);
+
+  it("keeps the hue and shape buildLook gives the id, and drops only a homburg", () => {
+    for (const id of ids) {
+      const thread = buildLook(id);
+      const assistant = buildAssistantLook(id);
+      expect(assistant.hue).toBe(thread.hue);
+      expect(assistant.shape).toBe(thread.shape);
+      expect(assistant.accessories).toEqual(
+        thread.accessories.filter((accessory) => accessory !== "homburg"),
+      );
+      expect(assistant.headwear).not.toBeNull();
+    }
+  });
+
+  it("picks the headwear from the hash's bits 12-13", () => {
+    for (const id of ids) {
+      expect(buildAssistantLook(id).headwear).toBe(HEADWEAR[(hashSeed(id) >>> 12) % 3]);
+    }
+  });
+
+  it("reaches every headwear, and drops a homburg, from 1000 ids", () => {
+    expect(new Set(ids.map((id) => buildAssistantLook(id).headwear))).toEqual(new Set(HEADWEAR));
+    const homburgIds = ids.filter((id) => buildLook(id).accessories.includes("homburg"));
+    expect(homburgIds.length).toBeGreaterThan(0);
+  });
+
+  it("returns the same frozen object for the same id, every time", () => {
+    for (const id of ids) {
+      const look = buildAssistantLook(id);
+      expect(Object.isFrozen(look)).toBe(true);
+      expect(buildAssistantLook(id)).toBe(look);
+    }
+  });
+
+  it("never gives a thread's look any headwear", () => {
+    expect(ids.every((id) => buildLook(id).headwear === null)).toBe(true);
   });
 });
 

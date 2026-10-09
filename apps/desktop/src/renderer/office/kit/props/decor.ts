@@ -187,7 +187,8 @@ const RUG_SURFACES = {
   pattern: { token: "room-cork", finish: "fabric", shadow: false },
 } as const satisfies Record<string, Surface>;
 
-const readRugGeometry = memoizeByKey((size: string) => {
+const readRugGeometry = memoizeByKey((key: string) => {
+  const [size = "2x1.4", medallion] = key.split(":");
   const [width = 2, depth = 1.4] = size.split("x").map(Number);
   const parts = new PartList(RUG_SURFACES);
   // Layers 2 mm apart, so they never flicker into each other at a distance.
@@ -205,14 +206,18 @@ const readRugGeometry = memoizeByKey((size: string) => {
   const inset = 0.12;
   parts.add("field", buildSheet(width - inset * 2, 0.01, depth - inset * 2));
   // A stepped diamond in the middle: bands that narrow away from the centre line.
-  const scale = Math.min(1, depth / 1.4, width / 2);
-  const band = 0.034 * scale;
-  [0.4, 0.3, 0.2, 0.1].forEach((span, step) => {
-    for (const side of step === 0 ? [0] : [-1, 1]) {
-      parts.add("pattern", buildSheet(span * 2 * scale, 0.012, band), { z: side * step * band });
-    }
-  });
-  parts.add("border", buildSheet(0.1 * scale, 0.014, band));
+  if (medallion === "medallion") {
+    const scale = Math.min(1, depth / 1.4, width / 2);
+    const band = 0.034 * scale;
+    [0.4, 0.3, 0.2, 0.1].forEach((span, step) => {
+      for (const side of step === 0 ? [0] : [-1, 1]) {
+        parts.add("pattern", buildSheet(span * 2 * scale, 0.012, band), {
+          z: side * step * band,
+        });
+      }
+    });
+    parts.add("border", buildSheet(0.1 * scale, 0.014, band));
+  }
   // A stepped bracket in each corner of the field.
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
@@ -246,10 +251,18 @@ const readRugGeometry = memoizeByKey((size: string) => {
 /**
  * Builds a rug `width` by `depth`, lying flat on the floor, with a short
  * fringe that reaches 0.04 past each end along x. It is 0.014 tall and
- * casts no shadow.
+ * casts no shadow. It has a diamond medallion in its middle unless
+ * `medallion` is false, for a rug whose middle furniture would half cover.
  */
-export function buildRug(width: number, depth: number): Object3D {
-  return buildPropGroup("rug", readRugGeometry(`${width}x${depth}`));
+export function buildRug(
+  width: number,
+  depth: number,
+  { medallion = true }: { readonly medallion?: boolean } = {},
+): Object3D {
+  return buildPropGroup(
+    "rug",
+    readRugGeometry(`${width}x${depth}:${medallion ? "medallion" : "plain"}`),
+  );
 }
 
 // ---------------------------------------------------------------------------

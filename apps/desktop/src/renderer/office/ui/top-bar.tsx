@@ -6,7 +6,7 @@
  * - The counts of who is doing what. A click on a count selects the next
  *   colleague in that state, so repeated clicks walk through all of them.
  *
- * While the thread drawer is open the bar has less room, so the counts drop
+ * While the drawer is open the bar has less room, so the counts drop
  * their words.
  */
 import { useSyncExternalStore, type JSX } from "react";
@@ -27,8 +27,11 @@ import { findNextColleagueId, listColleaguesInPose } from "./office-keys";
 import { RoomDirectory } from "./room-directory";
 
 /**
- * The poses the bar counts, in its order: every pose a thread can have while
- * it has a colleague in the Office.
+ * The poses the bar counts, in its order: working, waiting and idle, the
+ * poses a thread can have while it has a colleague in the Office. The counts
+ * take assistants in those poses too. An asleep or away assistant is not
+ * counted: those poses have no mark, and the sidebar's foot counts the same
+ * three poses.
  */
 const COUNTED_POSES: ReadonlyArray<SeatedPose> = POSES.filter(isSeatedPose);
 

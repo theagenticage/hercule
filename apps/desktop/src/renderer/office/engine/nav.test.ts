@@ -201,6 +201,7 @@ function buildBureauWalks() {
     projects: [WEBSHOP_PROJECT, OPS_PROJECT],
     workspaces: [PRIMARY, THREAD_3F1],
     runners: [MOSS],
+    assistants: [],
     localRunnerId: MOSS.id,
   });
   const builder = createRecordingNavBuilder();

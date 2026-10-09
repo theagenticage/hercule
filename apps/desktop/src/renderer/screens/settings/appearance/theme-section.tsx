@@ -5,11 +5,10 @@ import "./appearance.css";
 import { THEME_NAMES } from "./theme-names";
 
 // The two colleagues every preview draws. They are the colleagues the book
-// casts by hand for this page: a session waiting on you and Ada at work. The
-// book gives Ada a cloche, which the app's wardrobe does not have, so here
-// Ada wears no accessory.
-const WAITING_LOOK: Look = { hue: "peach", shape: "egg", accessories: ["tache"] };
-const WORKING_LOOK: Look = { hue: "iris", shape: "egg", accessories: [] };
+// casts by hand for this page: a session waiting on you and Ada, an
+// assistant, at work in her cloche.
+const WAITING_LOOK: Look = { hue: "peach", shape: "egg", accessories: ["tache"], headwear: null };
+const WORKING_LOOK: Look = { hue: "iris", shape: "egg", accessories: [], headwear: "cloche" };
 
 /**
  * Renders the Theme section of Settings > Appearance: a card for each of

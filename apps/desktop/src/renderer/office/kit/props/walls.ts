@@ -143,8 +143,12 @@ const readClockGeometry = memoize(() => {
   return parts.merge();
 });
 
-/** Builds a clock hand `length` long and `width` wide, pointing up (+y) from the origin. */
-const readHandGeometry = memoizeByKey((size: string) => {
+/**
+ * Returns the shared geometry of a clock hand, by its size as
+ * "<length>x<width>": a hand `length` long and `width` wide, pointing up
+ * (+y) from the origin, and 0.004 thick, from z = -0.001 to 0.003.
+ */
+export const readHandGeometry = memoizeByKey((size: string) => {
   const [length = 0.1, width = 0.01] = size.split("x").map(Number);
   const shape = new Shape();
   shape.moveTo(-width / 2, -0.02);

@@ -5,13 +5,13 @@
  * components.
  *
  * crew.js returns each piece as a string of markup, so this is one of the
- * two files in the renderer that may set `innerHTML`, with
- * settings-appearance-reference.ts. The markup is the book's own,
- * from its second edition in docs/design/crew-bureau-2.
+ * two files in the renderer that may set `innerHTML`, with sheet-page.ts.
+ * The markup is the book's own, from its second edition in
+ * docs/design/crew-bureau-2.
  */
 import "./sheet.css";
 import { SHEET, type IconName, type Piece } from "./cells";
-import { applySheetTheme, markSheetReady, readCrew } from "./sheet-page";
+import { applySheetTheme, buildBookLook, markSheetReady, readCrew } from "./sheet-page";
 
 const crew = readCrew();
 
@@ -24,12 +24,12 @@ const BOOK_ICON_NAMES: Partial<Record<IconName, string>> = {
 /** Returns the book's markup for one cell's piece. */
 function drawPiece(piece: Piece): string {
   switch (piece.kind) {
-    case "face": {
-      const { hue, shape, accessories } = piece.look;
-      // The book spells a wardrobe entry as its accessories joined by "+", or "none".
-      const look = { hue, shape, acc: accessories.join("+") || "none" };
-      return crew.face("Specimen", { pose: piece.pose, size: piece.size, look });
-    }
+    case "face":
+      return crew.face("Specimen", {
+        pose: piece.pose,
+        size: piece.size,
+        look: buildBookLook(piece.look),
+      });
     case "seeded-face":
       // With no look given, the book computes one from the name with its `lookFor`.
       return crew.face(piece.seed, { pose: "idle", size: piece.size });

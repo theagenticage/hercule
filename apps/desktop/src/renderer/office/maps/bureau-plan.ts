@@ -10,8 +10,12 @@
  *   side of the Arcade once there are enough of them to need it;
  * - the back row, which the Bureau leaves empty;
  * - the Gallery, the main corridor, from the west wall to the east wall;
- * - the front row of fixed rooms along the street, ending in the Lobby on the
- *   south-east corner.
+ * - the front row of fixed rooms, ending in the Lobby on the south-east
+ *   corner;
+ * - the annex, when there is one: a fixed room south of one front-row room,
+ *   as wide as that room and entered only through it. The building is then a
+ *   T, and the ground either side of the annex, between the front row and the
+ *   street, is lawn.
  *
  * The East Hall runs along the east facade from the Gallery up to the
  * project rooms, so a colleague walks in through the Lobby, up the East
@@ -29,7 +33,7 @@ export interface Rect {
 }
 
 /** The rows of the plan a room can sit in, plus the corridors. */
-type Band = "north-code" | "south-code" | "back" | "front" | "hall";
+type Band = "north-code" | "south-code" | "back" | "front" | "annex" | "hall";
 
 export type Side = "north" | "south" | "east" | "west";
 
@@ -54,7 +58,10 @@ export interface RoomRequest {
 export interface PlannedRoom extends RoomRequest {
   readonly rect: Rect;
   readonly band: Band;
-  /** The side its door to a corridor is on, or null for the corridors and the lobby. */
+  /**
+   * The side its door is on, or null for the corridors and the lobby. The
+   * door opens onto a corridor, or for the annex onto the room north of it.
+   */
   readonly doorSide: Side | null;
 }
 
@@ -82,14 +89,21 @@ export interface PlannedWall {
   readonly windows: boolean;
 }
 
+/** The front door: a doorway in the Lobby's south wall, which runs along x at z = `line`. */
+interface FrontDoor extends Doorway {
+  readonly line: number;
+}
+
 export interface FloorPlan {
   /** Every room and corridor. */
   readonly rooms: ReadonlyArray<PlannedRoom>;
   readonly walls: ReadonlyArray<PlannedWall>;
+  /** The size of the rectangle round the building, from its north-west corner at the origin. */
   readonly width: number;
   readonly depth: number;
-  /** The front door in the Lobby's south wall: its centre's x, and its width. */
-  readonly frontDoor: Doorway;
+  /** The ground inside that rectangle that no room covers: either side of the annex. */
+  readonly lawns: ReadonlyArray<Rect>;
+  readonly frontDoor: FrontDoor;
 }
 
 /** What the plan is asked to fit. */
@@ -100,12 +114,13 @@ export interface PlanRequest {
   readonly back: ReadonlyArray<RoomRequest>;
   /** The front row, west to east; the last one is the Lobby, which takes the south-east corner. */
   readonly front: ReadonlyArray<RoomRequest>;
-  /** Pairs of neighbouring rooms joined by a door of their own, beside their corridor doors. */
-  readonly connections: ReadonlyArray<{
-    readonly between: readonly [string, string];
-    /** Where along the shared wall, from 0 at its north or west end to 1 at the other. */
-    readonly at: number;
-  }>;
+  /**
+   * The room south of the front-row room whose id is `southOf`, or null. Its
+   * door is in its north wall, at its `doorAt`. The front-row room widens to
+   * the annex's width when the annex needs more. `planFloor` fails when no
+   * front-row room has that id.
+   */
+  readonly annex: { readonly room: RoomRequest; readonly southOf: string } | null;
 }
 
 /** The corridors' widths. Two colleagues pass each other with room to spare. */
@@ -201,10 +216,23 @@ function buildHall(id: string, label: string, rect: Rect): PlannedRoom {
  * The Arcade runs between two rows of project rooms; with one row, its rooms
  * open straight onto the Gallery. An empty row takes no floor, and the plan
  * still holds the Gallery and the front row when there are no project rooms.
+ * The annex grows the building south, so a deeper annex never widens it.
+ *
+ * Throws an Error when the annex names a room that is not in the front row.
  */
 export function planFloor(request: PlanRequest): FloorPlan {
+  const { annex } = request;
+  if (annex !== null && !request.front.some((room) => room.id === annex.southOf)) {
+    const ids = request.front.map((room) => room.id).join(", ");
+    throw new Error(
+      `The annex "${annex.room.id}" is set to stand south of "${annex.southOf}", but the front row has no room with that id (it has: ${ids}). Set the annex's southOf to the id of a front-row room.`,
+    );
+  }
+  const frontRequests = request.front.map((room) =>
+    room.id === annex?.southOf ? { ...room, width: Math.max(room.width, annex.room.width) } : room,
+  );
   const backWidth = sumWidths(request.back);
-  const frontWidth = sumWidths(request.front) - EAST_HALL_WIDTH;
+  const frontWidth = sumWidths(frontRequests) - EAST_HALL_WIDTH;
   const rows = splitIntoRows(request.code);
   const singleWidth = sumWidths(request.code);
   const doubleWidth = Math.max(sumWidths(rows.north), sumWidths(rows.south));
@@ -226,14 +254,15 @@ export function planFloor(request: PlanRequest): FloorPlan {
   const northDepth = measureMaxDepth(northRooms);
   const southDepth = measureMaxDepth(southRooms);
   const backDepth = measureMaxDepth(request.back);
-  const frontDepth = measureMaxDepth(request.front);
+  const frontDepth = measureMaxDepth(frontRequests);
 
   const arcadeZ = northDepth;
   const southZ = arcadeZ + (double ? ARCADE_WIDTH : 0);
   const backZ = southZ + southDepth;
   const galleryZ = backZ + backDepth;
   const frontZ = galleryZ + GALLERY_WIDTH;
-  const depth = frontZ + frontDepth;
+  const streetZ = frontZ + frontDepth;
+  const depth = streetZ + (annex?.room.depth ?? 0);
 
   const rooms: PlannedRoom[] = [];
   rooms.push(...layRow(northRooms, 0, innerWidth, 0, arcadeZ, "north-code", "south"));
@@ -249,7 +278,7 @@ export function planFloor(request: PlanRequest): FloorPlan {
     );
   }
   rooms.push(...layRow(request.back, 0, innerWidth, backZ, galleryZ, "back", "south"));
-  const front = layRow(request.front, 0, width, frontZ, depth, "front", "north");
+  const front = layRow(frontRequests, 0, width, frontZ, streetZ, "front", "north");
   // The Lobby's door is the front door and its opening into the Gallery, not a room door.
   front[front.length - 1] = { ...front[front.length - 1]!, doorSide: null };
   rooms.push(...front);
@@ -272,13 +301,27 @@ export function planFloor(request: PlanRequest): FloorPlan {
     );
   }
 
+  const lawns: Rect[] = [];
+  if (annex !== null) {
+    const { minX, maxX } = front.find((room) => room.id === annex.southOf)!.rect;
+    rooms.push({
+      ...annex.room,
+      rect: { minX, minZ: streetZ, maxX, maxZ: depth },
+      band: "annex",
+      doorSide: "north",
+    });
+    if (minX > 0) lawns.push({ minX: 0, minZ: streetZ, maxX: minX, maxZ: depth });
+    if (maxX < width) lawns.push({ minX: maxX, minZ: streetZ, maxX: width, maxZ: depth });
+  }
+
   const lobby = front[front.length - 1]!;
-  const frontDoor: Doorway = {
+  const frontDoor: FrontDoor = {
     at: (lobby.rect.minX + lobby.rect.maxX) / 2,
     width: FRONT_DOOR_WIDTH,
+    line: lobby.rect.maxZ,
   };
-  const walls = planWalls(rooms, request.connections, frontDoor, lobby.id);
-  return { rooms, walls, width, depth, frontDoor };
+  const walls = planWalls(rooms, frontDoor, lobby.id);
+  return { rooms, walls, width, depth, lawns, frontDoor };
 }
 
 /** One piece of a wall line between two breakpoints, with the rooms on either side. */
@@ -374,7 +417,6 @@ function decideNeighbourSide(axis: "x" | "z", isBefore: boolean): Side {
  */
 function planWalls(
   rooms: ReadonlyArray<PlannedRoom>,
-  connections: PlanRequest["connections"],
   frontDoor: Doorway,
   lobbyId: string,
 ): PlannedWall[] {
@@ -417,16 +459,7 @@ function planWalls(
         // The front door belongs in the lobby's south wall, the front of the
         // building, and in none of the lobby's other outer walls.
         const lobbyFront = axis === "x" && before?.id === lobbyId && after === null;
-        if (lobbyFront) doors.push(frontDoor);
-        for (const connection of connections) {
-          const ids = [before?.id, after?.id];
-          if (!ids.includes(connection.between[0]) || !ids.includes(connection.between[1]))
-            continue;
-          doors.push({
-            at: piece.from + (piece.to - piece.from) * connection.at,
-            width: DOOR_WIDTH,
-          });
-        }
+        if (lobbyFront) doors.push({ at: frontDoor.at, width: frontDoor.width });
         walls.push({
           axis,
           line,

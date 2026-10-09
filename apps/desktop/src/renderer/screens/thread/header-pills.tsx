@@ -6,7 +6,12 @@
  */
 import { useId, type JSX, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { decideThreadPose, decideThreadRowEnd, describePose } from "@hercule/client-core";
+import {
+  decideThreadPose,
+  decideThreadRowEnd,
+  describePose,
+  isAbsentPose,
+} from "@hercule/client-core";
 import type { Project, Runner, Session } from "@hercule/contract";
 import { MoreIcon } from "../../icons/more";
 import { Mark } from "../../marks";
@@ -107,7 +112,7 @@ function ThreadTab({
       aria-label={`${session.title}, ${describePose(pose)}`}
       aria-describedby={end.kind === "mark" ? undefined : endId}
     >
-      {pose === "asleep" || pose === "away" ? null : <Mark state={pose} />}
+      {isAbsentPose(pose) ? null : <Mark state={pose} />}
       <span className="ptab-title" title={session.title}>
         {session.title}
       </span>

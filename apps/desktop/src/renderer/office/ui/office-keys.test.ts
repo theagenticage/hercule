@@ -4,7 +4,8 @@
  *
  * - the colleagues in a pose come in the world's order;
  * - the waiting colleagues come in the queue's order, the longest waiting
- *   first, whatever the order of their desks;
+ *   first, whatever the order of their desks, with waiting assistants among
+ *   the threads;
  * - the pose the sim holds now wins over the world's;
  * - a step wraps at both ends, and starts at an end when nothing is selected.
  */
@@ -43,6 +44,7 @@ const WORLD = buildWorld({
   projects: [],
   workspaces: [],
   runners: [MOSS],
+  assistants: [],
   localRunnerId: MOSS.id,
 });
 
@@ -57,6 +59,33 @@ describe("listColleaguesInPose", () => {
 
   it("returns the waiting colleagues in the queue's order, the longest waiting first", () => {
     expect(listIds(listColleaguesInPose(WORLD, new Map(), "waiting"))).toEqual(["s-b", "s-a"]);
+  });
+
+  it("puts a waiting assistant among the waiting threads, by how long it has waited", () => {
+    const world = buildWorld({
+      sessions: [
+        buildAsking("s-a", "2026-09-10T10:00:00.000Z"),
+        buildAsking("s-b", "2026-09-10T09:00:00.000Z"),
+      ],
+      projects: [],
+      workspaces: [],
+      runners: [MOSS],
+      assistants: [
+        {
+          id: "a-1",
+          name: "Ada",
+          pose: "waiting",
+          session: buildAsking("s-ada", "2026-09-10T09:30:00.000Z"),
+        },
+      ],
+      localRunnerId: MOSS.id,
+    });
+
+    expect(listIds(listColleaguesInPose(world, new Map(), "waiting"))).toEqual([
+      "s-b",
+      "a-1",
+      "s-a",
+    ]);
   });
 
   it("takes the pose the sim holds now, and puts a waiting colleague the queue lacks last", () => {

@@ -1,13 +1,16 @@
 import type { JSX } from "react";
 import type { Pose, ProfileAgent } from "@hercule/client-core";
-import { buildLook, Face } from "../../../faces";
+import { buildAssistantLook, buildLook, Face } from "../../../faces";
 
 /** An agent that carries a permission profile, with the pose its face shows. */
 export interface PosedProfileAgent extends ProfileAgent {
   readonly pose: Pose;
 }
 
-/** Renders the face of `agent`, `size` CSS pixels square, in the look its id gives. */
+/**
+ * Renders the face of `agent`, `size` CSS pixels square, in the look its id
+ * gives. An assistant wears its headwear, as it does everywhere else.
+ */
 export function ProfileAgentFace({
   agent,
   size,
@@ -15,5 +18,6 @@ export function ProfileAgentFace({
   readonly agent: PosedProfileAgent;
   readonly size: number;
 }): JSX.Element {
-  return <Face look={buildLook(agent.id)} pose={agent.pose} size={size} />;
+  const look = agent.kind === "assistant" ? buildAssistantLook(agent.id) : buildLook(agent.id);
+  return <Face look={look} pose={agent.pose} size={size} />;
 }

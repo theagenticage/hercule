@@ -26,6 +26,7 @@ import { createOverlay, type Overlay } from "./engine/overlay";
 import { createPicker, type Picker } from "./engine/picking";
 import { buildSim } from "./engine/sim";
 import { Stage } from "./engine/stage";
+import { watchMinutes } from "./engine/minutes";
 import { prefersReducedMotion, watchStillness } from "./engine/stillness";
 import { buildColleagueRig, setAmbientMotion } from "./kit/character";
 import {
@@ -134,6 +135,10 @@ export function mountOfficeScene(
   const build = (): BuiltScene => {
     const office = buildBureau({ world, nav: createNavBuilder() });
     stage.scene.add(office.root);
+    if (office.clock !== undefined) {
+      office.clock.setTime(new Date());
+      stage.scene.add(office.clock.hands);
+    }
     const rigs = new Map<string, ColleagueRig>();
     for (const colleague of world.colleagues) {
       const rig = buildColleagueRig(colleague);
@@ -187,6 +192,10 @@ export function mountOfficeScene(
     }
     stage.scene.remove(office.root);
     disposeGeometry(office.root);
+    if (office.clock !== undefined) {
+      stage.scene.remove(office.clock.hands);
+      disposeGeometry(office.clock.hands);
+    }
     office.dispose();
   };
 
@@ -278,6 +287,16 @@ export function mountOfficeScene(
     built.sim.setLiveliness(level);
     stage.requestRender();
   }
+
+  // The longcase clock's hands move once a minute, even while the office
+  // stands still, because a clock that stops is wrong. An office with no
+  // clock needs no new frame.
+  const stopMinutes = watchMinutes((now) => {
+    const { clock } = built.office;
+    if (clock === undefined) return;
+    clock.setTime(now);
+    stage.requestRender();
+  });
 
   const stopStillness = watchStillness((next) => {
     if (next === still) return;
@@ -375,6 +394,7 @@ export function mountOfficeScene(
       canvas.removeEventListener("pointerleave", onPointerLeave);
       stopFrames();
       stopState();
+      stopMinutes();
       stopStillness();
       stopCommands();
       themeObserver.disconnect();

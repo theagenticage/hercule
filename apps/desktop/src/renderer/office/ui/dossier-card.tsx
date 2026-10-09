@@ -3,26 +3,27 @@
  * a glass card at the top left of the Office.
  *
  * - The header: the colleague's face in its hue and pose, its name, and its
- *   state.
+ *   state. An assistant's state line starts with "Assistant".
  * - The oldest Request it waits on, when it waits on the user, answered with the
  *   same dock and the same operations as the thread screen's.
- * - The facts: the room, the runner and the model.
- * - Open thread.
+ * - The facts: the room, the runner and the model, and for an assistant
+ *   when its current session was last active.
+ * - Open thread, or Open conversation for an assistant.
  *
- * The card hides while the thread drawer is open, because the drawer shows
- * the same thread in full. The card keeps the colleague's Request drafts, as
+ * The card hides while the drawer is open, because the drawer shows the
+ * same thread or Conversation in full. The card keeps the colleague's Request drafts, as
  * the drawer does, so an answer begun on the card is still there in the
  * drawer, and the other way round. As the card keeps the last colleague
  * drawn after the selection is cleared, it keeps that colleague's drafts
- * until another colleague is selected or the Office closes. After the selection is cleared the card keeps the
- * last colleague drawn while it fades out.
+ * until another colleague is selected or the Office closes.
  */
 import { useState, useSyncExternalStore, type JSX, type ReactNode } from "react";
-import { buildLook, Face } from "../../faces";
+import { isAbsentPose } from "@hercule/client-core";
+import { Face } from "../../faces";
 import { Mark } from "../../marks";
 import { ProjectTile } from "../../screens/project-tile";
 import { RequestDock } from "../../screens/session/dock";
-import { useAgeLabel } from "../../app/age-clock";
+import { useAgeLabel, useAgeWords } from "../../app/age-clock";
 import { useKeepRequestDrafts } from "../../app/request-drafts";
 import type { BuiltOffice } from "../engine/contracts";
 import {
@@ -64,6 +65,21 @@ function RequestHead({
   );
 }
 
+/**
+ * Renders the card's Last active fact: how long ago `at` was, in words, such
+ * as "2 hours ago", counted as the sidebar counts a thread's age. The age
+ * stays current only while `counting` is true.
+ */
+function LastActiveFact({
+  at,
+  counting,
+}: {
+  readonly at: string;
+  readonly counting: boolean;
+}): JSX.Element {
+  return <Fact name="Last active">{useAgeWords(at, counting)}</Fact>;
+}
+
 /** Renders one fact of the card: its name at the left, its value at the right. */
 function Fact({
   name,
@@ -95,12 +111,13 @@ export function DossierCard({
   const [shown, setShown] = useState(selected);
   if (selected !== null && selected !== shown) setShown(selected);
   const open = selected !== null && !state.drawer;
-  useKeepRequestDrafts(shown?.id ?? null);
+  useKeepRequestDrafts(shown?.sessionId ?? null);
 
   if (shown === null) return <section className="office-card glass" data-open={false} inert />;
 
   const colleague = applyColleagueState(shown, states);
-  const { pose, request, oldestRequest } = colleague;
+  const { pose, request, oldestRequest, sessionId } = colleague;
+  const assistant = colleague.kind === "assistant";
   const waiting = listColleaguesInPose(world, states, "waiting");
   const runner = world.runners.find((each) => each.id === colleague.runnerId);
   const roomId = office?.homes.get(colleague.id)?.roomId;
@@ -119,7 +136,13 @@ export function DossierCard({
         <span className="who-text">
           <span className="who-name">{colleague.name}</span>
           <span className="who-state">
-            <Mark state={pose} />
+            {assistant ? (
+              <>
+                <span>Assistant</span>
+                <span aria-hidden="true">·</span>
+              </>
+            ) : null}
+            {isAbsentPose(pose) ? null : <Mark state={pose} />}
             <span>{colleague.stateLabel}</span>
           </span>
         </span>
@@ -133,7 +156,7 @@ export function DossierCard({
         </button>
       </header>
 
-      {request === null || oldestRequest === null ? null : (
+      {request === null || oldestRequest === null || sessionId === null ? null : (
         <div className="office-card-request">
           <RequestHead
             waitingSince={request.waitingSince}
@@ -143,8 +166,8 @@ export function DossierCard({
           />
           <RequestDock
             key={oldestRequest.requestId}
-            sessionId={colleague.id}
-            look={buildLook(colleague.id)}
+            sessionId={sessionId}
+            look={colleague.look}
             request={oldestRequest}
           />
         </div>
@@ -160,7 +183,9 @@ export function DossierCard({
         </Fact>
         <Fact name="Runner">
           {runner === undefined ? (
-            <span className="faint">unknown</span>
+            <span className="faint">
+              {assistant && colleague.runnerId === null ? "no session" : "unknown"}
+            </span>
           ) : (
             <>
               {runner.name}
@@ -169,6 +194,9 @@ export function DossierCard({
           )}
         </Fact>
         {colleague.model === null ? null : <Fact name="Model">{colleague.model}</Fact>}
+        {colleague.lastActivityAt === null ? null : (
+          <LastActiveFact at={colleague.lastActivityAt} counting={open} />
+        )}
       </dl>
 
       <footer className="office-card-foot">
@@ -182,7 +210,7 @@ export function DossierCard({
           aria-keyshortcuts="Enter"
           onClick={() => setOffice({ drawer: true })}
         >
-          Open thread
+          {assistant ? "Open conversation" : "Open thread"}
           <kbd>↩</kbd>
         </button>
       </footer>

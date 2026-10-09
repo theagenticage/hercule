@@ -1,7 +1,8 @@
 /**
  * A colleague's face in 3D: the Bureau book's eyes, brows and mouths for
- * each pose a seated colleague can have (working, waiting and idle), the
- * blush, the moustache, glasses and monocle, raised off the egg like ink.
+ * each pose a colleague in the Office can have (working, waiting, idle,
+ * asleep and away), the away pose's badge, the blush, the moustache, glasses
+ * and monocle, raised off the egg like ink.
  *
  * Every drawing comes from the 2D face (`faces/face-parts.tsx`): the same
  * points, in the same face units, mapped onto the egg. A face is one skinned
@@ -10,10 +11,10 @@
  * The eyes follow their own bones, so a blink squeezes them; everything else
  * follows the head.
  */
-import { BufferGeometry, Shape, TorusGeometry, Vector2, Vector3 } from "three";
+import { BufferGeometry, LatheGeometry, Shape, TorusGeometry, Vector2, Vector3 } from "three";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
 import type { Accessory } from "../../../faces/look";
-import type { SeatedPose } from "@hercule/client-core";
+import type { SessionPose } from "@hercule/client-core";
 import { mapFacePoint, measureEggRadius, placeOnEgg, type Anatomy, type Egg } from "./anatomy";
 import {
   BONE,
@@ -53,6 +54,14 @@ type FacePoint = readonly [number, number];
 export function readEyeCentre(egg: Egg, side: "left" | "right"): Vector3 {
   const flat = mapFacePoint(egg, EYE_X[side], EYE_Y, new Vector3());
   return placeOnEgg(egg, flat.x, flat.y, 0, new Vector3(), new Vector3());
+}
+
+/**
+ * Returns true when the eyes of `pose` are open, so they blink. Asleep eyes
+ * are already shut, so they never blink.
+ */
+export function hasOpenEyes(pose: SessionPose): boolean {
+  return pose !== "asleep";
 }
 
 /** The parts of a face, before they are merged: layers, bones and the egg they sit on. */
@@ -137,8 +146,8 @@ function addDot(
   face.list.add(layer, geometry, bone);
 }
 
-/** Adds one open eye in `pose`, as the book draws it, with its white glint. */
-function addEye(face: FaceBuild, pose: SeatedPose, side: "left" | "right"): void {
+/** Adds one eye in `pose`, as the book draws it, with its white glint when it is open wide. */
+function addEye(face: FaceBuild, pose: SessionPose, side: "left" | "right"): void {
   const x = EYE_X[side];
   const eye = { eye: side } as const;
   const addOpenEye = (dy: number, ry: number) => {
@@ -157,11 +166,23 @@ function addEye(face: FaceBuild, pose: SeatedPose, side: "left" | "right"): void
       return addOpenEye(-0.5, 2.75);
     case "idle":
       return addOpenEye(0, 2.55);
+    case "asleep":
+      // A closed eye: an arc that hangs down, like a smile.
+      return addLine(
+        face,
+        "ink",
+        traceFaceQuadratic([x - 2.3, EYE_Y], [x, EYE_Y + 2], [x + 2.3, EYE_Y]),
+        1.5,
+        eye,
+      );
+    case "away":
+      // A small dot without a glint, both eyes shifted toward the image's left, looking elsewhere.
+      return addDot(face, "ink", [x - 1, EYE_Y + 0.3], 1.5, 1.5, eye);
   }
 }
 
 /** Adds the brows of the poses the book draws with brows. */
-function addBrows(face: FaceBuild, pose: SeatedPose): void {
+function addBrows(face: FaceBuild, pose: SessionPose): void {
   switch (pose) {
     case "waiting":
       addLine(face, "ink", traceFaceQuadratic([16.9, 21.6], [19, 20.2], [21.1, 21.6]), 1.25);
@@ -188,6 +209,8 @@ function addBrows(face: FaceBuild, pose: SeatedPose): void {
       );
       return;
     case "idle":
+    case "asleep":
+    case "away":
       return;
   }
 }
@@ -196,7 +219,7 @@ function addBrows(face: FaceBuild, pose: SeatedPose): void {
  * Adds the mouth of `pose`. Under a moustache the mouth sits lower, and only
  * the waiting mouth still shows, as in the book.
  */
-function addMouth(face: FaceBuild, pose: SeatedPose, wearsTache: boolean): void {
+function addMouth(face: FaceBuild, pose: SessionPose, wearsTache: boolean): void {
   const y = wearsTache ? 34.4 : 32.6;
   switch (pose) {
     case "waiting":
@@ -220,6 +243,15 @@ function addMouth(face: FaceBuild, pose: SeatedPose, wearsTache: boolean): void 
         traceFaceQuadratic([21.6, y - 1.2], [24, y + 1.1], [26.4, y - 1.2]),
         1.45,
       );
+    case "asleep":
+      if (wearsTache) return;
+      return addLine(face, "ink", traceFaceQuadratic([23, y], [24, y + 0.8], [25, y]), 1.45);
+    case "away":
+      if (wearsTache) return;
+      // The book dashes a 3.6 long line with dashes 0.1 long and gaps 1.8 long,
+      // and round caps turn each dash into a dot: two dots, at 22.25 and 24.15.
+      for (const x of [22.25, 24.15]) addDot(face, "ink", [x, y], 0.72, 0.72, { height: 0.5 });
+      return;
   }
 }
 
@@ -331,6 +363,49 @@ function addMonocle(face: FaceBuild): void {
   addRim(face, EYE_X.left, 4.2, 1.2);
 }
 
+/**
+ * Adds the away pose's badge: a pale enamel pin with a flat top and the
+ * book's symbol on it, a crossed-out arc for "can't be reached". The book
+ * draws the badge at the lower right of the face, partly off the egg; here it
+ * is pinned on the body there, low on the colleague's left (+x), or on its
+ * right when a pocket watch hangs on the left.
+ */
+function addAwayBadge(face: FaceBuild, wearsWatch: boolean): void {
+  const { egg } = face;
+  const centre = mapFacePoint(egg, wearsWatch ? 13.6 : 34.4, 37.2, new Vector3());
+  const radius = 3 * egg.unit;
+  const height = radius * 0.32;
+  const pin = new LatheGeometry(
+    [
+      new Vector2(0.0001, 0),
+      new Vector2(radius * 0.96, 0),
+      new Vector2(radius, height * 0.45),
+      new Vector2(radius * 0.93, height * 0.88),
+      new Vector2(radius * 0.78, height),
+      new Vector2(0.0001, height),
+    ],
+    20,
+  );
+  pin.deleteAttribute("uv");
+  pin.rotateX(Math.PI / 2);
+  pin.translate(centre.x, centre.y, 0);
+  face.list.add("paper", wrapOntoEgg(pin, egg, 0), BONE.head);
+  // The symbol, in the book's badge units, where the badge has a radius of 5.6 around (40, 39).
+  const scale = radius / 5.6;
+  const addSymbol = (points: ReadonlyArray<FacePoint>) => {
+    const line = buildStroke(
+      points.map(([x, y]) => new Vector3(centre.x + x * scale, centre.y - y * scale, 0)),
+      0.65 * scale,
+    );
+    face.list.add("ink", wrapOntoEgg(line, egg, height), BONE.head);
+  };
+  addSymbol([
+    [-2.4, 1.8],
+    [2.4, -3],
+  ]);
+  addSymbol(traceFaceQuadratic([-2.2, -1.8], [0.2, -4.2], [2.6, -1.8]));
+}
+
 /** Adds the two blushing cheeks. */
 function addBlush(face: FaceBuild): void {
   for (const x of [15, 33]) {
@@ -348,7 +423,7 @@ registerCache(() => faces.clear());
  */
 export function readFaceGeometry(
   anatomy: Anatomy,
-  pose: SeatedPose,
+  pose: SessionPose,
   accessories: ReadonlyArray<Accessory>,
 ): BufferGeometry {
   const wears = (accessory: Accessory) => accessories.includes(accessory);
@@ -378,6 +453,7 @@ export function readFaceGeometry(
     face.list.add("paper", buildWatchDial(anatomy), BONE.head);
     for (const part of buildWatchCase(anatomy)) face.list.add("brass", part, BONE.head);
   }
+  if (pose === "away") addAwayBadge(face, wears("watch"));
   const geometry = paintLayers(face.list.mergeLayers(FACE_LAYERS), (layer) => {
     switch (layer) {
       case "ink":

@@ -189,6 +189,7 @@
   --room-metal: oklch(0.8 0.012 150);
   --room-lamp: oklch(0.58 0.11 162);
   --room-plant: oklch(0.66 0.12 150);
+  --room-lawn: oklch(0.73 0.055 150);
   --room-sun: oklch(0.97 0.05 92);
   --room-screen: oklch(0.3 0.02 165);
   --room-shade: oklch(0.36 0.03 165); /* what furniture sides darken toward */
@@ -255,6 +256,7 @@
   --room-metal: oklch(0.78 0.02 90);
   --room-lamp: oklch(0.55 0.1 158);
   --room-plant: oklch(0.64 0.12 145);
+  --room-lawn: oklch(0.71 0.055 140);
   --room-sun: oklch(0.95 0.07 85);
   --room-screen: oklch(0.3 0.03 45);
   --room-shade: oklch(0.36 0.05 45);
@@ -322,6 +324,7 @@
   --room-metal: oklch(0.5 0.014 90);
   --room-lamp: oklch(0.62 0.11 162);
   --room-plant: oklch(0.58 0.1 150);
+  --room-lawn: oklch(0.4 0.045 150);
   --room-sun: oklch(0.5 0.07 75);
   --room-screen: oklch(0.19 0.012 50);
   --room-shade: oklch(0.12 0.012 50);
@@ -388,6 +391,7 @@
   --room-metal: oklch(0.5 0.016 150);
   --room-lamp: oklch(0.64 0.11 160);
   --room-plant: oklch(0.6 0.11 145);
+  --room-lawn: oklch(0.4 0.045 140);
   --room-sun: oklch(0.5 0.07 100);
   --room-screen: oklch(0.19 0.014 170);
   --room-shade: oklch(0.12 0.012 170);
@@ -454,6 +458,7 @@
   --room-metal: oklch(0.51 0.018 350);
   --room-lamp: oklch(0.62 0.1 162);
   --room-plant: oklch(0.6 0.1 150);
+  --room-lawn: oklch(0.4 0.04 150);
   --room-sun: oklch(0.52 0.08 40);
   --room-screen: oklch(0.2 0.018 350);
   --room-shade: oklch(0.12 0.016 350);

@@ -13,10 +13,10 @@
  */
 import { Vector3 } from "three";
 import type { Action, BuildSim, ColleagueRig, ColleagueState, Seat, Spot } from "./contracts";
-import { WALK_SPEED } from "./contracts";
+import { HOP_SECONDS, STRETCH_SECONDS, WALK_SPEED } from "./contracts";
 import { isOfficeNavGraph } from "./nav";
 import type { Frame } from "./stage";
-import type { SeatedPose } from "@hercule/client-core";
+import { isAbsentPose, type SessionPose } from "@hercule/client-core";
 import type { Colleague } from "../world/types";
 
 // ---------------------------------------------------------------------------
@@ -26,12 +26,15 @@ import type { Colleague } from "../world/types";
 const STAND_UP_SECONDS = 0.5;
 /** Sitting down onto a seat, at the least. */
 const SIT_DOWN_SECONDS = 0.55;
-/** One happy hop, from take-off to standing again. */
-const HOP_SECONDS = 0.9;
+/**
+ * How long an answered colleague stays on the spot before it walks home: its
+ * hop, plus a beat to land and settle before the first step.
+ */
+const HOP_AND_SETTLE_SECONDS = HOP_SECONDS + 0.28;
 /** Between two colleagues of the queue stepping forward. */
 const QUEUE_STEP_SECONDS = 0.35;
 /** Between an answered colleague's hop and the queue moving up behind it. */
-const QUEUE_CLOSE_SECONDS = HOP_SECONDS + 0.7;
+const QUEUE_CLOSE_SECONDS = HOP_AND_SETTLE_SECONDS + 0.7;
 /** The least time between two colleagues setting off on an errand, so no two start at once. */
 const DEPARTURE_GAP_SECONDS = 0.7;
 /** A visit's exchange: the visitor talks, listens, and talks again. */
@@ -90,7 +93,7 @@ const QUEUE_DISC_RADIUS = 0.65;
 const TOWARD_USER = Math.PI / 4;
 
 /** The actions in which a colleague sits. */
-const SEATED: ReadonlySet<Action> = new Set<Action>(["sit", "type", "read", "sip"]);
+const SEATED: ReadonlySet<Action> = new Set<Action>(["sit", "type", "read", "sip", "doze"]);
 
 /** Where to stand beside a seat, as (sideways, forward) metres in the seat's own frame, best first. */
 const BESIDE_SEAT: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
@@ -121,7 +124,7 @@ const BESIDE_SEAT: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
 type Errand = "queue" | "desk-wait" | "answer" | "visit" | "tea" | "lounge" | "home";
 
 /** Where an actor rests between scripts. */
-type Place = "home" | "lounge" | "queue" | "desk-side" | "elsewhere";
+type Place = "home" | "armchair" | "lounge" | "queue" | "desk-side" | "elsewhere";
 
 /** A stretch of a path on one storey, with its corners rounded. */
 interface WalkLeg {
@@ -169,7 +172,9 @@ interface Actor {
   readonly colleague: Colleague;
   readonly rig: ColleagueRig;
   readonly home: Seat;
-  pose: SeatedPose;
+  /** Its own armchair, where it dozes while asleep or away. Only an assistant has one. */
+  readonly armchair: Seat | null;
+  pose: SessionPose;
   action: Action;
   place: Place;
   floor: number;
@@ -238,9 +243,12 @@ function isDeskSeat(spot: Spot): spot is Seat {
 }
 
 /** Returns the action a colleague does at its own seat in a pose. */
-function decideHomeAction(pose: SeatedPose, seat: Seat["kind"]): Action {
+function decideHomeAction(pose: SessionPose, seat: Seat["kind"]): Action {
   if (seat === "standing") return pose === "waiting" ? "raise-hand" : "stand";
   switch (pose) {
+    case "asleep":
+    case "away":
+      return "doze";
     case "working":
       return seat === "armchair" ? "read" : "type";
     case "idle":
@@ -435,7 +443,7 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
   };
 
   /** Sets a colleague's pose: its face, and the lamp and note on its desk. */
-  const setPose = (actor: Actor, pose: SeatedPose): void => {
+  const setPose = (actor: Actor, pose: SessionPose): void => {
     actor.pose = pose;
     actor.rig.setFace(pose);
     actor.home.desk?.setLamp(pose === "working");
@@ -555,10 +563,14 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
    * to the place beside it, and onto it from there. Any other seat inside an
    * obstacle is left and entered by the nearest place to stand, which for an
    * armchair is in front of it.
+   *
+   * A colleague that dozed stretches once it stands, before it walks off:
+   * it is waking up.
    */
   const walkTo = (actor: Actor, to: Spot, sitAction: Action | null = null): Promise<void> => {
     const start = actor.rig.object.position.clone();
     const seated = SEATED.has(actor.action);
+    const waking = actor.action === "doze";
     const exit =
       seated && actor.place === "home" && actor.home.kind === "desk"
         ? findBesideSeat(actor.home, to.position)
@@ -606,6 +618,17 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
         facing: null,
         action: "stand",
       });
+      // A slide from where it stands to the same spot holds the stretch for its time.
+      if (waking) {
+        legs.push({
+          kind: "glide",
+          from: end,
+          to: end,
+          seconds: STRETCH_SECONDS,
+          facing: null,
+          action: "stretch",
+        });
+      }
     }
     let sitDown: GlideLeg | null = null;
     if (sitAction !== null) {
@@ -656,25 +679,37 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     if (at > now) await wait(actor, at - now);
   };
 
-  /** Walks a colleague to its own seat and sits it down to `action`. */
-  const walkHome = async (
-    actor: Actor,
-    action: Action = decideHomeAction(actor.pose, actor.home.kind),
-  ): Promise<void> => {
-    await walkTo(actor, actor.home, SEATED.has(action) ? action : null);
-    actor.place = "home";
-    setAction(actor, action);
-    setCup(actor, action === "sip");
+  /**
+   * Returns the seat a colleague's pose puts it on: its armchair while it
+   * is asleep or away, when it has one, and its home seat otherwise.
+   */
+  const findOwnSeat = (actor: Actor): Seat =>
+    isAbsentPose(actor.pose) && actor.armchair !== null ? actor.armchair : actor.home;
+
+  /** Returns the place a colleague rests at once it sits on `seat`, one of its own. */
+  const decideSeatPlace = (actor: Actor, seat: Seat): Place =>
+    seat === actor.home ? "home" : "armchair";
+
+  /** Walks a colleague to the seat its pose puts it on, and sits it down to `action`. */
+  const walkHome = async (actor: Actor, action?: Action): Promise<void> => {
+    const seat = findOwnSeat(actor);
+    const doing = action ?? decideHomeAction(actor.pose, seat.kind);
+    await walkTo(actor, seat, SEATED.has(doing) ? doing : null);
+    actor.place = decideSeatPlace(actor, seat);
+    setAction(actor, doing);
+    setCup(actor, doing === "sip");
   };
 
   /**
-   * Sends a colleague to its own seat to do what its pose does there. A
-   * colleague already sitting there only changes what it does, without
-   * getting up.
+   * Sends a colleague to the seat its pose puts it on, to do what its pose
+   * does there. A colleague already sitting there only changes what it
+   * does, without getting up, as an assistant that goes from asleep to away
+   * in its armchair.
    */
   const sendHome = (actor: Actor): void => {
-    if (actor.place === "home" && actor.errand === null) {
-      const action = decideHomeAction(actor.pose, actor.home.kind);
+    const seat = findOwnSeat(actor);
+    if (actor.place === decideSeatPlace(actor, seat) && actor.errand === null) {
+      const action = decideHomeAction(actor.pose, seat.kind);
       setAction(actor, action);
       setCup(actor, action === "sip");
       return;
@@ -976,12 +1011,17 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
   };
 
   /**
-   * Sends a settled colleague to visit another one in the same room. Returns
-   * false when no pair is free.
+   * Sends a settled thread to visit another colleague in the same room.
+   * Returns false when no pair is free. An assistant never visits: it keeps
+   * to its own desk, where it reads and sips, and leaves it only for tea.
+   * Its room holds only assistants, so it is never a host either.
    */
   const visitWithinRoom = (): boolean => {
     const visitor = pickSettled(
-      (actor) => actor.place === "home" && (actor.pose === "working" || actor.pose === "idle"),
+      (actor) =>
+        actor.colleague.kind === "thread" &&
+        actor.place === "home" &&
+        (actor.pose === "working" || actor.pose === "idle"),
     );
     if (visitor === undefined) return false;
     const host = pickSettled(
@@ -995,7 +1035,8 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
 
   /**
    * Sends a colleague to fetch tea from the trolley and sip it at its desk.
-   * Returns false when no one can.
+   * Returns false when no one can. A working assistant stays at its writing
+   * desk: only an idle one fetches tea.
    */
   const fetchTea = (): boolean => {
     const tea = spots.tea;
@@ -1004,7 +1045,8 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
       (candidate) =>
         candidate.place === "home" &&
         candidate.home.kind === "desk" &&
-        (candidate.pose === "idle" || candidate.pose === "working"),
+        (candidate.pose === "idle" ||
+          (candidate.pose === "working" && candidate.colleague.kind === "thread")),
     );
     if (actor === undefined) return false;
     teaTaken = true;
@@ -1024,6 +1066,28 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
       setCup(actor, false);
       setAction(actor, "type");
     });
+    return true;
+  };
+
+  /**
+   * Has an idle assistant at its desk put down its tea and pick up the
+   * newspaper, or put the newspaper down and sip its tea again. The cup on
+   * the desk shows only while it sips. Returns false when no assistant sits
+   * idle at its desk. A thread idle at its desk only sips: the newspaper is
+   * an assistant's.
+   */
+  const switchTeaAndNewspaper = (): boolean => {
+    const actor = pickSettled(
+      (candidate) =>
+        candidate.colleague.kind === "assistant" &&
+        candidate.place === "home" &&
+        candidate.home.kind === "desk" &&
+        candidate.pose === "idle",
+    );
+    if (actor === undefined) return false;
+    const action = actor.action === "read" ? "sip" : "read";
+    setAction(actor, action);
+    setCup(actor, action === "sip");
     return true;
   };
 
@@ -1053,6 +1117,7 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     const happenings: Array<readonly [() => boolean, number]> = [
       [fetchTea, 3],
       [visitWithinRoom, 3],
+      [switchTeaAndNewspaper, 2],
     ];
     // Tries the happenings in a weighted random order until one can happen.
     const order = happenings
@@ -1079,6 +1144,7 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
       colleague,
       rig,
       home,
+      armchair: office.armchairs.get(colleague.id) ?? null,
       pose: colleague.pose,
       action: "stand",
       place: "home",
@@ -1140,7 +1206,10 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
           continue;
         }
       }
-      const action = decideHomeAction(actor.pose, home.kind);
+      const seat = findOwnSeat(actor);
+      placeAt(actor, seat.position, seat.floor, seat.facing);
+      actor.place = decideSeatPlace(actor, seat);
+      const action = decideHomeAction(actor.pose, seat.kind);
       setAction(actor, action);
       setCup(actor, action === "sip");
       // The rig's own transition into its first action is not shown: the
@@ -1158,7 +1227,7 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     leaveQueue(actor, QUEUE_CLOSE_SECONDS);
     run(actor, "answer", async () => {
       setAction(actor, "hop");
-      await wait(actor, HOP_SECONDS);
+      await wait(actor, HOP_AND_SETTLE_SECONDS);
       setAction(actor, "stand");
       await walkHome(actor);
     });

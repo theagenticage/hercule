@@ -719,8 +719,8 @@ describe("the Go menu", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("opens the assistant main asks for on its screen, also while the Office is open", async () => {
-    const { fake, router } = await startShell({ path: "/office", handlers: WITH_ADA });
+  it("opens the assistant main asks for on its screen, and closes the project picker", async () => {
+    const { fake, router } = await startShell({ handlers: WITH_ADA });
     fake.sendMenuCommand("newThread");
     await screen.findByRole("dialog", { name: "New thread in" });
 
@@ -730,6 +730,17 @@ describe("the Go menu", () => {
       expect(router.state.location.pathname).toBe(`/assistants/${ADA.id}`);
     });
     expect(screen.queryByRole("dialog", { name: "New thread in" })).toBeNull();
+  });
+
+  it("opens the assistant main asks for in the Office's drawer while the Office is open", async () => {
+    const { fake, router } = await startShell({ path: "/office", handlers: WITH_ADA });
+
+    fake.openDestination({ kind: "assistant", assistantId: ADA.id });
+
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ assistant: ADA.id });
+    });
+    expect(router.state.location.pathname).toBe("/office");
   });
 });
 

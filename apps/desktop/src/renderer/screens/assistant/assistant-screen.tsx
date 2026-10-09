@@ -22,7 +22,7 @@ import {
   runningTurnQuery,
 } from "../../app/queries";
 import { useKeepRequestDrafts } from "../../app/request-drafts";
-import { buildLook, Face, type Look } from "../../faces";
+import { buildAssistantLook, Face, type Look } from "../../faces";
 import { NotFound } from "../not-found";
 import { useSessionLive, type AttachOpenParagraph } from "../session/use-session-live";
 import { Conversation, type ConversationHandle } from "./conversation";
@@ -94,7 +94,7 @@ function AssistantPage({ assistant }: { readonly assistant: Assistant }): JSX.El
     session,
     session === null ? undefined : runners.find((runner) => runner.id === session.runnerId),
   );
-  const look = buildLook(assistant.id);
+  const look = buildAssistantLook(assistant.id);
   // As on the thread screen: the composer's stack is state, because the
   // composer mounts after the Conversation, and the composer shrinks while
   // the reader is away from the bottom, unless the focus is in it.

@@ -2,9 +2,9 @@
  * The Office Map type, and the Bureau: for now the only Office Map.
  *
  * An Office Map is a plain typed value. `maps/bureau-rooms.ts` reads only
- * its fixed rooms: which exist, in what order, under what name, which
- * furniture stands in them, and which spots they offer to colleagues. The
- * other fields describe what the code does anyway:
+ * its fixed rooms and its annex: which exist, in what order, under what
+ * name, which furniture stands in them, and which spots they offer to
+ * colleagues. The other fields describe what the code does anyway:
  *
  * - `growth`, `wing`, `room` and `desk` each allow one value, the one the
  *   code implements;
@@ -28,6 +28,9 @@ export type Furniture =
   | "coat-stand"
   | "directory"
   | "wall-clock"
+  | "writing-desks"
+  | "bookcases"
+  | "longcase-clock"
   | "plant"
   | "lamp";
 
@@ -40,8 +43,12 @@ export type Furniture =
  */
 export type SpotKind = "seat" | "stand" | "queue";
 
-/** The kinds of fixed room the code can build. Each has its geometry in code. */
-type FixedRoomKind = "triage-room" | "lounge" | "your-office" | "lobby";
+/**
+ * The kinds of fixed room the code can build. Each has its geometry in code.
+ * A map holds at most one room of each kind, so a fixed room's kind is also
+ * its room id.
+ */
+export type FixedRoomKind = "triage-room" | "lounge" | "your-office" | "secretariat" | "lobby";
 
 /** A room every Office has, whatever threads it seats. */
 export interface FixedRoom {
@@ -64,8 +71,9 @@ export interface OfficeMap {
   readonly name: string;
   /**
    * The rule by which the place grows. `gallery-wings` lays the thread rooms
-   * in wings along a corridor north of the Gallery, and the fixed rooms along
-   * the street south of it; the rule's geometry is `maps/bureau-plan.ts`.
+   * in wings along a corridor north of the Gallery, the fixed rooms along
+   * the street south of it, and the annex south of its room, toward the
+   * street; the rule's geometry is `maps/bureau-plan.ts`.
    */
   readonly growth: "gallery-wings";
   /** What a wing stands for. `none`: wings carry no meaning, and rooms fill them in order. */
@@ -76,9 +84,18 @@ export interface OfficeMap {
   readonly desk: "clerks-desk";
   /** The fixed rooms, west to east along the street. The last one holds the front door. */
   readonly fixedRooms: ReadonlyArray<FixedRoom>;
+  /**
+   * The fixed room south of the street-row room of kind `southOf`, or null.
+   * It stands between that room and the street, as wide as it, and is
+   * entered only through it.
+   */
+  readonly annex: { readonly room: FixedRoom; readonly southOf: FixedRoomKind } | null;
 }
 
-/** The Bureau: thread rooms in wings north of the Gallery, fixed rooms along the street south of it. */
+/**
+ * The Bureau: thread rooms in wings north of the Gallery, fixed rooms along
+ * the street south of it, and the Secretariat south of Your Office.
+ */
 export const BUREAU_MAP: OfficeMap = {
   id: "bureau",
   name: "Bureau",
@@ -121,4 +138,14 @@ export const BUREAU_MAP: OfficeMap = {
       spots: ["stand"],
     },
   ],
+  annex: {
+    room: {
+      kind: "secretariat",
+      name: "The Secretariat",
+      // Each assistant's corner holds a writing desk, an armchair and a bookcase.
+      furniture: ["writing-desks", "armchairs", "bookcases", "longcase-clock", "plant", "lamp"],
+      spots: ["seat"],
+    },
+    southOf: "your-office",
+  },
 };
