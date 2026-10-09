@@ -12,22 +12,22 @@ import type { SavedField } from "../../../../app/saved-field";
  *
  * - While a save runs, the control already shows the new value.
  * - A successful save puts the settings the controller returns in the cache,
- *   so every screen that reads them shows the new value at once.
+ *   so every screen that reads them shows the new value at once, and then
+ *   reads the settings again.
  * - A failed save puts the control back to `stored` and returns the error,
  *   which the row shows under itself until the next save.
  *
  * Each setting has its own save, so a failure shows under its own row only.
  *
- * Two things could put an older value back in the cache after a save:
+ * Two things could leave an older value in the cache after a save:
  *
- * - A read of the settings could answer after the save, with a value the
- *   controller read before it stored the save. The read may have started
- *   before the save or while it ran, for example the read that runs in the
- *   background each time the section opens. So when a save succeeds, it
- *   first cancels any read of the settings still running, and only then
- *   writes its answer to the cache. The save counts as running until the
- *   cache holds its answer, so the control never shows the old value in
- *   between.
+ * - The settings the save returns, or a read that started before the save
+ *   (for example the read that runs in the background each time the section
+ *   opens), could be older than a change another writer made meanwhile. So
+ *   the read after a save starts once the save is stored, and replaces any
+ *   read still running, and the cache ends as the controller has it. The
+ *   save counts as running until that read answers, so the control never
+ *   shows the old value in between.
  * - Two saves could answer out of order. So every settings save shares one
  *   mutation scope, which runs them one after another, in the order they
  *   were made.
@@ -43,8 +43,8 @@ export function useSavedSetting<Value>(
     scope: { id: "settings" },
     mutationFn: (value: Value) => client.settings.update({ payload: buildPatch(value) }),
     onSuccess: async (updated) => {
-      await queryClient.cancelQueries({ queryKey });
       queryClient.setQueryData(queryKey, updated);
+      await queryClient.invalidateQueries({ queryKey });
     },
   });
   return {

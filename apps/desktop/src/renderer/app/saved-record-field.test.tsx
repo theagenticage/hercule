@@ -1,13 +1,13 @@
 /**
  * Tests `useSavedRecordField` with a plain list of records: what the control
- * shows while a save runs, what a failed save leaves, the order of saves, and
- * what a payload is built on.
+ * shows while a save runs, what a failed save leaves, the order of saves,
+ * what a payload is built on, and what the list holds after a save.
  * The assistant settings test the hook again through the real screen.
  */
 import { describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClientProvider, queryOptions } from "@tanstack/react-query";
+import { QueryClientProvider, QueryObserver, queryOptions } from "@tanstack/react-query";
 import { createQueryClient } from "./query-client";
 import { useSavedRecordField } from "./saved-record-field";
 
@@ -131,6 +131,29 @@ describe("useSavedRecordField", () => {
 
     await waitFor(() => expect(result.current.error).toBeNull());
     expect(result.current.failedChange).toBeNull();
+  });
+
+  it("reads the list again after a save, so an older answer does not replace a newer record", async () => {
+    const { result, queryClient, sent } = renderNoteField();
+    let stored: ReadonlyArray<Note> = [{ id: "n-1", text: "first" }];
+    // A screen that shows the list keeps it active, so invalidating it reads it again.
+    const unsubscribe = new QueryObserver(queryClient, {
+      queryKey: LIST_KEY,
+      queryFn: () => Promise.resolve(stored),
+      staleTime: Infinity,
+    }).subscribe(() => undefined);
+    act(() => result.current.save("second"));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    // Another writer changes the note after the save is stored, and a live
+    // update brings that change into the cache before the save answers.
+    stored = [{ id: "n-1", text: "changed elsewhere" }];
+    queryClient.setQueryData(LIST_KEY, stored);
+
+    act(() => sent[0]?.succeed());
+
+    await waitFor(() => expect(queryClient.isMutating()).toBe(0));
+    expect(queryClient.getQueryData(LIST_KEY)).toEqual([{ id: "n-1", text: "changed elsewhere" }]);
+    unsubscribe();
   });
 
   it("builds a payload on the record as the controller has it when `readLatest` is given", async () => {

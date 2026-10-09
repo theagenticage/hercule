@@ -423,11 +423,15 @@ describe("Settings > Permission profiles, a profile's page", () => {
   });
 
   it("shows a failed save under its row while a later save is queued, and keeps only the later change", async () => {
+    const store = storeProfiles(ALL_PROFILES);
+    const update = store[`PATCH /api/v1/profiles/${TRIAGE.id}`]!;
     const first = holdAnswer();
     let updates = 0;
+    // The first update is held, and fails without storing anything.
     const { calls } = await openProfile(TRIAGE, {
+      ...store,
       [`PATCH /api/v1/profiles/${TRIAGE.id}`]: (call) =>
-        ++updates === 1 ? first.handler() : { body: { ...TRIAGE, ...(call.body as object) } },
+        ++updates === 1 ? first.handler() : update(call),
     });
     const tasksDelete = findVerb("Tasks", "Delete");
 

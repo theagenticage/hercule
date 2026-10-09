@@ -71,12 +71,15 @@ export interface SavedRecordField<Value, Change> extends SavedField<Value, Chang
  *   the save before it stored.
  * - A save of a record that is gone from the list, because it was deleted,
  *   saves nothing.
- * - A successful save cancels any read of the list still running, because
- *   that read could answer with the list from before the save, and then puts
- *   the record the controller returns in the cached list. Every screen that
- *   shows the list shows the record at once. The save counts as running until
- *   the cache holds its answer, so the control never shows the old value in
- *   between.
+ * - A successful save puts the record the controller returns in the cached
+ *   list, so every screen that shows the list shows the record at once, and
+ *   then reads the list again. The returned record can be older than the
+ *   cache: a live update can bring in another writer's newer change while
+ *   the answer is on its way. The new read starts after the save, and
+ *   replaces any read that started before it, so the list ends as the
+ *   controller has it. The save counts as running until that read answers,
+ *   so the control never shows the old value in between, and a save queued
+ *   behind it builds on the list that read returned.
  */
 export function useSavedRecordField<
   ListedRecord extends { readonly id: string },
@@ -116,10 +119,10 @@ export function useSavedRecordField<
     },
     onSuccess: async (updated) => {
       if (updated === null) return;
-      await queryClient.cancelQueries({ queryKey: listKey });
       queryClient.setQueryData(listKey, (records) =>
         records?.map((each) => (each.id === updated.id ? updated : each)),
       );
+      await queryClient.invalidateQueries({ queryKey: listKey });
     },
   });
   return {
