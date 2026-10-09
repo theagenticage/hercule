@@ -48,6 +48,7 @@ import { readBearerToken } from "../http/bearer";
 import { buildErrorResponse } from "../http/envelope";
 import { ControllerIdentity } from "../identity";
 import { WORKSPACE_ACTION_IDS } from "../plugins";
+import { buildForwardingPointer, PromotionState } from "../promotion";
 import { mintConnection, RunnerConnections, type Connection, type Departure } from "./connections";
 
 const RUNNER_SOCKET_PATH = "/api/v1/runners/socket";
@@ -142,6 +143,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
   Effect.gen(function* () {
     const connections = yield* RunnerConnections;
     const identity = yield* ControllerIdentity;
+    const promotion = yield* PromotionState;
     const pings = yield* RunnerPingSchedule;
     const write = yield* socket.writer;
 
@@ -158,19 +160,22 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
 
     const greet = (hello: RunnerHello) =>
       Effect.gen(function* () {
-        const controller = yield* identity.read;
-        if (Option.isNone(controller)) {
-          // The boot creates the identity before the server starts, so a
-          // missing identity is a bug, not a state to handle.
-          return yield* Effect.die("the controller has no identity row");
+        const phase = yield* promotion.phase;
+        if (phase._tag === "Sealed") {
+          // A sealed controller does not prove itself as a live peer: it
+          // tells the runner where the live controller is, and the runner
+          // verifies that pointer against the identity it already trusts.
+          yield* write(encodeFrameText(buildForwardingPointer(phase.seal)));
+          return;
         }
+        const controller = yield* identity.readOrDie;
         const signature = yield* identity.sign(encodeChallengeBytes(runnerId, hello.nonce));
         const answer: ControllerHello = {
           _tag: "controllerHello",
           protocolVersion: PROTOCOL_VERSION,
           capabilities: CAPABILITIES,
-          identityId: controller.value.id,
-          publicKey: Buffer.from(controller.value.publicKey).toString("base64"),
+          identityId: controller.id,
+          publicKey: Buffer.from(controller.publicKey).toString("base64"),
           nonce: hello.nonce,
           signature: Buffer.from(signature).toString("base64"),
         };

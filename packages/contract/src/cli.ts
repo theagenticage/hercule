@@ -3013,6 +3013,13 @@ export const CLI = {
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
+  "controller.createPromotionToken": {
+    command: "controller promotion-token create",
+    help: "Creates a 15-minute single-use token that lets another machine take over this controller. Prints the promote command to run on that machine, which pulls this controller's data. Creating a token invalidates any earlier one not yet spent. When the CLI reaches this controller at a loopback address, the command holds a placeholder for the URL the new machine reaches it at.",
+    examples: [{ args: [] }],
+    fields: {},
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
 } as const satisfies Record<OperationId, CliRow>;
 
 /**

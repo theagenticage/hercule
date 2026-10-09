@@ -3,19 +3,28 @@
  * is created at first run and never leaves its machine. Outside this domain a
  * secret is only ever a reference.
  */
+export { type SecretDecryptError } from "./cipher";
 export { readInstanceSecrets } from "./instances";
-export { masterKeyLayer, type MasterKeyBackend, type MasterKeyError } from "./masterKey";
+export {
+  MasterKey,
+  masterKeyLayer,
+  createMasterKey,
+  defaultBackend,
+  openKeyStore,
+  type MasterKeyBackend,
+  type MasterKeyError,
+} from "./masterKey";
 export {
   CORE_OWNER,
   buildProviderInstanceOwner,
   Secrets,
   secretsLayer,
-  type SecretDecryptError,
   type SecretNameError,
   type SecretNameRef,
   type SecretOwner,
   type SecretOwnerKind,
 } from "./repository";
+export { rewrapSecrets } from "./rewrap";
 export {
   Secret,
   SecretLayer,

@@ -25,8 +25,11 @@ const LOOPBACK_HOSTS = new Set([LOOPBACK, "localhost"]);
 
 export interface IdentityOptions {
   readonly runnerId: string;
-  /** Only pages from this URL's origin may read the response. */
-  readonly controllerUrl: string;
+  /**
+   * The controller origin allowed to read `/identity`. Called on every
+   * request so a re-point refreshes CORS without restarting the listener.
+   */
+  readonly readControllerUrl: () => string;
   /** The first port to try. When it is taken, the next few ports are tried. */
   readonly port: number;
 }
@@ -49,12 +52,15 @@ const isLoopbackRequest = (request: Request): boolean => {
  * a browser needs.
  */
 const buildIdentityHandler =
-  (runnerId: string, allowOrigin: string) =>
+  (runnerId: string, readControllerUrl: () => string) =>
   (request: Request): Response =>
     request.method === "GET" &&
     new URL(request.url).pathname === IDENTITY_PATH &&
     isLoopbackRequest(request)
-      ? Response.json({ runnerId }, { headers: { "access-control-allow-origin": allowOrigin } })
+      ? Response.json(
+          { runnerId },
+          { headers: { "access-control-allow-origin": new URL(readControllerUrl()).origin } },
+        )
       : new Response(null, { status: 404 });
 
 /** Serves `GET /identity` while the scope is open. Returns the port the server bound. */
@@ -64,7 +70,7 @@ export const serveIdentity = (
   Effect.map(
     Effect.acquireRelease(
       Effect.gen(function* () {
-        const fetch = buildIdentityHandler(options.runnerId, new URL(options.controllerUrl).origin);
+        const fetch = buildIdentityHandler(options.runnerId, options.readControllerUrl);
         const serve = (port: number) => Bun.serve({ hostname: LOOPBACK, port, fetch });
         for (let offset = 0; offset < IDENTITY_PORT_COUNT; offset += 1) {
           const port = options.port + offset;

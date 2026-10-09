@@ -23,6 +23,7 @@ import { ConnectionValidationFailed, type SetupStep } from "@hercule/plugin-host
 import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { IngestExecutorLayer } from "../daemon/ingest";
+import { ServingPromotionStateLayer } from "../promotion/testing";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { NotifierLayer } from "../notifications";
@@ -57,6 +58,7 @@ const buildStack = () => {
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(AuditLogLayer),
+    Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );

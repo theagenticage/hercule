@@ -110,6 +110,8 @@ export const AuthenticatedLayer: Layer.Layer<Authenticated, never, Credentials |
       return {
         bearer: (httpEffect, options) =>
           Effect.gen(function* () {
+            const operation = yield* parseOperationId(buildOperationId(options));
+
             const token = Redacted.value(options.credential);
             if (token === "") return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
 
@@ -117,7 +119,6 @@ export const AuthenticatedLayer: Layer.Layer<Authenticated, never, Credentials |
             if (Option.isNone(actor))
               return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
 
-            const operation = yield* parseOperationId(buildOperationId(options));
             const refused = checkGrant(operation, actor.value);
             if (refused !== undefined) return yield* Effect.fail(refused);
 

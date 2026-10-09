@@ -20,6 +20,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import { createNotFoundError, type CapabilitySnapshot, type NotFound } from "@hercule/contract";
 import { announce, nowIso, withTransaction } from "../db";
 import { PluginHost } from "../plugins";
+import { PromotionState } from "../promotion";
 import { RunnerConnections, runnerRepository } from "../runners";
 import { readInstanceSecrets, Secrets, type SecretDecryptError } from "../secrets";
 import { providerRepository, type StoredInstance } from "./repository";
@@ -65,6 +66,7 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const secrets = yield* Secrets;
   const host = yield* PluginHost;
+  const promotion = yield* PromotionState;
 
   /**
    * Probes one instance on one runner, stores the snapshot, and returns it.
@@ -340,18 +342,20 @@ const make = Effect.gen(function* () {
         // Forked, because a runner that answers slowly must not hold up the
         // next runner's sweep.
         Stream.runForEach(connections.arrivals, (runnerId) =>
-          Effect.forkChild(sweepRunner(runnerId)),
+          Effect.forkChild(promotion.whenServing(sweepRunner(runnerId))),
         ),
         Effect.gen(function* () {
           const interval = yield* ProviderProbeInterval;
           while (true) {
             yield* Effect.sleep(interval);
-            yield* logSweepFailure(
-              Effect.gen(function* () {
-                const online = yield* runners.connected();
-                if (online.length === 0) return;
-                yield* sweep(online, yield* instances.list());
-              }),
+            yield* promotion.whenServing(
+              logSweepFailure(
+                Effect.gen(function* () {
+                  const online = yield* runners.connected();
+                  if (online.length === 0) return;
+                  yield* sweep(online, yield* instances.list());
+                }),
+              ),
             );
           }
         }),
@@ -369,5 +373,5 @@ export class ProviderProbes extends Context.Service<ProviderProbes, Effect.Succe
 export const ProviderProbesLayer: Layer.Layer<
   ProviderProbes,
   never,
-  SqlClient.SqlClient | RunnerConnections | Secrets | PluginHost
+  SqlClient.SqlClient | RunnerConnections | Secrets | PluginHost | PromotionState
 > = Layer.effect(ProviderProbes)(make);

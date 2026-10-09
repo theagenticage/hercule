@@ -22,7 +22,14 @@
  */
 import * as Effect from "effect/Effect";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import { OPERATIONS, createUnauthenticatedError } from "@hercule/contract";
+import {
+  OPERATIONS,
+  ControllerSealed,
+  PromotionInProgress,
+  createUnauthenticatedError,
+} from "@hercule/contract";
+import { CALLBACK_PATH } from "../connections";
+import { PromotionState, createSealedError } from "../promotion";
 import { Setup } from "../setup";
 import { buildErrorResponse } from "./envelope";
 
@@ -58,6 +65,54 @@ export const setupGate = HttpRouter.middleware(
         if (OPEN_BEFORE_SETUP.has(`${route.method} ${route.path}`)) return yield* httpEffect;
         if (yield* isComplete) return yield* httpEffect;
         return buildErrorResponse(createUnauthenticatedError(NOT_SET_UP));
+      });
+  }),
+);
+
+const SETUP_READ_PATH = OPERATIONS["setup.read"].path;
+
+/** Returns whether a request on this route only reads. The OAuth callback is a GET that writes. */
+const isReadOnly = (route: { readonly method: string; readonly path: string }): boolean =>
+  (route.method === "GET" || route.method === "HEAD") && route.path !== CALLBACK_PATH;
+
+const isPromotionRefusal = (error: unknown): error is ControllerSealed | PromotionInProgress =>
+  error instanceof ControllerSealed || error instanceof PromotionInProgress;
+
+/**
+ * The promotion gate, as route middleware.
+ *
+ * - Once the controller is sealed, every request but `setup.read` is refused
+ *   with the new address. `setup.read` holds no data, and it is what tools
+ *   call to learn that a controller is up.
+ * - A request that writes is admitted by the promotion state, which counts it
+ *   while it runs and refuses it while the controller is frozen.
+ * - A request that only reads runs uncounted while frozen, so a long-lived
+ *   socket never holds up a freeze.
+ *
+ * The promotion's own routes and the runner socket are not behind this gate,
+ * because they must keep working while frozen or sealed: each one checks the
+ * promotion phase itself.
+ */
+export const promotionGate = HttpRouter.middleware(
+  Effect.gen(function* () {
+    const promotion = yield* PromotionState;
+
+    return (httpEffect) =>
+      Effect.gen(function* () {
+        const { route } = yield* HttpRouter.RouteContext;
+        if (!isReadOnly(route)) {
+          return yield* promotion
+            .admit(httpEffect)
+            .pipe(
+              Effect.catchIf(isPromotionRefusal, (error) =>
+                Effect.succeed(buildErrorResponse(error)),
+              ),
+            );
+        }
+        const phase = yield* promotion.phase;
+        if (phase._tag === "Sealed" && route.path !== SETUP_READ_PATH)
+          return buildErrorResponse(createSealedError(phase.seal));
+        return yield* httpEffect;
       });
   }),
 );

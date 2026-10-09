@@ -510,6 +510,11 @@ const TABLE = {
 
   "controller.read": { requires: "infra.read", method: "GET", path: "/api/v1/controller" },
   "controller.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/controller" },
+  "controller.createPromotionToken": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/controller/promotion-tokens",
+  },
 } as const satisfies Record<string, { requires: Requirement; method: Method; path: string }>;
 
 /** Every operation id in the public API. */

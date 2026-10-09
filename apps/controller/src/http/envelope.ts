@@ -29,6 +29,7 @@ import {
   createInternalError,
   createNotFoundError,
   createValidationError,
+  isApiError,
   listDecodeIssues,
   type ApiError,
 } from "@hercule/contract";
@@ -100,3 +101,28 @@ export const withEnvelope = <E, R>(
       ? Effect.andThen(Effect.logError("Unhandled failure while serving a request", cause), respond)
       : respond;
   });
+
+/**
+ * Returns a function, for `pipe`, that turns every failure of a route outside
+ * the operation table into a response, so the route itself never fails:
+ *
+ * - an error of the contract becomes its error envelope;
+ * - anything else is logged under `logMessage` and becomes `internal`, so no
+ *   detail of it reaches the caller.
+ *
+ * The derived routes get the same treatment from `withApiErrors` in
+ * `./routes.ts`.
+ */
+export const respondToFailures =
+  (logMessage: string) =>
+  <E, R>(
+    self: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
+  ): Effect.Effect<HttpServerResponse.HttpServerResponse, never, R> =>
+    Effect.catch(self, (error) =>
+      isApiError(error)
+        ? Effect.succeed(buildErrorResponse(error))
+        : Effect.as(
+            Effect.logError(logMessage, error),
+            buildErrorResponse(createInternalError("something went wrong")),
+          ),
+    );

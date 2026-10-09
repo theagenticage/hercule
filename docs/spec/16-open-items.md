@@ -54,7 +54,7 @@ Not design questions. The constraint is stated where one exists.
 - 08 §5.2: Gmail's stale-`historyId` error path re-baselines at now.
 - 13 §1: what counts as a tailnet address for the bind warning.
 - 13 §2.1: AEAD cipher choice with per-row nonce and owner/name as associated data.
-- 13 §2.3: the KDF from the promotion token.
+- ~~13 §2.3: the KDF from the promotion token.~~ **Resolved 2026-10-09 ([#103](https://github.com/theagenticage/hercule/issues/103)):** HKDF-SHA256, salt 32 bytes, info `hercule-promotion-v1`, over a 32-byte token; AES-256-GCM with AD `<kind>|<id>|<name>`; recorded in 13 §2.3.
 - ~~13 §4.2: the password hash function (argon2id expected).~~ **Resolved 2026-09-04 ([#57](https://github.com/theagenticage/hercule/issues/57)):** argon2id via `Bun.password`, native in the pinned Bun; recorded in 13 §4.2.
 - ~~13 §9: the runner daemon's local channel for the git credential helper and how the helper authenticates.~~ **Resolved 2026-09-16 ([#72](https://github.com/theagenticage/hercule/issues/72)):** a Unix socket under the runner's storage directory, mode 0600, and the session's own token verified by the controller, which answers only for that session's workspace; recorded in 13 §9.1.
 - 15 §11: macOS notarization of a Bun-compiled binary - prototype notarize + staple first.

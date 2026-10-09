@@ -58,6 +58,7 @@ import {
   type SessionTokens,
 } from "./permissions";
 import {
+  MasterKey,
   masterKeyLayer,
   Secrets,
   secretsLayer,
@@ -65,6 +66,12 @@ import {
   type MasterKeyError,
   type SecretNameError,
 } from "./secrets";
+import {
+  PromotionState,
+  PromotionStateLayer,
+  PromotionTokens,
+  PromotionTokensLayer,
+} from "./promotion";
 import {
   JoinTokensLayer,
   LocalRunnerId,
@@ -222,6 +229,7 @@ export type ControllerServices =
   | SqlClient.SqlClient
   | ControllerIdentity
   | Secrets
+  | MasterKey
   | AuditLog
   | PlatformEvents
   | Notifier
@@ -245,7 +253,9 @@ export type ControllerServices =
   | ConnectionService
   | LocalRunnerId
   | HerculeHome
-  | BootstrapConfig;
+  | BootstrapConfig
+  | PromotionTokens
+  | PromotionState;
 
 /**
  * Boots the controller, then runs `use` with the database still open, and
@@ -292,9 +302,13 @@ export const bootWith = <A, E>(
           AuditLogLayer,
           PlatformEventsLayer,
           JoinTokensLayer,
+          PromotionTokensLayer,
+          PromotionStateLayer.pipe(
+            Layer.provide(Layer.mergeAll(controllerIdentityLayer, AuditLogLayer)),
+          ),
         ).pipe(
           Layer.provideMerge(
-            secretsLayer.pipe(Layer.provide(masterKeyLayer(options.masterKeyBackend))),
+            secretsLayer.pipe(Layer.provideMerge(masterKeyLayer(options.masterKeyBackend))),
           ),
         ),
       ),
@@ -367,6 +381,10 @@ export const bootWith = <A, E>(
 
     const steps = Effect.gen(function* () {
       yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });
+      // Right after the migrations, which create the seal's table, and before
+      // anything that a sealed controller must not do.
+      const flags = yield* config.ServeFlags;
+      yield* Effect.flatMap(PromotionState, (promotion) => promotion.restore(flags));
       // There is no way to ask whether the harness received an input that was
       // in flight before this boot. So the input is never sent again, which
       // could deliver it twice: an agent step's prompt is marked sent, any

@@ -54,6 +54,7 @@ import { agentRepository } from "../../agents";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
 import type { PluginHost } from "../../plugins";
+import { PromotionState } from "../../promotion";
 import { providerRepository, resolvedInstance } from "../../providers";
 import { RunnerConnections } from "../../runners";
 import {
@@ -171,6 +172,7 @@ const make = Effect.gen(function* () {
   const { dispatch } = yield* Dispatch;
   const agents = yield* agentRepository;
   const forkAfterCommit = yield* makeForkAfterCommit;
+  const promotion = yield* PromotionState;
 
   /**
    * Returns the model selection to use: the given model, or the session's
@@ -366,13 +368,22 @@ const make = Effect.gen(function* () {
    * the row back to waiting, and the next change to idle or delivery pass
    * sends it. An agent step's prompt the runner did not reply to is the
    * exception: it is never sent again (see `deliverClaimed`).
+   *
+   * Waits while a promotion freezes the controller, and never sends once it
+   * is sealed. The new machine's copy of the data holds the row as claimed
+   * and unanswered, and sends it again to the session's next process. Sent
+   * from here after the copy as well, the input would run twice. The send is
+   * counted, so a freeze waits for the runner's answer, as it does for a
+   * request that sends an input.
    */
   const sendClaimed = (row: StoredInput): Effect.Effect<void, SqlError> =>
-    Effect.catchIf(
-      deliverClaimed(row),
-      (error): error is InvalidState | NotFound =>
-        error instanceof InvalidState || error instanceof NotFound,
-      () => Effect.void,
+    promotion.whenServing(
+      Effect.catchIf(
+        deliverClaimed(row),
+        (error): error is InvalidState | NotFound =>
+          error instanceof InvalidState || error instanceof NotFound,
+        () => Effect.void,
+      ),
     );
 
   /**
@@ -405,69 +416,76 @@ const make = Effect.gen(function* () {
    * idle or exited without the controller seeing it, is retried on every
    * tick for as long as the session can take it. The check for an input
    * already sent and unanswered keeps those retries to one row at a time.
+   *
+   * Waits while a promotion freezes the controller, and never claims,
+   * resumes or sends anything once it is sealed: the new machine delivers
+   * these inputs from its own copy of the data, and an input this
+   * controller delivered after the copy would run twice.
    */
   const deliverQueuedInput = (
     sessionId: string,
   ): Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError> =>
-    Effect.gen(function* () {
-      const session = yield* readSession(sessionId);
-      if (session.status === "idle") {
-        // A runner that is not connected cannot be sent anything. Claiming a
-        // row only to put it straight back would rewrite the row, and notify
-        // every client watching the session, on every pass while the runner
-        // is away. With a connection, the session's oldest queued row is
-        // sent, whoever wrote it. So a typed input whose delivery failed is
-        // retried first, and a matched input waits behind it, as in any
-        // queue.
-        if (!(yield* connections.holdsConnection(session.runnerId))) return;
-        const claimed = yield* sessions.claimOldestUnlessOneIsOnTheWire(sessionId);
-        if (Option.isSome(claimed)) yield* sendClaimed(claimed.value);
-        return;
-      }
-      if (session.status !== "exited") return;
-      const check = yield* resumableNativeSession(session).pipe(
-        Effect.map((nativeSessionId) => ({ nativeSessionId })),
-        Effect.catchIf(
-          (error): error is InvalidState => error instanceof InvalidState,
-          (refused) => Effect.succeed({ refusal: refused.error.message }),
-        ),
-      );
-      if ("refusal" in check) {
-        return yield* sessions.dropUnresumableInputs(sessionId, check.refusal);
-      }
-      // Checked again, with the rest of the rule, inside the resume's
-      // transaction. Checked here too, so a held session, which every tick
-      // reaches, costs no spec build. The owner was told at the exit that
-      // put the hold on, with a "can't be reached" notice.
-      if (isResumeHeld(session)) return;
-      const { nativeSessionId } = check;
-      const resumed = yield* withTransaction(
-        sql,
-        Effect.flatMap(nowIso, (at) =>
-          sessions.resume(
-            sessionId,
-            (now) =>
-              now.conversationId === null
-                ? buildResumeSpec(now, now.modelSelection, nativeSessionId)
-                : buildConversationResumeSpec(now, nativeSessionId),
-            at,
-            true,
+    promotion.whenServing(
+      Effect.gen(function* () {
+        const session = yield* readSession(sessionId);
+        if (session.status === "idle") {
+          // A runner that is not connected cannot be sent anything. Claiming a
+          // row only to put it straight back would rewrite the row, and notify
+          // every client watching the session, on every pass while the runner
+          // is away. With a connection, the session's oldest queued row is
+          // sent, whoever wrote it. So a typed input whose delivery failed is
+          // retried first, and a matched input waits behind it, as in any
+          // queue.
+          if (!(yield* connections.holdsConnection(session.runnerId))) return;
+          const claimed = yield* sessions.claimOldestUnlessOneIsOnTheWire(sessionId);
+          if (Option.isSome(claimed)) yield* sendClaimed(claimed.value);
+          return;
+        }
+        if (session.status !== "exited") return;
+        const check = yield* resumableNativeSession(session).pipe(
+          Effect.map((nativeSessionId) => ({ nativeSessionId })),
+          Effect.catchIf(
+            (error): error is InvalidState => error instanceof InvalidState,
+            (refused) => Effect.succeed({ refusal: refused.error.message }),
           ),
-        ),
-      ).pipe(
-        Effect.catchIf(
-          (error): error is InvalidState => error instanceof InvalidState,
-          // The assistant's access mode has no match in the provider any
-          // more, so the session cannot be resumed as the assistant now is.
-          (refused) =>
-            Effect.as(sessions.dropUnresumableInputs(sessionId, refused.error.message), false),
-        ),
-      );
-      if (!resumed) return;
-      // After the commit: dispatch sends a frame to the runner, and a
-      // transaction never waits on anything outside the database.
-      yield* dispatch(session.runnerId);
-    });
+        );
+        if ("refusal" in check) {
+          return yield* sessions.dropUnresumableInputs(sessionId, check.refusal);
+        }
+        // Checked again, with the rest of the rule, inside the resume's
+        // transaction. Checked here too, so a held session, which every tick
+        // reaches, costs no spec build. The owner was told at the exit that
+        // put the hold on, with a "can't be reached" notice.
+        if (isResumeHeld(session)) return;
+        const { nativeSessionId } = check;
+        const resumed = yield* withTransaction(
+          sql,
+          Effect.flatMap(nowIso, (at) =>
+            sessions.resume(
+              sessionId,
+              (now) =>
+                now.conversationId === null
+                  ? buildResumeSpec(now, now.modelSelection, nativeSessionId)
+                  : buildConversationResumeSpec(now, nativeSessionId),
+              at,
+              true,
+            ),
+          ),
+        ).pipe(
+          Effect.catchIf(
+            (error): error is InvalidState => error instanceof InvalidState,
+            // The assistant's access mode has no match in the provider any
+            // more, so the session cannot be resumed as the assistant now is.
+            (refused) =>
+              Effect.as(sessions.dropUnresumableInputs(sessionId, refused.error.message), false),
+          ),
+        );
+        if (!resumed) return;
+        // After the commit: dispatch sends a frame to the runner, and a
+        // transaction never waits on anything outside the database.
+        yield* dispatch(session.runnerId);
+      }),
+    );
 
   /**
    * Checks the `session.input` grant, decodes the input, and stores it as the
@@ -1218,4 +1236,5 @@ export const LiveLayer: Layer.Layer<
   | Settings
   | AuditLog
   | Dispatch
+  | PromotionState
 > = Layer.effect(Live)(make);

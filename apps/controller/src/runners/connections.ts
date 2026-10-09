@@ -575,6 +575,19 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Sends one frame to every runner that has an open connection. A runner
+     * with no connection is skipped. Used to announce a new controller
+     * address during promotion.
+     */
+    tellConnectedRunners: (frame: ControllerToRunner): Effect.Effect<void> =>
+      Effect.forEach([...reachable.keys()], (id) =>
+        Effect.suspend(() => {
+          const held = reachable.get(id);
+          return held === undefined ? Effect.void : held.ask(frame);
+        }),
+      ).pipe(Effect.asVoid),
+
+    /**
      * Adds a runner's session frame to the session queue. A frame from a
      * replaced connection is dropped: an old connection must not overwrite the
      * session state the current one reports.

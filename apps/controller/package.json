@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./promote": "./src/promote.ts"
   },
   "dependencies": {
     "@effect/platform-bun": "4.0.0-rc.112",
@@ -18,6 +19,7 @@
     "@hercule/plugin-pi": "workspace:*",
     "@hercule/process-log": "workspace:*",
     "@hercule/protocol": "workspace:*",
+    "@hercule/service": "workspace:*",
     "@marcbachmann/cel-js": "8.0.0",
     "effect": "4.0.0-rc.112"
   }

@@ -30,7 +30,11 @@ const RUNNER_ID = "r_local";
 
 /** Starts the listener, passes its bound port to `use`, and closes the listener afterwards. */
 const withListener = <A>(
-  options: { readonly runnerId: string; readonly controllerUrl: string; readonly port: number },
+  options: {
+    readonly runnerId: string;
+    readonly readControllerUrl: () => string;
+    readonly port: number;
+  },
   use: (port: number) => Promise<A>,
 ): Promise<A> =>
   Effect.runPromise(
@@ -110,7 +114,7 @@ const bareMachine: Machine = {
 describe("the identity response", () => {
   it("returns the runner id and lets the controller origin read it", async () => {
     const { status, body, allowOrigin } = await withListener(
-      { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: await findFreePort() },
+      { runnerId: RUNNER_ID, readControllerUrl: () => CONTROLLER_URL, port: await findFreePort() },
       async (port) => {
         const response = await fetch(`http://127.0.0.1:${port}/identity`);
         return {
@@ -126,6 +130,24 @@ describe("the identity response", () => {
     // The origin, not the whole controller URL, because a browser compares origins.
     expect(allowOrigin).toBe(CONTROLLER_ORIGIN);
   });
+
+  it("lets the new controller origin read /identity after a re-point, without restarting", async () => {
+    const newUrl = "http://b.example:9/moved";
+    const newOrigin = "http://b.example:9";
+    let controllerUrl = CONTROLLER_URL;
+
+    await withListener(
+      { runnerId: RUNNER_ID, readControllerUrl: () => controllerUrl, port: await findFreePort() },
+      async (port) => {
+        const before = await fetch(`http://127.0.0.1:${String(port)}/identity`);
+        expect(before.headers.get("access-control-allow-origin")).toBe(CONTROLLER_ORIGIN);
+        controllerUrl = newUrl;
+        const after = await fetch(`http://127.0.0.1:${String(port)}/identity`);
+        expect(after.status).toBe(200);
+        expect(after.headers.get("access-control-allow-origin")).toBe(newOrigin);
+      },
+    );
+  });
 });
 
 describe("the port the listener binds", () => {
@@ -133,7 +155,7 @@ describe("the port the listener binds", () => {
     const wanted = await findFreePort();
 
     const port = await withListener(
-      { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: wanted },
+      { runnerId: RUNNER_ID, readControllerUrl: () => CONTROLLER_URL, port: wanted },
       (bound) => Promise.resolve(bound),
     );
 
@@ -155,7 +177,7 @@ describe("the port the listener binds", () => {
       await run.releaseAt(IDENTITY_PORT_COUNT - 1);
       try {
         const { port, body } = await withListener(
-          { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: run.base },
+          { runnerId: RUNNER_ID, readControllerUrl: () => CONTROLLER_URL, port: run.base },
           async (bound) => {
             const response = await fetch(`http://127.0.0.1:${String(bound)}/identity`);
             return { port: bound, body: await response.json() };
@@ -181,7 +203,7 @@ describe("the port the listener binds", () => {
     const run = await occupyPortRange(IDENTITY_PORT_COUNT);
     try {
       const { port, body } = await withListener(
-        { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: run.base },
+        { runnerId: RUNNER_ID, readControllerUrl: () => CONTROLLER_URL, port: run.base },
         async (bound) => {
           const response = await fetch(`http://127.0.0.1:${String(bound)}/identity`);
           return { port: bound, body: await response.json() };
@@ -203,7 +225,7 @@ describe("the port the listener binds", () => {
     const held = occupyPort(0);
     try {
       const port = await withListener(
-        { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: held.port },
+        { runnerId: RUNNER_ID, readControllerUrl: () => CONTROLLER_URL, port: held.port },
         (bound) => Promise.resolve(bound),
       );
       const facts = await Effect.runPromise(probeFacts(bareMachine, port));
@@ -220,7 +242,7 @@ describe("the port the listener binds", () => {
     const wanted = await findFreePort();
 
     const port = await withListener(
-      { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: wanted },
+      { runnerId: RUNNER_ID, readControllerUrl: () => CONTROLLER_URL, port: wanted },
       (bound) => Promise.resolve(bound),
     );
 
@@ -239,7 +261,7 @@ describe("who can reach the listener", () => {
     if (lan === undefined) skip("this machine has no non-loopback IPv4 address");
 
     const outcome = await withListener(
-      { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: await findFreePort() },
+      { runnerId: RUNNER_ID, readControllerUrl: () => CONTROLLER_URL, port: await findFreePort() },
       async (port) => {
         // Check loopback first, so a failure on the LAN address proves the
         // binding and not a listener that never started.
@@ -287,7 +309,7 @@ describe("requests the listener rejects", () => {
     const wanted = await findFreePort();
 
     const seen = await withListener(
-      { runnerId: RUNNER_ID, controllerUrl: CONTROLLER_URL, port: wanted },
+      { runnerId: RUNNER_ID, readControllerUrl: () => CONTROLLER_URL, port: wanted },
       fetchRefusals,
     );
 

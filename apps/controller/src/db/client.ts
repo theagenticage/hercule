@@ -174,6 +174,24 @@ export const openDatabase = (
   );
 
 /**
+ * Opens a copy of the database that `copyDatabaseTo` wrote, and provides it as
+ * `SqlClient`. Fails with a {@link DatabaseError} when the file cannot be opened.
+ *
+ * Unlike {@link openDatabase}, it keeps the copy in the rollback journal and
+ * takes no exclusive lock. The copy is about to be sent or moved as one file,
+ * and in WAL mode closing it would leave `-wal` and `-shm` files beside it. A
+ * controller that later opens the file switches it to WAL as usual.
+ */
+export const openDatabaseCopy = (
+  filename: string,
+): Layer.Layer<SqlClient.SqlClient, DatabaseError> =>
+  SqliteClient.layer({ filename, disableWAL: true }).pipe(
+    Layer.catchCause((cause): Layer.Layer<SqlClient.SqlClient, DatabaseError> =>
+      Layer.unwrap(Effect.fail(createDatabaseError(filename, Cause.squash(cause)))),
+    ),
+  );
+
+/**
  * Runs one operation's write set in a transaction, on the client the caller
  * already holds. Nested calls join the outer transaction through a savepoint.
  *

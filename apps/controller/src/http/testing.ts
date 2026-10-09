@@ -38,7 +38,7 @@ import {
   type RunnerLifecycle,
 } from "@hercule/contract";
 import type { Plugin } from "@hercule/plugin-host";
-import { buildHomePaths } from "@hercule/home";
+import { buildHomePaths, BootstrapConfig } from "@hercule/home";
 import { HerculeHome } from "../config";
 import { ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
@@ -100,6 +100,7 @@ import {
   runnerRepository,
   type RunnerPings,
 } from "../runners";
+import { PromotionStateLayer, PromotionTokensLayer } from "../promotion";
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
@@ -165,6 +166,7 @@ const buildServices = (home: string) =>
       ),
     ),
     Layer.provideMerge(NotifierLayer),
+    Layer.provideMerge(PromotionStateLayer),
     Layer.provideMerge(
       Layer.mergeAll(
         UsersLayer,
@@ -176,11 +178,23 @@ const buildServices = (home: string) =>
         controllerIdentityLayer,
         JoinTokensLayer,
         SessionTokensLayer,
+        PromotionTokensLayer,
       ),
     ),
-    Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
+    Layer.provideMerge(secretsLayer.pipe(Layer.provideMerge(masterKeyLayer("file")))),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
+    Layer.provideMerge(
+      Layer.succeed(
+        BootstrapConfig,
+        BootstrapConfig.of({
+          dataDir: join(home, "data"),
+          bindHost: "127.0.0.1",
+          bindPort: 0,
+          logLevel: "debug",
+        }),
+      ),
+    ),
   );
 
 /**

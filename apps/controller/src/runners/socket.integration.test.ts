@@ -535,18 +535,18 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 3 cannot distinguish incomplete usage from exact counts.
-  it("refuses a runner on protocol version 4 and says to upgrade it", async () => {
+  // Version 5 cannot announce a promoted controller.
+  it("refuses a runner on protocol version 5 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dial(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 4 }));
+      wire.send(buildHello({ protocolVersion: 5 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(5);
+      expect(PROTOCOL_VERSION).toBe(6);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 5 and the runner does not; " +
-          "upgrade the runner to a build that uses version 5",
+        "this controller uses runner protocol version 6 and the runner does not; " +
+          "upgrade the runner to a build that uses version 6",
       );
       expect(wire.frames).toEqual([]);
     });

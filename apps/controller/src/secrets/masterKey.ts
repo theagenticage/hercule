@@ -29,7 +29,7 @@
  * or an error message. It is held only as a non-extractable WebCrypto key, and
  * the bytes it was imported from are zeroed as soon as the import succeeds.
  */
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -87,6 +87,8 @@ export interface KeyStore {
    * every secret already encrypted under the first unreadable.
    */
   readonly write: (bytes: Bytes) => Effect.Effect<Bytes, MasterKeyError>;
+  /** Removes the stored key. Succeeds when there is none. */
+  readonly remove: Effect.Effect<void, MasterKeyError>;
 }
 
 const decodeBase64 = (encoded: string, source: string): Bytes => {
@@ -158,6 +160,10 @@ export const createFileStore = (path: string): KeyStore => {
               ),
         ),
       ),
+    remove: Effect.try({
+      try: () => rmSync(path, { force: true }),
+      catch: () => new MasterKeyError({ message: `Cannot remove the master key file ${path}.` }),
+    }),
   };
 };
 
@@ -263,6 +269,16 @@ export const createKeychainStore = (
           message: `Storing the master key in the login keychain failed: ${describeSecurityExit(result, item)}`,
         });
       }),
+    remove: Effect.gen(function* () {
+      const result = yield* runSecurity(
+        ["security", "delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account],
+        "Cannot run `security` to remove the master key from the login keychain.",
+      );
+      if (result.exitCode === 0 || result.exitCode === KEYCHAIN_ITEM_NOT_FOUND) return;
+      return yield* new MasterKeyError({
+        message: `Removing the master key from the login keychain failed: ${describeSecurityExit(result, item)}`,
+      });
+    }),
   };
 };
 
@@ -271,6 +287,49 @@ export type MasterKeyBackend = "keychain" | "file";
 
 /** macOS keeps the key in the login keychain; every other platform in the file. */
 export const defaultBackend: MasterKeyBackend = process.platform === "darwin" ? "keychain" : "file";
+
+/**
+ * Returns the store that holds the master key of the Hercule Home at `home`:
+ * the login keychain item for that Home, or its key file.
+ */
+export const openKeyStore = (
+  home: { readonly home: string; readonly masterKeyFile: string },
+  backend: MasterKeyBackend,
+): KeyStore =>
+  backend === "keychain" ? createKeychainStore(home.home) : createFileStore(home.masterKeyFile);
+
+/**
+ * Imports key bytes as a non-extractable AES-256-GCM key, then zeroes the
+ * bytes. Fails with `MasterKeyError` when they are not a usable key.
+ */
+const importMasterKey = (bytes: Bytes): Effect.Effect<CryptoKey, MasterKeyError> =>
+  Effect.tryPromise({
+    try: () =>
+      crypto.subtle.importKey("raw", bytes, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]),
+    catch: () => new MasterKeyError({ message: "The master key is not a usable AES-256 key." }),
+  }).pipe(
+    // WebCrypto copied the material; this process keeps no plain copy.
+    Effect.ensuring(Effect.sync(() => bytes.fill(0))),
+  );
+
+/**
+ * Mints a master key into an empty store and returns it, ready to encrypt.
+ * Fails with `MasterKeyError` when the store already holds a key. Used where
+ * secrets already exist under another key and are about to be re-encrypted
+ * under this one, which `masterKeyLayer` refuses to mint for.
+ */
+export const createMasterKey = (store: KeyStore): Effect.Effect<CryptoKey, MasterKeyError> =>
+  Effect.gen(function* () {
+    const existing = yield* store.read;
+    if (existing !== undefined) {
+      existing.fill(0);
+      return yield* new MasterKeyError({
+        message: `${store.describe} already holds a master key.`,
+      });
+    }
+    const stored = yield* store.write(crypto.getRandomValues(new Uint8Array(MASTER_KEY_BYTES)));
+    return yield* importMasterKey(stored);
+  });
 
 /** Counts the secrets in the database. Returns 0 before the first migration has run. */
 const secretCount: Effect.Effect<number, SqlError, SqlClient.SqlClient> = Effect.gen(function* () {
@@ -297,10 +356,7 @@ export const masterKeyLayer = (
     MasterKey,
     Effect.gen(function* () {
       const home = yield* HerculeHome;
-      const store =
-        backend === "keychain"
-          ? createKeychainStore(home.home)
-          : createFileStore(home.masterKeyFile);
+      const store = openKeyStore(home, backend);
 
       let bytes = yield* store.read;
       if (bytes === undefined) {
@@ -319,14 +375,6 @@ export const masterKeyLayer = (
         bytes = yield* store.write(crypto.getRandomValues(new Uint8Array(MASTER_KEY_BYTES)));
       }
 
-      const key = yield* Effect.tryPromise({
-        try: () =>
-          crypto.subtle.importKey("raw", bytes, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]),
-        catch: () => new MasterKeyError({ message: "The master key is not a usable AES-256 key." }),
-      });
-      // WebCrypto copied the material; this process keeps no plain copy.
-      bytes.fill(0);
-
-      return MasterKey.of({ key });
+      return MasterKey.of({ key: yield* importMasterKey(bytes) });
     }),
   );

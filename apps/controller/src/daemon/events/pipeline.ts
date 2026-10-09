@@ -21,6 +21,7 @@ import type { Notifier } from "../../notifications";
 import type { RunService } from "../../runs";
 import type { SessionService } from "../../sessions";
 import type { TriggerEffects, TriggerHealth } from "../../workflows";
+import { PromotionState } from "../../promotion";
 import { absorbFailures } from "../absorbing";
 import { EventRouter } from "./event-router";
 import { Live } from "../sessions";
@@ -39,6 +40,7 @@ const make = Effect.gen(function* () {
   const router = yield* EventRouter;
   const routingTables = yield* buildRoutingTables;
   const deliveries = yield* buildDeliveries;
+  const promotion = yield* PromotionState;
 
   const tick = Effect.gen(function* () {
     yield* router.routeNewEvents(routingTables);
@@ -59,7 +61,10 @@ const make = Effect.gen(function* () {
       const interval = yield* EventRoutingInterval;
       while (true) {
         yield* Effect.sleep(interval);
-        yield* absorbFailures("Running a tick of the event pipeline failed", tick);
+        yield* absorbFailures(
+          "Running a tick of the event pipeline failed",
+          promotion.whenServing(tick),
+        );
       }
     }),
   };
@@ -80,5 +85,6 @@ export const PipelineLayer: Layer.Layer<
   | TriggerEffects
   | RunService
   | Live
+  | PromotionState
   | SqlClient.SqlClient
 > = Layer.effect(Pipeline)(make);

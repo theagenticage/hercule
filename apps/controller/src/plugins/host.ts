@@ -66,6 +66,7 @@ import {
 } from "./event-sources";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
 import type { IngestExecutor } from "./ingest-executor";
+import type { PromotionState } from "../promotion";
 import { pluginRepository, type NewContribution } from "./repository";
 import {
   CORE_CONTRIBUTION_OWNER,
@@ -986,7 +987,13 @@ export class PluginHost extends Context.Service<PluginHost, Effect.Success<typeo
 export const PluginHostLayer: Layer.Layer<
   PluginHost | IngestLoops,
   never,
-  SqlClient.SqlClient | Secrets | AuditLog | Notifier | ConnectionTypes | IngestExecutor
+  | SqlClient.SqlClient
+  | Secrets
+  | AuditLog
+  | Notifier
+  | ConnectionTypes
+  | IngestExecutor
+  | PromotionState
 > = Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer));
 
 /**
