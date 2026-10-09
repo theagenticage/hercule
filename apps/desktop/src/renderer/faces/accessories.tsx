@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { Accessory } from "./look";
+import type { Accessory, Headwear } from "./look";
 import { roundToHundredths } from "./shapes";
 
 /**
@@ -125,6 +125,89 @@ export function drawAccessory(accessory: Accessory, topY: number): JSX.Element {
             fill="none"
             strokeLinecap="round"
           />
+        </>
+      );
+  }
+}
+
+/**
+ * Returns an assistant's headwear, drawn on top of the body and its
+ * accessories as the Bureau book's crew.js draws it. `topY` is the y of the
+ * top of the body, as for `drawAccessory`: the cloche and the beret sit
+ * relative to it, and the headset's band arches over it.
+ *
+ * Every piece is drawn in `--hat`; the cloche's band and rosette are the
+ * wearer's own shade.
+ */
+export function drawHeadwear(headwear: Headwear, topY: number): JSX.Element {
+  switch (headwear) {
+    case "cloche": {
+      // Returns the y `dy` below the top of the body, rounded as crew.js rounds it.
+      const computeHatY = (dy: number): number => roundToHundredths(topY + dy);
+      // A 1920s bell hat pulled down to the brows, with a rosette on the band.
+      const bell =
+        `M9.2 ${computeHatY(13.6)}` +
+        `C9.6 ${computeHatY(3)} 15.4 ${computeHatY(-2)} 24 ${computeHatY(-2)}` +
+        `S38.4 ${computeHatY(3)} 38.8 ${computeHatY(13.6)}` +
+        `C35 ${computeHatY(11.4)} 30 ${computeHatY(10.6)} 24 ${computeHatY(10.6)}` +
+        `S13 ${computeHatY(11.4)} 9.2 ${computeHatY(13.6)}z`;
+      const band =
+        `M10.2 ${computeHatY(9.4)}` +
+        `C15.6 ${computeHatY(7)} 32.4 ${computeHatY(7)} 37.8 ${computeHatY(9.4)}`;
+      const rosetteY = computeHatY(7.9);
+      return (
+        <>
+          <path d={bell} fill="var(--hat)" />
+          <path d={band} fill="none" stroke="var(--who-shade)" strokeWidth="2" />
+          <circle cx="32.8" cy={rosetteY} r="2.4" fill="var(--who-shade)" />
+          <circle cx="32.8" cy={rosetteY} r=".9" fill="var(--hat)" />
+        </>
+      );
+    }
+    case "beret": {
+      // A beret tilted to one side, with its stalk on top. crew.js leaves
+      // these two numbers unrounded.
+      const crownY = topY + 1.8;
+      return (
+        <>
+          <ellipse
+            cx="22.6"
+            cy={crownY}
+            rx="12.6"
+            ry="4.6"
+            transform={`rotate(-9 22.6 ${crownY})`}
+            fill="var(--hat)"
+          />
+          <path
+            d={`M21.4 ${topY - 2.4}l.6-2.6`}
+            stroke="var(--hat)"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+        </>
+      );
+    }
+    case "headset":
+      // A band over the head, an earpiece on the left and a microphone on a
+      // boom to the mouth. The band's control points sit 1 above the top of
+      // the body, unrounded as in crew.js.
+      return (
+        <>
+          <path
+            d={`M9.4 26.4C9 ${topY - 1} 39 ${topY - 1} 38.6 26.4`}
+            fill="none"
+            stroke="var(--hat)"
+            strokeWidth="1.9"
+          />
+          <rect x="6.2" y="23" width="5.6" height="9.2" rx="2.6" fill="var(--hat)" />
+          <path
+            d="M9.4 31.6c.6 3 3.2 4.8 7.4 5.2"
+            fill="none"
+            stroke="var(--hat)"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+          <circle cx="17.4" cy="36.8" r="1.7" fill="var(--hat)" />
         </>
       );
   }

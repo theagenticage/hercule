@@ -1,5 +1,5 @@
 /**
- * Where the office keeps things: the filing cabinet.
+ * Where the office keeps things: the filing cabinet and the bookcase.
  */
 import type { Object3D } from "three";
 import {
@@ -51,4 +51,86 @@ const readCabinetGeometry = memoize(() => {
  */
 export function buildCabinet(): Object3D {
   return buildPropGroup("cabinet", readCabinetGeometry());
+}
+
+// ---------------------------------------------------------------------------
+// The bookcase.
+
+const BOOKCASE_SURFACES = {
+  wood: { token: "room-wood", finish: "lacquer", shadow: true },
+  // The back panel casts a shadow so it shares the wood's mesh, and so no light shows through the
+  // shelves' openings in the bookcase's shadow.
+  back: { token: "room-wood", finish: "lacquer", shift: { dl: -0.06 }, shadow: true },
+  brass: { token: "brass", finish: "brass", shadow: false },
+} as const satisfies Record<string, Surface>;
+
+/** The bookcase's width and depth outside its sides, and the space between its sides. */
+const BOOKCASE_WIDTH = 0.8;
+const BOOKCASE_DEPTH = 0.32;
+const BOOKCASE_INSIDE = 0.72;
+/** The height of each opening between two shelves, and the thickness of a shelf. */
+const SHELF_GAP = 0.3;
+const SHELF = 0.025;
+/** How many openings the bookcase has, top to bottom. */
+const OPENINGS = 4;
+/** The height of the plinth the lowest shelf stands on. */
+const PLINTH = 0.08;
+
+const readBookcaseGeometry = memoize(() => {
+  const parts = new PartList(BOOKCASE_SURFACES);
+  const carcass = PLINTH + OPENINGS * (SHELF_GAP + SHELF) + SHELF;
+  const side = (BOOKCASE_WIDTH - BOOKCASE_INSIDE) / 2;
+  // The plinth, set back a little, and the back panel.
+  parts.add("wood", buildBlock(BOOKCASE_WIDTH - 0.02, PLINTH, BOOKCASE_DEPTH - 0.03, 0.01, 1), {
+    z: -0.01,
+  });
+  parts.add("back", buildSheet(BOOKCASE_INSIDE, carcass - PLINTH, 0.015), {
+    y: PLINTH,
+    z: -BOOKCASE_DEPTH / 2 + 0.0075,
+  });
+  // The two sides, with a brass line down each front edge.
+  for (const sign of [-1, 1]) {
+    const x = sign * (BOOKCASE_INSIDE / 2 + side / 2);
+    parts.add("wood", buildBlock(side, carcass, BOOKCASE_DEPTH, 0.008, 1), { x });
+    parts.add("brass", buildSheet(0.006, carcass - PLINTH - 0.04, 0.004), {
+      x,
+      y: PLINTH + 0.02,
+      z: BOOKCASE_DEPTH / 2 + 0.002,
+    });
+  }
+  // The shelves: the lowest on the plinth, the top one under the cornice.
+  for (let shelf = 0; shelf <= OPENINGS; shelf++) {
+    parts.add("wood", buildBlock(BOOKCASE_INSIDE, SHELF, BOOKCASE_DEPTH - 0.02, 0.004, 1), {
+      y: PLINTH + shelf * (SHELF_GAP + SHELF),
+      z: 0.005,
+    });
+  }
+  // A stepped cornice, higher in the middle, the Deco way.
+  parts.add("wood", buildBlock(BOOKCASE_WIDTH + 0.04, 0.04, BOOKCASE_DEPTH + 0.03, 0.01, 1), {
+    y: carcass,
+    z: 0.005,
+  });
+  parts.add("wood", buildBlock(BOOKCASE_WIDTH - 0.06, 0.035, BOOKCASE_DEPTH - 0.02, 0.01, 1), {
+    y: carcass + 0.04,
+  });
+  parts.add("wood", buildBlock(0.3, 0.035, BOOKCASE_DEPTH - 0.06, 0.01, 1), {
+    y: carcass + 0.075,
+    z: -0.01,
+  });
+  parts.add("brass", buildBlock(0.22, 0.012, 0.006, 0.003, 1), {
+    y: carcass + 0.0865,
+    z: BOOKCASE_DEPTH / 2 - 0.037,
+  });
+  return parts.merge();
+});
+
+/**
+ * Builds an empty bookcase: four open shelves on a plinth, under a stepped
+ * cornice. It is 0.84 wide at its cornice (0.8 at its sides), 0.35 deep and
+ * 1.52 tall. Each opening is 0.72 wide, 0.3 tall and 0.3 deep: the top three
+ * hold eight topic books each, standing, and the lowest holds the ledger
+ * lying flat. No books are drawn.
+ */
+export function buildBookcase(): Object3D {
+  return buildPropGroup("bookcase", readBookcaseGeometry());
 }

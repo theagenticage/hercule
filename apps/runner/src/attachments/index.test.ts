@@ -57,7 +57,10 @@ afterAll(() => {
  */
 const startStub = (bytes: Readonly<Record<string, Buffer | (() => Response)>>): Stub => {
   const stub: Stub = { url: "", requested: [], authorizations: [], hold: undefined };
+  // Bound to the address the cache is given, so another process listening on
+  // the same port number at another address can never answer instead.
   const server = Bun.serve({
+    hostname: "127.0.0.1",
     port: 0,
     fetch: async (request) => {
       const id = new URL(request.url).pathname.replace("/api/v1/runners/attachments/", "");

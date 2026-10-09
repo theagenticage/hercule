@@ -11,7 +11,7 @@
  * tool reports differences by that name.
  */
 import { POSES, type Pose } from "@hercule/client-core";
-import { HUES, SHAPES, WARDROBE, type Look } from "../faces";
+import { HEADWEAR, HUES, SHAPES, WARDROBE, type Look } from "../faces";
 import type { MarkState } from "../marks";
 
 /**
@@ -184,9 +184,64 @@ function buildWardrobeCells(): ReadonlyArray<Cell> {
       name: `face/${accessories.join("+") || "none"}/${shape}`,
       piece: {
         kind: "face",
-        look: { hue: HUES[(entry * SHAPES.length + index) % HUES.length]!, shape, accessories },
+        look: {
+          hue: HUES[(entry * SHAPES.length + index) % HUES.length]!,
+          shape,
+          accessories,
+          headwear: null,
+        },
         pose: "idle",
         size: 34,
+      },
+    })),
+  );
+}
+
+/**
+ * Builds the cells of each assistant's headwear on each shape, idle at 34,
+ * named `face/<headwear>/<shape>`, such as `face/cloche/tall`. The hue moves
+ * one step along the wheel with each cell.
+ */
+function buildHeadwearShapeCells(): ReadonlyArray<Cell> {
+  return HEADWEAR.flatMap((headwear, entry) =>
+    SHAPES.map((shape, index) => ({
+      name: `face/${headwear}/${shape}`,
+      piece: {
+        kind: "face",
+        look: {
+          hue: HUES[(entry * SHAPES.length + index) % HUES.length]!,
+          shape,
+          accessories: [],
+          headwear,
+        },
+        pose: "idle",
+        size: 34,
+      },
+    })),
+  );
+}
+
+/**
+ * Builds the cells of each headwear at the sizes the app draws an assistant's
+ * face at, idle, then waiting and asleep at 24, whose raised hand and z's
+ * come near the hats. Each is named `face/<headwear>/<pose>/<size>`.
+ */
+function buildHeadwearSizeCells(): ReadonlyArray<Cell> {
+  const cases: ReadonlyArray<readonly [Pose, number]> = [
+    ["idle", 16],
+    ["idle", 24],
+    ["idle", 48],
+    ["waiting", 24],
+    ["asleep", 24],
+  ];
+  return cases.flatMap(([pose, size]) =>
+    HEADWEAR.map((headwear, index) => ({
+      name: `face/${headwear}/${pose}/${String(size)}`,
+      piece: {
+        kind: "face",
+        look: { hue: HUES[index]!, shape: "egg", accessories: [], headwear },
+        pose,
+        size,
       },
     })),
   );
@@ -197,8 +252,8 @@ function buildIconCell(icon: IconName, size: number): Cell {
   return { name: `icon/${icon}/${String(size)}`, piece: { kind: "icon", icon, size } };
 }
 
-const PLAIN: Look = { hue: "iris", shape: "egg", accessories: [] };
-const TACHE: Look = { hue: "iris", shape: "egg", accessories: ["tache"] };
+const PLAIN: Look = { hue: "iris", shape: "egg", accessories: [], headwear: null };
+const TACHE: Look = { hue: "iris", shape: "egg", accessories: ["tache"], headwear: null };
 const wardrobe = buildWardrobeCells();
 
 /** The sheet, row by row. It fits the 1440 × 900 window with room to spare. */
@@ -218,7 +273,9 @@ export const SHEET: ReadonlyArray<ReadonlyArray<Cell>> = [
     })),
     { name: "avatar/24", piece: { kind: "avatar", size: 24 } },
     { name: "avatar/28", piece: { kind: "avatar", size: 28 } },
+    ...buildHeadwearShapeCells(),
   ],
+  buildHeadwearSizeCells(),
   [
     ...MARK_STATES.map((state): Cell => ({
       name: `mark/${state}`,

@@ -8,9 +8,10 @@
  * otherwise. Each piece's geometry is built once and shared by every copy,
  * merged into one mesh per finish, with its colours painted into the vertices.
  */
-export { buildDesk, buildYourDesk } from "./desk";
-export { buildArmchair, buildBench } from "./seating";
-export { buildCabinet } from "./storage";
+export { buildDesk, buildWritingDesk, buildYourDesk } from "./desk";
+export { buildArmchair, buildBench, buildPicnicTable } from "./seating";
+export { buildBookcase, buildCabinet } from "./storage";
+export { buildLongcaseClock, type LongcaseClockHandle } from "./longcase-clock";
 export { buildCaseBoard, buildNowServing, buildWallClock, type NowServingHandle } from "./walls";
 export { buildCoatStand, buildPlant, buildRug, buildTeaTrolley } from "./decor";
 export { buildFloorLamp } from "./lights";

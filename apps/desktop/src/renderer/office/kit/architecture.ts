@@ -47,7 +47,7 @@ import {
 } from "./architecture-shared";
 
 export { buildPlaque } from "./architecture-signs";
-export { buildLamppost, buildPath } from "./architecture-outdoors";
+export { buildLamppost, buildLawn, buildPath } from "./architecture-outdoors";
 
 /** The thickness of every wall. */
 export const WALL_THICKNESS = 0.12;

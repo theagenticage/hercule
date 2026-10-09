@@ -34,10 +34,9 @@ import {
   Euler,
 } from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import type { Accessory, Hue } from "../../../faces/look";
+import type { Accessory, Headwear, Hue } from "../../../faces/look";
 import { registerCache } from "../../engine/caches";
 import { readColor, readHue, subscribePalette, writeOklch } from "../../engine/palette";
-import type { Headwear } from "../../world/types";
 import { mapFacePoint, measureEggRadius, placeOnEgg, type Anatomy, type Egg } from "./anatomy";
 
 /** The index of each bone in a rig's skeleton. Left is the colleague's own left, +x. */
@@ -1009,20 +1008,17 @@ function readLayeredBody(build: Build): LayeredBody {
   return layered;
 }
 
-/** Returns the height of the top of the hat above the egg's top, or 0 without one. */
+/**
+ * Returns the height of the top of the hat above the egg's top, or 0 without
+ * one. The height is read from the hat's own geometry rather than kept as a
+ * number per hat, so it stays true when a hat is reshaped.
+ */
 export function measureHatHeight(build: Build): number {
-  const { egg } = build.anatomy;
-  if (build.accessories.includes("homburg")) return 4.2 * egg.unit;
-  switch (build.headwear) {
-    case "cloche":
-      return 0.8 * egg.unit;
-    case "beret":
-      return 2.6 * egg.unit;
-    case "headset":
-      return 1.6 * egg.unit;
-    case null:
-      return 0;
-  }
+  const { hat } = readLayeredBody(build);
+  if (hat === null) return 0;
+  // The hat geometry is shared per look, so its bounding box is computed once.
+  if (hat.geometry.boundingBox === null) hat.geometry.computeBoundingBox();
+  return Math.max(0, hat.geometry.boundingBox!.max.y - build.anatomy.egg.height);
 }
 
 // ---------------------------------------------------------------------------

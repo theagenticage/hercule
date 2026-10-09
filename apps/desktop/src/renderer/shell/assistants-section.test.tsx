@@ -8,13 +8,13 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import type { AssistantRow, Pose } from "@hercule/client-core";
+import type { AssistantRow, SessionPose } from "@hercule/client-core";
 import { AssistantsSection } from "./assistants-section";
 
 afterEach(cleanup);
 
 /** Returns the row of an assistant named and identified `name`, in `pose`, with no session. */
-const buildRow = (name: string, pose: Pose): AssistantRow => ({
+const buildRow = (name: string, pose: SessionPose): AssistantRow => ({
   id: name.toLowerCase(),
   name,
   pose,
@@ -33,7 +33,7 @@ const renderSection = async (
   const rootRoute = createRootRoute({
     component: () => (
       <>
-        <AssistantsSection rows={rows} />
+        <AssistantsSection rows={rows} officeOpen={false} />
         <Outlet />
       </>
     ),
@@ -51,7 +51,7 @@ const renderSection = async (
 };
 
 describe("AssistantsSection", () => {
-  it.each<[Pose, string]>([
+  it.each<[SessionPose, string]>([
     ["idle", "idle"],
     ["working", "working"],
     ["waiting", "waiting on you"],

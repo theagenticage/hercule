@@ -2,6 +2,7 @@
  * Reads the assistants as the sidebar shows them, for the Assistants section
  * and for Waiting on you, the dock badge and the notifications.
  */
+import { useMemo } from "react";
 import { queryOptions, useQueries, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { buildAssistantRows, type AssistantRow } from "@hercule/client-core";
@@ -28,18 +29,30 @@ export function useAssistantRows(): AssistantRow[] {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const assistants = useSuspenseQuery(assistantsQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
-  const sessions = useQueries({
+  // `combine` keeps the same `sessions` array until one session's data
+  // changes, so the rows below are built again only when an assistant, a
+  // runner or a current session changes, and a caller can memoize on them.
+  // `failed` is there only so a failed read draws again, and so throws to
+  // the error screen: a hook that uses `combine` draws again only when the
+  // combined value changes.
+  const { sessions } = useQueries({
     queries: assistants.map(({ mainConversationId }) =>
       queryOptions({
         ...currentConversationSessionQuery(client, mainConversationId),
         throwOnError: (_error, query) => query.state.data === undefined,
       }),
     ),
+    combine: (results) => ({
+      sessions: results.map((result) => result.data),
+      failed: results.map((result) => result.isError),
+    }),
   });
-  const currentSessions = new Map<string, Session>();
-  assistants.forEach(({ id }, index) => {
-    const session = sessions[index]?.data;
-    if (session !== undefined && session !== null) currentSessions.set(id, session);
-  });
-  return buildAssistantRows(assistants, currentSessions, runners);
+  return useMemo(() => {
+    const currentSessions = new Map<string, Session>();
+    assistants.forEach(({ id }, index) => {
+      const session = sessions[index];
+      if (session !== undefined && session !== null) currentSessions.set(id, session);
+    });
+    return buildAssistantRows(assistants, currentSessions, runners);
+  }, [assistants, sessions, runners]);
 }

@@ -7,7 +7,14 @@
  */
 import { describe, expect, it } from "vitest";
 import type { OpenRequest, Runner, Session } from "@hercule/contract";
-import { decideThreadPose, decideThreadRowEnd, describePose, POSES, type Pose } from "./pose";
+import {
+  decideThreadPose,
+  decideThreadRowEnd,
+  describePose,
+  isAbsentPose,
+  POSES,
+  type Pose,
+} from "./pose";
 import { buildRunner, buildSession } from "./workspaces.testing";
 
 const AT = "2026-09-10T09:00:00.000Z";
@@ -162,5 +169,11 @@ describe("describePose", () => {
       away: "can't be reached",
     };
     expect(Object.fromEntries(POSES.map((pose) => [pose, describePose(pose)]))).toEqual(words);
+  });
+});
+
+describe("isAbsentPose", () => {
+  it("holds for asleep and away, the two poses that show no mark", () => {
+    expect(POSES.filter(isAbsentPose)).toEqual(["asleep", "away"]);
   });
 });

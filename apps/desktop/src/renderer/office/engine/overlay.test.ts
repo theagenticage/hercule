@@ -46,6 +46,7 @@ const WORLD = buildWorld({
   projects: [],
   workspaces: [],
   runners: [MOSS],
+  assistants: [],
   localRunnerId: MOSS.id,
 });
 

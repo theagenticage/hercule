@@ -4,6 +4,7 @@
  * capture when it is ready.
  */
 import { waitForPresentedFrame } from "../app/presented-frame";
+import type { Look } from "../faces/look";
 import { ALL_THEMES } from "./sheet-themes";
 
 /**
@@ -54,10 +55,7 @@ export function computeScrolledTop(transcript: Element): number {
 /** The part of the Bureau book's crew.js that the reference pages use. */
 export interface Crew {
   /** Returns the SVG markup of a face, a You mark, a state mark or an icon. */
-  face(
-    name: string,
-    opts: { pose: string; size: number; look?: { hue: string; shape: string; acc: string } },
-  ): string;
+  face(name: string, opts: { pose: string; size: number; look?: BookLook }): string;
   you(size: number): string;
   mark(state: string, size: number): string;
   icon(name: string, size: number): string;
@@ -80,6 +78,35 @@ export function readCrew(): Crew {
     );
   }
   return crew;
+}
+
+/** A look as crew.js's `face` takes it. */
+export interface BookLook {
+  readonly hue: string;
+  readonly shape: string;
+  /** What the face wears, joined by "+", such as "tache+bowtie", or "none". */
+  readonly acc: string;
+}
+
+/**
+ * Converts the app's `look` into the look crew.js's `face` takes. The book
+ * keeps headwear in the same list as the accessories, and draws that list in
+ * order, so the headwear comes last, as the app draws it.
+ */
+export function buildBookLook({ hue, shape, accessories, headwear }: Look): BookLook {
+  const worn = headwear === null ? accessories : [...accessories, headwear];
+  return { hue, shape, acc: worn.join("+") || "none" };
+}
+
+/**
+ * Returns the face crew.js draws for `look` in `pose` at `size`, as an
+ * element. crew.js returns a face only as a string of markup, so the face is
+ * parsed from it. `name` is the face's accessible name.
+ */
+export function drawBookFace(name: string, look: Look, pose: string, size: number): Element {
+  const template = document.createElement("template");
+  template.innerHTML = readCrew().face(name, { pose, size, look: buildBookLook(look) });
+  return template.content.firstElementChild!;
 }
 
 /**

@@ -3,7 +3,7 @@
  * with the pose its face shows and the word beside its name.
  */
 import type { Assistant, Runner, Session } from "@hercule/contract";
-import { decideThreadPose, type Pose } from "../threads/pose";
+import { decideThreadPose, type SessionPose } from "../threads/pose";
 
 /** An assistant as its sidebar row shows it. */
 export interface AssistantRow {
@@ -11,7 +11,7 @@ export interface AssistantRow {
   readonly id: string;
   readonly name: string;
   /** `idle` while the assistant has no session yet. */
-  readonly pose: Pose;
+  readonly pose: SessionPose;
   /** The current session of the assistant's main conversation, or `null` when it has none. */
   readonly session: Session | null;
 }
@@ -26,13 +26,23 @@ export interface AssistantRow {
  *   assistant and a thread in the same state show the same face. A runner
  *   that is `undefined` counts as connected.
  */
-export const decideAssistantPose = (session: Session | null, runner: Runner | undefined): Pose =>
-  session === null ? "idle" : decideThreadPose(session, runner);
+export const decideAssistantPose = (
+  session: Session | null,
+  runner: Runner | undefined,
+): SessionPose => (session === null ? "idle" : decideThreadPose(session, runner));
 
 /**
- * Returns one row per assistant, sorted by name, and by id for two
- * assistants with the same name. Names are compared with `localeCompare`, so
- * the order follows the runtime's locale.
+ * Compares two assistants for the sidebar's order: by name, and by id for
+ * two assistants with the same name. Names are compared with
+ * `localeCompare`, so the order follows the runtime's locale.
+ */
+export const compareAssistantRows = (
+  a: Pick<AssistantRow, "id" | "name">,
+  b: Pick<AssistantRow, "id" | "name">,
+): number => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/**
+ * Returns one row per assistant, in the order of `compareAssistantRows`.
  *
  * - `currentSessions` holds the current session of each assistant's main
  *   conversation, by assistant id. An assistant missing from it has no
@@ -54,4 +64,4 @@ export const buildAssistantRows = (
         session === null ? undefined : runners.find((each) => each.id === session.runnerId);
       return { id, name, pose: decideAssistantPose(session, runner), session };
     })
-    .sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    .sort(compareAssistantRows);

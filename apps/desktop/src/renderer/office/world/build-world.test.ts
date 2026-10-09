@@ -8,11 +8,19 @@
  *   change on the built office instead of rebuilding it;
  * - a new thread changes the desk key, so the Office is rebuilt;
  * - a colleague's state counts as changed when any field of its request
- *   changed, so the Office never keeps showing an older request.
+ *   changed, so the Office never keeps showing an older request;
+ * - each assistant becomes a colleague in the Secretariat's order, wearing
+ *   its assistant look, with its row's pose and its session's runner,
+ *   model and last activity;
+ * - an assistant that changes pose or moves to a new session on another
+ *   runner keeps the desk key, and adding, removing or renaming one
+ *   changes it.
  */
 import { describe, expect, it } from "vitest";
+import { buildAssistantRows, type AssistantRow } from "@hercule/client-core";
 import type { OpenRequest, Session } from "@hercule/contract";
 import {
+  COVE,
   MOSS,
   OPS_PROJECT,
   PRIMARY,
@@ -20,6 +28,7 @@ import {
   WEBSHOP_PROJECT,
   buildSession,
 } from "@hercule/client-core/threads/testing";
+import { buildAssistantLook } from "../../faces/look";
 import { buildWorld, computeDeskKey, isSameColleagueState } from "./build-world";
 import type { Colleague, OfficeRequest } from "./types";
 
@@ -31,15 +40,37 @@ const REQUEST: OpenRequest = {
   detail: { command: "git push" },
 };
 
-/** Returns the world for `sessions` in the fixture fleet. */
-const build = (sessions: readonly Session[]) =>
+/** Returns the world for `sessions` and `assistants` in the fixture fleet. */
+const build = (sessions: readonly Session[], assistants: readonly AssistantRow[] = []) =>
   buildWorld({
     sessions,
     projects: [WEBSHOP_PROJECT, OPS_PROJECT],
     workspaces: [PRIMARY, THREAD_3F1],
-    runners: [MOSS],
+    runners: [MOSS, COVE],
+    assistants,
     localRunnerId: MOSS.id,
   });
+
+const ADA = { id: "a-ada", name: "Ada" };
+const BEA = { id: "a-bea", name: "Bea" };
+
+/** Returns the current session of Ada's main conversation. */
+const buildAdaSession = (over: Partial<Session> = {}): Session =>
+  buildSession({
+    id: "s-ada",
+    agentId: ADA.id,
+    conversationId: "c-ada",
+    status: "busy",
+    runnerId: MOSS.id,
+    lastActivityAt: "2026-10-04T09:00:00.000Z",
+    ...over,
+  });
+
+/** Returns the rows of Ada, with `adaSession` as her current session, and of Bea, with none. */
+const buildRows = (
+  adaSession: Session = buildAdaSession(),
+  assistants: ReadonlyArray<{ id: string; name: string }> = [ADA, BEA],
+): AssistantRow[] => buildAssistantRows(assistants, new Map([[ADA.id, adaSession]]), [MOSS, COVE]);
 
 const working = buildSession({ id: "s-working", status: "busy", runnerId: MOSS.id });
 const idle = buildSession({ id: "s-idle", status: "idle", runnerId: MOSS.id });
@@ -77,6 +108,55 @@ describe("buildWorld", () => {
   });
 });
 
+describe("buildWorld with assistants", () => {
+  it("turns each assistant into a colleague in the Secretariat's order", () => {
+    const world = build([working], buildRows());
+
+    expect(world.secretariat).toEqual(["a-ada", "a-bea"]);
+    expect(world.colleagues.map((colleague) => [colleague.kind, colleague.id])).toEqual([
+      ["thread", "s-working"],
+      ["assistant", "a-ada"],
+      ["assistant", "a-bea"],
+    ]);
+  });
+
+  it("draws an assistant with its look, its row's pose, and its session's runner, model and last activity", () => {
+    const ada = build([], buildRows()).colleagues.find((colleague) => colleague.id === ADA.id);
+
+    expect(ada).toEqual({
+      kind: "assistant",
+      id: "a-ada",
+      sessionId: buildAdaSession().id,
+      name: "Ada",
+      look: buildAssistantLook("a-ada"),
+      pose: "working",
+      stateLabel: "working",
+      project: null,
+      runnerId: MOSS.id,
+      model: "claude-sonnet-5",
+      request: null,
+      oldestRequest: null,
+      lastActivityAt: "2026-10-04T09:00:00.000Z",
+    });
+    expect(ada?.look.headwear).not.toBeNull();
+  });
+
+  it("draws an assistant with no session as idle, with no session, runner, model or last activity", () => {
+    const bea = build([], buildRows()).colleagues.find((colleague) => colleague.id === BEA.id);
+
+    expect(bea).toMatchObject({
+      kind: "assistant",
+      pose: "idle",
+      stateLabel: "idle",
+      sessionId: null,
+      runnerId: null,
+      model: null,
+      request: null,
+      lastActivityAt: null,
+    });
+  });
+});
+
 describe("computeDeskKey", () => {
   it("keeps the key when a thread only changes pose, so the Office does not rebuild", () => {
     const before = build([working, idle]);
@@ -88,6 +168,37 @@ describe("computeDeskKey", () => {
     // Desks are in creation order, then by id: s-idle before s-working.
     expect(after.colleagues.map((colleague) => colleague.pose)).toEqual(["working", "waiting"]);
     expect(computeDeskKey(after)).toBe(computeDeskKey(before));
+  });
+
+  it("keeps the key when an assistant changes pose or starts a new session on another runner", () => {
+    const before = build([working], buildRows());
+    const asleep = build(
+      [working],
+      buildRows(buildAdaSession({ status: "exited", resumable: true })),
+    );
+    const elsewhere = build(
+      [working],
+      buildRows(buildAdaSession({ id: "s-ada-2", runnerId: COVE.id, openRequests: [REQUEST] })),
+    );
+
+    expect(asleep.colleagues[1]?.pose).toBe("asleep");
+    expect(elsewhere.colleagues[1]?.pose).toBe("waiting");
+    expect(computeDeskKey(asleep)).toBe(computeDeskKey(before));
+    expect(computeDeskKey(elsewhere)).toBe(computeDeskKey(before));
+  });
+
+  it("changes the key when an assistant is added, removed or renamed", () => {
+    const key = computeDeskKey(build([working], buildRows()));
+
+    expect(computeDeskKey(build([working], buildRows(undefined, [ADA])))).not.toBe(key);
+    expect(
+      computeDeskKey(
+        build([working], buildRows(undefined, [ADA, BEA, { id: "a-cleo", name: "Cleo" }])),
+      ),
+    ).not.toBe(key);
+    expect(
+      computeDeskKey(build([working], buildRows(undefined, [ADA, { ...BEA, name: "Beatrix" }]))),
+    ).not.toBe(key);
   });
 
   it("changes the key when a thread gets a desk", () => {

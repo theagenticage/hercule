@@ -36,6 +36,7 @@ export type Token =
   | "room-metal"
   | "room-lamp"
   | "room-plant"
+  | "room-lawn"
   | "room-sun"
   | "room-screen"
   | "room-shade"

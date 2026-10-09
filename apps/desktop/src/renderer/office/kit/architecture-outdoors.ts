@@ -1,5 +1,5 @@
 /**
- * The outdoors round the campus: Deco lampposts and paved paths.
+ * The outdoors round the campus: Deco lampposts, paved paths and lawns.
  */
 import {
   BufferGeometry,
@@ -115,6 +115,41 @@ export function buildPath(width: number, length: number): Object3D {
         [paint("room-inlay-2", "satin", { dl: 0.04 }), kerbs],
         [paint("room-inlay", "matte", { dl: 0.04 }), slabs[0]],
         [paint("room-inlay", "matte", { dl: -0.02 }), slabs[1]],
+      ],
+      { cast: false },
+    )!,
+  );
+  return object;
+}
+
+/** The width a mowing stripe aims for; the stripes are stretched a little so whole stripes fill the lawn. */
+const MOWING_STRIPE = 0.6;
+/** The lawn's thickness. A path laid over the lawn has its bed 0.006 tall, so its bed covers the grass. */
+const LAWN_HEIGHT = 0.003;
+
+/**
+ * Builds a lawn `width` along x and `depth` along z, centred on the origin,
+ * its top at y = 0.003. Mowing stripes run along z, in two close tones of
+ * the lawn's green. It has no edging of its own: a path, the pavement or a wall
+ * borders it, and a path laid over it covers the grass because the path's
+ * bed is taller. It is one mesh, named "lawn", that receives shadows and
+ * casts none.
+ */
+export function buildLawn(width: number, depth: number): Object3D {
+  const stripes: [BufferGeometry[], BufferGeometry[]] = [[], []];
+  const count = Math.max(1, Math.round(width / MOWING_STRIPE));
+  const stripeWidth = width / count;
+  for (let stripe = 0; stripe < count; stripe++) {
+    const x = -width / 2 + (stripe + 0.5) * stripeWidth;
+    stripes[stripe % 2 === 0 ? 0 : 1].push(placeBox(stripeWidth, LAWN_HEIGHT, depth, x));
+  }
+  const object = new Group();
+  object.name = "lawn";
+  object.add(
+    buildPaintedMesh(
+      [
+        [paint("room-lawn", "matte"), stripes[0]],
+        [paint("room-lawn", "matte", { dl: -0.025 }), stripes[1]],
       ],
       { cast: false },
     )!,

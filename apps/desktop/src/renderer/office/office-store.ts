@@ -7,8 +7,8 @@
  * app's theme, and the rest is fixed: see `OFFICE_SETTINGS`.
  *
  * The scene and the panels subscribe; anything can call `setOffice`. The
- * route keeps `selectedId` and `drawer` in step with its `session` search
- * param, see `office-screen.tsx`.
+ * route keeps `selectedId` and `drawer` in step with its `session` and
+ * `assistant` search params, see `office-screen.tsx`.
  */
 import type { ColleagueState } from "./engine/contracts";
 import type { Colleague } from "./world/types";
@@ -30,7 +30,11 @@ export const OFFICE_SETTINGS: {
 export interface OfficeState {
   readonly hoveredId: string | null;
   readonly selectedId: string | null;
-  /** The thread drawer is open on the selected colleague's thread. */
+  /**
+   * The Office asks for the drawer open on the selected colleague's thread or
+   * Conversation. The route turns this into its search param, and the drawer
+   * opens on what the param names.
+   */
   readonly drawer: boolean;
   /** The room the camera last flew to, by the directory or a key. */
   readonly roomId: string | null;
@@ -57,6 +61,17 @@ export function setOffice(change: Partial<OfficeState>): void {
 export function subscribeOffice(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+/**
+ * What the drawer shows: a thread by its session id, or an assistant's
+ * Conversation by the assistant's id. The kind travels with the id, because
+ * an id the Office has no colleague for, such as an asleep thread or a
+ * deleted assistant, still has to show the right screen.
+ */
+export interface OpenColleague {
+  readonly kind: Colleague["kind"];
+  readonly id: string;
 }
 
 // ---------------------------------------------------------------------------

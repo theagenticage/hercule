@@ -324,13 +324,12 @@ export default tseslint.config(
     },
   },
   {
-    // The reference sheet, and the Appearance and Permission profiles
-    // references' redrawn faces, draw the Bureau book's pieces, which the
-    // book's crew.js returns as strings of markup.
+    // The reference sheet, and the references' redrawn faces (drawn by
+    // sheet-page.ts), draw the Bureau book's pieces, which the book's crew.js
+    // returns as strings of markup.
     files: [
       "apps/desktop/src/renderer/specimens/reference.ts",
-      "apps/desktop/src/renderer/specimens/settings-appearance-reference.ts",
-      "apps/desktop/src/renderer/specimens/settings-profiles-reference.ts",
+      "apps/desktop/src/renderer/specimens/sheet-page.ts",
     ],
     rules: {
       "no-restricted-syntax": browserSyntax({ more: desktopRendererSyntax }),

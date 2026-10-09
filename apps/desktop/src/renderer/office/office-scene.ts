@@ -26,6 +26,7 @@ import { createOverlay, type Overlay } from "./engine/overlay";
 import { createPicker, type Picker } from "./engine/picking";
 import { buildSim } from "./engine/sim";
 import { Stage } from "./engine/stage";
+import { watchMinutes } from "./engine/minutes";
 import { prefersReducedMotion, watchStillness } from "./engine/stillness";
 import { buildColleagueRig, setAmbientMotion } from "./kit/character";
 import {
@@ -55,6 +56,8 @@ interface BuiltScene {
   readonly picker: Picker;
   /** The room lights under the built office's root, which the time of day switches. */
   readonly lamps: ReadonlyArray<Lamp>;
+  /** Stops the longcase clock's minute timer. Does nothing for an office with no clock. */
+  readonly stopClock: () => void;
 }
 
 /** What the page and the tools read of a mounted office. */
@@ -134,6 +137,18 @@ export function mountOfficeScene(
   const build = (): BuiltScene => {
     const office = buildBureau({ world, nav: createNavBuilder() });
     stage.scene.add(office.root);
+    const { clock } = office;
+    let stopClock = (): void => {};
+    if (clock !== undefined) {
+      stage.scene.add(clock.hands);
+      // The hands move once a minute, even while the office stands still,
+      // because a clock that stops is wrong. Only an office with a clock
+      // runs the timer.
+      stopClock = watchMinutes((now) => {
+        clock.setTime(now);
+        stage.requestRender();
+      });
+    }
     const rigs = new Map<string, ColleagueRig>();
     for (const colleague of world.colleagues) {
       const rig = buildColleagueRig(colleague);
@@ -169,6 +184,7 @@ export function mountOfficeScene(
       overlay,
       picker: createPicker(stage.renderer.domElement, stage.camera, rigs),
       lamps,
+      stopClock,
     };
   };
 
@@ -178,7 +194,8 @@ export function mountOfficeScene(
     for (const lamp of built.lamps) lamp.setOn(on);
   };
 
-  const tearDownBuiltScene = ({ office, rigs, sim, overlay }: BuiltScene): void => {
+  const tearDownBuiltScene = ({ office, rigs, sim, overlay, stopClock }: BuiltScene): void => {
+    stopClock();
     sim.dispose();
     overlay.dispose();
     for (const rig of rigs.values()) {
@@ -187,6 +204,10 @@ export function mountOfficeScene(
     }
     stage.scene.remove(office.root);
     disposeGeometry(office.root);
+    if (office.clock !== undefined) {
+      stage.scene.remove(office.clock.hands);
+      disposeGeometry(office.clock.hands);
+    }
     office.dispose();
   };
 

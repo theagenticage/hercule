@@ -12,7 +12,7 @@ import {
   readOnOpen,
   settingsQuery,
 } from "../../../../../app/queries";
-import { buildHueStyle, buildLook, Face } from "../../../../../faces";
+import { buildAssistantLook, buildHueStyle, Face } from "../../../../../faces";
 import { PlusIcon } from "../../../../../icons/plus";
 import { SettingsHeaderActions } from "../../../../../screens/settings/settings-frame";
 import { AssistantRecord } from "./-assistant-record";
@@ -115,10 +115,10 @@ function Assistants(): JSX.Element {
                 search={{ assistant: row.id }}
                 className="assistant-tab"
                 aria-current={row.id === picked.id ? "page" : undefined}
-                style={buildHueStyle(buildLook(row.id).hue)}
+                style={buildHueStyle(buildAssistantLook(row.id).hue)}
                 title={row.name}
               >
-                <Face look={buildLook(row.id)} pose={row.pose} size={28} />
+                <Face look={buildAssistantLook(row.id)} pose={row.pose} size={28} />
                 <span className="assistant-tab-name">{row.name}</span>
               </Link>
             ))}

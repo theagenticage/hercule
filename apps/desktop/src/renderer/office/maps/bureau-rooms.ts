@@ -19,16 +19,20 @@ import { WALL_THICKNESS } from "../kit/architecture";
 import {
   buildArmchair,
   buildBench,
+  buildBookcase,
   buildCabinet,
   buildCaseBoard,
   buildCoatStand,
   buildDesk,
+  buildLongcaseClock,
   buildNowServing,
   buildPlant,
   buildRug,
   buildTeaTrolley,
   buildWallClock,
+  buildWritingDesk,
   buildYourDesk,
+  type LongcaseClockHandle,
   type NowServingHandle,
 } from "../kit/props";
 import type { FixedRoom, Furniture, OfficeMap, SpotKind } from "./office-map";
@@ -93,6 +97,8 @@ export interface Fitter {
 /** What the rooms give the built office: seats, spots, and the pieces the office animates. */
 export interface Fittings {
   readonly homes: Map<string, Seat>;
+  /** Each assistant's armchair in the Secretariat, by assistant id. */
+  readonly armchairs: Map<string, Seat>;
   readonly lounge: Seat[];
   readonly queue: Spot[];
   /** Every desk with an owner, and the runner its owner runs on, for the fleet's desk tags. */
@@ -101,6 +107,7 @@ export interface Fittings {
   tea: Spot | null;
   entrance: Spot | null;
   nowServing: NowServingHandle | null;
+  clock: LongcaseClockHandle | null;
 }
 
 /** One room the world needs: what it asks of the plan, and how it is furnished once placed. */
@@ -123,11 +130,16 @@ const QUEUE_PITCH = 0.72;
 /** Half a wall: a room's rectangle runs to the walls' middles. */
 const HALF_WALL = WALL_THICKNESS / 2;
 
-/** The furniture sizes the rooms are planned around, measured once per build. */
+/** The furniture sizes the rooms are planned around, measured once from the props kit. */
 interface KitSizes {
   /** A clerk's desk with its chair, turned so its sitter faces +z. */
   readonly desk: Footprint;
   readonly cabinet: Footprint;
+  /** A writing desk with its chair, turned so its sitter faces +z. */
+  readonly writingDesk: Footprint;
+  readonly bookcase: Footprint;
+  /** An armchair turned toward the writing desk on its west, as it stands in a Secretariat corner. */
+  readonly cornerArmchair: Footprint;
 }
 
 /** Rows and columns of desks, and the floor they cover. */
@@ -163,12 +175,22 @@ function decideColumnLimit(count: number): number {
   return Math.max(3, Math.ceil(Math.sqrt(count * 2)));
 }
 
-/** Returns the rooms' sizes, measured from the props kit. */
+/** The sizes `measureKit` measured, kept because a prop's size never changes. */
+let kitSizes: KitSizes | undefined;
+
+/**
+ * Returns the rooms' sizes, measured from the props kit the first time it is
+ * called and kept after that, so a rebuild builds no throwaway props.
+ */
 function measureKit(): KitSizes {
-  return {
+  kitSizes ??= {
     desk: measureFootprint(buildDesk().object, Math.PI),
     cabinet: measureFootprint(buildCabinet(), 0),
+    writingDesk: measureFootprint(buildWritingDesk().object, Math.PI),
+    bookcase: measureFootprint(buildBookcase(), 0),
+    cornerArmchair: measureFootprint(buildArmchair().object, CORNER_ARMCHAIR_FACING),
   };
+  return kitSizes;
 }
 
 /**
@@ -303,6 +325,20 @@ function requestRoom(
 }
 
 /**
+ * Returns a fixed room's request, with the plan's minimum size applied. The
+ * room's id and its kind are both the fixed room's kind, which is what lets
+ * an Office Map name a fixed room by its kind, as its annex does.
+ */
+function requestFixedRoom(
+  fixed: FixedRoom,
+  width: number,
+  depth: number,
+  doorAt?: number,
+): RoomRequest {
+  return requestRoom(fixed.kind, fixed.name, fixed.kind, null, width, depth, doorAt);
+}
+
+/**
  * Returns the checks a fixed room's furnishing asks: whether the map puts a
  * piece of furniture in the room, and whether the room offers a kind of spot.
  */
@@ -322,8 +358,13 @@ function readFixedRoom(room: FixedRoom): {
  * - one room per thread room of the world, in its order, with a desk for each
  *   of its colleagues in desk order;
  * - the fixed rooms of `map`, in its order, along the street, the last one
- *   holding the front door. The Lounge has an armchair for every
- *   colleague.
+ *   holding the front door;
+ * - the map's annex, south of the room it names. When the annex is the
+ *   Secretariat it is left out while there are no assistants: an empty room
+ *   would cost the building depth and the GPU memory for nothing.
+ *
+ * The Lounge has an armchair for every thread, and the Secretariat a corner
+ * for every assistant, in the world's Secretariat order.
  *
  * `directory` is the fleet's board, which stands in the Lobby.
  */
@@ -344,19 +385,29 @@ export function designRooms(world: World, map: OfficeMap, directory: Object3D): 
       ),
     ),
   );
-  const front = map.fixedRooms.map((room) => {
+  const assistants = world.secretariat.flatMap((id) => colleagues.get(id) ?? []);
+  const threadCount = world.colleagues.filter((colleague) => colleague.kind === "thread").length;
+  const designFixedRoom = (room: FixedRoom): RoomRequest => {
     switch (room.kind) {
       case "triage-room":
         return add(designTriageRoom(room, sizes));
       case "lounge":
-        return add(designLounge(room, world.colleagues.length));
+        return add(designLounge(room, threadCount));
       case "your-office":
         return add(designYourOffice(room));
+      case "secretariat":
+        return add(designSecretariat(room, assistants, sizes));
       case "lobby":
         return add(designLobby(room, directory));
     }
-  });
-  return { request: { code, back: [], front, connections: [] }, designs };
+  };
+  const front = map.fixedRooms.map(designFixedRoom);
+  const annex =
+    map.annex === null || (map.annex.room.kind === "secretariat" && assistants.length === 0)
+      ? null
+      : // A fixed room's id is its kind (see `requestFixedRoom`).
+        { room: designFixedRoom(map.annex.room), southOf: map.annex.southOf };
+  return { request: { code, back: [], front, annex }, designs };
 }
 
 /** Designs a thread room: desks in rows facing the camera, a plant by the far wall, a lamp. */
@@ -404,15 +455,7 @@ function designTriageRoom(fixed: FixedRoom, sizes: KitSizes): RoomDesign {
   const boardWidth = 2.2;
   const boardZone = 3.0;
   return {
-    request: requestRoom(
-      "triage-room",
-      fixed.name,
-      "triage-room",
-      null,
-      Math.max(sizes.desk.width + 1.8, 5.4),
-      boardZone + 1.0,
-      0.86,
-    ),
+    request: requestFixedRoom(fixed, Math.max(sizes.desk.width + 1.8, 5.4), boardZone + 1.0, 0.86),
     furnish(room, fitter) {
       const inside = computeFloorInsideWalls(room.rect);
       if (has("case-board")) {
@@ -435,13 +478,14 @@ function designTriageRoom(fixed: FixedRoom, sizes: KitSizes): RoomDesign {
 
 /**
  * Designs the Lounge: seating groups on rugs, the tea trolley, plants by the
- * windows. Every idle colleague sits in the Lounge, and all of them can be
- * idle at once, so the Lounge has an armchair for each of `colleagueCount`
- * colleagues, and at least two seating groups.
+ * windows. Every idle thread sits in the Lounge, and all of them can be idle
+ * at once, so the Lounge has an armchair for each of `threadCount` threads,
+ * and at least two seating groups. An idle assistant stays in the
+ * Secretariat, so it needs no armchair here.
  */
-function designLounge(fixed: FixedRoom, colleagueCount: number): RoomDesign {
+function designLounge(fixed: FixedRoom, threadCount: number): RoomDesign {
   const { has, offers } = readFixedRoom(fixed);
-  const needed = Math.max(2, Math.ceil(colleagueCount / SEATING_GROUP_ARMCHAIRS));
+  const needed = Math.max(2, Math.ceil(threadCount / SEATING_GROUP_ARMCHAIRS));
   const rows = Math.ceil(needed / decideColumnLimit(needed));
   const cols = Math.ceil(needed / rows);
   // Every cell of the grid gets a group, so no corner of the room stands bare.
@@ -452,15 +496,7 @@ function designLounge(fixed: FixedRoom, colleagueCount: number): RoomDesign {
   const cellWidth = 4.3;
   const cellDepth = 3.1;
   return {
-    request: requestRoom(
-      "lounge",
-      fixed.name,
-      "lounge",
-      null,
-      cols * cellWidth + 1.2,
-      rows * cellDepth + 2.3,
-      0.3,
-    ),
+    request: requestFixedRoom(fixed, cols * cellWidth + 1.2, rows * cellDepth + 2.3, 0.3),
     furnish(room, fitter, fittings) {
       const inside = computeFloorInsideWalls(room.rect);
       if (has("tea-trolley")) {
@@ -509,7 +545,7 @@ function designLounge(fixed: FixedRoom, colleagueCount: number): RoomDesign {
 function designYourOffice(fixed: FixedRoom): RoomDesign {
   const { has, offers } = readFixedRoom(fixed);
   return {
-    request: requestRoom("your-office", fixed.name, "your-office", null, 6.6, 6.2, 0.84),
+    request: requestFixedRoom(fixed, 6.6, 6.2, 0.84),
     furnish(room, fitter, fittings) {
       const inside = computeFloorInsideWalls(room.rect);
       const deskX = inside.minX + 2.2;
@@ -560,6 +596,133 @@ function designYourOffice(fixed: FixedRoom): RoomDesign {
   };
 }
 
+/** How an armchair stands in a Secretariat corner: turned a little west, toward its writing desk. */
+const CORNER_ARMCHAIR_FACING = -Math.PI / 5;
+/** The gap between a writing desk and the armchair east of it, and between the chair and the bookcase behind. */
+const CORNER_ARMCHAIR_GAP = 0.4;
+const CORNER_BOOKCASE_GAP = 0.25;
+/** The aisle between two corners side by side. */
+const CORNER_AISLE_X = 0.9;
+/**
+ * The aisle between two rows of corners. It is wide enough that the camera's
+ * close-up of an assistant, which looks down at 30 degrees, sees the whole
+ * writing desk over the bookcase of the row in front.
+ */
+const CORNER_AISLE_Z = 1.8;
+
+/**
+ * Designs the Secretariat: one corner per assistant, and a longcase clock.
+ * A corner is a writing desk, the assistant's home, facing the camera; a
+ * bookcase behind its chair; and an armchair east of it, where the assistant
+ * sits while it is asleep or away, on a rug under the desk and armchair.
+ *
+ * The Secretariat is the Bureau's annex, south of Your Office, so the
+ * corners stand two abreast and the room grows south a row at a time. A
+ * strip along the north wall holds the door from Your Office, the clock west
+ * of it facing the camera, and a clear walk in front of both. `designRooms`
+ * builds no Secretariat while there are no assistants, so `assistants` is
+ * never empty here.
+ */
+function designSecretariat(
+  fixed: FixedRoom,
+  assistants: ReadonlyArray<Colleague>,
+  sizes: KitSizes,
+): RoomDesign {
+  const { has, offers } = readFixedRoom(fixed);
+  const corner: Footprint = {
+    width: sizes.writingDesk.width + CORNER_ARMCHAIR_GAP + sizes.cornerArmchair.width,
+    depth: sizes.bookcase.depth + CORNER_BOOKCASE_GAP + sizes.writingDesk.depth,
+    centreX: 0,
+    centreZ: 0,
+  };
+  const cols = Math.min(2, assistants.length);
+  const rows = Math.ceil(assistants.length / cols);
+  const gridWidth = cols * corner.width + (cols - 1) * CORNER_AISLE_X;
+  const gridDepth = rows * corner.depth + (rows - 1) * CORNER_AISLE_Z;
+  // The north strip holds the clock against the wall and a clear walk in front of it; the other
+  // sides keep an aisle.
+  const westStrip = 1.0;
+  const northAisle = 1.5;
+  const eastAisle = 1.0;
+  const southAisle = 1.0;
+  return {
+    request: requestFixedRoom(
+      fixed,
+      westStrip + gridWidth + eastAisle,
+      northAisle + gridDepth + southAisle,
+      // East of Your Office's desk, and of the user's chair behind it.
+      0.7,
+    ),
+    furnish(room, fitter, fittings) {
+      const inside = computeFloorInsideWalls(room.rect);
+      const gridX = (inside.minX + westStrip + inside.maxX - eastAisle) / 2;
+      const gridZ = (inside.minZ + northAisle + inside.maxZ - southAisle) / 2;
+      const pitchX = corner.width + CORNER_AISLE_X;
+      const pitchZ = corner.depth + CORNER_AISLE_Z;
+      assistants.forEach((assistant, index) => {
+        const row = Math.floor(index / cols);
+        const inRow = Math.min(cols, assistants.length - row * cols);
+        const col = index % cols;
+        const left = gridX - (inRow * pitchX - CORNER_AISLE_X) / 2 + col * pitchX;
+        const top = gridZ - gridDepth / 2 + row * pitchZ;
+        const deskX = left + sizes.writingDesk.width / 2;
+        const deskZ = top + corner.depth - sizes.writingDesk.depth / 2;
+        const armchairX = left + corner.width - sizes.cornerArmchair.width / 2;
+        if (has("writing-desks")) {
+          fitter.place(
+            // The armchair would cover part of a medallion wherever it sat.
+            buildRug(corner.width + 0.5, sizes.writingDesk.depth + 0.6, { medallion: false }),
+            left + corner.width / 2,
+            deskZ + 0.1,
+            0,
+            true,
+          );
+          const desk = buildWritingDesk();
+          fitter.place(desk.object, deskX, deskZ, Math.PI);
+          // Not among the fleet's owned desks: an assistant's runner can change while the
+          // building stands, so its desk carries no runner tag.
+          fittings.homes.set(assistant.id, {
+            ...fitter.readSpot(desk.seatMarker),
+            kind: "desk",
+            roomId: "secretariat",
+            desk,
+          });
+        }
+        if (has("bookcases")) {
+          // East of the desk's middle, so the shelves show past the assistant sitting before them.
+          fitter.place(
+            buildBookcase(),
+            left + sizes.writingDesk.width - sizes.bookcase.width / 2 + 0.2,
+            top + sizes.bookcase.depth / 2,
+          );
+        }
+        if (has("armchairs")) {
+          const armchair = buildArmchair();
+          fitter.place(armchair.object, armchairX, deskZ + 0.15, CORNER_ARMCHAIR_FACING);
+          if (offers("seat")) {
+            fittings.armchairs.set(assistant.id, {
+              ...fitter.readSpot(armchair.seatMarker),
+              kind: "armchair",
+              roomId: "secretariat",
+              desk: null,
+            });
+          }
+        }
+      });
+      if (has("longcase-clock")) {
+        const clock = buildLongcaseClock();
+        fitter.place(clock.object, inside.minX + 1.1, inside.minZ + 0.2);
+        fittings.clock = clock;
+      }
+      if (has("plant")) {
+        fitter.place(buildPlant("tall"), inside.minX + 0.4, inside.maxZ - 0.4);
+        fitter.place(buildPlant("small"), inside.maxX - 0.35, inside.maxZ - 0.35);
+      }
+      if (has("lamp")) fitter.placeLamp(inside.maxX - 0.35, inside.minZ + 0.45);
+    },
+  };
+}
+
 /**
  * Returns the queue's places along a path, `QUEUE_PITCH` apart, head first.
  * The head faces south, toward the desk; everyone else faces the back of the
@@ -590,7 +753,7 @@ function layQueue(path: ReadonlyArray<Vector3>): Spot[] {
 function designLobby(fixed: FixedRoom, directory: Object3D): RoomDesign {
   const { has, offers } = readFixedRoom(fixed);
   return {
-    request: requestRoom("lobby", fixed.name, "lobby", null, 5.6, 5.0),
+    request: requestFixedRoom(fixed, 5.6, 5.0),
     furnish(room, fitter, fittings) {
       const inside = computeFloorInsideWalls(room.rect);
       const doorX = (room.rect.minX + room.rect.maxX) / 2;

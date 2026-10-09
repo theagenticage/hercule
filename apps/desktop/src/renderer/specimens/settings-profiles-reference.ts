@@ -25,7 +25,8 @@
  *    app could pose it from: only an assistant's session has a status. The
  *    book poses pr-review as working;
  * 4. draws each face in the look the app takes from the agent's id, where the
- *    book casts or hashes it from the name;
+ *    book casts or hashes it from the name. An assistant wears the headwear
+ *    its id picks;
  * 5. puts the names after a list row's faces in a `span`, as the app does so
  *    that a long name can end in an ellipsis. The book gives the `span` no
  *    style, so it draws the same;
@@ -45,9 +46,9 @@ import {
   groupAgentsByProfile,
   type ProfileAgent,
 } from "@hercule/client-core";
-import { buildLook } from "../faces/look";
+import { buildAssistantLook, buildLook } from "../faces/look";
 import { findElement, findElements } from "./book-page";
-import { markSheetReady, readCrew, stillBookPage } from "./sheet-page";
+import { drawBookFace, markSheetReady, readCrew, stillBookPage } from "./sheet-page";
 import {
   PERMISSION_PROFILES_SETTINGS_RECORDS,
   PERMISSION_PROFILES_SIDEBAR_RECORDS,
@@ -78,11 +79,8 @@ function decidePose(agent: ProfileAgent): string {
  * passed in.
  */
 function buildFace(agent: ProfileAgent, size: number): Element {
-  const { hue, shape, accessories } = buildLook(agent.id);
-  const look = { hue, shape, acc: accessories.join("+") || "none" };
-  const template = document.createElement("template");
-  template.innerHTML = readCrew().face(agent.name, { pose: decidePose(agent), size, look });
-  return template.content.firstElementChild!;
+  const look = agent.kind === "assistant" ? buildAssistantLook(agent.id) : buildLook(agent.id);
+  return drawBookFace(agent.name, look, decidePose(agent), size);
 }
 
 stillBookPage();

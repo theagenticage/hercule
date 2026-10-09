@@ -1,9 +1,10 @@
 /**
- * Where each thread sits in the Office: its desk in a room, its place in the
- * queue at the user's desk while it has an open Request, and the Lounge while
- * it is idle.
+ * Where each colleague sits in the Office: a thread's desk in a room, an
+ * assistant's corner in the Secretariat, the queue at the user's desk while
+ * either has an open Request, and the Lounge while a thread is idle.
  */
 import type { Project, Runner, Session, Workspace } from "@hercule/contract";
+import { compareAssistantRows, type AssistantRow } from "../assistants/rows";
 import { decideGroupProjectId, rankLane } from "../threads/groups";
 import { decideThreadPose, type Pose } from "../threads/pose";
 
@@ -27,7 +28,15 @@ export interface OfficeRoom {
 
 export interface OfficeSeating {
   readonly rooms: readonly OfficeRoom[];
-  /** The ids of threads with an open Request, in queue order: waiting longest first. */
+  /**
+   * Every assistant, in the order of its corner in the Secretariat: the
+   * sidebar's order, by name (see `compareAssistantRows`).
+   */
+  readonly secretariat: readonly AssistantRow[];
+  /**
+   * The ids of threads and assistants with an open Request, in queue order:
+   * waiting longest first.
+   */
   readonly queue: readonly string[];
   /** The ids of idle threads, who sit in the Lounge. */
   readonly lounge: readonly string[];
@@ -49,7 +58,7 @@ export const isSeatedPose = (pose: Pose): pose is SeatedPose => SEATED_POSES.has
 const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
- * Returns where each thread sits in the Office.
+ * Returns where each thread and each assistant sits in the Office.
  *
  * - Only Threads sit in the Office. A session an Agent runs belongs to that
  *   Agent, as it does in the sidebar.
@@ -71,19 +80,28 @@ const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 
  *   desk keeps its place when a new thread starts.
  * - A thread keeps its desk while it queues or sits in the Lounge, so it has
  *   a place to return to.
- * - `queue` holds the threads with an open Request, waiting longest first.
- * - `lounge` holds the idle threads, in desk order.
+ * - Every assistant has a corner in the Secretariat, whatever its pose, in
+ *   the sidebar's order, by name, whatever the order of `assistants`.
+ *   Assistants are few, and one that can't be reached should be easy to
+ *   spot. Its pose and current session are the row's.
+ * - `queue` holds the threads and assistants with an open Request, waiting
+ *   longest first. An assistant is queued by its own id.
+ * - `lounge` holds the idle threads, in desk order. An idle assistant stays
+ *   at its desk in the Secretariat.
  */
 export const decideOfficeSeating = ({
   sessions,
   projects,
   workspaces,
   runners,
+  assistants,
 }: {
   readonly sessions: readonly Session[];
   readonly projects: readonly Project[];
   readonly workspaces: readonly Workspace[];
   readonly runners: readonly Runner[];
+  /** The sidebar's assistant rows, from `buildAssistantRows`. */
+  readonly assistants: readonly AssistantRow[];
 }): OfficeSeating => {
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
   const listedProjectIds = new Set(projects.map((project) => project.id));
@@ -126,15 +144,20 @@ export const decideOfficeSeating = ({
   // A session records no time for when its Requests opened. The session is
   // active until a Request opens and then waits, so the oldest
   // `lastActivityAt` stands in for the longest wait.
-  const queue = seated
-    .map((desk) => desk.session)
-    .filter((session) => session.openRequests.length > 0)
+  const queue = [
+    ...seated.map((desk) => ({ id: desk.session.id, session: desk.session })),
+    ...assistants.flatMap(({ id, session }) => (session === null ? [] : [{ id, session }])),
+  ]
+    .filter(({ session }) => session.openRequests.length > 0)
     .sort(
       (a, b) =>
-        Date.parse(a.lastActivityAt) - Date.parse(b.lastActivityAt) || compareText(a.id, b.id),
+        Date.parse(a.session.lastActivityAt) - Date.parse(b.session.lastActivityAt) ||
+        compareText(a.id, b.id),
     )
-    .map((session) => session.id);
+    .map(({ id }) => id);
   const lounge = seated.filter((desk) => desk.pose === "idle").map((desk) => desk.session.id);
 
-  return { rooms, queue, lounge };
+  const secretariat = [...assistants].sort(compareAssistantRows);
+
+  return { rooms, secretariat, queue, lounge };
 };

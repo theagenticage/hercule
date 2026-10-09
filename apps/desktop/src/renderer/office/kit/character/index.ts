@@ -29,9 +29,9 @@ import {
 import { registerCache } from "../../engine/caches";
 import type { BuildColleagueRig, ColleagueRig } from "../../engine/contracts";
 import { paint, paintHue, paintVertexColors } from "../../engine/palette";
-import type { SeatedPose } from "@hercule/client-core";
+import type { SessionPose } from "@hercule/client-core";
 import { readAnatomy, type Anatomy } from "./anatomy";
-import { readEyeCentre, readFaceGeometry } from "./face";
+import { hasOpenEyes, readEyeCentre, readFaceGeometry } from "./face";
 import { Motion, Spring, measureDamping, type RigBones } from "./motion";
 import {
   BONE,
@@ -232,8 +232,8 @@ export const buildColleagueRig: BuildColleagueRig = (colleague) => {
     object.add(mesh);
   }
 
-  let shownPose: SeatedPose = "idle";
-  let nextPose: SeatedPose | null = null;
+  let shownPose: SessionPose = "idle";
+  let nextPose: SessionPose | null = null;
   const face = createSkinnedMesh(
     readFaceGeometry(anatomy, shownPose, look.accessories),
     paintVertexColors("gloss"),
@@ -286,14 +286,17 @@ export const buildColleagueRig: BuildColleagueRig = (colleague) => {
   let hasLookTarget = false;
 
   /** Swaps in the face of `pose`. */
-  const showPose = (pose: SeatedPose): void => {
+  const showPose = (pose: SessionPose): void => {
     shownPose = pose;
     face.geometry = readFaceGeometry(anatomy, pose, look.accessories);
   };
 
-  /** Moves the blink on; returns true while the eyes are closing or opening. */
+  /**
+   * Moves the blink on; returns true while the eyes are closing or opening.
+   * Only open eyes blink on their own; a new face blinks in whatever the eyes.
+   */
   const updateBlink = (dt: number): boolean => {
-    if (blinkClock < 0 && ambient > 0) {
+    if (blinkClock < 0 && ambient > 0 && hasOpenEyes(shownPose)) {
       nextBlink -= dt;
       if (nextBlink <= 0) {
         blinkClock = 0;

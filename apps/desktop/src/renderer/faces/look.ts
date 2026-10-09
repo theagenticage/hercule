@@ -11,11 +11,18 @@ export type Shape = (typeof SHAPES)[number];
 /** One small thing a colleague wears: a hat, a moustache, glasses, a tie or a watch. */
 export type Accessory = "homburg" | "bowtie" | "tache" | "monocle" | "watch" | "glasses";
 
+/** The headwear an assistant wears, in the order the hash picks it. Threads never wear any. */
+export const HEADWEAR = ["cloche", "beret", "headset"] as const;
+/** One piece of an assistant's headwear, as the Bureau book's crew.js draws it. */
+export type Headwear = (typeof HEADWEAR)[number];
+
 /** What a colleague looks like: its hue, its body shape, and what it wears, in drawing order. */
 export interface Look {
   readonly hue: Hue;
   readonly shape: Shape;
   readonly accessories: ReadonlyArray<Accessory>;
+  /** The assistant's headwear, drawn over everything else, or null for a thread. */
+  readonly headwear: Headwear | null;
 }
 
 /**
@@ -73,5 +80,28 @@ export function buildLook(seed: string): Look {
     hue: HUES[hue]!,
     shape: SHAPES[shape]!,
     accessories: WARDROBE[wardrobeEntry]!,
+    headwear: null,
+  }));
+}
+
+// Every assistant look built so far, by its thread look and its headwear.
+const builtAssistantLooks = new Map<Look, Array<Look | undefined>>();
+
+/**
+ * Returns the look of the assistant with id `assistantId`: the look
+ * `buildLook` gives the id, wearing the headwear the hash's bits 12-13 pick.
+ * One head wears one hat, so the headwear replaces a homburg.
+ *
+ * The same id always gets the same frozen object, as with `buildLook`.
+ */
+export function buildAssistantLook(assistantId: string): Look {
+  const look = buildLook(assistantId);
+  const index = (hashSeed(assistantId) >>> 12) % HEADWEAR.length;
+  let byHeadwear = builtAssistantLooks.get(look);
+  if (byHeadwear === undefined) builtAssistantLooks.set(look, (byHeadwear = []));
+  return (byHeadwear[index] ??= Object.freeze({
+    ...look,
+    accessories: look.accessories.filter((accessory) => accessory !== "homburg"),
+    headwear: HEADWEAR[index]!,
   }));
 }

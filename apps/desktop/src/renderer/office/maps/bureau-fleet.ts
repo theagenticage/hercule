@@ -36,11 +36,16 @@ const TAG_SCALE = 0.42;
 /** The space one plaque takes on the directory, top to top. */
 const DIRECTORY_LINE = 0.2;
 
-/** Returns the colleagues each runner hosts, by runner id. */
+/**
+ * Returns the threads each runner hosts, by runner id. Assistants are left
+ * out: an assistant's session moves between runners while the building
+ * stands, and the directory is built once with the building, so a count
+ * that included assistants would go stale.
+ */
 function countByRunner(world: World): Map<string, number> {
   const counts = new Map<string, number>();
   for (const colleague of world.colleagues) {
-    if (colleague.runnerId === null) continue;
+    if (colleague.kind !== "thread" || colleague.runnerId === null) continue;
     counts.set(colleague.runnerId, (counts.get(colleague.runnerId) ?? 0) + 1);
   }
   return counts;

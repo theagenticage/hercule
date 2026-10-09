@@ -4,7 +4,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import { computeHeartbeatNow, type Pose } from "@hercule/client-core";
 import type { Assistant, Heartbeat, Rotation } from "@hercule/contract";
 import { settingsQuery } from "../../../../../app/queries";
-import { buildHueStyle, buildLook, Face } from "../../../../../faces";
+import { buildAssistantLook, buildHueStyle, Face } from "../../../../../faces";
 import { HeartbeatSection } from "../../../../../screens/settings/assistants/heartbeat-section";
 import { RotationSection } from "../../../../../screens/settings/assistants/rotation-section";
 import { DeleteSection } from "./-delete-section";
@@ -54,7 +54,7 @@ export function AssistantRecord({
     (latest, change) => ({ rotation: { ...latest.rotation, ...change } }),
   );
   const now = computeHeartbeatNow(openedAt, heartbeat.value.timezone, settings.user.timezone);
-  const look = buildLook(assistant.id);
+  const look = buildAssistantLook(assistant.id);
   return (
     <div className="assistant-record" style={buildHueStyle(look.hue)}>
       <div className="head">

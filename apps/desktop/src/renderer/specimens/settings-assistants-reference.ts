@@ -21,7 +21,7 @@
  *    and the sidebar sort assistants;
  * 3. draws every face from the fixture's assistant ids, in the book's poses,
  *    and sets Ada's hue from its id, as the app draws every assistant: the
- *    book casts each assistant by hand;
+ *    book casts each assistant by hand, with headwear the ids do not pick;
  * 4. removes the line under Ada's name and Open Conversation from the head:
  *    the app draws the name alone (Open Conversation comes with its own
  *    ticket);
@@ -63,10 +63,10 @@
  * the comparison would no longer compare what it claims to.
  */
 import { describeWhenAssistantChangesApply, formatAccessMode } from "@hercule/client-core";
-import { buildLook } from "../faces/look";
+import { buildAssistantLook } from "../faces/look";
 import { ADA, JUNO, MILO } from "./assistant-states-fixture";
 import { findElement, findElementByText, findElements } from "./book-page";
-import { markSheetReady, readCrew, stillBookPage } from "./sheet-page";
+import { drawBookFace, markSheetReady, stillBookPage } from "./sheet-page";
 import { SETTINGS_ADA } from "./settings-assistants-fixture";
 
 /** Returns a new `tag` element with the class `className`, holding `children`. */
@@ -134,7 +134,7 @@ style.textContent = `
 document.head.append(style);
 
 const ada = SETTINGS_ADA;
-const adaHue = `var(--hue-${buildLook(ADA.id).hue})`;
+const adaHue = `var(--hue-${buildAssistantLook(ADA.id).hue})`;
 const record = findElement(document, ".set-body > .rec") as HTMLElement;
 
 // 1. The right-hand column, and one column of 760px.
@@ -159,7 +159,7 @@ for (const { tab, id } of TAB_FACES) {
   const face = findElement(tab, "svg.cr");
   face.replaceWith(redrawFace(face, id));
   // Each tab carries its own hue in the app, which only the picked tab shows.
-  tab.style.setProperty("--hue", `var(--hue-${buildLook(id).hue})`);
+  tab.style.setProperty("--hue", `var(--hue-${buildAssistantLook(id).hue})`);
 }
 const main = findElement(record, ".rec-main") as HTMLElement;
 main.style.setProperty("--hue", adaHue);
@@ -273,8 +273,6 @@ main.append(
   buildElement("section", "set-sec", buildElement("h2", "", `Delete ${ada.name}`), deleteRow),
 );
 
-readCrew().drawPlaceholders(record);
-
 if (document.documentElement.dataset.state === "scrolled") {
   const body = findElement(document, ".set-body");
   body.scrollTop = body.scrollHeight;
@@ -283,15 +281,17 @@ if (document.documentElement.dataset.state === "scrolled") {
 await markSheetReady();
 
 /**
- * Returns a placeholder for the face of the assistant with id `id`, in the
- * pose and at the size of the book's face `face`, for crew.js to draw.
+ * Returns the face of the assistant with id `id`, drawn by crew.js in the
+ * look the app gives that id, in the pose and at the size of the book's face
+ * `face`.
  */
-function redrawFace(face: Element, id: string): HTMLElement {
-  const placeholder = document.createElement("i");
-  placeholder.dataset.face = id;
-  placeholder.dataset.pose = readPose(face);
-  placeholder.dataset.size = face.getAttribute("width") ?? "";
-  return placeholder;
+function redrawFace(face: Element, id: string): Element {
+  return drawBookFace(
+    id,
+    buildAssistantLook(id),
+    readPose(face),
+    Number(face.getAttribute("width")),
+  );
 }
 
 /** Returns the pose the book drew `face` in, from the class crew.js gives its SVG. */

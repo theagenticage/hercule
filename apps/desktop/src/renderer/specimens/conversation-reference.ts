@@ -34,8 +34,7 @@
  *    app keeps it, so that the controls beside it do not move when a turn
  *    starts or ends;
  * 9. draws Ada's faces from the fixture's assistant id, as the app draws
- *    every assistant's face from its id. The book casts Ada by hand, with a
- *    cloche the app's wardrobe does not have;
+ *    every assistant's face from its id. The book casts Ada by hand;
  * 10. sets Ada's hue on each reply, so that the name is drawn in her hue, as
  *    the book's `.msg-name` rule asks and the prototype draws it. The book's
  *    replies set no hue, so their names fall back to the ink.
@@ -46,8 +45,8 @@
 import { formatMessageTime, resolveBrowserTimezone } from "@hercule/client-core";
 import { SPECIMEN_NOW } from "./sidebar-fixture";
 import { findElement, findElements } from "./book-page";
-import { markSheetReady, readCrew, stillBookPage } from "./sheet-page";
-import { buildLook } from "../faces/look";
+import { drawBookFace, markSheetReady, stillBookPage } from "./sheet-page";
+import { buildAssistantLook } from "../faces/look";
 import { ADA } from "./assistant-states-fixture";
 import { CONVERSATION_MESSAGES } from "./conversation-fixture";
 
@@ -115,23 +114,20 @@ findElement(composer, ".lip").closest(".fold")!.remove();
 
 // 9. Ada's faces, from her id, in the book's poses and sizes, in page order.
 const BOOK_FACES = [
-  { pose: "failed", size: "28" },
-  { pose: "idle", size: "34" },
-  { pose: "idle", size: "34" },
-  { pose: "working", size: "34" },
+  { pose: "failed", size: 28 },
+  { pose: "idle", size: 34 },
+  { pose: "idle", size: 34 },
+  { pose: "working", size: 34 },
 ];
+const adaLook = buildAssistantLook(ADA.id);
 findElements(column, ".notice > .cr, .msg > .cr", BOOK_FACES.length).forEach((face, index) => {
-  const placeholder = document.createElement("i");
-  placeholder.dataset.face = ADA.id;
-  placeholder.dataset.pose = BOOK_FACES[index]!.pose;
-  placeholder.dataset.size = BOOK_FACES[index]!.size;
-  face.replaceWith(placeholder);
+  const { pose, size } = BOOK_FACES[index]!;
+  face.replaceWith(drawBookFace(ADA.id, adaLook, pose, size));
 });
-readCrew().drawPlaceholders(column);
 
 // 10. Ada's hue on each reply.
 for (const reply of replies) {
-  (reply as HTMLElement).style.setProperty("--hue", `var(--hue-${buildLook(ADA.id).hue})`);
+  (reply as HTMLElement).style.setProperty("--hue", `var(--hue-${adaLook.hue})`);
 }
 
 await markSheetReady();

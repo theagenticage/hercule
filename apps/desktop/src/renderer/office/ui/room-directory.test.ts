@@ -2,7 +2,7 @@
  * Tests the groups of the room directory. The tests check that:
  *
  * - the project rooms come under "Projects", then every other room under
- *   "The Office", each in the built office's order;
+ *   "The Office", each in the built office's order, the Secretariat among them;
  * - a group with no rooms is left out.
  */
 import { describe, expect, it } from "vitest";
@@ -32,11 +32,12 @@ describe("groupRooms", () => {
       buildRoom("webshop", "project"),
       buildRoom("lounge", "lounge"),
       buildRoom("ops", "project"),
+      buildRoom("secretariat", "secretariat"),
     ];
 
     expect(listGroups(rooms)).toEqual([
       ["Projects", ["webshop", "ops"]],
-      ["The Office", ["lobby", "lounge"]],
+      ["The Office", ["lobby", "lounge", "secretariat"]],
     ]);
   });
 

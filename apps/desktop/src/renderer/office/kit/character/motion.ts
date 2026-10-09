@@ -23,13 +23,38 @@
  * whose action has settled stops moving entirely.
  */
 import { type Bone, Matrix4, type Object3D, Quaternion, Vector3, Euler } from "three";
-import { DESK_HEIGHT, SEAT_HEIGHT, WALK_SPEED, type Action } from "../../engine/contracts";
+import {
+  DESK_HEIGHT,
+  HOP_SECONDS,
+  SEAT_HEIGHT,
+  STRETCH_SECONDS,
+  WALK_SPEED,
+  type Action,
+} from "../../engine/contracts";
 import { mapFacePoint, measureEggRadius, type Anatomy } from "./anatomy";
 
-/** How long `hop` takes, from the crouch to the landing; the rig then stands on its own. */
-export const HOP_SECONDS = 0.62;
+const SITTING_ACTIONS: ReadonlySet<Action> = new Set<Action>([
+  "sit",
+  "type",
+  "read",
+  "sip",
+  "doze",
+]);
 
-const SITTING_ACTIONS: ReadonlySet<Action> = new Set<Action>(["sit", "type", "read", "sip"]);
+/**
+ * Returns how long `action` lasts when it ends on its own, back to `stand`,
+ * or null for an action that lasts until the next one is set.
+ */
+function measureOneShot(action: Action): number | null {
+  switch (action) {
+    case "hop":
+      return HOP_SECONDS;
+    case "stretch":
+      return STRETCH_SECONDS;
+    default:
+      return null;
+  }
+}
 
 /** Returns true when `action` is done sitting on a seat. */
 function isSittingAction(action: Action): boolean {
@@ -547,7 +572,8 @@ export class Motion {
 
   private action: Action = "stand";
   private clock = 0;
-  private hopClock = 0;
+  /** The time since a one-shot action (`hop`, `stretch`) started. */
+  private oneShotClock = 0;
   private blendWeight = 1;
   private blendSeconds = 0.2;
   private blendArc = 0;
@@ -618,12 +644,16 @@ export class Motion {
     return this.output.pelvis.y + neck.y + egg.height * this.squash.value;
   }
 
-  /** Starts `action`, crossfading from whatever the body is doing now. */
+  /**
+   * Starts `action`, crossfading from whatever the body is doing now. Setting
+   * a one-shot action again starts it over.
+   */
   setAction(action: Action): void {
-    if (action === this.action && action !== "hop") return;
+    const oneShot = measureOneShot(action) !== null;
+    if (action === this.action && !oneShot) return;
     const previous = this.action;
     this.action = action;
-    if (action === "hop") this.hopClock = 0;
+    if (oneShot) this.oneShotClock = 0;
     if (!this.hasPosture) return;
     this.from.copy(this.output);
     this.blendWeight = 0;
@@ -643,9 +673,10 @@ export class Motion {
     const { dt } = input;
     this.clock += dt;
     let moving = false;
-    if (this.action === "hop") {
-      this.hopClock += dt;
-      if (this.hopClock >= HOP_SECONDS) this.setAction("stand");
+    const oneShotSeconds = measureOneShot(this.action);
+    if (oneShotSeconds !== null) {
+      this.oneShotClock += dt;
+      if (this.oneShotClock >= oneShotSeconds) this.setAction("stand");
       moving = true;
     }
     moving = this.measureRoot(dt) || moving;
@@ -756,6 +787,12 @@ export class Motion {
         break;
       case "sip":
         this.writeSipping(p, t, ambient);
+        break;
+      case "doze":
+        this.writeDozing(p, t, ambient);
+        break;
+      case "stretch":
+        this.writeStretch(p, t, ambient);
         break;
     }
     if (hasPlantedFeet(this.action)) {
@@ -880,7 +917,7 @@ export class Motion {
   /** Writes the hop: a crouch, a jump with arms up, a landing that squashes; then the rig stands. */
   private writeHop(p: Posture): void {
     this.writeStanding(p);
-    const t = this.hopClock;
+    const t = this.oneShotClock;
     const crouch = 0.14;
     const air = 0.32;
     let dip: number;
@@ -1049,6 +1086,60 @@ export class Motion {
   }
 
   /**
+   * Writes the doze: sunk back into an armchair, the body leaning back and
+   * tilted to one side, hands in the lap, feet fallen open. Only slow, deep
+   * breaths move it, so with ambient motion off the doze holds still.
+   */
+  private writeDozing(p: Posture, t: number, ambient: number): void {
+    this.writeSitting(p);
+    p.pelvis.z += 0.02;
+    p.torsoTurn.x -= 0.12;
+    p.torsoTurn.z += 0.16;
+    // A bean's head is its body: it drops by settling a little lower and wider.
+    p.squash = 0.985;
+    const breath = Math.sin(2 * Math.PI * 0.17 * t) * ambient;
+    p.squash += 0.022 * breath;
+    for (const side of SIDES) {
+      p.footTurns[side].y += mirrorX(side) * 0.3;
+      p.hands[side].y += 0.006 * breath;
+    }
+  }
+
+  /**
+   * Writes the stretch after a doze: both arms go up as high as they reach,
+   * the body leans back and grows a little taller, holds, then the arms come
+   * down again. It is timed by the one-shot clock and ends in `stand`.
+   */
+  private writeStretch(p: Posture, t: number, ambient: number): void {
+    this.writeStanding(p);
+    this.addBreath(p, t, ambient, 0.4);
+    const time = this.oneShotClock;
+    const rise = 0.6;
+    const fall = 0.7;
+    // 0 at rest, 1 at the top of the stretch: up over `rise`, held, down over `fall`.
+    const reach =
+      time < rise
+        ? easeInOut(time / rise)
+        : 1 - easeInOut((time - (STRETCH_SECONDS - fall)) / fall);
+    p.torsoTurn.x -= 0.1 * reach;
+    p.squash += 0.05 * reach;
+    p.pelvis.y += 0.008 * reach;
+    for (const side of SIDES) {
+      const x = mirrorX(side);
+      const shoulder = this.shoulders[side];
+      const up = scratchPoint.set(
+        shoulder.x + x * 0.08,
+        shoulder.y + this.reach * 0.9,
+        shoulder.z - 0.01,
+      );
+      p.hands[side].lerp(up, reach);
+      p.elbowPoles[side].set(x, -0.3 * reach, -1 + reach * 0.7);
+      // The mittens tip back, palms up, at the top of the stretch.
+      p.handTurns[side].set(-0.4 * reach, 0, 0);
+    }
+  }
+
+  /**
    * Turns the head toward the look target, or the camera, or a glance
    * around, smoothly and within a neck's reach. Returns true while it turns.
    */
@@ -1056,7 +1147,9 @@ export class Motion {
     let yaw = 0;
     let pitch = 0;
     const yawLimit = 0.6;
-    if (input.look !== null) {
+    if (this.action === "doze") {
+      // A dozer looks at nothing, not even the pointer.
+    } else if (input.look !== null) {
       const local = scratchPoint.copy(input.look).applyMatrix4(this.inverseRoot);
       const headY = this.output.pelvis.y + this.anatomy.neck.y + this.anatomy.egg.height * 0.55;
       local.y -= headY;
@@ -1066,7 +1159,11 @@ export class Motion {
       yaw = Math.max(-yawLimit, Math.min(yawLimit, yaw));
       pitch = -Math.atan2(local.y, Math.max(0.1, Math.hypot(local.x, local.z)));
       pitch = Math.max(-0.35, Math.min(0.3, pitch));
-    } else if (input.ambient > 0 && this.action !== "walk" && this.action !== "hop") {
+    } else if (
+      input.ambient > 0 &&
+      measureOneShot(this.action) === null &&
+      this.action !== "walk"
+    ) {
       // A glance to one side now and then.
       const slot = Math.floor((this.clock + this.seed * 50) / 4.6);
       const pick = hashToUnit(this.seed, slot);

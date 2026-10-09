@@ -10,16 +10,13 @@
  *
  * 1. removes the Density and Text size rows: the app has neither setting
  *    yet, and each comes with its own ticket;
- * 2. removes the Start and motion section, which comes with its own ticket;
- * 3. redraws Ada's face in every theme card without the cloche the book
- *    casts her with: the app's wardrobe has no cloche, so the app draws Ada
- *    with no accessory, in the same hue, shape and pose.
+ * 2. removes the Start and motion section, which comes with its own ticket.
  *
  * An edit that finds nothing to edit fails, because the book has changed and
  * the comparison would no longer compare what it claims to.
  */
-import { findElement, findElementByText, findElements } from "./book-page";
-import { markSheetReady, readCrew, stillBookPage } from "./sheet-page";
+import { findElement, findElementByText } from "./book-page";
+import { markSheetReady, stillBookPage } from "./sheet-page";
 
 /** Returns the `.set-row` whose label is `label`. */
 function findRow(scope: ParentNode, label: string): HTMLElement {
@@ -36,19 +33,5 @@ findRow(body, "Text size").remove();
 
 // 2. Start and motion.
 findElementByText(body, ".set-sec > h2", "Start and motion").parentElement!.remove();
-
-// 3. Ada without the cloche: one face in each of the five cards. crew.js
-// draws a face with a given look only as a string of markup, so the face is
-// parsed from it, as the reference sheet (reference.ts) parses its pieces.
-const crew = readCrew();
-for (const face of findElements(body, ".tp-row:nth-child(2) > svg", 5)) {
-  const template = document.createElement("template");
-  template.innerHTML = crew.face("Ada", {
-    look: { hue: "iris", shape: "egg", acc: "none" },
-    pose: "working",
-    size: 20,
-  });
-  face.replaceWith(template.content);
-}
 
 await markSheetReady();

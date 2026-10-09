@@ -612,3 +612,96 @@ export function buildYourDesk(): DeskHandle {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// The assistant's writing desk.
+
+/** The surfaces of the writing desk: the clerk's desk's, plus the ink and the inkwell's glass. */
+const WRITING_DESK_SURFACES = {
+  ...DESK_SURFACES,
+  ink: { token: "room-inlay-2", finish: "gloss", shadow: false },
+} as const satisfies Record<string, Surface>;
+
+/** How far the writing desk's chair stands in front of the desk's centre. */
+const WRITING_CHAIR_Z = 0.66;
+
+/** Builds the writing desk's shared geometry. */
+const readWritingDeskGeometry = memoize(() => {
+  const parts = new PartList(WRITING_DESK_SURFACES);
+  const top = DESK_HEIGHT;
+  // The top, with a brass line under its edge, on an apron with one shallow drawer.
+  parts.add("wood", buildBlock(1.0, 0.04, 0.6, 0.018, 2), { y: top - 0.04 });
+  parts.add("brass", buildBlock(0.96, 0.01, 0.56, 0.004, 1), { y: top - 0.05 });
+  parts.add("wood", buildBlock(0.9, 0.09, 0.5, 0.01, 1), { y: top - 0.14 });
+  parts.add("wood", buildBlock(0.4, 0.07, 0.02, 0.008, 1), { y: top - 0.13, z: 0.25 });
+  parts.add("brass", buildBlock(0.08, 0.012, 0.016, 0.006, 1), { y: top - 0.1, z: 0.264 });
+  // Four slim legs that taper to brass toes.
+  for (const x of [-0.42, 0.42]) {
+    for (const z of [-0.22, 0.22]) {
+      parts.add("wood", buildCylinder(0.024, 0.014, top - 0.17, 10), { x, y: 0.03, z });
+      parts.add("brass", buildCylinder(0.016, 0.016, 0.03, 10), { x, z });
+    }
+  }
+  // A low gallery along the back of the top: a rail on three posts.
+  parts.add("wood", buildBlock(0.9, 0.11, 0.06, 0.01, 1), { y: top, z: -0.26 });
+  parts.add("brass", buildBlock(0.9, 0.008, 0.008, 0.003, 1), { y: top + 0.11, z: -0.232 });
+  // The writing pad, a leather blotter with a brass corner at each end, and a sheet of paper on it.
+  // It lies under the sitter's hands while it writes: they rest 0.43 in front of the seat, at z 0.23.
+  parts.add("blotter", buildSheet(0.5, 0.006, 0.34), { y: top, z: 0.12 });
+  for (const side of [-1, 1]) {
+    parts.add("brass", buildSheet(0.03, 0.008, 0.34), { x: side * 0.25, y: top, z: 0.12 });
+  }
+  parts.add("paper", buildSheet(0.2, 0.003, 0.27), { x: 0.03, y: top + 0.006, z: 0.14, ry: -0.08 });
+  // The inkwell: a squat cut-glass well in a brass tray, with a pen resting beside it.
+  parts.nest({ x: 0.36, y: top, z: -0.1 }, () => {
+    parts.add("brass", buildBlock(0.16, 0.012, 0.1, 0.005, 1));
+    parts.add("ink", buildBlock(0.055, 0.045, 0.055, 0.01, 1), { x: -0.03, y: 0.012 });
+    parts.add("brass", buildCylinder(0.016, 0.018, 0.012, 10), { x: -0.03, y: 0.057 });
+    parts.add(
+      "ink",
+      buildRod(new Vector3(0.02, 0.018, 0.035), new Vector3(0.07, 0.022, -0.04), 0.005, 6),
+    );
+  });
+  parts.nest({ x: -0.34, y: top, z: -0.12 }, () => addBankersLampParts(parts));
+  parts.nest({ z: WRITING_CHAIR_Z, ry: Math.PI }, () => addChairParts(parts));
+  return parts.merge();
+});
+
+/**
+ * Builds an assistant's writing desk with its chair: a slimmer desk than a
+ * clerk's, on four tapered legs, with a writing pad, an inkwell and a
+ * banker's lamp. The chair is on the desk's +z side, so its sitter faces -z,
+ * across the desk, and writes on the pad.
+ *
+ * The desk is 1.0 wide (x) and 0.6 deep (z, from -0.3 to 0.3), its top at
+ * `DESK_HEIGHT`. The chair's seat is centred on the marker at (0, 0, 0.66).
+ * `setNote` and `setCup` show the marigold note and a cup of tisane, as on a
+ * clerk's desk.
+ */
+export function buildWritingDesk(): DeskHandle {
+  const object = new Group();
+  object.name = "writing-desk";
+  const meshes = addMeshes(object, readWritingDeskGeometry());
+  const shade = meshes.get("shade")!;
+  const pool = buildPoolMesh(0.56, 0.5);
+  pool.position.set(-0.22, DESK_HEIGHT + 0.0075, 0.02);
+  object.add(pool);
+  const note = addToggle(object, readNoteGeometry(), -0.3, DESK_HEIGHT, 0.18, 0.35);
+  const cup = addToggle(object, readCupGeometry(), 0.34, DESK_HEIGHT, 0.17, -0.6);
+  const seatMarker = buildMarker(0, WRITING_CHAIR_Z, Math.PI);
+  object.add(seatMarker);
+  return {
+    object,
+    seatMarker,
+    setLamp(on) {
+      shade.material = on ? paintLitShade() : paint("room-lamp", "gloss");
+      pool.visible = on;
+    },
+    setNote(on) {
+      note.visible = on;
+    },
+    setCup(on) {
+      cup.visible = on;
+    },
+  };
+}

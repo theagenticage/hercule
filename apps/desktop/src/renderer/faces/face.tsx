@@ -1,5 +1,5 @@
 import { Fragment, type CSSProperties, type JSX } from "react";
-import { drawAccessory } from "./accessories";
+import { drawAccessory, drawHeadwear } from "./accessories";
 import {
   drawBrows,
   drawEyes,
@@ -74,6 +74,7 @@ export function Face({
       {look.accessories.map((accessory) => (
         <Fragment key={accessory}>{drawAccessory(accessory, topY)}</Fragment>
       ))}
+      {look.headwear !== null && drawHeadwear(look.headwear, topY)}
       {tapping ? drawTypewriter() : drawPoseExtras(pose)}
     </>
   );

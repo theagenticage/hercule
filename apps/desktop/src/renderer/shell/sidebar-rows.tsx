@@ -19,7 +19,7 @@
 import { memo, useId, type ComponentProps, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import { describePose, isSeatedPose, type Pose } from "@hercule/client-core";
-import { buildLook, Face } from "../faces";
+import { buildAssistantLook, buildLook, Face } from "../faces";
 import { ComposeIcon } from "../icons/compose";
 import { PlusIcon } from "../icons/plus";
 import { Mark } from "../marks";
@@ -97,6 +97,44 @@ function ThreadLink({
 }
 
 /**
+ * Renders a link to the Conversation of the assistant `assistantId`. While
+ * `officeOpen` is true, the link opens the Conversation in the Office's
+ * drawer, because an assistant always has a colleague there; otherwise it
+ * opens the assistant's own screen. The other props are the link's own.
+ * Either way the router marks the link as the current page while its
+ * Conversation is open, so an assistant listed twice is marked in both
+ * places.
+ */
+export function ConversationLink({
+  assistantId,
+  officeOpen,
+  ...props
+}: Pick<
+  ComponentProps<"a">,
+  "className" | "style" | "aria-label" | "aria-describedby" | "children"
+> & {
+  readonly assistantId: string;
+  readonly officeOpen: boolean;
+  readonly "data-key"?: string;
+}): JSX.Element {
+  return officeOpen ? (
+    <Link
+      to="/office"
+      search={{ assistant: assistantId }}
+      activeProps={SELECTED_LINK_PROPS}
+      {...props}
+    />
+  ) : (
+    <Link
+      to="/assistants/$assistantId"
+      params={{ assistantId }}
+      activeProps={SELECTED_LINK_PROPS}
+      {...props}
+    />
+  );
+}
+
+/**
  * Renders a thread in Waiting on you: its waiting face, its title and the
  * question it asks. The link is named "<title>, waiting on you" and described
  * by the question; the face is hidden, because the name already says the
@@ -143,8 +181,8 @@ export const WaitingThreadRow = memo(function WaitingThreadRow({
  * Renders an assistant in Waiting on you, drawn as a waiting thread's row:
  * its waiting face, its name and the question it asks. The link is named
  * "<name>, waiting on you" and described by the question. It opens the
- * assistant's Conversation, where the Request is answered, also while the
- * Office is open, because an assistant has no colleague there.
+ * assistant's Conversation, where the Request is answered: in the Office's
+ * drawer while `officeOpen` is true, as `ConversationLink` describes.
  */
 export const WaitingAssistantRow = memo(function WaitingAssistantRow({
   itemKey,
@@ -152,31 +190,32 @@ export const WaitingAssistantRow = memo(function WaitingAssistantRow({
   assistantId,
   name,
   question,
+  officeOpen,
 }: Placement & {
   readonly assistantId: string;
   readonly name: string;
   readonly question: string;
+  readonly officeOpen: boolean;
 }): JSX.Element {
   const questionId = useId();
   return (
-    <Link
-      to="/assistants/$assistantId"
-      params={{ assistantId }}
-      activeProps={SELECTED_LINK_PROPS}
+    <ConversationLink
+      assistantId={assistantId}
+      officeOpen={officeOpen}
       className="side-row side-row--wait side-item"
       data-key={itemKey}
       style={{ marginTop: leading, height: ITEM_HEIGHTS["waiting-assistant-row"] }}
       aria-label={`${name}, ${describePose("waiting")}`}
       aria-describedby={questionId}
     >
-      <Face look={buildLook(assistantId)} pose="waiting" size={24} />
+      <Face look={buildAssistantLook(assistantId)} pose="waiting" size={24} />
       <span className="side-text">
         <span className="side-name">{name}</span>
         <span className="side-ask" id={questionId}>
           {question}
         </span>
       </span>
-    </Link>
+    </ConversationLink>
   );
 });
 

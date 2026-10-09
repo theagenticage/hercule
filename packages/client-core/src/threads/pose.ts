@@ -21,6 +21,12 @@ export const POSES = [
 /** A colleague's state, as its face shows it. */
 export type Pose = (typeof POSES)[number];
 
+/**
+ * The poses a session can be in today: every pose but `failed`, `paused` and
+ * `done`, which `decideThreadPose` never returns (see there).
+ */
+export type SessionPose = Exclude<Pose, "failed" | "paused" | "done">;
+
 /** The words for each pose, as the Bureau book's `poseWord` in crew.js spells them. */
 const POSE_WORDS: Readonly<Record<Pose, string>> = {
   working: "working",
@@ -35,6 +41,18 @@ const POSE_WORDS: Readonly<Record<Pose, string>> = {
 
 /** Returns the words that describe a pose to assistive technology, such as "waiting on you". */
 export const describePose = (pose: Pose): string => POSE_WORDS[pose];
+
+/** The poses of a colleague who is not at work: asleep, or out of reach. */
+export type AbsentPose = Extract<Pose, "asleep" | "away">;
+
+/**
+ * Checks whether a colleague in `pose` is not at work: true for `asleep` and
+ * `away`, false for every other pose. A face in an absent pose shows no
+ * mark beside its state, because no mark stands for being gone; the face
+ * itself shows it.
+ */
+export const isAbsentPose = (pose: Pose): pose is AbsentPose =>
+  pose === "asleep" || pose === "away";
 
 /**
  * Checks whether the session cannot run again until the user acts:
@@ -74,7 +92,7 @@ const isRunnerDisconnected = (runner: Runner | undefined): boolean =>
  * not say why a session ended, so a row cannot claim any of them. #278 adds
  * that reason, and `failed` with it.
  */
-export const decideThreadPose = (session: Session, runner: Runner | undefined): Pose => {
+export const decideThreadPose = (session: Session, runner: Runner | undefined): SessionPose => {
   if (session.openRequests.length > 0) return "waiting";
   if (isStoppedUntilUserActs(session) || isRunnerDisconnected(runner)) return "away";
   if (session.status === "exited") return "asleep";

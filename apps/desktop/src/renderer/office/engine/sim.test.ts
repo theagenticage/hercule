@@ -7,30 +7,34 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Object3D } from "three";
-import type { Session } from "@hercule/contract";
+import type { OpenRequest, Session } from "@hercule/contract";
+import type { AssistantRow, SessionPose } from "@hercule/client-core";
 import { MOSS, buildSession } from "@hercule/client-core/threads/testing";
 import { buildBureau } from "../maps/bureau";
 import { buildWorld } from "../world/build-world";
-import type { Action, BuiltOffice, ColleagueRig, Sim } from "./contracts";
+import type { Action, BuiltOffice, ColleagueRig, Sim, Spot } from "./contracts";
 import { createNavBuilder } from "./nav";
 import { buildSim } from "./sim";
 import type { Stage } from "./stage";
 
-/** A rig that draws nothing and records the last action the sim gave it. */
+/** A rig that draws nothing and records the actions and faces the sim gave it. */
 interface RecordingRig extends ColleagueRig {
   readonly actions: Action[];
+  readonly faces: SessionPose[];
 }
 
-/** Returns a rig for `colleague` that records its actions. */
+/** Returns a rig for `colleague` that records its actions and faces. */
 const buildRecordingRig = (colleague: ColleagueRig["colleague"]): RecordingRig => {
   const actions: Action[] = [];
+  const faces: SessionPose[] = [];
   return {
     colleague,
     object: new Object3D(),
     headHeight: 1.6,
     actions,
+    faces,
     setAction: (action) => void actions.push(action),
-    setFace: () => {},
+    setFace: (pose) => void faces.push(pose),
     setWalkSpeed: () => {},
     lookAt: () => {},
     setHovered: () => {},
@@ -96,13 +100,17 @@ interface OpenOffice {
 
 const opened: Sim[] = [];
 
-/** Builds the Bureau office for `sessions` on moss, and starts its sim. */
-const openOffice = (sessions: ReadonlyArray<Session>): OpenOffice => {
+/** Builds the Bureau office for `sessions` and `assistants` on moss, and starts its sim. */
+const openOffice = (
+  sessions: ReadonlyArray<Session>,
+  assistants: ReadonlyArray<AssistantRow> = [],
+): OpenOffice => {
   const world = buildWorld({
     sessions,
     projects: [],
     workspaces: [],
     runners: [MOSS],
+    assistants,
     localRunnerId: MOSS.id,
   });
   const office = buildBureau({ world, nav: createNavBuilder() });
@@ -134,6 +142,43 @@ const buildThreads = (count: number, status: Session["status"]): Session[] =>
   Array.from({ length: count }, (_, index) =>
     buildSession({ id: `t${index}`, title: `t${index}`, runnerId: MOSS.id, status }),
   );
+
+const REQUEST: OpenRequest = {
+  requestId: "req-1",
+  itemId: "tool-1",
+  kind: "command_approval",
+  decisions: ["allow", "deny"],
+  detail: { command: "git push" },
+};
+
+/**
+ * Returns the sidebar row of an assistant with id `id` in `pose`. A waiting
+ * assistant has a current session with an open Request, which is what queues
+ * it; the others need none for the sim.
+ */
+const buildAssistant = (id: string, pose: SessionPose): AssistantRow => ({
+  id,
+  name: id,
+  pose,
+  session:
+    pose === "waiting"
+      ? buildSession({
+          id: `s-${id}`,
+          agentId: id,
+          conversationId: `c-${id}`,
+          status: "busy",
+          runnerId: MOSS.id,
+          openRequests: [REQUEST],
+        })
+      : null,
+});
+
+/** Returns the state the director gives a colleague that moves to `pose`. */
+const buildState = (pose: SessionPose) => ({ pose, request: null, stateLabel: pose });
+
+/** Checks whether the colleague with rig `rig` stands or sits on `spot`. */
+const isOn = (rig: RecordingRig, spot: Spot): boolean =>
+  rig.object.position.distanceTo(spot.position) < 1e-3;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -204,5 +249,142 @@ describe("a visit", () => {
     await advance(30);
 
     expect(readAction(host)).toBe("sip");
+  });
+});
+
+describe("an assistant", () => {
+  it("is where its pose puts it when the office opens, doing what its pose does", () => {
+    const { office, rigs } = openOffice(
+      [],
+      [
+        buildAssistant("a-working", "working"),
+        buildAssistant("a-idle", "idle"),
+        buildAssistant("a-asleep", "asleep"),
+        buildAssistant("a-away", "away"),
+        buildAssistant("a-waiting", "waiting"),
+      ],
+    );
+    const at = (id: string) => {
+      const rig = rigs.get(id)!;
+      return {
+        action: readAction(rig),
+        atDesk: isOn(rig, office.homes.get(id)!),
+        inArmchair: isOn(rig, office.armchairs.get(id)!),
+      };
+    };
+
+    expect(at("a-working")).toEqual({ action: "type", atDesk: true, inArmchair: false });
+    expect(at("a-idle")).toEqual({ action: "sip", atDesk: true, inArmchair: false });
+    expect(at("a-asleep")).toEqual({ action: "doze", atDesk: false, inArmchair: true });
+    expect(at("a-away")).toEqual({ action: "doze", atDesk: false, inArmchair: true });
+    expect(isOn(rigs.get("a-waiting")!, office.spots.queue[0]!)).toBe(true);
+    expect(readAction(rigs.get("a-waiting")!)).toBe("raise-hand");
+  });
+
+  it("wakes by standing up and stretching, then walks to its desk and writes", async () => {
+    const { office, sim, rigs, advance } = openOffice([], [buildAssistant("a", "asleep")]);
+    const rig = rigs.get("a")!;
+    const before = rig.actions.length;
+
+    sim.setColleagueState("a", buildState("working"), false);
+    await advance(30);
+
+    const actions = rig.actions.slice(before);
+    const stretch = actions.indexOf("stretch");
+    expect(actions.indexOf("stand")).toBeGreaterThanOrEqual(0);
+    expect(actions.indexOf("stand")).toBeLessThan(stretch);
+    expect(actions.indexOf("walk", stretch)).toBeGreaterThan(stretch);
+    expect(isOn(rig, office.homes.get("a")!)).toBe(true);
+    expect(readAction(rig)).toBe("type");
+  });
+
+  it("falls asleep by walking to its armchair and dozing there", async () => {
+    const { office, sim, rigs, advance } = openOffice([], [buildAssistant("a", "working")]);
+    const rig = rigs.get("a")!;
+
+    sim.setColleagueState("a", buildState("asleep"), false);
+    await advance(30);
+
+    expect(rig.actions).not.toContain("stretch");
+    expect(isOn(rig, office.armchairs.get("a")!)).toBe(true);
+    expect(readAction(rig)).toBe("doze");
+  });
+
+  it("stays dozing in its armchair as it goes from asleep to away, with the away face", async () => {
+    const { office, sim, rigs, advance } = openOffice([], [buildAssistant("a", "asleep")]);
+    const rig = rigs.get("a")!;
+    const before = rig.actions.length;
+
+    sim.setColleagueState("a", buildState("away"), false);
+    await advance(10);
+
+    expect(rig.actions.length).toBe(before);
+    expect(isOn(rig, office.armchairs.get("a")!)).toBe(true);
+    expect(rig.faces.at(-1)).toBe("away");
+  });
+
+  it("queues while it waits, and walks back to its desk once answered", async () => {
+    const { office, sim, rigs, advance } = openOffice([], [buildAssistant("a", "working")]);
+    const rig = rigs.get("a")!;
+
+    sim.setColleagueState("a", buildState("waiting"), false);
+    await advance(60);
+    expect(isOn(rig, office.spots.queue[0]!)).toBe(true);
+    expect(readAction(rig)).toBe("raise-hand");
+
+    sim.setColleagueState("a", buildState("working"), false);
+    await advance(60);
+    expect(isOn(rig, office.homes.get("a")!)).toBe(true);
+    expect(readAction(rig)).toBe("type");
+  });
+});
+
+describe("an idle colleague at its desk", () => {
+  it("shows the cup only while an assistant sips, and leaves the newspaper to assistants", async () => {
+    const { office, sim, rigs, advance } = openOffice(buildThreads(1, "busy"), [
+      buildAssistant("a", "idle"),
+    ]);
+    sim.setColleagueState("t0", buildState("idle"), false);
+    await advance(30);
+    const assistant = rigs.get("a")!;
+    const home = office.homes.get("a")!;
+    // An idle assistant opens the office sipping, with its cup on the desk.
+    let cupShown = true;
+    vi.spyOn(home.desk!, "setCup").mockImplementation((on) => void (cupShown = on));
+    const thread = rigs.get("t0")!;
+    const threadActionsBefore = thread.actions.length;
+    sim.setLiveliness(2);
+
+    const assistantActions = new Set<Action>();
+    for (let second = 0; second < 600; second++) {
+      await advance(1);
+      const action = readAction(assistant)!;
+      assistantActions.add(action);
+      // The check waits until the assistant sits at its desk: it sits down
+      // to sip with the fetched tea in hand, and the cup goes on the desk after.
+      if (isOn(assistant, home) && (action === "read" || action === "sip"))
+        expect(cupShown).toBe(action === "sip");
+    }
+
+    expect(assistantActions).toContain("read");
+    expect(assistantActions).toContain("sip");
+    expect(thread.actions.slice(threadActionsBefore)).not.toContain("read");
+  });
+});
+
+describe("a still office", () => {
+  it("starts no happening, doze or stretch, and keeps no timer", async () => {
+    const { sim, rigs, advance } = openOffice(buildThreads(4, "busy"), [
+      buildAssistant("a-working", "working"),
+      buildAssistant("a-idle", "idle"),
+      buildAssistant("a-asleep", "asleep"),
+    ]);
+    sim.setLiveliness(0);
+    const counts = new Map([...rigs].map(([id, rig]) => [id, rig.actions.length]));
+
+    await advance(600);
+
+    expect(new Map([...rigs].map(([id, rig]) => [id, rig.actions.length]))).toEqual(counts);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
