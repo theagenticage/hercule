@@ -472,6 +472,50 @@ describe("buildThreadBlocks", () => {
     expect(blocks.at(-1)).toEqual({ kind: "pending", key: "pending", since: buildInstant(2) });
   });
 
+  it("draws no agent block for a message the user stopped before its first word, and keeps the ending", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Hi"),
+      buildItemStarted("t1", "a1", "assistant_message", 1),
+      buildTurnCompleted("t1", 3, "interrupted"),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(IDLE));
+
+    expect(listKeys(blocks)).toEqual(["user:u1", "ending:t1"]);
+  });
+
+  it("draws no agent block for a completed message with no text, and shows the status line in its place", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Hi"),
+      buildItemStarted("t1", "a1", "assistant_message", 1),
+      buildItemCompleted("t1", "a1", "assistant_message", 2),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+
+    // The empty message cannot hold the working face, so the status line does.
+    expect(listKeys(blocks)).toEqual(["user:u1", "pending"]);
+  });
+
+  it("keeps an open message with no text yet, so its row can wait for the first word", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Hi"),
+      buildItemStarted("t1", "a1", "assistant_message", 1),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+
+    expect(listKeys(blocks)).toEqual(["user:u1", "agent:a1"]);
+    expect(findBlock(blocks, "agent", "agent:a1")).toMatchObject({
+      text: "",
+      open: true,
+      live: true,
+    });
+  });
+
   it("keeps the status line when a new turn only reasons after an earlier turn ended on work", () => {
     // A subagent can wake into a turn of its own with no user message. The
     // earlier turn's finished stretch is then the last block, but it is not a

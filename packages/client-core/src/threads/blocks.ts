@@ -193,7 +193,8 @@ const readChangedPaths = (event: ItemStarted): readonly string[] => {
  * Requests the agent waits on, and the model when a turn does not name one.
  *
  * - A `user` block per user message, and an `agent` block per assistant
- *   message, placed where the message started.
+ *   message, placed where the message started. A message with no text gets
+ *   a block only while it is open, since the agent may yet write it.
  * - A `work` block per stretch of items between two messages of a turn, once
  *   it holds an item other than reasoning.
  * - An `ending` block after a turn that was stopped, failed, or cut short. A
@@ -448,7 +449,13 @@ export const buildThreadBlocks = (
       case "warning":
         blocks.push(slot);
         break;
-      case "agent":
+      case "agent": {
+        const open = slot.itemId === openItemId && !slot.turn.finished;
+        // A message that ended with no text, such as one the user stopped
+        // before its first word, would draw a face and a meta line beside
+        // nothing. Only an open message may be empty: its row waits for the
+        // first word behind a "Writing…" line.
+        if (slot.text === "" && !open) break;
         blocks.push({
           kind: "agent",
           key: `agent:${slot.itemId}`,
@@ -457,10 +464,11 @@ export const buildThreadBlocks = (
           text: slot.text,
           startedAt: slot.startedAt,
           model: model(slot.turn),
-          open: slot.itemId === openItemId && !slot.turn.finished,
+          open,
           live: slot === faceAgent,
         });
         break;
+      }
       case "work":
         if (slot.items.every((item) => item.kind === "reasoning")) break;
         blocks.push({
@@ -519,5 +527,6 @@ const findFaceAgent = (
   if (writing !== undefined && writing.turn === running) return writing;
   const lastStarted =
     running.lastStartedItemId === null ? undefined : agents.get(running.lastStartedItemId);
-  return lastStarted?.completed === true ? lastStarted : undefined;
+  // A message with no text is not drawn, so it cannot hold the face.
+  return lastStarted?.completed === true && lastStarted.text !== "" ? lastStarted : undefined;
 };
