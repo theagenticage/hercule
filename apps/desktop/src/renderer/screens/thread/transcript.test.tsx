@@ -89,18 +89,11 @@ describe("Transcript", () => {
     expect(vi.getTimerCount()).toBe(1);
   });
 
-  it("animates the live row's face only while the thread works", () => {
-    // The turn has started and no step or message has followed the user's
-    // message yet: no message holds the face and no divider shows, so the
-    // live row does.
-    const rowsBeforeFirstStep = THREAD.transcript.slice(
-      0,
-      THREAD.transcript.findIndex(
-        (row) => "itemId" in row.event && row.event.itemId === "turn-1-rerun",
-      ),
-    );
-    const blocks = buildThreadBlocks(rowsBeforeFirstStep, buildSessionAgentState(THREAD.session));
-    expect(blocks.at(-1)?.kind).toBe("live");
+  it("animates the face of the message the agent is writing only while the thread works", () => {
+    // The running fixture's agent is writing its answer, so its message holds
+    // the working face.
+    const blocks = buildThreadBlocks(THREAD.transcript, buildSessionAgentState(THREAD.session));
+    expect(blocks.at(-1)).toMatchObject({ kind: "agent", open: true, live: true });
     const renderTranscript = (pose: Pose) => (
       <Transcript
         faceSeed={THREAD.session.id}
@@ -115,11 +108,43 @@ describe("Transcript", () => {
     const { container, rerender } = render(renderTranscript("working"));
     const animated = [...container.querySelectorAll(".cr--animated")];
     expect(animated.map((face) => face.closest(".msg")?.textContent)).toEqual([
-      "Claude Code · Claude Sonnet 5",
+      expect.stringContaining("Claude Code · Claude Sonnet 5"),
     ]);
 
     rerender(renderTranscript("waiting"));
     expect(container.querySelector(".cr--animated")).toBeNull();
+  });
+
+  it("draws a status line, and no face or agent row, while the turn has drawn nothing yet", () => {
+    // The turn has started and no step or message has followed the user's
+    // message yet.
+    const rowsBeforeFirstStep = THREAD.transcript.slice(
+      0,
+      THREAD.transcript.findIndex(
+        (row) => "itemId" in row.event && row.event.itemId === "turn-1-rerun",
+      ),
+    );
+    const blocks = buildThreadBlocks(rowsBeforeFirstStep, buildSessionAgentState(THREAD.session));
+    expect(blocks.at(-1)?.kind).toBe("pending");
+
+    const { container } = render(
+      <Transcript
+        faceSeed={THREAD.session.id}
+        blocks={blocks}
+        pose="working"
+        describeAgent={() => "Claude Code · Claude Sonnet 5"}
+        attachOpenParagraph={() => undefined}
+        composerStack={null}
+        onBottomChange={() => {}}
+      />,
+    );
+
+    const status = screen.getByRole("status");
+    expect(status.querySelector("b")?.textContent).toMatch(/^Working for \d+s$/);
+    // A screen reader hears the state, not the count.
+    expect(status.querySelector(".visually-hidden")?.textContent).toBe("Working");
+    expect(container.querySelector(".msg")).toBeNull();
+    expect(container.querySelector(".cr")).toBeNull();
   });
 
   it("draws the lead first, as the column's first item, so it scrolls with the blocks", () => {

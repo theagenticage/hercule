@@ -380,6 +380,7 @@ export {
   buildThreadBlocks,
   type AgentBlock,
   type EndingBlock,
+  type PendingBlock,
   type ThreadBlock,
   type WorkBlock,
 } from "./threads/blocks";
@@ -517,7 +518,7 @@ export { buildBranchField, type BranchField } from "./threads/branch-menu";
 export { buildWorkspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
 export { buildThreadWorkspaceLabel } from "./threads/thread-workspace";
 export { buildWorkspaceDetails, type WorkspaceDetails } from "./workspace-details";
-export { describeWorkStretch, summarizeWork } from "./threads/work-summary";
+export { describePending, describeWorkStretch, summarizeWork } from "./threads/work-summary";
 export {
   describeRemoteRefusal,
   isClonableRemote,

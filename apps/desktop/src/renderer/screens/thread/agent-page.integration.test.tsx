@@ -83,9 +83,16 @@ const openThread = async (
 /** Returns the transcript region. */
 const findTranscript = (): HTMLElement => screen.getByRole("region", { name: "Transcript" });
 
-/** Returns the text of each block the transcript draws, in order. */
+/**
+ * Returns the text of each block the transcript draws, in order. A message's
+ * block is its row's text: the "Writing…" line that stands in for an open
+ * message with no text is checked on its own, because jsdom does not apply
+ * the stylesheet that hides one of the two.
+ */
 const readBlocks = (): string[] =>
-  [...findTranscript().querySelectorAll(".tx-item")].map((item) => item.textContent);
+  [...findTranscript().querySelectorAll(".tx-item")].map(
+    (item) => (item.querySelector(".msg") ?? item).textContent,
+  );
 
 /** The message the running thread's agent starts once the thread is open, whose taps are painted. */
 const NEXT_ITEM_ID = "turn-1-fix";
@@ -227,7 +234,7 @@ describe("the thread screen", () => {
     expect(animated).toHaveLength(1);
     // The message is still open, so the paragraph being written shows as
     // stored, with the space the next word follows.
-    expect(animated[0]!.closest(".tx-item")?.textContent).toBe(
+    expect(animated[0]!.closest(".msg")?.textContent).toBe(
       "Claude Code · Claude Sonnet 5 · 11:03The three failures share one cause: ",
     );
   });
@@ -259,6 +266,13 @@ describe("the thread screen", () => {
     expect(animated.map((face) => face.closest(".tx-item"))).toEqual([
       findOpenParagraph().closest(".tx-item"),
     ]);
+    // The message has no word yet, so a "Writing…" line stands before its row.
+    // Which of the two shows is the stylesheet's to decide, and jsdom reads its
+    // `:has()` rules in its own way, so the packaged-app test checks what is
+    // visible and this one checks what is drawn.
+    const item = findOpenParagraph().closest<HTMLElement>(".tx-item")!;
+    expect(within(item).getByRole("status", { hidden: true }).textContent).toBe("Writing…Writing");
+    expect(item.querySelector(".msg-pending + .msg")).not.toBeNull();
 
     act(() => {
       live.pushTaps(sessionId, buildTaps("It is a race ", "in the **retry** queue.\n\nThe fix "));

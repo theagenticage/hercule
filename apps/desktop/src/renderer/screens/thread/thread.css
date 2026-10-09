@@ -45,6 +45,33 @@
 button.worked:hover b {
   color: var(--ink);
 }
+/* The words only a screen reader gets: a status line's label may count up
+   every second, so the live region holds a text that changes with the state. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The agent's message the agent has started and not yet written a word of.
+   A face and a meta line with nothing beside them would read as a response
+   that has started, so the message's row is hidden and the "Writing…" line
+   before it shows, until the first word lands in the paragraph being written
+   (`.msg-meta + .streaming:empty`: no finished paragraph, and none being
+   written). The live hook fills that paragraph outside React, so only a
+   selector sees the first word arrive. */
+.msg-pending + .msg:has(.msg-meta + .streaming:empty) {
+  display: none;
+}
+/* Written without a `:has()` inside `:has()`, which a selector may not hold:
+   the line goes once what follows the meta line is not an empty paragraph. */
+.msg-pending:has(+ .msg .msg-meta + :not(.streaming:empty)) {
+  display: none;
+}
+
 /* The chevron points down while the stretch is expanded, as it does in the
    web app. The book draws no expanded state. The chevron is a box of its own
    only while the stretch is expanded (blocks.tsx says why), so it turns at

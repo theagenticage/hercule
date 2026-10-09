@@ -43,13 +43,13 @@ describe("splitSubagentBrief", () => {
     attachments: [],
     at: "2026-10-05T09:00:00.000Z",
   });
-  const live: ThreadBlock = { kind: "live", key: "live", model: "claude-haiku-5" };
+  const pending: ThreadBlock = { kind: "pending", key: "pending", since: null };
 
   it("takes the first block's user message out as the brief", () => {
     const later = user("And then?");
-    expect(splitSubagentBrief([user("Read the docs"), live, later])).toEqual({
+    expect(splitSubagentBrief([user("Read the docs"), pending, later])).toEqual({
       brief: "Read the docs",
-      blocks: [live, later],
+      blocks: [pending, later],
     });
   });
 
@@ -60,20 +60,23 @@ describe("splitSubagentBrief", () => {
       message: "the harness named a subagent",
       at: "2026-10-05T09:00:00.000Z",
     };
-    expect(splitSubagentBrief([warning, user("Read the docs"), live])).toEqual({
+    expect(splitSubagentBrief([warning, user("Read the docs"), pending])).toEqual({
       brief: "Read the docs",
-      blocks: [warning, live],
+      blocks: [warning, pending],
     });
   });
 
   it("returns no brief and every block when the first block is not a user message with text", () => {
     const empty = user("");
     expect(splitSubagentBrief([])).toEqual({ brief: undefined, blocks: [] });
-    expect(splitSubagentBrief([live, user("Late")])).toEqual({
+    expect(splitSubagentBrief([pending, user("Late")])).toEqual({
       brief: undefined,
-      blocks: [live, user("Late")],
+      blocks: [pending, user("Late")],
     });
-    expect(splitSubagentBrief([empty, live])).toEqual({ brief: undefined, blocks: [empty, live] });
+    expect(splitSubagentBrief([empty, pending])).toEqual({
+      brief: undefined,
+      blocks: [empty, pending],
+    });
   });
 });
 

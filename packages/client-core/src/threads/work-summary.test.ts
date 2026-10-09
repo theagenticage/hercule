@@ -2,11 +2,12 @@
  * Tests the words on a work stretch's divider:
  *
  * - `summarizeWork(items)` counts the stretch's items by kind;
- * - `describeWorkStretch(block, now)` returns "Working for" or "Worked for".
+ * - `describeWorkStretch(block, now)` returns "Working for" or "Worked for";
+ * - `describePending(since, now)` returns "Working for" or "Starting…".
  */
 import { describe, expect, it } from "vitest";
 import type { WorkBlock, WorkItem } from "./blocks";
-import { describeWorkStretch, summarizeWork } from "./work-summary";
+import { describePending, describeWorkStretch, summarizeWork } from "./work-summary";
 
 let itemSeq = 0;
 
@@ -102,5 +103,17 @@ describe("describeWorkStretch", () => {
     expect(describeWorkStretch(block, Date.parse(STARTED_AT) + 3_600_000)).toBe(
       "Worked for 2m 14s",
     );
+  });
+});
+
+describe("describePending", () => {
+  const SINCE = "2026-09-30T09:00:00.000Z";
+
+  it("counts the wait from its start to now", () => {
+    expect(describePending(SINCE, Date.parse(SINCE) + 12_000)).toBe("Working for 12s");
+  });
+
+  it("reads Starting… while no turn has started", () => {
+    expect(describePending(null, Date.parse(SINCE))).toBe("Starting…");
   });
 });

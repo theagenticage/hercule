@@ -67,3 +67,12 @@ export const describeWorkStretch = (block: WorkBlock, now: number): string => {
     ? `Working for ${formatDuration(now - startedAt)}`
     : `Worked for ${formatDuration(Date.parse(block.endedAt) - startedAt)}`;
 };
+
+/**
+ * Returns the words on a turn's status line while nothing else shows that
+ * the agent is busy: "Working for 12s", counted from `since` to `now`
+ * (milliseconds since the epoch), or "Starting…" when `since` is `null`
+ * because no turn has started yet.
+ */
+export const describePending = (since: string | null, now: number): string =>
+  since === null ? "Starting…" : `Working for ${formatDuration(now - Date.parse(since))}`;

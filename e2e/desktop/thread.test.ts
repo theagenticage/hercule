@@ -4,6 +4,10 @@
  * (spec 17, §Design system, **The thread**):
  *
  * - a thread opens from the sidebar, and its transcript shows its rows;
+ * - a message the agent has started, with no word yet, shows a "Writing…"
+ *   line and no agent row, and the row shows once the first word arrives,
+ *   while the message is still open; a message the user stops before its
+ *   first word shows no agent row at all;
  * - a message streams into the tail before its row lands, then shows as
  *   markdown, below a divider that sums up the work before it;
  * - a Request shows the dock and the waiting note, and Allow resolves it;
@@ -21,6 +25,7 @@ import {
   arrangeFleet,
   buildCountedMessage,
   buildLiveCheck,
+  createMessagePause,
   createUserDataDirForTest,
   joinShownText,
   keepWindowOnTop,
@@ -49,10 +54,13 @@ function readOpenTab(page: Page): Promise<string | null> {
 
 /**
  * Returns every block the transcript has mounted, top to bottom, each as one
- * line of text:
+ * line of text. A block shows only what the stylesheet leaves visible, so a
+ * message the agent has started and not yet written a word of reads as its
+ * "Writing…" line, and a message with text as the message:
  *
  * - a message the user sent: "you: Why does the test fail?";
  * - a message the agent wrote, without its meta line: "agent: Let me look.";
+ * - a status line, while the turn has drawn nothing: "pending: Working for 3s";
  * - a work stretch's divider, by its accessible name: "divider: Worked for
  *   2s, ran 2 commands";
  * - the end of a turn that did not complete: "ending: Stopped after 4s";
@@ -61,7 +69,7 @@ function readOpenTab(page: Page): Promise<string | null> {
 function readTranscript(page: Page): Promise<string[]> {
   return page.evaluate(() =>
     [...document.querySelectorAll('section[aria-label="Transcript"] .tx-item')].map((item) => {
-      const block = item.firstElementChild!;
+      const block = [...item.children].find((part) => getComputedStyle(part).display !== "none")!;
       if (block.matches(".msg--me")) return `you: ${block.querySelector(".bubble")!.textContent}`;
       if (block.matches(".msg")) {
         const parts = [...block.querySelector(".msg-body")!.children].filter(
@@ -70,6 +78,8 @@ function readTranscript(page: Page): Promise<string[]> {
         return `agent: ${parts.map((part) => part.textContent).join("")}`;
       }
       if (block.matches("button.worked")) return `divider: ${block.getAttribute("aria-label")}`;
+      if (block.matches('.worked[role="status"]'))
+        return `pending: ${block.querySelector("b")!.textContent}`;
       if (block.matches(".worked")) return `ending: ${block.textContent}`;
       if (block.matches(".waiting-note")) return `waiting: ${block.textContent}`;
       return `unknown: ${block.outerHTML}`;
@@ -196,6 +206,106 @@ describe("the thread view", () => {
     const answer = page.locator('section[aria-label="Transcript"] .msg-body').last();
     expect(await answer.locator("code").textContent()).toBe("fetchOrders");
     expect(await answer.locator("strong").textContent()).toBe("retry");
+  });
+
+  it("shows a Writing… line, never an agent row with no text, until the message's first word arrives", async () => {
+    const { url, fleet, client } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
+    // The first step waits on a Request, so the message starts only after the
+    // page has subscribed. The message then pauses before its first word and
+    // again after it, so the test looks at each state while the message is
+    // still open, not after the turn has ended and the page has redrawn.
+    const beforeFirstWord = createMessagePause(0);
+    const afterFirstWord = createMessagePause(1);
+    const { thread, played } = await fleet.spawnScriptedThread(
+      { runner, prompt: "Why does the checkout test fail?" },
+      [
+        { kind: "command", command: "pnpm test", ask: true },
+        {
+          kind: "message",
+          text: "Found it.",
+          pauses: [beforeFirstWord.pause, afterFirstWord.pause],
+        },
+        { kind: "end", state: "completed" },
+      ],
+    );
+    await fleet.waitForTurn(thread.id, 1, "waiting");
+    const { app, page } = await openSignedIn(url);
+    await keepWindowOnTop(app);
+    await page.evaluate(recordFrames);
+    await openThread(page, "Why does the checkout test fail?");
+    await expect.poll(() => page.evaluate(buildLiveCheck(thread.id))).toBe(true);
+
+    const [openRequest] = (await client.session.read({ params: { id: thread.id } })).openRequests;
+    await client.session.respondToApprovalRequest({
+      params: { id: thread.id },
+      payload: { requestId: openRequest!.requestId, decision: "allow" },
+    });
+
+    // The message has started and has no word: its line shows, its row does not.
+    await expect
+      .poll(() => readTranscript(page))
+      .toEqual([
+        "you: Why does the checkout test fail?",
+        expect.stringMatching(/^divider: Worked for \d+s, ran 1 command$/),
+        "pending: Writing…",
+      ]);
+    expect(await page.locator(`${TRANSCRIPT_SELECTOR} .msg:visible`).count()).toBe(0);
+
+    // The first word has landed and the message is still open: the row shows
+    // and the line is gone.
+    beforeFirstWord.resume();
+    await expect
+      .poll(() => readTranscript(page))
+      .toEqual([
+        "you: Why does the checkout test fail?",
+        expect.stringMatching(/^divider: Worked for \d+s, ran 1 command$/),
+        expect.stringMatching(/^agent: Found/),
+      ]);
+    expect(await page.locator(`${TRANSCRIPT_SELECTOR} .msg-pending:visible`).count()).toBe(0);
+    expect(await page.locator(`${TRANSCRIPT_SELECTOR} .msg:visible`).count()).toBe(1);
+
+    afterFirstWord.resume();
+    await played;
+    await fleet.waitForTurn(thread.id, 1, "completed");
+  });
+
+  it("shows no agent row when the user stops the agent before a message's first word", async () => {
+    const { url, fleet, client } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
+    const beforeFirstWord = createMessagePause(0);
+    const { thread } = await fleet.spawnScriptedThread(
+      { runner, prompt: "Why does the checkout test fail?" },
+      [
+        { kind: "command", command: "pnpm test", ask: true },
+        { kind: "message", text: "Found it.", pauses: [beforeFirstWord.pause] },
+        { kind: "end", state: "completed" },
+      ],
+    );
+    await fleet.waitForTurn(thread.id, 1, "waiting");
+    const { app, page } = await openSignedIn(url);
+    await keepWindowOnTop(app);
+    await page.evaluate(recordFrames);
+    await openThread(page, "Why does the checkout test fail?");
+    await expect.poll(() => page.evaluate(buildLiveCheck(thread.id))).toBe(true);
+
+    const [openRequest] = (await client.session.read({ params: { id: thread.id } })).openRequests;
+    await client.session.respondToApprovalRequest({
+      params: { id: thread.id },
+      payload: { requestId: openRequest!.requestId, decision: "allow" },
+    });
+    await expect.poll(() => readTranscript(page)).toContainEqual("pending: Writing…");
+
+    await client.session.interrupt({ params: { id: thread.id }, payload: {} });
+
+    await expect
+      .poll(() => readTranscript(page))
+      .toEqual([
+        "you: Why does the checkout test fail?",
+        expect.stringMatching(/^divider: Worked for \d+s, ran 1 command$/),
+        expect.stringMatching(/^ending: Stopped after /),
+      ]);
+    expect(await page.locator(`${TRANSCRIPT_SELECTOR} .msg:visible`).count()).toBe(0);
   });
 
   it("shows the dock and the waiting note while a Request is open, and Allow resolves it", async () => {

@@ -360,23 +360,23 @@ describe("buildThreadBlocks", () => {
       live: false,
     });
     // The agent has the steered message still to answer, so the working face
-    // moves to a live row below it.
-    expect(listKeys(written)).toEqual(["user:u1", "agent:a1", "user:u2", "live"]);
+    // is on no message: a status line below it shows the agent is busy.
+    expect(listKeys(written)).toEqual(["user:u1", "agent:a1", "user:u2", "pending"]);
   });
 
-  it("shows a live row for a session that is starting before any row", () => {
+  it("shows a status line for a session that is starting before any row", () => {
     expect(buildThreadBlocks([], buildSessionAgentState({ ...BASE, status: "starting" }))).toEqual([
-      { kind: "live", key: "live", model: "claude-sonnet-5" },
+      { kind: "pending", key: "pending", since: null },
     ]);
     expect(buildThreadBlocks([], buildSessionAgentState(IDLE))).toEqual([]);
   });
 
-  it("shows only the live row while a turn runs before its first item", () => {
+  it("shows only the status line, timed from the user message, while a turn runs before its first item", () => {
     const rows = [buildTurnStarted("t1", 0, "gpt-5.5"), ...buildUserMessage("t1", "u1", 0, "Hi")];
 
     expect(buildThreadBlocks(rows, buildSessionAgentState(BUSY))).toEqual([
       expect.objectContaining({ key: "user:u1" }),
-      { kind: "live", key: "live", model: "gpt-5.5" },
+      { kind: "pending", key: "pending", since: buildInstant(0) },
     ]);
   });
 
@@ -388,7 +388,7 @@ describe("buildThreadBlocks", () => {
     ];
     expect(listKeys(buildThreadBlocks(thinking, buildSessionAgentState(BUSY)))).toEqual([
       "user:u1",
-      "live",
+      "pending",
     ]);
 
     const working = [...thinking, buildItemStarted("t1", "c1", "command_execution", 2)];
@@ -399,7 +399,7 @@ describe("buildThreadBlocks", () => {
     expect(work.endedAt).toBeNull();
   });
 
-  it("puts the working face on the message the agent is writing, and shows no live row", () => {
+  it("puts the working face on the message the agent is writing, and shows no status line", () => {
     const rows = [
       buildTurnStarted("t1", 0),
       ...buildUserMessage("t1", "u1", 0, "Hi"),
@@ -459,7 +459,64 @@ describe("buildThreadBlocks", () => {
     expect(findBlock(ended, "agent", "agent:a1").live).toBe(false);
   });
 
-  it("keeps the live row when a new turn only reasons after an earlier turn ended on work", () => {
+  it("times the status line from the end of the last message, while the agent only reasons after it", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Hi"),
+      ...buildAgentMessage("t1", "a1", 1, "Let me think."),
+      buildItemStarted("t1", "r1", "reasoning", 5),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+
+    expect(blocks.at(-1)).toEqual({ kind: "pending", key: "pending", since: buildInstant(2) });
+  });
+
+  it("draws no agent block for a message the user stopped before its first word, and keeps the ending", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Hi"),
+      buildItemStarted("t1", "a1", "assistant_message", 1),
+      buildTurnCompleted("t1", 3, "interrupted"),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(IDLE));
+
+    expect(listKeys(blocks)).toEqual(["user:u1", "ending:t1"]);
+  });
+
+  it("draws no agent block for a completed message with no text, and shows the status line in its place", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Hi"),
+      buildItemStarted("t1", "a1", "assistant_message", 1),
+      buildItemCompleted("t1", "a1", "assistant_message", 2),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+
+    // The empty message cannot hold the working face, so the status line does.
+    expect(listKeys(blocks)).toEqual(["user:u1", "pending"]);
+  });
+
+  it("keeps an open message with no text yet, so its row can wait for the first word", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Hi"),
+      buildItemStarted("t1", "a1", "assistant_message", 1),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+
+    expect(listKeys(blocks)).toEqual(["user:u1", "agent:a1"]);
+    expect(findBlock(blocks, "agent", "agent:a1")).toMatchObject({
+      text: "",
+      open: true,
+      live: true,
+    });
+  });
+
+  it("keeps the status line when a new turn only reasons after an earlier turn ended on work", () => {
     // A subagent can wake into a turn of its own with no user message. The
     // earlier turn's finished stretch is then the last block, but it is not a
     // running divider, so nothing else shows that the agent is busy.
@@ -474,11 +531,11 @@ describe("buildThreadBlocks", () => {
 
     const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
 
-    expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "live"]);
+    expect(listKeys(blocks)).toEqual(["user:u1", "work:c1", "pending"]);
     expect(findBlock(blocks, "work", "work:c1").endedAt).not.toBeNull();
   });
 
-  it("shows no live row when a tool starts after the last message, because the running divider shows the work", () => {
+  it("shows no status line when a tool starts after the last message, because the running divider shows the work", () => {
     const rows = [
       buildTurnStarted("t1", 0),
       ...buildUserMessage("t1", "u1", 0, "Hi"),
@@ -492,7 +549,7 @@ describe("buildThreadBlocks", () => {
     expect(findBlock(blocks, "agent", "agent:a1").live).toBe(false);
   });
 
-  it("shows no live row when a warning follows the running work, because the divider above it still shows the work", () => {
+  it("shows no status line when a warning follows the running work, because the divider above it still shows the work", () => {
     const rows = [
       buildTurnStarted("t1", 0),
       ...buildUserMessage("t1", "u1", 0, "Hi"),
@@ -602,7 +659,7 @@ describe("buildThreadBlocks", () => {
 
       expect(buildThreadBlocks(rows, buildSessionAgentState({ ...BASE, status }))).toEqual([
         expect.objectContaining({ key: "user:u1" }),
-        { kind: "live", key: "live", model: "claude-sonnet-5" },
+        { kind: "pending", key: "pending", since: buildInstant(0) },
       ]);
     },
   );
@@ -706,7 +763,7 @@ describe("buildThreadBlocks", () => {
       "agent:a1",
       "the model was rerouted",
       "user:u2",
-      "live",
+      "pending",
     ]);
     const work = findBlock(blocks, "work", "work:c1");
     expect(work.items.map((item) => item.itemId)).toEqual(["c1", "c2"]);
@@ -779,7 +836,7 @@ describe("buildThreadBlocks", () => {
     };
 
     expect(listKeys(buildThreadBlocks([], buildSubagentAgentState(subagent, IDLE)))).toEqual([
-      "live",
+      "pending",
     ]);
     expect(
       buildThreadBlocks([], buildSubagentAgentState({ ...subagent, status: "completed" }, BUSY)),
@@ -847,7 +904,7 @@ describe("buildThreadBlocks", () => {
     for (let length = 1; length < rows.length; length++) {
       const keys = listKeys(
         buildThreadBlocks(rows.slice(0, length), buildSessionAgentState(BUSY)),
-      ).filter((key) => key !== "live");
+      ).filter((key) => key !== "pending");
       expect(final.slice(0, keys.length)).toEqual(keys);
     }
   });

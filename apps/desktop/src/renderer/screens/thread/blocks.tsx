@@ -5,8 +5,8 @@
  * Conversation draws too, are in `../session/messages`.
  *
  * Every block is presentational, apart from the finished paragraphs an open
- * message keeps and the shared age clock that `WorkDivider` and
- * `WaitingNote` read. Every block is `memo`: the transcript draws again each
+ * message keeps and the shared age clock that `PendingLine`, `WorkDivider`
+ * and `WaitingNote` read. Every block is `memo`: the transcript draws again each
  * time its visible range changes, and a block whose props did not change is
  * skipped. The props are the block from `buildThreadBlocks`, whose identity
  * changes only when the transcript does, `Look`s from `buildLook`, which
@@ -19,6 +19,7 @@
 import { memo, type JSX } from "react";
 import {
   describeMessageMeta,
+  describePending,
   describeTurnEnding,
   describeWaitingNote,
   describeWorkStretch,
@@ -45,6 +46,13 @@ import type { AttachOpenParagraph } from "../session/use-session-live";
  *   the working face, else `idle`.
  * - `text` is the text the transcript's rows hold. While the message is
  *   `open`, the agent is still writing it: see `OpenMessageText`.
+ *
+ * An open message has no text until its first word streams in, and a face
+ * and meta line with no text beside them would look like a response that
+ * has started. So until then the row is hidden and a "Writing…" line stands
+ * in its place. Both switch on the paragraph being written: the live hook
+ * fills it outside React, so only the stylesheet can see the first word land
+ * (see `.msg-pending` in thread.css).
  */
 export const AgentMessage = memo(function AgentMessage({
   look,
@@ -71,48 +79,74 @@ export const AgentMessage = memo(function AgentMessage({
 }): JSX.Element {
   const meta = describeMessageMeta(agent, formatBlockTime(startedAt, timezone, today));
   return (
-    <div className="msg">
-      <AgentFace look={look} pose={pose} />
-      <div className="msg-body">
-        <div className="msg-meta">{meta}</div>
-        {open ? (
-          <OpenMessageText
-            itemId={itemId}
-            storedText={text}
-            attachOpenParagraph={attachOpenParagraph}
-          />
-        ) : (
-          <Markdown text={text} />
-        )}
+    <>
+      {open ? (
+        <PendingNote label="Writing…" announcement="Writing" className="msg-pending" />
+      ) : null}
+      <div className="msg">
+        <AgentFace look={look} pose={pose} />
+        <div className="msg-body">
+          <div className="msg-meta">{meta}</div>
+          {open ? (
+            <OpenMessageText
+              itemId={itemId}
+              storedText={text}
+              attachOpenParagraph={attachOpenParagraph}
+            />
+          ) : (
+            <Markdown text={text} />
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 });
 
 /**
- * Renders the working row at the bottom of a running turn while no message
- * holds the working face: the face in the thread's `pose`, and the meta line
- * without a time. Once the agent starts a message, the message takes the
- * face, and the row goes.
+ * Renders a status line in the divider's drawing: `label` on screen, and
+ * `announcement` to a screen reader. The two differ because the label may
+ * count up every second, and a live region would read each change out; the
+ * announcement changes only when the state does. `className` adds to the
+ * divider's own class.
  */
-export const LiveRow = memo(function LiveRow({
-  look,
-  agent,
-  pose,
+function PendingNote({
+  label,
+  announcement,
+  className,
 }: {
-  /** The agent's look, from `buildLook`: the session's own agent's, or a subagent's. */
-  readonly look: Look;
-  readonly agent: string;
-  readonly pose: Pose;
+  readonly label: string;
+  readonly announcement: string;
+  readonly className?: string;
 }): JSX.Element {
   return (
-    <div className="msg">
-      <AgentFace look={look} pose={pose} />
-      <div className="msg-body">
-        <div className="msg-meta">{agent}</div>
-      </div>
+    <div className={className === undefined ? "worked" : `worked ${className}`} role="status">
+      <b aria-hidden="true">{label}</b>
+      <span className="visually-hidden">{announcement}</span>
     </div>
   );
+}
+
+/**
+ * Renders the status line at the bottom of a running turn that has drawn
+ * nothing yet: "Working for 12s", counted from `since`, or "Starting…" while
+ * `since` is `null` because no turn has started. It stands where an agent
+ * message will be, in the divider's drawing, so the thread never shows an
+ * agent row with no text. The agent's face is drawn only beside text,
+ * because the first thing the agent does may be a tool call, not a message.
+ *
+ * The count runs on the age clock while the line is `onScreen`.
+ */
+export const PendingLine = memo(function PendingLine({
+  since,
+  onScreen,
+}: {
+  readonly since: string | null;
+  readonly onScreen: boolean;
+}): JSX.Element {
+  const label = useDurationText(since ?? "", since !== null && onScreen, (now) =>
+    describePending(since, now),
+  );
+  return <PendingNote label={label} announcement={since === null ? "Starting" : "Working"} />;
 });
 
 /**
