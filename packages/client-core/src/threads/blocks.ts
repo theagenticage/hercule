@@ -72,7 +72,7 @@ export interface AgentBlock {
    * whose end never arrived is not open, and shows the text its rows hold.
    */
   readonly open: boolean;
-  /** Whether the thread's working face is on this message instead of on a live row. */
+  /** Whether this message is the one the thread's working face is on. */
   readonly live: boolean;
 }
 
@@ -88,15 +88,19 @@ export interface EndingBlock {
 }
 
 /**
- * The working face at the bottom of a running turn, while no message holds it
- * and no running work stretch shows the agent is busy: right after the user's
- * message, and while the agent only reasons.
+ * The status line at the bottom of a running turn that has drawn nothing
+ * yet: right after the user's message, while the agent only reasons, and
+ * while a session or subagent starts. It stands where an agent message will
+ * be, so the thread never shows an agent row with no text.
  */
-export interface LiveBlock {
-  readonly kind: "live";
+export interface PendingBlock {
+  readonly kind: "pending";
   readonly key: string;
-  /** The model the running turn runs on, or the agent's model. */
-  readonly model: string;
+  /**
+   * When the wait began, for the line's timer: the start of the stretch the
+   * turn is in. `null` while no turn has started, which reads "Starting…".
+   */
+  readonly since: string | null;
 }
 
 /** The note that the thread waits on the user's answer to a Request. */
@@ -121,7 +125,7 @@ export interface WarningBlock {
 }
 
 export type ThreadBlock =
-  UserBlock | WorkBlock | AgentBlock | EndingBlock | LiveBlock | WaitingBlock | WarningBlock;
+  UserBlock | WorkBlock | AgentBlock | EndingBlock | PendingBlock | WaitingBlock | WarningBlock;
 
 interface BuildingTurn {
   readonly turnId: string;
@@ -201,16 +205,16 @@ const readChangedPaths = (event: ItemStarted): readonly string[] => {
  * - A `warning` block per `runtime.warning` row, where the row sits. It does
  *   not end the work stretch it falls in: the stretch's divider stays one,
  *   above the warning, and items that start after the warning still join it.
- * - A `live` block at the end while the agent has no open Request, no agent
- *   message holds the working face, the last block other than a warning is
- *   not the running turn's running `work` block, and either the last turn has
- *   not finished or, before any turn, the agent is working.
+ * - A `pending` block at the end while the agent has no open Request, no
+ *   agent message holds the working face, the last block other than a
+ *   warning is not the running turn's running `work` block, and either the
+ *   last turn has not finished or, before any turn, the agent is working.
  *
  * The working face is on one block at most: the agent message the agent is
  * writing; else the running turn's last agent message, when nothing started
- * after it (its turn's end is about to land); else the `live` block. While
- * the running turn's running work stretch is the last block other than a
- * warning, the face is on none: the stretch's divider shows the agent is busy.
+ * after it (its turn's end is about to land). While nothing holds it, the
+ * `pending` block or the running work stretch's divider shows the agent is
+ * busy, because a face is drawn only beside text.
  *
  * Each block's key is built from an item id, a turn id, a request id or, for
  * a warning, its row's position, so it stays the same as rows are appended.
@@ -480,8 +484,8 @@ export const buildThreadBlocks = (
     }
   }
   // A running work stretch of the running turn ends the list: its "Working
-  // for" divider already shows the agent is busy, and a face row under it
-  // would look like a response that has started when it has not. A finished
+  // for" divider already shows the agent is busy, so a status line under it
+  // would say the same twice. A finished
   // stretch of an earlier turn shows no such divider, so it does not count.
   // A warning reports on the work and is not a step of it, so a running
   // stretch above a warning still shows the agent is busy.
@@ -491,20 +495,20 @@ export const buildThreadBlocks = (
     lastBlock.endedAt === null &&
     lastBlock.turnId === running?.turnId;
   if (hasFace && faceAgent === undefined && !endsOnRunningWork)
-    blocks.push({ kind: "live", key: "live", model: model(running) });
+    blocks.push({ kind: "pending", key: "pending", since: running?.boundary ?? null });
   return blocks;
 };
 
 /**
  * Returns the agent message of the running turn that holds the working face,
- * or `undefined` when the face belongs on a live block:
+ * or `undefined` when the face belongs on no message:
  *
  * - the open item (`openItemId`, from `findOpenItem`), when it is an agent
  *   message: the agent is writing it, even if the user steered a message in
  *   below it;
  * - else the turn's last started item, when it is an agent message that has
  *   completed. The turn's end usually lands a moment later, and moving the
- *   face to a live block in between would flash a second face.
+ *   face to a status line in between would flash a second face.
  */
 const findFaceAgent = (
   running: BuildingTurn,

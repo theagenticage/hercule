@@ -47,7 +47,14 @@ import {
 import { UserMessage } from "../session/messages";
 import { useStartOfToday } from "../session/start-of-today";
 import type { AttachOpenParagraph } from "../session/use-session-live";
-import { AgentMessage, LiveRow, TurnEnding, WaitingNote, WarningNote, WorkDivider } from "./blocks";
+import {
+  AgentMessage,
+  PendingLine,
+  TurnEnding,
+  WaitingNote,
+  WarningNote,
+  WorkDivider,
+} from "./blocks";
 
 /** The space between two blocks: the book's `.tx { gap: 22px }`. Each block but the first includes it. */
 const BLOCK_GAP = 22;
@@ -94,8 +101,8 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
       return (
         20.4 + AGENT_LINE_HEIGHT * Math.max(1, Math.ceil(block.text.length / AGENT_CHARS_PER_LINE))
       );
-    case "live":
-      return 42.8;
+    case "pending":
+      return 17.4;
     case "work": {
       // The divider, then a spawn line per subagent the stretch started. The
       // lines sit in the divider's item, so the block gap above them is a
@@ -257,10 +264,8 @@ export function Transcript({
             attachOpenParagraph={attachOpenParagraph}
           />
         );
-      case "live":
-        return (
-          <LiveRow look={buildLook(faceSeed)} agent={describeAgent(block.model)} pose={pose} />
-        );
+      case "pending":
+        return <PendingLine since={block.since} onScreen={onScreen} />;
       case "work":
         return (
           <>
