@@ -86,7 +86,9 @@ export const attachment = HttpApiGroup.make("attachment")
     // Deletes an upload the caller's actor made and no input references yet,
     // such as an image the user removed before sending. Any other id is
     // `not_found`, by the same rule as `readContent`, so a caller cannot tell
-    // someone else's upload from an id that does not exist.
+    // someone else's upload from an id that does not exist. An image an
+    // agent's tool returned is never deleted here: it lives as long as the
+    // session's transcript does.
     HttpApiEndpoint.delete("delete", "/attachments/:id", {
       params: { id: AttachmentId },
       success: Schema.Struct({}),

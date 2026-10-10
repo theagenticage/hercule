@@ -104,6 +104,50 @@ describe("replacing the images in a tool result", () => {
     expect(uploader.uploads).toEqual([PNG]);
   });
 
+  it("replaces a notebook cell output's image in the tool's structured output", async () => {
+    const uploader = createRecordingUploader();
+    const replaced = await replace(
+      uploader,
+      buildToolResult([buildImageBlock(PNG)], {
+        type: "notebook",
+        file: {
+          filePath: "/work/plot.ipynb",
+          cells: [{ outputs: [{ image: { image_data: PNG, media_type: "image/png" } }] }],
+        },
+      }),
+    );
+
+    expect(replaced).toMatchObject({
+      tool_use_result: {
+        file: { cells: [{ outputs: [{ image: { image_data: buildStored(PNG) } }] }] },
+      },
+    });
+    expect(JSON.stringify(replaced)).not.toContain(PNG);
+    expect(uploader.uploads).toEqual([PNG]);
+  });
+
+  it("uploads at most four images of one message at once", async () => {
+    let inFlight = 0;
+    let mostInFlight = 0;
+    const uploader: AttachmentUploader = {
+      upload: () =>
+        Effect.acquireUseRelease(
+          Effect.sync(() => {
+            inFlight += 1;
+            mostInFlight = Math.max(mostInFlight, inFlight);
+          }),
+          () => Effect.as(Effect.sleep("1 millis"), buildStored(PNG)),
+          () => Effect.sync(() => (inFlight -= 1)),
+        ),
+    };
+    const images = Array.from({ length: 10 }, (_, i) =>
+      buildImageBlock(Buffer.concat([PNG_BYTES, Buffer.from([i])]).toString("base64")),
+    );
+    await replace(uploader, buildToolResult(images));
+
+    expect(mostInFlight).toBe(4);
+  });
+
   it("replaces an image block the tool's structured output repeats, as an MCP tool's does", async () => {
     const uploader = createRecordingUploader();
     const text = { type: "text", text: "the screenshot" };

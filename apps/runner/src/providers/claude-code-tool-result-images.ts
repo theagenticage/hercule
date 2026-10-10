@@ -21,6 +21,16 @@ interface Base64ImageBlock {
   readonly source: { readonly type: "base64"; readonly media_type: string; readonly data: string };
 }
 
+/**
+ * The most images of one message that upload at once. Each upload holds its
+ * decoded bytes, up to `MAX_ATTACHMENT_BYTES`, until the controller answers,
+ * so a tool that returns dozens of images must not decode them all together.
+ */
+const MAX_PARALLEL_UPLOADS = 4;
+
+/** The keys under which a tool's structured output holds an image's base64 data. */
+const IMAGE_DATA_KEYS: ReadonlySet<string> = new Set(["base64", "image_data"]);
+
 /** The reason an image too large for the controller is not kept. */
 const IMAGE_TOO_LARGE = `The image is larger than ${String(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB, so it was not kept.`;
 
@@ -80,7 +90,10 @@ const uploadImage = (
  * of an uploaded image holds that image's reference instead. An image is
  * found in two shapes:
  *
- * - a `base64` field holding the image's data, as Claude's `Read` writes it;
+ * - a `base64` field holding the image's data, as Claude's `Read` of an image
+ *   writes it;
+ * - an `image_data` field holding the image's data, as Claude's `Read` of a
+ *   notebook writes a cell output's image;
  * - an image block with the image's data, as an MCP tool or a subagent
  *   repeats its result's content.
  *
@@ -97,7 +110,7 @@ const replaceUploadedImages = (
   return Object.fromEntries(
     Object.entries(value).map(([key, field]) => {
       const reference =
-        key === "base64" && typeof field === "string" ? references.get(field) : undefined;
+        IMAGE_DATA_KEYS.has(key) && typeof field === "string" ? references.get(field) : undefined;
       return [key, reference ?? replaceUploadedImages(field, references)];
     }),
   );
@@ -106,8 +119,8 @@ const replaceUploadedImages = (
 /**
  * Returns the message with each image in its tool results replaced by a
  * `ToolResultImage`, in the tool result's content and in `tool_use_result`
- * alike. Each distinct image is uploaded once, and the uploads of one
- * message run in parallel. A message with no such image is returned as the
+ * alike. Each distinct image is uploaded once, and up to
+ * `MAX_PARALLEL_UPLOADS` uploads of one message run in parallel. A message with no such image is returned as the
  * same object, with no work done, because every SDK message passes through
  * here. Never fails: an image that cannot be kept becomes `unavailable`, and
  * its bytes are dropped all the same.
@@ -128,7 +141,7 @@ export const replaceToolResultImages = (
           uploadImage(uploader, sessionId, image),
           (reference) => [data, reference] as const,
         ),
-      { concurrency: "unbounded" },
+      { concurrency: MAX_PARALLEL_UPLOADS },
     ),
     (entries) => {
       const references = new Map(entries);
