@@ -2265,6 +2265,16 @@ Bundle: the first screen is 327.5 kB gzipped before (14 chunks) and 331.6 kB aft
 - **A launch with a saved controller reads the Appearance once more,** a synchronous message to main answered from memory, because Open on decides the first screen. `theme-init.js` reads it once already before the first paint. The second read is lost in the spread above, as the first one was ([Settings › Appearance, slice 12](#measured)).
 - **The perf script was repaired to take these numbers.** It could no longer run on `main`: the scripted runner imported a value from the protocol package, which plain Node cannot load, and the script opened threads by their sidebar rows, which the flat sidebar ([#473](https://github.com/theagenticage/hercule/issues/473)) hides behind a section's "more" row. The script now stores the long thread as the last screen instead, and the subagent scenario opens "more" rows and scrolls the sidebar until its thread's row shows. The Before ran the same repaired script, storing the thread under the old `last-thread` key that build reads. Storing the thread is also what fixes the "Thread 500" timeout that [The Hercule face](#measured) entry above reports. The scripted runner's import was fixed on `main` in the meantime as well, the same way.
 
+**Intake: the first signal on screen,** measured 2026-10-11 with `pnpm build:desktop`'s size checks, on the branch base 5d260fee (Before) and on this change (After), for [#524](https://github.com/theagenticage/hercule/issues/524). Sizes are counted the way the budget script counts them, 1,024 bytes to a kB. The rows `apps/desktop/scripts/perf.ts` measures, and the Performance panel rows of [Intake](#intake)'s cost table, were not run for this change and stay TBD.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| The first screen's JavaScript, gzipped | none new | 336.1 kB | 339.9 kB across 21 chunks; the first-screen chunk is 262.3 kB |
+| Intake's chunk, gzipped | none | - | 11.6 kB of JavaScript, 2.0 kB of CSS |
+| Main's startup file, minified | 160 kB | unchanged by this change | 148.7 kB |
+
+- **The first screen grows by the sidebar's Work section:** the Intake row, its count of urgent signals, the `signal` subscription that keeps the count current, and client-core's reading of that count. The screen, its list and pane, and the three icons only it draws (alarm, arrow, diff) are in Intake's chunk, loaded the first time Intake opens.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
