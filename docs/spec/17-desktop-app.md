@@ -2241,7 +2241,7 @@ Bundle: the first screen is 327.5 kB gzipped before (14 chunks) and 331.6 kB aft
 | Processes | none added | 4 | 4: browser, GPU, network utility, renderer |
 | Memory, 40 threads, new-thread screen | the face's rows only | renderer 49.3 and 51.5 MB, the Threads face in the same run | renderer **50.3 MB**, Hercule face; summed 671.5 MB against 693.7 and 694.7 MB |
 | Idle, window visible | no timer, no polling, no animation | the Threads face in the same run: renderer 1.2 to 1.3% of a core and 5 wakeups a second; hidden, 1 | renderer **1.1%** and **5** wakeups a second; hidden, 1 |
-| Reads | none | - | none: the System section's red dot reads the Connections the shell's loader already caches |
+| Reads | none | - | none: the sidebar observes the Connections the shell's loader caches on both faces, so a switch reads nothing, even once a push has marked them stale |
 | The first screen's JavaScript, gzipped | grows by the switch, the face's rows and the two View commands | 334.1 kB across 20 chunks; first-screen chunk 256.4 kB | **335.8 kB**, up 1.7 kB; first-screen chunk 258.3 kB, up 1.9 kB |
 | The first screen's CSS, gzipped | a few rules | 9.99 kB | 10.06 kB |
 | Main's startup file | the View menu | 148.1 kB | 148.5 kB |

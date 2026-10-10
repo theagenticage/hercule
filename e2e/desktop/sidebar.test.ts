@@ -108,7 +108,7 @@ async function readSidebarFace(page: Page): Promise<{ tab: string | null; list: 
 }
 
 const THREADS_FACE = { tab: "Threads", list: "Threads" };
-const HERCULE_FACE = { tab: "Hercule", list: "Hercule" };
+const ORCHESTRATION_FACE = { tab: "Hercule", list: "Hercule" };
 
 describe("the sidebar", () => {
   it("connects the live socket from app://hercule under the release policy", async () => {
@@ -389,7 +389,7 @@ describe("the sidebar", () => {
     await openThread(page, "Thread 1");
     const transcript = page.locator('section[aria-label="Transcript"]');
     const switchList = page.getByRole("tablist", { name: "Sidebar" });
-    const herculeTab = switchList.getByRole("tab", { name: "Hercule" });
+    const orchestrationTab = switchList.getByRole("tab", { name: "Hercule" });
     const threadsTab = switchList.getByRole("tab", { name: "Threads" });
     expect(await readSidebarFace(page)).toEqual(THREADS_FACE);
 
@@ -405,23 +405,25 @@ describe("the sidebar", () => {
         getComputedStyle(element).getPropertyValue("-webkit-app-region"),
       ),
     ).toBe("no-drag");
-    await herculeTab.click();
-    await expect.poll(() => readSidebarFace(page)).toEqual(HERCULE_FACE);
+    await orchestrationTab.click();
+    await expect.poll(() => readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
     await transcript.waitFor();
 
     // Only the selected segment is in the tab order, and the arrow keys move
     // both the selection and the focus.
-    expect(await herculeTab.evaluate((element) => element === document.activeElement)).toBe(true);
+    expect(await orchestrationTab.evaluate((element) => element === document.activeElement)).toBe(
+      true,
+    );
     await page.keyboard.press("ArrowLeft");
     await expect.poll(() => readSidebarFace(page)).toEqual(THREADS_FACE);
     expect(await threadsTab.evaluate((element) => element === document.activeElement)).toBe(true);
     await page.keyboard.press("ArrowRight");
-    await expect.poll(() => readSidebarFace(page)).toEqual(HERCULE_FACE);
+    await expect.poll(() => readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
 
     await chooseMenuItem(app, "View", "Threads");
     await expect.poll(() => readSidebarFace(page)).toEqual(THREADS_FACE);
     await chooseMenuItem(app, "View", "Hercule");
-    await expect.poll(() => readSidebarFace(page)).toEqual(HERCULE_FACE);
+    await expect.poll(() => readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
     await transcript.waitFor();
   });
 
@@ -435,15 +437,15 @@ describe("the sidebar", () => {
       .getByRole("tablist", { name: "Sidebar" })
       .getByRole("tab", { name: "Hercule" })
       .click();
-    await expect.poll(() => readSidebarFace(page)).toEqual(HERCULE_FACE);
+    await expect.poll(() => readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
 
     await page.getByRole("link", { name: "Office ⌘⇧O" }).click();
     await page.locator(".office").waitFor();
-    expect(await readSidebarFace(page)).toEqual(HERCULE_FACE);
+    expect(await readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
 
     await page.locator(".side-foot").getByRole("link", { name: "Settings" }).click();
     await expect.poll(() => page.locator(".bar .title").textContent()).toBe("Appearance");
-    expect(await readSidebarFace(page)).toEqual(HERCULE_FACE);
+    expect(await readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
 
     // The Hercule face lists no threads that do not wait, so the thread opens
     // from Go, which lists the threads whichever face shows.

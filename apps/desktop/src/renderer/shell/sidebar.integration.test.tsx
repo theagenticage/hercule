@@ -699,11 +699,22 @@ describe("the sidebar's faces", () => {
     expect(within(nav).getByRole("button", { name: "Fleet" })).toBeTruthy();
   });
 
+  it("switches to the Hercule face without reading the Connections again, though the first push marks them stale", async () => {
+    const { calls, live } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
+    await live.waitForFirstPushes();
+    const sent = calls.length;
+
+    await userEvent.click(getSegment("Hercule"));
+
+    expect(screen.getByRole("button", { name: /Connections/ })).toBeTruthy();
+    expect(calls.slice(sent).filter((call) => call.path === "/api/v1/connections")).toEqual([]);
+  });
+
   it("moves between the segments with the arrow keys, keeping one of them in the tab order", async () => {
     await startSidebar();
     const threads = getSegment("Threads");
-    const hercule = getSegment("Hercule");
-    expect([threads.tabIndex, hercule.tabIndex]).toEqual([0, -1]);
+    const orchestration = getSegment("Hercule");
+    expect([threads.tabIndex, orchestration.tabIndex]).toEqual([0, -1]);
 
     threads.focus();
     await userEvent.keyboard("{ArrowRight}");
