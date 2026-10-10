@@ -713,7 +713,7 @@ export const CLI = {
       title: { flag: "title", help: "One line saying what this is about; not a paragraph." },
       reason: {
         flag: "reason",
-        help: "One line saying why the user should see this, shown under the title.",
+        help: "One line saying why the user should see this. It is stored with where the signal came from.",
       },
       eventIds: {
         flag: "event-id",
