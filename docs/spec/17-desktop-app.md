@@ -2265,6 +2265,16 @@ Bundle: the first screen is 327.5 kB gzipped before (14 chunks) and 331.6 kB aft
 - **A launch with a saved controller reads the Appearance once more,** a synchronous message to main answered from memory, because Open on decides the first screen. `theme-init.js` reads it once already before the first paint. The second read is lost in the spread above, as the first one was ([Settings › Appearance, slice 12](#measured)).
 - **The perf script was repaired to take these numbers.** It could no longer run on `main`: the scripted runner imported a value from the protocol package, which plain Node cannot load, and the script opened threads by their sidebar rows, which the flat sidebar ([#473](https://github.com/theagenticage/hercule/issues/473)) hides behind a section's "more" row. The script now stores the long thread as the last screen instead, and the subagent scenario opens "more" rows and scrolls the sidebar until its thread's row shows. The Before ran the same repaired script, storing the thread under the old `last-thread` key that build reads. Storing the thread is also what fixes the "Thread 500" timeout that [The Hercule face](#measured) entry above reports. The scripted runner's import was fixed on `main` in the meantime as well, the same way.
 
+**Loaders split off with their route,** measured 2026-10-11 with `pnpm build:desktop`'s bundle check, on `main` at b69b94db (Before) and on branch `t3/confirm-dialog-and-split-loaders` (After), for [#542](https://github.com/theagenticage/hercule/issues/542). The router plugin now puts a route's loader in the chunk of its component, so a loader, and every module it imports, loads the first time its route opens instead of with the first screen. The routes the app starts on keep `codeSplitGroupings: []` and stay whole. The change adds no process, no read and no timer, and touches no file main links.
+
+| Measure | Before | After |
+|---|---|---|
+| The first screen's JavaScript, gzipped | 336.1 kB | 336.0 kB |
+
+- **Today it saves little,** because today's loaders import only what the shell already loads: query options and client-core code. A loader that imports code of its own saves more. On the Workflows prototype, the loaders of the three workflow routes bring the workflow source parser, and keeping them with the first screen cost 4.8 kB gzipped.
+- **A loader now waits for its chunk before it starts.** The chunk is a local file, served on the `app://` origin, so the wait is a few milliseconds.
+- **Hot reload still works.** In the dev server, a split loader that was edited twice was replaced in place each time, and its route loaded again without an error. A specimen page that removes a route's loader fails with "Cannot read properties of undefined (reading 'ensureQueryData')" after such an edit, with or without this change: the hot reload puts the route's real loader back, and the specimen's router has no query client. Reloading the page fixes it.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
