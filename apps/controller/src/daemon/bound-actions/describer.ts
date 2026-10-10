@@ -191,7 +191,8 @@ const describeProvenance = (
 /**
  * Lists the fields of a new task after its title, separated by commas, such
  * as "description «…», priority high, labels a, b". Every value is written in
- * full. The caller reads the project's name.
+ * full, and an empty description is left out. The caller reads the project's
+ * name.
  */
 const describeNewTaskFields = (
   input: AnswerOperationInput<"task.create">,
@@ -199,7 +200,9 @@ const describeNewTaskFields = (
 ): DescribeLine =>
   joinParts(
     [
-      [buildTextPart("description "), buildMarkedPart(input.description)],
+      ...(input.description === ""
+        ? []
+        : [[buildTextPart("description "), buildMarkedPart(input.description)]]),
       ...(input.priority === undefined ? [] : [[buildTextPart(`priority ${input.priority}`)]]),
       ...(input.labels === undefined || input.labels.length === 0
         ? []
@@ -438,11 +441,11 @@ export const buildDescribe: Effect.Effect<
         Effect.gen(function* () {
           const projectName =
             input.projectId === undefined ? undefined : yield* readProjectName(input.projectId);
+          const fields = describeNewTaskFields(input, projectName);
           return [
             buildTextPart("Create task "),
             buildMarkedPart(input.title),
-            buildTextPart(" with "),
-            ...describeNewTaskFields(input, projectName),
+            ...(fields.length === 0 ? [] : [buildTextPart(" with "), ...fields]),
           ];
         }),
       "task.update": ({ taskId, ...changes }) =>

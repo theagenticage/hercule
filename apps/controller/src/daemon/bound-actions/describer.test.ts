@@ -198,6 +198,36 @@ describe("run.start", () => {
   });
 });
 
+describe("task.create", () => {
+  it("leaves out an empty description, and the word with when no field is left", async () => {
+    const lines = await run(
+      Effect.gen(function* () {
+        return {
+          bare: yield* describeOperation({
+            op: "task.create",
+            input: { title: "Fix login", description: "" },
+          }),
+          described: yield* describeOperation({
+            op: "task.create",
+            input: { title: "Fix login", description: "It fails", priority: "high" },
+          }),
+        };
+      }),
+    );
+
+    expect(lines.bare).toEqual([text("Create task "), marked("Fix login")]);
+    expect(lines.described).toEqual([
+      text("Create task "),
+      marked("Fix login"),
+      text(" with "),
+      text("description "),
+      marked("It fails"),
+      text(", "),
+      text("priority high"),
+    ]);
+  });
+});
+
 describe("task.update", () => {
   it("names the task and the project, and lists each change in full", async () => {
     const longDescription = "new words ".repeat(50);
