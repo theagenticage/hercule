@@ -72,6 +72,8 @@ const VERBS: Partial<Record<ItemKind, string>> = {
   reasoning: "reasoning",
   command_execution: "command",
   file_change: "edit",
+  file_read: "read",
+  file_search: "find",
   tool_call: "tool",
   web_search: "search",
   subagent: "subagent",

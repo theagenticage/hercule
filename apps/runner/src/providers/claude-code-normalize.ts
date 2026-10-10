@@ -193,9 +193,9 @@ const ensureAgentStream = (state: Normalizing, agent: TurnOwner): AgentStream =>
 
 /**
  * The item kind for each Claude tool name. Only the tool families the
- * taxonomy has an item kind for are mapped: shell commands, file changes, web
- * search, subagents and plans. Every other tool is a plain `tool_call`
- * (spec 06 section 6.3).
+ * taxonomy has an item kind for are mapped: shell commands, file changes, file
+ * reads, file searches, web search, subagents and plans. Every other tool is a
+ * plain `tool_call` (spec 06 section 6.3).
  */
 const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   Bash: "command_execution",
@@ -206,6 +206,10 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   Write: "file_change",
   NotebookEdit: "file_change",
   Patch: "file_change",
+  Read: "file_read",
+  Grep: "file_search",
+  Glob: "file_search",
+  LS: "file_search",
   WebSearch: "web_search",
   Task: "subagent",
   Agent: "subagent",
@@ -216,9 +220,12 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
 /**
  * Returns the item kind for a Claude tool name, or `tool_call` for a tool with
  * no specific kind. The adapter also uses it to pick the approval request kind,
- * so one table decides both and the two cannot disagree.
+ * so one table decides both and the two cannot disagree. Only the table's own
+ * keys count, so a tool named like an object method, such as `constructor`,
+ * is still a `tool_call`.
  */
-export const classifyTool = (name: string): ItemKind => TOOL_KINDS[name] ?? "tool_call";
+export const classifyTool = (name: string): ItemKind =>
+  Object.hasOwn(TOOL_KINDS, name) ? TOOL_KINDS[name]! : "tool_call";
 
 /** Checks whether a tool is an MCP tool. The name prefix is the only way to tell. */
 const isMcp = (name: string): boolean => name.startsWith("mcp__");
@@ -243,6 +250,42 @@ const readInputString = (input: unknown, key: string): string | undefined => {
   if (typeof input !== "object" || input === null) return undefined;
   const value = (input as Record<string, unknown>)[key];
   return typeof value === "string" ? value : undefined;
+};
+
+/**
+ * Returns a tool input's string field cut to the protocol's bounds, or
+ * `undefined` when it is missing, not a string, or empty.
+ */
+const readInputFact = (input: unknown, key: string): string | undefined => {
+  const value = readInputString(input, key);
+  return value === undefined || value === "" ? undefined : truncateFact(value);
+};
+
+/**
+ * Builds the fixed detail fields of a file read or file search item, so a
+ * client can show the path or pattern without digging through `input`:
+ *
+ * - `file_read`: `path`, from the tool's `file_path`.
+ * - `file_search`: `pattern` and `path`. `LS` has no pattern, and `Glob` and
+ *   `Grep` may leave out the path to search the workspace.
+ *
+ * A field is left out when the input does not hold it. Returns no fields for
+ * any other kind.
+ */
+const buildFileFields = (kind: ItemKind, input: unknown): Record<string, string> => {
+  if (kind === "file_read") {
+    const path = readInputFact(input, "file_path");
+    return path === undefined ? {} : { path };
+  }
+  if (kind === "file_search") {
+    const pattern = readInputFact(input, "pattern");
+    const path = readInputFact(input, "path");
+    return {
+      ...(pattern === undefined ? {} : { pattern }),
+      ...(path === undefined ? {} : { path }),
+    };
+  }
+  return {};
 };
 
 /**
@@ -642,6 +685,7 @@ const onAssistant = (
         buildItemStarted(state, turn, itemId, kind, {
           name: block.name,
           input: block.input,
+          ...buildFileFields(kind, block.input),
           ...(kind === "tool_call" ? { kind: isMcp(block.name) ? "mcp" : "native" } : {}),
           ...(subagentIds.length === 0 ? {} : { subagentIds }),
         }),

@@ -1810,6 +1810,7 @@ describe("the request kind for each tool", () => {
     ["Read", { file_path: "/work/five.ts" }, "file_read_approval", ["/work/five.ts"]],
     ["Glob", { pattern: "**/*.ts", path: "/work" }, "file_read_approval", ["/work"]],
     ["Grep", { pattern: "todo", path: "/work" }, "file_read_approval", ["/work"]],
+    ["LS", { path: "/work" }, "file_read_approval", ["/work"]],
     ["WebFetch", { url: "https://example.com" }, "tool_approval", []],
   ];
 

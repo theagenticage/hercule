@@ -314,8 +314,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 6, the version that forwards runners to a promoted controller", () => {
-    expect(PROTOCOL_VERSION).toBe(6);
+  it("is 7, the version that reports file reads and file searches", () => {
+    expect(PROTOCOL_VERSION).toBe(7);
   });
 });
 
