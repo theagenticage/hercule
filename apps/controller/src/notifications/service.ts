@@ -24,12 +24,12 @@ import {
   createForbiddenError,
   createInvalidStateError,
   createNotFoundError,
-  decodeBindableOperation,
+  decodeAnswerOperation,
   DEFAULT_PAGE_LIMIT,
   NOTIFICATION_SORT_FIELDS,
   NotificationFilter,
   NotificationWithdrawInput,
-  type BindableOperation,
+  type AnswerOperation,
   type BoundAction,
   type BoundOperation,
   type DescribeLine,
@@ -128,7 +128,7 @@ const isProducer = (actor: Actor, producer: NotificationProducer): actor is Sess
  * with a describe line that shows the user why the answer cannot be taken.
  */
 type CheckedOperation =
-  | { readonly _tag: "decoded"; readonly operation: BindableOperation }
+  | { readonly _tag: "decoded"; readonly operation: AnswerOperation<"notification.answer"> }
   | { readonly _tag: "refused"; readonly describeLine: DescribeLine };
 
 const make = Effect.gen(function* () {
@@ -145,7 +145,7 @@ const make = Effect.gen(function* () {
    * created, cannot be taken, and its describe line shows the user why.
    */
   const checkStoredOperation = (operation: BoundOperation): Effect.Effect<CheckedOperation> =>
-    decodeBindableOperation(operation, []).pipe(
+    decodeAnswerOperation("notification.answer", operation, []).pipe(
       Effect.match({
         onFailure: (refused): CheckedOperation => ({
           _tag: "refused",
@@ -391,7 +391,9 @@ const make = Effect.gen(function* () {
             }
             if (action.operation !== null) {
               yield* operations.run(
-                yield* decodeBindableOperation(action.operation, ["operation"]),
+                yield* decodeAnswerOperation("notification.answer", action.operation, [
+                  "operation",
+                ]),
               );
             }
             yield* decideOrFail(notification, action);

@@ -30,14 +30,25 @@ export { ALL_GRANTS, GRANT_FAMILIES, GrantSchema, type Grant, type GrantFamily }
 export { DESKTOP_APP_ORIGIN } from "./desktop-app";
 
 export {
-  decodeBindableOperation,
-  dispatchBindableOperation,
+  decodeAnswerOperation,
+  dispatchAnswerOperation,
+  listAnswerOperations,
   OWN_SESSION_ALIAS,
-  type BindableOperation,
-  type BindableOperationHandlers,
-  type BindableOperationId,
-  type BindableOperationInput,
+  type AnswerOperation,
+  type AnswerOperationHandlers,
+  type AnswerOperationId,
+  type AnswerOperationInput,
 } from "./bound-operations";
+
+// The places an operation may be bound, and the describe line's parts, belong
+// to the plugin API, because a plugin action declares both. The contract
+// passes them on under the same names.
+export {
+  BINDING_PLACES,
+  BindingPlace,
+  DescribeLinePart,
+  type AnswerPlace,
+} from "@hercule/plugin-host";
 
 export { CLI, NOUNS, type CliExample, type CliRow, type FieldRow, type NounRow } from "./cli";
 
@@ -112,8 +123,10 @@ export {
   ExternalRef,
   Id,
   isId,
+  isQualifiedId,
   MAX_EXTERNAL_REF_LENGTH,
   NullableActor,
+  QualifiedId,
   Timestamp,
 } from "./ids";
 
@@ -337,6 +350,8 @@ export {
   CORE_KIND_PREFIX,
   CORE_NOTIFICATION_KINDS,
   MAX_ACTION_DESCRIPTION_LENGTH,
+  MAX_ACTION_FIELD_NAME_LENGTH,
+  MAX_ACTION_FIELD_PLACEHOLDER_LENGTH,
   MAX_ACTION_ID_LENGTH,
   MAX_ACTION_LABEL_LENGTH,
   MAX_BOUND_INPUT_BYTES,
@@ -347,7 +362,6 @@ export {
   MAX_NOTIFICATION_TITLE_LENGTH,
   MAX_WITHDRAW_REASON_LENGTH,
   DescribeLine,
-  DescribeLinePart,
   MuteKey,
   NOTIFICATION_SORT_FIELDS,
   Notification,
@@ -365,6 +379,54 @@ export {
   Resolution,
   ResolutionOrigin,
 } from "./groups/notification";
+export {
+  Block,
+  ChangeBlock,
+  CheckRow,
+  ChecksBlock,
+  CORE_SIGNAL_KINDS,
+  DONE_ACTION_ID,
+  isCoreSignalKind,
+  KNOWN_BLOCK_TYPES,
+  KnownBlock,
+  MAX_BLOCK_MESSAGES,
+  MAX_BLOCK_NAME_LENGTH,
+  MAX_BLOCK_URL_LENGTH,
+  MAX_CHECK_LOG_LENGTH,
+  MAX_CHECK_LOG_LINES,
+  MAX_CHECK_ROWS,
+  MAX_MESSAGE_ATTACHMENTS,
+  MAX_MESSAGE_RECIPIENTS,
+  MAX_MESSAGE_TEXT_LENGTH,
+  MAX_SIGNAL_ASKER_LENGTH,
+  MAX_SIGNAL_BLOCKS,
+  MAX_SIGNAL_EVENT_IDS,
+  MAX_SIGNAL_KIND_LENGTH,
+  MAX_SIGNAL_PLACE_LENGTH,
+  MAX_SIGNAL_REASON_LENGTH,
+  MAX_SIGNAL_REPLY_LENGTH,
+  MAX_SIGNAL_TITLE_LENGTH,
+  MAX_TEXT_BLOCK_LENGTH,
+  MessagesBlock,
+  Person,
+  Signal,
+  SignalAction,
+  SignalActInput,
+  SignalFilter,
+  SignalKind,
+  SignalMatch,
+  SignalOrigin,
+  SignalRaiseInput,
+  SignalRaiseResult,
+  SignalResolution,
+  SignalSnooze,
+  SignalStatus,
+  SignalWithdrawInput,
+  TextBlock,
+  ThreadMessage,
+  UnknownBlock,
+  type CoreSignalKind,
+} from "./groups/signal";
 export {
   MAX_PROJECT_DESCRIPTION_LENGTH,
   MAX_PROJECT_NAME_LENGTH,

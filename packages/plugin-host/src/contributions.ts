@@ -351,7 +351,43 @@ export interface ActionContext {
 }
 
 /**
- * A workflow action that a plugin registers, for an action step to call.
+ * The places a workflow action, or a contract operation, may be bound:
+ *
+ * - `workflow.step`: called by an action step of a workflow.
+ * - `notification.answer`: run by a Bound Action on a decision Notification,
+ *   when the user takes it.
+ * - `signal.answer`: run by a Bound Action on a Signal, when the user takes it.
+ */
+export const BINDING_PLACES = ["workflow.step", "notification.answer", "signal.answer"] as const;
+
+export const BindingPlace = Schema.Literals(BINDING_PLACES);
+
+export type BindingPlace = Schema.Schema.Type<typeof BindingPlace>;
+
+/** A place where the user's answer runs a bound operation: every place but a workflow step. */
+export type AnswerPlace = Exclude<BindingPlace, "workflow.step">;
+
+/**
+ * One piece of a describe line. It has one of two kinds:
+ *
+ * - `text` is the ordinary words of the line.
+ * - `marked` is set apart from the words around it; the apps render it in
+ *   ink. It is either the live name of an entity the answer acts on, such as
+ *   a workflow or a session, or a value the answer sends or sets, such as the
+ *   text of an input or a new title.
+ *
+ * It lives here, not in the contract, because a plugin action that may be
+ * bound as an answer writes its own describe line.
+ */
+export const DescribeLinePart = Schema.Struct({
+  kind: Schema.Literals(["text", "marked"]),
+  text: Schema.String,
+});
+
+export type DescribeLinePart = Schema.Schema.Type<typeof DescribeLinePart>;
+
+/**
+ * The fields every workflow action has, wherever it may be bound.
  *
  * - `id` is the unqualified id, often `<entity>.<verb>` such as `pr.merge`.
  *   The host prefixes the plugin id, so a step calls the action as
@@ -364,7 +400,7 @@ export interface ActionContext {
  * - `output` is the schema of the action's result, which an expression reads
  *   as `steps.<id>.output`.
  */
-export interface WorkflowActionContribution {
+interface WorkflowActionFields {
   readonly id: string;
   readonly displayName: string;
   /** One line, shown in the action picker. */
@@ -375,3 +411,36 @@ export interface WorkflowActionContribution {
   readonly connection?: { readonly type: string };
   readonly execute: (input: unknown, context: ActionContext) => Effect.Effect<unknown, ActionError>;
 }
+
+/**
+ * A workflow action that only an action step may call. Leaving out
+ * `usableIn` means the same as listing `workflow.step` alone.
+ */
+export interface WorkflowStepAction extends WorkflowActionFields {
+  readonly usableIn?: readonly ["workflow.step"];
+}
+
+/**
+ * A workflow action that the user's answer may run, on a decision
+ * Notification, on a Signal, or both. It may list `workflow.step` too.
+ *
+ * - `describe` returns the describe line for one frozen input. It must be
+ *   pure: it reads only `input`. The plugin writes the line, so the producer
+ *   that binds the action cannot make it say something else.
+ * - `outcome` returns the one line a Signal keeps once this action, taken as
+ *   its answer, succeeds: "Replied to Marta Visser". It must be pure too.
+ *   Without it, the core writes the line from the answer's label.
+ */
+export interface AnswerAction extends WorkflowActionFields {
+  readonly usableIn: readonly [BindingPlace, ...ReadonlyArray<BindingPlace>];
+  readonly describe: (input: unknown) => ReadonlyArray<DescribeLinePart>;
+  readonly outcome?: (input: unknown) => string;
+}
+
+/**
+ * A workflow action that a plugin registers. Where it may be bound decides
+ * its shape: an action that lists a `*.answer` place in `usableIn` must have
+ * `describe`, and TypeScript refuses one without it. Spec 05 §4.4 owns the
+ * rules.
+ */
+export type WorkflowActionContribution = WorkflowStepAction | AnswerAction;

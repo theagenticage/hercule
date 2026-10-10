@@ -42,13 +42,13 @@ import {
   createDecodeValidationError,
   createForbiddenError,
   createValidationError,
-  decodeBindableOperation,
+  decodeAnswerOperation,
   MAX_NOTIFICATION_BODY_LENGTH,
   MAX_NOTIFICATION_TITLE_LENGTH,
   NotificationCreateInput,
   OWN_SESSION_ALIAS,
   truncateText,
-  type BindableOperation,
+  type AnswerOperation,
   type BoundAction,
   type BoundOperation,
   type CoreNotificationKind,
@@ -85,7 +85,7 @@ export interface CoreAction {
   readonly label: string;
   /** What choosing this answer means, shown as fine print under the answer. */
   readonly description?: string;
-  readonly operation: BindableOperation | null;
+  readonly operation: AnswerOperation<"notification.answer"> | null;
   readonly primary?: boolean;
 }
 
@@ -223,7 +223,7 @@ const replaceOwnSessionAlias = (
  * A run's step may bind `session.input` to any session.
  */
 const checkProducerMayBind = (
-  operation: BindableOperation,
+  operation: AnswerOperation<"notification.answer">,
   caller: SessionActor | RunActor,
   path: ReadonlyArray<string>,
 ): Effect.Effect<void, Validation> => {
@@ -256,7 +256,7 @@ const checkActions = (
       if (action.operation === null) return action;
       const path = ["actions", String(index), "operation"];
       const replaced = yield* replaceOwnSessionAlias(action.operation, caller, path);
-      const operation = yield* decodeBindableOperation(replaced, path);
+      const operation = yield* decodeAnswerOperation("notification.answer", replaced, path);
       yield* checkProducerMayBind(operation, caller, path);
       return { ...action, operation };
     }),

@@ -14,6 +14,7 @@
  * `api.test.ts` checks that the table and the HttpApi declaration match one
  * to one.
  */
+import type { AnswerPlace } from "@hercule/plugin-host";
 import type { Grant } from "./grants";
 
 /** The prefix every route carries. */
@@ -39,12 +40,21 @@ export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  * nothing but takes its input as a request body, such as validating a
  * workflow, uses POST and sets it. The controller keeps such an operation
  * answering while a promotion freezes it, like a GET.
+ *
+ * `usableIn` lists the places where the user's answer may run the operation:
+ * on a decision Notification, on a Signal, or both. A row without it is never
+ * bound, so a new operation is safe until its author opts in. The operation
+ * then needs a schema of its whole input in `bound-operations.ts`, and
+ * `bound-operations.test.ts` refuses it when it is too dangerous for one click.
+ * Which operations a workflow step may call is decided by the built-in
+ * actions, not by this field.
  */
 interface OperationRow {
   readonly requires: Requirement;
   readonly method: Method;
   readonly path: string;
   readonly readOnly?: true;
+  readonly usableIn?: readonly [AnswerPlace, ...ReadonlyArray<AnswerPlace>];
 }
 
 /**
@@ -108,8 +118,18 @@ const TABLE = {
 
   "task.query": { requires: "task.read", method: "GET", path: "/api/v1/tasks" },
   "task.read": { requires: "task.read", method: "GET", path: "/api/v1/tasks/:id" },
-  "task.create": { requires: "task.create", method: "POST", path: "/api/v1/tasks" },
-  "task.update": { requires: "task.update", method: "PATCH", path: "/api/v1/tasks/:id" },
+  "task.create": {
+    requires: "task.create",
+    method: "POST",
+    path: "/api/v1/tasks",
+    usableIn: ["signal.answer"],
+  },
+  "task.update": {
+    requires: "task.update",
+    method: "PATCH",
+    path: "/api/v1/tasks/:id",
+    usableIn: ["notification.answer", "signal.answer"],
+  },
   "task.delete": { requires: "task.delete", method: "DELETE", path: "/api/v1/tasks/:id" },
 
   "notification.query": {
@@ -136,6 +156,18 @@ const TABLE = {
     requires: "notification.write",
     method: "POST",
     path: "/api/v1/notifications/:id/act",
+  },
+
+  "signal.query": { requires: "signal.read", method: "GET", path: "/api/v1/signals" },
+  "signal.read": { requires: "signal.read", method: "GET", path: "/api/v1/signals/:id" },
+  // Raising is a verb on signals with no signal to act on yet, so its path is
+  // the collection's plus the verb, as `run.start`'s is.
+  "signal.raise": { requires: "signal.write", method: "POST", path: "/api/v1/signals/raise" },
+  "signal.act": { requires: "signal.write", method: "POST", path: "/api/v1/signals/:id/act" },
+  "signal.withdraw": {
+    requires: "signal.write",
+    method: "POST",
+    path: "/api/v1/signals/:id/withdraw",
   },
 
   "project.query": { requires: "project.read", method: "GET", path: "/api/v1/projects" },
@@ -235,7 +267,12 @@ const TABLE = {
   // One operation starts a run, of a stored workflow or of one sent with the
   // request. It is a verb on runs with no run to act on yet, so its path is
   // the collection's plus the verb.
-  "run.start": { requires: "run.start", method: "POST", path: "/api/v1/runs/start" },
+  "run.start": {
+    requires: "run.start",
+    method: "POST",
+    path: "/api/v1/runs/start",
+    usableIn: ["notification.answer", "signal.answer"],
+  },
   "run.query": { requires: "run.read", method: "GET", path: "/api/v1/runs" },
   "run.read": { requires: "run.read", method: "GET", path: "/api/v1/runs/:id" },
   "run.cancel": { requires: "run.write", method: "POST", path: "/api/v1/runs/:id/cancel" },
@@ -450,6 +487,7 @@ const TABLE = {
     requires: "session.steer",
     method: "POST",
     path: "/api/v1/sessions/:id/input",
+    usableIn: ["notification.answer"],
   },
   "session.interrupt": {
     requires: "session.steer",
@@ -460,6 +498,7 @@ const TABLE = {
     requires: "session.steer",
     method: "POST",
     path: "/api/v1/sessions/:id/respond-to-approval-request",
+    usableIn: ["notification.answer"],
   },
   "session.respondToQuestion": {
     requires: "session.steer",

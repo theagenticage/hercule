@@ -11,7 +11,7 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import { dispatchBindableOperation, type BindableOperationHandlers } from "@hercule/contract";
+import { dispatchAnswerOperation, type AnswerOperationHandlers } from "@hercule/contract";
 import { BindableOperations, type BindableOperationError } from "../../notifications";
 import { RunService } from "../../runs";
 import { TaskService } from "../../tasks";
@@ -26,7 +26,10 @@ const make = Effect.gen(function* () {
   // Each runs in the caller's transaction and sends nothing to a runner until
   // it commits: `queueInput` stores the input and delivers it afterwards, and
   // `respondToApprovalRequest` sends its frame afterwards.
-  const handlers: BindableOperationHandlers<Effect.Effect<unknown, BindableOperationError>> = {
+  const handlers: AnswerOperationHandlers<
+    "notification.answer",
+    Effect.Effect<unknown, BindableOperationError>
+  > = {
     "task.update": ({ taskId, ...changes }) => tasks.update({ id: taskId, ...changes }),
     "run.start": (input) => runs.start(input),
     "session.input": ({ sessionId, ...input }) => live.queueInput({ id: sessionId, ...input }),
@@ -35,7 +38,7 @@ const make = Effect.gen(function* () {
   };
 
   return BindableOperations.of({
-    run: (operation) => Effect.asVoid(dispatchBindableOperation(handlers, operation)),
+    run: (operation) => Effect.asVoid(dispatchAnswerOperation(handlers, operation)),
     describe: yield* buildDescribe,
   });
 });

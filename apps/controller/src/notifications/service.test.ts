@@ -15,7 +15,7 @@ import { TestClock } from "effect/testing";
 import type { SqlClient } from "effect/unstable/sql";
 import {
   createNotFoundError,
-  type BindableOperation,
+  type AnswerOperation,
   type BoundAction,
   type Grant,
   type Notification,
@@ -1068,7 +1068,7 @@ describe("describe lines", () => {
     expect(notification.actions[0]!.describeLine).toEqual([
       {
         kind: "text",
-        text: "Cannot be taken: An answer cannot run task.delete. An answer can run one of: task.update, run.start, session.input, session.respondToApprovalRequest.",
+        text: "Cannot be taken: An answer on a notification cannot run task.delete. An answer on a notification can run one of: task.update, run.start, session.input, session.respondToApprovalRequest, or a plugin action that lists notification.answer in its usableIn.",
       },
     ]);
   });
@@ -1083,7 +1083,7 @@ describe("notification.act", () => {
 
   /** Runs one operation for a test. It is handed the notifier, so it can resolve decisions. */
   type RunOperation = (
-    operation: BindableOperation,
+    operation: AnswerOperation<"notification.answer">,
     notifier: Notifier["Service"],
   ) => Effect.Effect<void, BindableOperationError>;
 

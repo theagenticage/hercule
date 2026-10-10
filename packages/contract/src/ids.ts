@@ -52,6 +52,23 @@ export const NullableActor = Schema.NullOr(Actor);
 
 export type NullableActor = Schema.Schema.Type<typeof NullableActor>;
 
+/**
+ * The id of a catalog contribution: `<pluginId>/<word>`, such as
+ * `github/pr.merge`. The plugin declares the word and the host prefixes its
+ * plugin id, so the word holds no `/`. An operation id (`task.create`) never
+ * matches, because it holds no `/` at all.
+ */
+export const QualifiedId = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9]+(-[a-z0-9]+)*\/[^/]+$/, {
+    title: "qualified id",
+    description: "`<pluginId>/<word>`, such as github/pr.merge",
+  }),
+);
+
+export type QualifiedId = Schema.Schema.Type<typeof QualifiedId>;
+
+export const isQualifiedId = Schema.is(QualifiedId);
+
 /** The longest External Ref. It is an identity, not a document. */
 export const MAX_EXTERNAL_REF_LENGTH = 512;
 

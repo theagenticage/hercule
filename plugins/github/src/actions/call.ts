@@ -26,11 +26,7 @@
 import { Clock, Effect, Schema } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
-import {
-  ActionError,
-  type ActionContext,
-  type WorkflowActionContribution,
-} from "@hercule/plugin-host";
+import { ActionError, type ActionContext, type WorkflowStepAction } from "@hercule/plugin-host";
 import {
   computeRateLimitWaitSeconds,
   isRateLimited,
@@ -53,7 +49,7 @@ import { GITHUB_CONNECTION_TYPE } from "../connection-type";
 export interface GithubAction<
   Input extends Schema.Top,
   Output extends Schema.Top,
-> extends WorkflowActionContribution {
+> extends WorkflowStepAction {
   readonly input: Input;
   readonly output: Output;
   readonly perform: (

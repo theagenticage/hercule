@@ -16,7 +16,7 @@
  *
  * Spec 10 §7 owns the record, its lifecycle and the router.
  */
-import { PluginId } from "@hercule/plugin-host";
+import { DescribeLinePart, PluginId } from "@hercule/plugin-host";
 import { Fact } from "@hercule/protocol";
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -30,7 +30,7 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
-import { Actor, Id, Timestamp } from "../ids";
+import { Actor, Id, isQualifiedId, Timestamp } from "../ids";
 import { isOperationId } from "../operations";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -70,6 +70,12 @@ export const MAX_ACTION_DESCRIPTION_LENGTH = 4 * 1024;
  * ids and a few words, never a document.
  */
 export const MAX_BOUND_INPUT_BYTES = 16 * 1024;
+
+/** The longest name of the input field a typed answer fills in. */
+export const MAX_ACTION_FIELD_NAME_LENGTH = 64;
+
+/** The longest placeholder of a typed answer's text box. It is one line. */
+export const MAX_ACTION_FIELD_PLACEHOLDER_LENGTH = 256;
 
 /** The longest withdrawal reason. It is one line under the notification. */
 export const MAX_WITHDRAW_REASON_LENGTH = 256;
@@ -171,21 +177,30 @@ export type NotificationSubject = Schema.Schema.Type<typeof NotificationSubject>
 
 /**
  * The operation an answer runs when the user takes it: a contract operation
- * id and its whole input as one object. This schema only bounds its size.
- * `notification.create` checks that the operation is one an answer may run
- * and that the input fits it (`decodeBindableOperation`), and `notification.act`
- * checks again before it runs the operation. A stored answer is read with this
- * looser schema, so a notification stays readable after the list of bindable
- * operations or an operation's input schema changes.
+ * id or a plugin action's qualified id, the Connection it acts through, and
+ * its whole input as one object.
+ *
+ * This schema only checks the shape. The core checks the rest when the
+ * Notification or the Signal is written, and again before the operation
+ * runs: that the operation lists the place in its `usableIn`, that the input
+ * fits the operation's schema (`decodeAnswerOperation` for a contract
+ * operation), and that a named Connection fits the action. A stored answer is
+ * read with this looser schema, so it stays readable after an operation's
+ * `usableIn` or input schema changes.
  */
 export const BoundOperation = Schema.Struct({
   op: Schema.String.check(
     Schema.makeFilter((op) =>
-      isOperationId(op)
+      isOperationId(op) || isQualifiedId(op)
         ? undefined
-        : `There is no operation named ${JSON.stringify(op)}. Bind a contract operation id, such as run.start.`,
+        : `There is no operation named ${JSON.stringify(op)}. Bind a contract operation id, such as run.start, or a plugin action's qualified id, such as github/pr.merge.`,
     ),
   ),
+  /**
+   * The Connection a plugin action acts through. Present exactly when the
+   * action declares a Connection type; it stays out of `input`.
+   */
+  connectionId: Schema.optionalKey(Id),
   input: Schema.Unknown.check(
     Schema.makeFilter((input) =>
       new TextEncoder().encode(JSON.stringify(input) ?? "").byteLength <= MAX_BOUND_INPUT_BYTES
@@ -211,27 +226,25 @@ export const BoundAction = Schema.Struct({
   description: Schema.optionalKey(bounded(1, MAX_ACTION_DESCRIPTION_LENGTH)),
   /** `null` resolves the decision and runs nothing: "Dismiss", "Neither". */
   operation: Schema.NullOr(BoundOperation),
-  /** The quiet primary answer. At most one per notification. */
+  /** The quiet primary answer. At most one per notification or signal. */
   primary: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Makes the answer a typed reply, on a Signal only. `name` is one top-level
+   * text field of the operation's input, such as `body`, left empty until the
+   * click; the text the user types fills it in. `placeholder` is the grey
+   * text of the empty text box.
+   */
+  field: Schema.optionalKey(
+    Schema.Struct({
+      name: bounded(1, MAX_ACTION_FIELD_NAME_LENGTH),
+      placeholder: bounded(1, MAX_ACTION_FIELD_PLACEHOLDER_LENGTH).check(
+        Schema.isPattern(/^[^\r\n]*$/, { description: "one line" }),
+      ),
+    }),
+  ),
 });
 
 export type BoundAction = Schema.Schema.Type<typeof BoundAction>;
-
-/**
- * One piece of a describe line. It has one of two kinds:
- *
- * - `text` is the ordinary words of the line.
- * - `marked` is set apart from the words around it; the web app renders it
- *   in ink. It is either the live name of an entity the answer acts on, such
- *   as a workflow or a session, or a value the answer sends or sets, such as
- *   the text of an input or a new title.
- */
-export const DescribeLinePart = Schema.Struct({
-  kind: Schema.Literals(["text", "marked"]),
-  text: Schema.String,
-});
-
-export type DescribeLinePart = Schema.Schema.Type<typeof DescribeLinePart>;
 
 /**
  * What taking an answer does, written by the core from the frozen operation
@@ -323,7 +336,7 @@ export type Notification = Schema.Schema.Type<typeof Notification>;
  * primary. An answer is taken by its id, and the design shows one primary
  * answer at most.
  */
-const refuseAmbiguousActions = Schema.makeFilter((actions: ReadonlyArray<BoundAction>) => {
+export const refuseAmbiguousActions = Schema.makeFilter((actions: ReadonlyArray<BoundAction>) => {
   const ids = actions.map((action) => action.id);
   const repeated = ids.find((id, index) => ids.indexOf(id) !== index);
   if (repeated !== undefined) {
@@ -351,7 +364,24 @@ export const NotificationCreateInput = Schema.Struct({
   body: Schema.optionalKey(bounded(1, MAX_NOTIFICATION_BODY_LENGTH)),
   /** Answers make the notification a decision. Without them it is informational. */
   actions: Schema.optionalKey(
-    atMost(BoundAction, MAX_NOTIFICATION_ACTIONS).check(refuseAmbiguousActions),
+    atMost(BoundAction, MAX_NOTIFICATION_ACTIONS).check(
+      refuseAmbiguousActions,
+      // A decision answered in free text is answered by opening the session
+      // and typing there; a typed answer exists on Signals only.
+      Schema.makeFilter((actions: ReadonlyArray<BoundAction>) =>
+        actions.flatMap((action, index) =>
+          action.field === undefined
+            ? []
+            : [
+                {
+                  path: [index, "field"],
+                  issue:
+                    "A notification's answer cannot take typed text. Leave out field, and let the user answer in the session instead.",
+                },
+              ],
+        ),
+      ),
+    ),
   ),
   subject: Schema.optionalKey(atMost(NotificationSubject, MAX_NOTIFICATION_SUBJECTS)),
 });

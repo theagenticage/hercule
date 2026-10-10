@@ -14,7 +14,7 @@ import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type {
-  BindableOperation,
+  AnswerOperation,
   CapExceeded,
   DescribeLine,
   Forbidden,
@@ -54,7 +54,9 @@ export class BindableOperations extends Context.Service<
      * if the transaction rolls back. So the caller can resolve the decision
      * in the same transaction, and both commit or neither does.
      */
-    readonly run: (operation: BindableOperation) => Effect.Effect<void, BindableOperationError>;
+    readonly run: (
+      operation: AnswerOperation<"notification.answer">,
+    ) => Effect.Effect<void, BindableOperationError>;
 
     /**
      * Returns the describe lines of the operations of one notification's
@@ -65,7 +67,7 @@ export class BindableOperations extends Context.Service<
      * fails for a missing entity.
      */
     readonly describe: (
-      operations: ReadonlyArray<BindableOperation>,
+      operations: ReadonlyArray<AnswerOperation<"notification.answer">>,
     ) => Effect.Effect<ReadonlyArray<DescribeLine>, SqlError>;
   }
 >()("hercule/controller/notifications/BindableOperations") {}

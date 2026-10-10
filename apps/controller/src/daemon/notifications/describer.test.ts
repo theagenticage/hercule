@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as Statement from "effect/unstable/sql/Statement";
 import type {
-  BindableOperation,
+  AnswerOperation,
   DescribeLine,
   OpenRequest,
   WorkflowDefinition,
@@ -42,7 +42,7 @@ const text = (value: string) => ({ kind: "text", text: value }) as const;
 const marked = (value: string) => ({ kind: "marked", text: value }) as const;
 
 /** Returns the describe line of one operation. */
-const describeOperation = (operation: BindableOperation) =>
+const describeOperation = (operation: AnswerOperation<"notification.answer">) =>
   Effect.flatMap(buildDescribe, (describe) =>
     Effect.map(describe([operation]), (lines) => lines[0]!),
   );

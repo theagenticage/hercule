@@ -70,6 +70,7 @@ export const MUTABLE_LIVE_TOPICS = [
   // A subagent is read through its session, so this topic's invalidations
   // carry the ids of the sessions whose subagents changed.
   "subagent",
+  "signal",
 ] as const;
 
 /**

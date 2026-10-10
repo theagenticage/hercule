@@ -32,10 +32,10 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   isId,
   type ApprovalDecision,
-  dispatchBindableOperation,
-  type BindableOperation,
-  type BindableOperationHandlers,
-  type BindableOperationInput,
+  dispatchAnswerOperation,
+  type AnswerOperation,
+  type AnswerOperationHandlers,
+  type AnswerOperationInput,
   type DescribeLine,
   type DescribeLinePart,
   type OpenRequest,
@@ -158,7 +158,7 @@ const describeDecision = (
  * "ref «github:issue:1», run «…»". An entry holds at least one of the three.
  */
 const describeProvenance = (
-  entries: NonNullable<BindableOperationInput<"task.update">["provenance"]>,
+  entries: NonNullable<AnswerOperationInput<"task.update">["provenance"]>,
 ): DescribeLine =>
   joinParts(
     entries.map((entry) =>
@@ -185,7 +185,7 @@ const describeProvenance = (
  */
 export const buildDescribe: Effect.Effect<
   (
-    operations: ReadonlyArray<BindableOperation>,
+    operations: ReadonlyArray<AnswerOperation<"notification.answer">>,
   ) => Effect.Effect<ReadonlyArray<DescribeLine>, SqlError>,
   never,
   SqlClient.SqlClient
@@ -257,7 +257,7 @@ export const buildDescribe: Effect.Effect<
      * is written in full.
      */
     const describeTaskChanges = (
-      changes: Omit<BindableOperationInput<"task.update">, "taskId">,
+      changes: Omit<AnswerOperationInput<"task.update">, "taskId">,
     ): Effect.Effect<DescribeLine, SqlError> =>
       Effect.gen(function* () {
         const described: Array<DescribeLine> = [];
@@ -382,14 +382,17 @@ export const buildDescribe: Effect.Effect<
             session.markedName,
           ),
         ),
-    } satisfies BindableOperationHandlers<Effect.Effect<DescribeLine, SqlError>>;
+    } satisfies AnswerOperationHandlers<
+      "notification.answer",
+      Effect.Effect<DescribeLine, SqlError>
+    >;
   };
 
-  return (operations: ReadonlyArray<BindableOperation>) =>
+  return (operations: ReadonlyArray<AnswerOperation<"notification.answer">>) =>
     Effect.suspend(() => {
       const describers = buildDescribers();
       return Effect.forEach(operations, (operation) =>
-        dispatchBindableOperation(describers, operation),
+        dispatchAnswerOperation(describers, operation),
       );
     });
 });
