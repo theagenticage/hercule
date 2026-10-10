@@ -106,6 +106,12 @@ describe("the dock", () => {
       ["docs/"],
     ],
     [
+      "a read that names no file",
+      { ...COMMAND, kind: "file_read_approval", detail: { paths: [] } },
+      "Read files?",
+      [],
+    ],
+    [
       "a tool call",
       { ...COMMAND, kind: "tool_approval", detail: { toolName: "WebFetch" } },
       "Run WebFetch?",

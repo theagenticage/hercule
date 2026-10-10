@@ -137,16 +137,22 @@ const createBashToolDefinition = (cwd: string, options: Record<string, unknown>)
   ...options,
 });
 
+/** A `pi.on` handler the extension registered: pi calls it with the event and the context. */
+type EventHandler = (event: unknown, ctx: unknown) => Promise<unknown>;
+
 /**
  * Loads the extension the way pi loads it, and returns every tool it
- * registered. It evaluates the source and runs the default export against a
- * fake pi that records registrations. The environment is the only input,
- * because the adapter tells the extension about the session through the
- * environment.
+ * registered and every event handler, by event name. It evaluates the source
+ * and runs the default export against a fake pi that records registrations.
+ * The environment is the only input, because the adapter tells the extension
+ * about the session through the environment.
  */
-const loadRegisteredTools = (
+const loadExtension = (
   env: Readonly<Record<string, string | undefined>>,
-): ReadonlyArray<RegisteredTool> => {
+): {
+  readonly tools: ReadonlyArray<RegisteredTool>;
+  readonly handlers: ReadonlyMap<string, EventHandler>;
+} => {
   const body = EXTENSION_SOURCE.split("\n")
     .filter((line) => !line.startsWith("import "))
     .join("\n")
@@ -159,14 +165,22 @@ const loadRegisteredTools = (
     createBashToolDefinition,
   ) as (pi: unknown) => void;
   const tools: Array<RegisteredTool> = [];
+  const handlers = new Map<string, EventHandler>();
   load({
-    on: () => undefined,
+    on: (event: string, handler: EventHandler) => {
+      handlers.set(event, handler);
+    },
     registerTool: (tool: RegisteredTool) => {
       tools.push(tool);
     },
   });
-  return tools;
+  return { tools, handlers };
 };
+
+/** Loads the extension, and returns every tool it registered. */
+const loadRegisteredTools = (
+  env: Readonly<Record<string, string | undefined>>,
+): ReadonlyArray<RegisteredTool> => loadExtension(env).tools;
 
 /**
  * Returns the tools the extension adds to pi's own. It leaves out the
@@ -189,6 +203,56 @@ describe("the bash tool", () => {
         commandPrefix: `exec 9<"$${AGENT_FILE_VARIABLE}"`,
       },
     ]);
+  });
+});
+
+describe("the approval hook's dialog", () => {
+  /**
+   * Runs the `tool_call` handler on one call, under approval-required, with a
+   * context whose dialog allows. Returns the message of the dialog it opened.
+   */
+  const readDialogMessage = async (
+    toolName: string,
+    input: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> => {
+    const handler = loadExtension({}).handlers.get("tool_call")!;
+    const messages: Array<string> = [];
+    const ctx = {
+      signal: new AbortController().signal,
+      ui: {
+        confirm: (_title: string, message: string) => {
+          messages.push(message);
+          return Promise.resolve(true);
+        },
+      },
+    };
+    await handler({ type: "tool_call", toolCallId: "call_1", toolName, input }, ctx);
+    expect(messages).toHaveLength(1);
+    return JSON.parse(messages[0]!);
+  };
+
+  it("carries the command of a shell call, as pi validated it", async () => {
+    expect(await readDialogMessage("bash", { command: "rm -rf build", timeout: 5 })).toEqual({
+      toolCallId: "call_1",
+      toolName: "bash",
+      command: "rm -rf build",
+    });
+  });
+
+  it("carries the path of a file change, and leaves the content out", async () => {
+    // A write's content can be megabytes, and the message is one RPC frame.
+    expect(await readDialogMessage("write", { path: "42", content: "x".repeat(1000) })).toEqual({
+      toolCallId: "call_1",
+      toolName: "write",
+      path: "42",
+    });
+  });
+
+  it("leaves out a command or path that is not a string", async () => {
+    expect(await readDialogMessage("mcp__jira__create", { path: 42, command: ["ls"] })).toEqual({
+      toolCallId: "call_1",
+      toolName: "mcp__jira__create",
+    });
   });
 });
 

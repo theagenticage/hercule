@@ -55,8 +55,8 @@ describe("a repeated header", () => {
 
     const [first, second] = readHeaders(given);
 
-    expect(first).toBe(long.slice(0, MAX_FACT_LENGTH));
-    expect(second).toBe(`${long.slice(0, MAX_FACT_LENGTH - 4)} (2)`);
+    expect(first).toBe(`${long.slice(0, MAX_FACT_LENGTH - 1)}…`);
+    expect(second).toBe(`${long.slice(0, MAX_FACT_LENGTH - 5)}… (2)`);
     expect(keyAnswersForVendor({ [second!]: "b" }, given, "question")).toEqual(
       new Map([["Second?", ["b"]]]),
     );

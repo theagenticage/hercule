@@ -120,6 +120,15 @@ describe("the subagent tool", () => {
   }
 });
 
+describe("an access mode this build does not know", () => {
+  // An unrecognised mode asks about everything, even a read.
+  for (const tool of ["read", "grep", "find", "ls", "bash", "write"] as const) {
+    it(`parks ${tool}`, () => {
+      expect(requiresApproval("supervised" as AccessMode, tool)).toBe(true);
+    });
+  }
+});
+
 describe("the access mode a launched pi is given", () => {
   for (const mode of ["approval-required", "auto-accept-edits", "full-access"] as const) {
     it(`passes ${mode} to pi in its environment`, async () => {

@@ -171,10 +171,19 @@ export default function (pi) {
   pi.on("tool_call", async (event, ctx) => {
     if (!requiresApproval(MODE, event.toolName)) return undefined;
     try {
-      // The message is the call's id and tool name as JSON, not prose. Hercule
-      // builds the approval card from the tool call itself, and uses this id to
-      // find that call.
-      const heldCall = JSON.stringify({ toolCallId: event.toolCallId, toolName: event.toolName });
+      // The message is JSON, not prose: the call's id, which Hercule uses to
+      // find the call, its tool name, and the command and path the approval
+      // card shows. pi has validated and converted the input by now, so the
+      // card shows what will run: a path the model sent as the number 42 runs
+      // as "42". The rest of the input stays out, because one message is one
+      // RPC frame and a write's content can be megabytes.
+      const input = event.input ?? {};
+      const heldCall = JSON.stringify({
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        ...(typeof input.command === "string" ? { command: input.command } : {}),
+        ...(typeof input.path === "string" ? { path: input.path } : {}),
+      });
       const allowed = await ctx.ui.confirm(\`Approve \${event.toolName}?\`, heldCall, {
         // Without the signal, an aborted turn leaves this dialog waiting
         // forever, and the session stuck with it.

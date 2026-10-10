@@ -37,21 +37,36 @@ const SECOND_UI = "3f1a0c7e-0000-4000-8000-00000000abce";
 const SECOND_CALL = "call_0199e0e8";
 
 /**
- * Builds the dialog message Hercule's approval hook writes: the call it asks
- * about. pi's dialog does not include the call, and the card is built from the
- * call itself, so the message holds only the call's id and tool name.
+ * Builds the dialog message Hercule's approval hook writes: the held call's
+ * id and tool name, and its command and path when they are strings. The hook
+ * reads them from the input pi validated, so the card is built from them.
  */
-const buildDialogMessage = (toolCallId: string, toolName: string): string =>
-  JSON.stringify({ toolCallId, toolName });
+const buildDialogMessage = (
+  toolCallId: string,
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+): string =>
+  JSON.stringify({
+    toolCallId,
+    toolName,
+    ...(typeof input["command"] === "string" ? { command: input["command"] } : {}),
+    ...(typeof input["path"] === "string" ? { path: input["path"] } : {}),
+  });
 
 const COMMAND = "rm -rf build && echo rebuilt";
 
 type DrivenAdapter = Awaited<ReturnType<typeof startBusySession>>;
 
-/** Starts a turn and pushes a tool call plus the approval dialog that holds it. */
+/**
+ * Starts a turn and pushes a tool call plus the approval dialog that holds it.
+ * The call starts with `args`, the arguments the model sent; the dialog
+ * carries `validated`, the input after pi validated and converted `args`,
+ * which is `args` unless a test says otherwise.
+ */
 const parkOnTool = async (
   toolName: string,
   args: Readonly<Record<string, unknown>>,
+  validated: Readonly<Record<string, unknown>> = args,
 ): Promise<DrivenAdapter> => {
   const run = await startBusySession();
   run.child.push({ type: "tool_execution_start", toolCallId: CALL, toolName, args });
@@ -60,7 +75,7 @@ const parkOnTool = async (
     id: UI,
     method: "confirm",
     title: `Approve ${toolName}?`,
-    message: buildDialogMessage(CALL, toolName),
+    message: buildDialogMessage(CALL, toolName, validated),
   });
   return run;
 };
@@ -102,6 +117,7 @@ const awaitResolvedRequest = async (
  *
  * - a shell is a command approval;
  * - writing or editing a file is a file change approval;
+ * - reading, searching or listing files is a file read approval;
  * - any other tool is a tool approval, by name.
  */
 describe("the request kind of a held call", () => {
@@ -111,6 +127,12 @@ describe("the request kind of a held call", () => {
     ["powershell", { command: COMMAND }, "command_approval"],
     ["write", { path: "src/new.ts" }, "file_change_approval"],
     ["edit", { path: "src/new.ts" }, "file_change_approval"],
+    // These run unasked in the known modes, but a mode this build does not
+    // know asks about everything, so they still need the right card.
+    ["read", { path: "src/main.ts" }, "file_read_approval"],
+    ["grep", { pattern: "TODO", path: "src" }, "file_read_approval"],
+    ["find", { pattern: "*.ts" }, "file_read_approval"],
+    ["ls", {}, "file_read_approval"],
     // An MCP tool, or one a later pi adds: shown by name, never guessed at.
     ["mcp__jira__create", { summary: "ship it" }, "tool_approval"],
   ];
@@ -120,6 +142,36 @@ describe("the request kind of a held call", () => {
       const run = await parkOnTool(toolName, args);
 
       expect((await awaitOpenedRequest(run)).request.kind).toBe(kind);
+    });
+  }
+});
+
+describe("the paths on a parked file call", () => {
+  it("shows the path a read is about", async () => {
+    const run = await parkOnTool("read", { path: "src/main.ts" });
+
+    expect((await awaitOpenedRequest(run)).request.detail).toEqual({ paths: ["src/main.ts"] });
+  });
+
+  // pi converts the model's arguments before the call runs, so a path sent as
+  // the number 42 writes the file "42". The card must name that file.
+  it("shows the path pi validated, not the argument the model sent", async () => {
+    const run = await parkOnTool("write", { path: 42, content: "b" }, { path: "42", content: "b" });
+
+    expect((await awaitOpenedRequest(run)).request.detail).toEqual({ paths: ["42"] });
+  });
+
+  // The protocol refuses an empty path, and a frame it refuses is lost, which
+  // would leave pi holding the call with no card for the user to answer.
+  for (const [toolName, args] of [
+    ["ls", {}],
+    ["find", { pattern: "*.ts", path: "" }],
+    ["write", { content: "b" }],
+  ] as const) {
+    it(`shows no paths when a held ${toolName} call has no path`, async () => {
+      const run = await parkOnTool(toolName, args);
+
+      expect((await awaitOpenedRequest(run)).request.detail).toEqual({ paths: [] });
     });
   }
 });
@@ -138,6 +190,12 @@ describe("the request for a parked shell command", () => {
     expect(opened.request.itemId).toBe(item?.itemId);
     expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
     expect(opened.request.detail).toEqual({ command: COMMAND });
+  });
+
+  it("shows the command pi validated, not the argument the model sent", async () => {
+    const run = await parkOnTool("bash", { command: 7 }, { command: "7" });
+
+    expect((await awaitOpenedRequest(run)).request.detail).toEqual({ command: "7" });
   });
 
   it("sends pi nothing until the user answers", async () => {
@@ -267,7 +325,7 @@ describe("a second approval asked while one is open", () => {
       id: SECOND_UI,
       method: "confirm",
       title: "Approve bash?",
-      message: buildDialogMessage(SECOND_CALL, "bash"),
+      message: buildDialogMessage(SECOND_CALL, "bash", { command: "ls" }),
     });
     await waitUntil("docked both", () => filterByTag(run.seen, "request.opened").length === 2);
     return run;

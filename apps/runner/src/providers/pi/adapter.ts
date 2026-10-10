@@ -60,6 +60,7 @@ import {
   buildNormalizingState,
   buildSubagentState,
   buildUsageEvents,
+  readFactArg,
   type Normalizing,
   type RunningTool,
 } from "./normalize";
@@ -95,7 +96,7 @@ const STOP_DEADLINE: Duration.Duration = Duration.seconds(2);
  */
 type ParkKind = Extract<
   OpenRequest["kind"],
-  "command_approval" | "file_change_approval" | "tool_approval"
+  "command_approval" | "file_change_approval" | "file_read_approval" | "tool_approval"
 >;
 
 export interface PiSeam {
@@ -258,39 +259,55 @@ const buildDialogAnswer = (decision: ApprovalDecision): Record<string, unknown> 
 
 /**
  * The request kind for a held call, by the item kind the normalizer gave the
- * call: a command, a file change, or (for anything else) a tool by name. Which
- * calls are held is decided in `policy.ts`; this only picks the kind.
+ * call: a command, a file change, a file read, or (for anything else) a tool
+ * by name. A search or a listing reads files too, so it asks the same question
+ * as a read. Which calls are held is decided in `policy.ts`; this only picks
+ * the kind.
  */
 const APPROVALS: Readonly<Partial<Record<ItemKind, ParkKind>>> = {
   command_execution: "command_approval",
   file_change: "file_change_approval",
-};
-
-/** Returns the named string argument of a tool call, or "" when it is missing or not a string. */
-const readStringArg = (item: RunningTool, name: string): string => {
-  const value = item.args?.[name];
-  return typeof value === "string" ? value : "";
+  file_read: "file_read_approval",
+  file_search: "file_read_approval",
 };
 
 /**
- * Builds the approval request the user answers. Its detail comes from the tool
- * call pi started, not from pi's dialog, because the dialog only says which
- * call it is about. Surfaces show the command, the path or the tool name.
+ * Builds the approval request the user answers. Its detail comes from the
+ * held call's fields in pi's dialog, not from the arguments pi started the
+ * call with: pi validates and converts the arguments before the approval hook
+ * sees them, and the card must show what will run. Surfaces show the command,
+ * the paths or the tool name.
  */
-const buildOpenRequest = (requestId: string, item: RunningTool, kind: ParkKind): OpenRequest => {
+const buildOpenRequest = (
+  requestId: string,
+  item: RunningTool,
+  kind: ParkKind,
+  dialog: ApprovalDialog,
+): OpenRequest => {
   const common = { requestId, itemId: item.itemId, decisions: DECISIONS };
   if (kind === "command_approval") {
-    return {
-      ...common,
-      kind,
-      detail: { command: truncateMessage(readStringArg(item, "command")) },
-    };
+    return { ...common, kind, detail: { command: truncateMessage(dialog.command) } };
   }
-  if (kind === "file_change_approval") {
-    return { ...common, kind, detail: { paths: [truncateFact(readStringArg(item, "path"))] } };
+  if (kind === "file_change_approval" || kind === "file_read_approval") {
+    // An empty path is left out, because the protocol refuses one and a frame
+    // it refuses is lost.
+    return { ...common, kind, detail: { paths: dialog.path === undefined ? [] : [dialog.path] } };
   }
   return { ...common, kind, detail: { toolName: truncateFact(item.toolName) } };
 };
+
+/**
+ * The approval hook's dialog: the held call's id, and the command and path
+ * pi will run it with. `command` is "" and `path` undefined when the call has
+ * none; `path` is already cut to the fact bound.
+ */
+interface ApprovalDialog {
+  readonly kind: "approval";
+  readonly id: string;
+  readonly toolCallId: string;
+  readonly command: string;
+  readonly path: string | undefined;
+}
 
 /**
  * A pi dialog the extension opened, and the tool call it is about. Either the
@@ -298,7 +315,7 @@ const buildOpenRequest = (requestId: string, item: RunningTool, kind: ParkKind):
  * asks the runner to start a subagent with the call's task.
  */
 type Dialog =
-  | { readonly kind: "approval"; readonly id: string; readonly toolCallId: string }
+  | ApprovalDialog
   | {
       readonly kind: "subagent";
       readonly id: string;
@@ -342,7 +359,13 @@ const parseDialog = (frame: unknown): Dialog | undefined => {
   if (asked["type"] !== "extension_ui_request" || typeof id !== "string") return undefined;
   if (asked["method"] === "confirm") {
     const held = parseDialogJson(asked["message"]);
-    return { kind: "approval", id, toolCallId: readString(held, "toolCallId") };
+    return {
+      kind: "approval",
+      id,
+      toolCallId: readString(held, "toolCallId"),
+      command: readString(held, "command"),
+      path: readFactArg(held, "path"),
+    };
   }
   if (asked["method"] === "input" && asked["title"] === SUBAGENT_DIALOG) {
     const task = parseDialogJson(asked["placeholder"]);
@@ -696,7 +719,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * may have several approvals open at once, because pi runs a message's tool
    * calls at the same time; each is answered on its own.
    */
-  const openPark = (held: Held, agent: RunningAgent, dialog: Dialog): void => {
+  const openPark = (held: Held, agent: RunningAgent, dialog: ApprovalDialog): void => {
     const sessionId = held.binding.sessionId;
     const item = agent.state.tools.get(dialog.toolCallId);
     if (item === undefined) {
@@ -711,6 +734,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       crypto.randomUUID(),
       item,
       APPROVALS[item.kind] ?? "tool_approval",
+      dialog,
     );
     held.parks.set(request.requestId, {
       request,

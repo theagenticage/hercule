@@ -91,14 +91,24 @@ export interface ApprovalCard {
   readonly rows: readonly ApprovalRow[];
 }
 
+/**
+ * Builds the title of a card about files, from the verb and the paths the
+ * request names. A request may name no path, such as a listing of the
+ * workspace, and then the title names no file either.
+ */
+const buildFilesTitle = (verb: string, paths: readonly string[]): string => {
+  if (paths.length === 0) return `${verb} files?`;
+  return paths.length === 1 ? `${verb} this file?` : `${verb} these files?`;
+};
+
 const buildCardTitle = (request: OpenRequest): string => {
   switch (request.kind) {
     case "command_approval":
       return "Run this command?";
     case "file_change_approval":
-      return request.detail.paths.length === 1 ? "Change this file?" : "Change these files?";
+      return buildFilesTitle("Change", request.detail.paths);
     case "file_read_approval":
-      return request.detail.paths.length === 1 ? "Read this file?" : "Read these files?";
+      return buildFilesTitle("Read", request.detail.paths);
     case "tool_approval":
       return `Run ${request.detail.toolName}?`;
     case "question":

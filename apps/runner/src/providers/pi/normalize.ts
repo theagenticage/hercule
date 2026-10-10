@@ -87,9 +87,12 @@ interface Running {
 
 /**
  * A running tool item, with the output already reported for it. It keeps pi's
- * tool name and the call's arguments, because the approval hook asks about a
- * call after the call has started: the adapter builds the approval request
- * from the waiting call's name and arguments.
+ * tool name, because the approval hook asks about a call after the call has
+ * started and the adapter reads the name and kind from this item. It keeps the
+ * arguments the call started with for `submit_result`, whose arguments are
+ * the turn's answer. An approval request never reads them: pi converts the
+ * arguments before the hook runs, so the request is built from the converted
+ * command and path in the hook's dialog.
  */
 export interface RunningTool extends Running {
   readonly toolName: string;
@@ -395,7 +398,8 @@ const BLOCKS: Readonly<
 
 /**
  * The item kinds of pi's built-in tools and of the runner's `subagent` tool.
- * Any other tool is a `tool_call`.
+ * Any other tool is a `tool_call`. Only the table's own keys count, so a tool
+ * named like an object method, such as `constructor`, is still a `tool_call`.
  */
 const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   [SUBAGENT_TOOL]: "subagent",
@@ -403,26 +407,61 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   powershell: "command_execution",
   edit: "file_change",
   write: "file_change",
+  read: "file_read",
+  grep: "file_search",
+  find: "file_search",
+  ls: "file_search",
 };
 
 /**
- * Builds the one detail field a row shows for a tool item: the task a
- * subagent was given, the command, the file path, or else the tool name. The
- * full arguments are in `raw`.
+ * Returns a tool call's string argument cut to the fact bound, or `undefined`
+ * when the argument is missing, not a string, or empty.
+ */
+export const readFactArg = (
+  args: Record<string, unknown> | undefined,
+  name: string,
+): string | undefined => {
+  const value = args?.[name];
+  return typeof value === "string" && value !== "" ? truncateFact(value) : undefined;
+};
+
+/**
+ * Builds the detail a row shows for a tool item. The full arguments are in
+ * `raw`.
+ *
+ * - A subagent shows the task it was given.
+ * - A file read shows the fixed field `path`, and a file search the fixed
+ *   fields `pattern` and `path`, each left out when the call did not give it.
+ *   `ls` has no pattern, and a search with no path covers the workspace. The
+ *   tool's name is kept beside them, so a row still has a label when both are
+ *   missing.
+ * - Any other tool shows its command, else its file path, else its name.
  */
 const buildToolDetail = (
+  kind: ItemKind,
   toolName: string,
   args: Record<string, unknown> | undefined,
 ): Schema.Json => {
   const description = args?.["description"];
-  if (toolName === SUBAGENT_TOOL && typeof description === "string") {
+  if (kind === "subagent" && typeof description === "string") {
     return { name: truncateFact(toolName), description: truncateMessage(description) };
+  }
+  if (kind === "file_read" || kind === "file_search") {
+    // `ls` takes no pattern. pi accepts one anyway and ignores it, so showing
+    // it would claim a filter that never ran.
+    const pattern =
+      kind === "file_search" && toolName !== "ls" ? readFactArg(args, "pattern") : undefined;
+    const path = readFactArg(args, "path");
+    return {
+      name: truncateFact(toolName),
+      ...(pattern === undefined ? {} : { pattern }),
+      ...(path === undefined ? {} : { path }),
+    };
   }
   const command = args?.["command"];
   if (typeof command === "string") return { command: truncateMessage(command) };
-  const path = args?.["path"];
-  if (typeof path === "string") return { path: truncateFact(path) };
-  return { name: truncateFact(toolName) };
+  const path = readFactArg(args, "path");
+  return path === undefined ? { name: truncateFact(toolName) } : { path };
 };
 
 /** Returns a tool's output so far as one string. */
@@ -437,7 +476,9 @@ const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
     type.slice(0, type.lastIndexOf("_")),
     type.slice(type.lastIndexOf("_") + 1),
   ];
-  const block = BLOCKS[channel];
+  // Only the table's own keys count: a block type such as `constructor_start`
+  // would otherwise find an object method and start an item with no kind.
+  const block = Object.hasOwn(BLOCKS, channel) ? BLOCKS[channel] : undefined;
   if (block === undefined) return [];
   const turnId = ensureTurnId(state);
   if (phase === "start") {
@@ -479,13 +520,13 @@ const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
 const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEvent> => {
   const toolName = typeof event.toolName === "string" ? event.toolName : "";
   const callId = typeof event.toolCallId === "string" ? event.toolCallId : "";
-  const kind = TOOL_KINDS[toolName] ?? "tool_call";
+  const kind = Object.hasOwn(TOOL_KINDS, toolName) ? TOOL_KINDS[toolName]! : "tool_call";
   const item: RunningTool = {
     // A call with no id from pi gets a new one. Giving two such calls the same
     // id would put the second call's output on the first call's row.
     itemId: callId === "" ? crypto.randomUUID() : ensureId(callId),
     kind,
-    detail: buildToolDetail(toolName, event.args),
+    detail: buildToolDetail(kind, toolName, event.args),
     toolName,
     args: event.args,
     seen: "",
