@@ -147,7 +147,8 @@ const make = Effect.gen(function* () {
      *   names an operation whose input can carry a secret;
      * - `InvalidState` when the session already holds the grant, so it should
      *   retry its call, already waits on a request for the same grant, or has
-     *   exited.
+     *   exited. The grants are read inside the transaction, so a grant given
+     *   to the session while this call was on its way counts.
      */
     request: (
       input: PermissionRequestInput,
@@ -174,17 +175,23 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        if (actor.grants.includes(input.grant)) {
-          return yield* Effect.fail(
-            createInvalidStateError(
-              `this session already holds ${input.grant}; retry the call instead of asking`,
-            ),
-          );
-        }
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const open = yield* requests.findOpen(actor.sessionId, input.grant);
+            const session = yield* readLiveSession(actor.sessionId);
+            const profile = yield* readProfile(session.permissionProfileId);
+            // Read here rather than taken from the actor: the actor's grants
+            // were read when the call was authenticated, and another request
+            // of the session may have been decided since.
+            const sessionGrants = yield* requests.listSessionGrants(session.id);
+            if (profile.grants.includes(input.grant) || sessionGrants.includes(input.grant)) {
+              return yield* Effect.fail(
+                createInvalidStateError(
+                  `this session already holds ${input.grant}; retry the call instead of asking`,
+                ),
+              );
+            }
+            const open = yield* requests.findOpen(session.id, input.grant);
             if (Option.isSome(open)) {
               return yield* Effect.fail(
                 createInvalidStateError(
@@ -194,10 +201,8 @@ const make = Effect.gen(function* () {
               );
             }
             const at = yield* nowIso;
-            const session = yield* readLiveSession(actor.sessionId);
             const agent =
               session.agentId === null ? Option.none() : yield* agents.read(session.agentId);
-            const profile = yield* readProfile(session.permissionProfileId);
             const requestId = yield* requests.insert({
               sessionId: session.id,
               profileId: profile.id,

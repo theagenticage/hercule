@@ -140,6 +140,28 @@ describe("permission.request", () => {
     expect(refusal.code).toBe("invalid_state");
     expect(refusal.message).toMatch(/has ended, so it can neither ask for a grant/);
   });
+
+  it("refuses a grant decided with outcome session after the caller's grants were read", async () => {
+    const refusal = await run(
+      Effect.gen(function* () {
+        const profileId = yield* insertProfile("worker");
+        const sessionId = yield* insertSession(profileId, "idle");
+        const requestId = yield* insertOpenRequest(sessionId, profileId);
+        yield* decide(requestId, "session");
+        // The actor still lacks task.delete, as it would for a second call
+        // authenticated before the first request was decided.
+        const use = yield* PermissionRequests;
+        return yield* readRefusal(
+          use
+            .request({ grant: "task.delete", reason: "a reason" })
+            .pipe(Effect.provideService(CurrentActor, buildSessionActor(sessionId, profileId))),
+        );
+      }),
+    );
+
+    expect(refusal.code).toBe("invalid_state");
+    expect(refusal.message).toMatch(/already holds task\.delete; retry the call/);
+  });
 });
 
 describe("permission.decide", () => {

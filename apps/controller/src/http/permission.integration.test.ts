@@ -9,7 +9,12 @@
  * subscription `permission.request` opens.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { Notification, PermissionRequest, Profile } from "@hercule/contract";
+import {
+  MAX_BOUND_INPUT_DEPTH,
+  type Notification,
+  type PermissionRequest,
+  type Profile,
+} from "@hercule/contract";
 import {
   exitSession,
   readSubscriptionRow,
@@ -243,6 +248,46 @@ describe("permission.request", () => {
       expect(refused.message).toMatch(/send the request without operation/);
       expect(refused.message).not.toContain("hunter2");
       expect(await readOpenRequests(arranged, asker.session.id)).toEqual([]);
+    });
+  });
+
+  it("refuses an operation input nested past the bound, and accepts one at the bound", async () => {
+    await withPipeline(async (arranged) => {
+      const { asker } = await spawnTwoWorkers(arranged);
+      // About 2 KB of JSON: well inside the size bound, but deeper than
+      // SQLite stores in a JSON column.
+      const tooDeep = JSON.parse(`${"[".repeat(1000)}"end"${"]".repeat(1000)}`) as unknown;
+
+      const refused = await readErrorBody(
+        await requestPermission(
+          arranged,
+          {
+            grant: "task.delete",
+            reason: REASON,
+            operation: { op: "task.delete", input: tooDeep },
+          },
+          asker.token,
+        ),
+      );
+      expect(refused.code).toBe("validation");
+      // The issue at operation.input says what was wrong and what to send instead.
+      expect(refused.issues).toEqual([["operation", "input"]]);
+      expect(refused.text).toMatch(
+        new RegExp(
+          `more than ${MAX_BOUND_INPUT_DEPTH} levels deep.*Send a flatter input, or leave out the operation`,
+        ),
+      );
+      expect(await readOpenRequests(arranged, asker.session.id)).toEqual([]);
+
+      const deepest = JSON.parse(
+        `${"[".repeat(MAX_BOUND_INPUT_DEPTH)}"end"${"]".repeat(MAX_BOUND_INPUT_DEPTH)}`,
+      ) as unknown;
+      const accepted = await requestPermission(
+        arranged,
+        { grant: "task.delete", reason: REASON, operation: { op: "task.delete", input: deepest } },
+        asker.token,
+      );
+      expect(accepted.status, await accepted.clone().text()).toBe(200);
     });
   });
 

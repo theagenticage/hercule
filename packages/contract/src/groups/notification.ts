@@ -71,6 +71,18 @@ export const MAX_ACTION_DESCRIPTION_LENGTH = 4 * 1024;
  */
 export const MAX_BOUND_INPUT_BYTES = 16 * 1024;
 
+/**
+ * The most levels of arrays and objects a bound operation's input may nest:
+ * `"x"` nests 0 levels, `{ "ids": ["x"] }` nests 2. The input is stored in a
+ * JSON column, and SQLite's JSON functions refuse JSON nested deeper than a
+ * limit that depends on the SQLite build: 1000 levels in current SQLite, and
+ * about 800 in the build Bun uses on macOS. Without this bound, an input a few
+ * kilobytes long could pass the size check and then fail to be stored. 32
+ * levels is far below either limit and far above anything an operation's
+ * input needs.
+ */
+export const MAX_BOUND_INPUT_DEPTH = 32;
+
 /** The longest withdrawal reason. It is one line under the notification. */
 export const MAX_WITHDRAW_REASON_LENGTH = 256;
 
@@ -175,13 +187,25 @@ export const NotificationSubject = Schema.Union([
 export type NotificationSubject = Schema.Schema.Type<typeof NotificationSubject>;
 
 /**
+ * Checks whether a JSON value nests arrays and objects more than `levels`
+ * deep. It stops descending once it is past `levels`, so the check costs no
+ * more for a very deep value than for one just past the limit.
+ */
+const isNestedDeeperThan = (value: unknown, levels: number): boolean => {
+  if (typeof value !== "object" || value === null) return false;
+  if (levels === 0) return true;
+  return Object.values(value).some((child) => isNestedDeeperThan(child, levels - 1));
+};
+
+/**
  * The operation an answer runs when the user takes it: a contract operation
- * id and its whole input as one object. This schema only bounds its size.
- * `notification.create` checks that the operation is one an answer may run
- * and that the input fits it (`decodeBindableOperation`), and `notification.act`
- * checks again before it runs the operation. A stored answer is read with this
- * looser schema, so a notification stays readable after the list of bindable
- * operations or an operation's input schema changes.
+ * id and its whole input as one object. This schema only bounds the input's
+ * size and nesting. `notification.create` checks that the operation is one an
+ * answer may run and that the input fits it (`decodeBindableOperation`), and
+ * `notification.act` checks again before it runs the operation. A stored
+ * answer is read with this looser schema, so a notification stays readable
+ * after the list of bindable operations or an operation's input schema
+ * changes.
  */
 export const BoundOperation = Schema.Struct({
   op: Schema.String.check(
@@ -192,6 +216,11 @@ export const BoundOperation = Schema.Struct({
     ),
   ),
   input: Schema.Unknown.check(
+    Schema.makeFilter((input) =>
+      isNestedDeeperThan(input, MAX_BOUND_INPUT_DEPTH)
+        ? `The input nests arrays and objects more than ${MAX_BOUND_INPUT_DEPTH} levels deep, which cannot be stored. Send a flatter input, or leave out the operation.`
+        : undefined,
+    ),
     Schema.makeFilter((input) =>
       new TextEncoder().encode(JSON.stringify(input) ?? "").byteLength <= MAX_BOUND_INPUT_BYTES
         ? undefined

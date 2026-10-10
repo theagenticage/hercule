@@ -98,6 +98,17 @@ export const buildOpenPermissionRequestsColumn = (sessionTable: string): string 
   `WHERE permission_requests.session_id = ${sessionTable}.id AND status = 'open' ` +
   "ORDER BY created_at, id))";
 
+/**
+ * Builds the SQL for a column that holds, as a JSON array, the grants of the
+ * requests of the session in `sessionTable` that were decided with outcome
+ * `session` under the profile the session is on now. A session holds these
+ * grants on top of its profile's (see `tokens.ts`).
+ */
+export const buildSessionGrantsColumn = (sessionTable: string): string =>
+  "(SELECT json_group_array(r.grant) FROM permission_requests r " +
+  `WHERE r.session_id = ${sessionTable}.id AND r.profile_id = ${sessionTable}.permission_profile_id ` +
+  "AND r.status = 'decided' AND r.outcome = 'session')";
+
 interface OpenPermissionRequestColumnEntry {
   readonly id: string;
   readonly grant: Grant;
@@ -159,6 +170,20 @@ export const permissionRequestRepository = Effect.gen(function* () {
           WHERE session_id = ${uuidFromString(sessionId)} AND status = 'open'
             AND grant = ${grant}`,
         (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.id)),
+      ),
+
+    /**
+     * Returns the grants the session holds through its requests decided with
+     * outcome `session` under the profile it is on now. The session's profile
+     * grants are not included. Returns an empty list when there is no such
+     * session.
+     */
+    listSessionGrants: (sessionId: string): Effect.Effect<ReadonlyArray<Grant>, SqlError> =>
+      Effect.map(
+        sql<{ readonly grants: string }>`
+          SELECT ${sql.literal(buildSessionGrantsColumn("s"))} AS grants
+          FROM sessions s WHERE s.id = ${uuidFromString(sessionId)}`,
+        (rows) => (rows[0] === undefined ? [] : (JSON.parse(rows[0].grants) as Array<Grant>)),
       ),
 
     /**

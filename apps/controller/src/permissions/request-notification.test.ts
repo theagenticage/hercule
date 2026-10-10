@@ -3,7 +3,11 @@
  * asking session, what its body shows, and the three answers it offers.
  */
 import { describe, expect, it } from "vitest";
-import { MAX_NOTIFICATION_BODY_LENGTH } from "@hercule/contract";
+import {
+  MAX_BOUND_INPUT_BYTES,
+  MAX_BOUND_INPUT_DEPTH,
+  MAX_NOTIFICATION_BODY_LENGTH,
+} from "@hercule/contract";
 import {
   buildPermissionRequestNotification,
   type PermissionRequestNotificationInput,
@@ -77,9 +81,15 @@ describe("buildPermissionRequestNotification", () => {
     expect(body).toContain("of ` Ada [Renew credentials](https://evil.example) ` asks");
   });
 
-  it("shows a deeply nested input whole, closing fence included", () => {
-    // About 4 KB of JSON. Indented, it would grow past the 64 KB body limit.
-    const input = JSON.parse(`${"[".repeat(1000)}"end"${"]".repeat(1000)}`) as unknown;
+  it("shows an input as deep and as large as allowed whole, closing fence included", () => {
+    // Thousands of numbers inside the deepest nesting allowed, just under the
+    // size bound. Indented, every number would take a line of its own with
+    // over 60 spaces in front, and the body would grow past its limit.
+    const numbers = Array.from({ length: 7000 }, () => 1);
+    const input = JSON.parse(
+      `${"[".repeat(MAX_BOUND_INPUT_DEPTH - 1)}${JSON.stringify(numbers)}${"]".repeat(MAX_BOUND_INPUT_DEPTH - 1)}`,
+    ) as unknown;
+    expect(JSON.stringify(input).length).toBeLessThanOrEqual(MAX_BOUND_INPUT_BYTES);
     const body =
       buildPermissionRequestNotification({ ...INPUT, operation: { op: "task.delete", input } })
         .body ?? "";

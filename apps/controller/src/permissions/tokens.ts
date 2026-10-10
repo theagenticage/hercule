@@ -42,6 +42,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import { GrantSchema } from "@hercule/contract";
 import type { SessionActor } from "../actor";
 import { uuidToString } from "../db";
+import { buildSessionGrantsColumn } from "./requests";
 
 interface Row {
   readonly id: Uint8Array;
@@ -85,10 +86,7 @@ const make = Effect.gen(function* () {
         const before = dropped;
         const rows = yield* sql<Row>`
           SELECT s.id, s.permission_profile_id, p.grants, c.assistant_id,
-            (SELECT json_group_array(r.grant) FROM permission_requests r
-             WHERE r.session_id = s.id AND r.profile_id = s.permission_profile_id
-               AND r.status = 'decided' AND r.outcome = 'session')
-              AS session_grants
+            ${sql.literal(buildSessionGrantsColumn("s"))} AS session_grants
           FROM sessions s
           JOIN permission_profiles p ON p.id = s.permission_profile_id
           LEFT JOIN conversations c ON c.id = s.conversation_id
