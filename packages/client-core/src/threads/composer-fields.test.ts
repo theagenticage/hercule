@@ -504,6 +504,7 @@ const buildThread = (id: string, title: string): Session => ({
   modelSelection: { model: "claude-sonnet-5", options: {} },
   parentSessionId: null,
   openRequests: [],
+  openPermissionRequests: [],
   createdAt: at,
   startedAt: at,
   exitedAt: null,

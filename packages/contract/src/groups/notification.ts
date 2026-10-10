@@ -94,10 +94,13 @@ export const CORE_KIND_PREFIX = "core.";
  * The kinds the core produces about itself. Clients that treat one of them
  * specially, such as marking a failed run, name it from here. `core.approval`
  * is the decision raised while a session waits for approval to run a command,
- * change or read files, or use a tool. Spec 10 §7.2 owns the list.
+ * change or read files, or use a tool. `core.permission-request` is the
+ * decision raised when a session asks for a grant its profile lacks. Spec 10
+ * §7.2 owns the list.
  */
 export const CORE_NOTIFICATION_KINDS = [
   "core.approval",
+  "core.permission-request",
   "core.run-failed",
   "core.plugin-error",
   "core.connection-error",
@@ -151,7 +154,8 @@ const buildIdSubject = <const Kind extends string, Value extends Schema.Top>(
  * named by its workflow and its id in that workflow's source. A request is
  * the approval a session waits on, named by its session and its own id, so
  * the core can resolve the decision about one request without touching other
- * decisions about the same session.
+ * decisions about the same session. A Permission Request has its own kind,
+ * so its id is never read as an approval's.
  */
 export const NotificationSubject = Schema.Union([
   buildIdSubject("task", Id),
@@ -163,6 +167,7 @@ export const NotificationSubject = Schema.Union([
   buildIdSubject("subscription", Id),
   buildIdSubject("plugin", PluginId),
   buildIdSubject("event", EventId),
+  buildIdSubject("permissionRequest", Id),
   Schema.Struct({ kind: Schema.Literal("trigger"), workflowId: Id, triggerId: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("request"), sessionId: Id, requestId: Fact }),
 ]);

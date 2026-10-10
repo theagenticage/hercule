@@ -23,6 +23,7 @@ import { plugin } from "./groups/plugin";
 import { profile } from "./groups/profile";
 import { provider } from "./groups/provider";
 import { notification } from "./groups/notification";
+import { permission } from "./groups/permission";
 import { project } from "./groups/project";
 import { resource } from "./groups/resource";
 import { run } from "./groups/run";
@@ -48,6 +49,7 @@ export const api = HttpApi.make("hercule")
     user,
     settings,
     profile,
+    permission,
     secret,
     task,
     notification,

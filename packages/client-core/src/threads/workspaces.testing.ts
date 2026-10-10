@@ -124,6 +124,7 @@ export const buildSession = (over: Partial<Session> & { id: string }): Session =
   modelSelection: { model: "claude-sonnet-5", options: {} },
   parentSessionId: null,
   openRequests: [],
+  openPermissionRequests: [],
   createdAt: AT,
   startedAt: AT,
   exitedAt: null,

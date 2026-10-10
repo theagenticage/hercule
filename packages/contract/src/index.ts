@@ -17,6 +17,7 @@ export {
   ALL_OPERATIONS,
   API_PREFIX,
   OPERATIONS,
+  canCarrySecrets,
   isOperationId,
   readRequirement,
   type Method,
@@ -145,6 +146,15 @@ export {
   PluginRefusalReason,
   PluginStatus,
 } from "./groups/plugin";
+export {
+  PERMISSION_DECISION_OUTCOMES,
+  PermissionDecideCall,
+  PermissionDecidedEventPayload,
+  PermissionDecisionOutcome,
+  PermissionRequest,
+  PermissionRequestInput,
+  PermissionRequestResult,
+} from "./groups/permission";
 export {
   MAX_PROFILE_GRANTS,
   MAX_PROFILE_NAME_LENGTH,
@@ -494,6 +504,7 @@ export {
 } from "./groups/run";
 export { truncateText, shortenLibraryMessage, joinNames, quoteAuthorText } from "./excerpts";
 export { APPROVAL_ANSWER_LABELS, describeApprovalAnswer } from "./approval-answers";
+export { PERMISSION_ANSWER_LABELS, describePermissionAnswer } from "./permission-answers";
 export { WorkflowAction, WorkflowActionRunsIn } from "./groups/workflow-action";
 export { DeclaredEventKind } from "./groups/event-kind";
 export {

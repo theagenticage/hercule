@@ -37,6 +37,7 @@ import {
 import { Id, Timestamp } from "../ids";
 import { UnenforcedSpecField } from "./agent";
 import { AttachmentId, MAX_ATTACHMENTS_PER_INPUT } from "./attachment";
+import { PermissionRequest } from "./permission";
 import { Branch } from "./workspace";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -206,6 +207,13 @@ export const Session = Schema.Struct({
    * session exits.
    */
   openRequests: Schema.Array(SessionRequest),
+  /**
+   * The Permission Requests the session waits on the user to decide, oldest
+   * first; empty when none is open. The agent keeps working while one is
+   * open: it learns the decision as queued input. A request closes when it is
+   * decided, or when the session exits.
+   */
+  openPermissionRequests: Schema.Array(PermissionRequest),
   /**
    * The session's Token Usage: every token its own agent and all its
    * subagents have used over the session's whole life, summed across its

@@ -98,6 +98,7 @@ const BASE_SESSION: Session = {
   modelSelection: { model: "claude-sonnet-5", options: {} },
   parentSessionId: null,
   openRequests: [],
+  openPermissionRequests: [],
   createdAt: "2026-09-05T09:00:00.000Z",
   startedAt: "2026-09-05T09:00:00.000Z",
   exitedAt: null,
