@@ -607,7 +607,7 @@ describe("what a connection leaves behind", () => {
     );
   });
 
-  it("closes the older connection when a runner connects again, and keeps the runner online", async () => {
+  it("closes the older connection as going away when a runner connects again", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetupWithNoProviderInstance(harness);
@@ -631,13 +631,9 @@ describe("what a connection leaves behind", () => {
         const ending = await older.wire.closed();
         expect(ending.code).toBe(GOING_AWAY);
         expect(ending.reason).not.toBe("");
-
-        // The older connection's final status write does not overwrite the row
-        // the newer connection now owns.
-        await delay(150);
-        const row = await readRunner(harness.base, token, joined.runnerId);
-        expect(row.connectivity).toBe("online");
-        expect(await readStateTransitions(harness)).toEqual(["online"]);
+        // That the older connection's end leaves the runner online is tested
+        // in connections.test.ts: nothing on the socket shows when the
+        // controller has handled the close.
 
         newer.wire.close();
       },
@@ -1123,14 +1119,16 @@ describe("what a runner reports about its machine", () => {
 
         wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(4 * GIB) });
         wire.send({ _tag: "factsReport", facts: { ...FACTS, docker: true } });
-        await delay(100);
+        // The controller handles one frame at a time, in the order they
+        // arrive, and closes the connection on a hello of another protocol
+        // version. Once it has closed, it has handled both reports.
+        wire.send(buildHello({ protocolVersion: PROTOCOL_VERSION + 1 }));
+        expect((await wire.closed()).code).toBe(PROTOCOL_ERROR);
 
         const row = await readRunner(harness.base, token, joined.runnerId);
         expect(row.connectivity).toBe("offline");
         expect(row.watermark).toBeNull();
         expect(row.facts).toBeNull();
-
-        wire.close();
       },
       { pings: FAST },
     );
@@ -1177,8 +1175,11 @@ describe("what a runner reports about its machine", () => {
         );
         expect(online.lastSeenAt).not.toBeNull();
 
-        // Long enough that a report which updated the timestamp would show it.
-        await delay(50);
+        // Timestamps have millisecond precision, so a report handled within
+        // the same millisecond as the hello could update the timestamp
+        // without changing it. Once the clock has moved past it, any update
+        // shows. The controller runs in this process and reads the same clock.
+        while (Date.now() <= Date.parse(online.lastSeenAt!)) await delay(1);
         wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(200 * GIB) });
         wire.send({ _tag: "factsReport", facts: { ...FACTS, docker: true } });
 
@@ -1215,17 +1216,25 @@ describe("what the controller stopping does to its local runner", () => {
         [process.execPath, "run", HERCULE, "runner", "--local", "--home", home],
         { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
       );
-      let said = "";
+      // Settles with the child's output up to its first newline, or with all
+      // of its output if it exits before writing one. The child's stdout is
+      // read to the end either way, so the child never blocks on a full pipe.
+      const firstLine = Promise.withResolvers<string>();
       void (async () => {
         const decoder = new TextDecoder();
-        for await (const chunk of child.stdout) said += decoder.decode(chunk, { stream: true });
+        let said = "";
+        for await (const chunk of child.stdout) {
+          said += decoder.decode(chunk, { stream: true });
+          const end = said.indexOf("\n");
+          if (end !== -1) firstLine.resolve(said.slice(0, end + 1));
+        }
+        firstLine.resolve(said);
       })();
 
       try {
         // The controller's handshake: it reads the child's first line and
         // answers on its stdin, exactly as the boot step does.
-        for (let waited = 0; waited < 15_000 && said === ""; waited += 20) await delay(20);
-        expect(said).toBe('{"join":true}\n');
+        expect(await firstLine.promise).toBe('{"join":true}\n');
         void child.stdin.write(
           `${JSON.stringify({ controllerUrl: harness.base, token: await harness.joinToken() })}\n`,
         );
@@ -1500,43 +1509,6 @@ describe("refreshing a runner's facts on demand", () => {
         wire.close();
       }
     });
-  });
-
-  it("answers a caller still waiting when the report arrives after another caller timed out", async () => {
-    await withServer(
-      async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
-        const joined = await enlist(harness);
-        const { wire } = await greet(harness.base, joined.credential);
-        try {
-          await waitForRunner(
-            harness.base,
-            token,
-            joined.runnerId,
-            (one) => one.connectivity === "online",
-          );
-
-          const early = refreshFacts(harness.base, token, joined.runnerId);
-          await expectFactsRequest(wire);
-          // Long enough that the second caller still has time left when the
-          // first times out.
-          await delay(700);
-          const late = refreshFacts(harness.base, token, joined.runnerId);
-          expect((await early).status).toBe(409);
-
-          wire.send({ _tag: "factsReport", facts: GROWN });
-          const answered = await late;
-          expect(answered.status, await answered.clone().text()).toBe(200);
-          expect(((await answered.json()) as RunnerDetail).facts).toEqual(GROWN);
-          // The first caller's timeout did not remove the wait: the second
-          // caller shared it and got the report.
-          expect(wire.frames.filter((frame) => frame._tag === "factsRequest")).toHaveLength(2);
-        } finally {
-          wire.close();
-        }
-      },
-      { factsDeadline: Duration.seconds(1) },
-    );
   });
 
   it("sends a new request after one that was never answered, and the next report arrives", async () => {

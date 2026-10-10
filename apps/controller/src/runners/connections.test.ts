@@ -14,7 +14,7 @@
  * nothing on the socket shows when the controller has handled a close.
  */
 import { describe, expect, it } from "vitest";
-import { Duration, Effect, Fiber, Layer, Option, Stream } from "effect";
+import { Deferred, Duration, Effect, Fiber, Layer, Option, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
   RunnerConnectivity,
@@ -43,6 +43,7 @@ import {
   mintConnection,
   RunnerConnections,
   RunnerConnectionsLayer,
+  RunnerFactsDeadline,
   type Connection,
   type Departure,
 } from "./connections";
@@ -202,6 +203,27 @@ const WATERMARK: RunnerWatermark = {
 
 /** A connection these tests never write to: they test the row, not the socket. */
 const HELD = { close: () => undefined, askForFacts: Effect.void, ask: () => Effect.void };
+
+/** The hello every runner in these tests connects with. */
+const HELLO = {
+  binaryVersion: "0.1.0",
+  protocolVersion: PROTOCOL_VERSION,
+  negotiatedCapabilities: [],
+  facts: FACTS,
+};
+
+/**
+ * Reads the runner's connectivity now, and every connectivity change the
+ * audit log recorded, oldest first. Each test has one runner, so every change
+ * is about it.
+ */
+const readConnectivity = (id: string) =>
+  Effect.gen(function* () {
+    const runners = yield* runnerRepository;
+    const row = Option.getOrThrow(yield* runners.read(id));
+    const changes = yield* readEventsOfKind("runner.stateChanged");
+    return { now: row.connectivity, changes: changes.map((entry) => entry.payload["state"]) };
+  });
 
 it("refuses inspection immediately on the current unsupported connection", async () => {
   const written: Array<ControllerToRunner> = [];
@@ -387,6 +409,74 @@ describe("a report from a connection the runner has replaced", () => {
   });
 });
 
+describe("a connection the runner has replaced", () => {
+  it("ends without moving the runner off the online the newer connection wrote", async () => {
+    const { now, changes } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+
+        const older = mintConnection();
+        yield* connections.greeted(runner!.id, older, HELD, HELLO);
+        // The runner connected again, and the row now follows the newer connection.
+        yield* connections.greeted(runner!.id, mintConnection(), HELD, HELLO);
+        yield* connections.ended(runner!.id, older, "unreachable");
+
+        return yield* readConnectivity(runner!.id);
+      }).pipe(Effect.provide(layer), Effect.orDie),
+    );
+
+    expect(now).toBe("online");
+    expect(changes).toEqual(["online"]);
+  });
+});
+
+describe("refreshedFacts", () => {
+  it("still wakes a caller with the report after another caller timed out", async () => {
+    const { impatient, patient, asked } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+        const connection = mintConnection();
+        let asked = 0;
+        const patientAsked = yield* Deferred.make<void>();
+        yield* connections.greeted(
+          runner!.id,
+          connection,
+          {
+            ...HELD,
+            askForFacts: Effect.suspend(() => {
+              asked += 1;
+              return Deferred.succeed(patientAsked, undefined);
+            }),
+          },
+          HELLO,
+        );
+
+        // A caller starts waiting before it asks the runner, so once the patient
+        // caller has asked, it is waiting for the report.
+        const patientCaller = yield* Effect.forkChild(connections.refreshedFacts(runner!.id));
+        yield* Deferred.await(patientAsked);
+        // The impatient caller waits on the same report and times out at once:
+        // nothing has reported yet.
+        const impatient = yield* connections
+          .refreshedFacts(runner!.id)
+          .pipe(Effect.provideService(RunnerFactsDeadline, Duration.zero));
+
+        yield* connections.reportedFacts(runner!.id, connection, { ...FACTS, docker: true });
+        // Moves the clock past the patient caller's deadline, so a caller the
+        // report did not wake ends with false instead of waiting forever.
+        yield* TestClock.adjust(Duration.minutes(1));
+        return { impatient, patient: yield* Fiber.join(patientCaller), asked };
+      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.orDie),
+    );
+
+    expect(impatient).toBe(false);
+    expect(patient).toBe(true);
+    expect(asked, "every caller asks, whether or not another caller is waiting").toBe(2);
+  });
+});
+
 /** A frame that carries an input, as a send of that input writes it. */
 const INPUT_FRAME: SessionInput = {
   _tag: "sessionInput",
@@ -517,13 +607,6 @@ const promotableLayer = RunnerConnectionsLayer.pipe(
 /** The promotion token every freeze in these tests is for. */
 const PROMOTION_TOKEN = "0199f0b7-0000-7000-8000-00000000aaaa";
 
-const HELLO = {
-  binaryVersion: "0.1.0",
-  protocolVersion: PROTOCOL_VERSION,
-  negotiatedCapabilities: [],
-  facts: FACTS,
-};
-
 /**
  * Inserts an offline runner, connects it over `connection`, and returns its
  * id. The hello moves the row to online, which records the first change.
@@ -556,19 +639,6 @@ const thawAndRecordHeldDepartures = Effect.gen(function* () {
   expect(yield* promotion.thaw(PROMOTION_TOKEN)).toBe(true);
   yield* connections.recordHeldDepartures;
 });
-
-/**
- * Reads the runner's connectivity now, and every connectivity change the
- * audit log recorded, oldest first. Each test has one runner, so every change
- * is about it.
- */
-const readConnectivity = (id: string) =>
-  Effect.gen(function* () {
-    const runners = yield* runnerRepository;
-    const row = Option.getOrThrow(yield* runners.read(id));
-    const changes = yield* readEventsOfKind("runner.stateChanged");
-    return { now: row.connectivity, changes: changes.map((entry) => entry.payload["state"]) };
-  });
 
 /**
  * A promotion freeze copies the database, so a write after the copy would be
