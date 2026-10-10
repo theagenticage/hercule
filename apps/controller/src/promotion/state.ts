@@ -104,11 +104,19 @@ export type PromotionPhase =
 /** A phase in which work does not run. */
 type StoppedPhase = Exclude<PromotionPhase, { readonly _tag: "Serving" }>;
 
-/** What the gate decides from: the phase, and how much admitted work is running. */
-interface GateState {
+/**
+ * What the gate decides from, the phase and how much admitted work is running,
+ * and how much work it holds back.
+ */
+export interface GateState {
   readonly phase: PromotionPhase;
   /** How many admitted requests and background passes are running now. */
   readonly running: number;
+  /**
+   * How many units of work wait at the gate now: while frozen until the
+   * freeze ends, and once sealed for good.
+   */
+  readonly held: number;
 }
 
 /**
@@ -116,12 +124,6 @@ interface GateState {
  * minutes, but a controller that is that busy is not ready to move anyway.
  */
 const DRAIN_TIMEOUT: Duration.Duration = Duration.seconds(60);
-
-/** Lets tests set a drain timeout short enough to wait for. */
-export const PromotionDrainTimeout = Context.Reference<Duration.Duration>(
-  "hercule/controller/promotion/PromotionDrainTimeout",
-  { defaultValue: (): Duration.Duration => DRAIN_TIMEOUT },
-);
 
 /** One unit of admitted work, which is running until it ends. */
 interface Admission {
@@ -173,6 +175,13 @@ export class PromotionState extends Context.Service<
      * never ends. Work being counted in and out does not emit anything.
      */
     readonly phaseChanges: Stream.Stream<PromotionPhase>;
+
+    /**
+     * Emits the gate's state now, then each time it changes, and never ends.
+     * Tests read it to know that work has reached the gate and waits there,
+     * or that admitted work is running, instead of waiting for a while.
+     */
+    readonly gateChanges: Stream.Stream<GateState>;
 
     /**
      * Succeeds when a promotion transfer could start now. Fails with
@@ -296,6 +305,7 @@ export const PromotionStateLayer: Layer.Layer<
     const gate = yield* SubscriptionRef.make<GateState>({
       phase: { _tag: "Serving" },
       running: 0,
+      held: 0,
     });
     // Freeze, copy, thaw, seal and restore each read the phase and then
     // change it or the database. One at a time, so a thaw at the deadline
@@ -310,6 +320,14 @@ export const PromotionStateLayer: Layer.Layer<
       ...current,
       running: current.running - 1,
     }));
+
+    /** Runs `wait`, counted as held work until it ends, however it ends. */
+    const hold = <A, E, R>(wait: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+      Effect.acquireUseRelease(
+        SubscriptionRef.update(gate, (current) => ({ ...current, held: current.held + 1 })),
+        () => wait,
+        () => SubscriptionRef.update(gate, (current) => ({ ...current, held: current.held - 1 })),
+      );
 
     /** Waits until the gate state matches, including when it already does. */
     const awaitGateState = (matches: (current: GateState) => boolean) =>
@@ -416,16 +434,18 @@ export const PromotionStateLayer: Layer.Layer<
         stopped._tag === "Sealed"
           ? onSealed(stopped.seal)
           : Effect.andThen(
-              awaitGateState((current) => current.phase._tag !== "Frozen"),
+              hold(awaitGateState((current) => current.phase._tag !== "Frozen")),
               whenServingOr(work, onSealed),
             ),
       );
 
     const whenServing = <A, E, R>(work: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-      whenServingOr(work, () => Effect.never);
+      whenServingOr(work, () => hold(Effect.never));
 
     return PromotionState.of({
       phase: Effect.map(SubscriptionRef.get(gate), (current) => current.phase),
+
+      gateChanges: SubscriptionRef.changes(gate),
 
       // Counting work in and out keeps the phase object, so comparing by
       // reference drops those changes.
@@ -462,16 +482,15 @@ export const PromotionStateLayer: Layer.Layer<
           yield* Effect.logInfo(
             "A promotion transfer has started; this controller is read-only until it ends.",
           );
-          const timeout = yield* PromotionDrainTimeout;
           yield* awaitGateState((current) => current.running === 0).pipe(
             Effect.timeoutOrElse({
-              duration: timeout,
+              duration: DRAIN_TIMEOUT,
               orElse: () =>
                 Effect.andThen(
                   Effect.ignore(thaw(tokenId)),
                   Effect.fail(
                     createInvalidStateError(
-                      `The controller was still busy after ${Duration.format(timeout)}, so the ` +
+                      `The controller was still busy after ${Duration.format(DRAIN_TIMEOUT)}, so the ` +
                         "transfer did not start and the promotion token is used up. Create a new " +
                         "promotion token and promote when no agent or workflow is running.",
                     ),

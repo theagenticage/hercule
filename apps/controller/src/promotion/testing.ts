@@ -7,12 +7,15 @@
  *   through a promotion over HTTP, as the new machine would;
  * - `pullTransfer` and `receiveTransferIntoHome`, which copy a running
  *   controller's data into a new Home, as `hercule promote` does;
+ * - `awaitHeldWork` and `awaitRunningWork`, which wait for the promotion
+ *   gate to reach a state, so a test never waits for a fixed time;
  * - helpers to create promotion tokens, request transfers and find a free port.
  */
 import { writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { HomePaths } from "@hercule/home";
 import { post } from "../http/testing";
@@ -21,7 +24,7 @@ import { ControllerIdentity } from "../identity";
 import { decodePromotionToken } from "./crypto";
 import { SWITCH_PATH, TRANSFER_PATH, type PromotionPreview } from "./exchange";
 import { receiveTransfer, reserveHome } from "./receive";
-import { PromotionStateLayer, type PromotionState } from "./state";
+import { PromotionStateLayer, type GateState, type PromotionState } from "./state";
 
 const NO_IDENTITY =
   "this test's promotion state has no controller identity, so it cannot seal. " +
@@ -46,6 +49,29 @@ export const ServingPromotionStateLayer: Layer.Layer<PromotionState, never, SqlC
       ),
     ),
   );
+
+/** Waits until the gate's state matches, including when it already does. */
+const awaitGateState = (
+  promotion: PromotionState["Service"],
+  matches: (state: GateState) => boolean,
+): Effect.Effect<void> =>
+  promotion.gateChanges.pipe(Stream.filter(matches), Stream.runHead, Effect.asVoid);
+
+/**
+ * Waits until exactly `count` units of work wait at the promotion gate. Work
+ * that waits there has not run, so a test can then check that nothing it
+ * would have done has happened yet.
+ */
+export const awaitHeldWork = (
+  promotion: PromotionState["Service"],
+  count: number,
+): Effect.Effect<void> => awaitGateState(promotion, (state) => state.held === count);
+
+/** Waits until exactly `count` units of admitted work are running. */
+export const awaitRunningWork = (
+  promotion: PromotionState["Service"],
+  count: number,
+): Effect.Effect<void> => awaitGateState(promotion, (state) => state.running === count);
 
 /**
  * Creates a promotion token on the controller at `base`, signed in as `user`,

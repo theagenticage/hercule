@@ -14,6 +14,7 @@ export {
   PromotionStateLayer,
   buildForwardingPointer,
   createSealedError,
+  type GateState,
   type PromotionPhase,
 } from "./state";
 export { PromotionTransfer, PromotionTransferLayer, NO_PROMOTION_TOKEN } from "./transfer";

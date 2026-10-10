@@ -106,7 +106,7 @@ import {
   runnerRepository,
   type RunnerPings,
 } from "../runners";
-import { PromotionStateLayer, PromotionTokensLayer } from "../promotion";
+import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../promotion";
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
@@ -327,6 +327,11 @@ export interface ServerHarness {
    */
   readonly secrets: Secrets["Service"];
   /**
+   * The controller's promotion gate. A test reads its state to know that work
+   * waits at the gate while the controller is frozen or sealed.
+   */
+  readonly promotion: PromotionState["Service"];
+  /**
    * Checks whether a fiber is still executing the run. A cancelled run's
    * fiber lives on until its steps have stopped, so a test that checks what a
    * step does after the cancel waits for this to turn false first.
@@ -492,6 +497,7 @@ export const withServer = (
             ),
           );
         const secrets = yield* Secrets;
+        const promotion = yield* PromotionState;
         const tokens = yield* JoinTokens;
         const joinToken: JoinTokenArranger = () =>
           Effect.runPromise(
@@ -512,6 +518,7 @@ export const withServer = (
             reboot,
             runWithLiveSessions,
             secrets,
+            promotion,
             isRunExecuting: (runId) => FiberMap.hasUnsafe(runFibers, runId),
           }),
         );

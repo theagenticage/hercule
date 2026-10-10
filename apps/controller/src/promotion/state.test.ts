@@ -7,13 +7,16 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SYSTEM_ACTOR } from "../actor";
 import { AfterCommit } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "../events";
 import { ControllerIdentity } from "../identity";
-import { PromotionDrainTimeout, PromotionState, PromotionStateLayer } from "./state";
+import { PromotionState, PromotionStateLayer } from "./state";
+import { awaitHeldWork, awaitRunningWork } from "./testing";
 
 const TOKEN = "0199f0b7-0000-7000-8000-00000000aaaa";
 const OTHER_TOKEN = "0199f0b7-0000-7000-8000-00000000bbbb";
@@ -36,8 +39,8 @@ const StateDependencies = Layer.mergeAll(
 const inAnHour = (): Date => new Date(Date.now() + 3_600_000);
 
 /**
- * Runs `body` against a fresh promotion state over an in-memory database, with
- * a drain timeout short enough for a test to wait out.
+ * Runs `body` against a fresh promotion state over an in-memory database. The
+ * clock is a test clock, so time passes only when a test moves it.
  */
 const run = <A, E>(
   body: Effect.Effect<A, E, PromotionState | SqlClient.SqlClient | AuditLog>,
@@ -46,7 +49,7 @@ const run = <A, E>(
     body.pipe(
       Effect.provide(PromotionStateLayer.pipe(Layer.provideMerge(StateDependencies))),
       Effect.provide(TestDatabase),
-      Effect.provideService(PromotionDrainTimeout, Duration.millis(100)),
+      Effect.provide(TestClock.layer()),
     ),
   );
 
@@ -61,8 +64,14 @@ const readErrorCode = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<s
       : Effect.die(error),
   );
 
-/** Lets forked fibers run until they block. */
-const settle = Effect.sleep(Duration.millis(20));
+/** Waits until the controller is frozen, including when it already is. */
+const awaitFrozen = Effect.flatMap(PromotionState, (state) =>
+  state.phaseChanges.pipe(
+    Stream.filter((phase) => phase._tag === "Frozen"),
+    Stream.runHead,
+    Effect.asVoid,
+  ),
+);
 
 /**
  * Writes one audit entry, as any writer of the controller might, and returns
@@ -133,14 +142,14 @@ describe("PromotionState", () => {
             ),
           ),
         );
-        yield* settle;
+        yield* awaitRunningWork(state, 1);
         const freeze = yield* Effect.forkChild(
           Effect.andThen(
             state.freeze(TOKEN, inAnHour()),
             Effect.sync(() => order.push("frozen")),
           ),
         );
-        yield* settle;
+        yield* awaitFrozen;
         order.push("released");
         yield* Deferred.succeed(release, undefined);
         yield* Fiber.join(request);
@@ -156,8 +165,11 @@ describe("PromotionState", () => {
       Effect.gen(function* () {
         const state = yield* PromotionState;
         yield* Effect.forkChild(state.admit(Effect.never));
-        yield* settle;
-        const code = yield* readErrorCode(state.freeze(TOKEN, inAnHour()));
+        yield* awaitRunningWork(state, 1);
+        const freeze = yield* Effect.forkChild(readErrorCode(state.freeze(TOKEN, inAnHour())));
+        yield* awaitFrozen;
+        yield* TestClock.adjust(Duration.seconds(60));
+        const code = yield* Fiber.join(freeze);
         const phase = yield* state.phase;
         return { code, phase: phase._tag };
       }),
@@ -175,9 +187,9 @@ describe("PromotionState", () => {
             Effect.andThen(Deferred.await(release), state.whenServing(Effect.succeed("inner"))),
           ),
         );
-        yield* settle;
+        yield* awaitRunningWork(state, 1);
         const freeze = yield* Effect.forkChild(state.freeze(TOKEN, inAnHour()));
-        yield* settle;
+        yield* awaitFrozen;
         yield* Deferred.succeed(release, undefined);
         const inner = yield* Fiber.join(request);
         yield* Fiber.join(freeze);
@@ -203,7 +215,7 @@ describe("PromotionState", () => {
         );
         yield* state.freeze(TOKEN, inAnHour());
         yield* Deferred.succeed(release, undefined);
-        yield* settle;
+        yield* awaitHeldWork(state, 1);
         const whileFrozen = ran;
         yield* state.thaw(TOKEN);
         yield* Fiber.join(forked);
@@ -230,7 +242,7 @@ describe("PromotionState", () => {
           ),
         );
         const freeze = yield* Effect.forkChild(state.freeze(TOKEN, inAnHour()));
-        yield* settle;
+        yield* awaitFrozen;
         const frozenEarly = freeze.pollUnsafe() !== undefined;
         yield* Deferred.succeed(release, undefined);
         yield* Fiber.join(freeze);
@@ -249,7 +261,7 @@ describe("PromotionState", () => {
         const background = yield* Effect.forkChild(
           state.whenServing(Effect.sync(() => (ran = true))),
         );
-        yield* settle;
+        yield* awaitHeldWork(state, 1);
         const whileFrozen = ran;
         yield* state.thaw(TOKEN);
         yield* Fiber.join(background);
@@ -312,18 +324,22 @@ describe("PromotionState", () => {
         const state = yield* PromotionState;
         yield* state.freeze(TOKEN, inAnHour());
         // The announcement of the seal's audit entry runs right after the
-        // commit, so interrupting the seal then aims at the moment between
-        // the stored seal and the sealed phase.
+        // commit. It pauses there until the interrupt has been sent, so the
+        // interrupt arrives between the stored seal and the sealed phase.
         const committed = yield* Deferred.make<void>();
+        const interrupted = yield* Deferred.make<void>();
         const seal = yield* Effect.forkChild(
           state.seal(TOKEN, NEW_ADDRESS).pipe(
             Effect.provideService(AfterCommit, {
-              publish: () => Effect.andThen(Deferred.succeed(committed, undefined), settle),
+              publish: () =>
+                Effect.andThen(Deferred.succeed(committed, undefined), Deferred.await(interrupted)),
             }),
           ),
         );
         yield* Deferred.await(committed);
-        yield* Fiber.interrupt(seal);
+        seal.interruptUnsafe();
+        yield* Deferred.succeed(interrupted, undefined);
+        yield* Fiber.await(seal);
         return { seals: yield* countStoredSeals, phase: (yield* state.phase)._tag };
       }),
     );
