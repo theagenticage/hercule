@@ -2011,11 +2011,27 @@ export interface WorkflowsRecords {
   readonly workflowActions: ReadonlyArray<WorkflowAction>;
 }
 
+/**
+ * A run of Ship release's plan sent with `run.start`, so it has no saved
+ * workflow: its page's crumb links nowhere, and it re-runs only as it ran.
+ * Its steps are those of Ship release's run 1139.
+ */
+const buildUnsavedRun = (): Run => {
+  const template = BUILT.flatMap(({ runs }) => runs).find((run) => run.id === buildId("d", 1139));
+  if (template === undefined) throw new Error("The fixture has no run 1139 to copy.");
+  return {
+    ...template,
+    id: buildId("d", 1150),
+    workflowId: null,
+    origin: { kind: "manual", actor: "user" },
+  };
+};
+
 export const WORKFLOWS_RECORDS: WorkflowsRecords = {
   workflows: BUILT.map(({ entry }) => entry),
   storedWorkflows: BUILT.map(({ workflow, definition }) => ({ workflow, definition })),
   triggers: BUILT.flatMap(({ triggers }) => triggers),
-  runs: BUILT.flatMap(({ runs }) => runs),
+  runs: [...BUILT.flatMap(({ runs }) => runs), buildUnsavedRun()],
   runSummaries: new Map(
     BUILT.map(({ entry, runs }) => [entry.id, runs.map((run) => summarizeRun(run, entry.name))]),
   ),

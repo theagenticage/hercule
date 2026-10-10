@@ -277,7 +277,7 @@ function RunPage({ runId }: { readonly runId: string }): JSX.Element {
           onPickMode={setRerunMode}
           pending={rerun.isPending}
           error={rerun.error === null ? null : `Not re-run: ${readErrorMessage(rerun.error)}`}
-          onConfirm={() => rerun.mutate(rerunMode)}
+          onConfirm={(mode) => rerun.mutate(mode)}
           onClose={() => setDialog(null)}
         />
       ) : null}

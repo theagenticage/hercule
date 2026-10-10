@@ -18,6 +18,7 @@ import type { listRerunChoices } from "@hercule/client-core";
 import { Mark } from "../../marks/mark";
 import type { MarkState } from "../../marks/mark-state";
 import { ConfirmDialog } from "../confirm-dialog";
+import { GlassDialog } from "../glass-dialog";
 import type { InputFact, RunLead, StepRow, StepTimelineRows } from "./run-page-rows";
 import { SourceIcon } from "./workflow-detail";
 import "../session/floating-header.css";
@@ -393,9 +394,31 @@ function StepTimelineRow({
 }
 
 /**
+ * TEMPORARY, for comparing the re-run dialog's layouts side by side: reads
+ * `rerun` from the page's address, `seg`, `ledger` or `radios`. Goes once a
+ * layout is picked.
+ */
+const readRerunVariant = (): "seg" | "ledger" | "radios" => {
+  const variant = new URLSearchParams(location.search).get("rerun");
+  return variant === "ledger" || variant === "radios" ? variant : "seg";
+};
+
+/**
+ * TEMPORARY. The ledger variant's answer per way to re-run: the button's
+ * verb and what the click does. `listRerunChoices` would carry these.
+ */
+const LEDGER_ANSWERS: Readonly<
+  Record<RerunChoice["mode"], { readonly verb: string; readonly does: string }>
+> = {
+  "re-stamp": { verb: "Re-run", does: "Uses the saved workflow" },
+  replay: { verb: "Re-run as it ran", does: "Uses the plan this run froze" },
+};
+
+/**
  * Renders the dialog that confirms a re-run. With more than one way to
  * re-run, a switch picks one, and the chosen way's explanation shows under
- * it. The re-run starts with the run's inputs whichever way is picked.
+ * it. The re-run starts with the run's inputs whichever way is picked, and
+ * `onConfirm` receives the picked way.
  */
 export function RerunDialog({
   dialogRef,
@@ -413,10 +436,65 @@ export function RerunDialog({
   readonly onPickMode: (mode: RerunChoice["mode"]) => void;
   readonly pending: boolean;
   readonly error: string | null;
-  readonly onConfirm: () => void;
+  readonly onConfirm: (mode: RerunChoice["mode"]) => void;
   readonly onClose: () => void;
 }): JSX.Element {
   const chosen = choices.find((choice) => choice.mode === mode) ?? choices[0];
+  const variant = readRerunVariant();
+  if (variant === "ledger") {
+    const only = choices.length === 1 ? choices[0] : undefined;
+    return (
+      <GlassDialog
+        dialogRef={dialogRef}
+        className="confirm-dialog run-rerun-ledger"
+        label="Re-run with the same inputs?"
+        onClose={onClose}
+      >
+        <div className="pop-h">
+          <b>Re-run with the same inputs?</b>
+        </div>
+        <div className="pop-sec confirm-dialog-body">
+          {only === undefined ? null : <p>{only.explanation}</p>}
+          <div className="ledger">
+            {choices.map((choice, index) => (
+              <button
+                key={choice.mode}
+                type="button"
+                className="ans"
+                aria-disabled={pending}
+                onClick={() => {
+                  onPickMode(choice.mode);
+                  onConfirm(choice.mode);
+                }}
+              >
+                <span className={`btn btn--sm${index === 0 ? " btn--accent" : ""}`}>
+                  {pending && choice.mode === mode
+                    ? "Starting…"
+                    : only === undefined
+                      ? LEDGER_ANSWERS[choice.mode].verb
+                      : "Re-run"}
+                </span>
+                <span className="ans-desc">
+                  {only === undefined
+                    ? LEDGER_ANSWERS[choice.mode].does
+                    : "Uses the plan this run froze"}
+                </span>
+              </button>
+            ))}
+            <button type="button" className="ans" onClick={() => dialogRef.current?.close()}>
+              <span className="btn btn--quiet btn--sm">Cancel</span>
+              <span className="ans-desc">Starts nothing</span>
+            </button>
+          </div>
+          {error !== null && (
+            <p className="fl-err" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      </GlassDialog>
+    );
+  }
   return (
     <ConfirmDialog
       dialogRef={dialogRef}
@@ -425,10 +503,28 @@ export function RerunDialog({
       actionClass="accent"
       pending={pending}
       error={error}
-      onConfirm={onConfirm}
+      onConfirm={() => onConfirm(chosen?.mode ?? mode)}
       onClose={onClose}
     >
-      {choices.length > 1 ? (
+      {variant === "radios" && choices.length > 1 ? (
+        <div className="run-rerun-options" role="radiogroup" aria-label="Re-run from">
+          {choices.map((choice) => (
+            <label key={choice.mode} className="run-rerun-option">
+              <span className="run-rerun-radio">
+                <input
+                  type="radio"
+                  name="rerun-mode"
+                  checked={choice.mode === mode}
+                  onChange={() => onPickMode(choice.mode)}
+                />
+              </span>
+              <span className="run-rerun-option-label">{choice.label}</span>
+              <span className="run-rerun-option-desc">{choice.explanation}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+      {variant === "radios" && choices.length > 1 ? null : choices.length > 1 ? (
         <div className="seg run-rerun-seg" role="group" aria-label="Re-run">
           {choices.map((choice) => (
             <button
@@ -442,7 +538,9 @@ export function RerunDialog({
           ))}
         </div>
       ) : null}
-      {chosen === undefined ? null : <p>{chosen.explanation}</p>}
+      {chosen === undefined || (variant === "radios" && choices.length > 1) ? null : (
+        <p>{chosen.explanation}</p>
+      )}
     </ConfirmDialog>
   );
 }
