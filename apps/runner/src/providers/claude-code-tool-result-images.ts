@@ -53,9 +53,15 @@ const SESSION_STOPPED = "The session stopped before the image was kept.";
  * or without media type parameters such as `;charset=utf-8`. The first
  * group is the image's base64, which ends at the first character base64
  * does not use, so the text around the URL is kept.
+ *
+ * A parameter's name and value are plain tokens, as RFC 2397 has them, so
+ * a parameter can never hold another `data:` URL. Each part then matches
+ * text in only one way, and the work stays linear in the text's length: a
+ * looser value let crafted text make the engine give up before the real
+ * URL, which was then missed.
  */
 const IMAGE_DATA_URL =
-  /data:image\/[a-z0-9.+_-]+(?:;[a-z0-9.+_-]+=[^;,\s]*)*;base64,([A-Za-z0-9+/]+={0,2})/gi;
+  /data:image\/[a-z0-9.+_-]+(?:;[a-z0-9.+_-]+=[a-z0-9.+_-]*)*;base64,([A-Za-z0-9+/]+={0,2})/gi;
 
 /**
  * The number of base64 characters that decode to the 18 bytes the image
@@ -212,19 +218,24 @@ const replaceImages = (
   if (Array.isArray(value)) return value.map((item) => replaceImages(item, references));
   const record = asRecord(value);
   if (record === undefined) return value;
-  // Two keys that scrub to the same text keep the last field; both held
-  // the same image, so nothing a person reads is lost.
-  return Object.fromEntries(
-    Object.entries(record).map(([key, field]) => {
-      const fieldData = readImageFieldData(record, key);
-      return [
-        scrubImageData(key, references),
-        fieldData === undefined
-          ? replaceImages(field, references)
-          : (references.get(fieldData) ?? field),
-      ];
-    }),
-  );
+  const entries: Array<readonly [string, unknown]> = [];
+  const keys = new Set<string>();
+  for (const [key, field] of Object.entries(record)) {
+    // Two keys can scrub to the same text, such as two images not kept, so
+    // a later one gets a number and neither field is lost.
+    const scrubbed = scrubImageData(key, references);
+    let unique = scrubbed;
+    for (let n = 2; keys.has(unique); n++) unique = `${scrubbed} (${String(n)})`;
+    keys.add(unique);
+    const fieldData = readImageFieldData(record, key);
+    entries.push([
+      unique,
+      fieldData === undefined
+        ? replaceImages(field, references)
+        : (references.get(fieldData) ?? field),
+    ]);
+  }
+  return Object.fromEntries(entries);
 };
 
 /** Checks whether a content block of a user message is a `tool_result`. */

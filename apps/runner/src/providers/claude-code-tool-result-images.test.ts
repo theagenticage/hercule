@@ -313,6 +313,32 @@ describe("replacing the images in a tool result", () => {
     ]);
   });
 
+  it("finds a data URL after text crafted to look like many unfinished ones", async () => {
+    const uploader = createRecordingUploader();
+    const text = `${"data:image/png;x=".repeat(4000)}! data:image/png;base64,${PNG}`;
+    const replaced = await replace(uploader, buildToolResult([{ type: "text", text }]));
+
+    expect(uploader.uploads).toEqual([PNG]);
+    expect(JSON.stringify(replaced)).not.toContain(PNG);
+  });
+
+  it("keeps both fields when two keys scrub to the same placeholder", async () => {
+    const replaced = await replace(
+      { upload: () => Effect.succeed({ type: "image", unavailable: "Not kept." }) },
+      buildToolResult([buildImageBlock(PNG), buildImageBlock(OTHER)], {
+        [PNG]: { caption: "first" },
+        [OTHER]: { caption: "second" },
+      }),
+    );
+
+    expect(replaced).toMatchObject({
+      tool_use_result: {
+        "[image not kept]": { caption: "first" },
+        "[image not kept] (2)": { caption: "second" },
+      },
+    });
+  });
+
   it("scrubs every copy of an image whose base64 begins with another image's", async () => {
     // Bytes in multiples of three encode with no padding, so the shorter
     // image's base64 is exactly the start of the longer one's.
