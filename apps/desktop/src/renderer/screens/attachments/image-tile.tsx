@@ -11,7 +11,7 @@ export const IMAGE_TILE_HEIGHT = 158;
 
 /** One image as a grid of tiles draws it. */
 export interface TileImage {
-  /** The attachment's id. */
+  /** The tile's React key, unique within its grid. */
   readonly key: string;
   readonly name: string;
   /** The image at the tile's size, or `undefined` while it is built. */

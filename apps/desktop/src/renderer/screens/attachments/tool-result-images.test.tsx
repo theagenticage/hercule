@@ -1,8 +1,9 @@
 /**
- * Tests a tool's images against the stubbed controller: each stored image is
- * read from the controller and drawn as its thumbnail, an image that could
- * not be kept is a line with its reason and no tile, and a click opens a
- * stored image in the lightbox, counted among the stored images only.
+ * Tests the images in a tool's result against the stubbed controller: each
+ * stored image is read from the controller and drawn as its thumbnail, an
+ * image that could not be kept is a line with its reason and no tile, and a
+ * click opens a stored image in the lightbox, counted among the stored
+ * images only. An image the tool returned twice is two tiles.
  *
  * jsdom cannot decode images, so the thumbnail builder is stubbed.
  */
@@ -46,9 +47,12 @@ const IMAGES: readonly ToolResultImage[] = [
   { type: "image", attachment: { id: STORED_IDS[1]!, mimeType: "image/jpeg", sizeBytes: 4 } },
 ];
 
-/** Renders `IMAGES` as a tool's images, and returns the controller's calls. */
-const renderToolImages = async () => {
-  const { calls } = await renderThreadPart(() => <ToolResultImages images={IMAGES} />, {
+/**
+ * Renders `images` as the images in a tool's result, and returns the
+ * controller's calls.
+ */
+const renderToolResultImages = async (images: readonly ToolResultImage[] = IMAGES) => {
+  const { calls } = await renderThreadPart(() => <ToolResultImages images={images} />, {
     thread: THREAD_FIXTURES.finished,
     handlers: Object.fromEntries(
       STORED_IDS.map((id) => [`GET /api/v1/attachments/${id}/content`, { body: "" }]),
@@ -57,9 +61,9 @@ const renderToolImages = async () => {
   return calls;
 };
 
-describe("a tool's images", () => {
+describe("the images in a tool's result", () => {
   it("reads each stored image and draws it as its thumbnail", async () => {
-    const calls = await renderToolImages();
+    const calls = await renderToolResultImages();
 
     const tiles = screen.getAllByRole("button", { name: /^Preview / });
     expect(tiles.map((tile) => tile.getAttribute("aria-label"))).toEqual([
@@ -85,14 +89,37 @@ describe("a tool's images", () => {
   });
 
   it("draws an image that could not be kept as a line with its reason, not as a tile", async () => {
-    await renderToolImages();
+    await renderToolResultImages();
 
     expect(screen.getByText(TOO_LARGE).closest("button")).toBeNull();
   });
 
   it("opens a clicked image in the lightbox, counted among the stored images", async () => {
     const user = userEvent.setup();
-    await renderToolImages();
+    await renderToolResultImages();
+
+    await user.click(screen.getByRole("button", { name: "Preview Image 2" }));
+
+    expect((await screen.findByText(/Image 2 \(2\/2\)/)).className).toBe("lightbox-caption");
+  });
+
+  it("draws an image the tool returned twice as two tiles, each opening its own place", async () => {
+    // The runner puts the same reference in every place a repeated image
+    // appeared, so the two entries share one attachment id.
+    const repeated = IMAGES[0]!;
+    const consoleError = vi.spyOn(console, "error");
+    const user = userEvent.setup();
+    await renderToolResultImages([repeated, repeated]);
+
+    expect(
+      screen
+        .getAllByRole("button", { name: /^Preview / })
+        .map((tile) => tile.getAttribute("aria-label")),
+    ).toEqual(["Preview Image 1", "Preview Image 2"]);
+    expect(consoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining("Encountered two children with the same key"),
+      expect.anything(),
+    );
 
     await user.click(screen.getByRole("button", { name: "Preview Image 2" }));
 

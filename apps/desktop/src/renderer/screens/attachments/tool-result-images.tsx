@@ -11,9 +11,9 @@ const ImageLightbox = lazy(() =>
 );
 
 /**
- * Returns the name a tool's stored image is shown with. A tool's image has
- * no file name, so it is named by its place among the step's stored images:
- * "Image 1", "Image 2", and so on.
+ * Returns the name an image from a tool's result is shown with. Such an
+ * image has no file name, so it is named by its place among the step's
+ * stored images: "Image 1", "Image 2", and so on.
  */
 const nameToolResultImage = (index: number): string => `Image ${String(index + 1)}`;
 
@@ -43,8 +43,11 @@ export function ToolResultImages({
   return (
     <>
       <ToolResultImageList
-        images={stored.map((image, index) => ({
-          key: image.id,
+        // A tile is keyed by its position, not by the image's id: the runner
+        // puts the same reference in every place a repeated image appeared,
+        // so one id can be in `stored` twice.
+        images={stored.map((_, index) => ({
+          key: String(index),
           name: nameToolResultImage(index),
           thumbnail: thumbnails[index],
         }))}
@@ -69,7 +72,7 @@ export function ToolResultImages({
 }
 
 /**
- * Renders a tool's images: the stored ones as tiles, as many 210px columns
+ * Renders the images in a tool's result: the stored ones as tiles, as many 210px columns
  * as fit, and under them one quiet line per image that could not be kept:
  * the reason the runner gave, a whole sentence written for the user, such
  * as "The image is larger than 10 MB, so it was not kept." A click on a
@@ -79,7 +82,7 @@ export function ToolResultImages({
  * place among the stored ones; a reason is a sentence and does not fit in a
  * tile.
  */
-export function ToolResultImageList({
+function ToolResultImageList({
   images,
   unavailable,
   onOpen,

@@ -1,8 +1,8 @@
 /* Attached images: the composer's shelf, the drop overlay, the user's
-   bubble, a tool's images and the lightbox. The Bureau book draws none of
-   them, so every rule here is not in the book. They take its tokens:
-   hairline edges are inset box shadows in `--line`, as `.stop` draws its
-   edge, and the text is the book's type scale.
+   bubble, the images in a tool's result and the lightbox. The Bureau book
+   draws none of them, so every rule here is not in the book. They take its
+   tokens: hairline edges are inset box shadows in `--line`, as `.stop`
+   draws its edge, and the text is the book's type scale.
 
    A tile's corner is `--r-sm`. The strip and the remove button sit on the
    image itself, so their dark glaze has no token and is the same in every
@@ -157,8 +157,8 @@
 
 /* ---------- The user's bubble ---------- */
 /* Above the bubble's text, at the bubble's right edge: two columns at most,
-   each tile up to 210px wide, at 4:3. The tile (image-tile.tsx) is the one
-   a tool's images use too. */
+   each tile up to 210px wide, at 4:3. The images in a tool's result use the
+   same tile (image-tile.tsx). */
 .bubble-images {
   display: grid;
   grid-template-columns: repeat(var(--bubble-columns), minmax(0, 210px));
@@ -185,7 +185,7 @@
   pointer-events: none;
 }
 
-/* ---------- A tool's images ---------- */
+/* ---------- The images in a tool's result ---------- */
 /* Under a step, at its left edge: as many 210px tiles as fit in a row, the
    same tiles as the bubble's. An image the controller could not keep is a
    quiet line under them, in the faint ink and not in the failure colour:

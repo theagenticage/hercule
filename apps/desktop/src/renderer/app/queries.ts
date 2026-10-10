@@ -591,9 +591,9 @@ export const userQuery = (client: HerculeClient) =>
 
 /**
  * Reads a stored image, one a user sent or one a tool returned, at full
- * size, as a `Blob`, for the lightbox. An image never changes once uploaded, so the entry never goes stale. It is
- * dropped a minute after the lightbox closes, so a full-size image is not
- * held after it is shown.
+ * size, as a `Blob`, for the lightbox. An image never changes once
+ * uploaded, so the entry never goes stale. It is dropped a minute after the
+ * lightbox closes, so a full-size image is not held after it is shown.
  *
  * An upload puts its file here as soon as it succeeds, so the image the user
  * just sent is not read back from the controller.

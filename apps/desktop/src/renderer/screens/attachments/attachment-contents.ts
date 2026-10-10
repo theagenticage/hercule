@@ -10,16 +10,13 @@ import type { Attachment } from "@hercule/contract";
 import { attachmentContentQuery, attachmentThumbnailQuery } from "../../app/queries";
 import { toDevicePixels } from "../../app/thumbnails";
 
-/** A stored image, as the controller's `attachment.readContent` reads it by id. */
-type StoredImage = Pick<Attachment, "id">;
-
 /**
  * Returns a thumbnail of each of `attachments`, in order, drawn `width` ×
  * `height` CSS pixels: a small WebP blob, or `undefined` while it is being
  * built and when the image cannot be read or decoded.
  */
 export function useAttachmentThumbnails(
-  attachments: readonly StoredImage[],
+  attachments: readonly Pick<Attachment, "id">[],
   width: number,
   height: number,
 ): readonly (Blob | undefined)[] {
@@ -43,7 +40,9 @@ export function useAttachmentThumbnails(
  * while they load, when the read fails, and while `attachment` is
  * `undefined`, when nothing is read.
  */
-export function useAttachmentContent(attachment: StoredImage | undefined): Blob | undefined {
+export function useAttachmentContent(
+  attachment: Pick<Attachment, "id"> | undefined,
+): Blob | undefined {
   const { controller } = useRouteContext({ from: "/_connected" });
   return useQuery({
     ...attachmentContentQuery(controller.client, attachment?.id ?? ""),
