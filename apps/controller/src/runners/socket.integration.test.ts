@@ -18,6 +18,9 @@
  * - The row then follows the connection: a pong keeps it online, silence marks
  *   it unreachable, a goodbye reads differently from a vanished runner, and a
  *   new hello brings it back from either.
+ * - A promotion's freeze holds a hello and a departure until the transfer is
+ *   cancelled. Once the controller is sealed, a held hello is answered with
+ *   the new address and a departure writes nothing.
  *
  * The default 15 and 60 seconds are checked as the exported constants. The
  * behaviour is tested with intervals of tens of milliseconds passed to the
@@ -36,6 +39,7 @@ import {
   encodeChallengeBytes,
   type ControllerHello,
   type ControllerToRunner as ControllerMessage,
+  type ForwardingPointer,
   type InstallRequest,
   type JoinAnswer,
   type LoginCode,
@@ -49,6 +53,12 @@ import {
 import type { RunnerDetail } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { registry } from "../plugins";
+import {
+  freezeController,
+  NEW_CONTROLLER_ADDRESS,
+  requestTransfer,
+  sealController,
+} from "../promotion/testing";
 import { completeSetup, get, send, withServer, type ServerHarness } from "../http/testing";
 // The two default durations are imported from the socket module, so the test
 // checks the values the controller actually uses.
@@ -1993,6 +2003,41 @@ describe("probing a runner's provider instances", () => {
     });
   });
 
+  it("freezes without waiting for a probe's answer, and stores the answer once the transfer is cancelled", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const asked = await waitForProbeRequests(wire, 3);
+        const request = asked.find((one) => one.instanceId === claude.id)!;
+
+        // The probes are unanswered, and their deadline is the default 20
+        // seconds. The freeze must not wait for them.
+        const promotionToken = await freezeController(harness.base, token);
+
+        wire.send({
+          _tag: "probeReport",
+          requestId: request.requestId,
+          instanceId: claude.id,
+          result: buildProbeResult("2.1.263"),
+        });
+        await delay(QUIET_MS);
+        const frozen = (await (
+          await get(harness.base, `/api/v1/providers/${claude.id}`, token)
+        ).json()) as Instance;
+        expect(frozen.snapshots, "a frozen controller stores no snapshot").toEqual([]);
+
+        await thaw(harness.base, promotionToken);
+        const snapshot = await readSnapshot(harness.base, token, claude.id, joined.runnerId);
+        expect(snapshot.harnessVersion).toBe("2.1.263");
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
   it("probes every instance of every online runner again on the interval", async () => {
     const INTERVAL = Duration.millis(150);
     await withRegistry(
@@ -2988,6 +3033,142 @@ describe("logging a runner's provider instance in", () => {
       } finally {
         wire.close();
       }
+    });
+  });
+});
+
+/** Cancels the transfer of `promotionToken`, which thaws the controller. */
+const thaw = async (base: string, promotionToken: string): Promise<void> => {
+  const response = await requestTransfer(base, promotionToken, "DELETE");
+  expect(response.status).toBe(204);
+};
+
+/**
+ * Returns the runner's connectivity as the database holds it. A sealed
+ * controller answers no request, so the tests read its database directly.
+ */
+const readConnectivityFromDatabase = async (
+  harness: ServerHarness,
+  runnerId: string,
+): Promise<string> => {
+  const rows = await Effect.runPromise(
+    Effect.orDie(
+      harness.sql<{ connectivity: string }>`
+        SELECT connectivity FROM runners WHERE id = ${uuidFromString(runnerId)}
+      `,
+    ),
+  );
+  return rows[0]!.connectivity;
+};
+
+/**
+ * How long a test waits to show that something did not happen. A frame or a
+ * write the controller was going to make arrives well within this.
+ */
+const QUIET_MS = 300;
+
+describe("a runner connection during a promotion", () => {
+  it("holds a hello that arrives while frozen, and answers it with the new address once sealed", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+      const promotionToken = await freezeController(harness.base, token);
+
+      const wire = await dial(harness.base, joined.credential);
+      wire.send(buildHello());
+      await delay(QUIET_MS);
+      expect(wire.frames, "a frozen controller holds the hello").toEqual([]);
+
+      await sealController(harness.base, promotionToken);
+      const pointer = await waitForFrame<ForwardingPointer>(wire, "forwardingPointer");
+      expect(pointer.newAddress).toBe(NEW_CONTROLLER_ADDRESS);
+      await delay(QUIET_MS);
+      // Exactly one pointer: the connection never joined the connections the
+      // seal announces itself to, and it never got a hello of its own.
+      expect(wire.frames.map((frame) => frame._tag)).toEqual(["forwardingPointer"]);
+      expect(await readConnectivityFromDatabase(harness, joined.runnerId)).not.toBe("online");
+      wire.close();
+    });
+  });
+
+  it("holds a hello that arrives while frozen, and answers it once the transfer is cancelled", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+      const promotionToken = await freezeController(harness.base, token);
+
+      const wire = await dial(harness.base, joined.credential);
+      wire.send(buildHello());
+      await delay(QUIET_MS);
+      expect(wire.frames, "a frozen controller holds the hello").toEqual([]);
+      // Reading still works while frozen.
+      expect((await readRunner(harness.base, token, joined.runnerId)).connectivity).not.toBe(
+        "online",
+      );
+
+      await thaw(harness.base, promotionToken);
+      await waitForFrame<ControllerHello>(wire, "controllerHello");
+      await waitForRunner(
+        harness.base,
+        token,
+        joined.runnerId,
+        (one) => one.connectivity === "online",
+      );
+      expect(await readStateTransitions(harness)).toEqual(["online"]);
+      wire.close();
+    });
+  });
+
+  it("records a runner that disconnects while frozen as unreachable only once the transfer is cancelled", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential);
+      await waitForRunner(
+        harness.base,
+        token,
+        joined.runnerId,
+        (one) => one.connectivity === "online",
+      );
+      const promotionToken = await freezeController(harness.base, token);
+
+      wire.close();
+      await delay(QUIET_MS);
+      // The copy the new machine took has the runner online, and nothing is
+      // written after the copy.
+      expect((await readRunner(harness.base, token, joined.runnerId)).connectivity).toBe("online");
+      expect(await readStateTransitions(harness)).toEqual(["online"]);
+
+      await thaw(harness.base, promotionToken);
+      await waitForRunner(
+        harness.base,
+        token,
+        joined.runnerId,
+        (one) => one.connectivity === "unreachable",
+      );
+      expect(await readStateTransitions(harness)).toEqual(["online", "unreachable"]);
+    });
+  });
+
+  it("writes nothing for a runner that disconnects from a sealed controller", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential);
+      await waitForRunner(
+        harness.base,
+        token,
+        joined.runnerId,
+        (one) => one.connectivity === "online",
+      );
+      const promotionToken = await freezeController(harness.base, token);
+      await sealController(harness.base, promotionToken);
+      await waitForFrame<ForwardingPointer>(wire, "forwardingPointer");
+
+      wire.close();
+      await delay(QUIET_MS);
+      expect(await readConnectivityFromDatabase(harness, joined.runnerId)).toBe("online");
+      expect(await readStateTransitions(harness)).toEqual(["online"]);
     });
   });
 });

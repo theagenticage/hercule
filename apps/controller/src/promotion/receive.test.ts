@@ -1,14 +1,27 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
-import { buildHomePaths } from "@hercule/home";
-import { createMasterKey, openKeyStore } from "../secrets";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { buildHomePaths, type HomePaths } from "@hercule/home";
+import { openDatabase, openDatabaseCopy } from "../db";
+import { createMasterKey, openKeyStore, type SecurityRunner } from "../secrets";
 import { streamTransfer, TRANSFER_FORMAT_VERSION } from "./bundle";
 import { encodeBase64Url } from "./crypto";
-import { receiveTransfer } from "./receive";
+import { receiveTransfer, reserveHome } from "./receive";
 
 /** The controller every transfer in this file comes from, and the one its preview showed. */
 const CONTROLLER_ID = "0198e4b0-0000-7000-8000-000000000001";
@@ -23,16 +36,25 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-/** Writes a transfer of an empty database at `schemaVersion` to a file, and returns its path. */
-const writeEmptyTransfer = async (schemaVersion: number): Promise<string> => {
+/**
+ * Writes a transfer to a file and returns its path. Its database holds an
+ * empty `secrets` table, the one table a receive reads, so the transfer is
+ * received whole.
+ */
+const writeTransfer = async (schemaVersion: number): Promise<string> => {
   const database = join(dir, "database");
-  writeFileSync(database, new Uint8Array());
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`CREATE TABLE secrets (id, owner_kind, owner_id, name, nonce, ciphertext)`;
+    }).pipe(Effect.provide(openDatabaseCopy(database))),
+  );
   const header = {
     formatVersion: TRANSFER_FORMAT_VERSION,
     controllerId: CONTROLLER_ID,
     schemaVersion,
     salt: encodeBase64Url(new Uint8Array(32)),
-    databaseByteLength: 0,
+    databaseByteLength: statSync(database).size,
     attachments: [],
   } as const;
   const chunks = await Effect.runPromise(Stream.runCollect(streamTransfer(header, database, [])));
@@ -46,16 +68,64 @@ const buildHomeB = () => buildHomePaths(join(dir, "home"), "data");
 /** Returns the bytes of a random promotion token. */
 const buildTokenBytes = () => crypto.getRandomValues(new Uint8Array(32));
 
-describe("receiveTransfer", () => {
-  it("refuses a Home that already holds a database, and writes nothing", async () => {
+/** Reserves the Home at `paths`, receives `transferFile` into it, and ends the reservation. */
+const receiveIntoHome = (
+  paths: HomePaths,
+  transferFile: string,
+  previewedControllerId: string = CONTROLLER_ID,
+) =>
+  Effect.scoped(
+    Effect.flatMap(reserveHome(paths, "file"), (home) =>
+      receiveTransfer(home, buildTokenBytes(), previewedControllerId, transferFile),
+    ),
+  );
+
+/** Opens the database at `path` the way a controller does, and closes it again. */
+const openAsController = (path: string) => Effect.scoped(Layer.build(openDatabase(path)));
+
+/**
+ * A `security` CLI that keeps items in memory, for the command shape the
+ * macOS store sends. `afterAdd` runs once an item is stored, before the
+ * command returns.
+ */
+const createFakeSecurityRunner =
+  (items: Map<string, string>, afterAdd: () => Promise<void> = () => Promise.resolve()) =>
+  async (argv: ReadonlyArray<string>): ReturnType<SecurityRunner> => {
+    const ok = { exitCode: 0, stdout: "", stderr: "" };
+    const missing = { exitCode: 44, stdout: "", stderr: "" };
+    const account = argv[argv.indexOf("-a") + 1] ?? "";
+    switch (argv[1]) {
+      case "find-generic-password": {
+        const value = items.get(account);
+        return value === undefined ? missing : { ...ok, stdout: `${value}\n` };
+      }
+      case "add-generic-password":
+        items.set(account, argv[argv.indexOf("-w") + 1] ?? "");
+        await afterAdd();
+        return ok;
+      case "delete-generic-password":
+        return items.delete(account) ? ok : missing;
+      default:
+        return { exitCode: 1, stdout: "", stderr: "" };
+    }
+  };
+
+describe("reserveHome", () => {
+  it("refuses a Home that already holds a database, and leaves it", async () => {
     const paths = buildHomeB();
     mkdirSync(paths.dataDir, { recursive: true });
     writeFileSync(paths.databaseFile, "keep-me");
-    const exit = await Effect.runPromiseExit(
-      receiveTransfer(paths, buildTokenBytes(), CONTROLLER_ID, await writeEmptyTransfer(1), "file"),
-    );
-    expect(JSON.stringify(exit)).toContain("already exists");
+    const exit = await Effect.runPromiseExit(Effect.scoped(reserveHome(paths, "file")));
+    expect(JSON.stringify(exit)).toContain(`${paths.databaseFile} already exists`);
     expect(readFileSync(paths.databaseFile, "utf8")).toBe("keep-me");
+  });
+
+  it("refuses a Home that a killed promotion left behind, and says what to remove", async () => {
+    const paths = buildHomeB();
+    mkdirSync(paths.promotionTransferDir, { recursive: true });
+    const exit = await Effect.runPromiseExit(Effect.scoped(reserveHome(paths, "file")));
+    expect(JSON.stringify(exit)).toContain(`If none is running, remove ${paths.dataDir}`);
+    expect(existsSync(paths.promotionTransferDir)).toBe(true);
   });
 
   it("refuses a Home whose store already holds a master key, and leaves the key", async () => {
@@ -63,40 +133,94 @@ describe("receiveTransfer", () => {
     mkdirSync(paths.home, { recursive: true });
     await Effect.runPromise(createMasterKey(openKeyStore(paths, "file")));
     const key = readFileSync(paths.masterKeyFile);
-    const exit = await Effect.runPromiseExit(
-      receiveTransfer(paths, buildTokenBytes(), CONTROLLER_ID, await writeEmptyTransfer(1), "file"),
-    );
+    const exit = await Effect.runPromiseExit(Effect.scoped(reserveHome(paths, "file")));
     expect(JSON.stringify(exit)).toContain("already holds a master key");
     expect(readFileSync(paths.masterKeyFile)).toEqual(key);
-    expect(existsSync(paths.databaseFile)).toBe(false);
+    expect(existsSync(paths.dataDir)).toBe(false);
   });
 
-  it("refuses a transfer from another controller than the preview showed, and writes nothing", async () => {
+  it("refuses a controller that starts in the Home until the reservation ends", async () => {
+    const paths = buildHomeB();
+    const transferFile = await writeTransfer(1);
+    const refusals = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const home = yield* reserveHome(paths, "file");
+          const beforeReceive = yield* Effect.flip(openAsController(paths.databaseFile));
+          yield* receiveTransfer(home, buildTokenBytes(), CONTROLLER_ID, transferFile);
+          const afterReceive = yield* Effect.flip(openAsController(paths.databaseFile));
+          return [beforeReceive.message, afterReceive.message];
+        }),
+      ),
+    );
+    for (const refusal of refusals) expect(refusal).toContain("is already open");
+    expect(readdirSync(paths.dataDir).sort()).toEqual(["attachments", "hercule.db"]);
+
+    await Effect.runPromise(openAsController(paths.databaseFile));
+  });
+});
+
+describe("receiveTransfer", () => {
+  it("leaves only the database and the attachments directory in the data directory", async () => {
+    const paths = buildHomeB();
+    await Effect.runPromise(receiveIntoHome(paths, await writeTransfer(1)));
+    expect(existsSync(paths.promotionTransferDir)).toBe(false);
+    expect(existsSync(`${paths.databaseFile}-wal`)).toBe(false);
+    expect(existsSync(paths.masterKeyFile)).toBe(true);
+  });
+
+  it("refuses a transfer from another controller than the preview showed, and leaves the Home empty", async () => {
     const paths = buildHomeB();
     const previewed = "0198e4b0-0000-7000-8000-000000000002";
     const exit = await Effect.runPromiseExit(
-      receiveTransfer(paths, buildTokenBytes(), previewed, await writeEmptyTransfer(1), "file"),
+      receiveIntoHome(paths, await writeTransfer(1), previewed),
     );
     expect(JSON.stringify(exit)).toContain(
       `The transfer came from controller ${CONTROLLER_ID}, but the preview showed controller ${previewed}`,
     );
-    expect(existsSync(paths.dataDir)).toBe(false);
-    expect(existsSync(paths.masterKeyFile)).toBe(false);
+    expect(existsSync(paths.home)).toBe(false);
   });
 
-  it("refuses a schema newer than this build, and writes nothing", async () => {
+  it("refuses a schema newer than this build, and leaves the Home empty", async () => {
     const paths = buildHomeB();
-    const exit = await Effect.runPromiseExit(
-      receiveTransfer(
-        paths,
-        buildTokenBytes(),
-        CONTROLLER_ID,
-        await writeEmptyTransfer(99_999),
-        "file",
+    const exit = await Effect.runPromiseExit(receiveIntoHome(paths, await writeTransfer(99_999)));
+    expect(JSON.stringify(exit)).toContain("too old");
+    expect(existsSync(paths.home)).toBe(false);
+  });
+
+  it("removes the master key when interrupted while creating it, so a retry succeeds", async () => {
+    const paths = buildHomeB();
+    const transferFile = await writeTransfer(1);
+    const items = new Map<string, string>();
+    let keyStored!: () => void;
+    const stored = new Promise<void>((resolve) => (keyStored = resolve));
+    // The key is in the Keychain, but the command that stored it never returns.
+    const stallAfterAdd = createFakeSecurityRunner(items, () => {
+      keyStored();
+      return new Promise<void>(() => undefined);
+    });
+
+    const fiber = Effect.runFork(
+      Effect.scoped(
+        Effect.flatMap(reserveHome(paths, "keychain", stallAfterAdd), (home) =>
+          receiveTransfer(home, buildTokenBytes(), CONTROLLER_ID, transferFile),
+        ),
       ),
     );
-    expect(JSON.stringify(exit)).toContain("too old");
-    expect(existsSync(paths.dataDir)).toBe(false);
-    expect(existsSync(paths.masterKeyFile)).toBe(false);
+    await stored;
+    expect(items.size).toBe(1);
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    expect(items.size).toBe(0);
+    expect(existsSync(paths.home)).toBe(false);
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.flatMap(reserveHome(paths, "keychain", createFakeSecurityRunner(items)), (home) =>
+          receiveTransfer(home, buildTokenBytes(), CONTROLLER_ID, transferFile),
+        ),
+      ),
+    );
+    expect(items.size).toBe(1);
+    expect(existsSync(paths.databaseFile)).toBe(true);
   });
 });

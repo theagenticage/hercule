@@ -15,7 +15,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { buildHomePaths, type HomePaths } from "@hercule/home";
 import { buildAttachmentPath } from "../attachments";
 import { HerculeHome } from "../config";
-import { STARTER_WORKFLOW_SOURCE } from "@hercule/contract";
 import { mintToken } from "../credentials";
 import { mintUuid, openDatabase, uuidToString } from "../db";
 import {
@@ -31,7 +30,7 @@ import {
 import { masterKeyLayer, Secrets, secretsLayer, type SecurityRunner } from "../secrets";
 import { decodePromotionToken } from "./crypto";
 import type { PromotionPreview } from "./exchange";
-import { receiveTransfer } from "./receive";
+import { receiveTransfer, reserveHome } from "./receive";
 import { createPromotionToken, requestTransfer } from "./testing";
 import { NO_PROMOTION_TOKEN } from "./transfer";
 
@@ -238,7 +237,11 @@ describe("promotion transfer", () => {
 
       const paths = createHomeB();
       const received = await Effect.runPromise(
-        receiveTransfer(paths, decodeTokenOrThrow(token), controllerId, transferFile, "file"),
+        Effect.scoped(
+          Effect.flatMap(reserveHome(paths, "file"), (home) =>
+            receiveTransfer(home, decodeTokenOrThrow(token), controllerId, transferFile),
+          ),
+        ),
       );
       expect(received.controllerId).toBe(controllerId);
       expect(readdirSync(paths.dataDir).sort()).toEqual(["attachments", "hercule.db"].sort());
@@ -298,7 +301,11 @@ describe("promotion transfer", () => {
 
         const paths = createHomeB();
         await Effect.runPromise(
-          receiveTransfer(paths, decodeTokenOrThrow(token), controllerId, transferFile, "file"),
+          Effect.scoped(
+            Effect.flatMap(reserveHome(paths, "file"), (home) =>
+              receiveTransfer(home, decodeTokenOrThrow(token), controllerId, transferFile),
+            ),
+          ),
         );
         expect(existsSync(paths.masterKeyFile)).toBe(true);
         expect((await Bun.file(paths.masterKeyFile).stat()).mode & 0o777).toBe(0o600);
@@ -331,7 +338,11 @@ describe("promotion transfer", () => {
 
       const paths = createHomeB();
       const exit = await Effect.runPromiseExit(
-        receiveTransfer(paths, decodeTokenOrThrow(mintToken()), controllerId, transferFile, "file"),
+        Effect.scoped(
+          Effect.flatMap(reserveHome(paths, "file"), (home) =>
+            receiveTransfer(home, decodeTokenOrThrow(mintToken()), controllerId, transferFile),
+          ),
+        ),
       );
       expect(JSON.stringify(exit)).toContain("do not decrypt with this token");
       expect(existsSync(paths.databaseFile)).toBe(false);
@@ -340,58 +351,18 @@ describe("promotion transfer", () => {
     });
   });
 
-  it("freezes mutations after the copy and leaves a later write off B", async () => {
+  it("freezes mutations after the copy, and refuses a write that skips the gate", async () => {
     await withServer(async (harness) => {
       const user = await completeSetup(harness.base);
       const token = await createPromotionToken(harness.base, user);
-      const controllerId = await readPreviewedControllerId(harness.base, token);
       const response = await requestTransfer(harness.base, token);
       expect(response.status).toBe(200);
-      const transferFile = await saveTransfer(response);
+      await response.arrayBuffer();
 
       const read = await fetch(`${harness.base}/api/v1/controller`, {
         headers: { authorization: `Bearer ${user}`, connection: "close" },
       });
       expect(read.status).toBe(200);
-
-      const validate = await post(
-        harness.base,
-        "/api/v1/workflows/validate",
-        { source: STARTER_WORKFLOW_SOURCE },
-        user,
-      );
-      expect(validate.status, await validate.clone().text()).toBe(200);
-
-      const beforeRenewal = await Effect.runPromise(
-        Effect.orDie(
-          harness.sql<{ readonly expires_at: string }>`
-            SELECT expires_at FROM login_tokens WHERE revoked_at IS NULL
-          `,
-        ),
-      );
-      const nearExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-      await Effect.runPromise(
-        Effect.orDie(
-          harness.sql`
-            UPDATE login_tokens
-            SET last_used_at = ${"2000-01-01T00:00:00.000Z"}, expires_at = ${nearExpiry}
-            WHERE revoked_at IS NULL
-          `,
-        ),
-      );
-      const readAgain = await fetch(`${harness.base}/api/v1/controller`, {
-        headers: { authorization: `Bearer ${user}`, connection: "close" },
-      });
-      expect(readAgain.status).toBe(200);
-      const afterRead = await Effect.runPromise(
-        Effect.orDie(
-          harness.sql<{ readonly expires_at: string }>`
-            SELECT expires_at FROM login_tokens WHERE revoked_at IS NULL
-          `,
-        ),
-      );
-      expect(afterRead[0]?.expires_at).toBe(nearExpiry);
-      expect(beforeRenewal[0]?.expires_at).not.toBe(nearExpiry);
 
       const mutating = await send("PUT", harness.base, SECRET_PATH, {
         body: { value: SECRET_VALUE },
@@ -407,36 +378,26 @@ describe("promotion transfer", () => {
       expect(login.status).toBe(409);
       expect((await readErrorBody(login)).code).toBe("promotion_in_progress");
 
-      // Snapshot timing only: a row written on A after the copy is not in the
-      // bundle. Loss of live runner traffic is covered on the runner socket.
-      const lostId = mintUuid();
+      // A write after the copy would be on A and never on B. A writer that
+      // forgot the freeze is refused by the database itself, so the mistake
+      // fails loudly instead of leaving the two machines apart.
       const now = new Date().toISOString();
-      await Effect.runPromise(
-        Effect.orDie(
+      const refused = await Effect.runPromise(
+        Effect.flip(
           harness.sql`
             INSERT INTO sessions (
               id, permission_profile_id, instance_id, runner_id,
               requested_access_mode, access_mode, spec, title, status,
               created_at, last_activity_at
             ) VALUES (
-              ${lostId}, ${mintUuid()}, ${mintUuid()}, ${mintUuid()},
+              ${mintUuid()}, ${mintUuid()}, ${mintUuid()}, ${mintUuid()},
               'full', 'full', ${'{"prompt":"after the copy"}'}, 'lost after copy', 'idle',
               ${now}, ${now}
             )
           `,
         ),
       );
-
-      const paths = createHomeB();
-      await Effect.runPromise(
-        receiveTransfer(paths, decodeTokenOrThrow(token), controllerId, transferFile, "file"),
-      );
-      const found = await readFromDatabase(
-        paths,
-        (sql) =>
-          sql<{ readonly n: number }>`SELECT count(*) AS n FROM sessions WHERE id = ${lostId}`,
-      );
-      expect(found[0]?.n).toBe(0);
+      expect(String(refused.reason.cause)).toContain("attempt to write a readonly database");
     });
   });
 

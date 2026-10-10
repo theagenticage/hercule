@@ -698,40 +698,49 @@ const make = Effect.gen(function* () {
    * A steer that fails leaves the input waiting, for the flush that follows
    * the turn's end, so its failure is logged, not returned. So is an input
    * the flush has already sent by the time the steer looks for it.
+   *
+   * Runs after the caller's request has ended, so it passes the promotion
+   * gate on its own: it waits while a promotion freezes the controller, and
+   * never delivers once it is sealed, as `deliverQueuedInput` explains.
    */
   const deliverConversationInput = (
     sessionId: string,
     inputId: string,
   ): Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError> =>
-    Effect.gen(function* () {
-      const session = yield* readSession(sessionId);
-      switch (session.status) {
-        case "busy":
-          return yield* sessions.queuedInput(sessionId, inputId).pipe(
-            Effect.flatMap((row) => steerInto(session, row)),
-            Effect.asVoid,
-            // Not found: the flush at the turn's end already sent the input.
-            Effect.catchIf(
-              (error): error is InvalidState | NotFound =>
-                error instanceof InvalidState || error instanceof NotFound,
-              (error) =>
-                Effect.logInfo("An owner's message was not steered; it waits for the turn's end", {
-                  sessionId,
-                  reason: error.error.message,
-                }),
-            ),
-          );
-        case "queued":
-          return yield* dispatch(session.runnerId);
-        case "starting":
-          // The start already carried the session's oldest input. This one
-          // waits, and the flush at the end of that input's turn sends it.
-          return;
-        case "idle":
-        case "exited":
-          return yield* deliverQueuedInput(sessionId);
-      }
-    });
+    promotion.whenServing(
+      Effect.gen(function* () {
+        const session = yield* readSession(sessionId);
+        switch (session.status) {
+          case "busy":
+            return yield* sessions.queuedInput(sessionId, inputId).pipe(
+              Effect.flatMap((row) => steerInto(session, row)),
+              Effect.asVoid,
+              // Not found: the flush at the turn's end already sent the input.
+              Effect.catchIf(
+                (error): error is InvalidState | NotFound =>
+                  error instanceof InvalidState || error instanceof NotFound,
+                (error) =>
+                  Effect.logInfo(
+                    "An owner's message was not steered; it waits for the turn's end",
+                    {
+                      sessionId,
+                      reason: error.error.message,
+                    },
+                  ),
+              ),
+            );
+          case "queued":
+            return yield* dispatch(session.runnerId);
+          case "starting":
+            // The start already carried the session's oldest input. This one
+            // waits, and the flush at the end of that input's turn sends it.
+            return;
+          case "idle":
+          case "exited":
+            return yield* deliverQueuedInput(sessionId);
+        }
+      }),
+    );
 
   /**
    * Delivers the prompt of an agent step that `queueStepInput` stored, once
@@ -784,47 +793,57 @@ const make = Effect.gen(function* () {
    * A session read as queued may have been sent to its runner since. Only a
    * session still queued is ended directly; any other is stopped through its
    * runner.
+   *
+   * Passes the promotion gate, because the database refuses writes while a
+   * promotion freezes the controller. A request to stop is already admitted,
+   * but a run's ending and an assistant's stop call this after their own
+   * request or transaction is over. The stop then waits while frozen, and
+   * never happens once the controller is sealed. A stop still waiting at the
+   * seal is lost, like a runner's report that arrives after the copy (spec
+   * 03 section 8.2); the session then ends by its own idle timeout.
    */
   const stopSession = (
     session: StoredSession,
   ): Effect.Effect<"ended" | "told" | "exited" | "unreachable", NotFound | SqlError> =>
-    Effect.gen(function* () {
-      const actor = yield* currentStamp;
-      const payload = { sessionId: session.id, runnerId: session.runnerId };
-      if (session.status === "queued") {
-        const ended = yield* withTransaction(
-          sql,
+    promotion.whenServing(
+      Effect.gen(function* () {
+        const actor = yield* currentStamp;
+        const payload = { sessionId: session.id, runnerId: session.runnerId };
+        if (session.status === "queued") {
+          const ended = yield* withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const at = yield* nowIso;
+              if (yield* sessions.endQueued(session.id, at)) {
+                yield* audit.append({ kind: "session.stopped", actor, payload, at });
+                return "ended" as const;
+              }
+              // The session left `queued` after it was read. If it has exited,
+              // this stop changes nothing and records nothing. Otherwise
+              // dispatch sent it to its runner, which is told to stop it below.
+              return (yield* readSession(session.id)).status === "exited"
+                ? ("exited" as const)
+                : undefined;
+            }),
+          );
+          if (ended !== undefined) return ended;
+        }
+        return yield* writeThenTellRunner(
+          session.runnerId,
+          sessions.stopping(session.id),
           Effect.gen(function* () {
-            const at = yield* nowIso;
-            if (yield* sessions.endQueued(session.id, at)) {
-              yield* audit.append({ kind: "session.stopped", actor, payload, at });
-              return "ended" as const;
-            }
-            // The session left `queued` after it was read. If it has exited,
-            // this stop changes nothing and records nothing. Otherwise
-            // dispatch sent it to its runner, which is told to stop it below.
-            return (yield* readSession(session.id)).status === "exited"
-              ? ("exited" as const)
-              : undefined;
+            yield* audit.append({ kind: "session.stopped", actor, payload, at: yield* nowIso });
+            yield* sessions.withdrawApprovalNotifications(session.id, "stopped", undefined);
           }),
+        ).pipe(
+          Effect.as("told" as const),
+          Effect.catchIf(
+            (error): error is InvalidState => error instanceof InvalidState,
+            () => Effect.succeed("unreachable" as const),
+          ),
         );
-        if (ended !== undefined) return ended;
-      }
-      return yield* writeThenTellRunner(
-        session.runnerId,
-        sessions.stopping(session.id),
-        Effect.gen(function* () {
-          yield* audit.append({ kind: "session.stopped", actor, payload, at: yield* nowIso });
-          yield* sessions.withdrawApprovalNotifications(session.id, "stopped", undefined);
-        }),
-      ).pipe(
-        Effect.as("told" as const),
-        Effect.catchIf(
-          (error): error is InvalidState => error instanceof InvalidState,
-          () => Effect.succeed("unreachable" as const),
-        ),
-      );
-    });
+      }),
+    );
 
   return {
     sendClaimed,

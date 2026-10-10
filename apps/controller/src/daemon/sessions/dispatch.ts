@@ -67,6 +67,13 @@ const make = Effect.gen(function* () {
    * and the runner is asked for the step's result instead. The wait ended
    * with the connection, so the request is sent only when the runner has
    * connected again by then. Otherwise the runner is asked when it connects.
+   *
+   * The wait for the answer is not counted by the promotion gate, because a
+   * freeze must not wait for a slow start. Recording the answer is counted:
+   * it waits while a promotion freezes the controller, and never happens
+   * once it is sealed. The new machine's copy then holds the session as
+   * starting with its input unanswered, as it holds any step result a runner
+   * reports after the copy.
    */
   const sendStart = (runnerId: string, start: StartRequest): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
@@ -75,16 +82,18 @@ const make = Effect.gen(function* () {
         start.frame,
         Duration.infinity,
       );
-      if (sent._tag === "notSent") return yield* sessions.requeue(start);
-      // Only an unconfirmed step prompt needs anything more: a refusal is
-      // recorded on the input, where its reader sees it, and nobody waits on
-      // this start to be told.
-      const recorded = yield* promotion.whenServing(
-        sessions.recordInputAnswer(start.input, sent, runnerId),
+      yield* promotion.whenServing(
+        Effect.gen(function* () {
+          if (sent._tag === "notSent") return yield* sessions.requeue(start);
+          // Only an unconfirmed step prompt needs anything more: a refusal is
+          // recorded on the input, where its reader sees it, and nobody waits
+          // on this start to be told.
+          const recorded = yield* sessions.recordInputAnswer(start.input, sent, runnerId);
+          if (recorded._tag === "unconfirmed") {
+            yield* connections.tell(runnerId, recorded.resultRequest);
+          }
+        }),
       );
-      if (recorded._tag === "unconfirmed") {
-        yield* connections.tell(runnerId, recorded.resultRequest);
-      }
     });
 
   return {

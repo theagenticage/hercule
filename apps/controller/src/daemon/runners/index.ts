@@ -5,7 +5,6 @@
  */
 export { Arrival, ArrivalLayer } from "./arrival";
 export { Inbound, InboundLayer } from "./inbound";
-export { PromotionExpiryLayer } from "./promotion-expiry";
 export { PromotionFleet, PromotionFleetLayer, PromotionFleetRouteLayer } from "./promotion-fleet";
 export { Retirement, RetirementLayer } from "./retirement";
 export { sweepUnreachableRunners } from "./unreachable-runners";

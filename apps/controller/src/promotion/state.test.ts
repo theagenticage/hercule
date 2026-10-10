@@ -1,13 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { uuidFromString } from "../db";
+import { SYSTEM_ACTOR } from "../actor";
+import { AfterCommit } from "../db";
 import { TestDatabase } from "../db/testing";
-import { AuditLogLayer } from "../events";
+import { AuditLog, AuditLogLayer } from "../events";
 import { ControllerIdentity } from "../identity";
 import { PromotionDrainTimeout, PromotionState, PromotionStateLayer } from "./state";
 
@@ -28,11 +32,16 @@ const StateDependencies = Layer.mergeAll(
   AuditLogLayer,
 );
 
+/** Returns a deadline far enough away that no test reaches it. */
+const inAnHour = (): Date => new Date(Date.now() + 3_600_000);
+
 /**
  * Runs `body` against a fresh promotion state over an in-memory database, with
  * a drain timeout short enough for a test to wait out.
  */
-const run = <A, E>(body: Effect.Effect<A, E, PromotionState | SqlClient.SqlClient>): Promise<A> =>
+const run = <A, E>(
+  body: Effect.Effect<A, E, PromotionState | SqlClient.SqlClient | AuditLog>,
+): Promise<A> =>
   Effect.runPromise(
     body.pipe(
       Effect.provide(PromotionStateLayer.pipe(Layer.provideMerge(StateDependencies))),
@@ -55,13 +64,48 @@ const readErrorCode = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<s
 /** Lets forked fibers run until they block. */
 const settle = Effect.sleep(Duration.millis(20));
 
+/**
+ * Writes one audit entry, as any writer of the controller might, and returns
+ * "written", or the SQLite error the database refused it with.
+ */
+const tryWrite: Effect.Effect<string, never, AuditLog> = Effect.flatMap(AuditLog, (audit) =>
+  audit
+    .append({
+      kind: "controller.promotion.cancelled",
+      actor: SYSTEM_ACTOR,
+      payload: { promotionTokenId: TOKEN },
+    })
+    .pipe(
+      Effect.as("written"),
+      Effect.catchTag("SqlError", (error) => Effect.succeed(String(error.reason.cause))),
+    ),
+);
+
+/** Counts the rows of `sealed_state`: 1 once a seal is stored, 0 before. */
+const countStoredSeals = Effect.flatMap(SqlClient.SqlClient, (sql) =>
+  Effect.map(
+    sql<{ readonly n: number }>`SELECT count(*) AS n FROM sealed_state`,
+    (rows) => rows[0]?.n ?? 0,
+  ),
+);
+
+let scratch: string;
+
+beforeEach(() => {
+  scratch = mkdtempSync(join(tmpdir(), "hercule-promotion-state-"));
+});
+
+afterEach(() => {
+  rmSync(scratch, { recursive: true, force: true });
+});
+
 describe("PromotionState", () => {
   it("admits requests while serving, refuses them while frozen, and once sealed", async () => {
     const codes = await run(
       Effect.gen(function* () {
         const state = yield* PromotionState;
         const serving = yield* state.admit(Effect.succeed("ran"));
-        yield* state.freeze(TOKEN);
+        yield* state.freeze(TOKEN, inAnHour());
         const frozen = yield* readErrorCode(state.admit(Effect.void));
         yield* state.seal(TOKEN, NEW_ADDRESS);
         const sealed = yield* readErrorCode(state.admit(Effect.void));
@@ -92,7 +136,7 @@ describe("PromotionState", () => {
         yield* settle;
         const freeze = yield* Effect.forkChild(
           Effect.andThen(
-            state.freeze(TOKEN),
+            state.freeze(TOKEN, inAnHour()),
             Effect.sync(() => order.push("frozen")),
           ),
         );
@@ -113,7 +157,7 @@ describe("PromotionState", () => {
         const state = yield* PromotionState;
         yield* Effect.forkChild(state.admit(Effect.never));
         yield* settle;
-        const code = yield* readErrorCode(state.freeze(TOKEN));
+        const code = yield* readErrorCode(state.freeze(TOKEN, inAnHour()));
         const phase = yield* state.phase;
         return { code, phase: phase._tag };
       }),
@@ -132,7 +176,7 @@ describe("PromotionState", () => {
           ),
         );
         yield* settle;
-        const freeze = yield* Effect.forkChild(state.freeze(TOKEN));
+        const freeze = yield* Effect.forkChild(state.freeze(TOKEN, inAnHour()));
         yield* settle;
         yield* Deferred.succeed(release, undefined);
         const inner = yield* Fiber.join(request);
@@ -157,7 +201,7 @@ describe("PromotionState", () => {
             ),
           ),
         );
-        yield* state.freeze(TOKEN);
+        yield* state.freeze(TOKEN, inAnHour());
         yield* Deferred.succeed(release, undefined);
         yield* settle;
         const whileFrozen = ran;
@@ -185,7 +229,7 @@ describe("PromotionState", () => {
             Deferred.await(started),
           ),
         );
-        const freeze = yield* Effect.forkChild(state.freeze(TOKEN));
+        const freeze = yield* Effect.forkChild(state.freeze(TOKEN, inAnHour()));
         yield* settle;
         const frozenEarly = freeze.pollUnsafe() !== undefined;
         yield* Deferred.succeed(release, undefined);
@@ -200,7 +244,7 @@ describe("PromotionState", () => {
     const seen = await run(
       Effect.gen(function* () {
         const state = yield* PromotionState;
-        yield* state.freeze(TOKEN);
+        yield* state.freeze(TOKEN, inAnHour());
         let ran = false;
         const background = yield* Effect.forkChild(
           state.whenServing(Effect.sync(() => (ran = true))),
@@ -215,47 +259,83 @@ describe("PromotionState", () => {
     expect(seen).toEqual({ whileFrozen: false, afterThaw: true });
   });
 
-  it("stays frozen until something thaws it; freeze itself does not schedule a timer", async () => {
-    const phase = await run(
-      Effect.gen(function* () {
-        const state = yield* PromotionState;
-        yield* state.freeze(TOKEN);
-        yield* Effect.sleep(Duration.millis(150));
-        return (yield* state.phase)._tag;
-      }),
-    );
-    expect(phase).toBe("Frozen");
-  });
-
-  it("refuses a thaw when a seal is already persisted, even if memory still says frozen", async () => {
+  it("refuses every write from the copy until the thaw, and allows writes after it", async () => {
     const outcome = await run(
       Effect.gen(function* () {
         const state = yield* PromotionState;
-        yield* state.freeze(TOKEN);
-        const sql = yield* SqlClient.SqlClient;
-        yield* sql`
-          INSERT INTO sealed_state (singleton, token_id, sealed_at, new_address, signature)
-          VALUES (
-            1,
-            ${uuidFromString(TOKEN)},
-            ${"2026-01-01T00:00:00.000Z"},
-            ${NEW_ADDRESS},
-            ${new Uint8Array(64)}
-          )
-        `;
-        const code = yield* readErrorCode(state.thaw(TOKEN));
-        return { code, phase: (yield* state.phase)._tag };
+        yield* state.freeze(TOKEN, inAnHour());
+        const beforeCopy = yield* tryWrite;
+        yield* state.copyDatabaseAndStopWrites(TOKEN, join(scratch, "copy.db"));
+        const afterCopy = yield* tryWrite;
+        yield* state.thaw(TOKEN);
+        const afterThaw = yield* tryWrite;
+        return { beforeCopy, afterCopy, afterThaw };
       }),
     );
-    expect(outcome).toEqual({ code: "controller_sealed", phase: "Sealed" });
+    expect(outcome.beforeCopy).toBe("written");
+    expect(outcome.afterCopy).toContain("readonly");
+    expect(outcome.afterThaw).toBe("written");
+  });
+
+  it("refuses to copy once the freeze has ended, and leaves writes allowed", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const state = yield* PromotionState;
+        yield* state.freeze(TOKEN, inAnHour());
+        yield* state.thaw(TOKEN);
+        const code = yield* readErrorCode(
+          state.copyDatabaseAndStopWrites(TOKEN, join(scratch, "copy.db")),
+        );
+        return { code, write: yield* tryWrite };
+      }),
+    );
+    expect(outcome).toEqual({ code: "invalid_state", write: "written" });
+  });
+
+  it("writes the seal while writes are stopped, and refuses every write after it", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const state = yield* PromotionState;
+        yield* state.freeze(TOKEN, inAnHour());
+        yield* state.copyDatabaseAndStopWrites(TOKEN, join(scratch, "copy.db"));
+        yield* state.seal(TOKEN, NEW_ADDRESS);
+        return { seals: yield* countStoredSeals, write: yield* tryWrite };
+      }),
+    );
+    expect(outcome.seals).toBe(1);
+    expect(outcome.write).toContain("readonly");
+  });
+
+  it("is sealed in memory whenever the seal is stored, even if the seal is interrupted", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const state = yield* PromotionState;
+        yield* state.freeze(TOKEN, inAnHour());
+        // The announcement of the seal's audit entry runs right after the
+        // commit, so interrupting the seal then aims at the moment between
+        // the stored seal and the sealed phase.
+        const committed = yield* Deferred.make<void>();
+        const seal = yield* Effect.forkChild(
+          state.seal(TOKEN, NEW_ADDRESS).pipe(
+            Effect.provideService(AfterCommit, {
+              publish: () => Effect.andThen(Deferred.succeed(committed, undefined), settle),
+            }),
+          ),
+        );
+        yield* Deferred.await(committed);
+        yield* Fiber.interrupt(seal);
+        return { seals: yield* countStoredSeals, phase: (yield* state.phase)._tag };
+      }),
+    );
+    expect(outcome).toEqual({ seals: 1, phase: "Sealed" });
   });
 
   it("refuses a second freeze, and a thaw for another token", async () => {
     const outcome = await run(
       Effect.gen(function* () {
         const state = yield* PromotionState;
-        yield* state.freeze(TOKEN);
-        const second = yield* readErrorCode(state.freeze(OTHER_TOKEN));
+        yield* state.freeze(TOKEN, inAnHour());
+        const second = yield* readErrorCode(state.freeze(OTHER_TOKEN, inAnHour()));
         yield* state.thaw(OTHER_TOKEN);
         return { second, phase: (yield* state.phase)._tag };
       }),
@@ -268,7 +348,7 @@ describe("PromotionState", () => {
       Effect.gen(function* () {
         const state = yield* PromotionState;
         const unfrozen = yield* readErrorCode(state.seal(TOKEN, NEW_ADDRESS));
-        yield* state.freeze(TOKEN);
+        yield* state.freeze(TOKEN, inAnHour());
         const otherToken = yield* readErrorCode(state.seal(OTHER_TOKEN, NEW_ADDRESS));
         const first = yield* state.seal(TOKEN, NEW_ADDRESS);
         const again = yield* state.seal(TOKEN, NEW_ADDRESS);
@@ -290,8 +370,12 @@ describe("PromotionState", () => {
     const phases = await run(
       Effect.gen(function* () {
         const before = yield* PromotionState;
-        yield* before.freeze(TOKEN);
+        yield* before.freeze(TOKEN, inAnHour());
         yield* before.seal(TOKEN, NEW_ADDRESS);
+        // A restarted controller opens a new connection, which accepts writes
+        // again. This test keeps the one connection, so it allows them itself.
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`PRAGMA query_only = OFF`;
         // A second state over the same database stands in for the restarted controller.
         const restart = (forceUnseal: boolean) =>
           Effect.gen(function* () {
@@ -304,7 +388,6 @@ describe("PromotionState", () => {
         const restored = yield* restart(false);
         const unsealed = yield* restart(true);
         const afterUnseal = yield* restart(false);
-        const sql = yield* SqlClient.SqlClient;
         const audited = yield* sql<{ readonly kind: string }>`
           SELECT kind FROM events WHERE kind LIKE 'controller.%' ORDER BY id
         `;

@@ -73,6 +73,13 @@ const make = Effect.gen(function* () {
    * Returns `none` if the runner does not answer before the deadline. A late
    * report is dropped rather than stored, because nothing is waiting for that
    * request any more.
+   *
+   * Only the store passes the promotion gate, not the wait for the runner, so
+   * a freeze never waits up to a probe's deadline for its answer. While a
+   * promotion freezes the controller, the store waits until the freeze ends.
+   * Once the controller is sealed, the snapshot is dropped and `none` is
+   * returned: the runner reconnects to the new machine, which probes it again
+   * when it arrives.
    */
   const probeOne = (
     runnerId: string,
@@ -100,7 +107,7 @@ const make = Effect.gen(function* () {
       );
       if (Option.isNone(answer) || answer.value._tag !== "probeReport") return Option.none();
       const result = answer.value.result;
-      return yield* withTransaction(
+      const store = withTransaction(
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
@@ -121,6 +128,7 @@ const make = Effect.gen(function* () {
           });
         }),
       );
+      return yield* promotion.whenServingOr(store, () => Effect.succeed(Option.none()));
     });
 
   /**
@@ -342,20 +350,18 @@ const make = Effect.gen(function* () {
         // Forked, because a runner that answers slowly must not hold up the
         // next runner's sweep.
         Stream.runForEach(connections.arrivals, (runnerId) =>
-          Effect.forkChild(promotion.whenServing(sweepRunner(runnerId))),
+          Effect.forkChild(sweepRunner(runnerId)),
         ),
         Effect.gen(function* () {
           const interval = yield* ProviderProbeInterval;
           while (true) {
             yield* Effect.sleep(interval);
-            yield* promotion.whenServing(
-              logSweepFailure(
-                Effect.gen(function* () {
-                  const online = yield* runners.connected();
-                  if (online.length === 0) return;
-                  yield* sweep(online, yield* instances.list());
-                }),
-              ),
+            yield* logSweepFailure(
+              Effect.gen(function* () {
+                const online = yield* runners.connected();
+                if (online.length === 0) return;
+                yield* sweep(online, yield* instances.list());
+              }),
             );
           }
         }),

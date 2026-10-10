@@ -89,7 +89,7 @@ Path nouns are plural (`/tasks`) although operation ids are singular; that is th
 ```
 
 - `code` is a closed enum in the contract, extended additively: `unauthenticated` (401), `forbidden` (403), `validation` (400), `not_found` (404), `conflict` (409), `invalid_state` (409), `cap_exceeded` (422), `internal` (500). *(Amended 2026-10-09, [#103](https://github.com/theagenticage/hercule/issues/103).)* Promotion adds two codes ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 8):
-  - `promotion_in_progress` (409): a promotion is copying this controller's data, so it accepts no change. Every operation that is not a `GET` or `HEAD` returns it until the switch, a cancel, or the promotion token's expiry. Reads still answer.
+  - `promotion_in_progress` (409): a promotion is copying this controller's data, so it accepts no change. Every operation that changes something returns it until the switch, a cancel, or the promotion token's expiry. Reads still answer: every `GET` and `HEAD`, and the operations that change nothing but take a body, which the operation table marks `readOnly` (`workflow.validate`).
   - `controller_sealed` (503): this controller has moved to another machine and no longer serves. Every operation except `setup.read` returns it. The message names the new address and the `hercule login` command for it.
 - `details` is typed per code: `forbidden` carries `{ grant }`; `cap_exceeded` carries `{ size, cap }` or `{ count, cap }`; `validation` carries `{ issues: { path: string[]; message: string }[] }`, mapped from the schema library's parse issues; the wire contract names no schema library. *(Amended 2026-10-09, [#103](https://github.com/theagenticage/hercule/issues/103).)* `controller_sealed` carries `{ newAddress }`, the URL of the controller the data moved to. It is not signed: only a runner holds a key to check a signature with, and a runner learns the move from the signed `ForwardingPointer` frame instead ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 8.3).
 - `message` is for people and is never parsed.
@@ -109,7 +109,7 @@ Path nouns are plural (`/tasks`) although operation ids are singular; that is th
   *(Amended 2026-10-09, [#103](https://github.com/theagenticage/hercule/issues/103).)* Two gates run before the credential is read, so the full order of checks on HTTP is:
 
   1. the body cap: a bare `413` or `411` (above);
-  2. the promotion gate: `controller_sealed`, or `promotion_in_progress` for an operation that is not a `GET` or `HEAD`;
+  2. the promotion gate: `controller_sealed`, or `promotion_in_progress` for an operation that changes something;
   3. the pre-setup gate: `unauthenticated` for every operation but `setup.read` and `setup.complete` until setup is complete;
   4. the credential: `unauthenticated`;
   5. the static grant check: `forbidden`;

@@ -21,20 +21,24 @@ import {
   type RunnerHello,
 } from "@hercule/protocol";
 import { mintToken } from "../../credentials";
+import { withFinalTransaction } from "../../db";
 import { completeSetup, get, readErrorBody, send, withServer } from "../../http/testing";
 import { NO_PROMOTION_TOKEN, SWITCH_PATH } from "../../promotion";
-import { createPromotionToken, requestTransfer } from "../../promotion/testing";
+import {
+  createPromotionToken,
+  freezeController,
+  NEW_CONTROLLER_ADDRESS,
+  requestTransfer,
+  sealController,
+} from "../../promotion/testing";
 
-const NEW_ADDRESS = "http://hercule.example:9";
 const SOCKET_PATH = "/api/v1/runners/socket";
 
-const spendToken = async (base: string, token: string): Promise<void> => {
-  const response = await requestTransfer(base, token);
-  expect(response.status).toBe(200);
-  await response.arrayBuffer();
-};
-
-const postSwitch = (base: string, token: string, newAddress = NEW_ADDRESS): Promise<Response> =>
+const postSwitch = (
+  base: string,
+  token: string,
+  newAddress = NEW_CONTROLLER_ADDRESS,
+): Promise<Response> =>
   fetch(`${base}${SWITCH_PATH}`, {
     method: "POST",
     headers: {
@@ -179,7 +183,9 @@ describe("promotion preview", () => {
       expect(body.controllerId).toMatch(/^[0-9a-f-]{36}$/);
       expect(Array.isArray(body.runners)).toBe(true);
 
-      await spendToken(harness.base, token);
+      const spent = await requestTransfer(harness.base, token);
+      expect(spent.status).toBe(200);
+      await spent.arrayBuffer();
 
       const frozen = await requestTransfer(harness.base, mintToken(), "GET");
       expect(frozen.status).toBe(409);
@@ -196,7 +202,7 @@ describe("promotion switch", () => {
       const missing = await fetch(`${harness.base}${SWITCH_PATH}`, {
         method: "POST",
         headers: { "content-type": "application/json", connection: "close" },
-        body: JSON.stringify({ newAddress: NEW_ADDRESS }),
+        body: JSON.stringify({ newAddress: NEW_CONTROLLER_ADDRESS }),
       });
       expect(missing.status).toBe(401);
 
@@ -214,8 +220,7 @@ describe("promotion switch", () => {
   it("refuses a switch once the freeze has ended, and does not seal", async () => {
     await withServer(async (harness) => {
       const user = await completeSetup(harness.base);
-      const token = await createPromotionToken(harness.base, user);
-      await spendToken(harness.base, token);
+      const token = await freezeController(harness.base, user);
       const cancelled = await requestTransfer(harness.base, token, "DELETE");
       expect(cancelled.status).toBe(204);
 
@@ -234,22 +239,27 @@ describe("promotion switch", () => {
   it("answers a repeated switch and refuses a cancel once sealed, even after the token expired", async () => {
     await withServer(async (harness) => {
       const user = await completeSetup(harness.base);
-      const token = await createPromotionToken(harness.base, user);
-      await spendToken(harness.base, token);
-      expect((await postSwitch(harness.base, token)).status).toBe(200);
+      const token = await freezeController(harness.base, user);
+      await sealController(harness.base, token);
+      // A sealed controller's database refuses every write. The test expires
+      // the token in `withFinalTransaction`, the one kind of transaction
+      // allowed then, which leaves writes stopped after it.
       await Effect.runPromise(
         Effect.orDie(
-          harness.sql`
-            UPDATE promotion_tokens
-            SET created_at = ${"2000-01-01T00:00:00.000Z"},
-                expires_at = ${"2000-01-01T00:15:00.000Z"}
-          `,
+          withFinalTransaction(
+            harness.sql,
+            harness.sql`
+              UPDATE promotion_tokens
+              SET created_at = ${"2000-01-01T00:00:00.000Z"},
+                  expires_at = ${"2000-01-01T00:15:00.000Z"}
+            `,
+          ),
         ),
       );
 
       const again = await postSwitch(harness.base, token);
       expect(again.status).toBe(200);
-      expect(await again.json()).toEqual({ newAddress: NEW_ADDRESS });
+      expect(await again.json()).toEqual({ newAddress: NEW_CONTROLLER_ADDRESS });
 
       const cancelled = await requestTransfer(harness.base, token, "DELETE");
       expect(cancelled.status).toBe(503);
@@ -257,29 +267,28 @@ describe("promotion switch", () => {
         error: { code: string; details: { newAddress: string } };
       };
       expect(refusal.error.code).toBe("controller_sealed");
-      expect(refusal.error.details.newAddress).toBe(NEW_ADDRESS);
+      expect(refusal.error.details.newAddress).toBe(NEW_CONTROLLER_ADDRESS);
     });
   });
 
   it("seals A after a spent token, is idempotent, and refuses later writes", async () => {
     await withServer(async (harness) => {
       const user = await completeSetup(harness.base);
-      const token = await createPromotionToken(harness.base, user);
-      await spendToken(harness.base, token);
+      const token = await freezeController(harness.base, user);
 
       const first = await postSwitch(harness.base, token);
       expect(first.status).toBe(200);
-      expect(await first.json()).toEqual({ newAddress: NEW_ADDRESS });
+      expect(await first.json()).toEqual({ newAddress: NEW_CONTROLLER_ADDRESS });
 
       const again = await postSwitch(harness.base, token, "http://other.example:8");
       expect(again.status).toBe(200);
-      expect(await again.json()).toEqual({ newAddress: NEW_ADDRESS });
+      expect(await again.json()).toEqual({ newAddress: NEW_CONTROLLER_ADDRESS });
 
       const read = await get(harness.base, "/api/v1/controller", user);
       expect(read.status).toBe(503);
       const body = await readErrorBody(read);
       expect(body.code).toBe("controller_sealed");
-      expect(body.message).toContain(NEW_ADDRESS);
+      expect(body.message).toContain(NEW_CONTROLLER_ADDRESS);
     });
   });
 
@@ -293,13 +302,11 @@ describe("promotion switch", () => {
       const hello = await waitForTag<ControllerHello>(wire, "controllerHello");
       expect(hello.identityId).toBe(joined.controllerIdentityId);
 
-      const token = await createPromotionToken(harness.base, user);
-      await spendToken(harness.base, token);
-      const switched = await postSwitch(harness.base, token);
-      expect(switched.status).toBe(200);
+      const token = await freezeController(harness.base, user);
+      await sealController(harness.base, token);
 
       const announcement = await waitForTag<ForwardingPointer>(wire, "forwardingPointer");
-      expect(announcement.newAddress).toBe(NEW_ADDRESS);
+      expect(announcement.newAddress).toBe(NEW_CONTROLLER_ADDRESS);
       expect(
         await verifyAddressSignature(
           joined.controllerPublicKey,
@@ -312,7 +319,7 @@ describe("promotion switch", () => {
       const again = await dial(harness.base, joined.credential);
       again.send(buildHello());
       const pointer = await waitForTag<ForwardingPointer>(again, "forwardingPointer");
-      expect(pointer.newAddress).toBe(NEW_ADDRESS);
+      expect(pointer.newAddress).toBe(NEW_CONTROLLER_ADDRESS);
       expect(
         await verifyAddressSignature(
           joined.controllerPublicKey,

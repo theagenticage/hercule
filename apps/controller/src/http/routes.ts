@@ -47,7 +47,6 @@ import {
   ArrivalLayer,
   AssistantSessionsLayer,
   DispatchLayer,
-  PromotionExpiryLayer,
   PromotionFleetLayer,
   InboundLayer,
   Live,
@@ -688,10 +687,7 @@ export const operationLayers = Layer.mergeAll(
   // The controller daemon's promotion preview asks the transfer whether a
   // token may preview, so the transfer is provided to it rather than merged
   // next to it.
-  PromotionFleetLayer.pipe(
-    Layer.provideMerge(PromotionTransferLayer),
-    Layer.provide(PromotionExpiryLayer),
-  ),
+  PromotionFleetLayer.pipe(Layer.provideMerge(PromotionTransferLayer)),
   SettingsOperationsLayer,
   // The controller daemon's profile removal uses the profile service, so the
   // profile service is provided to it rather than merged next to it.

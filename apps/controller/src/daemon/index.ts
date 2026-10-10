@@ -24,8 +24,7 @@
  * - `workspaces/`: provisioning and disposing workspaces, and the sweep that
  *   removes the ones nothing needs any more;
  * - `runners/`: sending a runner that connects the work owed to it, handling
- *   what runners report, retiring a runner, and the thaw timer of a
- *   promotion freeze;
+ *   what runners report, and retiring a runner;
  * - `permissions/`: deleting a permission profile;
  * - `connections/`: what the connections domain reads from the resources and
  *   workflows domains;
@@ -39,6 +38,8 @@
  * - `ingest/`: the Ingest Reconciler, which keeps an ingest handle open for
  *   every Connection that should be ingesting events from its plugin, and
  *   the Ingest Executor, which gives each Connection's ingest a fiber.
+ * - `promotion/`: the driver that ends a promotion freeze at its token's
+ *   expiry.
  *
  * The top level holds what belongs to no single folder: the steps run once at
  * boot (`boot.ts`), the helpers every long-running loop uses (`absorbing.ts`),
@@ -68,12 +69,12 @@ export { ConnectionServiceWithReferencesLayer } from "./connections";
 export { IngestExecutorLayer, IngestReconcileInterval, runIngestReconciler } from "./ingest";
 export { BindableOperationsLayer } from "./notifications";
 export { ProfileRemoval, ProfileRemovalLayer } from "./permissions";
+export { thawExpiredFreezes } from "./promotion";
 export {
   Arrival,
   ArrivalLayer,
   Inbound,
   InboundLayer,
-  PromotionExpiryLayer,
   PromotionFleet,
   PromotionFleetLayer,
   PromotionFleetRouteLayer,

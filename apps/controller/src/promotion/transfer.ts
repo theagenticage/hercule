@@ -8,8 +8,9 @@
  *   preview; the controller daemon builds the preview, because it lists the
  *   runners.
  * - The transfer spends the token, freezes this controller, copies the
- *   database with `VACUUM INTO` and encrypts every secret in the copy under
- *   the transfer key. It then streams the copy and the attachment files.
+ *   database and stops every write to it (`PromotionState`), and encrypts
+ *   every secret in the copy under the transfer key. It then streams the
+ *   copy and the attachment files.
  * - A cancel ends the freeze, so this controller serves again at once rather
  *   than at the token's expiry.
  *
@@ -42,7 +43,6 @@ import { buildAttachmentPath } from "../attachments";
 import { SYSTEM_ACTOR } from "../actor";
 import { HerculeHome } from "../config";
 import {
-  copyDatabaseTo,
   databaseVersion,
   nowIso,
   openDatabaseCopy,
@@ -60,7 +60,6 @@ import {
   type TransferHeader,
 } from "./bundle";
 import { decodePromotionToken, deriveTransferKey, encodeBase64Url, SALT_BYTES } from "./crypto";
-import { PromotionExpiry } from "./expiry";
 import { PromotionState } from "./state";
 import { PromotionTokens } from "./tokens";
 
@@ -76,7 +75,6 @@ export const NO_PROMOTION_TOKEN =
 const make = Effect.gen(function* () {
   const tokens = yield* PromotionTokens;
   const promotion = yield* PromotionState;
-  const expiry = yield* PromotionExpiry;
   const audit = yield* AuditLog;
   const identity = yield* ControllerIdentity;
   const { dataDir, promotionTransferDir } = yield* HerculeHome;
@@ -89,12 +87,13 @@ const make = Effect.gen(function* () {
   yield* Effect.sync(() => rmSync(promotionTransferDir, { recursive: true, force: true }));
 
   /**
-   * Copies the database into a new directory inside `promotionTransferDir`,
-   * encrypts every secret in the copy under `transferKey`, and returns the
-   * stream of the transfer. The stream removes the directory when it ends,
-   * however it ends.
+   * Copies the database into a new directory inside `promotionTransferDir`
+   * and stops writes to it, encrypts every secret in the copy under
+   * `transferKey`, and returns the stream of the transfer. The stream removes
+   * the directory when it ends, however it ends. Fails with `InvalidState`
+   * when the freeze of `tokenId` ended before the copy.
    */
-  const buildTransfer = (transferKey: CryptoKey, salt: Uint8Array) =>
+  const buildTransfer = (tokenId: string, transferKey: CryptoKey, salt: Uint8Array) =>
     Effect.gen(function* () {
       // Each transfer gets a directory of its own. A cancel or the token's
       // expiry ends the freeze while the stream may still be sending, so a
@@ -104,7 +103,7 @@ const make = Effect.gen(function* () {
       const removeScratch = Effect.sync(() => rmSync(scratch, { recursive: true, force: true }));
       return yield* Effect.gen(function* () {
         const copyPath = join(scratch, "database.db");
-        yield* copyDatabaseTo(copyPath).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+        yield* promotion.copyDatabaseAndStopWrites(tokenId, copyPath);
         const copy = yield* Effect.gen(function* () {
           yield* rewrapSecrets(masterKey.key, transferKey);
           const copySql = yield* SqlClient.SqlClient;
@@ -177,11 +176,16 @@ const make = Effect.gen(function* () {
      * transfer. Fails with `Unauthenticated` when the token cannot be spent,
      * and with the freeze's errors when the controller is not serving or
      * stays busy for too long. The token is spent before the freeze, so it is
-     * used up even when the freeze is refused (spec 03 section 8.2).
+     * used up even when the freeze fails (spec 03 section 8.2).
+     *
+     * A controller that is already frozen or sealed refuses before it spends
+     * the token, because after a transfer's copy the database refuses every
+     * write, the spend included.
      *
      * The freeze ends when anything fails before the stream finishes, including
      * a caller that hangs up. A stream that finishes leaves the controller
-     * frozen until the switch, a cancel, or the token's expiry.
+     * frozen, and its database refusing writes, until the switch, a cancel,
+     * or the token's expiry.
      */
     open: (
       token: string,
@@ -198,6 +202,11 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const tokenBytes = decodePromotionToken(token);
         if (tokenBytes === undefined) return yield* createUnauthenticatedError(NO_PROMOTION_TOKEN);
+        // A spent or expired token is refused as such even while another
+        // transfer holds the freeze, before anything tries to write.
+        const live = yield* tokens.lookupLive(token, yield* nowIso);
+        if (Option.isNone(live)) return yield* createUnauthenticatedError(NO_PROMOTION_TOKEN);
+        yield* promotion.refuseTransferUnlessServing;
         // The entry is written before the copy is taken, so it travels with
         // the data and the new machine's log shows where its data came from.
         const spent = yield* withTransaction(
@@ -225,10 +234,9 @@ const make = Effect.gen(function* () {
         // A thaw fails only once sealed, when the data has moved and the
         // freeze no longer matters.
         const thaw = Effect.ignore(promotion.thaw(tokenId));
-        const transfer = yield* promotion.freeze(tokenId).pipe(
-          Effect.andThen(expiry.scheduleThaw(tokenId, new Date(expiresAt))),
+        const transfer = yield* promotion.freeze(tokenId, new Date(expiresAt)).pipe(
           Effect.andThen(deriveTransferKey(tokenBytes, salt)),
-          Effect.flatMap((transferKey) => buildTransfer(transferKey, salt)),
+          Effect.flatMap((transferKey) => buildTransfer(tokenId, transferKey, salt)),
           Effect.onError(() => thaw),
         );
         return transfer.pipe(Stream.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : thaw)));
@@ -269,7 +277,6 @@ export const PromotionTransferLayer: Layer.Layer<
   never,
   | PromotionTokens
   | PromotionState
-  | PromotionExpiry
   | ControllerIdentity
   | HerculeHome
   | MasterKey

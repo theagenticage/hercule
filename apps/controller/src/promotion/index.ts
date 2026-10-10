@@ -9,12 +9,12 @@
  */
 export { PromotionService, PromotionServiceLayer } from "./service";
 export { PromotionTokens, PromotionTokensLayer } from "./tokens";
-export { PromotionExpiry } from "./expiry";
 export {
   PromotionState,
   PromotionStateLayer,
   buildForwardingPointer,
   createSealedError,
+  type PromotionPhase,
 } from "./state";
 export { PromotionTransfer, PromotionTransferLayer, NO_PROMOTION_TOKEN } from "./transfer";
 export { PromotionTransferRouteLayer } from "./route";

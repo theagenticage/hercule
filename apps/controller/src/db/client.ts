@@ -20,6 +20,8 @@ import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Scope from "effect/Scope";
+import type { Connection } from "effect/unstable/sql/SqlConnection";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { isSqlErrorReason, SqlError } from "effect/unstable/sql/SqlError";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
@@ -80,10 +82,15 @@ const wasLocked = (error: unknown): boolean => {
  */
 const BUSY_TIMEOUT = Duration.seconds(1);
 
-/** Returns the error message for a second controller started on the same home. */
+/**
+ * Returns the error message for a controller started on a home that another
+ * process holds: another controller, or `hercule promote` receiving data into
+ * the home.
+ */
 const ALREADY_OPEN = (filename: string): string =>
-  `${filename} is already open by another Hercule controller. One controller serves a home; ` +
-  `stop the other one and try again.`;
+  `${filename} is already open by another Hercule process: a controller, or a ` +
+  `\`hercule promote\` receiving data into this home. One process holds a home at a time; ` +
+  `stop the other one, or let the promotion finish, and try again.`;
 
 /**
  * Converts a driver error into a `DatabaseError` with one line of text that the
@@ -155,6 +162,54 @@ const takeExclusiveLock = (
   });
 
 /**
+ * Makes every transaction on the client begin with a plain `BEGIN` instead of
+ * the driver's `BEGIN IMMEDIATE`. Everything else about a transaction stays as
+ * the driver builds it: a nested transaction joins through a savepoint, and a
+ * failure or an interrupt rolls back.
+ *
+ * Two facts make the change safe and necessary:
+ *
+ * - `BEGIN IMMEDIATE` takes the write lock up front, so that a transaction
+ *   that reads first never has to wait for another writer when it writes.
+ *   Here no other writer exists. The controller has one connection, and it
+ *   holds the database exclusively (`takeExclusiveLock`), so a plain `BEGIN`
+ *   behaves the same.
+ * - While a promotion has stopped writes (`./writes.ts`), SQLite refuses
+ *   `BEGIN IMMEDIATE` but accepts `BEGIN`. A transaction that only reads, such
+ *   as answering a GET while frozen, then still works, and one that writes
+ *   still fails at its first write.
+ *
+ * The driver offers no option for the statement, so the client's transaction
+ * wrapper is replaced right after the client is built, before any statement
+ * runs. The driver adds its own members to the client the same way.
+ */
+const beginTransactionsDeferred: Effect.Effect<void, never, SqlClient.SqlClient> = Effect.map(
+  SqlClient.SqlClient,
+  (sql) => {
+    const run = (connection: Connection, statement: string) =>
+      connection.executeUnprepared(statement, [], undefined);
+    Object.assign(sql, {
+      withTransaction: SqlClient.makeWithTransaction({
+        transactionService: sql.transactionService,
+        spanAttributes: [["db.system.name", "sqlite"]],
+        acquireConnection: Effect.flatMap(Scope.make(), (scope) =>
+          Effect.map(
+            Scope.provide(sql.reserve, scope),
+            (connection) => [scope, connection] as const,
+          ),
+        ),
+        begin: (connection) => run(connection, "BEGIN"),
+        savepoint: (connection, id) => run(connection, `SAVEPOINT effect_sql_${id}`),
+        commit: (connection) => run(connection, "COMMIT"),
+        rollback: (connection) => run(connection, "ROLLBACK"),
+        rollbackSavepoint: (connection, id) =>
+          run(connection, `ROLLBACK TO SAVEPOINT effect_sql_${id}`),
+      }),
+    });
+  },
+);
+
+/**
  * Opens the database file and provides it as both `SqlClient` and the Bun
  * `SqliteClient`. Pass {@link MEMORY} for a throwaway database.
  *
@@ -165,7 +220,9 @@ const takeExclusiveLock = (
 export const openDatabase = (
   filename: string,
 ): Layer.Layer<SqlClient.SqlClient | SqliteClient.SqliteClient, DatabaseError> =>
-  Layer.effectDiscard(configureConnection(filename)).pipe(
+  Layer.effectDiscard(
+    Effect.andThen(beginTransactionsDeferred, configureConnection(filename)),
+  ).pipe(
     Layer.provideMerge(SqliteClient.layer({ filename, busyTimeout: BUSY_TIMEOUT })),
     Layer.catchCause(
       (cause): Layer.Layer<SqlClient.SqlClient | SqliteClient.SqliteClient, DatabaseError> =>

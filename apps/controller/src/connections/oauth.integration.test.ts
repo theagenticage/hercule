@@ -15,6 +15,7 @@
  * plugin-owned secret `clientSecret`.
  */
 import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -26,6 +27,7 @@ import {
   type Plugin,
 } from "@hercule/plugin-host";
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
+import { freezeController, requestTransfer } from "../promotion/testing";
 import {
   buildAccount,
   buildAccountName,
@@ -743,6 +745,32 @@ describe("the access token a plugin asks the core for", () => {
       ).toHaveLength(1);
       expect(both[0]).toMatchObject({ accessToken: REFRESHED_TOKEN });
       expect(both[1]).toMatchObject({ accessToken: REFRESHED_TOKEN });
+    });
+  });
+
+  it("is refreshed only after a promotion's freeze ends, when it expires while the controller is frozen", async () => {
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      makeTokensExpireNow(provider);
+      const one = await connect(base, token);
+      const promotionToken = await freezeController(base, token);
+
+      const credentials = Effect.runPromise(
+        readConnectionsSurface(registry.oauth).credentials(one.id),
+      );
+      await delay(200);
+      // A rotated refresh token would be spent on the provider, but the new
+      // one could not be stored: the copy on the new machine would keep the
+      // spent one. So the provider is not called while the controller is frozen.
+      expect(provider.requests.filter((form) => form["grant_type"] === "refresh_token")).toEqual(
+        [],
+      );
+
+      const cancelled = await requestTransfer(base, promotionToken, "DELETE");
+      expect(cancelled.status).toBe(204);
+      expect(await credentials).toMatchObject({ accessToken: REFRESHED_TOKEN });
+      expect(
+        provider.requests.filter((form) => form["grant_type"] === "refresh_token"),
+      ).toHaveLength(1);
     });
   });
 

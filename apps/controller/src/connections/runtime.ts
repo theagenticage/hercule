@@ -11,6 +11,13 @@
  * A plugin's access is scoped by the `plugin_id` column alone: a plugin reaches
  * the connections whose `plugin_id` is its own, and cannot learn that any
  * others exist.
+ *
+ * Every write here passes the promotion gate (`PromotionState`) itself. A
+ * plugin calls this runtime from its own work, such as an ingest poll or a
+ * workflow action, and the gate does not always count that work already.
+ * While a promotion freezes the controller, the database refuses writes, so
+ * a write waits until the freeze ends. Once the controller is sealed, it
+ * never happens.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -98,30 +105,32 @@ const make = Effect.gen(function* () {
     status: ConnectionStatus,
     detail: string | null,
   ): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      const at = yield* nowIso;
-      yield* Effect.orDie(
-        withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const changed = yield* connections.changeStatusFrom(
-              connectionId,
-              ["connected", "error", "needs-reauth"],
-              status,
-              detail,
-              at,
-            );
-            if (!changed) return;
-            yield* announce({
-              _tag: "record",
-              topic: "connection",
-              id: connectionId,
-              kind: "updated",
-            });
-          }),
-        ),
-      );
-    });
+    promotion.whenServing(
+      Effect.gen(function* () {
+        const at = yield* nowIso;
+        yield* Effect.orDie(
+          withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const changed = yield* connections.changeStatusFrom(
+                connectionId,
+                ["connected", "error", "needs-reauth"],
+                status,
+                detail,
+                at,
+              );
+              if (!changed) return;
+              yield* announce({
+                _tag: "record",
+                topic: "connection",
+                id: connectionId,
+                kind: "updated",
+              });
+            }),
+          ),
+        );
+      }),
+    );
 
   /**
    * Marks the connection `needs-reauth`, with `message` as the status detail,
@@ -163,18 +172,20 @@ const make = Effect.gen(function* () {
     write: Effect.Effect<void>,
   ): Effect.Effect<void, ConnectionUnavailable> =>
     Effect.gen(function* () {
-      const written = yield* Effect.orDie(
-        withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const current = yield* secrets.get(
-              { kind: "connection", id: connectionId },
-              OAUTH_TOKENS,
-            );
-            if (Option.isNone(current) || Redacted.value(current.value) !== held) return false;
-            yield* write;
-            return true;
-          }),
+      const written = yield* promotion.whenServing(
+        Effect.orDie(
+          withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const current = yield* secrets.get(
+                { kind: "connection", id: connectionId },
+                OAUTH_TOKENS,
+              );
+              if (Option.isNone(current) || Redacted.value(current.value) !== held) return false;
+              yield* write;
+              return true;
+            }),
+          ),
         ),
       );
       if (!written) {
@@ -251,55 +262,53 @@ const make = Effect.gen(function* () {
     row: StoredConnection,
     oauth: OAuthDeclaration,
   ): Effect.Effect<TokenSet, ConnectionUnavailable> =>
-    promotion.whenServing(
-      Effect.gen(function* () {
-        const stored = yield* Effect.orDie(
-          secrets.get({ kind: "connection", id: row.id }, OAUTH_TOKENS),
-        );
-        // The caller found a token set before it waited for the semaphore, so
-        // finding none now means a reconnect swapped it for pasted credentials.
-        if (Option.isNone(stored)) {
-          return yield* Effect.fail(new ConnectionUnavailable({ message: CREDENTIALS_REPLACED }));
-        }
-        const held = Redacted.value(stored.value);
-        const tokens = yield* parseStoredTokens(row.id, held);
-        const millis = yield* Clock.currentTimeMillis;
-        if (!isStale(tokens, millis)) return tokens;
+    Effect.gen(function* () {
+      const stored = yield* Effect.orDie(
+        secrets.get({ kind: "connection", id: row.id }, OAUTH_TOKENS),
+      );
+      // The caller found a token set before it waited for the semaphore, so
+      // finding none now means a reconnect swapped it for pasted credentials.
+      if (Option.isNone(stored)) {
+        return yield* Effect.fail(new ConnectionUnavailable({ message: CREDENTIALS_REPLACED }));
+      }
+      const held = Redacted.value(stored.value);
+      const tokens = yield* parseStoredTokens(row.id, held);
+      const millis = yield* Clock.currentTimeMillis;
+      if (!isStale(tokens, millis)) return tokens;
 
-        const client = yield* Effect.orDie(findOAuthClient(row.pluginId));
-        if (tokens.refreshToken === undefined || Option.isNone(client)) {
-          return yield* markTokensNeedReauth(row.id, held, "this connection cannot be refreshed");
-        }
-        const answer = yield* refreshAccess({
-          tokenUrl: oauth.tokenUrl,
-          client: client.value,
-          refreshToken: tokens.refreshToken,
-        }).pipe(
-          Effect.provide(FetchHttpClient.layer),
-          Effect.catchTag("ProviderRefused", (error) =>
-            markTokensNeedReauth(row.id, held, error.message),
+      const client = yield* Effect.orDie(findOAuthClient(row.pluginId));
+      if (tokens.refreshToken === undefined || Option.isNone(client)) {
+        return yield* markTokensNeedReauth(row.id, held, "this connection cannot be refreshed");
+      }
+      const answer = yield* refreshAccess({
+        tokenUrl: oauth.tokenUrl,
+        client: client.value,
+        refreshToken: tokens.refreshToken,
+      }).pipe(
+        Effect.provide(FetchHttpClient.layer),
+        Effect.catchTag("ProviderRefused", (error) =>
+          markTokensNeedReauth(row.id, held, error.message),
+        ),
+        Effect.catchTag("ProviderUnreachable", (error) =>
+          Effect.fail(new ConnectionUnavailable({ message: error.message })),
+        ),
+      );
+      // When the response has no refresh token, the old one is still valid.
+      const keep = answer.refreshToken ?? tokens.refreshToken;
+      const next: TokenSet = { ...answer, refreshToken: keep };
+      yield* writeWhileTokensHeld(
+        row.id,
+        held,
+        Effect.orDie(
+          secrets.set(
+            { kind: "connection", id: row.id },
+            OAUTH_TOKENS,
+            Redacted.make(serializeTokens(next)),
           ),
-          Effect.catchTag("ProviderUnreachable", (error) =>
-            Effect.fail(new ConnectionUnavailable({ message: error.message })),
-          ),
-        );
-        // When the response has no refresh token, the old one is still valid.
-        const keep = answer.refreshToken ?? tokens.refreshToken;
-        const next: TokenSet = { ...answer, refreshToken: keep };
-        yield* writeWhileTokensHeld(
-          row.id,
-          held,
-          Effect.orDie(
-            secrets.set(
-              { kind: "connection", id: row.id },
-              OAUTH_TOKENS,
-              Redacted.make(serializeTokens(next)),
-            ),
-          ),
-        );
-        return next;
-      }),
-    );
+        ),
+      );
+      return next;
+    });
 
   /**
    * Returns the access token of a token connection, refreshing it first when
@@ -309,6 +318,14 @@ const make = Effect.gen(function* () {
    * Only a type with an `oauth` declaration can refresh. A token from a device
    * flow has no expiry, so it never needs a refresh; if a provider ever sends
    * one with an expiry anyway, the connection needs reauth once it lapses.
+   *
+   * A refresh passes the promotion gate as one unit, before the provider is
+   * called: it waits while a promotion freezes the controller, and never
+   * happens once it is sealed. The provider's answer and the write that
+   * stores it cannot be split. Many providers rotate the refresh token and
+   * invalidate the old one, so a refresh whose new tokens are not in the
+   * copy would leave the new machine holding a refresh token that no longer
+   * works.
    */
   const readFreshAccessToken = (
     row: StoredConnection,
@@ -327,8 +344,10 @@ const make = Effect.gen(function* () {
           "this connection's access token has expired",
         );
       }
-      const fresh = yield* readOrCreateRefreshPermit(row.id).withPermits(1)(
-        refreshTokens(row, oauth),
+      // The gate is passed before the permit is taken, so no caller holds
+      // the permit while it waits for a freeze to end.
+      const fresh = yield* promotion.whenServing(
+        readOrCreateRefreshPermit(row.id).withPermits(1)(refreshTokens(row, oauth)),
       );
       return { accessToken: fresh.accessToken };
     });

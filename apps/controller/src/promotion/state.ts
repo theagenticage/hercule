@@ -9,10 +9,20 @@
  *   data. Nothing may write, because a write after the copy would be lost on
  *   the new machine. Mutating requests are refused, and background work waits.
  *   The freeze ends with a seal, with a cancel from the new machine, with a
- *   transfer that broke, or at the token's expiry, whichever comes first.
+ *   transfer that broke, or at the token's expiry, whichever comes first. The
+ *   frozen phase carries that expiry, and the controller daemon thaws the
+ *   freeze when it passes.
  * - **sealed**: the new machine took over. The controller refuses every
  *   request and points runners at the new address. Only `hercule serve
  *   --force-unseal` leaves this phase.
+ *
+ * The gate keeps well-behaved work out, and the database enforces the rest.
+ * From the copy until the thaw, the database refuses every write
+ * (`copyDatabaseAndStopWrites`), so a writer that skips the gate fails with
+ * an error instead of writing data the new machine never receives. The seal
+ * is the one write allowed after the copy, and after it the database stays
+ * read-only. A controller that restarts sealed makes it read-only again once
+ * its boot is done (`serve`).
  *
  * The freeze lives in memory only. A controller that restarts while frozen
  * comes back serving, and the switch for that transfer is refused, so the new
@@ -52,7 +62,15 @@ import {
 } from "@hercule/contract";
 import { encodeForwardingPointerBytes, type ForwardingPointer } from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../actor";
-import { nowIso, uuidFromString, uuidToString, withTransaction } from "../db";
+import {
+  copyDatabaseAndStopWrites,
+  nowIso,
+  resumeWrites,
+  uuidFromString,
+  uuidToString,
+  withFinalTransaction,
+  withTransaction,
+} from "../db";
 import { AuditLog } from "../events";
 import { ControllerIdentity } from "../identity";
 import type { SecretNameError } from "../secrets";
@@ -73,10 +91,14 @@ export const buildForwardingPointer = (seal: Seal): ForwardingPointer => ({
   signature: Buffer.from(seal.signature).toString("base64"),
 });
 
-/** The three phases a controller can be in. */
+/**
+ * The three phases a controller can be in. A freeze holds the promotion token
+ * whose transfer it serves, and the moment it ends on its own: the token's
+ * expiry.
+ */
 export type PromotionPhase =
   | { readonly _tag: "Serving" }
-  | { readonly _tag: "Frozen"; readonly tokenId: string }
+  | { readonly _tag: "Frozen"; readonly tokenId: string; readonly until: Date }
   | { readonly _tag: "Sealed"; readonly seal: Seal };
 
 /** A phase in which work does not run. */
@@ -147,6 +169,12 @@ export class PromotionState extends Context.Service<
     readonly phase: Effect.Effect<PromotionPhase>;
 
     /**
+     * Emits the current phase, then each phase the controller moves to, and
+     * never ends. Work being counted in and out does not emit anything.
+     */
+    readonly phaseChanges: Stream.Stream<PromotionPhase>;
+
+    /**
      * Succeeds when a promotion transfer could start now. Fails with
      * `PromotionInProgress` while frozen for another transfer, and with
      * `ControllerSealed` once sealed. Changes nothing.
@@ -175,34 +203,67 @@ export class PromotionState extends Context.Service<
     readonly whenServing: <A, E, R>(work: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 
     /**
+     * Runs `work` counted once the controller is serving, like `whenServing`,
+     * and waits while frozen. Once sealed, runs `onSealed` with the seal
+     * instead. For work that has something else to do on a sealed
+     * controller, such as answering a runner with the new address.
+     */
+    readonly whenServingOr: <A, E, R, E2, R2>(
+      work: Effect.Effect<A, E, R>,
+      onSealed: (seal: Seal) => Effect.Effect<A, E2, R2>,
+    ) => Effect.Effect<A, E | E2, R | R2>;
+
+    /**
+     * Runs `work` counted if the controller is serving, and skips it
+     * otherwise. For a write that only records how something was used, such
+     * as a login's renewed expiry, which nothing needs once the data has
+     * been copied.
+     */
+    readonly runIfServing: <E, R>(work: Effect.Effect<void, E, R>) => Effect.Effect<void, E, R>;
+
+    /**
      * Freezes the controller for the transfer of `tokenId`, then waits for
-     * the work that is running to finish. Does not schedule the token's
-     * expiry: the caller asks `PromotionExpiry` to thaw at that deadline, so
-     * the timer lives in the controller daemon (ADR 0033). Fails with
+     * the work that is running to finish. The freeze lasts until `until` at
+     * the latest: the controller daemon thaws it then. Fails with
      * `PromotionInProgress` when another transfer holds the freeze, with
      * `ControllerSealed` when sealed, and with `InvalidState` when the
      * running work did not finish within the drain timeout, after thawing.
      */
     readonly freeze: (
       tokenId: string,
+      until: Date,
     ) => Effect.Effect<void, PromotionInProgress | ControllerSealed | InvalidState>;
 
     /**
-     * Ends the freeze of `tokenId`, and returns whether it did. Returns false
-     * when the controller is serving or frozen for another token. Fails with
-     * `ControllerSealed` once sealed, because the data has moved and a thaw
-     * can no longer undo that.
+     * Copies the database to `path` for the transfer of `tokenId`, and stops
+     * every write to the database until the thaw. Call it once `freeze` has
+     * returned. Fails with `InvalidState` when the controller is no longer
+     * frozen for `tokenId`, because the transfer was cancelled or its token
+     * expired while the freeze waited, and with `SqlError` when the copy
+     * fails, leaving writes allowed.
      */
-    readonly thaw: (tokenId: string) => Effect.Effect<boolean, ControllerSealed | SqlError>;
+    readonly copyDatabaseAndStopWrites: (
+      tokenId: string,
+      path: string,
+    ) => Effect.Effect<void, InvalidState | SqlError>;
+
+    /**
+     * Ends the freeze of `tokenId`, lets the database accept writes again,
+     * and returns whether it did. Returns false when the controller is
+     * serving or frozen for another token. Fails with `ControllerSealed` once
+     * sealed, because the data has moved and a thaw can no longer undo that.
+     */
+    readonly thaw: (tokenId: string) => Effect.Effect<boolean, ControllerSealed>;
 
     /**
      * Seals the controller for the transfer of `tokenId` and returns the seal.
-     * Signs the forwarding pointer, persists the seal, and only then stops
-     * serving. Returns the stored seal again when that token already sealed
-     * it. Fails with `ControllerSealed` when another token sealed it, and
-     * with `InvalidState` when the controller is not frozen for that token,
-     * because the transfer was cancelled or timed out, or the controller
-     * restarted.
+     * Signs the forwarding pointer, persists the seal, and stops serving, and
+     * an interrupt cannot separate the last two. The database refuses every
+     * write after that. Returns the stored seal again when that token already
+     * sealed it. Fails with `ControllerSealed` when another token sealed it,
+     * and with `InvalidState` when the controller is not frozen for that
+     * token, because the transfer was cancelled or timed out, or the
+     * controller restarted.
      */
     readonly seal: (
       tokenId: string,
@@ -213,6 +274,10 @@ export class PromotionState extends Context.Service<
      * Loads the seal at boot. With `forceUnseal`, deletes it instead and logs
      * that this machine serves again, which is disaster recovery: the machine
      * the data moved to may still be serving under the same identity.
+     *
+     * A controller restored sealed keeps a writable database until its boot
+     * is done, because the boot steps after this one write. `serve` then
+     * stops writes, as the seal did before the restart.
      */
     readonly restore: (options: { readonly forceUnseal: boolean }) => Effect.Effect<void, SqlError>;
   }
@@ -232,9 +297,10 @@ export const PromotionStateLayer: Layer.Layer<
       phase: { _tag: "Serving" },
       running: 0,
     });
-    // Freeze, thaw, seal and restore each read the phase and then change it,
-    // and a seal writes the database in between. One at a time, so a thaw at
-    // the deadline cannot land between a seal's check and its write.
+    // Freeze, copy, thaw, seal and restore each read the phase and then
+    // change it or the database. One at a time, so a thaw at the deadline
+    // cannot land between a seal's check and its write, and a copy cannot
+    // stop writes after a thaw has resumed them.
     const transitions = yield* Semaphore.make(1);
 
     const setPhase = (phase: PromotionPhase) =>
@@ -281,16 +347,14 @@ export const PromotionStateLayer: Layer.Layer<
     const thaw = (tokenId: string) =>
       transitions.withPermit(
         Effect.gen(function* () {
-          // A seal that persisted and then lost its in-memory write still
-          // owns the data. Memory may still say Frozen; the row wins.
-          const stored = yield* readSeal;
-          if (Option.isSome(stored)) {
-            yield* setPhase({ _tag: "Sealed", seal: stored.value });
-            return yield* createSealedError(stored.value);
-          }
           const { phase } = yield* SubscriptionRef.get(gate);
           if (phase._tag === "Sealed") return yield* createSealedError(phase.seal);
           if (phase._tag !== "Frozen" || phase.tokenId !== tokenId) return false;
+          // Writes resume before work is let back in, so nothing admitted
+          // after the thaw finds the database refusing it. A freeze that ends
+          // before its copy never stopped writes, and resuming them again
+          // changes nothing.
+          yield* Effect.orDie(resumeWrites(sql));
           yield* setPhase({ _tag: "Serving" });
           yield* Effect.logInfo("The promotion freeze has ended; this controller serves again.");
           return true;
@@ -344,18 +408,31 @@ export const PromotionStateLayer: Layer.Layer<
         ),
       );
 
-    const whenServing = <A, E, R>(work: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-      runCountedOr(work, (stopped) =>
+    const whenServingOr = <A, E, R, E2, R2>(
+      work: Effect.Effect<A, E, R>,
+      onSealed: (seal: Seal) => Effect.Effect<A, E2, R2>,
+    ): Effect.Effect<A, E | E2, R | R2> =>
+      runCountedOr<A, E | E2, R | R2, E | E2>(work, (stopped) =>
         stopped._tag === "Sealed"
-          ? Effect.never
+          ? onSealed(stopped.seal)
           : Effect.andThen(
               awaitGateState((current) => current.phase._tag !== "Frozen"),
-              whenServing(work),
+              whenServingOr(work, onSealed),
             ),
       );
 
+    const whenServing = <A, E, R>(work: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+      whenServingOr(work, () => Effect.never);
+
     return PromotionState.of({
       phase: Effect.map(SubscriptionRef.get(gate), (current) => current.phase),
+
+      // Counting work in and out keeps the phase object, so comparing by
+      // reference drops those changes.
+      phaseChanges: SubscriptionRef.changes(gate).pipe(
+        Stream.map((current) => current.phase),
+        Stream.changesWith((previous, next) => previous === next),
+      ),
 
       refuseTransferUnlessServing,
 
@@ -370,12 +447,16 @@ export const PromotionStateLayer: Layer.Layer<
 
       whenServing,
 
-      freeze: (tokenId) =>
+      whenServingOr,
+
+      runIfServing: (work) => runCountedOr(work, () => Effect.void),
+
+      freeze: (tokenId, until) =>
         Effect.gen(function* () {
           yield* transitions.withPermit(
             Effect.gen(function* () {
               yield* refuseTransferUnlessServing;
-              yield* setPhase({ _tag: "Frozen", tokenId });
+              yield* setPhase({ _tag: "Frozen", tokenId, until });
             }),
           );
           yield* Effect.logInfo(
@@ -400,6 +481,21 @@ export const PromotionStateLayer: Layer.Layer<
           );
         }),
 
+      copyDatabaseAndStopWrites: (tokenId, path) =>
+        transitions.withPermit(
+          Effect.gen(function* () {
+            const { phase } = yield* SubscriptionRef.get(gate);
+            if (phase._tag !== "Frozen" || phase.tokenId !== tokenId) {
+              return yield* createInvalidStateError(
+                "The promotion freeze ended before the data was copied: the transfer was " +
+                  "cancelled, or its promotion token expired while the controller waited for " +
+                  "running work. Promote again with a new promotion token.",
+              );
+            }
+            yield* copyDatabaseAndStopWrites(sql, path);
+          }),
+        ),
+
       thaw,
 
       seal: (tokenId, newAddress) =>
@@ -420,12 +516,13 @@ export const PromotionStateLayer: Layer.Layer<
             const signature = yield* identity.sign(encodeForwardingPointerBytes(newAddress));
             const at = yield* nowIso;
             const seal: Seal = { tokenId, newAddress, signature };
-            // Persist and take effect together. An interrupt after the row
-            // commits and before memory updates would leave thaw able to
-            // serve again over a sealed database.
+            // The stored seal and the sealed phase change together. An
+            // interrupt between them would leave the seal stored while this
+            // process still counts itself frozen, and the thaw at the
+            // token's expiry would let it serve again on data that moved.
             yield* Effect.uninterruptible(
-              Effect.gen(function* () {
-                yield* withTransaction(
+              Effect.andThen(
+                withFinalTransaction(
                   sql,
                   Effect.gen(function* () {
                     yield* sql`
@@ -439,9 +536,9 @@ export const PromotionStateLayer: Layer.Layer<
                       at,
                     });
                   }),
-                );
-                yield* setPhase({ _tag: "Sealed", seal });
-              }),
+                ),
+                setPhase({ _tag: "Sealed", seal }),
+              ),
             );
             yield* Effect.logInfo(`This controller is sealed; it has moved to ${newAddress}.`);
             return seal;

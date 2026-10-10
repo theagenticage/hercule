@@ -320,15 +320,8 @@ const importMasterKey = (bytes: Bytes): Effect.Effect<CryptoKey, MasterKeyError>
  * Fails with `MasterKeyError` when the store already holds a key. Used where
  * secrets already exist under another key and are about to be re-encrypted
  * under this one, which `masterKeyLayer` refuses to mint for.
- *
- * `afterPersist` runs after the store holds the key and before the bytes are
- * imported, and cannot be interrupted, so a caller that must clean up on
- * failure still learns the key was written if the import is then cut off.
  */
-export const createMasterKey = (
-  store: KeyStore,
-  afterPersist: Effect.Effect<void> = Effect.void,
-): Effect.Effect<CryptoKey, MasterKeyError> =>
+export const createMasterKey = (store: KeyStore): Effect.Effect<CryptoKey, MasterKeyError> =>
   Effect.gen(function* () {
     const existing = yield* store.read;
     if (existing !== undefined) {
@@ -338,10 +331,6 @@ export const createMasterKey = (
       });
     }
     const stored = yield* store.write(crypto.getRandomValues(new Uint8Array(MASTER_KEY_BYTES)));
-    // The store already holds the key. Record that before the import, which
-    // can be interrupted, so a caller that must clean up on failure still
-    // knows to remove it.
-    yield* Effect.uninterruptible(afterPersist);
     return yield* importMasterKey(stored);
   });
 

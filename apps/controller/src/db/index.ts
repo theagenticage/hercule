@@ -46,3 +46,9 @@ export {
   SchemaVersionError,
 } from "./migrate";
 export { binaryVersion } from "./migrations/index";
+export {
+  copyDatabaseAndStopWrites,
+  resumeWrites,
+  stopWrites,
+  withFinalTransaction,
+} from "./writes";

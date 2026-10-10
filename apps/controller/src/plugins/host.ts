@@ -66,7 +66,7 @@ import {
 } from "./event-sources";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
 import type { IngestExecutor } from "./ingest-executor";
-import type { PromotionState } from "../promotion";
+import { PromotionState } from "../promotion";
 import { pluginRepository, type NewContribution } from "./repository";
 import {
   CORE_CONTRIBUTION_OWNER,
@@ -472,6 +472,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
   const ingest = yield* IngestLoops;
+  const promotion = yield* PromotionState;
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Not guarded by `gate`, unlike everything else here: registration has no
   // side effects and runs only at boot, so this does not change after boot.
@@ -562,6 +563,22 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Runs a plugin's write to its key-value store or its secrets once the
+   * promotion gate lets it. A plugin writes from its own work, such as an
+   * ingest poll or a workflow action, which the gate does not always count
+   * already. While a promotion freezes the controller, the database refuses
+   * writes, so the write waits until the freeze ends. Once the controller is
+   * sealed, its data lives on the new machine, so the write is dropped, and
+   * the drop is logged. The plugin API declares that these calls cannot fail.
+   */
+  const writeWhenServing = (pluginId: string, write: Effect.Effect<void>): Effect.Effect<void> =>
+    promotion.whenServingOr(write, () =>
+      Effect.logWarning(
+        "Dropped a plugin's write to its own storage, because this controller is sealed",
+      ).pipe(Effect.annotateLogs({ pluginId })),
+    );
+
+  /**
    * Builds a plugin's key-value store. A failed statement dies rather than
    * failing: the plugin API declares that these calls cannot fail, and a
    * plugin cannot do anything useful about a broken database.
@@ -572,10 +589,13 @@ const make = Effect.gen(function* () {
     set: (key, value) =>
       Effect.andThen(
         assertNonEmpty("key", key),
-        Effect.orDie(repository.kvSet(pluginId, key, value)),
+        writeWhenServing(pluginId, Effect.orDie(repository.kvSet(pluginId, key, value))),
       ),
     delete: (key) =>
-      Effect.andThen(assertNonEmpty("key", key), Effect.orDie(repository.kvDelete(pluginId, key))),
+      Effect.andThen(
+        assertNonEmpty("key", key),
+        writeWhenServing(pluginId, Effect.orDie(repository.kvDelete(pluginId, key))),
+      ),
     list: () => Effect.orDie(repository.kvKeys(pluginId)),
   });
 
@@ -588,12 +608,12 @@ const make = Effect.gen(function* () {
       set: (name, value) =>
         Effect.andThen(
           assertNonEmpty("name", name),
-          Effect.orDie(Effect.asVoid(secrets.set(owner, name, value))),
+          writeWhenServing(pluginId, Effect.orDie(Effect.asVoid(secrets.set(owner, name, value)))),
         ),
       delete: (name) =>
         Effect.andThen(
           assertNonEmpty("name", name),
-          Effect.orDie(Effect.asVoid(secrets.delete(owner, name))),
+          writeWhenServing(pluginId, Effect.orDie(Effect.asVoid(secrets.delete(owner, name)))),
         ),
       list: () =>
         Effect.map(Effect.orDie(secrets.refs(owner.kind, [owner.id])), (grouped) =>

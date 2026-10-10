@@ -23,6 +23,7 @@
 import * as Effect from "effect/Effect";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import {
+  ALL_OPERATIONS,
   OPERATIONS,
   ControllerSealed,
   PromotionInProgress,
@@ -70,12 +71,23 @@ export const setupGate = HttpRouter.middleware(
 );
 
 const SETUP_READ_PATH = OPERATIONS["setup.read"].path;
-const VALIDATE_PATH = OPERATIONS["workflow.validate"].path;
 
-/** Returns whether a request on this route only reads. The OAuth callback is a GET that writes. */
-const isReadOnly = (route: { readonly method: string; readonly path: string }): boolean =>
-  (route.method === "POST" && route.path === VALIDATE_PATH) ||
-  ((route.method === "GET" || route.method === "HEAD") && route.path !== CALLBACK_PATH);
+/** The routes of the operations that change nothing although they are not GETs, as `METHOD path`. */
+const READ_ONLY_BODY_ROUTES = new Set(
+  ALL_OPERATIONS.filter((operation) => operation.readOnly === true).map(
+    (operation) => `${operation.method} ${operation.path}`,
+  ),
+);
+
+/**
+ * Returns whether a request on this route only reads. A GET or HEAD only
+ * reads, except the OAuth callback, which stores the Connection's tokens. So
+ * does an operation that takes a body but changes nothing, such as
+ * `workflow.validate`.
+ */
+const isReadOnlyRoute = (route: { readonly method: string; readonly path: string }): boolean =>
+  ((route.method === "GET" || route.method === "HEAD") && route.path !== CALLBACK_PATH) ||
+  READ_ONLY_BODY_ROUTES.has(`${route.method} ${route.path}`);
 
 const isPromotionRefusal = (error: unknown): error is ControllerSealed | PromotionInProgress =>
   error instanceof ControllerSealed || error instanceof PromotionInProgress;
@@ -102,7 +114,7 @@ export const promotionGate = HttpRouter.middleware(
     return (httpEffect) =>
       Effect.gen(function* () {
         const { route } = yield* HttpRouter.RouteContext;
-        if (!isReadOnly(route)) {
+        if (!isReadOnlyRoute(route)) {
           return yield* promotion
             .admit(httpEffect)
             .pipe(

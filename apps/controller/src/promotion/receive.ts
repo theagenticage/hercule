@@ -1,30 +1,46 @@
 /**
- * The new machine's side of a promotion transfer: unpacks a transfer that
- * `hercule promote` saved to a file into an empty Hercule Home, creates this
- * machine's Master Key, and encrypts every secret again under that key.
+ * The new machine's side of a promotion transfer: reserves an empty Hercule
+ * Home, unpacks a transfer that `hercule promote` saved to a file into it,
+ * creates this machine's Master Key, and encrypts every secret again under
+ * that key.
  *
- * No controller boots here. Once this returns, the Home holds a database
- * whose secrets the Master Key opens, so the first boot never meets secrets
- * it cannot read.
+ * No controller boots here. Once the transfer is received, the Home holds a
+ * database whose secrets the Master Key opens, so the first boot never meets
+ * secrets it cannot read.
+ *
+ * The Home is reserved with the controller lock: the exclusive SQLite lock a
+ * controller holds on its database. While the reservation lasts, a controller
+ * started in this Home fails to open its database, so the promotion never
+ * writes over a controller's data, and never deletes it when it cleans up.
  */
 import {
-  closeSync,
-  constants,
   createReadStream,
   createWriteStream,
-  existsSync,
+  linkSync,
   mkdirSync,
-  openSync,
+  renameSync,
+  rmdirSync,
   rmSync,
+  statSync,
 } from "node:fs";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import type { HomePaths } from "@hercule/home";
 import { buildAttachmentPath, buildAttachmentsDirectory } from "../attachments";
-import { binaryVersion, openDatabaseCopy } from "../db";
-import { createMasterKey, openKeyStore, rewrapSecrets, type MasterKeyBackend } from "../secrets";
+import { binaryVersion, openDatabase, openDatabaseCopy } from "../db";
+import {
+  createMasterKey,
+  openKeyStore,
+  rewrapSecrets,
+  type MasterKeyBackend,
+  type SecurityRunner,
+} from "../secrets";
 import { readTransferLayout, type ByteRange, type TransferBundleError } from "./bundle";
 import { decodeBase64Url, deriveTransferKey, SALT_BYTES } from "./crypto";
 
@@ -40,6 +56,18 @@ export interface ReceivedTransfer {
   readonly schemaVersion: number;
 }
 
+/** An empty Hercule Home that this process has reserved for a promotion transfer. */
+export interface ReservedHome {
+  readonly paths: HomePaths;
+  readonly keyStore: ReturnType<typeof openKeyStore>;
+  /**
+   * The scope that holds the controller locks. It closes after everything
+   * else the reservation registered, so every file is removed while the Home
+   * is still locked.
+   */
+  readonly locks: Scope.Scope;
+}
+
 /**
  * Returns the message of a thrown error. A thrown value that is not an
  * `Error` is converted to a string, so there is always something to show.
@@ -48,100 +76,130 @@ export const readErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
- * Checks that the Home at `paths` is empty enough to receive a transfer: no
- * database, no attachments directory, and no Master Key in the store
- * `backend` names. Fails with `PromotionReceiveError` naming what is there,
- * and writes nothing.
+ * Returns the error for a file or directory at `path` that could not be
+ * created. Something already at `path` means the Home is not empty.
  */
-export const refuseOccupiedHome = (
+const describeCreateFailure = (path: string, cause: unknown): PromotionReceiveError =>
+  new PromotionReceiveError({
+    message:
+      (cause as NodeJS.ErrnoException).code === "EEXIST"
+        ? `${path} already exists; promotion needs an empty Hercule Home`
+        : `could not create ${path}: ${readErrorMessage(cause)}`,
+  });
+
+/** Creates a directory at `path`, readable by its owner only. Fails when anything is already there. */
+const createDirectoryExclusively = (path: string): Effect.Effect<void, PromotionReceiveError> =>
+  Effect.try({
+    try: () => mkdirSync(path, { mode: 0o700 }),
+    catch: (cause) => describeCreateFailure(path, cause),
+  });
+
+/**
+ * Reserves the Hercule Home at `paths` for a promotion transfer, and fails
+ * with `PromotionReceiveError` when the Home is not empty: when it holds a
+ * database, an attachments directory, a promotion transfer directory, or a
+ * Master Key in the store that `backend` names. `run` is the `security` CLI
+ * the Keychain store uses; tests pass a fake.
+ *
+ * The reservation lasts until the scope closes. When the scope closes with a
+ * failure, everything the reservation and `receiveTransfer` created is
+ * removed. When it closes with a success, the received data stays. Either
+ * way, the promotion transfer directory is removed and the controller lock is
+ * released last, so a controller can start in this Home only afterwards.
+ *
+ * The lock is taken before anything is checked. The database name is claimed
+ * by hard-linking a locked placeholder database to it: a link fails when the
+ * name exists, so the check and the claim are one step, and from the moment
+ * the name exists, a controller that opens it finds it locked.
+ */
+export const reserveHome = (
   paths: HomePaths,
   backend: MasterKeyBackend,
-): Effect.Effect<void, PromotionReceiveError> =>
+  run?: SecurityRunner,
+): Effect.Effect<ReservedHome, PromotionReceiveError, Scope.Scope> =>
   Effect.gen(function* () {
-    for (const path of [paths.databaseFile, buildAttachmentsDirectory(paths.dataDir)]) {
-      if (existsSync(path)) {
-        return yield* new PromotionReceiveError({
-          message: `${path} already exists; promotion needs an empty Hercule Home`,
-        });
-      }
-    }
-    const store = openKeyStore(paths, backend);
-    const existing = yield* store.read.pipe(
+    // Forked first, so the locks are released after every removal below.
+    const locks = yield* Scope.fork(yield* Effect.scope, "sequential");
+
+    yield* Effect.acquireRelease(
+      Effect.try({
+        try: () => mkdirSync(paths.dataDir, { recursive: true, mode: 0o700 }),
+        catch: (cause) => describeCreateFailure(paths.dataDir, cause),
+      }),
+      // `mkdirSync` returns the first directory it created, if any. Only the
+      // directories created here are removed, and only when they are empty.
+      (firstCreated, exit) =>
+        Effect.sync(() => {
+          if (Exit.isSuccess(exit) || firstCreated === undefined) return;
+          for (let directory = paths.dataDir; ; directory = dirname(directory)) {
+            try {
+              rmdirSync(directory);
+            } catch {
+              return;
+            }
+            if (directory === firstCreated) return;
+          }
+        }),
+    );
+
+    yield* Effect.acquireRelease(
+      Effect.try({
+        try: () => mkdirSync(paths.promotionTransferDir, { mode: 0o700 }),
+        // Every promotion removes this directory when it ends, unless its
+        // process was killed. So it exists only while another promotion runs,
+        // or after one was killed and left part of a Home behind.
+        catch: (cause) =>
+          (cause as NodeJS.ErrnoException).code === "EEXIST"
+            ? new PromotionReceiveError({
+                message:
+                  `${paths.promotionTransferDir} already exists: another \`hercule promote\` is ` +
+                  `receiving data into this Home, or one was killed before it finished. ` +
+                  `If none is running, remove ${paths.dataDir} and try again.`,
+              })
+            : describeCreateFailure(paths.promotionTransferDir, cause),
+      }),
+      () => Effect.sync(() => rmSync(paths.promotionTransferDir, { recursive: true, force: true })),
+    );
+
+    const placeholder = join(paths.promotionTransferDir, "reservation.db");
+    yield* Layer.buildWithScope(openDatabase(placeholder), locks).pipe(
+      Effect.mapError((error) => new PromotionReceiveError({ message: error.message })),
+    );
+    yield* Effect.acquireRelease(
+      Effect.try({
+        try: () => linkSync(placeholder, paths.databaseFile),
+        catch: (cause) => describeCreateFailure(paths.databaseFile, cause),
+      }),
+      (_, exit) =>
+        Exit.isSuccess(exit)
+          ? Effect.void
+          : Effect.sync(() => rmSync(paths.databaseFile, { force: true })),
+    );
+
+    const attachmentsDirectory = buildAttachmentsDirectory(paths.dataDir);
+    yield* Effect.acquireRelease(createDirectoryExclusively(attachmentsDirectory), (_, exit) =>
+      Exit.isSuccess(exit)
+        ? Effect.void
+        : Effect.sync(() => rmSync(attachmentsDirectory, { recursive: true, force: true })),
+    );
+
+    const keyStore = openKeyStore(paths, backend, run);
+    const existing = yield* keyStore.read.pipe(
       Effect.mapError((error) => new PromotionReceiveError({ message: error.message })),
     );
     if (existing !== undefined) {
       existing.fill(0);
       return yield* new PromotionReceiveError({
-        message: `${store.describe} already holds a master key; promotion needs an empty Hercule Home`,
+        message: `${keyStore.describe} already holds a master key; promotion needs an empty Hercule Home`,
       });
     }
-  });
-
-/** Removes the database and the attachments a transfer wrote into the Home at `paths`. */
-const removeReceivedFiles = (paths: HomePaths): Effect.Effect<void> =>
-  Effect.sync(() => {
-    rmSync(paths.databaseFile, { force: true });
-    rmSync(buildAttachmentsDirectory(paths.dataDir), { recursive: true, force: true });
-  });
-
-/**
- * Exclusively creates the destination database file and attachments
- * directory. Fails with `PromotionReceiveError` when either already exists,
- * without truncating them, and removes the database file it created when the
- * attachments directory cannot be reserved.
- */
-const reserveDestination = (paths: HomePaths): Effect.Effect<void, PromotionReceiveError> =>
-  Effect.try({
-    try: () => {
-      mkdirSync(paths.dataDir, { recursive: true, mode: 0o700 });
-      const fd = openSync(
-        paths.databaseFile,
-        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-        0o600,
-      );
-      closeSync(fd);
-      try {
-        mkdirSync(buildAttachmentsDirectory(paths.dataDir), { mode: 0o700 });
-      } catch (cause) {
-        rmSync(paths.databaseFile, { force: true });
-        throw cause;
-      }
-    },
-    catch: (cause) => {
-      const err = cause as NodeJS.ErrnoException;
-      if (err.code === "EEXIST") {
-        return new PromotionReceiveError({
-          message: `${err.path ?? paths.databaseFile} already exists; promotion needs an empty Hercule Home`,
-        });
-      }
-      return new PromotionReceiveError({
-        message: `could not reserve the Home: ${readErrorMessage(cause)}`,
-      });
-    },
-  });
-
-/**
- * Removes everything a received transfer put in the Home at `paths`: the
- * database, the attachments, the promotion transfer directory and the Master
- * Key. Called when the switch fails after the transfer, so a retry starts
- * from an empty Home. A key that cannot be removed is logged, because the
- * retry then names it.
- */
-export const discardReceivedHome = (
-  paths: HomePaths,
-  backend: MasterKeyBackend,
-): Effect.Effect<void> =>
-  Effect.gen(function* () {
-    yield* removeReceivedFiles(paths);
-    rmSync(paths.promotionTransferDir, { recursive: true, force: true });
-    yield* openKeyStore(paths, backend).remove.pipe(
-      Effect.catch((error) => Effect.logWarning("Could not remove the master key", error)),
-    );
+    return { paths, keyStore, locks };
   });
 
 /**
  * Copies the bytes `range` of the file at `from` into a new file at `to`,
- * readable by its owner only, without holding them in memory.
+ * readable by its owner only, without holding them in memory. Fails when a
+ * file already exists at `to`.
  */
 const copyRange = (from: string, range: ByteRange, to: string) =>
   Effect.tryPromise({
@@ -153,45 +211,35 @@ const copyRange = (from: string, range: ByteRange, to: string) =>
         range.end === range.start
           ? Readable.from([])
           : createReadStream(from, { start: range.start, end: range.end - 1 }),
-        createWriteStream(to, { mode: 0o600 }),
+        createWriteStream(to, { flags: "wx", mode: 0o600 }),
       ),
     catch: (cause) =>
       new PromotionReceiveError({ message: `could not write ${to}: ${readErrorMessage(cause)}` }),
   });
 
 /**
- * Unpacks the transfer saved at `transferFile` into the Home at `paths`,
- * creates this machine's Master Key in the store `backend` names, and
- * encrypts every secret again from the key that `tokenBytes`, the decoded
- * promotion token, derives to that Master Key.
+ * Unpacks the transfer saved at `transferFile` into the reserved Home `home`,
+ * creates this machine's Master Key in its store, and encrypts every secret
+ * again from the key that `tokenBytes`, the decoded promotion token, derives
+ * to that Master Key. Runs in the scope of the reservation, so a failure
+ * removes what it created when that scope closes.
  *
- * Fails, having written nothing:
+ * Fails with `TransferBundleError` when the transfer is not one this build
+ * can read, and with `PromotionReceiveError`:
  *
- * - when the Home is not empty;
- * - when the transfer is not one this build can read;
  * - when the transfer comes from another controller than
  *   `previewedControllerId`, the one the preview showed the user;
- * - when the transfer's schema is newer than this build.
- *
- * Fails with `PromotionReceiveError` when a later step fails, after removing
- * what it wrote.
- *
- * `hercule promote` checks that the Home is empty before the transfer too,
- * so it can refuse before the token is spent. This function checks again,
- * then exclusively creates the destination database and attachments
- * directory, because a long transfer or a confirmation prompt left open
- * leaves time for something else to start in the same Home. An existing
- * file is refused; it is never truncated.
+ * - when the transfer's schema is newer than this build;
+ * - when the secrets do not decrypt with the token, or a write fails.
  */
 export const receiveTransfer = (
-  paths: HomePaths,
+  home: ReservedHome,
   tokenBytes: Uint8Array<ArrayBuffer>,
   previewedControllerId: string,
   transferFile: string,
-  backend: MasterKeyBackend,
-): Effect.Effect<ReceivedTransfer, PromotionReceiveError | TransferBundleError> =>
+): Effect.Effect<ReceivedTransfer, PromotionReceiveError | TransferBundleError, Scope.Scope> =>
   Effect.gen(function* () {
-    yield* refuseOccupiedHome(paths, backend);
+    const { paths, keyStore, locks } = home;
     const layout = yield* readTransferLayout(transferFile);
     const { header } = layout;
     // The preview and the transfer are two requests, and something between
@@ -220,49 +268,70 @@ export const receiveTransfer = (
       });
     }
 
-    yield* reserveDestination(paths);
+    // The database is unpacked beside the placeholder, and takes the
+    // database's name only once it is ready and locked.
+    const database = join(paths.promotionTransferDir, "received.db");
+    yield* copyRange(transferFile, layout.database, database);
+    for (const attachment of layout.attachments) {
+      yield* copyRange(transferFile, attachment, buildAttachmentPath(paths.dataDir, attachment.id));
+    }
 
-    let createdKey = false;
-    const unpack = Effect.gen(function* () {
-      yield* copyRange(transferFile, layout.database, paths.databaseFile);
-      for (const attachment of layout.attachments) {
-        yield* copyRange(
-          transferFile,
-          attachment,
-          buildAttachmentPath(paths.dataDir, attachment.id),
-        );
-      }
-
-      const masterKey = yield* createMasterKey(
-        openKeyStore(paths, backend),
-        Effect.sync(() => {
-          createdKey = true;
-        }),
-      ).pipe(Effect.mapError((error) => new PromotionReceiveError({ message: error.message })));
-      const transferKey = yield* deriveTransferKey(tokenBytes, salt);
-      yield* rewrapSecrets(transferKey, masterKey).pipe(
-        Effect.provide(openDatabaseCopy(paths.databaseFile)),
-        Effect.catchTag("SecretDecryptError", () =>
-          Effect.fail(
-            new PromotionReceiveError({
-              message:
-                "the secrets in the promotion transfer do not decrypt with this token, so the " +
-                "transfer was not made for it",
-            }),
+    // The reservation found the key store empty, and holds the controller
+    // lock, which a controller takes before it creates a key. So any key in
+    // the store when the scope fails is the one created here. The removal is
+    // registered before the key is created, so an interrupt at any point
+    // during the creation still removes it.
+    yield* Effect.addFinalizer((exit) =>
+      Exit.isSuccess(exit)
+        ? Effect.void
+        : keyStore.remove.pipe(
+            Effect.catch((error) => Effect.logWarning("Could not remove the master key", error)),
           ),
-        ),
-        Effect.catchTags({
-          SqlError: (error) => Effect.fail(new PromotionReceiveError({ message: error.message })),
-          DatabaseError: (error) =>
-            Effect.fail(new PromotionReceiveError({ message: error.message })),
-        }),
-      );
-      return { controllerId: header.controllerId, schemaVersion: header.schemaVersion };
-    });
-
-    return yield* unpack.pipe(
-      Effect.onError(() =>
-        createdKey ? discardReceivedHome(paths, backend) : removeReceivedFiles(paths),
-      ),
     );
+    const masterKey = yield* createMasterKey(keyStore).pipe(
+      Effect.mapError((error) => new PromotionReceiveError({ message: error.message })),
+    );
+    const transferKey = yield* deriveTransferKey(tokenBytes, salt);
+    yield* rewrapSecrets(transferKey, masterKey).pipe(
+      Effect.provide(openDatabaseCopy(database)),
+      Effect.catchTag("SecretDecryptError", () =>
+        Effect.fail(
+          new PromotionReceiveError({
+            message:
+              "the secrets in the promotion transfer do not decrypt with this token, so the " +
+              "transfer was not made for it",
+          }),
+        ),
+      ),
+      Effect.catchTags({
+        SqlError: (error) => Effect.fail(new PromotionReceiveError({ message: error.message })),
+        DatabaseError: (error) =>
+          Effect.fail(new PromotionReceiveError({ message: error.message })),
+      }),
+    );
+
+    // Locked before it is renamed, so no controller can open it under the
+    // database's name before the reservation ends.
+    yield* Layer.buildWithScope(openDatabase(database), locks).pipe(
+      Effect.mapError((error) => new PromotionReceiveError({ message: error.message })),
+    );
+    // Its write-ahead log keeps its old name and is removed with the promotion
+    // transfer directory, so the rename loses nothing only while that log is
+    // empty. Opening the database writes nothing to it today; this check
+    // fails loudly if that ever changes. `statSync` opens no file, so the
+    // lock stays.
+    const writeAheadLog = statSync(`${database}-wal`, { throwIfNoEntry: false });
+    if (writeAheadLog !== undefined && writeAheadLog.size > 0) {
+      return yield* new PromotionReceiveError({
+        message: `the received database has unsaved changes in ${database}-wal, so it cannot be moved to ${paths.databaseFile}`,
+      });
+    }
+    yield* Effect.try({
+      try: () => renameSync(database, paths.databaseFile),
+      catch: (cause) =>
+        new PromotionReceiveError({
+          message: `could not move the received database to ${paths.databaseFile}: ${readErrorMessage(cause)}`,
+        }),
+    });
+    return { controllerId: header.controllerId, schemaVersion: header.schemaVersion };
   });

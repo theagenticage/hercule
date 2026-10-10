@@ -63,6 +63,12 @@ const parseOperationId = (id: string): Effect.Effect<OperationId> =>
  * forward, and an API key's `last_used_at` is updated. The repository decides
  * whether a use is worth a write; on a busy connection most are not.
  *
+ * The use is recorded only while the controller is serving. A request that
+ * only reads still runs while a promotion freezes the controller, and the
+ * database then refuses every write. Skipping the record loses nothing that
+ * matters: the copy the new machine receives holds the older values, and
+ * this controller then agrees with it.
+ *
  * Session tokens are tried first, because they are cached. Agents call the
  * API on every tool use, so they cost one cached lookup instead of two
  * database misses first. A user pays one cache miss, which a person does not
@@ -80,12 +86,9 @@ const resolveActor = (
     const session = yield* sessions.resolve(tokenHash);
     if (Option.isSome(session)) return session;
 
-    const serving = (yield* promotion.phase)._tag === "Serving";
     const login = yield* credentials.findLoginToken(tokenHash);
     if (Option.isSome(login)) {
-      // A freeze's copy would miss a renewal written after it. Skip the
-      // write so B keeps the expiry A had when it copied.
-      if (serving) yield* credentials.renewLoginToken(login.value);
+      yield* promotion.runIfServing(credentials.renewLoginToken(login.value));
       return Option.some<Actor>({
         _tag: "user",
         userId: login.value.userId,
@@ -95,7 +98,7 @@ const resolveActor = (
 
     const apiKey = yield* credentials.findApiKey(tokenHash);
     if (Option.isSome(apiKey)) {
-      if (serving) yield* credentials.touchApiKey(apiKey.value);
+      yield* promotion.runIfServing(credentials.touchApiKey(apiKey.value));
       return Option.some<Actor>({
         _tag: "user",
         userId: apiKey.value.userId,

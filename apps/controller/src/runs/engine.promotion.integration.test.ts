@@ -14,23 +14,12 @@ import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 import { uuidFromString } from "../db";
-import { SWITCH_PATH, TRANSFER_PATH } from "../promotion/exchange";
-import { createPromotionToken } from "../promotion/testing";
+import { freezeController, requestTransfer, sealController } from "../promotion/testing";
 import { WAIT_DEADLINE_MS } from "../sessions/testing";
 import { withSetUpController } from "../workflows/testing";
 import { buildHeldAction, readRun, startHeldRun, waitForRunToFinish } from "./testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS + 10_000 });
-
-/** Spends `token` with a transfer, which freezes the controller until a switch or a cancel. */
-const spendToken = async (base: string, token: string): Promise<void> => {
-  const response = await fetch(`${base}${TRANSFER_PATH}`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}`, connection: "close" },
-  });
-  expect(response.status).toBe(200);
-  await response.arrayBuffer();
-};
 
 describe("runs during a promotion", () => {
   it("holds a step's end while frozen, and ends it once the transfer is cancelled", async () => {
@@ -38,18 +27,14 @@ describe("runs during a promotion", () => {
     await withSetUpController(
       async ({ base, token }) => {
         const runId = await startHeldRun(base, token, held);
-        const promotionToken = await createPromotionToken(base, token);
-        await spendToken(base, promotionToken);
+        const promotionToken = await freezeController(base, token);
 
         held.release();
         await delay(200);
         const frozen = await readRun(base, token, runId);
         expect(frozen.status, JSON.stringify(frozen)).toBe("running");
 
-        const cancelled = await fetch(`${base}${TRANSFER_PATH}`, {
-          method: "DELETE",
-          headers: { authorization: `Bearer ${promotionToken}`, connection: "close" },
-        });
+        const cancelled = await requestTransfer(base, promotionToken, "DELETE");
         expect(cancelled.status).toBe(204);
         const finished = await waitForRunToFinish(base, token, runId);
         expect(finished.status, JSON.stringify(finished)).toBe("completed");
@@ -63,18 +48,8 @@ describe("runs during a promotion", () => {
     await withSetUpController(
       async ({ harness, base, token }) => {
         const runId = await startHeldRun(base, token, held);
-        const promotionToken = await createPromotionToken(base, token);
-        await spendToken(base, promotionToken);
-        const switched = await fetch(`${base}${SWITCH_PATH}`, {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${promotionToken}`,
-            "content-type": "application/json",
-            connection: "close",
-          },
-          body: JSON.stringify({ newAddress: "http://hercule.example:9" }),
-        });
-        expect(switched.status).toBe(200);
+        const promotionToken = await freezeController(base, token);
+        await sealController(base, promotionToken);
 
         held.release();
         await delay(200);

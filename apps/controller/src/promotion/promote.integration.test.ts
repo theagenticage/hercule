@@ -3,16 +3,19 @@
  * happy path, and what each machine is left with when the transfer comes from
  * another controller than the preview showed, when the switch is refused,
  * when its answer is lost, when another machine switched first, when the old
- * controller cannot be reached after the transfer, and when this Home fills
- * up during the transfer.
+ * controller cannot be reached after the transfer, when it is interrupted
+ * before the transfer arrives, when an answer stalls, and when a controller
+ * tries to start in this Home during the promotion.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import { buildHomePaths, type HomePaths } from "@hercule/home";
+import { openDatabase } from "../db";
 import { completeSetup, get, post, readErrorBody, withServer } from "../http/testing";
 import { SWITCH_PATH, TRANSFER_PATH } from "./exchange";
 import { promote, type PromoteOptions } from "./promote";
@@ -59,6 +62,12 @@ const preparePromotion = async (from: string, token: string, fetcher?: typeof fe
   };
   return { options, lines };
 };
+
+/** Returns a response that never arrives: it fails only once the request is aborted. */
+const waitForAbort = (init: RequestInit | undefined): Promise<Response> =>
+  new Promise((_resolve, reject) =>
+    init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+  );
 
 const isHomeEmpty = (paths: HomePaths): boolean =>
   !existsSync(paths.databaseFile) &&
@@ -167,9 +176,7 @@ describe("promote", () => {
       const asked = new Promise<void>((resolve) => (switchAsked = resolve));
       const stallSwitch = interceptFetch("POST", SWITCH_PATH, (_input, init) => {
         switchAsked();
-        return new Promise((_resolve, reject) =>
-          init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
-        );
+        return waitForAbort(init);
       });
       const { options, lines } = await preparePromotion(harness.base, token, stallSwitch);
 
@@ -228,29 +235,116 @@ describe("promote", () => {
     });
   });
 
-  it("leaves a database that appeared in this Home during the transfer, and lets the old controller serve again", async () => {
+  it("refuses a controller that starts in this Home during the promotion", async () => {
     await withServer(async (harness) => {
       const user = await completeSetup(harness.base);
       const token = await createPromotionToken(harness.base, user);
       const { options } = await preparePromotion(harness.base, token);
-      const { dataDir, databaseFile } = options.paths;
-      const fillHomeFirst: PromoteOptions = {
-        ...options,
-        fetch: interceptFetch("POST", TRANSFER_PATH, (input, init) => {
-          mkdirSync(dataDir, { recursive: true });
-          writeFileSync(databaseFile, "keep-me");
-          return fetch(input, init);
-        }),
-      };
+      const refusals: Array<string> = [];
+      /** Opens this Home's database as a starting controller does, and records the refusal. */
+      const startController = () =>
+        Effect.runPromise(
+          Effect.scoped(Layer.build(openDatabase(options.paths.databaseFile))).pipe(
+            Effect.match({
+              onFailure: (error) => refusals.push(error.message),
+              onSuccess: () => refusals.push("opened"),
+            }),
+          ),
+        );
+      const startDuringTransfer = interceptFetch("POST", TRANSFER_PATH, async (input, init) => {
+        await startController();
+        return fetch(input, init);
+      });
+      const startDuringSwitch = ((input: string, init?: RequestInit) =>
+        init?.method === "POST" && new URL(input).pathname === SWITCH_PATH
+          ? startController().then(() => fetch(input, init))
+          : startDuringTransfer(input, init)) as unknown as typeof fetch;
 
-      const error = await Effect.runPromise(Effect.flip(promote(fillHomeFirst)));
+      await Effect.runPromise(promote({ ...options, fetch: startDuringSwitch }));
 
-      expect(error.message).toContain(`${databaseFile} already exists`);
-      expect(error.message).toContain(`${harness.base} serves again.`);
-      expect(readFileSync(databaseFile, "utf8")).toBe("keep-me");
+      expect(refusals).toHaveLength(2);
+      for (const refusal of refusals) expect(refusal).toContain("is already open");
+      expect(readdirSync(options.paths.dataDir).sort()).toEqual(["attachments", "hercule.db"]);
+      await expectSealed(harness.base, user, options.address!);
+    });
+  });
+
+  it("lets the old controller serve again when interrupted while it prepares the transfer", async () => {
+    await withServer(async (harness) => {
+      const user = await completeSetup(harness.base);
+      const token = await createPromotionToken(harness.base, user);
+      let frozen!: () => void;
+      const transferSpent = new Promise<void>((resolve) => (frozen = resolve));
+      // The old controller has frozen and sent the transfer, but a proxy in
+      // between holds the answer back.
+      const holdTransfer = interceptFetch("POST", TRANSFER_PATH, async (input, init) => {
+        await (await fetch(input, init)).arrayBuffer();
+        frozen();
+        return waitForAbort(init);
+      });
+      const { options, lines } = await preparePromotion(harness.base, token, holdTransfer);
+
+      const fiber = Effect.runFork(promote(options));
+      await transferSpent;
+      await Effect.runPromise(Fiber.interrupt(fiber));
+
+      expect(lines.at(-1)).toContain("The promotion was interrupted.");
+      expect(lines.at(-1)).toContain(`${harness.base} serves again.`);
+      expect(isHomeEmpty(options.paths)).toBe(true);
       await expectServing(harness.base, user);
     });
   });
+
+  it("says the token is unspent when interrupted before the old controller got the transfer request", async () => {
+    await withServer(async (harness) => {
+      const user = await completeSetup(harness.base);
+      const token = await createPromotionToken(harness.base, user);
+      let requested!: () => void;
+      const transferRequested = new Promise<void>((resolve) => (requested = resolve));
+      const holdRequest = interceptFetch("POST", TRANSFER_PATH, (_input, init) => {
+        requested();
+        return waitForAbort(init);
+      });
+      const { options, lines } = await preparePromotion(harness.base, token, holdRequest);
+
+      const fiber = Effect.runFork(promote(options));
+      await transferRequested;
+      await Effect.runPromise(Fiber.interrupt(fiber));
+
+      expect(lines.at(-1)).toContain(
+        `${harness.base} did not spend the token, so it still serves.`,
+      );
+      expect(isHomeEmpty(options.paths)).toBe(true);
+      await expectServing(harness.base, user);
+    });
+  });
+
+  it("gives up on an old controller that sends the headers of an answer but not all of its body", async () => {
+    await withServer(async (harness) => {
+      const user = await completeSetup(harness.base);
+      const token = await createPromotionToken(harness.base, user);
+      const stallBody = interceptFetch("GET", TRANSFER_PATH, (_input, init) => {
+        const body = new ReadableStream<Uint8Array>({
+          start: (controller) => {
+            controller.enqueue(new TextEncoder().encode('{"controllerId":'));
+            init?.signal?.addEventListener("abort", () => controller.error(new Error("aborted")));
+          },
+        });
+        return Promise.resolve(
+          new Response(body, { headers: { "content-type": "application/json" } }),
+        );
+      });
+      const { options } = await preparePromotion(harness.base, token, stallBody);
+
+      const started = Date.now();
+      const error = await Effect.runPromise(Effect.flip(promote(options)));
+
+      expect(error.message).toContain("did not answer within 10 seconds");
+      expect(Date.now() - started).toBeLessThan(12_000);
+      expect(isHomeEmpty(options.paths)).toBe(true);
+      expect(existsSync(options.paths.promotionTransferDir)).toBe(false);
+    });
+  }, 20_000);
 
   it("keeps this Home and says what to check when the old controller cannot be reached after the transfer", async () => {
     await withServer(async (harness) => {

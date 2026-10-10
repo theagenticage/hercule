@@ -64,6 +64,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServer from "effect/unstable/http/HttpServer";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
@@ -94,7 +95,9 @@ import {
   runScheduler,
   sweepSessionsOnLostRunners,
   sweepUnreachableRunners,
+  thawExpiredFreezes,
 } from "../daemon";
+import { stopWrites } from "../db";
 import { PromotionState, PromotionTransferRouteLayer } from "../promotion";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
@@ -384,11 +387,22 @@ export const serve = (bundle: WebBundle | undefined) =>
     // plugins emit reach it. Each ingest runs on a fiber of the Ingest
     // Executor, apart from the reconciler's pass that opened it.
     yield* Effect.forkScoped(runIngestReconciler);
+    // A freeze whose promotion token expires before the new machine switches
+    // over ends on its own, so a new machine that went quiet cannot leave
+    // this controller frozen.
+    yield* Effect.forkScoped(thawExpiredFreezes);
     // Runs a restart cut off continue from their rows. Each run executes on
     // a fiber of the Run Executor, so this returns once they are all started.
     // A sealed controller resumes nothing: the controller its data moved to
     // runs them. No controller boots frozen, because the freeze is not stored.
+    // A sealed controller's database refuses writes again once the boot's
+    // own writes are done, as it did before the restart, so no writer the
+    // promotion phase misses can change data that now lives elsewhere.
     const promotion = yield* PromotionState;
-    if ((yield* promotion.phase)._tag !== "Sealed") yield* resumeUnfinishedRuns;
+    if ((yield* promotion.phase)._tag === "Sealed") {
+      yield* Effect.orDie(stopWrites(yield* SqlClient.SqlClient));
+    } else {
+      yield* resumeUnfinishedRuns;
+    }
     yield* Effect.flatMap(buildApplication(bundle), HttpServer.serveEffect());
   });
