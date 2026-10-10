@@ -15,16 +15,50 @@ import type { Attachment, TranscriptRow } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
 import type { AgentState } from "./agent-state";
 import { findOpenItem } from "./open-item";
-import { buildThreadItem, readUserAttachments, type ThreadItem } from "./turns";
+import {
+  buildThreadItem,
+  describeToolCallTarget,
+  readUserAttachments,
+  type ThreadItem,
+} from "./turns";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
 type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
 
-/** A tool item in a work stretch, with what its summary counts. */
+/** A tool item in a work stretch, with what its summary and its row show. */
 export interface WorkItem extends ThreadItem {
-  /** The files a file change touched, as its detail names them. Empty for any other item. */
+  /**
+   * What the item acted on, in one line, as the desktop's row shows it:
+   *
+   * - a file read's `path`, and a file search's `pattern` and `path`, read
+   *   from the fixed fields of their detail;
+   * - a tool call's command, path, query or description, never its tool's
+   *   name, which the row shows as its label (`describeToolCallTarget`);
+   * - for any other kind, the target the web's row shows.
+   */
+  readonly target: string;
+  /**
+   * The files a file change touched or a file read read, as its detail names
+   * them. Empty for any other item.
+   */
   readonly paths: readonly string[];
+  /** The time of the item's `item.started` row. */
+  readonly startedAt: string;
+  /**
+   * The name of the tool a tool call used, such as `WebFetch` or
+   * `github/create_issue`, as its detail names it. Empty when the detail names
+   * none, and for any item that is not a tool call.
+   */
+  readonly toolName: string;
+  /**
+   * The `detail.content` of the item's `item.completed` row, as the adapter
+   * sent it: a string, a list of content blocks, or `undefined` while the
+   * item runs or when it returned nothing. It is kept as it is, and only read
+   * for its text when a row shows it (`buildWorkRows`), so building the
+   * transcript does no work for results nobody opens.
+   */
+  readonly resultContent: unknown;
 }
 
 /** A message the user sent: the opening one, or one steered into the running turn. */
@@ -171,19 +205,46 @@ type Slot =
   UserBlock | BuildingStretch | BuildingAgent | BuildingEnding | WaitingBlock | WarningBlock;
 
 /**
- * Returns the files a file change item touched, as its detail names them:
- * the `paths` list, else one path from the tool's input or the detail. The
- * adapters spell it in their own ways (Claude Code's `input.file_path`,
- * Codex's `paths`, pi's `path`), and any of them may be absent.
+ * Returns the files an item touched, as its detail names them, or `[]` for an
+ * item that is neither a file change nor a file read:
+ *
+ * - a file read names one, in the fixed field `path`;
+ * - a file change names its `paths` list, else one path from the tool's
+ *   input or the detail. The adapters spell it in their own ways (Claude
+ *   Code's `input.file_path`, Codex's `paths`, pi's `path`), and any of them
+ *   may be absent.
  */
-const readChangedPaths = (event: ItemStarted): readonly string[] => {
-  if (event.kind !== "file_change") return [];
+const readItemPaths = (event: ItemStarted): readonly string[] => {
   const detail = readJsonObject(event.detail);
+  if (event.kind === "file_read") return typeof detail?.path === "string" ? [detail.path] : [];
+  if (event.kind !== "file_change") return [];
   const listed = readStringList(detail?.paths);
   if (listed !== undefined) return listed;
   const input = readJsonObject(detail?.input);
   const path = input?.file_path ?? input?.notebook_path ?? input?.path ?? detail?.path;
   return typeof path === "string" ? [path] : [];
+};
+
+/**
+ * Returns what a work item acted on, as its row in the desktop shows it (see
+ * `WorkItem.target`). Reads only the fixed fields of a file read's and a file
+ * search's detail, never the tool's input, which differs from one harness to
+ * the next.
+ */
+const readWorkItemTarget = (event: ItemStarted, threadItem: ThreadItem): string => {
+  switch (event.kind) {
+    case "file_read":
+    case "file_search": {
+      const detail = readJsonObject(event.detail);
+      const pattern = typeof detail?.pattern === "string" ? detail.pattern : "";
+      const path = typeof detail?.path === "string" ? detail.path : "";
+      return pattern !== "" && path !== "" ? `${pattern} in ${path}` : pattern || path;
+    }
+    case "tool_call":
+      return describeToolCallTarget(event.detail);
+    default:
+      return threadItem.target;
+  }
 };
 
 /**
@@ -353,9 +414,15 @@ export const buildThreadBlocks = (
           }
           const stretch = turn.stretch;
           workItems.set(event.itemId, { stretch, index: stretch.items.length });
+          const threadItem = buildThreadItem(event);
+          const name = event.kind === "tool_call" ? readJsonObject(event.detail)?.name : undefined;
           stretch.items.push({
-            ...buildThreadItem(event),
-            paths: readChangedPaths(event),
+            ...threadItem,
+            target: readWorkItemTarget(event, threadItem),
+            paths: readItemPaths(event),
+            startedAt: event.at,
+            toolName: typeof name === "string" ? name : "",
+            resultContent: undefined,
           });
         }
         break;
@@ -374,6 +441,7 @@ export const buildThreadBlocks = (
           work.stretch.items[work.index] = {
             ...work.stretch.items[work.index]!,
             result: event.status,
+            resultContent: readJsonObject(event.detail)?.content,
           };
         }
         break;

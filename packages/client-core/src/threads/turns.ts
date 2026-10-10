@@ -89,11 +89,11 @@ const MAX_TARGET_LENGTH = 200;
 
 /**
  * Returns the field of an item's `detail` that is worth showing in a row: the
- * command a shell item ran, the path a file item changed, what a web search
- * searched for, or a tool call's description. Returns `undefined` when none
- * of these is present, and the caller then shows the raw JSON. Each provider
- * adapter shapes `detail` its own way, so every field is optional (spec 06
- * §6.3).
+ * command a shell item ran, the path a file item changed or read, the pattern
+ * a file search looked for, what a web search searched for, or a tool call's
+ * description. Returns `undefined` when none of these is present. Each
+ * provider adapter shapes `detail` its own way, so every field is optional
+ * (spec 06 §6.3).
  */
 const findDetailText = (detail: Record<string, unknown>): string | undefined => {
   const input = readJsonObject(detail.input);
@@ -101,27 +101,44 @@ const findDetailText = (detail: Record<string, unknown>): string | undefined => 
     input?.command ??
     detail.command ??
     input?.file_path ??
+    detail.pattern ??
     detail.path ??
     input?.query ??
     input?.description ??
-    detail.description ??
-    detail.name;
+    detail.description;
   return typeof candidate === "string" ? candidate : undefined;
+};
+
+/** Returns the first line of `text`, cut to `MAX_TARGET_LENGTH` with an ellipsis. */
+const cutToTargetLine = (text: string): string => {
+  const line = text.split("\n")[0] ?? "";
+  return line.length > MAX_TARGET_LENGTH ? `${line.slice(0, MAX_TARGET_LENGTH)}…` : line;
 };
 
 /**
  * Returns a one-line summary of an item's `detail`, truncated to
  * `MAX_TARGET_LENGTH`. A string is used as it is; any other value is
- * summarized by `findDetailText`, or else shown as compact JSON.
+ * summarized by `findDetailText`, else by the tool's `name`, else shown as
+ * compact JSON.
  */
 const summarizeDetail = (detail: unknown): string => {
   if (detail === undefined || detail === null) return "";
-  const text =
-    typeof detail === "string"
-      ? detail
-      : (findDetailText(readJsonObject(detail) ?? {}) ?? JSON.stringify(detail));
-  const line = text.split("\n")[0] ?? "";
-  return line.length > MAX_TARGET_LENGTH ? `${line.slice(0, MAX_TARGET_LENGTH)}…` : line;
+  if (typeof detail === "string") return cutToTargetLine(detail);
+  const object = readJsonObject(detail) ?? {};
+  const name = typeof object.name === "string" ? object.name : undefined;
+  return cutToTargetLine(findDetailText(object) ?? name ?? JSON.stringify(detail));
+};
+
+/**
+ * Returns what a tool call acted on, in one line cut to `MAX_TARGET_LENGTH`:
+ * the field `findDetailText` picks from its `detail`. Returns "" when the
+ * detail holds none of those fields. Unlike `summarizeDetail`, it never falls
+ * back to the tool's name or the JSON, because the desktop's row already
+ * shows the name as its label.
+ */
+export const describeToolCallTarget = (detail: unknown): string => {
+  const text = findDetailText(readJsonObject(detail) ?? {});
+  return text === undefined ? "" : cutToTargetLine(text);
 };
 
 /**

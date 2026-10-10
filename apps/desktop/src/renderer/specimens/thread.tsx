@@ -9,12 +9,20 @@
  * `?state=scrolled` page has it, and the composer shrinks as it does when
  * the user scrolls there. With `?state=warning`, the thread shows two
  * runtime warnings among its work, which the book never draws, so
- * `pnpm compare:bureau` does not compare that state.
+ * `pnpm compare:bureau` does not compare that state. With `?state=steps`,
+ * the first stretch holds a web search, a read that returned text and a
+ * command that failed, for what an open stretch draws; the book draws no
+ * open stretch, so that state is not compared either.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
 import "./fixed-clock";
-import { FIX_THREAD, FIX_THREAD_WITH_WARNINGS, THREAD_PAGE_RECORDS } from "./thread-fixture";
+import {
+  FIX_THREAD,
+  FIX_THREAD_WITH_RESULTS,
+  FIX_THREAD_WITH_WARNINGS,
+  THREAD_PAGE_RECORDS,
+} from "./thread-fixture";
 import { mountThreadSpecimen } from "./shell-page";
 import { computeScrolledTop, markSheetReady } from "./sheet-page";
 
@@ -42,7 +50,11 @@ async function scrollTranscriptAway(): Promise<void> {
 const state = new URLSearchParams(location.search).get("state");
 await mountThreadSpecimen(
   THREAD_PAGE_RECORDS,
-  state === "warning" ? FIX_THREAD_WITH_WARNINGS : FIX_THREAD,
+  state === "warning"
+    ? FIX_THREAD_WITH_WARNINGS
+    : state === "steps"
+      ? FIX_THREAD_WITH_RESULTS
+      : FIX_THREAD,
 );
 if (state === "scrolled") {
   await scrollTranscriptAway();

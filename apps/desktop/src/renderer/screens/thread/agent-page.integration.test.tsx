@@ -198,7 +198,7 @@ describe("the thread screen", () => {
     }
   });
 
-  it("expands a work divider into its items, and collapses it again", async () => {
+  it("expands a work divider into its rows, opens a group into its steps, and collapses it again", async () => {
     await openThread(THREAD_FIXTURES.finished);
     const divider = within(findTranscript()).getByRole("button", {
       name: "Worked for 1m 57s, edited 3 files, ran 2 commands",
@@ -209,22 +209,36 @@ describe("the thread screen", () => {
     await userEvent.click(divider);
     expect(divider.getAttribute("aria-expanded")).toBe("true");
     const list = divider.nextElementSibling as HTMLElement;
-    expect(
-      within(list)
-        .getAllByRole("listitem")
-        .map((item) => item.textContent),
-    ).toEqual([
-      "edit · .bun-version · completed",
-      "edit · .github/workflows/ci.yml · completed",
-      "edit · .github/workflows/release.yml · completed",
-      "command · bun install · completed",
-      "command · bun test · completed",
+    // Back-to-back steps of one kind fold into one row, which opens.
+    const groups = within(list).getAllByRole("button");
+    expect(groups.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Edited 3 files",
+      "Ran 2 commands",
     ]);
-    expect(list.querySelector("code")?.textContent).toBe(".bun-version");
+
+    await userEvent.click(groups[0]!);
+    expect(groups[0]!.getAttribute("aria-expanded")).toBe("true");
+    const steps = within(groups[0]!.parentElement!).getAllByRole("listitem");
+    expect(steps.map((step) => step.textContent)).toEqual([
+      "Edited .bun-version11:00",
+      "Edited .github/workflows/ci.yml11:00",
+      "Edited .github/workflows/release.yml11:00",
+    ]);
+    expect(within(steps[0]!).getByText(".bun-version").tagName).toBe("CODE");
 
     await userEvent.click(divider);
     expect(divider.getAttribute("aria-expanded")).toBe("false");
     expect(divider.nextElementSibling).toBeNull();
+    // The open group is kept, so it shows open when the stretch expands again.
+    await userEvent.click(divider);
+    expect(
+      within(findTranscript())
+        .getAllByRole("button", { expanded: true })
+        .map((row) => row.getAttribute("aria-label")),
+    ).toEqual([divider.getAttribute("aria-label"), "Edited 3 files"]);
+    expect(
+      within(divider.nextElementSibling as HTMLElement).getByText(".github/workflows/release.yml"),
+    ).toBeTruthy();
   });
 
   it("animates the face of the message the agent is writing, and only that one", async () => {
