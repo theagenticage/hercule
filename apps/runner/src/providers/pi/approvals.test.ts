@@ -37,21 +37,36 @@ const SECOND_UI = "3f1a0c7e-0000-4000-8000-00000000abce";
 const SECOND_CALL = "call_0199e0e8";
 
 /**
- * Builds the dialog message Hercule's approval hook writes: the call it asks
- * about. pi's dialog does not include the call, and the card is built from the
- * call itself, so the message holds only the call's id and tool name.
+ * Builds the dialog message Hercule's approval hook writes: the held call's
+ * id and tool name, and its command and path when they are strings. The hook
+ * reads them from the input pi validated, so the card is built from them.
  */
-const buildDialogMessage = (toolCallId: string, toolName: string): string =>
-  JSON.stringify({ toolCallId, toolName });
+const buildDialogMessage = (
+  toolCallId: string,
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+): string =>
+  JSON.stringify({
+    toolCallId,
+    toolName,
+    ...(typeof input["command"] === "string" ? { command: input["command"] } : {}),
+    ...(typeof input["path"] === "string" ? { path: input["path"] } : {}),
+  });
 
 const COMMAND = "rm -rf build && echo rebuilt";
 
 type DrivenAdapter = Awaited<ReturnType<typeof startBusySession>>;
 
-/** Starts a turn and pushes a tool call plus the approval dialog that holds it. */
+/**
+ * Starts a turn and pushes a tool call plus the approval dialog that holds it.
+ * The call starts with `args`, the arguments the model sent; the dialog
+ * carries `validated`, the input after pi validated and converted `args`,
+ * which is `args` unless a test says otherwise.
+ */
 const parkOnTool = async (
   toolName: string,
   args: Readonly<Record<string, unknown>>,
+  validated: Readonly<Record<string, unknown>> = args,
 ): Promise<DrivenAdapter> => {
   const run = await startBusySession();
   run.child.push({ type: "tool_execution_start", toolCallId: CALL, toolName, args });
@@ -60,7 +75,7 @@ const parkOnTool = async (
     id: UI,
     method: "confirm",
     title: `Approve ${toolName}?`,
-    message: buildDialogMessage(CALL, toolName),
+    message: buildDialogMessage(CALL, toolName, validated),
   });
   return run;
 };
@@ -138,6 +153,14 @@ describe("the paths on a parked file call", () => {
     expect((await awaitOpenedRequest(run)).request.detail).toEqual({ paths: ["src/main.ts"] });
   });
 
+  // pi converts the model's arguments before the call runs, so a path sent as
+  // the number 42 writes the file "42". The card must name that file.
+  it("shows the path pi validated, not the argument the model sent", async () => {
+    const run = await parkOnTool("write", { path: 42, content: "b" }, { path: "42", content: "b" });
+
+    expect((await awaitOpenedRequest(run)).request.detail).toEqual({ paths: ["42"] });
+  });
+
   // The protocol refuses an empty path, and a frame it refuses is lost, which
   // would leave pi holding the call with no card for the user to answer.
   for (const [toolName, args] of [
@@ -167,6 +190,12 @@ describe("the request for a parked shell command", () => {
     expect(opened.request.itemId).toBe(item?.itemId);
     expect(opened.request).toMatchObject({ decisions: ["allow", "deny", "cancel"] });
     expect(opened.request.detail).toEqual({ command: COMMAND });
+  });
+
+  it("shows the command pi validated, not the argument the model sent", async () => {
+    const run = await parkOnTool("bash", { command: 7 }, { command: "7" });
+
+    expect((await awaitOpenedRequest(run)).request.detail).toEqual({ command: "7" });
   });
 
   it("sends pi nothing until the user answers", async () => {
@@ -296,7 +325,7 @@ describe("a second approval asked while one is open", () => {
       id: SECOND_UI,
       method: "confirm",
       title: "Approve bash?",
-      message: buildDialogMessage(SECOND_CALL, "bash"),
+      message: buildDialogMessage(SECOND_CALL, "bash", { command: "ls" }),
     });
     await waitUntil("docked both", () => filterByTag(run.seen, "request.opened").length === 2);
     return run;
