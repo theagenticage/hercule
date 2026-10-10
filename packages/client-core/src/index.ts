@@ -178,6 +178,7 @@ export {
   listAwaitedSignals,
   measureElapsed,
   listRerunChoices,
+  type RerunChoice,
   readTimestamps,
   shouldRunRecede,
   describeStepSession,

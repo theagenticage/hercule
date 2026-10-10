@@ -1,7 +1,7 @@
 /* The controls every screen shares: the buttons, the answer ledger, the
-   pills, the segmented controls, the navigation rows, the counts, the text
-   field, the quiet text and dots, the priority bars and the section
-   headings. The rules and class names are the Bureau book's, as its
+   pills, the segmented controls, the choice boxes, the navigation rows, the
+   counts, the text field, the quiet text and dots, the priority bars and the
+   section headings. The rules and class names are the Bureau book's, as its
    system.css spells them. Each departure from the book says why. */
 
 /* ---------- Buttons ---------- */
@@ -286,6 +286,61 @@
   box-shadow:
     inset 0 0 0 1px var(--line-soft),
     var(--shadow-1);
+}
+
+/* ---------- Choice boxes ---------- */
+/* Not in the book, which draws no checkbox or radio. The box around a
+   checkbox or a radio input: a square for an option of several, a round for
+   one of one. A checkbox puts a check icon after its input, which shows once
+   it is checked. A checked choice is in ink, not in the accent, which the
+   book keeps for the one suggested answer. The dock's question options and
+   the re-run dialog use it. Not `.choice`, which reads too close to the
+   book's `.choices`, a row of buttons. */
+.choice-box {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.choice-box input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border-radius: 4px;
+  background: var(--field);
+  /* A rim of --line all but vanishes on a tinted surface such as the dock,
+     so the rim is a faded --faint, which reads as an empty box on every
+     theme. */
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--faint) 60%, transparent);
+}
+.choice-box input[type="radio"] {
+  border-radius: 50%;
+}
+.choice-box input:checked {
+  background: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+/* A ring with a dot: the field colour between the rim and the dot. */
+.choice-box input[type="radio"]:checked {
+  box-shadow:
+    inset 0 0 0 1px var(--ink),
+    inset 0 0 0 4px var(--field);
+}
+.choice-box input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.choice-box .ic {
+  position: absolute;
+  color: var(--field);
+  opacity: 0;
+  pointer-events: none;
+}
+.choice-box input:checked + .ic {
+  opacity: 1;
 }
 
 /* ---------- Navigation rows ---------- */

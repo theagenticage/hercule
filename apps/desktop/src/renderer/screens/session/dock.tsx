@@ -260,7 +260,7 @@ export function RequestDock({
                   // the next question has a choice in the same place.
                   <label key={index} className="dock-option">
                     <span className="dock-option-label">
-                      <span className="dock-choice">
+                      <span className="choice-box">
                         <input
                           type={question.multiSelect ? "checkbox" : "radio"}
                           name={titleId}
