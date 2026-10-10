@@ -2,7 +2,8 @@
  * Tests `storeNewestMessages` and `storeSentMessage`: a fresh newest page,
  * or a message just sent, stored in the pages a Conversation holds, also
  * while an earlier page is being read, and never once the pages are gone.
- * Tests `removeQueryOnceUnobserved`, which drops those pages.
+ * Tests `removeQueryOnceUnobserved`, which drops those pages, and that
+ * `ensureShellData` keeps every read it loads.
  */
 import { describe, expect, it, vi } from "vitest";
 import { InfiniteQueryObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
@@ -14,8 +15,19 @@ import {
   type MessagePages,
 } from "@hercule/client-core";
 import { createApiStub } from "@hercule/client-core/testing";
-import { removeQueryOnceUnobserved, storeNewestMessages, storeSentMessage } from "./queries";
-import { buildFixtureAssistant, buildFixtureMessage, CONTROLLER_URL } from "./testing";
+import {
+  ensureShellData,
+  removeQueryOnceUnobserved,
+  storeNewestMessages,
+  storeSentMessage,
+} from "./queries";
+import {
+  buildFixtureAssistant,
+  buildFixtureMessage,
+  buildSidebarHandlers,
+  CONTROLLER_URL,
+  SIDEBAR_FIXTURE,
+} from "./testing";
 
 const ADA = buildFixtureAssistant({
   id: "01a06d02-a000-7000-8000-000000000005",
@@ -206,5 +218,24 @@ describe("removeQueryOnceUnobserved", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("ensureShellData", () => {
+  // A shell read that Query removed while no component drew it would suspend
+  // the whole app when a component that is not always on screen reads it
+  // again. So every read the shell loads must stay cached, whoever draws it.
+  it("keeps every read it loads for the life of the window", async () => {
+    const { fetch } = createApiStub(buildSidebarHandlers(SIDEBAR_FIXTURE));
+    const queryClient = new QueryClient();
+
+    await ensureShellData(queryClient, createClient({ baseUrl: CONTROLLER_URL, fetch }));
+
+    const kept = queryClient
+      .getQueryCache()
+      .getAll()
+      .map((query) => [JSON.stringify(query.queryKey), query.gcTime]);
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept).toEqual(kept.map(([key]) => [key, Infinity]));
   });
 });

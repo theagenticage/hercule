@@ -1,6 +1,6 @@
 /**
- * The sidebar's thread list: the items `buildSidebar` returns, in the
- * `nav` landmark "Threads", virtualized.
+ * The sidebar's list: the items `buildSidebar` returns, virtualized, in a
+ * `nav` landmark that scrolls.
  *
  * Only the items in and near the visible part of the list are mounted, so a
  * list of a thousand threads costs about what a list of forty costs. Every
@@ -27,6 +27,7 @@ import {
   useState,
   type FocusEvent,
   type JSX,
+  type ReactNode,
 } from "react";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import {
@@ -52,9 +53,6 @@ import { useThreadHover } from "./use-thread-hover";
  * short scroll shows no empty space before React draws the new items.
  */
 const OVERSCAN = 8;
-
-/** The space below the last item: the book's `.side-scroll { padding-bottom: 12px }`. */
-const LIST_END_PADDING = 12;
 
 /** The item that holds keyboard focus. */
 interface Focus {
@@ -175,7 +173,8 @@ const renderItem = (
 };
 
 /**
- * Renders the thread list, or "No threads yet" when `items` is empty.
+ * Renders the list in the `nav` landmark with the id `id` and the name
+ * `label`, and `children` after its items, in the same scroll.
  *
  * - While `officeOpen` is true, the row of a thread with a colleague in the
  *   Office, and the row of a waiting assistant, opens the thread or the
@@ -186,13 +185,19 @@ const renderItem = (
  *   draws again on each render.
  */
 export function SidebarList({
+  id,
+  label,
   items,
   officeOpen,
   onExpand,
+  children,
 }: {
+  readonly id: string;
+  readonly label: string;
   readonly items: readonly SidebarItem[];
   readonly officeOpen: boolean;
   readonly onExpand: (section: SectionKey) => void;
+  readonly children?: ReactNode;
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement>(null);
   const [focus, setFocus] = useState<Focus>(NO_FOCUS);
@@ -245,7 +250,6 @@ export function SidebarList({
     getItemKey,
     rangeExtractor,
     overscan: OVERSCAN,
-    paddingEnd: LIST_END_PADDING,
   });
 
   useLayoutEffect(() => {
@@ -303,19 +307,19 @@ export function SidebarList({
     <>
       <nav
         ref={scrollRef}
+        id={id}
         className="side-scroll"
-        aria-label="Threads"
+        aria-label={label}
         onFocus={noteFocus}
         onBlur={noteBlur}
         {...listHandlers}
       >
-        {items.length === 0 ? (
-          <p className="side-meta side-empty">No threads yet</p>
-        ) : (
+        {items.length > 0 && (
           <div className="side-list" style={{ height: virtualizer.getTotalSize() }}>
             {drawn}
           </div>
         )}
+        {children}
       </nav>
       <ThreadHoverCard placement={placement} details={details} />
     </>

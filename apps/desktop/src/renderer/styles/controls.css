@@ -207,7 +207,8 @@
     background var(--dur-2) var(--ease-out),
     color var(--dur-2);
 }
-.seg button[aria-pressed="true"] {
+.seg button[aria-pressed="true"],
+.seg button[aria-selected="true"] {
   background: var(--raised);
   color: var(--ink);
   box-shadow:
@@ -238,6 +239,14 @@
 .nav-row.is-on {
   background: var(--selected);
   color: var(--ink);
+}
+/* Not in the book, whose rows are all links. A row that is a button, such as
+   an inert one, would otherwise centre its text, take only the width of its
+   content, and take Chromium's text rendering for buttons. */
+button.nav-row {
+  width: 100%;
+  text-align: start;
+  text-rendering: inherit;
 }
 
 /* ---------- Counts ---------- */
@@ -542,6 +551,9 @@ input.field[type="password"]:not(:placeholder-shown) {
 }
 .dot--fail {
   background: var(--fail);
+}
+.nav-row .dot {
+  margin-right: 7px;
 }
 /* Items side by side, centred on one line. */
 .row {

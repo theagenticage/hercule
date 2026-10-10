@@ -26,11 +26,21 @@
 }
 
 /* The shell's drag strip covers the top 52px of the window and drags it. A
-   control in that band opts out, so a click reaches it. The New thread row
+   control in that band opts out, so a click reaches it. The face switch
    starts at 48px, inside the band. */
 .side-top .icon-btn,
-.side-actions {
+.seg--side {
   -webkit-app-region: no-drag;
+}
+
+/* The face switch, Threads | Hercule: its two segments share the sidebar's
+   width. Two classes, as in the book, so the grid wins over `.seg`'s
+   `inline-flex` whichever style sheet loads first. */
+.seg.seg--side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: none;
+  margin-bottom: 8px;
 }
 
 /* Not the book's, which draws New thread and Search as two full-width rows.
@@ -54,18 +64,15 @@
   width: 30px;
   height: 30px;
 }
-/* The list scrolls under a fixed top and foot. Two departures from the book:
-   - The book hides the scroll bar (`scrollbar-width: none`). Spec 17 asks for
-     the system's overlay scroll bars, unstyled, which macOS draws only while
-     the list scrolls.
-   - The book's `padding-bottom: 12px` is the list's `paddingEnd` in
-     sidebar-list.tsx, because the virtualized list sets its own height. */
+/* The list scrolls under a fixed top and foot. The book hides the scroll bar
+   (`scrollbar-width: none`). Spec 17 asks for the system's overlay scroll
+   bars, unstyled, which macOS draws only while the list scrolls. */
 .side-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
   margin: 0 -12px;
-  padding: 0 12px;
+  padding: 0 12px 12px;
   /* The virtualized list places its items itself. The browser must not also
      move the scroll position when items mount above the visible part. */
   overflow-anchor: none;
@@ -78,6 +85,17 @@
    keeps the first item's top margin inside the list. */
 .side-list {
   display: flow-root;
+}
+
+/* Sections are separated by space and a small label, never by a rule. The
+   virtualized list spaces its own sections (`leading` in sidebar-items.ts);
+   these are the sections drawn in flow: the Hercule face's, and Settings'
+   list. */
+.side-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 8px;
 }
 
 .side-h {

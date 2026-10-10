@@ -173,6 +173,8 @@ const READ_LAYOUT = `[...document.querySelectorAll("[data-cell]")].map((cell) =>
 const SIDEBAR_PARTS = [
   ".side-top > .icon-btn",
   ".side-top > .icon-btn > svg",
+  ".seg--side",
+  ".seg--side > button",
   ".side-actions > .nav-row",
   ".side-actions > .nav-row > svg",
   ".side-actions > .nav-row > span",

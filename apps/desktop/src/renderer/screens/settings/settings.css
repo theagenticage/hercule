@@ -69,18 +69,6 @@
 .set-nav .nav-row .dot {
   margin-right: 4px;
 }
-/* Not in the book, whose rows are all links. An inert row is a button, which
-   centres its text and takes only the width of its content. */
-.set-nav button.nav-row {
-  width: 100%;
-  text-align: start;
-}
-.side-sec {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding-top: 8px;
-}
 
 /* The section's body: one centred column, which scrolls on its own. The
    container query below reads its width. */

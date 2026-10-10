@@ -353,7 +353,8 @@ html[data-motion="off"] .cr * {
   height: 22px;
   border-radius: var(--r-xs);
 }
-.seg--side {
+/* `.seg.seg--side`, not `.seg--side`: the `.seg` rule below sets inline-flex and would win. */
+.seg.seg--side {
   display: grid;
   grid-template-columns: 1fr 1fr;
   flex: none;

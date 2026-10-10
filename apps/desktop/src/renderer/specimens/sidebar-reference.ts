@@ -11,8 +11,8 @@
  * shows its own sample data; the last two are where the app's layout departs
  * from the book's:
  *
- * 1. removes the Threads and Hercule tabs and the Assistants section, which
- *    v1 does not have (spec 17 §Scope);
+ * 1. removes the Assistants section: the sidebar fixture has no assistant,
+ *    so the app draws none. The Threads | Hercule switch stays;
  * 2. removes "Ship release v2.15" from Waiting on you and sets the count to
  *    2: it is a Run, and v1 lists threads only;
  * 3. sets the counts line to the fixture's counts, without "paused", which
@@ -56,8 +56,7 @@ stillBookPage();
 
 const side = findElement(document, "aside.side");
 
-// 1. The tabs and the Assistants section.
-findElement(side, ".seg--side").remove();
+// 1. The Assistants section.
 const assistants = [...side.querySelectorAll(".side-sec")].find(
   (section) => section.querySelector(".side-h > span")?.textContent === "Assistants",
 );

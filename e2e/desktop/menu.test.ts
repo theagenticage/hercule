@@ -1,8 +1,9 @@
 /**
  * Tests the menu bar in the packaged app (spec 17, §Native behaviour):
  *
- * - the menus stand in the order macOS users expect, and Go holds a dimmed
- *   Office and a dimmed "No Threads" while signed out;
+ * - the menus stand in the order macOS users expect; while signed out, View
+ *   holds a dimmed Threads and Hercule, and Go a dimmed Office and "No
+ *   Threads";
  * - Go lists the sidebar's threads under Office, top to bottom, with ⌘1 and
  *   on, and choosing one opens it;
  * - Thread > Send sends what the open thread's composer holds.
@@ -32,16 +33,21 @@ function readSidebarTitles(page: Page): Promise<string[]> {
 }
 
 describe("the menu bar", () => {
-  it("has the app menu, File, Edit, Go, Thread and Window, and a dimmed Office and No Threads in Go while signed out", async () => {
+  it("has the app menu, File, Edit, View, Go, Thread and Window, and dims View's faces and Go's items while signed out", async () => {
     const { app } = await launchForTest();
 
     expect(await readMenuLabels(app)).toEqual([
       "Hercule",
       "File",
       "Edit",
+      "View",
       "Go",
       "Thread",
       "Window",
+    ]);
+    expect(await readMenuItems(app, "View")).toEqual([
+      { label: "Threads", accelerator: "Alt+CmdOrCtrl+1", enabled: false },
+      { label: "Hercule", accelerator: "Alt+CmdOrCtrl+2", enabled: false },
     ]);
     expect(await readMenuItems(app, "Go")).toEqual([
       { label: "Office", accelerator: "CmdOrCtrl+Shift+O", enabled: false },

@@ -1,6 +1,6 @@
-import { useCallback, useState, type JSX } from "react";
+import { useCallback, useEffect, useId, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link, useMatch, useRouteContext } from "@tanstack/react-router";
+import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useAssistantRows } from "../app/assistant-rows";
 import { useDraftThread } from "../app/draft-thread";
 import { useUnsentKeys } from "../app/pending-submissions";
@@ -21,9 +21,12 @@ import { OfficeIcon } from "../icons/office";
 import { SearchIcon } from "../icons/search";
 import { SidebarIcon } from "../icons/sidebar";
 import { AssistantsSection } from "./assistants-section";
+import { FaceSwitch } from "./face-switch";
+import { decideScreenFace, type SidebarFace } from "./sidebar-face";
 import { buildSidebar, listGoMenuItems, type SectionKey } from "./sidebar-items";
 import { SidebarFoot } from "./sidebar-foot";
 import { SidebarList } from "./sidebar-list";
+import { SystemSection } from "./system-section";
 import "./sidebar.css";
 import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
 
@@ -32,16 +35,23 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *
  * - the top strip, where macOS draws the window's traffic lights, with the
  *   Hide the sidebar button;
+ * - the face switch, Threads | Hercule;
  * - one row of actions: New thread, which calls `onNewThread`, then Search
  *   and the Office as square icon buttons, where the book draws New thread
  *   and Search as two rows and has no Office button;
- * - the thread list: Waiting on you, with the threads and the assistants
- *   that wait on the user, then the threads of each project, newest created
- *   first, with the Draft Thread's row, while one is open, first in its
- *   project. A row whose composer holds unsent work is tinted;
- * - the Assistants section, pinned under the list, while there is an
- *   assistant;
+ * - the list: Waiting on you, with the threads and the assistants that wait
+ *   on the user, then the face's own rows.
+ *   - On the threads face, the threads of each project, newest created
+ *     first, with the Draft Thread's row, while one is open, first in its
+ *     project. A row whose composer holds unsent work is tinted. Then the
+ *     Assistants section, pinned under the list, while there is an
+ *     assistant.
+ *   - On the Hercule face, the System section;
  * - the foot: the thread counts, the signed-in user and the Settings button.
+ *
+ * The face follows the screen (`decideScreenFace`). The switch, and View ›
+ * Threads and View › Hercule in the menu, change it without leaving the
+ * screen.
  *
  * Hide the sidebar and Search are drawn but do nothing yet, and carry
  * `aria-disabled` to say so. The open thread is marked in the list by its
@@ -58,8 +68,9 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * shell's loader reads them, so nothing here waits in practice. A live push
  * updates the cache, and only the rows whose thread changed draw again.
  *
- * It also sends main the threads and the waiting assistants its list shows,
- * top to bottom, for the Go menu, each time they or their titles change.
+ * It also sends main the threads and the waiting assistants the threads face
+ * shows, top to bottom, for the Go menu, each time they or their titles
+ * change, whichever face is showing.
  */
 export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): JSX.Element {
   const { bridge, controller } = useRouteContext({ from: "/_connected" });
@@ -93,6 +104,28 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   const officeMatch = useMatch({ from: "/_connected/_shell/office", shouldThrow: false });
   const officeOpen = officeMatch !== undefined;
   const selectedId = threadMatch?.params.sessionId ?? officeMatch?.search.session ?? null;
+  const listId = useId();
+
+  // The face is set again each time a screen with a face of its own opens,
+  // while rendering, so the sidebar never draws the old face beside the new
+  // screen. The whole address is compared, not only the path, because a new
+  // Draft Thread opens at "/" with other search parameters.
+  const { pathname, href } = useLocation();
+  const [face, setFace] = useState<SidebarFace>(() => decideScreenFace(pathname) ?? "threads");
+  const [faceHref, setFaceHref] = useState(href);
+  if (faceHref !== href) {
+    setFaceHref(href);
+    const screenFace = decideScreenFace(pathname);
+    if (screenFace !== null) setFace(screenFace);
+  }
+  useEffect(
+    () =>
+      bridge.menu.onCommand((command) => {
+        if (command === "showThreadsFace") setFace("threads");
+        if (command === "showOrchestrationFace") setFace("orchestration");
+      }),
+    [bridge],
+  );
 
   // The sections whose "more" row the user pressed. Kept only while the
   // window is open: a restart shows every section capped again.
@@ -124,6 +157,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
           <SidebarIcon />
         </button>
       </div>
+      <FaceSwitch face={face} onChange={setFace} listId={listId} />
       {/* The space between a row's text and its key cap keeps the row's name
           "New thread ⌘N", not "New thread⌘N". A row is a flex box, which
           draws no space between its items, so the layout is the book's. The
@@ -146,8 +180,22 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
           <OfficeIcon />
         </Link>
       </div>
-      <SidebarList items={items} officeOpen={officeOpen} onExpand={expandSection} />
-      <AssistantsSection rows={assistantRows} officeOpen={officeOpen} />
+      {/* One list for both faces, so a focused row both faces show, such as
+          a Waiting on you row, keeps its focus when the face changes. */}
+      <SidebarList
+        id={listId}
+        label={face === "threads" ? "Threads" : "Hercule"}
+        items={face === "threads" ? items : items.filter((item) => item.section === "waiting")}
+        officeOpen={officeOpen}
+        onExpand={expandSection}
+      >
+        {face === "orchestration" ? (
+          <SystemSection />
+        ) : (
+          items.length === 0 && <p className="side-meta side-empty">No threads yet</p>
+        )}
+      </SidebarList>
+      {face === "threads" && <AssistantsSection rows={assistantRows} officeOpen={officeOpen} />}
       <SidebarFoot
         working={counts.working}
         waiting={counts.waiting}
