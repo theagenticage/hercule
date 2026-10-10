@@ -8,7 +8,8 @@
  *   with the signal's id;
  * - a run's signal input takes only the id of a signal of a kind it lists;
  * - a plugin action bound as a typed reply runs with the text the user typed,
- *   outside any run, and writes the line the Done list keeps.
+ *   outside any run, and writes the line the Done list keeps;
+ * - while a plugin action runs, a second action on its signal is refused.
  *
  * The rules that need no real operation are tested in `service.test.ts`.
  */
@@ -278,6 +279,48 @@ describe("a plugin action as a typed reply", () => {
         expect(forge.inputs).toEqual([{ verdict: "comment", body: "Looks good." }]);
         expect(forge.contexts[0]!.run).toBeUndefined();
         expect(forge.contexts[0]!.connection?.credentials).toEqual({ token: "a-forge-token" });
+      },
+      { plugins: [forge.plugin] },
+    );
+  });
+
+  it("refuses a second action while a plugin action on the same signal still runs", async () => {
+    let releaseReview = () => {};
+    const forge = buildForgePlugin({
+      reviewHeldUntil: new Promise<void>((resolve) => {
+        releaseReview = resolve;
+      }),
+    });
+    await withServer(
+      async ({ base }) => {
+        const token = await completeSetup(base);
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const id = await raiseOrFail(base, token, {
+          ...OFFER,
+          actions: [
+            {
+              id: "approve",
+              label: "Approve",
+              operation: {
+                op: FORGE_REVIEW_ACTION_ID,
+                connectionId,
+                input: { verdict: "approve" },
+              },
+            },
+          ],
+        });
+
+        const review = actOrFail(base, token, id, { actionId: "approve" });
+        await expect.poll(() => forge.inputs.length).toBe(1);
+
+        const dismiss = await requestAct(base, token, id, { actionId: "dismiss" });
+        expect(dismiss.status).toBe(409);
+        expect((await readErrorBody(dismiss)).text).toContain("still running");
+
+        releaseReview();
+        expect((await review).resolution).toMatchObject({ actionId: "approve" });
       },
       { plugins: [forge.plugin] },
     );

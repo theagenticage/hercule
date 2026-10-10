@@ -111,6 +111,8 @@ const ONLY_THE_USER =
   "only the user may take a signal's action: it runs its operation as the user, so a session or a workflow step may not take one; ask the user instead";
 
 const ALREADY_RESOLVED = "the signal is already resolved, so its actions can no longer be taken";
+const ANOTHER_ACTION_RUNNING =
+  "another action on this signal is still running; wait for it to finish";
 
 /**
  * Returns the core's Dismiss: a null operation that resolves the signal and
@@ -594,11 +596,7 @@ const make = Effect.gen(function* () {
           // together cannot both pass the check.
           const claimSignal = Effect.suspend(() => {
             if (actingOn.has(signal.id)) {
-              return Effect.fail(
-                createInvalidStateError(
-                  "another action on this signal is still running; wait for it to finish",
-                ),
-              );
+              return Effect.fail(createInvalidStateError(ANOTHER_ACTION_RUNNING));
             }
             actingOn.add(signal.id);
             return Effect.void;
@@ -614,6 +612,11 @@ const make = Effect.gen(function* () {
             () => Effect.sync(() => actingOn.delete(signal.id)),
           );
         } else {
+          // A plugin action still running on this signal would find it
+          // resolved only after its effect outside the controller happened.
+          if (actingOn.has(signal.id)) {
+            return yield* Effect.fail(createInvalidStateError(ANOTHER_ACTION_RUNNING));
+          }
           yield* withTransaction(
             sql,
             Effect.gen(function* () {

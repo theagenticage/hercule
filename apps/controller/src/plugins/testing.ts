@@ -257,12 +257,16 @@ export interface ForgePlugin {
  *   Connection, takes a `verdict` from a fixed list, and records the context
  *   and input of every call.
  *
- * The plugin config accepts `clientId`, which a refresh needs.
+ * The plugin config accepts `clientId`, which a refresh needs. When
+ * `reviewHeldUntil` is given, every review records its call and then waits
+ * for that promise before it returns, so a test can act while one runs.
  */
-export const buildForgePlugin = (options: { readonly tokenUrl?: string } = {}): ForgePlugin => {
+export const buildForgePlugin = (
+  options: { readonly tokenUrl?: string; readonly reviewHeldUntil?: Promise<void> } = {},
+): ForgePlugin => {
   const contexts: Array<ActionContext> = [];
   const inputs: Array<unknown> = [];
-  const { tokenUrl } = options;
+  const { tokenUrl, reviewHeldUntil } = options;
   const plugin: Plugin = {
     manifest: {
       id: "forge",
@@ -306,8 +310,12 @@ export const buildForgePlugin = (options: { readonly tokenUrl?: string } = {}): 
             Effect.sync(() => {
               contexts.push(context);
               inputs.push(input);
-              return { reviewed: true };
-            }),
+            }).pipe(
+              Effect.andThen(
+                reviewHeldUntil === undefined ? Effect.void : Effect.promise(() => reviewHeldUntil),
+              ),
+              Effect.as({ reviewed: true }),
+            ),
         }),
       ),
     activate: () => Effect.succeed(Effect.void),
