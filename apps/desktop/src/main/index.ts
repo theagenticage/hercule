@@ -44,6 +44,7 @@ import { makeRunnerIdentityLayer } from "./runner-identity";
 import { makeSafeStorageLayer } from "./safe-storage";
 import { secureSession, secureWebContents } from "./security";
 import { StoredTokenLayer } from "./stored-token";
+import { makeUrgentSignalNotificationsLayer } from "./urgent-signal-notifications";
 import { makeWaitingNotificationsLayer } from "./waiting-notifications";
 import { MainWindowLayer } from "./window";
 
@@ -90,6 +91,7 @@ const startApp = (): void => {
   const windowMenuAndNotifications = Layer.mergeAll(
     makeMainMenuLayer(Menu, !app.isPackaged),
     waitingNotifications,
+    makeUrgentSignalNotificationsLayer({ Notification }),
   ).pipe(Layer.provideMerge(MainWindowLayer));
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(

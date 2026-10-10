@@ -12,6 +12,7 @@ import {
   makeTemporarySettingsFile,
   type TemporarySettingsFile,
 } from "./testing";
+import { UrgentSignalNotifications } from "./urgent-signal-notifications";
 import { WaitingNotifications } from "./waiting-notifications";
 
 let settingsFile: TemporarySettingsFile;
@@ -54,6 +55,10 @@ interface Seen {
  * Runs `effect` against a token service built on the temporary settings file,
  * with a fake Keychain that fails when `keychainFailing` is true. Returns the
  * effect's exit and what the menu, the window and the notifications saw.
+ *
+ * Fails the test when the urgent signals' notifications were not told the
+ * same signed-in states as the waiting notifications, so each test checks
+ * both while it states one.
  */
 const runWithStoredToken = async <A, E>(
   effect: Effect.Effect<A, E, StoredToken>,
@@ -61,6 +66,7 @@ const runWithStoredToken = async <A, E>(
 ): Promise<{ exit: Exit.Exit<A, E> } & Seen> => {
   const signedIn: Array<boolean> = [];
   const notificationsSignedIn: Array<boolean> = [];
+  const urgentSignalNotificationsSignedIn: Array<boolean> = [];
   const window = makeFakeMainWindow();
   const layer = StoredTokenLayer.pipe(
     Layer.provide(
@@ -82,10 +88,18 @@ const runWithStoredToken = async <A, E>(
             }),
           setWaitingRequests: () => Effect.void,
         }),
+        Layer.succeed(UrgentSignalNotifications)({
+          setSignedIn: (next) =>
+            Effect.sync(() => {
+              urgentSignalNotificationsSignedIn.push(next);
+            }),
+          setUrgentSignals: () => Effect.void,
+        }),
       ),
     ),
   );
   const exit = await Effect.runPromiseExit(Effect.provide(effect, layer));
+  expect(urgentSignalNotificationsSignedIn).toEqual(notificationsSignedIn);
   return { exit, signedIn, notificationsSignedIn, window: window.calls };
 };
 
