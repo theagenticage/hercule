@@ -331,12 +331,12 @@ describe("normalizing a file read or a file search on a pi turn", () => {
     });
   }
 
-  it("cuts a long path to the fact bound", () => {
+  it("cuts a long path to the fact bound, and marks the cut", () => {
     const path = `src/${"a".repeat(10_000)}.ts`;
 
     expect(startTool("read", { path })?.detail).toEqual({
       name: "read",
-      path: path.slice(0, MAX_FACT_LENGTH),
+      path: `${path.slice(0, MAX_FACT_LENGTH - 1)}…`,
     });
   });
 });
