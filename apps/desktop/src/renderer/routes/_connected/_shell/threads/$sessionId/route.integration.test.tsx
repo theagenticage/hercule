@@ -158,14 +158,42 @@ describe("a message another session's agent sent into the thread", () => {
   const RUNBOOK = SIDEBAR_FIXTURE.threads[0]!;
   const senderPath = `/api/v1/sessions/${RUNBOOK.id}`;
 
-  /** The finished thread's transcript, with its user message sent by the runbook's agent. */
-  const transcript: TranscriptRow[] = thread.transcript.map((row) => {
-    const { event } = row;
-    if (event._tag !== "item.started" || event.kind !== "user_message") return row;
-    // The fixture's user message detail is an object that holds its text.
-    const detail = { ...(event.detail as Record<string, unknown>), senderSessionId: RUNBOOK.id };
-    return { ...row, event: { ...event, detail } };
-  });
+  /**
+   * The finished thread's transcript, with its user message sent by the
+   * runbook's agent, and a second message from the same agent right after
+   * it. The rows are numbered again, so each keeps a position and an event
+   * id of its own.
+   */
+  const transcript: TranscriptRow[] = thread.transcript
+    .flatMap((row): TranscriptRow[] => {
+      const { event } = row;
+      if (event._tag !== "item.started" && event._tag !== "item.completed") return [row];
+      if (event.kind !== "user_message") return [row];
+      if (event._tag === "item.started") {
+        // The fixture's user message detail is an object that holds its text.
+        const detail = {
+          ...(event.detail as Record<string, unknown>),
+          senderSessionId: RUNBOOK.id,
+        };
+        return [{ ...row, event: { ...event, detail } }];
+      }
+      const itemId = `${event.itemId}-again`;
+      const detail = { text: "Then tag the release.", senderSessionId: RUNBOOK.id };
+      const { turnId, kind, eventId, sessionId, at } = event;
+      return [
+        row,
+        {
+          ...row,
+          event: { _tag: "item.started", turnId, itemId, kind, detail, eventId, sessionId, at },
+        },
+        { ...row, event: { ...event, itemId, detail } },
+      ];
+    })
+    .map((row, index) => ({
+      ...row,
+      position: index + 1,
+      event: { ...row.event, eventId: `event-${String(index + 1)}` },
+    }));
 
   beforeEach(() => {
     stubElementSize(800, 800);
@@ -183,10 +211,13 @@ describe("a message another session's agent sent into the thread", () => {
     const { context } = await app;
 
     expect(context.queryClient.getQueryData(queryKeys.sender(RUNBOOK.id))).toEqual(RUNBOOK);
-    const message = await screen.findByRole("group", { name: `Message from ${RUNBOOK.title}` });
-    const chip = within(message).getByRole("link", { name: RUNBOOK.title });
+    const [first, second] = await screen.findAllByRole("group", {
+      name: `Message from ${RUNBOOK.title}`,
+    });
+    const chip = within(first!).getByRole("link", { name: RUNBOOK.title });
     expect(chip.getAttribute("href")).toBe(`/threads/${RUNBOOK.id}`);
-    expect(within(message).getByText(/Bump the Bun pin to 1\.3\.2/)).toBeTruthy();
+    expect(within(first!).getByText(/Bump the Bun pin to 1\.3\.2/)).toBeTruthy();
+    expect(within(second!).getByText("Then tag the release.")).toBeTruthy();
     // One read for the sender, however many of its messages the thread holds.
     expect(calls.filter((call) => call.path === senderPath)).toHaveLength(1);
   });
@@ -202,9 +233,12 @@ describe("a message another session's agent sent into the thread", () => {
 
     // Retries in the loader would hold the thread's first paint for seconds,
     // for a name, and this test would time out. There are two reads: the
-    // loader's, and the one the message makes when it mounts, because a
+    // loader's, and the one the messages make when they mount, because a
     // read that failed is tried again by the next component that shows it.
-    await screen.findByRole("group", { name: "Message from another agent" });
+    // The two messages share that one read.
+    expect(
+      await screen.findAllByRole("group", { name: "Message from another agent" }),
+    ).toHaveLength(2);
     expect(calls.filter((call) => call.path === senderPath)).toHaveLength(2);
   });
 });

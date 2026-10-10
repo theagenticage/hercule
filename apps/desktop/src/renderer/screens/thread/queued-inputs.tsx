@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from "react";
+import type { JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -6,13 +6,14 @@ import {
   queryKeys,
   readErrorMessage,
   readInputSender,
+  type SenderReading,
 } from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
 import { queuedInputsQuery, sessionQuery } from "../../app/queries";
 import { buildHueStyle } from "../../faces";
 import { ClockIcon } from "../../icons/clock";
 import { QueuedImages } from "../attachments/queued-images";
-import { buildSenderLook, SenderChip } from "../session/sender-chip";
+import { buildSenderLook, SenderChip, SenderChipPlaceholder } from "../session/sender-chip";
 import { useSenderReading } from "./use-sender-reading";
 import "./queued-inputs.css";
 
@@ -51,9 +52,9 @@ export function QueuedInputs({ sessionId }: { readonly sessionId: string }): JSX
 }
 
 /**
- * Renders one queued input: the clock, its images, its text on one line, how soon it
- * runs, and Steer and Cancel when `offersActions` is true. Below them, the
- * row shows why its last delivery failed, when one did, and why Steer or
+ * Renders one queued input: the clock, its images, its text on one line,
+ * how soon it runs, and Steer and Cancel when `offersActions` is true. Below
+ * them, the row shows why its last delivery failed, when one did, and why Steer or
  * Cancel failed, when one does.
  *
  * An input another session's agent queued draws that agent's chip in place
@@ -91,77 +92,82 @@ function QueuedInputRow({
   });
   const running = steer.isPending || cancel.isPending;
   const failure = steer.error ?? cancel.error;
-  const senderSessionId = readInputSender(input);
 
-  const images =
-    input.attachments.length === 0 ? null : <QueuedImages attachments={input.attachments} />;
-  const main = (
-    <span className="queued-main">
-      <span className="queued-text" title={input.text}>
-        {input.text}
-      </span>
-      <span className="faint">{runsNext ? "queued · runs next" : "queued"}</span>
-      {offersActions ? (
-        <>
-          <button
-            type="button"
-            className="btn btn--quiet btn--sm"
-            aria-disabled={running || undefined}
-            onClick={() => {
-              if (!running) steer.mutate();
-            }}
-          >
-            Steer
-          </button>
-          <button
-            type="button"
-            className="btn btn--quiet btn--sm"
-            aria-disabled={running || undefined}
-            onClick={() => {
-              if (!running) cancel.mutate();
-            }}
-          >
-            Cancel
-          </button>
-        </>
-      ) : null}
-    </span>
-  );
-  const notes = (
-    <>
-      {input.reason === null ? null : <span className="queued-note faint">{input.reason}</span>}
-      {failure === null ? null : (
-        <span className="queued-note queued-error" role="alert">
-          {readErrorMessage(failure)}
-        </span>
-      )}
-    </>
-  );
-
-  if (senderSessionId !== undefined) {
+  // The row's markup is written once, for the owner's input and for an
+  // agent's, whose sender is read first (see `AgentQueuedInputRow`).
+  const renderRow = (sender?: SenderReading | "loading"): JSX.Element => {
+    const agent = sender === undefined || sender === "loading" ? undefined : sender;
     return (
-      <AgentQueuedInputRow senderSessionId={senderSessionId} images={images} notes={notes}>
-        {main}
-      </AgentQueuedInputRow>
+      <div
+        className={agent === undefined ? "queued" : "queued queued--agent"}
+        style={agent === undefined ? undefined : buildHueStyle(buildSenderLook(agent).hue)}
+        role={agent === undefined ? undefined : "group"}
+        aria-label={agent === undefined ? undefined : `Queued message from ${agent.label}`}
+      >
+        <span className="queued-lead">
+          {sender === undefined ? (
+            <ClockIcon size={14} />
+          ) : agent === undefined ? (
+            <SenderChipPlaceholder />
+          ) : (
+            <SenderChip sender={agent} />
+          )}
+          {input.attachments.length === 0 ? null : <QueuedImages attachments={input.attachments} />}
+        </span>
+        <span className="queued-main">
+          <span className="queued-text" title={input.text}>
+            {input.text}
+          </span>
+          <span className="faint">{runsNext ? "queued · runs next" : "queued"}</span>
+          {offersActions ? (
+            <>
+              <button
+                type="button"
+                className="btn btn--quiet btn--sm"
+                aria-disabled={running || undefined}
+                onClick={() => {
+                  if (!running) steer.mutate();
+                }}
+              >
+                Steer
+              </button>
+              <button
+                type="button"
+                className="btn btn--quiet btn--sm"
+                aria-disabled={running || undefined}
+                onClick={() => {
+                  if (!running) cancel.mutate();
+                }}
+              >
+                Cancel
+              </button>
+            </>
+          ) : null}
+        </span>
+        {input.reason === null ? null : <span className="queued-note faint">{input.reason}</span>}
+        {failure === null ? null : (
+          <span className="queued-note queued-error" role="alert">
+            {readErrorMessage(failure)}
+          </span>
+        )}
+      </div>
     );
-  }
-  return (
-    <div className="queued">
-      <span className="queued-lead">
-        <ClockIcon size={14} />
-        {images}
-      </span>
-      {main}
-      {notes}
-    </div>
+  };
+
+  const senderSessionId = readInputSender(input);
+  return senderSessionId === undefined ? (
+    renderRow()
+  ) : (
+    <AgentQueuedInputRow senderSessionId={senderSessionId} renderRow={renderRow} />
   );
 }
 
 /**
- * Renders the row of an input another session's agent queued: the agent's
- * chip, then the input's images, `children` and `notes`, as `QueuedInputRow`
- * lays them out, on glass tinted in the agent's hue. The row is a group
- * named "Queued message from" and the agent's name.
+ * Reads the agent of session `senderSessionId`, which queued the input, and
+ * returns `renderRow`'s row for it: the agent's chip in place of the clock,
+ * on glass tinted in the agent's hue, as a group named "Queued message from"
+ * and the agent's name. It is a component of its own because only an
+ * agent's row reads a sender, and a hook cannot be called on a condition.
  *
  * While the agent is still being read, which happens only for a sender that
  * first appears while the thread is open, the chip's place is held empty and
@@ -169,42 +175,10 @@ function QueuedInputRow({
  */
 function AgentQueuedInputRow({
   senderSessionId,
-  images,
-  notes,
-  children,
+  renderRow,
 }: {
   readonly senderSessionId: string;
-  readonly images: ReactNode;
-  readonly notes: ReactNode;
-  readonly children: ReactNode;
+  readonly renderRow: (sender: SenderReading | "loading") => JSX.Element;
 }): JSX.Element {
-  const sender = useSenderReading(senderSessionId);
-  if (sender === "loading") {
-    return (
-      <div className="queued">
-        <span className="queued-lead">
-          <span className="queued-sender-pending" />
-          {images}
-        </span>
-        {children}
-        {notes}
-      </div>
-    );
-  }
-  const look = buildSenderLook(sender);
-  return (
-    <div
-      className="queued queued--agent"
-      style={buildHueStyle(look.hue)}
-      role="group"
-      aria-label={`Queued message from ${sender.label}`}
-    >
-      <span className="queued-lead">
-        <SenderChip sender={sender} look={look} />
-        {images}
-      </span>
-      {children}
-      {notes}
-    </div>
-  );
+  return renderRow(useSenderReading(senderSessionId));
 }

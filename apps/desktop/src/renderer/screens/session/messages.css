@@ -35,9 +35,10 @@
   max-width: 78%;
 }
 .bubble {
+  --bubble-fill: color-mix(in oklab, var(--ink) 6%, var(--surface));
   padding: 10px 14px;
   border-radius: 18px 18px 6px 18px;
-  background: color-mix(in oklab, var(--ink) 6%, var(--surface));
+  background: var(--bubble-fill);
   font-size: var(--t-14);
   line-height: 1.55;
 }
@@ -50,23 +51,31 @@
   font-size: var(--t-11);
 }
 /* Not in the book. A message another session's agent sent names it in a
-   chip above the bubble, on the right like the bubble, 4px in from its edge
-   where the bubble's corner starts to round. The row keeps its height while
-   the agent is read, so the bubble never moves when the name arrives. */
+   chip above the bubble, on the right like the bubble, its right edge on
+   the bubble's and the time's. */
 .msg-sender {
   display: flex;
   justify-content: flex-end;
-  min-height: 18px;
-  margin: 0 4px 4px;
+  margin-bottom: 4px;
   font-size: var(--t-13);
   line-height: 18px;
+  /* The chip's width is left out of the message's width, so a long name
+     never stretches a short bubble. A chip wider than its bubble keeps its
+     width and reaches past the bubble to the left, where the row is empty. */
+  contain: inline-size;
+}
+.msg-sender > * {
+  flex: none;
 }
 /* The agent's bubble takes its hue, as the book's `.chip--who` takes it. In
-   a dark theme the full tint is lighter than the neutral bubble and reads as
-   a block of colour, so it is mixed into the surface there, as the brief
-   card's tint is. */
+   a dark theme the full tint reads as a block of colour, so it is mixed into
+   the neutral bubble there: the bubble stays as light as the user's beside
+   it, and is clearly tinted. */
 .msg--agent .bubble {
-  background: light-dark(var(--who-tint), color-mix(in oklab, var(--who-tint) 45%, var(--surface)));
+  background: light-dark(
+    var(--who-tint),
+    color-mix(in oklab, var(--who-tint) 70%, var(--bubble-fill))
+  );
 }
 
 /* Markdown. The book draws paragraphs, inline code and code blocks; the

@@ -314,6 +314,20 @@ const STRIPE_THREAD = buildSpecimenSession({
   model: CLAUDE_SONNET,
 });
 
+/**
+ * The thread whose agent answers the Fix thread with a short "OK": its title
+ * is longer than a sender chip, which ends it in an ellipsis without
+ * stretching the short bubble under it.
+ */
+const IDEMPOTENCY_THREAD = buildSpecimenSession({
+  id: "01a0ec64-6e80-7000-8000-000000000104",
+  title: "Move every checkout webhook handler onto the new idempotency keys",
+  projectId: "p-webshop",
+  status: "busy",
+  minutesAgo: 12,
+  model: CLAUDE_SONNET,
+});
+
 /** A session that sent the Fix thread a message and can no longer be read: its face is teal. */
 const GONE_SESSION_ID = "01a0ec64-6e80-7000-8000-000000000100";
 
@@ -339,7 +353,8 @@ const steerMessage = (
  *
  * - at 09:05, the Stripe thread's agent steers a message in, between two edits;
  * - at 09:09, after the agent's second message, the user steers one in;
- * - then Ada sends one, and a session that can no longer be read sends one.
+ * - then Ada sends one, a session that can no longer be read sends one, and
+ *   the thread with the long title answers "OK".
  */
 const FIX_STEPS_WITH_SENDERS: ReadonlyArray<TranscriptStep> = FIX_STEPS.flatMap((step) => {
   const [seconds] = step;
@@ -371,6 +386,7 @@ const FIX_STEPS_WITH_SENDERS: ReadonlyArray<TranscriptStep> = FIX_STEPS.flatMap(
         "Done with the shared fixture, it's yours.",
         GONE_SESSION_ID,
       ),
+      ...steerMessage(475, "it-from-idempotency", "OK", IDEMPOTENCY_THREAD.id),
       step,
     ];
   }
@@ -394,8 +410,8 @@ const buildAgentInput = (
 /**
  * The Fix thread with messages from other agents in its transcript and its
  * queue, for the thread specimen's `?state=senders`: the user's queued input,
- * then one the Stripe thread's agent queued, then one from the session that
- * can no longer be read.
+ * then one the Stripe thread's agent queued, one from the session that can
+ * no longer be read, and the long-titled thread's "OK".
  */
 export const FIX_THREAD_WITH_SENDERS: ThreadScreenRecords = {
   session: FIX_SESSION,
@@ -409,11 +425,13 @@ export const FIX_THREAD_WITH_SENDERS: ThreadScreenRecords = {
       3,
     ),
     buildAgentInput("in-from-gone", GONE_SESSION_ID, "Shared fixture is free again.", 2),
+    buildAgentInput("in-from-idempotency", IDEMPOTENCY_THREAD.id, "OK", 1),
   ],
   senders: [
     { id: STRIPE_THREAD.id, session: STRIPE_THREAD },
     { id: ADA_SESSION.id, session: ADA_SESSION },
     { id: GONE_SESSION_ID, session: null },
+    { id: IDEMPOTENCY_THREAD.id, session: IDEMPOTENCY_THREAD },
   ],
 };
 

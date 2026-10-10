@@ -180,28 +180,24 @@ describe("an input another session's agent queued", () => {
     const row = await screen.findByRole("group", {
       name: `Queued message from ${RUNBOOK.title}`,
     });
-    expect(row.className).toBe("queued queued--agent");
     const chip = within(row).getByRole("link", { name: RUNBOOK.title });
     expect(chip.getAttribute("href")).toBe(`/threads/${RUNBOOK.id}`);
-    expect(row.querySelector(".queued-lead > svg")).toBeNull();
-    // The owner's row keeps its clock and is no group.
-    expect(readRow(NEWER).className).toBe("queued");
-    expect(readRow(NEWER).querySelector(".queued-lead > svg")).not.toBeNull();
-    expect(readRow(NEWER).getAttribute("role")).toBeNull();
+    expect(within(row).getByText(FROM_RUNBOOK.text)).toBeTruthy();
+    // The owner's row names no sender and is no group.
+    expect(screen.getAllByRole("group")).toEqual([row]);
+    expect(within(readRow(NEWER)).queryByRole("link")).toBeNull();
   });
 
-  it("puts a note in the text's column, under the text rather than the chip", async () => {
+  it("shows why the agent's input was not delivered, in the agent's row", async () => {
     await renderAgentQueue();
 
     const row = await screen.findByRole("group", {
       name: `Queued message from ${RUNBOOK.title}`,
     });
-    const note = within(row).getByText("The runner went offline.");
-    expect(note.parentElement).toBe(row);
-    expect(note.classList.contains("queued-note")).toBe(true);
+    expect(within(row).getByText("The runner went offline.")).toBeTruthy();
   });
 
-  it("steers and cancels the agent's input as the owner's", async () => {
+  it("offers Steer and Cancel on the agent's input, and steers it into the running turn", async () => {
     const user = userEvent.setup();
     const remaining = [FROM_RUNBOOK, NEWER];
     const { calls } = await renderAgentQueue(

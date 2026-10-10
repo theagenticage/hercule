@@ -5,7 +5,7 @@
  */
 import type { JSX } from "react";
 import { describe, expect, it } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import {
   buildErrorBody,
   buildFixtureAssistant,
@@ -56,10 +56,10 @@ describe("a message another session's agent sent", () => {
     });
 
     const message = await screen.findByRole("group", { name: `Message from ${RUNBOOK.title}` });
-    expect(message.className).toBe("msg--me msg--agent");
-    const chip = screen.getByRole("link", { name: RUNBOOK.title });
+    const chip = within(message).getByRole("link", { name: RUNBOOK.title });
     expect(chip.getAttribute("href")).toBe(`/threads/${RUNBOOK.id}`);
-    expect(message.querySelector(".bubble-meta")?.textContent).toBe("Steered · 09:14");
+    expect(within(message).getByText("Rebase onto main first.")).toBeTruthy();
+    expect(within(message).getByText("Steered · 09:14")).toBeTruthy();
   });
 
   it("names an assistant's agent by the assistant, linked to its page", async () => {
@@ -71,8 +71,8 @@ describe("a message another session's agent sent", () => {
       },
     });
 
-    await screen.findByRole("group", { name: "Message from Ada" });
-    const chip = screen.getByRole("link", { name: "Ada" });
+    const message = await screen.findByRole("group", { name: "Message from Ada" });
+    const chip = within(message).getByRole("link", { name: "Ada" });
     expect(chip.getAttribute("href")).toBe(`/assistants/${ADA.id}`);
   });
 
@@ -88,9 +88,10 @@ describe("a message another session's agent sent", () => {
     });
 
     const message = await screen.findByRole("group", { name: "Message from another agent" });
-    expect(message.querySelector(".sender-chip")?.textContent).toBe("Another agent");
+    expect(within(message).getByText("Another agent")).toBeTruthy();
     expect(screen.queryByRole("link")).toBeNull();
   });
+
   it('calls an agent the user may not read "Another agent" too', async () => {
     await renderThreadPart(drawAgentMessage(RUNBOOK.id), {
       thread: THREAD,
@@ -108,7 +109,7 @@ describe("a message another session's agent sent", () => {
 });
 
 describe("a message the owner steered into a turn", () => {
-  it("is the owner's bubble, with no chip, and says it was steered", async () => {
+  it("names no sender and says it was steered", async () => {
     await renderThreadPart(
       () => (
         <UserMessage
@@ -123,10 +124,10 @@ describe("a message the owner steered into a turn", () => {
       { thread: THREAD },
     );
 
-    const bubble = screen.getByText("Rebase onto main first.").closest(".msg--me")!;
-    expect(bubble.className).toBe("msg--me");
-    expect(bubble.getAttribute("role")).toBeNull();
-    expect(bubble.querySelector(".msg-sender")).toBeNull();
-    expect(bubble.querySelector(".bubble-meta")?.textContent).toBe("Steered · 09:14");
+    expect(screen.getByText("Rebase onto main first.")).toBeTruthy();
+    expect(screen.getByText("Steered · 09:14")).toBeTruthy();
+    expect(screen.queryByRole("group")).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.queryByText("Another agent")).toBeNull();
   });
 });

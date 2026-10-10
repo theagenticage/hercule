@@ -25,7 +25,7 @@ import type { Attachment } from "@hercule/contract";
 import { buildHueStyle, Face, type Look } from "../../faces";
 import { SentImages } from "../attachments/sent-images";
 import { Markdown } from "./markdown";
-import { buildSenderLook, SenderChip } from "./sender-chip";
+import { buildSenderLook, SenderChip, SenderChipPlaceholder } from "./sender-chip";
 import type { AttachOpenParagraph } from "./use-session-live";
 import "./messages.css";
 
@@ -88,49 +88,29 @@ export const UserMessage = memo(function UserMessage({
   readonly sender?: SenderReading | "loading";
 }): JSX.Element {
   const time = formatBlockTime(at, timezone, today);
-  const content = (
-    <>
-      {attachments.length === 0 ? null : <SentImages attachments={attachments} />}
-      {text === "" ? null : (
-        <div className="bubble">
-          <Markdown text={text} breaks />
-        </div>
-      )}
-      <div className="bubble-meta">
-        {steered ? (time === undefined ? "Steered" : `Steered · ${time}`) : time}
-      </div>
-    </>
-  );
-  if (sender === undefined) {
-    return (
-      <div className="msg--me">
-        <div>{content}</div>
-      </div>
-    );
-  }
-  if (sender === "loading") {
-    return (
-      <div className="msg--me">
-        <div>
-          <div className="msg-sender" />
-          {content}
-        </div>
-      </div>
-    );
-  }
-  const look = buildSenderLook(sender);
+  const agent = sender === undefined || sender === "loading" ? undefined : sender;
   return (
     <div
-      className="msg--me msg--agent"
-      style={buildHueStyle(look.hue)}
-      role="group"
-      aria-label={`Message from ${sender.label}`}
+      className={agent === undefined ? "msg--me" : "msg--me msg--agent"}
+      style={agent === undefined ? undefined : buildHueStyle(buildSenderLook(agent).hue)}
+      role={agent === undefined ? undefined : "group"}
+      aria-label={agent === undefined ? undefined : `Message from ${agent.label}`}
     >
       <div>
-        <div className="msg-sender">
-          <SenderChip sender={sender} look={look} />
+        {sender === undefined ? null : (
+          <div className="msg-sender">
+            {agent === undefined ? <SenderChipPlaceholder /> : <SenderChip sender={agent} />}
+          </div>
+        )}
+        {attachments.length === 0 ? null : <SentImages attachments={attachments} />}
+        {text === "" ? null : (
+          <div className="bubble">
+            <Markdown text={text} breaks />
+          </div>
+        )}
+        <div className="bubble-meta">
+          {steered ? (time === undefined ? "Steered" : `Steered · ${time}`) : time}
         </div>
-        {content}
       </div>
     </div>
   );

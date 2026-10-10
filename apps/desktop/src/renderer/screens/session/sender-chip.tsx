@@ -28,21 +28,20 @@ export const buildSenderLook = (sender: SenderReading): Look =>
  * chip is a link to the sender's thread or assistant when it has one, with
  * the focus ring every link has, and plain text when it has none. Its hue
  * comes from the nearest element that sets `--hue`, which the caller sets
- * from `look` so the chip and what it labels share one colour.
+ * from `buildSenderLook(sender)` so the chip and what it labels share one
+ * colour.
  *
  * The face never moves: the sender's state is not what the chip shows, and
  * only the running turn's face moves in a thread.
+ *
+ * A long name ends in an ellipsis and has no tooltip: only a session's title
+ * can be long, and its chip is a link to the thread, which shows the title
+ * in full.
  */
-export function SenderChip({
-  sender,
-  look,
-}: {
-  readonly sender: SenderReading;
-  readonly look: Look;
-}): JSX.Element {
+export function SenderChip({ sender }: { readonly sender: SenderReading }): JSX.Element {
   const content = (
     <>
-      <Face look={look} pose="idle" size={SENDER_FACE_SIZE} />
+      <Face look={buildSenderLook(sender)} pose="idle" size={SENDER_FACE_SIZE} />
       <span className="sender-chip-name">{sender.name}</span>
     </>
   );
@@ -54,7 +53,6 @@ export function SenderChip({
           to="/threads/$sessionId"
           params={{ sessionId: link.sessionId }}
           className="sender-chip"
-          title={sender.name}
         >
           {content}
         </Link>
@@ -65,16 +63,20 @@ export function SenderChip({
           to="/assistants/$assistantId"
           params={{ assistantId: link.assistantId }}
           className="sender-chip"
-          title={sender.name}
         >
           {content}
         </Link>
       );
     case "none":
-      return (
-        <span className="sender-chip" title={sender.name}>
-          {content}
-        </span>
-      );
+      return <span className="sender-chip">{content}</span>;
   }
+}
+
+/**
+ * Renders the empty place of a sender chip while its sender is still read:
+ * the size of the chip's face, so nothing beside it moves when the chip
+ * arrives.
+ */
+export function SenderChipPlaceholder(): JSX.Element {
+  return <span style={{ width: SENDER_FACE_SIZE, height: SENDER_FACE_SIZE }} />;
 }
