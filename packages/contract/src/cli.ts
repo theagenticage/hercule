@@ -677,7 +677,7 @@ export const CLI = {
   },
   "signal.raise": {
     command: "signal raise",
-    help: "Puts a proposal, an offer, an unsure item or an FYI on the user's Intake. A proposal carries the task it proposes in --task and takes no actions; the user's Accept creates the task. An action runs one operation as the user when the user takes it: task.create, task.update or run.start, with the operation's whole input as one object, ids included. Returns the signal's id.",
+    help: "Puts a proposal, an offer, an unsure item or an FYI on the user's Intake. A proposal carries the task it proposes in --task and takes no actions; the user's Accept creates the task. An action runs one operation as the user when the user takes it: task.create, task.update, run.start, or a plugin action that may answer a signal, such as github/pr.merge. Its input is the operation's whole input as one object, ids included. Returns the signal's id.",
     examples: [
       {
         args: [
@@ -730,7 +730,7 @@ export const CLI = {
       },
       actions: {
         flag: "action",
-        help: 'A JSON action: id, label, optional description and primary, and operation, {"op":"<operation>","input":{...}} or null to run nothing. Repeat it for each action.',
+        help: 'A JSON action: id, label, optional description and primary, and operation, {"op":"<operation>","input":{...}} or null to run nothing. A plugin action that declares a Connection type also needs the Connection\'s id as "connectionId" in operation, beside input. Add "field":{"name":"<input field>","placeholder":"..."} to make it a typed reply: the user\'s text fills that top-level text field of input. The ids accept, dismiss, done and hand-to-... are the core\'s. Repeat it for each action.',
       },
       task: {
         flag: "task",
