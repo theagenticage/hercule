@@ -105,12 +105,18 @@ const describeOpenRequest = (
   }
 };
 
-/** Lists every path as its own `marked` part, separated by commas. */
+/**
+ * Lists every path as its own `marked` part, separated by commas. A request
+ * may name no path, such as a listing of the whole workspace, and then the
+ * list reads "files" so the sentence around it stays whole.
+ */
 const listPaths = (paths: ReadonlyArray<string>): DescribeLine =>
-  joinParts(
-    paths.map((path) => [buildMarkedPart(path)]),
-    ", ",
-  );
+  paths.length === 0
+    ? [buildTextPart("files")]
+    : joinParts(
+        paths.map((path) => [buildMarkedPart(path)]),
+        ", ",
+      );
 
 /**
  * Returns the describe line of one approval answer, in the words of the

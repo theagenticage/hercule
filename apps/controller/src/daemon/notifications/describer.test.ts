@@ -423,6 +423,13 @@ describe("session.respondToApprovalRequest", () => {
           decisions: ["allow", "deny"],
           detail: { paths: ["a.ts", "b.ts"] },
         });
+        const listing = yield* insertSession("No paths", {
+          requestId: "req-3",
+          itemId: "item-3",
+          kind: "file_read_approval",
+          decisions: ["allow", "deny"],
+          detail: { paths: [] },
+        });
         const answeredElsewhere = yield* insertSession(
           "Moved on",
           buildCommandRequest("req-2", "ls"),
@@ -431,6 +438,10 @@ describe("session.respondToApprovalRequest", () => {
           files: yield* describeOperation({
             op: "session.respondToApprovalRequest",
             input: { sessionId: changing, requestId: "req-1", decision: "allow" },
+          }),
+          noPaths: yield* describeOperation({
+            op: "session.respondToApprovalRequest",
+            input: { sessionId: listing, requestId: "req-3", decision: "allow" },
           }),
           otherRequest: yield* describeOperation({
             op: "session.respondToApprovalRequest",
@@ -452,6 +463,15 @@ describe("session.respondToApprovalRequest", () => {
       marked("b.ts"),
       text(" once in session "),
       marked("Two files"),
+    ]);
+    // A request that names no path, such as a listing of the workspace,
+    // still reads as a whole sentence.
+    expect(lines.noPaths).toEqual([
+      text("Allow "),
+      text("the read of "),
+      text("files"),
+      text(" once in session "),
+      marked("No paths"),
     ]);
     expect(lines.otherRequest).toEqual([
       text("Allow "),
