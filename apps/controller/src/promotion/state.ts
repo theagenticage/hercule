@@ -280,9 +280,11 @@ export class PromotionState extends Context.Service<
     ) => Effect.Effect<Seal, InvalidState | ControllerSealed | SqlError | SecretNameError>;
 
     /**
-     * Loads the seal at boot. With `forceUnseal`, deletes it instead and logs
-     * that this machine serves again, which is disaster recovery: the machine
-     * the data moved to may still be serving under the same identity.
+     * Loads the seal at boot, and logs that this controller is sealed and
+     * where it moved, so a restart never looks like a healthy boot. With
+     * `forceUnseal`, deletes the seal instead and logs that this machine
+     * serves again, which is disaster recovery: the machine the data moved
+     * to may still be serving under the same identity.
      *
      * A controller restored sealed keeps a writable database until its boot
      * is done, because the boot steps after this one write. `serve` then
@@ -588,6 +590,11 @@ export const PromotionStateLayer: Layer.Layer<
               return;
             }
             yield* setPhase({ _tag: "Sealed", seal: stored.value });
+            yield* Effect.logWarning(
+              `This controller is sealed: it has moved to ${stored.value.newAddress}, and answers ` +
+                "every request with that address. To serve from this machine again, for disaster " +
+                "recovery only, start it with `hercule serve --force-unseal`.",
+            );
           }),
         ),
     });
