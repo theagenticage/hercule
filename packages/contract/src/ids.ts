@@ -58,23 +58,10 @@ export type NullableActor = Schema.Schema.Type<typeof NullableActor>;
  * plugin id, so the word holds no `/`. An operation id (`task.create`) never
  * matches, because it holds no `/` at all.
  */
-export const QualifiedId = Schema.String.check(
-  Schema.isPattern(/^[a-z0-9]+(-[a-z0-9]+)*\/[^/]+$/, {
-    title: "qualified id",
-    description: "`<pluginId>/<word>`, such as github/pr.merge",
-  }),
-);
+const QUALIFIED_ID_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*\/[^/]+$/;
 
-export type QualifiedId = Schema.Schema.Type<typeof QualifiedId>;
-
-const matchesQualifiedId = Schema.is(QualifiedId);
-
-/**
- * Checks that `id` is a qualified id. It returns a plain boolean, not a type
- * guard: `QualifiedId` is a plain string at the type level, so a guard would
- * leave the other branch typed `never`.
- */
-export const isQualifiedId = (id: string): boolean => matchesQualifiedId(id);
+/** Checks whether `id` is a qualified id, such as `github/pr.merge`. */
+export const isQualifiedId = (id: string): boolean => QUALIFIED_ID_PATTERN.test(id);
 
 /** The longest External Ref. It is an identity, not a document. */
 export const MAX_EXTERNAL_REF_LENGTH = 512;

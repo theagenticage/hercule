@@ -35,6 +35,7 @@ import { atMost, bounded } from "../strings";
 import { EventId } from "./event";
 import {
   BoundAction,
+  countJsonBytes,
   DescribeLine,
   MAX_ACTION_ID_LENGTH,
   MAX_BOUND_INPUT_BYTES,
@@ -97,10 +98,27 @@ export const MAX_BLOCK_NAME_LENGTH = 256;
 export const MAX_BLOCK_URL_LENGTH = 2048;
 
 /**
- * The longest typed reply, in characters. The reply goes into a bound input,
- * which holds at most this many bytes.
+ * The longest typed reply, in characters. The reply fills a field of the
+ * action's bound input, so when the action is taken the core also checks that
+ * the filled input still fits in `MAX_BOUND_INPUT_BYTES` of JSON. A character
+ * can take more than one byte, so a reply under this limit can still be
+ * refused there.
  */
-export const MAX_SIGNAL_REPLY_LENGTH = MAX_BOUND_INPUT_BYTES;
+export const MAX_SIGNAL_REPLY_LENGTH = 16 * 1024;
+
+/**
+ * The longest outcome, the one line the Done list shows. It holds "Accepted "
+ * and the longest task title. A plugin action's longer outcome line is cut to
+ * this length, because the action has already run when the line is written.
+ */
+export const MAX_SIGNAL_OUTCOME_LENGTH = 1024;
+
+/**
+ * The most bytes one raised signal may take once written as JSON. Each field
+ * has its own limit, but together they still allow megabytes, and every open
+ * signal is read each time To do loads.
+ */
+export const MAX_SIGNAL_BYTES = 256 * 1024;
 
 /**
  * The kinds the core owns. They are not prefixed. `signal.raise` raises these
@@ -125,6 +143,29 @@ export const isCoreSignalKind = (kind: string): kind is CoreSignalKind =>
  * to `fyi`, and nobody else may use the id.
  */
 export const DONE_ACTION_ID = "done";
+
+/** The id of the core's Accept action on a proposal, which creates the proposal's `task`. */
+export const ACCEPT_ACTION_ID = "accept";
+
+/** The id of the core's Dismiss action on a proposal or an offer. */
+export const DISMISS_ACTION_ID = "dismiss";
+
+/**
+ * The start of the id of each Hand to action the core adds to an offer, an
+ * `unsure` or an `fyi`: `hand-to-` and the id of the workflow it starts.
+ */
+export const HAND_TO_ACTION_PREFIX = "hand-to-";
+
+/**
+ * Checks whether an action id belongs to an action only the core adds:
+ * Accept, Dismiss, Done, or a Hand to action. A raiser may not use one, so
+ * clients and the core can tell the core's actions apart by their ids.
+ */
+const isCoreActionId = (id: string): boolean =>
+  id === ACCEPT_ACTION_ID ||
+  id === DISMISS_ACTION_ID ||
+  id === DONE_ACTION_ID ||
+  id.startsWith(HAND_TO_ACTION_PREFIX);
 
 /**
  * A signal's kind: a core kind, which is one lowercase word, or a plugin's
@@ -358,7 +399,7 @@ export const SignalResolution = Schema.Struct({
   kind: Schema.Literals(["decided", "withdrawn"]),
   actionId: Schema.optionalKey(Schema.String),
   eventId: Schema.optionalKey(EventId),
-  outcome: Schema.String,
+  outcome: Schema.String.check(Schema.isMaxLength(MAX_SIGNAL_OUTCOME_LENGTH)),
   actor: Actor,
   origin: ResolutionOrigin,
   at: Timestamp,
@@ -379,6 +420,11 @@ export const SignalSnooze = Schema.Struct({ until: Timestamp, snoozedAt: Timesta
 
 export type SignalSnooze = Schema.Schema.Type<typeof SignalSnooze>;
 
+/**
+ * A signal as a read returns it: what is asked of the user, where it came
+ * from, its body, the actions the user may take, and, once it is resolved,
+ * how.
+ */
 export const Signal = Schema.Struct({
   id: Id,
   kind: SignalKind,
@@ -433,7 +479,11 @@ export type SignalFilter = Schema.Schema.Type<typeof SignalFilter>;
  * - a `proposal` without `task`, or with actions of its own, because a
  *   proposal's actions are the core's Accept and Dismiss;
  * - `task` on any other kind, which nothing would create;
- * - an action with the id `done`, which belongs to the core's Done.
+ * - a `task` larger than `MAX_BOUND_INPUT_BYTES` of JSON, because Accept
+ *   binds the task as its input;
+ * - an action with an id only the core uses: `accept`, `dismiss`, `done`, or
+ *   one that starts with `hand-to-`;
+ * - a signal larger than `MAX_SIGNAL_BYTES` of JSON.
  */
 export const SignalRaiseInput = Schema.Struct({
   kind: Schema.String.check(
@@ -464,11 +514,11 @@ export const SignalRaiseInput = Schema.Struct({
       refuseAmbiguousActions,
       Schema.makeFilter((actions: ReadonlyArray<BoundAction>) =>
         actions.flatMap((action, index) =>
-          action.id === DONE_ACTION_ID
+          isCoreActionId(action.id)
             ? [
                 {
                   path: [index, "id"],
-                  issue: `The id ${DONE_ACTION_ID} belongs to the core's Done action. Give your action another id.`,
+                  issue: `The id ${action.id} belongs to an action the core adds. Give your action another id: not ${ACCEPT_ACTION_ID}, ${DISMISS_ACTION_ID} or ${DONE_ACTION_ID}, and not one that starts with ${HAND_TO_ACTION_PREFIX}.`,
                 },
               ]
             : [],
@@ -494,6 +544,12 @@ export const SignalRaiseInput = Schema.Struct({
             "A proposal takes no actions of its own: the core adds Accept and Dismiss. Leave out actions, or raise an offer instead.",
         };
       }
+      if (countJsonBytes(input.task) > MAX_BOUND_INPUT_BYTES) {
+        return {
+          path: ["task"],
+          issue: `The task is larger than ${MAX_BOUND_INPUT_BYTES} bytes of JSON, and Accept binds it as its input. Shorten the description, or put the details in a block.`,
+        };
+      }
       return undefined;
     }
     return input.task === undefined
@@ -503,6 +559,11 @@ export const SignalRaiseInput = Schema.Struct({
           issue: `Only a proposal carries task. Leave out task, or raise a proposal instead of ${input.kind}.`,
         };
   }),
+  Schema.makeFilter((input) =>
+    countJsonBytes(input) <= MAX_SIGNAL_BYTES
+      ? undefined
+      : `The signal is larger than ${MAX_SIGNAL_BYTES} bytes of JSON. Shorten its blocks, and link to the source for the rest.`,
+  ),
 );
 
 export type SignalRaiseInput = Schema.Schema.Type<typeof SignalRaiseInput>;
@@ -539,6 +600,11 @@ export const SignalWithdrawInput = Schema.Struct({
 
 export type SignalWithdrawInput = Schema.Schema.Type<typeof SignalWithdrawInput>;
 
+/**
+ * The signal operations: list To do, read one signal, raise a signal, take
+ * one of its actions as the user, and withdraw a signal its raiser no longer
+ * needs answered.
+ */
 export const signal = HttpApiGroup.make("signal")
   .add(
     // The to-do view is not paged: every client counts the whole list.

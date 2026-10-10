@@ -58,8 +58,12 @@ export const MAX_NOTIFICATION_ACTIONS = 16;
 /** The longest answer id. */
 export const MAX_ACTION_ID_LENGTH = 64;
 
-/** The longest answer label. A label is a button's text. */
-export const MAX_ACTION_LABEL_LENGTH = 128;
+/**
+ * The longest answer label. A label is a button's text. The limit leaves room
+ * for the label the core writes on a signal's Hand to action: "Hand to " and
+ * a workflow name of up to 128 characters.
+ */
+export const MAX_ACTION_LABEL_LENGTH = 160;
 
 /** The longest answer description. It is fine print under one answer. */
 export const MAX_ACTION_DESCRIPTION_LENGTH = 4 * 1024;
@@ -70,6 +74,13 @@ export const MAX_ACTION_DESCRIPTION_LENGTH = 4 * 1024;
  * ids and a few words, never a document.
  */
 export const MAX_BOUND_INPUT_BYTES = 16 * 1024;
+
+/**
+ * Returns how many bytes `value` takes once written as JSON in UTF-8. A value
+ * that JSON cannot write, such as `undefined`, takes none.
+ */
+export const countJsonBytes = (value: unknown): number =>
+  new TextEncoder().encode(JSON.stringify(value) ?? "").byteLength;
 
 /** The longest name of the input field a typed answer fills in. */
 export const MAX_ACTION_FIELD_NAME_LENGTH = 64;
@@ -203,7 +214,7 @@ export const BoundOperation = Schema.Struct({
   connectionId: Schema.optionalKey(Id),
   input: Schema.Unknown.check(
     Schema.makeFilter((input) =>
-      new TextEncoder().encode(JSON.stringify(input) ?? "").byteLength <= MAX_BOUND_INPUT_BYTES
+      countJsonBytes(input) <= MAX_BOUND_INPUT_BYTES
         ? undefined
         : `The input is larger than ${MAX_BOUND_INPUT_BYTES} bytes of JSON. Bind ids, not documents.`,
     ),

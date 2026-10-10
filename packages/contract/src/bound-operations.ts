@@ -121,6 +121,13 @@ export const listAnswerOperations = <Place extends AnswerPlace>(
     (operation) => operation.id as AnswerOperationId<Place>,
   );
 
+/**
+ * Returns the record an answer in `place` sits on, as the word a message
+ * uses: "signal" or "notification".
+ */
+export const nameAnswerRecord = (place: AnswerPlace): string =>
+  place === "signal.answer" ? "signal" : "notification";
+
 /** Checks whether an operation id lists `place` in its `usableIn`. */
 const isUsableIn = <Place extends AnswerPlace>(
   place: Place,
@@ -147,7 +154,7 @@ export const decodeAnswerOperation = <Place extends AnswerPlace>(
 ): Effect.Effect<AnswerOperation<Place>, Validation> => {
   const { op, input } = operation;
   if (!isUsableIn(place, op)) {
-    const record = place === "signal.answer" ? "signal" : "notification";
+    const record = nameAnswerRecord(place);
     return Effect.fail(
       createValidationError([
         {

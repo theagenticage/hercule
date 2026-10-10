@@ -32,7 +32,7 @@ export { DESKTOP_APP_ORIGIN } from "./desktop-app";
 export {
   decodeAnswerOperation,
   dispatchAnswerOperation,
-  listAnswerOperations,
+  nameAnswerRecord,
   OWN_SESSION_ALIAS,
   type AnswerOperation,
   type AnswerOperationHandlers,
@@ -40,15 +40,10 @@ export {
   type AnswerOperationInput,
 } from "./bound-operations";
 
-// The places an operation may be bound, and the describe line's parts, belong
-// to the plugin API, because a plugin action declares both. The contract
-// passes them on under the same names.
-export {
-  BINDING_PLACES,
-  BindingPlace,
-  DescribeLinePart,
-  type AnswerPlace,
-} from "@hercule/plugin-host";
+// The describe line's parts belong to the plugin API, because a plugin action
+// declares its own describe line. The contract passes them on under the same
+// name.
+export { DescribeLinePart } from "@hercule/plugin-host";
 
 export { CLI, NOUNS, type CliExample, type CliRow, type FieldRow, type NounRow } from "./cli";
 
@@ -126,7 +121,6 @@ export {
   isQualifiedId,
   MAX_EXTERNAL_REF_LENGTH,
   NullableActor,
-  QualifiedId,
   Timestamp,
 } from "./ids";
 
@@ -349,6 +343,7 @@ export {
   BoundAction,
   BoundOperation,
   CORE_KIND_PREFIX,
+  countJsonBytes,
   CORE_NOTIFICATION_KINDS,
   MAX_ACTION_DESCRIPTION_LENGTH,
   MAX_ACTION_FIELD_NAME_LENGTH,
@@ -385,8 +380,11 @@ export {
   ChangeBlock,
   CheckRow,
   ChecksBlock,
+  ACCEPT_ACTION_ID,
   CORE_SIGNAL_KINDS,
+  DISMISS_ACTION_ID,
   DONE_ACTION_ID,
+  HAND_TO_ACTION_PREFIX,
   isCoreSignalKind,
   KNOWN_BLOCK_TYPES,
   KnownBlock,
@@ -401,8 +399,10 @@ export {
   MAX_MESSAGE_TEXT_LENGTH,
   MAX_SIGNAL_ASKER_LENGTH,
   MAX_SIGNAL_BLOCKS,
+  MAX_SIGNAL_BYTES,
   MAX_SIGNAL_EVENT_IDS,
   MAX_SIGNAL_KIND_LENGTH,
+  MAX_SIGNAL_OUTCOME_LENGTH,
   MAX_SIGNAL_PLACE_LENGTH,
   MAX_SIGNAL_REASON_LENGTH,
   MAX_SIGNAL_REPLY_LENGTH,

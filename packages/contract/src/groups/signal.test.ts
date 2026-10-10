@@ -1,9 +1,12 @@
 import { Cause, Exit, Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { listDecodeIssues } from "../errors";
+import { MAX_BOUND_INPUT_BYTES } from "./notification";
 import {
   Block,
   MAX_CHECK_LOG_LINES,
+  MAX_SIGNAL_BLOCKS,
+  MAX_SIGNAL_BYTES,
   MAX_TEXT_BLOCK_LENGTH,
   SignalActInput,
   SignalRaiseInput,
@@ -123,12 +126,38 @@ describe("raising a signal", () => {
     ]);
   });
 
-  it("refuses an action with the id done, which belongs to the core", () => {
-    const actions = [{ id: "done", label: "Done", operation: null }];
-    expect(listIssues(SignalRaiseInput, { ...FYI, kind: "offer", actions })).toEqual([
+  it("refuses an action with an id only the core uses", () => {
+    const actions = ["done", "accept", "dismiss", "hand-to-mine"].map((id) => ({
+      id,
+      label: `Label of ${id}`,
+      operation: null,
+    }));
+    expect(
+      listIssues(SignalRaiseInput, { ...FYI, kind: "offer", actions }).map((issue) => issue.path),
+    ).toEqual([
+      ["actions", "0", "id"],
+      ["actions", "1", "id"],
+      ["actions", "2", "id"],
+      ["actions", "3", "id"],
+    ]);
+  });
+
+  it("refuses a proposal whose task is larger than Accept may bind", () => {
+    const task = { title: "Fix it", description: "x".repeat(MAX_BOUND_INPUT_BYTES) };
+    expect(
+      listIssues(SignalRaiseInput, { ...FYI, kind: "proposal", task }).map((issue) => issue.path),
+    ).toEqual([["task"]]);
+  });
+
+  it("refuses a signal larger than a signal may be, even when each block fits", () => {
+    const blocks = Array.from({ length: MAX_SIGNAL_BLOCKS }, () => ({
+      type: "text",
+      markdown: "x".repeat(MAX_TEXT_BLOCK_LENGTH),
+    }));
+    expect(listIssues(SignalRaiseInput, { ...FYI, blocks })).toEqual([
       {
-        path: ["actions", "0", "id"],
-        message: "The id done belongs to the core's Done action. Give your action another id.",
+        path: [],
+        message: `The signal is larger than ${MAX_SIGNAL_BYTES} bytes of JSON. Shorten its blocks, and link to the source for the rest.`,
       },
     ]);
   });
