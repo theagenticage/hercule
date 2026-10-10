@@ -521,6 +521,7 @@ export { buildWorkspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu
 export { buildThreadWorkspaceLabel } from "./threads/thread-workspace";
 export { buildWorkspaceDetails, type WorkspaceDetails } from "./workspace-details";
 export { describePending, describeWorkStretch, summarizeWork } from "./threads/work-summary";
+export { buildWorkRows, type WorkRow, type WorkRowIcon } from "./threads/work-rows";
 export {
   describeRemoteRefusal,
   isClonableRemote,

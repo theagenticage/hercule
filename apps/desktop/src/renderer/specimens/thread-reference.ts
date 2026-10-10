@@ -14,9 +14,8 @@
  *    second message, which are not built yet, and the 14px space above the
  *    message's paragraph, which only separated it from them;
  * 3. sets each divider's summary to the fixture's words: the summary counts
- *    items by kind, and no item kind says that a tool read a file, so the
- *    book's "read 6 files" is "used 6 tools" (spec 17 §Design system, The
- *    thread);
+ *    items by kind and never names a command, so the book's "ran pnpm test
+ *    checkout" is "ran 1 command" (spec 17 §Design system, The thread);
  * 4. sets the dock's question and its answers' labels and descriptions to
  *    client-core's words, which no screen may reword (spec 17 §Design
  *    system, The thread);

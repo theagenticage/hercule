@@ -88,40 +88,70 @@ const readItemVerb = (kind: ItemKind): string => VERBS[kind] ?? "unknown";
 const MAX_TARGET_LENGTH = 200;
 
 /**
- * Returns the field of an item's `detail` that is worth showing in a row: the
- * command a shell item ran, the path a file item changed, what a web search
- * searched for, or a tool call's description. Returns `undefined` when none
- * of these is present, and the caller then shows the raw JSON. Each provider
- * adapter shapes `detail` its own way, so every field is optional (spec 06
- * §6.3).
+ * The field of an item's `detail` that is worth showing in a row, as it is
+ * found (any JSON value), and whether it is code: a command, a path or a
+ * search pattern is code; a query or a description is words.
  */
-const findDetailText = (detail: Record<string, unknown>): string | undefined => {
+interface DetailField {
+  readonly value: unknown;
+  readonly isCode: boolean;
+}
+
+/**
+ * Returns the field of an item's `detail` that is worth showing in a row: the
+ * command a shell item ran, the path a file item changed or read, the pattern
+ * a file search looked for, what a web search searched for, or a tool call's
+ * description. The first of these that is present wins, even when it is not a
+ * string. Returns `undefined` when none is present. Each provider adapter
+ * shapes `detail` its own way, so every field is optional (spec 06 §6.3).
+ */
+const findDetailField = (detail: Record<string, unknown>): DetailField | undefined => {
   const input = readJsonObject(detail.input);
-  const candidate =
-    input?.command ??
-    detail.command ??
-    input?.file_path ??
-    detail.path ??
-    input?.query ??
-    input?.description ??
-    detail.description ??
-    detail.name;
-  return typeof candidate === "string" ? candidate : undefined;
+  const code =
+    input?.command ?? detail.command ?? input?.file_path ?? detail.pattern ?? detail.path;
+  if (code !== undefined && code !== null) return { value: code, isCode: true };
+  const words = input?.query ?? input?.description ?? detail.description;
+  return words === undefined || words === null ? undefined : { value: words, isCode: false };
+};
+
+/** Returns the first line of `text`, cut to `MAX_TARGET_LENGTH` with an ellipsis. */
+const cutToTargetLine = (text: string): string => {
+  const line = text.split("\n")[0] ?? "";
+  return line.length > MAX_TARGET_LENGTH ? `${line.slice(0, MAX_TARGET_LENGTH)}…` : line;
 };
 
 /**
  * Returns a one-line summary of an item's `detail`, truncated to
- * `MAX_TARGET_LENGTH`. A string is used as it is; any other value is
- * summarized by `findDetailText`, or else shown as compact JSON.
+ * `MAX_TARGET_LENGTH`. A string is used as it is. Any other value is
+ * summarized by the field `findDetailField` finds, else by the tool's `name`;
+ * when that value is not a string, the detail is shown as compact JSON.
  */
 const summarizeDetail = (detail: unknown): string => {
   if (detail === undefined || detail === null) return "";
-  const text =
-    typeof detail === "string"
-      ? detail
-      : (findDetailText(readJsonObject(detail) ?? {}) ?? JSON.stringify(detail));
-  const line = text.split("\n")[0] ?? "";
-  return line.length > MAX_TARGET_LENGTH ? `${line.slice(0, MAX_TARGET_LENGTH)}…` : line;
+  if (typeof detail === "string") return cutToTargetLine(detail);
+  const object = readJsonObject(detail) ?? {};
+  const value = findDetailField(object)?.value ?? object.name;
+  return cutToTargetLine(typeof value === "string" ? value : JSON.stringify(detail));
+};
+
+/** What a tool call acted on, in one line, and whether that is code. */
+export interface ToolCallTarget {
+  readonly text: string;
+  readonly isCode: boolean;
+}
+
+/**
+ * Returns what a tool call acted on, in one line cut to `MAX_TARGET_LENGTH`:
+ * the field `findDetailField` finds in its `detail`, when that is a string.
+ * Returns an empty text otherwise. Unlike `summarizeDetail`, it never falls
+ * back to the tool's name or the JSON, because the desktop's row already
+ * shows the name as its label.
+ */
+export const describeToolCallTarget = (detail: unknown): ToolCallTarget => {
+  const field = findDetailField(readJsonObject(detail) ?? {});
+  return typeof field?.value === "string"
+    ? { text: cutToTargetLine(field.value), isCode: field.isCode }
+    : { text: "", isCode: false };
 };
 
 /**

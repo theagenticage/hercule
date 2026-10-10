@@ -18,6 +18,7 @@
  */
 import { memo, type JSX } from "react";
 import {
+  buildWorkRows,
   describeMessageMeta,
   describePending,
   describeTurnEnding,
@@ -29,11 +30,13 @@ import {
   type WorkBlock,
 } from "@hercule/client-core";
 import { useAgeLabel, useDurationText } from "../../app/age-clock";
+import { ChevronRightIcon } from "../../icons/chevron-right";
 import type { Look } from "../../faces";
 import { Mark } from "../../marks";
 import { Markdown } from "../session/markdown";
 import { AgentFace, formatBlockTime, OpenMessageText } from "../session/messages";
 import type { AttachOpenParagraph } from "../session/use-session-live";
+import { WorkRowList } from "./work-rows";
 
 /**
  * Renders a message the agent wrote: the face, then the meta line "Claude
@@ -151,13 +154,17 @@ export const PendingLine = memo(function PendingLine({
 
 /**
  * Renders a work stretch's divider: "Worked for 2m 14s ›" and the summary,
- * such as "ran 2 commands", as a button that expands the list of the
- * stretch's items below it.
+ * such as "ran 2 commands", as a button that expands the stretch's rows
+ * below it (see `WorkRowList`).
  *
  * A stretch that still runs reads "Working for 12s ›" and counts on the age
- * clock while it is `onScreen`. `expanded` and `onToggle` belong to the
- * transcript, so a stretch stays open while it scrolls out of the mounted
- * range and back.
+ * clock while it is `onScreen`. `openKeys` holds the keys of the open
+ * stretches and rows, and `onToggle` opens or closes the one with the key it
+ * is passed. Both belong to the transcript, so a stretch and its rows stay
+ * open while they scroll out of the mounted range and back.
+ *
+ * The rows are built only while the stretch is expanded, so a collapsed
+ * stretch does no work for them.
  *
  * The button's name is its whole text, the summary included, with commas
  * where the book puts a gap and without the chevron, which a screen reader
@@ -166,18 +173,23 @@ export const PendingLine = memo(function PendingLine({
 export const WorkDivider = memo(function WorkDivider({
   block,
   onScreen,
-  expanded,
+  openKeys,
   onToggle,
+  timezone,
+  today,
 }: {
   readonly block: WorkBlock;
   readonly onScreen: boolean;
-  readonly expanded: boolean;
+  readonly openKeys: ReadonlySet<string>;
   readonly onToggle: (key: string) => void;
+  readonly timezone: string;
+  readonly today: number;
 }): JSX.Element {
   const label = useDurationText(block.startedAt, block.endedAt === null && onScreen, (now) =>
     describeWorkStretch(block, now),
   );
   const summary = summarizeWork(block.items);
+  const expanded = openKeys.has(block.key);
   return (
     <>
       <button
@@ -192,13 +204,14 @@ export const WorkDivider = memo(function WorkDivider({
         {/* Shut, the label and its chevron are one text, as in the book: the
             browser rounds the width of each piece of text on its own, so a
             chevron of its own would move the summary by 1/128 px, which
-            changes how its letters are drawn. Open, the chevron is a box of
-            its own, so that it can turn to point down. */}
+            changes how its letters are drawn. Open, the chevron is the
+            chevron icon turned to point down: the "›" glyph, turned, shrinks
+            to a speck. */}
         {expanded ? (
           <b>
             {`${label} `}
-            <span aria-hidden="true" className="chevron">
-              ›
+            <span className="chevron">
+              <ChevronRightIcon size={12} />
             </span>
           </b>
         ) : (
@@ -211,21 +224,13 @@ export const WorkDivider = memo(function WorkDivider({
         </span>
       </button>
       {expanded ? (
-        <ul className="worked-items">
-          {block.items.map((item) => (
-            <li key={item.itemId}>
-              {item.verb}
-              {/* A target the item did not report is left out with its separator. */}
-              {item.target === "" ? null : (
-                <>
-                  {" · "}
-                  <code>{item.target}</code>
-                </>
-              )}
-              {` · ${item.result}`}
-            </li>
-          ))}
-        </ul>
+        <WorkRowList
+          rows={buildWorkRows(block.items)}
+          openKeys={openKeys}
+          onToggle={onToggle}
+          timezone={timezone}
+          today={today}
+        />
       ) : null}
     </>
   );

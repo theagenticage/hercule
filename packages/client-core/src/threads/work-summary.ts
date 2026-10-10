@@ -1,8 +1,7 @@
 /**
  * The words on a work stretch's divider in the desktop thread: "Worked for
  * 2m 14s" and a summary such as "ran 2 commands", "edited 3 files". The
- * divider's expanded list shows each item's verb, target and result, which
- * the `WorkItem`s already hold.
+ * divider's expanded list is `buildWorkRows`.
  */
 import type { WorkBlock, WorkItem } from "./blocks";
 import { formatDuration } from "./duration";
@@ -10,7 +9,7 @@ import { formatDuration } from "./duration";
 type ItemKind = WorkItem["kind"];
 
 /** Returns `count` followed by `noun`, with an "s" when the count is not one. */
-const formatCount = (count: number, noun: string): string =>
+export const formatCount = (count: number, noun: string): string =>
   `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 /**
@@ -21,6 +20,8 @@ const formatCount = (count: number, noun: string): string =>
 const PHRASES: Partial<Record<ItemKind, (count: number) => string>> = {
   command_execution: (count) => `ran ${formatCount(count, "command")}`,
   file_change: (count) => `edited ${formatCount(count, "file")}`,
+  file_read: (count) => `read ${formatCount(count, "file")}`,
+  file_search: (count) => (count === 1 ? "searched once" : `searched ${count} times`),
   web_search: (count) => (count === 1 ? "searched the web" : `searched the web ${count} times`),
   tool_call: (count) => `used ${formatCount(count, "tool")}`,
   subagent: (count) => `ran ${formatCount(count, "subagent")}`,
@@ -31,28 +32,43 @@ const PHRASES: Partial<Record<ItemKind, (count: number) => string>> = {
   unknown: (count) => `did ${formatCount(count, "other step")}`,
 };
 
+/** The kinds whose summary counts distinct files rather than items (`countDistinctFiles`). */
+const FILE_KINDS: ReadonlySet<ItemKind> = new Set(["file_change", "file_read"]);
+
+/**
+ * Returns how many files `items` name: the distinct paths their details name,
+ * plus one per item that names none. Two edits to one file count as one
+ * file. The caller passes items of one kind, so edits and reads of one file
+ * are not counted together.
+ */
+export const countDistinctFiles = (items: readonly WorkItem[]): number => {
+  const paths = new Set<string>();
+  let unnamed = 0;
+  for (const item of items) {
+    if (item.paths.length === 0) unnamed += 1;
+    for (const path of item.paths) paths.add(path);
+  }
+  return paths.size + unnamed;
+};
+
 /**
  * Returns the summary of a stretch's items: one phrase per item kind, such as
  * "ran 2 commands", in the order each kind first appears. Reasoning is left
- * out. File changes count distinct files: the paths their details name, plus
- * one per change that names none, so two edits to one file read "edited 1
- * file".
+ * out. File changes and file reads count distinct files
+ * (`countDistinctFiles`), so two edits to one file read "edited 1 file".
  */
 export const summarizeWork = (items: readonly WorkItem[]): readonly string[] => {
   // A Map keeps its keys in insertion order, which is the order of first appearance.
-  const counts = new Map<ItemKind, number>();
-  const paths = new Set<string>();
+  const itemsByKind = new Map<ItemKind, WorkItem[]>();
   for (const item of items) {
     if (PHRASES[item.kind] === undefined) continue;
-    let added = 1;
-    if (item.kind === "file_change" && item.paths.length > 0) {
-      const before = paths.size;
-      for (const path of item.paths) paths.add(path);
-      added = paths.size - before;
-    }
-    counts.set(item.kind, (counts.get(item.kind) ?? 0) + added);
+    const ofKind = itemsByKind.get(item.kind);
+    if (ofKind === undefined) itemsByKind.set(item.kind, [item]);
+    else ofKind.push(item);
   }
-  return [...counts].map(([kind, count]) => PHRASES[kind]!(count));
+  return [...itemsByKind].map(([kind, ofKind]) =>
+    PHRASES[kind]!(FILE_KINDS.has(kind) ? countDistinctFiles(ofKind) : ofKind.length),
+  );
 };
 
 /**
