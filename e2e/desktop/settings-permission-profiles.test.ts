@@ -80,7 +80,7 @@ describe("Settings > Permission profiles", () => {
     expect(created.grants).toEqual([]);
     expect(created.shipped).toBe(false);
     const grantsHeading = page.getByRole("heading", { level: 2, name: /^Grants/ });
-    expect(await grantsHeading.textContent()).toBe("Grants0 of 42");
+    expect(await grantsHeading.textContent()).toBe("Grants0 of 44");
 
     // A grant saves when its verb is pressed.
     const read = findTasksReadButton(page);
@@ -90,18 +90,18 @@ describe("Settings > Permission profiles", () => {
       .poll(async () => (await readProfileByName(client, "New profile"))!.grants)
       .toEqual(["task.read"]);
     await expect.poll(() => read.getAttribute("aria-pressed")).toBe("true");
-    await expect.poll(() => grantsHeading.textContent()).toBe("Grants1 of 42");
+    await expect.poll(() => grantsHeading.textContent()).toBe("Grants1 of 44");
 
     // Back on the list, the count follows. Opening the page again reads the
     // saved profile: the verb is still pressed.
     await page.locator(".bar").getByRole("link", { name: "Permission profiles" }).click();
     await waitForTitle(page, "Permission profiles");
     const row = page.getByRole("link", { name: /New profile/ });
-    await expect.poll(() => row.locator(".profile-held").textContent()).toContain("1 of 42");
+    await expect.poll(() => row.locator(".profile-held").textContent()).toContain("1 of 44");
     await row.click();
     await waitForTitle(page, "New profile");
     await expect.poll(() => findTasksReadButton(page).getAttribute("aria-pressed")).toBe("true");
-    expect(await grantsHeading.textContent()).toBe("Grants1 of 42");
+    expect(await grantsHeading.textContent()).toBe("Grants1 of 44");
 
     // The name saves on Enter, and the header follows it.
     const name = page.getByRole("textbox", { name: "Name" });
