@@ -23,8 +23,9 @@ import {
   redirect,
   type ParsedLocation,
   type RegisteredRouter,
+  type ResolveParams,
 } from "@tanstack/react-router";
-import { isId } from "@hercule/contract";
+import { isId, isSubagentId } from "@hercule/contract";
 import type { Appearance } from "../../ipc/contract";
 import type { FileRouteTypes } from "../routeTree.gen";
 
@@ -33,6 +34,25 @@ const SHELL_ROUTE_ID = "/_connected/_shell" satisfies FileRouteTypes["id"];
 
 /** The id of Settings' layout route, whose screens do not count. */
 const SETTINGS_ROUTE_ID = "/_connected/_shell/settings" satisfies FileRouteTypes["id"];
+
+/**
+ * The name of each param in the path of a counted screen. Settings' screens
+ * are left out, because they are never stored.
+ */
+type ScreenParamName<Path = Exclude<FileRouteTypes["fullPaths"], `/settings${string}`>> =
+  Path extends string ? keyof ResolveParams<Path> : never;
+
+/**
+ * The check each param of a stored path must pass before the path is opened.
+ * A path is ordinary text in `localStorage`, so its ids may be corrupted, and
+ * the client refuses a malformed id only after a few seconds of retries. A
+ * screen added later with a new param fails the typecheck until it has a check.
+ */
+const SCREEN_PARAM_CHECKS = {
+  sessionId: isId,
+  assistantId: isId,
+  subagentId: isSubagentId,
+} satisfies Record<ScreenParamName, (value: string) => boolean>;
 
 /** Returns the `localStorage` key that holds the last screen for `controllerUrl`. */
 const buildStorageKey = (controllerUrl: string): string => `last-screen:${controllerUrl}`;
@@ -77,9 +97,18 @@ const isOpenedAtLaunch = (location: Pick<ParsedLocation, "state">): boolean =>
   "openedAtLaunch" in location.state && location.state.openedAtLaunch === true;
 
 /**
- * Checks whether `path` leads to a counted screen of `router`. A path that
- * leads nowhere, such as one a newer build wrote for a screen this build
- * does not have, does not.
+ * Checks whether the router went from `from` to `to` by going back or
+ * forward through its history. Only that changes the history index without
+ * making a new entry: a push makes a new entry, which holds no launch mark,
+ * and a replace or a reload keeps the index.
+ */
+const isHistoryReturn = (from: ParsedLocation | undefined, to: ParsedLocation): boolean =>
+  from !== undefined && from.state.__TSR_index !== to.state.__TSR_index;
+
+/**
+ * Checks whether `path` leads to a counted screen of `router`, with a valid
+ * id for each of the screen's params. A path that leads nowhere, such as one
+ * a newer build wrote for a screen this build does not have, does not.
  */
 const leadsToCountedScreen = (router: RegisteredRouter, path: string): boolean => {
   // The router matches a path with no leading slash, such as `office`, to the
@@ -91,6 +120,10 @@ const leadsToCountedScreen = (router: RegisteredRouter, path: string): boolean =
   // path, so a `**` param always means the path leads nowhere.
   const [routes, params, route] = router.getMatchedRoutes(path);
   if (route === undefined || "**" in params) return false;
+  const checks: Record<string, (value: string) => boolean> = SCREEN_PARAM_CHECKS;
+  if (!Object.entries(params).every(([name, value]) => checks[name]?.(value) === true)) {
+    return false;
+  }
   // `getMatchedRoutes` types its routes loosely, but every route's id is a string.
   return countsAsLastScreen(routes.map((matched) => matched.id as string));
 };
@@ -127,14 +160,15 @@ export const openLaunchScreen = (
  * The screen the app opens at launch is not stored again. It is either the
  * stored screen already, or the Office that Open on asked for, and the
  * Office must not replace the stored screen: switching Open on back to
- * Where I left off still reopens that screen.
+ * Where I left off still reopens that screen. Going back to that screen
+ * later is the user's choice, so it is stored then: its history entry still
+ * holds the launch mark, but the arrival is not the launch.
  */
 export const trackLastScreen = (router: RegisteredRouter, controllerUrl: string): void => {
-  router.subscribe("onResolved", () => {
-    const { location, matches } = router.state;
-    if (isOpenedAtLaunch(location)) return;
-    if (countsAsLastScreen(matches.map((match) => match.routeId))) {
-      rememberLastScreen(controllerUrl, location.pathname);
+  router.subscribe("onResolved", ({ fromLocation, toLocation }) => {
+    if (isOpenedAtLaunch(toLocation) && !isHistoryReturn(fromLocation, toLocation)) return;
+    if (countsAsLastScreen(router.state.matches.map((match) => match.routeId))) {
+      rememberLastScreen(controllerUrl, toLocation.pathname);
     }
   });
 };

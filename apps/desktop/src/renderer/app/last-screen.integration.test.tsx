@@ -10,6 +10,7 @@ import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
 import type { Appearance } from "../../ipc/contract";
 import {
   buildSidebarHandlers,
+  FIXTURE_SUBAGENT,
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
@@ -37,13 +38,17 @@ const storeScreen = (path: string, controllerUrl = CONTROLLER_URL): void => {
 };
 
 /**
- * Starts the app with the sidebar fixture and the finished thread's reads,
- * signed in unless `token` is `null`.
+ * Starts the app with the sidebar fixture and the reads of `threadRecords`,
+ * the finished thread unless given, signed in unless `token` is `null`.
  */
-const launch = (openOn: Appearance["openOn"] = "lastScreen", token: string | null = "bearer") => {
+const launch = (
+  openOn: Appearance["openOn"] = "lastScreen",
+  token: string | null = "bearer",
+  threadRecords: Parameters<typeof buildThreadHandlers>[0] = thread,
+) => {
   stubApi({
     ...buildSidebarHandlers(SIDEBAR_FIXTURE),
-    ...buildThreadHandlers(thread),
+    ...buildThreadHandlers(threadRecords),
     "POST /api/v1/auth/login": {
       body: { token: "fresh-bearer", expiresAt: "2026-10-29T12:00:00.000Z" },
     },
@@ -69,6 +74,13 @@ describe("a launch", () => {
     localStorage.setItem(`last-thread:${CONTROLLER_URL}`, thread.session.id);
     const { router } = await launch();
     expect(router.state.location.pathname).toBe(threadPath);
+  });
+
+  it("opens a subagent's page stored as the last screen", async () => {
+    const path = `/threads/${FIXTURE_SUBAGENT.sessionId}/subagents/${FIXTURE_SUBAGENT.id}`;
+    storeScreen(path);
+    const { router } = await launch("lastScreen", "bearer", THREAD_FIXTURES.delegating);
+    expect(router.state.location.pathname).toBe(path);
   });
 
   it.each([
@@ -102,6 +114,9 @@ describe("a launch", () => {
     ["a path that does not start with a slash", "office"],
     ["a relative path", "../settings"],
     ["an empty path", ""],
+    ["a thread whose id is corrupted", "/threads/not-an-id"],
+    ["an assistant whose id is corrupted", "/assistants/not-an-id"],
+    ["a subagent whose id is corrupted", `${threadPath}/subagents/agent:1`],
   ])("opens the new-thread screen when the stored path leads to %s", async (_, path) => {
     storeScreen(path);
     const { router } = await launch();
@@ -112,6 +127,9 @@ describe("a launch", () => {
     storeScreen(threadPath);
     const { router } = await launch("office");
     expect(router.state.location.pathname).toBe("/office");
+    expect(readStoredScreen()).toBe(threadPath);
+    // A reload of the screen keeps its history entry, so it is still the launch.
+    await act(() => router.invalidate());
     expect(readStoredScreen()).toBe(threadPath);
   });
 });
@@ -152,6 +170,24 @@ describe("moving between screens", () => {
     await act(() => router.navigate({ to: "/settings/appearance" }));
     expect(router.state.location.pathname).toBe("/settings/appearance");
     expect(readStoredScreen()).toBe("/office");
+  });
+
+  it("stores the screen the user goes back or forward to, the launch screen included", async () => {
+    storeScreen(threadPath);
+    const { router } = await launch();
+    await act(() => router.navigate({ to: "/office" }));
+    act(() => {
+      router.history.back();
+    });
+    await waitFor(() => {
+      expect(readStoredScreen()).toBe(threadPath);
+    });
+    act(() => {
+      router.history.forward();
+    });
+    await waitFor(() => {
+      expect(readStoredScreen()).toBe("/office");
+    });
   });
 
   it("replaces the thread id an older build stored", async () => {

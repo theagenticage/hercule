@@ -233,6 +233,7 @@ export {
   SpawnWorkspace,
   Subagent,
   SubagentId,
+  isSubagentId,
   SubagentStatus,
   Usage,
   UsageReport,
