@@ -19,8 +19,7 @@ const nameToolResultImage = (index: number): string => `Image ${String(index + 1
 
 /**
  * Renders the images a tool returned, under its step, and the lightbox while
- * one of them is open. `images` is what `readToolResultImages` read from the
- * step's detail.
+ * one of them is open. `images` is the step's `WorkRow.images`.
  *
  * Each stored image is a tile showing its thumbnail, built when the tile
  * first draws, so a step that is never drawn reads nothing. A tile shows its

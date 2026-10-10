@@ -441,7 +441,6 @@ export {
   type ThreadRowEnd,
 } from "./threads/pose";
 export { createTailBuffer } from "./threads/tail-buffer";
-export { readToolResultImages } from "./threads/tool-result-images";
 export { splitStreamingText } from "./threads/streaming-text";
 export { buildStreamCursor, decideStreamDelivery, decideTapDelivery } from "./threads/thread-live";
 export { buildOptionsLabel } from "./threads/options-label";

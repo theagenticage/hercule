@@ -1,9 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { useState, type JSX } from "react";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { WorkRow } from "@hercule/client-core";
 import { WorkRowList } from "./work-rows";
+
+// The tiles read their thumbnails from the controller, which
+// tool-result-images.test.tsx covers; here a stand-in only counts them.
+vi.mock("../attachments/tool-result-images", () => ({
+  ToolResultImages: ({ images }: { readonly images: readonly unknown[] }) => (
+    <div data-testid="tool-result-images">{images.length} images</div>
+  ),
+}));
 
 /** Returns a completed command row with no output, with `fields` laid over it. */
 const buildRow = (fields: Partial<WorkRow> & Pick<WorkRow, "key">): WorkRow => ({
@@ -14,6 +22,7 @@ const buildRow = (fields: Partial<WorkRow> & Pick<WorkRow, "key">): WorkRow => (
   startedAt: "2026-10-10T09:04:00Z",
   result: "completed",
   output: "",
+  images: [],
   steps: [],
   canOpen: false,
   ...fields,
@@ -118,6 +127,33 @@ describe("WorkRowList", () => {
 
     await userEvent.click(row);
     expect(screen.queryByText(/1 pass/)).toBeNull();
+  });
+
+  it("shows a step's images under its output, and no empty box for a step with images only", async () => {
+    const image = {
+      type: "image",
+      attachment: {
+        id: "01a06d02-7700-7000-8000-0000000000c1",
+        mimeType: "image/png",
+        sizeBytes: 4,
+      },
+    } as const;
+    render(
+      <RowsWithOpenKeys
+        rows={[
+          buildRow({ key: "row:s", output: "saved", images: [image], canOpen: true }),
+          buildRow({ key: "row:t", target: "bun shot", images: [image, image], canOpen: true }),
+        ]}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Ran, bun test" }));
+    await userEvent.click(screen.getByRole("button", { name: "Ran, bun shot" }));
+
+    const [withText, imagesOnly] = screen.getAllByRole("listitem");
+    expect(within(withText!).getByText("saved").tagName).toBe("PRE");
+    expect(within(withText!).getByTestId("tool-result-images").textContent).toBe("1 images");
+    expect(imagesOnly!.querySelector("pre")).toBeNull();
+    expect(within(imagesOnly!).getByTestId("tool-result-images").textContent).toBe("2 images");
   });
 
   it("opens a group into its steps, each of which opens on its own", async () => {
