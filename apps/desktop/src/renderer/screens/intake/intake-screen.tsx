@@ -115,6 +115,19 @@ export function IntakeScreen({
   const paneShown = selectedId !== null && !dismissed && fits;
   const listed = signals.find((signal) => signal.id === selectedId);
 
+  // The signal whose pane is sliding out: the pane stays drawn until the
+  // list has widened over it. Only that signal is drawn while the pane is
+  // closed, so moving the selection with the pane closed reads nothing and
+  // loads no image. Under Reduce motion no transition ends, so the id stays
+  // until the selection moves, which draws that same signal and nothing new.
+  const [closingId, setClosingId] = useState<string | null>(null);
+  const [paneShownBefore, setPaneShownBefore] = useState(paneShown);
+  if (paneShown !== paneShownBefore) {
+    setPaneShownBefore(paneShown);
+    setClosingId(paneShown ? null : selectedId);
+  }
+  const paneDrawn = selectedId !== null && (paneShown || closingId === selectedId);
+
   /** Selects `signalId` and shows the pane, as a click on its row does. */
   const openSignal = (signalId: string): void => {
     setDismissed(false);
@@ -306,9 +319,9 @@ export function IntakeScreen({
       {/* The keys are handled here, where every key press in the list and
           the pane arrives, rather than on each row and answer.
 
-          While a signal is selected the pane stays drawn, even closed, so
-          it slides out as the list widens over it. The split clips it, and
-          `inert` keeps the focus and screen readers out of it. */}
+          A closing pane stays drawn until the list's width transition ends,
+          so it slides out as the list widens over it. The split clips it,
+          and `inert` keeps the focus and screen readers out of it. */}
       <div
         ref={splitRef}
         className={paneShown ? "asks has-pane" : "asks"}
@@ -320,7 +333,17 @@ export function IntakeScreen({
         }}
         onKeyDown={handleKeys}
       >
-        <section ref={listRef} className="asks-list" aria-label="Signals">
+        <section
+          ref={listRef}
+          className="asks-list"
+          aria-label="Signals"
+          onTransitionEnd={(event) => {
+            // A row's own transitions end here too, so only the list's width counts.
+            if (event.target === event.currentTarget && event.propertyName === "width") {
+              setClosingId(null);
+            }
+          }}
+        >
           <IntakeList
             sections={sections}
             plugins={plugins}
@@ -346,7 +369,7 @@ export function IntakeScreen({
             onKeyDown={resizeWithKeys}
           />
         )}
-        {selectedId !== null && (
+        {paneDrawn && (
           <SignalPane
             key={selectedId}
             signalId={selectedId}

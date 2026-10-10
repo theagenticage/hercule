@@ -48,9 +48,8 @@ export interface SignalPaneHandle {
  * its read, the pane shows `listed`, the signal as the To do list holds it,
  * so it opens at once; the read adds the describe lines of its answers.
  *
- * `shown` is false while the pane is closed. The pane stays drawn then, so
- * closing it can slide it out, and it is made inert: off screen, it takes no
- * focus and screen readers skip it.
+ * `shown` is false while the pane slides out. The pane is inert then: on
+ * its way off screen, it takes no focus and screen readers skip it.
  *
  * `focusSuggestedOnOpen` puts the focus on the suggested answer as soon as
  * the pane shows the signal, then calls `onFocusedSuggested`. `ref` gives

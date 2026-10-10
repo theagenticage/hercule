@@ -429,6 +429,24 @@ describe("Intake's keys", () => {
     expect(getRow(REVIEW).getAttribute("aria-current")).toBeNull();
   });
 
+  it("draw the closed pane only while it slides out, and no pane for a signal J moves to", async () => {
+    const { router } = await openIntake(`/intake?signal=${REVIEW.id}`);
+    await findPane();
+    getRow(REVIEW).focus();
+    await userEvent.keyboard("{Escape}");
+    // The pane slides out, still drawn, until the list's width transition ends.
+    expect(screen.getByRole("region", { name: "The open signal" }).hasAttribute("inert")).toBe(
+      true,
+    );
+    fireEvent.transitionEnd(getList(), { propertyName: "width" });
+    expect(screen.queryByRole("region", { name: "The open signal" })).toBeNull();
+
+    // With the pane closed, J moves the selection and reads no signal.
+    await userEvent.keyboard("j");
+    expect(readSelected(router.state.location.search)).not.toBe(REVIEW.id);
+    expect(screen.queryByRole("region", { name: "The open signal" })).toBeNull();
+  });
+
   it("open the Reply box with R", async () => {
     await openIntake(`/intake?signal=${MENTION.id}`);
     const pane = await findPane();
@@ -464,6 +482,9 @@ describe("Intake's split", () => {
     expect(localStorage.getItem("hercule.intake.list-width")).toBe("448");
     fireEvent.keyDown(handle, { key: "ArrowLeft" });
     expect(localStorage.getItem("hercule.intake.list-width")).toBe("416");
+    // The handle keeps only the arrows: Esc still closes the pane.
+    fireEvent.keyDown(handle, { key: "Escape" });
+    expect(isPaneShown()).toBe(false);
   });
 
   it("keeps the pane closed while the window is too narrow for it, and says why", async () => {
