@@ -169,9 +169,9 @@ function QueuedInputRow({
  * and the agent's name. It is a component of its own because only an
  * agent's row reads a sender, and a hook cannot be called on a condition.
  *
- * While the agent is still being read, which happens only for a sender that
- * first appears while the thread is open, the chip's place is held empty and
- * the row is not tinted, rather than naming a sender that may be wrong.
+ * While the agent is still being read, the chip's place is held empty, in
+ * place of the clock, and the row is not tinted, rather than naming a sender
+ * that may be wrong.
  */
 function AgentQueuedInputRow({
   senderSessionId,

@@ -128,23 +128,26 @@ function QueuedRow({
  * a "·" that parts the sender from the message, so the name never reads as
  * the message's first words. A long name is cut with an ellipsis and shows
  * whole as a tooltip. Every row from one sender shares one cached read, so a
- * long queue reads each sender once. While the sender is still being read,
- * it shows nothing rather than a name that may be wrong.
+ * long queue reads each sender once.
+ *
+ * While the sender is still being read, a faint "…" holds the name's place,
+ * rather than a name that may be wrong. "From" shows from the first paint,
+ * so the row never looks like one the owner queued, and the row keeps its
+ * height when the name arrives.
  */
-function QueuedSender({
-  senderSessionId,
-}: {
-  readonly senderSessionId: string;
-}): JSX.Element | null {
+function QueuedSender({ senderSessionId }: { readonly senderSessionId: string }): JSX.Element {
   const sender = useSenderReading(senderSessionId);
-  if (sender === "loading") return null;
   return (
     <>
       <span className="flex min-w-0 max-w-[40%] shrink-0 gap-1 text-row text-muted">
         {/* The space keeps "From" apart from the name in the text a screen
             reader reads; on screen, the gap does that. */}
         <span className="shrink-0">{"From "}</span>
-        <ActorLink actor={sender} plainClassName="text-muted" truncates />
+        {sender === "loading" ? (
+          <span className="text-faint">…</span>
+        ) : (
+          <ActorLink actor={sender} plainClassName="text-muted" truncates />
+        )}
       </span>
       <span aria-hidden="true" className="shrink-0 text-row text-faint">
         {" · "}

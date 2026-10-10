@@ -1,7 +1,11 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { collectSenderSessionIds, resolveDisplayTimezone } from "@hercule/client-core";
+import {
+  collectSenderSessionIds,
+  resolveDisplayTimezone,
+  waitForSenderReads,
+} from "@hercule/client-core";
 import {
   assistantsQuery,
   inputsQuery,
@@ -26,9 +30,14 @@ import { AgentPage } from "../../../../screens/thread/agent-page";
  *   opens, as it did before the list was read here.
  * - Once the transcript and the queued inputs are in, it reads each agent
  *   that sent one of those messages, once per sender, and the assistants, so
- *   a message and a queued row name their sender at the first paint. Those
- *   reads are prefetched too: a sender that cannot be read shows as "another
- *   agent" and never fails the load.
+ *   a message and a queued row name their sender at the first paint. It
+ *   waits for those reads for at most `SENDER_READ_WAIT_MS`: a sender's name
+ *   only decorates a message, so a controller that never answers one must
+ *   not keep the thread from opening. A sender still being read after that
+ *   is named when its read answers; until then its rows hold the sender's
+ *   place (see `useSenderReading`). Those reads are prefetched, so a sender
+ *   that cannot be read shows as "another agent" and never fails the load,
+ *   and a sender whose read already failed is not read again.
  */
 export const Route = createFileRoute("/_shell/threads/$sessionId/")({
   staticData: { title: "Thread", ownsTopBar: true },
@@ -44,9 +53,12 @@ export const Route = createFileRoute("/_shell/threads/$sessionId/")({
     );
     const senderSessionIds = collectSenderSessionIds(rows, inputs);
     if (senderSessionIds.length === 0) return;
-    await Promise.all([
+    await waitForSenderReads([
       queryClient.prefetchQuery(assistantsQuery(client)),
-      ...senderSessionIds.map((id) => queryClient.prefetchQuery(senderSessionQuery(client, id))),
+      ...senderSessionIds
+        .map((id) => senderSessionQuery(client, id))
+        .filter((sender) => queryClient.getQueryState(sender.queryKey)?.status !== "error")
+        .map((sender) => queryClient.prefetchQuery(sender)),
     ]);
   },
   component: ThreadPage,

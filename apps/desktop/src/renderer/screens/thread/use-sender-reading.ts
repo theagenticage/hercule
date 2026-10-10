@@ -9,11 +9,12 @@ import { assistantsQuery, senderSessionQuery } from "../../app/queries";
  * read. The web app's hook of the same name returns the same values.
  *
  * Every message and row from one sender shares one cached read, which the
- * thread's loader has usually made already. The read never suspends and
- * never throws: a sender that first appears while the thread streams must
- * not hold up the transcript, and a sender that cannot be read, for any
- * reason, is shown as "Another agent" rather than as an error. The
- * assistants are shell data, cached before any thread opens.
+ * thread's loader usually makes before the first paint. The read never
+ * suspends and never throws: a sender whose read is slow, or that first
+ * appears while the thread streams, must not hold up the transcript, and a
+ * sender that cannot be read, for any reason, is shown as "Another agent"
+ * rather than as an error.
+ * The assistants are shell data, cached before any thread opens.
  */
 export function useSenderReading(senderSessionId: string): SenderReading | "loading" {
   const { controller } = useRouteContext({ from: "/_connected" });

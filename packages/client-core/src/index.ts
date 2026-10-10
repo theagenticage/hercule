@@ -573,7 +573,9 @@ export {
   describeSender,
   readInputSender,
   readSenderSession,
+  SENDER_READ_WAIT_MS,
   type SenderReading,
+  waitForSenderReads,
 } from "./threads/sender";
 export {
   resolveBrowserTimezone,

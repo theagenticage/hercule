@@ -170,12 +170,13 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
  * The read is made once per sender and kept: the sender's name comes from
  * fields that never change, and `queryKeys.sender` is outside the `session`
  * prefix, so no push reads it again, and the messages that mount after the
- * loader read it do not read it again either. The desktop app reads it the
- * same way.
+ * read do not read it again either. The desktop app reads it the same way.
  *
- * It is never retried. The thread's loader waits for it, and retries of a
- * controller that does not answer would hold the thread's first paint for
- * several seconds, for a name that only decorates a message.
+ * A read that fails is not tried again, neither at once nor when the next
+ * message from the same sender mounts: a read that fails for a network error
+ * or a 5xx would otherwise be made again by every message and queued row that
+ * shows the sender, each time one mounts. The thread's loader skips a sender
+ * whose read failed, for the same reason.
  */
 export const senderSessionQuery = (client: HerculeClient, id: string) =>
   queryOptions({
@@ -183,6 +184,9 @@ export const senderSessionQuery = (client: HerculeClient, id: string) =>
     queryFn: () => readSenderSession(client, id),
     staleTime: Infinity,
     retry: false,
+    // Without data, a mounting component reads the query again whatever its
+    // `staleTime`; this option alone stops that after an error.
+    retryOnMount: false,
   });
 
 /**

@@ -2,7 +2,7 @@
  * Tests the thread route's loading: the reads it makes before the screen
  * renders, the thread it stores as the last open one, what it shows when
  * the thread does not exist or cannot be read, and the sender it names on a
- * message another session's agent sent.
+ * message another session's agent sent, which it waits for only briefly.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, within } from "@testing-library/react";
@@ -206,12 +206,17 @@ describe("a message another session's agent sent into the thread", () => {
   it("reads the sender before the screen renders, and names it in a chip linked to its thread", async () => {
     const { app, calls } = openApp(`/threads/${sessionId}`, {
       ...buildThreadHandlers({ ...thread, transcript }),
-      [`GET ${senderPath}`]: { body: RUNBOOK },
+      // The sender answers after the thread's own reads, but well inside the
+      // loader's wait.
+      [`GET ${senderPath}`]: () =>
+        new Promise((resolve) => setTimeout(() => resolve({ body: RUNBOOK }), 50)),
     });
     const { context } = await app;
 
     expect(context.queryClient.getQueryData(queryKeys.sender(RUNBOOK.id))).toEqual(RUNBOOK);
-    const [first, second] = await screen.findAllByRole("group", {
+    // Nothing is awaited here: the loader waited for the sender, so the
+    // first paint already names it.
+    const [first, second] = screen.getAllByRole("group", {
       name: `Message from ${RUNBOOK.title}`,
     });
     const chip = within(first!).getByRole("link", { name: RUNBOOK.title });
@@ -222,23 +227,49 @@ describe("a message another session's agent sent into the thread", () => {
     expect(calls.filter((call) => call.path === senderPath)).toHaveLength(1);
   });
 
-  it("opens the thread after one read of a sender that got no answer, rather than retrying it first", async () => {
+  it("opens the thread while the sender's read gets no answer, and names the sender once it answers", async () => {
+    let answer = (): void => {};
+    const { app } = openApp(`/threads/${sessionId}`, {
+      ...buildThreadHandlers({ ...thread, transcript }),
+      [`GET ${senderPath}`]: () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ body: RUNBOOK });
+        }),
+    });
+    // The loader waits for the sender for at most a second, then the app's
+    // loaders resolve and the transcript shows while the read is still
+    // unanswered.
+    await app;
+    expect(await screen.findByText("Then tag the release.")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: /^Message from/ })).toBeNull();
+
+    answer();
+    expect(
+      await screen.findAllByRole("group", { name: `Message from ${RUNBOOK.title}` }),
+    ).toHaveLength(2);
+  });
+
+  it("reads a sender whose read failed only once, however often its messages mount again", async () => {
     const { app, calls } = openApp(`/threads/${sessionId}`, {
       ...buildThreadHandlers({ ...thread, transcript }),
       [`GET ${senderPath}`]: () => {
         throw new TypeError("Failed to fetch");
       },
     });
-    await app;
-
-    // Retries in the loader would hold the thread's first paint for seconds,
-    // for a name, and this test would time out. There are two reads: the
-    // loader's, and the one the messages make when they mount, because a
-    // read that failed is tried again by the next component that shows it.
-    // The two messages share that one read.
+    const { router } = await app;
     expect(
       await screen.findAllByRole("group", { name: "Message from another agent" }),
     ).toHaveLength(2);
-    expect(calls.filter((call) => call.path === senderPath)).toHaveLength(2);
+
+    // Leaving the thread and opening it again runs its loader again and
+    // mounts its messages again.
+    for (let visit = 0; visit < 3; visit += 1) {
+      await act(() => router.navigate({ to: "/" }));
+      await act(() => router.navigate({ to: "/threads/$sessionId", params: { sessionId } }));
+      expect(
+        await screen.findAllByRole("group", { name: "Message from another agent" }),
+      ).toHaveLength(2);
+    }
+    expect(calls.filter((call) => call.path === senderPath)).toHaveLength(1);
   });
 });

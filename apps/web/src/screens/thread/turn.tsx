@@ -107,11 +107,11 @@ function UserMessage({ message }: { readonly message: ThreadUserMessage }): JSX.
  * "· steered" when the message was steered. The message's accessible name
  * names the sender too, so a screen reader never takes it for the owner's.
  *
- * While the sender is still being read, which happens only for a sender that
- * first appears while the thread streams, the sender is left out of the line
- * rather than filled with a name that may be wrong. The message is not a
- * named group until then either, because a group with no name tells a
- * screen reader nothing.
+ * While the sender is still being read, the sender is left out of the line
+ * rather than filled with a name that may be wrong, and the line keeps its
+ * height, so the transcript does not move when the name arrives. The message
+ * is not a named group until then either, because a group with no name tells
+ * a screen reader nothing.
  */
 function AgentSentMessage({
   senderSessionId,
@@ -130,17 +130,17 @@ function AgentSentMessage({
       className="flex flex-col items-end gap-1"
     >
       {children}
-      {sender === "loading" && !steered ? null : (
-        <p className="text-meta text-faint">
-          {sender === "loading" ? null : (
-            <>
-              Sent by <ActorLink actor={sender} plainClassName="text-faint" />
-            </>
-          )}
-          {sender !== "loading" && steered ? " · " : null}
-          {steered ? "steered" : null}
-        </p>
-      )}
+      <p className="text-meta text-faint">
+        {sender === "loading" ? null : (
+          <>
+            Sent by <ActorLink actor={sender} plainClassName="text-faint" />
+          </>
+        )}
+        {sender !== "loading" && steered ? " · " : null}
+        {steered ? "steered" : null}
+        {/* An empty line has no height; the space gives it one. */}
+        {sender === "loading" && !steered ? "\u00a0" : null}
+      </p>
     </div>
   );
 }

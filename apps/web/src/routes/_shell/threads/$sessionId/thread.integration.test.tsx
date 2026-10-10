@@ -4153,6 +4153,69 @@ describe("Thread: an agent message that arrives while the thread is open", () =>
   });
 });
 
+describe("Thread: a sender whose read is slow or fails", () => {
+  /** A message `SENDER`'s agent queued into the busy thread. */
+  const AGENT_INPUT = buildQueuedInput({ actor: `session:${SENDER.id}`, text: "Tag the release" });
+
+  it("opens the thread while the sender's read gets no answer, and names the sender once it answers", async () => {
+    let answer = (): void => {};
+    // `openApp` resolves once the loaders have, so this test times out if a
+    // loader waits for the sender without a limit. The loader gives up on it
+    // after a second.
+    await openApp(buildSession({ status: "busy" }), buildTurnWithAgentMessage(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ body: SENDER });
+        }),
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [AGENT_INPUT] } },
+    });
+
+    // The transcript shows. The queued row starts with "From" and a
+    // placeholder, so it never reads as the owner's, and the message has no
+    // sender line yet.
+    expect(await screen.findByText("Rebasing on main.")).toBeDefined();
+    const row = screen.getByText("Tag the release").parentElement;
+    expect(readPageText(row)).toBe("From … · Tag the releaseSteerCancel");
+    expect(screen.queryByText(/^Sent by/)).toBeNull();
+
+    answer();
+    await waitFor(() => {
+      expect(readPageText(row)).toBe("From Fix EU checkout · Tag the releaseSteerCancel");
+    });
+    const agentMessage = await screen.findByRole("group", { name: "Message from Fix EU checkout" });
+    expect(readPageText(agentMessage)).toBe(
+      "The 3DS fix is mergedSent by Fix EU checkout · steered",
+    );
+  });
+
+  it("reads a sender whose read failed only once, however often its messages mount again", async () => {
+    const { api, router } = await openApp(
+      buildSession({ status: "idle" }),
+      buildTurnWithAgentMessage(),
+      {
+        [`GET /api/v1/sessions/${SENDER.id}`]: {
+          status: 500,
+          body: buildErrorBody("internal", "The session could not be read."),
+        },
+      },
+    );
+    await screen.findByRole("group", { name: "Message from another agent" });
+
+    // Leaving the thread and opening it again runs its loader again and
+    // mounts its message again.
+    for (let visit = 0; visit < 3; visit += 1) {
+      await act(async () => {
+        await router.navigate({ to: "/" });
+      });
+      await act(async () => {
+        await router.navigate({ to: "/threads/$sessionId", params: { sessionId: SESSION_ID } });
+      });
+      await screen.findByRole("group", { name: "Message from another agent" });
+    }
+    expect(countSessionReads(api.calls, SENDER.id)).toBe(1);
+  });
+});
+
 describe("Thread: a queued message another agent sent", () => {
   /** A message `SENDER`'s agent queued into the busy thread. */
   const AGENT_INPUT = buildQueuedInput({
@@ -4181,15 +4244,17 @@ describe("Thread: a queued message another agent sent", () => {
     expect(screen.getByText("Also check the logs").previousElementSibling).toBeNull();
   });
 
-  it("names the sender at the row's first paint, because the loader read the queue and its senders", async () => {
+  it("names the sender at the row's first paint, because the loader waited for its read", async () => {
     await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
-      [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },
+      // The sender answers after the thread's own reads, but well inside the
+      // loader's wait.
+      [`GET /api/v1/sessions/${SENDER.id}`]: () =>
+        new Promise((resolve) => setTimeout(() => resolve({ body: SENDER }), 50)),
       [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [AGENT_INPUT] } },
     });
 
     // `openApp` resolves once the loaders have, so nothing is awaited here: a
-    // row the loader did not read, or whose sender it did not read, would
-    // not be drawn yet, or be drawn without "From".
+    // row whose sender the loader did not wait for would show "From …".
     const row = screen.getByText("The 3DS fix is merged").parentElement;
     expect(readPageText(row)).toBe("From Fix EU checkout · The 3DS fix is mergedSteerCancel");
   });
