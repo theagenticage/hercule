@@ -25,7 +25,14 @@ export function WorkSection(): JSX.Element {
       <h3 className="side-h">
         <span>Work</span>
       </h3>
-      <Link to="/intake" className="nav-row" activeProps={SELECTED_LINK_PROPS}>
+      {/* A screen reader reads the count with what it counts, as it does the
+          Hercule segment's: "Intake, 8 to do". */}
+      <Link
+        to="/intake"
+        className="nav-row"
+        activeProps={SELECTED_LINK_PROPS}
+        aria-label={toDoCount > 0 ? `Intake, ${String(toDoCount)} to do` : undefined}
+      >
         <IntakeIcon />
         <span>Intake</span>
         {toDoCount > 0 && <b className="count count--you">{toDoCount}</b>}
