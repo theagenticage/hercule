@@ -25,8 +25,8 @@ import { ThreadsFace } from "./threads-face";
 /**
  * The count shown beside each nav item that has one, already formatted, such
  * as "3" or "99+". Only the notifications count is filled: nothing counts
- * proposals or decisions yet. The styling, including the attention hue on the
- * check-in count, is ready for the operations that will fill them.
+ * decisions yet. The check-in count's styling, in the attention hue, is ready
+ * for the operation that will fill it.
  */
 type Counts = Partial<Record<NonNullable<NavItem["count"]>, string | undefined>>;
 

@@ -24,13 +24,16 @@ describe("settings over HTTP", () => {
 
       const response = await patchSettings(
         base,
-        { controller: { "backup.time": "04:15" }, user: { "topics.order": ["intake"] } },
+        {
+          controller: { "backup.time": "04:15" },
+          user: { "onboarding.completedSteps": ["timezone"] },
+        },
         token,
       );
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({
         controller: { "backup.time": "04:15", "retention.events": 90 },
-        user: { timezone: "Europe/Amsterdam", "topics.order": ["intake"] },
+        user: { timezone: "Europe/Amsterdam", "onboarding.completedSteps": ["timezone"] },
       });
 
       expect(await (await readSettings(base, token)).json()).toMatchObject({
