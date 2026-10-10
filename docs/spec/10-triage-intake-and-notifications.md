@@ -547,6 +547,7 @@ Four kinds belong to the core and are not prefixed. Any actor may raise them thr
 - A `proposal` requires `task`, the `task.create` input: title, description, priority, labels (including the topic label, Section 4) and provenance.
 - The caller may bind any operation usable as `signal.answer`, plugin actions included, and names the `connectionId` when the action declares a Connection (Section 9.4).
 - Only the actor that raised a signal may withdraw it, with `signal.withdraw`.
+- *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* One signal is at most 256 KB, written as JSON. Each block and each action has its own limit, but many blocks at their limits would together make one signal too large to list and draw, so `signal.raise` refuses a larger signal with `validation`. The caller shortens the blocks and links to the source for the rest. It also refuses an action whose id the core uses for its own actions: `accept`, `dismiss`, `done`, or one that starts with `hand-to-`. A proposal's `task` must fit the input limit of a bound action, because Accept binds it. The core checks the whole signal, its own actions included, before it stores it, so a signal that would not read back is never written.
 
 **A proposal is a signal first.**
 
@@ -572,7 +573,7 @@ A signal's actions are Bound Actions, with the shape and the rules of Section 7.
 **Taking an action.** `signal.act { signalId, actionId, text? }` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#signal)) runs the frozen operation as the user, as `notification.act` does (Section 7.4, Executed):
 
 - Only the user may act. A session or a run holding `signal.write` is refused.
-- Every answer resolves the signal at the click, as `decided` with the answer's `actionId`. The core writes the outcome from the answer's label and subject ("Approved #1293", "Handed to Review PR"), unless the plugin action declares its own `outcome` line ([./05-plugins.md](./05-plugins.md#44-workflow-action)), as Gmail's Reply does: "Replied to Marta Visser".
+- Every answer resolves the signal at the click, as `decided` with the answer's `actionId`. The core writes the outcome from the answer's label and subject ("Approved #1293", "Handed to Review PR"), unless the plugin action declares its own `outcome` line ([./05-plugins.md](./05-plugins.md#44-workflow-action)), as Gmail's Reply does: "Replied to Marta Visser". *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* An outcome line is at most 1024 characters. The core cuts a longer line from a plugin to that length, ending it with "…", so a plugin cannot store a record the schema refuses to read.
 - A failed operation leaves the signal open with the error shown, and the user may retry or pick another answer.
 - `signal.act` refuses `actionId: "done"`: Done goes through `signal.markDone`.
 
