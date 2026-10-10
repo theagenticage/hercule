@@ -37,6 +37,7 @@ import {
   HAND_TO_ACTION_PREFIX,
   listSchemaIssues,
   MAX_BOUND_INPUT_BYTES,
+  MAX_SIGNAL_BYTES,
   Signal,
   Validation,
   type BoundAction,
@@ -614,12 +615,25 @@ const make = Effect.gen(function* () {
           status: "open",
           createdAt,
         };
-        yield* Effect.mapError(Schema.encodeEffect(Signal)(signal), (error) =>
+        const encoded = yield* Effect.mapError(Schema.encodeEffect(Signal)(signal), (error) =>
           createValidationError(
             listSchemaIssues(error.issue),
             "the signal does not fit the Signal schema once the core adds its own actions",
           ),
         );
+        // The raise input was checked against the same limit, but Accept
+        // copies the task and Hand to adds one action per workflow, so the
+        // signal as written can still be larger.
+        if (countJsonBytes(encoded) > MAX_SIGNAL_BYTES) {
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: [],
+                message: `With the actions the core adds, the signal is larger than ${MAX_SIGNAL_BYTES} bytes of JSON. Shorten its blocks or the task description, and link to the source for the rest.`,
+              },
+            ]),
+          );
+        }
         yield* withTransaction(
           sql,
           Effect.gen(function* () {

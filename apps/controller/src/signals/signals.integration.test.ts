@@ -11,12 +11,15 @@
  *   outside any run, and writes the line the Done list keeps, cut to the
  *   longest outcome;
  * - a typed reply that makes the input too large is refused;
+ * - a proposal that fits the size limit as raised, but not once Accept
+ *   copies its task, is refused;
  * - while a plugin action runs, a second action on its signal is refused.
  *
  * The rules that need no real operation are tested in `service.test.ts`.
  */
 import { describe, expect, it } from "vitest";
 import {
+  MAX_SIGNAL_BYTES,
   MAX_SIGNAL_OUTCOME_LENGTH,
   type Run,
   type Signal,
@@ -403,5 +406,26 @@ describe("a plugin action as a typed reply", () => {
       },
       { plugins: [notesPlugin] },
     );
+  });
+
+  it("refuses a proposal that is larger than the limit once Accept copies its task", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const input: SignalRaiseInput = {
+        ...PROPOSAL,
+        blocks: Array.from({ length: 8 }, () => ({
+          type: "text" as const,
+          markdown: "x".repeat(30_000),
+        })),
+        task: { title: "Fix the flaky login test", description: "y".repeat(15_000) },
+      };
+      expect(JSON.stringify(input).length).toBeLessThan(MAX_SIGNAL_BYTES);
+
+      const response = await post(base, "/api/v1/signals/raise", input, token);
+
+      const refusal = await readErrorBody(response);
+      expect(response.status, refusal.text).toBe(400);
+      expect(refusal.text).toContain(`larger than ${MAX_SIGNAL_BYTES} bytes`);
+    });
   });
 });
