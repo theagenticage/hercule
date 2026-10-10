@@ -67,12 +67,7 @@ const make = Effect.gen(function* () {
           if (Option.isNone(invitation)) {
             return yield* Effect.fail(createUnauthenticatedError(NO_JOIN));
           }
-          const controller = yield* identity.read;
-          if (Option.isNone(controller)) {
-            // The boot creates the identity before the server starts, so a
-            // missing identity is a bug, not a state to handle.
-            return yield* Effect.die("the controller has no identity row");
-          }
+          const controller = yield* identity.readOrDie;
           const credential = mintToken();
           const fleet = yield* runners.names();
           const name = pickName(fleet);
@@ -110,8 +105,8 @@ const make = Effect.gen(function* () {
             runnerId: enlisted.id,
             name,
             credential,
-            controllerIdentityId: controller.value.id,
-            controllerPublicKey: Buffer.from(controller.value.publicKey).toString("base64"),
+            controllerIdentityId: controller.id,
+            controllerPublicKey: Buffer.from(controller.publicKey).toString("base64"),
           };
         }),
       ),

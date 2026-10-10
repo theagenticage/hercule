@@ -22,7 +22,6 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 import {
   formatIssue,
@@ -46,7 +45,7 @@ import {
 } from "@hercule/plugin-host";
 import { buildRunActor, CurrentActor } from "../actor";
 import { connectionRepository, ConnectionTypes } from "../connections";
-import { nowIso, withTransaction } from "../db";
+import { nowIso } from "../db";
 import { renderTemplates } from "../expressions";
 import {
   CONNECTION_PARAM,
@@ -245,6 +244,10 @@ const waitFrom = (startedAt: string, seconds: number): Effect.Effect<Record<stri
 interface StepExecutionNeeds {
   /** `run.start`, which the `run.start` action calls as the run. */
   readonly start: (input: RunStartInput) => Effect.Effect<RunStarted, RunStartError>;
+  /** Runs an effect in a transaction of its own once the controller is serving. */
+  readonly transactWhenServing: <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | SqlError, R>;
   /** Fails the run at a step, in a transaction of its own. */
   readonly failRun: (
     runId: string,
@@ -264,9 +267,13 @@ interface StepExecutionNeeds {
  * Builds `prepareInput`, which prepares a step's input, and `executeStep`,
  * which executes one running step record of a run and records how it ended.
  */
-export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecutionNeeds) =>
+export const makeStepExecution = ({
+  start,
+  transactWhenServing,
+  failRun,
+  routeAfterStep,
+}: StepExecutionNeeds) =>
   Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
     const runs = yield* runRepository;
     const tasks = yield* TaskService;
     const notifier = yield* Notifier;
@@ -571,8 +578,8 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
             actor,
           );
           execute = builtIn.inTransaction
-            ? withTransaction(sql, Effect.flatMap(called, writeCompletion))
-            : Effect.flatMap(called, (output) => withTransaction(sql, writeCompletion(output)));
+            ? transactWhenServing(Effect.flatMap(called, writeCompletion))
+            : Effect.flatMap(called, (output) => transactWhenServing(writeCompletion(output)));
         } else if (pluginExecute !== undefined) {
           const { connection: declared } = catalogEntry;
           let connection: ActionContext["connection"];
@@ -596,7 +603,7 @@ export const makeStepExecution = ({ start, failRun, routeAfterStep }: StepExecut
               run: { runId: run.id, stepId: attempt.stepId },
               ...(connection === undefined ? {} : { connection }),
             }),
-            (output) => withTransaction(sql, writeCompletion(output)),
+            (output) => transactWhenServing(writeCompletion(output)),
           );
         } else {
           return yield* failRun(

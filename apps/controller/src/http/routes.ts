@@ -37,10 +37,17 @@ import {
 } from "../conversations";
 import { Controller, ControllerLayer } from "../controller";
 import {
+  PromotionService,
+  PromotionServiceLayer,
+  PromotionTokensLayer,
+  PromotionTransferLayer,
+} from "../promotion";
+import {
   BindableOperationsLayer,
   ArrivalLayer,
   AssistantSessionsLayer,
   DispatchLayer,
+  PromotionFleetLayer,
   InboundLayer,
   Live,
   LiveLayer,
@@ -586,9 +593,11 @@ const transcriptRoutes = HttpApiBuilder.group(api, "transcript", (handlers) =>
 const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
   Effect.gen(function* () {
     const controller = yield* Controller;
+    const promotion = yield* PromotionService;
     return handlers
       .handle("read", () => withApiErrors(controller.read()))
-      .handle("update", ({ payload }) => withApiErrors(controller.update(payload)));
+      .handle("update", ({ payload }) => withApiErrors(controller.update(payload)))
+      .handle("createPromotionToken", () => withApiErrors(promotion.createPromotionToken()));
   }),
 );
 
@@ -660,12 +669,12 @@ const RunDomainLayer = RunServiceLayer.pipe(
  * controller could boot without a layer an operation needs, and nothing would
  * show it until a request used that operation.
  *
- * Six services are left out on purpose: `Plugins`, `ProviderService`,
- * `SessionService`, `WorkspaceService`, `RunnerConnections` and
- * `ProviderProbes`. They must be the instances the boot built. A second
- * instance would have no plugins, no connections and none of the state a
- * session's stream is coalesced in, and would write over the same rows the
- * drivers use. The handlers get them from the boot.
+ * Seven services are left out on purpose: `Plugins`, `ProviderService`,
+ * `SessionService`, `WorkspaceService`, `RunnerConnections`,
+ * `ProviderProbes` and `PromotionState`. They must be the instances the boot
+ * built. A second instance would have no plugins, no connections, none of the
+ * state a session's stream is coalesced in, and no promotion phase, and would
+ * write over the same rows the drivers use. The handlers get them from the boot.
  */
 export const operationLayers = Layer.mergeAll(
   AuthLayer,
@@ -673,6 +682,12 @@ export const operationLayers = Layer.mergeAll(
   UserLayer,
   SecretLayer,
   ControllerLayer,
+  PromotionServiceLayer,
+  PromotionTokensLayer,
+  // The controller daemon's promotion preview asks the transfer whether a
+  // token may preview, so the transfer is provided to it rather than merged
+  // next to it.
+  PromotionFleetLayer.pipe(Layer.provideMerge(PromotionTransferLayer)),
   SettingsOperationsLayer,
   // The controller daemon's profile removal uses the profile service, so the
   // profile service is provided to it rather than merged next to it.

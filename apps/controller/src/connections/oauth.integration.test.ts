@@ -25,7 +25,21 @@ import {
   type ActivationContext,
   type Plugin,
 } from "@hercule/plugin-host";
-import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
+import {
+  completeSetup,
+  get,
+  post,
+  send,
+  withServer,
+  type ServerHarness,
+  type ServerOptions,
+} from "../http/testing";
+import {
+  awaitHeldWork,
+  freezeController,
+  requestTransfer,
+  QUIET_LOOP_TIMINGS,
+} from "../promotion/testing";
 import {
   buildAccount,
   buildAccountName,
@@ -200,6 +214,11 @@ const buildPlugins = (provider: AuthServer) => ({
 
 type Registry = ReturnType<typeof buildPlugins>;
 
+/**
+ * Runs `body` against a set-up controller that loads the test plugins, with
+ * an OAuth provider beside it, and stops the provider afterwards. `timings`
+ * are passed to the controller.
+ */
 const withOAuth = async (
   body: (
     harness: ServerHarness,
@@ -207,6 +226,10 @@ const withOAuth = async (
     token: string,
     provider: AuthServer,
   ) => Promise<void>,
+  timings: Pick<
+    ServerOptions,
+    "eventRoutingInterval" | "schedulerInterval" | "ingestReconcileInterval"
+  > = {},
 ): Promise<void> => {
   const provider = createAuthServer();
   const registry = buildPlugins(provider);
@@ -216,7 +239,7 @@ const withOAuth = async (
         const token = await completeSetup(harness.base);
         await body(harness, registry, token, provider);
       },
-      { plugins: Object.values(registry).map((one) => one.plugin) },
+      { ...timings, plugins: Object.values(registry).map((one) => one.plugin) },
     );
   } finally {
     await provider.stop();
@@ -744,6 +767,33 @@ describe("the access token a plugin asks the core for", () => {
       expect(both[0]).toMatchObject({ accessToken: REFRESHED_TOKEN });
       expect(both[1]).toMatchObject({ accessToken: REFRESHED_TOKEN });
     });
+  });
+
+  it("is refreshed only after a promotion's freeze ends, when it expires while the controller is frozen", async () => {
+    await withOAuth(async ({ base, promotion }, registry, token, provider) => {
+      makeTokensExpireNow(provider);
+      const one = await connect(base, token);
+      const promotionToken = await freezeController(base, token);
+
+      const credentials = Effect.runPromise(
+        readConnectionsSurface(registry.oauth).credentials(one.id),
+      );
+      // A rotated refresh token would be spent on the provider, but the new
+      // one could not be stored: the copy on the new machine would keep the
+      // spent one. So the refresh waits at the promotion gate, and the
+      // provider is not called while the controller is frozen.
+      await Effect.runPromise(awaitHeldWork(promotion, 1));
+      expect(provider.requests.filter((form) => form["grant_type"] === "refresh_token")).toEqual(
+        [],
+      );
+
+      const cancelled = await requestTransfer(base, promotionToken, "DELETE");
+      expect(cancelled.status).toBe(204);
+      expect(await credentials).toMatchObject({ accessToken: REFRESHED_TOKEN });
+      expect(
+        provider.requests.filter((form) => form["grant_type"] === "refresh_token"),
+      ).toHaveLength(1);
+    }, QUIET_LOOP_TIMINGS);
   });
 
   it("fails, and leaves the connection status unchanged, when the provider cannot be reached", async () => {

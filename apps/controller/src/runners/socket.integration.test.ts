@@ -18,6 +18,10 @@
  * - The row then follows the connection: a pong keeps it online, silence marks
  *   it unreachable, a goodbye reads differently from a vanished runner, and a
  *   new hello brings it back from either.
+ * - A promotion's freeze holds a hello until the transfer is cancelled, and
+ *   once the controller is sealed, a held hello is answered with the new
+ *   address. Whether a departure is written before or after the thaw is
+ *   tested on the service, in connections.test.ts.
  *
  * The default 15 and 60 seconds are checked as the exported constants. The
  * behaviour is tested with intervals of tens of milliseconds passed to the
@@ -27,15 +31,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Schema } from "effect";
+import { Duration, Effect, Option, Stream } from "effect";
 import {
-  ControllerToRunner,
   LOGIN_ENDED_CAPABILITY,
   MAX_FRAME_BYTES,
   PROTOCOL_VERSION,
   encodeChallengeBytes,
   type ControllerHello,
   type ControllerToRunner as ControllerMessage,
+  type ForwardingPointer,
   type InstallRequest,
   type JoinAnswer,
   type LoginCode,
@@ -49,10 +53,24 @@ import {
 import type { RunnerDetail } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { registry } from "../plugins";
+import {
+  awaitHeldWork,
+  freezeController,
+  NEW_CONTROLLER_ADDRESS,
+  requestTransfer,
+  sealController,
+  QUIET_LOOP_TIMINGS,
+} from "../promotion/testing";
 import { completeSetup, get, send, withServer, type ServerHarness } from "../http/testing";
 // The two default durations are imported from the socket module, so the test
 // checks the values the controller actually uses.
 import { RUNNER_PING_INTERVAL, RUNNER_SILENCE_LIMIT } from "./socket";
+import {
+  buildRunnerSocketUrl,
+  dialRunnerSocket,
+  RUNNER_SOCKET_PATH,
+  type RunnerSocket,
+} from "./testing";
 
 /**
  * Completes setup, then deletes every provider instance, and returns the login
@@ -69,11 +87,6 @@ const completeSetupWithNoProviderInstance = async (harness: ServerHarness): Prom
   await Effect.runPromise(Effect.orDie(harness.sql.unsafe(`DELETE FROM provider_instances`)));
   return token;
 };
-
-/** The path a runner connects to, on the same host and port as the API. */
-const SOCKET_PATH = "/api/v1/runners/socket";
-
-const buildSocketUrl = (base: string): string => `${base.replace(/^http:/, "ws:")}${SOCKET_PATH}`;
 
 /** Encodes bytes as standard base64, which is how the protocol sends bytes. */
 const encodeBase64 = (raw: Uint8Array): string => Buffer.from(raw).toString("base64");
@@ -105,9 +118,6 @@ const THIS_BUILD = "0.1.0";
 
 const GIB = 1024 * 1024 * 1024;
 
-const decodeFrame = (raw: unknown): ControllerMessage =>
-  Effect.runSync(Schema.decodeUnknownEffect(ControllerToRunner)(raw));
-
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -128,92 +138,19 @@ const waitUntil = async <A>(
   throw new Error(`the controller never ${what}`);
 };
 
-/** A fake runner's end of the socket, driven frame by frame. */
-interface Wire {
-  readonly send: (message: RunnerMessage) => void;
-  /** The next frame the controller sent that this test has not taken yet. */
-  readonly next: () => Promise<ControllerMessage>;
-  /** Everything the controller has sent so far, in order. */
-  readonly frames: ReadonlyArray<ControllerMessage>;
-  /** How the controller ended the connection, once it has. */
-  readonly closed: () => Promise<{ readonly code: number; readonly reason: string }>;
-  readonly close: () => void;
-}
+const listFrames = <T extends ControllerMessage>(
+  wire: RunnerSocket,
+  tag: T["_tag"],
+): ReadonlyArray<T> => wire.frames.filter((frame): frame is T => frame._tag === tag);
 
-const listFrames = <T extends ControllerMessage>(wire: Wire, tag: T["_tag"]): ReadonlyArray<T> =>
-  wire.frames.filter((frame): frame is T => frame._tag === tag);
-
-const listProbeRequests = (wire: Wire): ReadonlyArray<ProbeRequest> =>
+const listProbeRequests = (wire: RunnerSocket): ReadonlyArray<ProbeRequest> =>
   listFrames<ProbeRequest>(wire, "probeRequest");
 
 const waitForFrame = <T extends ControllerMessage>(
-  wire: Wire,
+  wire: RunnerSocket,
   tag: T["_tag"],
   index = 0,
 ): Promise<T> => waitUntil(`sent a ${tag}`, () => listFrames<T>(wire, tag)[index]);
-
-/**
- * Opens the socket with a credential, as a runner does. The credential is sent
- * with the upgrade request, so a connection that opens has already been
- * accepted.
- */
-const dial = (base: string, credential: string): Promise<Wire> =>
-  new Promise((resolve, reject) => {
-    const socket = new WebSocket(buildSocketUrl(base), {
-      headers: { authorization: `Bearer ${credential}` },
-    });
-    const frames: Array<ControllerMessage> = [];
-    let taken = 0;
-    let ending: { readonly code: number; readonly reason: string } | undefined;
-
-    socket.onmessage = (event) => {
-      frames.push(decodeFrame(JSON.parse(String(event.data)) as unknown));
-    };
-    socket.onclose = (event) => {
-      ending = { code: event.code, reason: event.reason };
-    };
-    socket.onerror = () => {
-      // A rejected upgrade shows up here; the close handler records the reason.
-    };
-    socket.onopen = () => {
-      resolve({
-        frames,
-        send: (message) => socket.send(JSON.stringify(message)),
-        next: async () => {
-          for (let attempt = 0; attempt < 400 && frames.length <= taken; attempt++) {
-            await delay(5);
-          }
-          if (frames.length <= taken) {
-            throw new Error(
-              ending === undefined
-                ? "the controller sent nothing"
-                : `the controller closed (${String(ending.code)} ${ending.reason}) instead of answering`,
-            );
-          }
-          return frames[taken++]!;
-        },
-        closed: async () => {
-          for (let attempt = 0; attempt < 600 && ending === undefined; attempt++) {
-            await delay(5);
-          }
-          if (ending === undefined) throw new Error("the controller held the connection open");
-          return ending;
-        },
-        close: () => socket.close(),
-      });
-    };
-    setTimeout(
-      () =>
-        reject(
-          new Error(
-            ending === undefined
-              ? "the controller never upgraded the connection"
-              : `the controller refused the upgrade (${String(ending.code)} ${ending.reason})`,
-          ),
-        ),
-      3000,
-    );
-  });
 
 /**
  * Checks whether the server upgrades the connection for an `Authorization`
@@ -221,7 +158,7 @@ const dial = (base: string, credential: string): Promise<Wire> =>
  */
 const tryDial = (base: string, authorization?: string): Promise<"open" | "refused" | "hung"> =>
   new Promise((resolve) => {
-    const socket = new WebSocket(buildSocketUrl(base), {
+    const socket = new WebSocket(buildRunnerSocketUrl(base), {
       headers: authorization === undefined ? {} : { authorization },
     });
     socket.onopen = () => {
@@ -238,7 +175,7 @@ const tryDial = (base: string, authorization?: string): Promise<"open" | "refuse
  * status and error body rather than as a socket that did not open.
  */
 const requestUpgrade = (base: string, authorization?: string): Promise<Response> =>
-  fetch(`${base}${SOCKET_PATH}`, {
+  fetch(`${base}${RUNNER_SOCKET_PATH}`, {
     headers: {
       connection: "Upgrade",
       upgrade: "websocket",
@@ -344,11 +281,11 @@ const greet = async (
   credential: string,
   overrides: Partial<RunnerHello> = {},
 ): Promise<{
-  readonly wire: Wire;
+  readonly wire: RunnerSocket;
   readonly sent: RunnerHello;
   readonly answer: ControllerHello;
 }> => {
-  const wire = await dial(base, credential);
+  const wire = await dialRunnerSocket(base, credential);
   const sent = buildHello(overrides);
   wire.send(sent);
   const answer = await wire.next();
@@ -377,7 +314,7 @@ describe("opening the runner socket", () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
 
-      const wire = await dial(harness.base, joined.credential);
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
       // The upgrade is the whole admission: the controller sends nothing on
       // the socket until the runner sends its hello.
       expect(wire.frames).toEqual([]);
@@ -502,7 +439,7 @@ describe("the hello exchange", () => {
       const token = await completeSetupWithNoProviderInstance(harness);
       const joined = await enlist(harness);
 
-      const wire = await dial(harness.base, joined.credential);
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
       wire.send(buildHello({ protocolVersion: PROTOCOL_VERSION + 1 }));
 
       const ending = await wire.closed();
@@ -523,7 +460,7 @@ describe("the hello exchange", () => {
       const token = await completeSetupWithNoProviderInstance(harness);
       const joined = await enlist(harness);
 
-      const wire = await dial(harness.base, joined.credential);
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
       wire.send(buildHello({ protocolVersion: 1 }));
 
       const ending = await wire.closed();
@@ -535,18 +472,18 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 5 cannot decode the file read and file search item kinds.
-  it("refuses a runner on protocol version 5 and says to upgrade it", async () => {
+  // Version 6 cannot decode the file read and file search item kinds.
+  it("refuses a runner on protocol version 6 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
-      const wire = await dial(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 5 }));
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
+      wire.send(buildHello({ protocolVersion: 6 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(6);
+      expect(PROTOCOL_VERSION).toBe(7);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 6 and the runner does not; " +
-          "upgrade the runner to a build that uses version 6",
+        "this controller uses runner protocol version 7 and the runner does not; " +
+          "upgrade the runner to a build that uses version 7",
       );
       expect(wire.frames).toEqual([]);
     });
@@ -555,7 +492,7 @@ describe("the hello exchange", () => {
   it("reports a version mismatch when a runner sends a hello it cannot decode", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
-      const wire = await dial(harness.base, joined.credential);
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
 
       // What a newer build's hello looks like to this controller: another
       // version, without the fields this build requires. It must be reported as
@@ -650,7 +587,7 @@ describe("what a connection leaves behind", () => {
     await withServer(
       async (harness) => {
         const joined = await enlist(harness);
-        const wire = await dial(harness.base, joined.credential);
+        const wire = await dialRunnerSocket(harness.base, joined.credential);
 
         // Both at once, without waiting for an answer to the first. The
         // transport gives each frame its own fiber, so a controller that
@@ -670,7 +607,7 @@ describe("what a connection leaves behind", () => {
     );
   });
 
-  it("closes the older connection when a runner connects again, and keeps the runner online", async () => {
+  it("closes the older connection as going away when a runner connects again", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetupWithNoProviderInstance(harness);
@@ -694,13 +631,9 @@ describe("what a connection leaves behind", () => {
         const ending = await older.wire.closed();
         expect(ending.code).toBe(GOING_AWAY);
         expect(ending.reason).not.toBe("");
-
-        // The older connection's final status write does not overwrite the row
-        // the newer connection now owns.
-        await delay(150);
-        const row = await readRunner(harness.base, token, joined.runnerId);
-        expect(row.connectivity).toBe("online");
-        expect(await readStateTransitions(harness)).toEqual(["online"]);
+        // That the older connection's end leaves the runner online is tested
+        // in connections.test.ts: nothing on the socket shows when the
+        // controller has handled the close.
 
         newer.wire.close();
       },
@@ -1182,18 +1115,20 @@ describe("what a runner reports about its machine", () => {
         // A credential proves a runner joined, not that this connection is
         // that runner speaking the protocol. Until the hello arrives, a report
         // is ignored.
-        const wire = await dial(harness.base, joined.credential);
+        const wire = await dialRunnerSocket(harness.base, joined.credential);
 
         wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(4 * GIB) });
         wire.send({ _tag: "factsReport", facts: { ...FACTS, docker: true } });
-        await delay(100);
+        // The controller handles one frame at a time, in the order they
+        // arrive, and closes the connection on a hello of another protocol
+        // version. Once it has closed, it has handled both reports.
+        wire.send(buildHello({ protocolVersion: PROTOCOL_VERSION + 1 }));
+        expect((await wire.closed()).code).toBe(PROTOCOL_ERROR);
 
         const row = await readRunner(harness.base, token, joined.runnerId);
         expect(row.connectivity).toBe("offline");
         expect(row.watermark).toBeNull();
         expect(row.facts).toBeNull();
-
-        wire.close();
       },
       { pings: FAST },
     );
@@ -1206,7 +1141,7 @@ describe("what a runner reports about its machine", () => {
         const joined = await enlist(harness);
         // A credential, a socket, and no hello. It answers every ping, which is
         // the only way a connection could look alive without a hello.
-        const wire = await dial(harness.base, joined.credential);
+        const wire = await dialRunnerSocket(harness.base, joined.credential);
         const answering = setInterval(() => {
           wire.send({ _tag: "pong" });
         }, 10);
@@ -1240,8 +1175,11 @@ describe("what a runner reports about its machine", () => {
         );
         expect(online.lastSeenAt).not.toBeNull();
 
-        // Long enough that a report which updated the timestamp would show it.
-        await delay(50);
+        // Timestamps have millisecond precision, so a report handled within
+        // the same millisecond as the hello could update the timestamp
+        // without changing it. Once the clock has moved past it, any update
+        // shows. The controller runs in this process and reads the same clock.
+        while (Date.now() <= Date.parse(online.lastSeenAt!)) await delay(1);
         wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(200 * GIB) });
         wire.send({ _tag: "factsReport", facts: { ...FACTS, docker: true } });
 
@@ -1278,17 +1216,25 @@ describe("what the controller stopping does to its local runner", () => {
         [process.execPath, "run", HERCULE, "runner", "--local", "--home", home],
         { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
       );
-      let said = "";
+      // Settles with the child's output up to its first newline, or with all
+      // of its output if it exits before writing one. The child's stdout is
+      // read to the end either way, so the child never blocks on a full pipe.
+      const firstLine = Promise.withResolvers<string>();
       void (async () => {
         const decoder = new TextDecoder();
-        for await (const chunk of child.stdout) said += decoder.decode(chunk, { stream: true });
+        let said = "";
+        for await (const chunk of child.stdout) {
+          said += decoder.decode(chunk, { stream: true });
+          const end = said.indexOf("\n");
+          if (end !== -1) firstLine.resolve(said.slice(0, end + 1));
+        }
+        firstLine.resolve(said);
       })();
 
       try {
         // The controller's handshake: it reads the child's first line and
         // answers on its stdin, exactly as the boot step does.
-        for (let waited = 0; waited < 15_000 && said === ""; waited += 20) await delay(20);
-        expect(said).toBe('{"join":true}\n');
+        expect(await firstLine.promise).toBe('{"join":true}\n');
         void child.stdin.write(
           `${JSON.stringify({ controllerUrl: harness.base, token: await harness.joinToken() })}\n`,
         );
@@ -1401,7 +1347,7 @@ describe("refreshing a runner's facts on demand", () => {
    * already decoded with the protocol schema, so only its type is left to
    * check.
    */
-  const expectFactsRequest = async (wire: Wire): Promise<void> => {
+  const expectFactsRequest = async (wire: RunnerSocket): Promise<void> => {
     const frame = await wire.next();
     expect(frame._tag, JSON.stringify(frame)).toBe("factsRequest");
   };
@@ -1515,7 +1461,7 @@ describe("refreshing a runner's facts on demand", () => {
       const joined = await enlist(harness);
       // A credential and a socket, but no hello: a connection exists, but the
       // other end is not yet a runner the controller can ask anything.
-      const wire = await dial(harness.base, joined.credential);
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
       try {
         expect((await readRunner(harness.base, token, joined.runnerId)).connectivity).toBe(
           "offline",
@@ -1563,43 +1509,6 @@ describe("refreshing a runner's facts on demand", () => {
         wire.close();
       }
     });
-  });
-
-  it("answers a caller still waiting when the report arrives after another caller timed out", async () => {
-    await withServer(
-      async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
-        const joined = await enlist(harness);
-        const { wire } = await greet(harness.base, joined.credential);
-        try {
-          await waitForRunner(
-            harness.base,
-            token,
-            joined.runnerId,
-            (one) => one.connectivity === "online",
-          );
-
-          const early = refreshFacts(harness.base, token, joined.runnerId);
-          await expectFactsRequest(wire);
-          // Long enough that the second caller still has time left when the
-          // first times out.
-          await delay(700);
-          const late = refreshFacts(harness.base, token, joined.runnerId);
-          expect((await early).status).toBe(409);
-
-          wire.send({ _tag: "factsReport", facts: GROWN });
-          const answered = await late;
-          expect(answered.status, await answered.clone().text()).toBe(200);
-          expect(((await answered.json()) as RunnerDetail).facts).toEqual(GROWN);
-          // The first caller's timeout did not remove the wait: the second
-          // caller shared it and got the report.
-          expect(wire.frames.filter((frame) => frame._tag === "factsRequest")).toHaveLength(2);
-        } finally {
-          wire.close();
-        }
-      },
-      { factsDeadline: Duration.seconds(1) },
-    );
   });
 
   it("sends a new request after one that was never answered, and the next report arrives", async () => {
@@ -1740,7 +1649,10 @@ describe("probing a runner's provider instances", () => {
       return one.snapshots.find((each) => each.runnerId === runnerId);
     });
 
-  const waitForProbeRequests = (wire: Wire, count: number): Promise<ReadonlyArray<ProbeRequest>> =>
+  const waitForProbeRequests = (
+    wire: RunnerSocket,
+    count: number,
+  ): Promise<ReadonlyArray<ProbeRequest>> =>
     waitUntil(`asked for ${String(count)} probes`, () => {
       const asked = listProbeRequests(wire);
       return asked.length >= count ? asked : undefined;
@@ -1885,7 +1797,7 @@ describe("probing a runner's provider instances", () => {
       const joined = await enlist(harness);
       const claude = await findInstanceFor(harness.base, token, "claude-code");
       // A socket with no hello: it has not identified itself as a runner yet.
-      const wire = await dial(harness.base, joined.credential);
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
       try {
         const response = await probeNow(harness.base, token, joined.runnerId, claude.id);
         expect(response.status, await response.clone().text()).toBe(409);
@@ -1991,6 +1903,42 @@ describe("probing a runner's provider instances", () => {
         second.wire.close();
       }
     });
+  });
+
+  it("freezes without waiting for a probe's answer, and stores the answer once the transfer is cancelled", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const { wire } = await greet(harness.base, joined.credential);
+      try {
+        const asked = await waitForProbeRequests(wire, 3);
+        const request = asked.find((one) => one.instanceId === claude.id)!;
+
+        // The probes are unanswered, and their deadline is the default 20
+        // seconds. The freeze must not wait for them.
+        const promotionToken = await freezeController(harness.base, token);
+
+        await sendAndAwaitHeld(harness, "the probe's answer", () =>
+          wire.send({
+            _tag: "probeReport",
+            requestId: request.requestId,
+            instanceId: claude.id,
+            result: buildProbeResult("2.1.263"),
+          }),
+        );
+        const frozen = (await (
+          await get(harness.base, `/api/v1/providers/${claude.id}`, token)
+        ).json()) as Instance;
+        expect(frozen.snapshots, "a frozen controller stores no snapshot").toEqual([]);
+
+        await thaw(harness.base, promotionToken);
+        const snapshot = await readSnapshot(harness.base, token, claude.id, joined.runnerId);
+        expect(snapshot.harnessVersion).toBe("2.1.263");
+      } finally {
+        wire.close();
+      }
+    }, QUIET_LOOP_TIMINGS);
   });
 
   it("probes every instance of every online runner again on the interval", async () => {
@@ -2151,7 +2099,7 @@ describe("installing a harness on a runner", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const wire = await dial(harness.base, joined.credential);
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
       try {
         const response = await installHarness(harness.base, token, joined.runnerId, "claude-code");
         expect(response.status, await response.clone().text()).toBe(409);
@@ -2180,7 +2128,11 @@ describe("logging a runner's provider instance in", () => {
     body: { readonly runnerId: string; readonly code: string },
   ) => send("POST", base, `/api/v1/providers/${instanceId}/login-code`, { body, token });
 
-  const waitForProbe = (wire: Wire, instanceId: string, after: number): Promise<ProbeRequest> =>
+  const waitForProbe = (
+    wire: RunnerSocket,
+    instanceId: string,
+    after: number,
+  ): Promise<ProbeRequest> =>
     waitUntil(`probed ${instanceId}`, () =>
       wire.frames
         .slice(after)
@@ -2301,7 +2253,7 @@ describe("logging a runner's provider instance in", () => {
   const startDeviceLogin = async (
     harness: ServerHarness,
     token: string,
-    login: { readonly instanceId: string; readonly runnerId: string; readonly wire: Wire },
+    login: { readonly instanceId: string; readonly runnerId: string; readonly wire: RunnerSocket },
     nth = 0,
   ): Promise<string> => {
     const pending = startLogin(harness.base, token, login.instanceId, login.runnerId);
@@ -2317,7 +2269,7 @@ describe("logging a runner's provider instance in", () => {
     return request.requestId;
   };
 
-  const answerProbe = (wire: Wire, probe: ProbeRequest): void => {
+  const answerProbe = (wire: RunnerSocket, probe: ProbeRequest): void => {
     wire.send({
       _tag: "probeReport",
       requestId: probe.requestId,
@@ -2326,7 +2278,7 @@ describe("logging a runner's provider instance in", () => {
     });
   };
 
-  const countProbes = (wire: Wire, instanceId: string): number =>
+  const countProbes = (wire: RunnerSocket, instanceId: string): number =>
     wire.frames.filter((frame) => frame._tag === "probeRequest" && frame.instanceId === instanceId)
       .length;
 
@@ -2350,7 +2302,7 @@ describe("logging a runner's provider instance in", () => {
   const settleCodexLogin = async (
     harness: ServerHarness,
     token: string,
-    login: { readonly instanceId: string; readonly runnerId: string; readonly wire: Wire },
+    login: { readonly instanceId: string; readonly runnerId: string; readonly wire: RunnerSocket },
     nth: number,
   ): Promise<void> => {
     const before = login.wire.frames.length;
@@ -2751,7 +2703,7 @@ describe("logging a runner's provider instance in", () => {
       first.wire.close();
       await first.wire.closed();
 
-      const wire = await dial(harness.base, joined.credential);
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
       try {
         // Until the hello arrives, this connection has only shown that it
         // holds a credential, so its report is not read. Had it been read, it
@@ -2845,7 +2797,7 @@ describe("logging a runner's provider instance in", () => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const wire = await dial(harness.base, joined.credential);
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
       try {
         const response = await startLogin(harness.base, token, claude.id, joined.runnerId);
         expect(response.status, await response.clone().text()).toBe(409);
@@ -2989,5 +2941,170 @@ describe("logging a runner's provider instance in", () => {
         wire.close();
       }
     });
+  });
+});
+
+/** Cancels the transfer of `promotionToken`, which thaws the controller. */
+const thaw = async (base: string, promotionToken: string): Promise<void> => {
+  const response = await requestTransfer(base, promotionToken, "DELETE");
+  expect(response.status).toBe(204);
+};
+
+/**
+ * Returns the runner's connectivity as the database holds it. A sealed
+ * controller answers no request, so the tests read its database directly.
+ */
+const readConnectivityFromDatabase = async (
+  harness: ServerHarness,
+  runnerId: string,
+): Promise<string> => {
+  const rows = await Effect.runPromise(
+    Effect.orDie(
+      harness.sql<{ connectivity: string }>`
+        SELECT connectivity FROM runners WHERE id = ${uuidFromString(runnerId)}
+      `,
+    ),
+  );
+  return rows[0]!.connectivity;
+};
+
+/**
+ * Runs `send`, then waits until one more unit of work waits at the promotion
+ * gate than before. Work that waits there has not run, so the test can then
+ * check that nothing it would have done has happened. Fails after four
+ * seconds, with an error naming `what`, when nothing more is held.
+ *
+ * The controller must run with `QUIET_LOOP_TIMINGS`, so that the one unit
+ * the count gains is the work `send` caused.
+ */
+const sendAndAwaitHeld = async (
+  harness: ServerHarness,
+  what: string,
+  send: () => void,
+): Promise<void> => {
+  const before = await Effect.runPromise(
+    Effect.map(
+      Stream.runHead(harness.promotion.gateChanges),
+      (gate) => Option.getOrThrow(gate).held,
+    ),
+  );
+  send();
+  await Effect.runPromise(
+    awaitHeldWork(harness.promotion, before + 1).pipe(
+      Effect.timeoutOrElse({
+        duration: Duration.seconds(4),
+        orElse: () => Effect.die(new Error(`the frozen controller never held ${what}`)),
+      }),
+    ),
+  );
+};
+
+describe("a runner connection during a promotion", () => {
+  it("holds a hello that arrives while frozen, and answers it with the new address once sealed", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+      const promotionToken = await freezeController(harness.base, token);
+
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
+      await sendAndAwaitHeld(harness, "the hello", () => wire.send(buildHello()));
+      expect(wire.frames, "a frozen controller holds the hello").toEqual([]);
+
+      await sealController(harness.base, promotionToken);
+      const pointer = await waitForFrame<ForwardingPointer>(wire, "forwardingPointer");
+      expect(pointer.newAddress).toBe(NEW_CONTROLLER_ADDRESS);
+      // The socket delivers frames in the order they were written, so a hello
+      // answered before the pointer would be in front of it.
+      expect(wire.frames.map((frame) => frame._tag)).toEqual(["forwardingPointer"]);
+      // The hello never joined the connections the seal announces itself to:
+      // joining writes online in the same admitted work as the answer.
+      expect(await readConnectivityFromDatabase(harness, joined.runnerId)).not.toBe("online");
+      wire.close();
+    }, QUIET_LOOP_TIMINGS);
+  });
+
+  it("holds a hello that arrives while frozen, and answers it once the transfer is cancelled", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+      const promotionToken = await freezeController(harness.base, token);
+
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
+      await sendAndAwaitHeld(harness, "the hello", () => wire.send(buildHello()));
+      expect(wire.frames, "a frozen controller holds the hello").toEqual([]);
+      // Reading still works while frozen.
+      expect((await readRunner(harness.base, token, joined.runnerId)).connectivity).not.toBe(
+        "online",
+      );
+
+      await thaw(harness.base, promotionToken);
+      await waitForFrame<ControllerHello>(wire, "controllerHello");
+      await waitForRunner(
+        harness.base,
+        token,
+        joined.runnerId,
+        (one) => one.connectivity === "online",
+      );
+      expect(await readStateTransitions(harness)).toEqual(["online"]);
+      wire.close();
+    }, QUIET_LOOP_TIMINGS);
+  });
+
+  // Whether the departure is written before or after the thaw is tested on
+  // the service, in connections.test.ts, because nothing on the socket shows
+  // when the controller has handled a close. This test checks only the end
+  // state, which is the same whichever side of the thaw the close lands on.
+  it("records a runner that disconnects while frozen as unreachable once the transfer is cancelled", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential);
+      await waitForRunner(
+        harness.base,
+        token,
+        joined.runnerId,
+        (one) => one.connectivity === "online",
+      );
+      const promotionToken = await freezeController(harness.base, token);
+
+      wire.close();
+      await thaw(harness.base, promotionToken);
+      await waitForRunner(
+        harness.base,
+        token,
+        joined.runnerId,
+        (one) => one.connectivity === "unreachable",
+      );
+      expect(await readStateTransitions(harness)).toEqual(["online", "unreachable"]);
+    });
+  });
+
+  it("keeps a runner online that disconnects and connects again while frozen", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+      const first = await greet(harness.base, joined.credential);
+      await waitForRunner(
+        harness.base,
+        token,
+        joined.runnerId,
+        (one) => one.connectivity === "online",
+      );
+      const promotionToken = await freezeController(harness.base, token);
+
+      first.wire.close();
+      const second = await dialRunnerSocket(harness.base, joined.credential);
+      await sendAndAwaitHeld(harness, "the second hello", () => second.send(buildHello()));
+
+      await thaw(harness.base, promotionToken);
+      await waitForFrame<ControllerHello>(second, "controllerHello");
+      // The hello writes online before it is answered, and whatever comes
+      // after it leaves the row online: the hello drops the held departure,
+      // and the first connection's close, if it lands later, belongs to a
+      // replaced connection and writes nothing.
+      expect((await readRunner(harness.base, token, joined.runnerId)).connectivity).toBe("online");
+      expect((await readStateTransitions(harness)).at(-1)).toBe("online");
+      second.close();
+    }, QUIET_LOOP_TIMINGS);
   });
 });

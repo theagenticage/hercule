@@ -16,6 +16,9 @@ const lookUpCommand = (...words: ReadonlyArray<string>): Command => {
   return found!;
 };
 
+/** The URL the CLI reached the controller at, as it is on the controller's own machine. */
+const CONTROLLER_URL = "http://127.0.0.1:4937";
+
 const SESSION = "0199e0e7-1111-7000-8000-0000000000ff";
 
 const buildTranscriptRow = (position: number, event: Record<string, unknown>) => ({
@@ -29,6 +32,7 @@ describe("hercule session spawn", () => {
     const lines = renderHuman(
       { kind: "value", value: { id: SESSION, status: "starting", openRequests: [] } },
       lookUpCommand("session", "spawn"),
+      CONTROLLER_URL,
     );
 
     expect(lines[0]).toBe(`id      ${SESSION.slice(-8)}`);
@@ -41,6 +45,7 @@ describe("hercule session spawn", () => {
     const lines = renderHuman(
       { kind: "value", value: { id: SESSION, status: "idle", openRequests: [] } },
       lookUpCommand("session", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines.join("\n")).not.toContain("hercule transcript read");
@@ -60,6 +65,7 @@ describe("hercule input list", () => {
         },
       },
       lookUpCommand("input", "list"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual([
@@ -103,6 +109,7 @@ describe("hercule session read", () => {
         value: { id: SESSION, status: "busy", openRequests: OPEN_REQUESTS },
       },
       lookUpCommand("session", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual([
@@ -118,13 +125,19 @@ describe("hercule session read", () => {
 
   it("prints the open Requests the same way after a command that returns the session", () => {
     const value = { id: SESSION, status: "busy", openRequests: OPEN_REQUESTS };
-    const read = renderHuman({ kind: "value", value }, lookUpCommand("session", "read"));
+    const read = renderHuman(
+      { kind: "value", value },
+      lookUpCommand("session", "read"),
+      CONTROLLER_URL,
+    );
 
     for (const words of [
       ["session", "respond-to-approval-request"],
       ["session", "interrupt"],
     ]) {
-      expect(renderHuman({ kind: "value", value }, lookUpCommand(...words))).toEqual(read);
+      expect(
+        renderHuman({ kind: "value", value }, lookUpCommand(...words), CONTROLLER_URL),
+      ).toEqual(read);
     }
   });
 
@@ -132,6 +145,7 @@ describe("hercule session read", () => {
     const lines = renderHuman(
       { kind: "value", value: { id: SESSION, status: "idle", openRequests: [] } },
       lookUpCommand("session", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual([`id      ${SESSION.slice(-8)}`, "status  idle"]);
@@ -156,6 +170,7 @@ describe("hercule session list", () => {
         },
       },
       lookUpCommand("session", "list"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual([
@@ -186,6 +201,7 @@ describe("hercule transcript read", () => {
         },
       },
       lookUpCommand("transcript", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual([
@@ -213,6 +229,7 @@ describe("hercule transcript read", () => {
         },
       },
       lookUpCommand("transcript", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines[0]).toContain("...");
@@ -236,6 +253,7 @@ describe("hercule transcript read", () => {
         },
       },
       lookUpCommand("transcript", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual([
@@ -265,6 +283,7 @@ describe("hercule transcript read", () => {
         },
       },
       lookUpCommand("transcript", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual([
@@ -289,6 +308,7 @@ describe("hercule transcript read", () => {
         },
       },
       lookUpCommand("transcript", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual([
@@ -311,6 +331,7 @@ describe("hercule transcript read", () => {
         },
       },
       lookUpCommand("transcript", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual([
@@ -322,6 +343,7 @@ describe("hercule transcript read", () => {
     const lines = renderHuman(
       { kind: "value", value: { items: [] } },
       lookUpCommand("transcript", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual(["no results"]);
@@ -361,6 +383,7 @@ describe("hercule session subagent list", () => {
         },
       },
       lookUpCommand("session", "subagent", "list"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual([
@@ -384,7 +407,11 @@ describe("hercule workflow", () => {
 
   it("prints the source of a read unchanged, and nothing else", () => {
     expect(
-      renderHuman({ kind: "value", value: record }, lookUpCommand("workflow", "read")),
+      renderHuman(
+        { kind: "value", value: record },
+        lookUpCommand("workflow", "read"),
+        CONTROLLER_URL,
+      ),
     ).toEqual([SOURCE]);
   });
 
@@ -394,6 +421,7 @@ describe("hercule workflow", () => {
       renderHuman(
         { kind: "value", value: { ...record, source: crlfSource } },
         lookUpCommand("workflow", "read"),
+        CONTROLLER_URL,
       ),
     ).toEqual([`${crlfSource}\r`]);
   });
@@ -409,6 +437,7 @@ describe("hercule workflow", () => {
         },
       },
       lookUpCommand("workflow", "list"),
+      CONTROLLER_URL,
     );
     expect(listed).toEqual([
       "id        name         description",
@@ -428,6 +457,7 @@ describe("hercule workflow", () => {
         },
       },
       lookUpCommand("trigger", "list"),
+      CONTROLLER_URL,
     );
     expect(triggers).toEqual([
       "triggerId  on            filter",
@@ -451,6 +481,7 @@ describe("hercule workflow", () => {
         },
       },
       lookUpCommand("trigger", "list"),
+      CONTROLLER_URL,
     );
     expect(listed).toEqual([
       "triggerId  on            nextFireAt                filter",
@@ -471,14 +502,15 @@ describe("hercule workflow", () => {
           },
         },
         validate,
+        CONTROLLER_URL,
       ),
     ).toEqual([
       "error: steps.1.action: task.creat is not an action.",
       "warning: steps: A run can end only when someone cancels it.",
     ]);
-    expect(renderHuman({ kind: "value", value: { errors: [], warnings: [] } }, validate)).toEqual([
-      "valid: no errors and no warnings",
-    ]);
+    expect(
+      renderHuman({ kind: "value", value: { errors: [], warnings: [] } }, validate, CONTROLLER_URL),
+    ).toEqual(["valid: no errors and no warnings"]);
   });
 
   it("prints the id, whether it is enabled and one line per warning after a save, and never the source", () => {
@@ -490,14 +522,18 @@ describe("hercule workflow", () => {
       ],
     };
     for (const verb of ["create", "update"]) {
-      expect(renderHuman({ kind: "value", value: saved }, lookUpCommand("workflow", verb))).toEqual(
-        [
-          `id       ${WORKFLOW.slice(-8)}`,
-          "enabled  false",
-          "warning: The run can end only when someone cancels it.",
-          "warning: steps.0: Nothing starts this step.",
-        ],
-      );
+      expect(
+        renderHuman(
+          { kind: "value", value: saved },
+          lookUpCommand("workflow", verb),
+          CONTROLLER_URL,
+        ),
+      ).toEqual([
+        `id       ${WORKFLOW.slice(-8)}`,
+        "enabled  false",
+        "warning: The run can end only when someone cancels it.",
+        "warning: steps.0: Nothing starts this step.",
+      ]);
     }
   });
 });
@@ -514,6 +550,7 @@ describe("a catalog query that returns a plain array", () => {
           ],
         },
         lookUpCommand("event-kind", "list"),
+        CONTROLLER_URL,
       ),
     ).toEqual([
       "kind               description          connectionRequired",
@@ -541,6 +578,7 @@ describe("a catalog query that returns a plain array", () => {
           ],
         },
         lookUpCommand("workflow-action", "list"),
+        CONTROLLER_URL,
       ),
     ).toEqual([
       "id           params                     description",
@@ -568,6 +606,7 @@ describe("a catalog query that returns a plain array", () => {
           ],
         },
         lookUpCommand("workflow-action", "list"),
+        CONTROLLER_URL,
       ),
     ).toEqual([
       "id                params                    description",
@@ -582,7 +621,11 @@ describe("hercule run", () => {
 
   it("prints the new run's full id after run start, and the command that shows it", () => {
     expect(
-      renderHuman({ kind: "value", value: { runId: RUN } }, lookUpCommand("run", "start")),
+      renderHuman(
+        { kind: "value", value: { runId: RUN } },
+        lookUpCommand("run", "start"),
+        CONTROLLER_URL,
+      ),
     ).toEqual([
       `run ${RUN} started`,
       "",
@@ -635,7 +678,9 @@ describe("hercule run", () => {
       startedAt: "2026-09-24T10:00:00.000Z",
       finishedAt: "2026-09-24T10:00:01.540Z",
     };
-    expect(renderHuman({ kind: "value", value: failed }, lookUpCommand("run", "read"))).toEqual([
+    expect(
+      renderHuman({ kind: "value", value: failed }, lookUpCommand("run", "read"), CONTROLLER_URL),
+    ).toEqual([
       `id             ${RUN}`,
       "workflow       File a task",
       "status         failed",
@@ -676,6 +721,7 @@ describe("hercule run", () => {
         },
       },
       lookUpCommand("run", "read"),
+      CONTROLLER_URL,
     );
     expect(lines.slice(lines.indexOf("inputs"))).toEqual(["inputs", "none", "", "steps", "none"]);
   });
@@ -698,6 +744,7 @@ describe("hercule run", () => {
         },
       },
       lookUpCommand("run", "read"),
+      CONTROLLER_URL,
     );
     expect(lines.slice(0, lines.indexOf(""))).toEqual([
       `id             ${RUN}`,
@@ -732,6 +779,7 @@ describe("hercule run", () => {
         },
       },
       lookUpCommand("run", "read"),
+      CONTROLLER_URL,
     );
     expect(lines.slice(2, 6)).toEqual([
       "status             failed",
@@ -794,6 +842,7 @@ describe("hercule run", () => {
         },
       },
       lookUpCommand("run", "read"),
+      CONTROLLER_URL,
     );
 
   it("names the edge a run failed at its iteration limit, as from -> to", () => {
@@ -860,6 +909,7 @@ describe("hercule run", () => {
         },
       },
       lookUpCommand("run", "read"),
+      CONTROLLER_URL,
     );
     expect(lines.slice(lines.indexOf("steps"))).toEqual([
       "steps",
@@ -900,6 +950,7 @@ describe("hercule run", () => {
         },
       },
       lookUpCommand("run", "read"),
+      CONTROLLER_URL,
     );
     expect(lines.slice(lines.indexOf("steps"))).toEqual([
       "steps",
@@ -930,6 +981,7 @@ describe("hercule run", () => {
           },
         },
         lookUpCommand("run", "read"),
+        CONTROLLER_URL,
       );
       return lines.slice(lines.indexOf("inputs"), lines.indexOf("steps"));
     };
@@ -976,6 +1028,7 @@ describe("hercule run", () => {
         },
       },
       lookUpCommand("run", "read"),
+      CONTROLLER_URL,
     );
     expect(lines.slice(lines.indexOf("output"), lines.indexOf("steps"))).toEqual([
       "output",
@@ -1010,6 +1063,7 @@ describe("hercule run", () => {
           },
         },
         lookUpCommand("run", "read"),
+        CONTROLLER_URL,
       ).find((line) => line.startsWith("startedBy"));
     expect(readStartedBy({ kind: "api", actor: `session:${CONNECTION}` })).toBe(
       "startedBy  session 000000cc through the API",
@@ -1045,6 +1099,7 @@ describe("hercule run", () => {
         },
       },
       lookUpCommand("run", "read"),
+      CONTROLLER_URL,
     );
     expect(lines.slice(0, 8)).toEqual([
       `id              ${RUN}`,
@@ -1091,6 +1146,7 @@ describe("hercule run", () => {
         },
       },
       lookUpCommand("trigger", "list"),
+      CONTROLLER_URL,
     );
     expect(lines).toEqual([
       "triggerId        kind   on                                    status  health                      nextFireAt                skippedTicks",
@@ -1141,6 +1197,7 @@ describe("hercule notification", () => {
     const lines = renderHuman(
       { kind: "value", value: decision },
       lookUpCommand("notification", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toContainEqual(expect.stringMatching(/^title +Which architecture\?$/));
@@ -1176,6 +1233,7 @@ describe("hercule notification", () => {
         },
       },
       lookUpCommand("notification", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toContainEqual(expect.stringMatching(/^resolution\.origin +api$/));
@@ -1192,6 +1250,7 @@ describe("hercule notification", () => {
     const lines = renderHuman(
       { kind: "value", value: { items: [decision] } },
       lookUpCommand("notification", "list"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toHaveLength(2);
@@ -1207,6 +1266,7 @@ describe("hercule notification", () => {
     const lines = renderHuman(
       { kind: "value", value: { ...decision, body: undefined, actions: [], status: "resolved" } },
       lookUpCommand("notification", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines).not.toContain("answers");
@@ -1230,6 +1290,7 @@ describe("hercule notification", () => {
         },
       },
       lookUpCommand("notification", "act"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual([`notification ${NOTIFICATION.slice(-8)} decided: Event-sourced`]);
@@ -1253,6 +1314,7 @@ describe("hercule notification", () => {
         },
       },
       lookUpCommand("notification", "act"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toEqual([
@@ -1281,6 +1343,7 @@ describe("hercule notification", () => {
         },
       },
       lookUpCommand("notification", "read"),
+      CONTROLLER_URL,
     );
 
     expect(lines).toContainEqual(expect.stringMatching(/^title +Which\[8m architecture\?$/));
@@ -1322,6 +1385,7 @@ describe("incomplete token usage in the CLI", () => {
         value: { items: [{ id: SESSION, status: "busy", openRequests: [], usageReport }] },
       },
       lookUpCommand("session", "list"),
+      CONTROLLER_URL,
     );
     expect(session.join("\n")).toContain("120 (incomplete)");
     const subagent = renderHuman(
@@ -1341,7 +1405,37 @@ describe("incomplete token usage in the CLI", () => {
         },
       },
       lookUpCommand("session", "subagent", "list"),
+      CONTROLLER_URL,
     );
     expect(subagent.join("\n")).toContain("120 (incomplete)");
+  });
+});
+
+describe("hercule controller promotion-token create", () => {
+  const renderMinted = (controllerUrl: string): ReadonlyArray<string> =>
+    renderHuman(
+      {
+        kind: "value",
+        value: { token: "promo-token-once", expiresAt: "2026-10-09T12:15:00.000Z" },
+      },
+      lookUpCommand("controller", "promotion-token", "create"),
+      controllerUrl,
+    );
+
+  it("prints a paste-ready promote command from the URL the CLI reached the controller at", () => {
+    expect(renderMinted("http://hercule.example:4937")).toEqual([
+      "hercule promote --from http://hercule.example:4937 --token promo-token-once",
+      "expires 2026-10-09T12:15:00.000Z",
+    ]);
+  });
+
+  it("prints a placeholder for a loopback URL, which the new machine cannot reach", () => {
+    for (const url of [CONTROLLER_URL, "http://localhost:4937", "http://[::1]:4937"]) {
+      expect(renderMinted(url)).toEqual([
+        "hercule promote --from <this-controller-url> --token promo-token-once",
+        "expires 2026-10-09T12:15:00.000Z",
+        "replace <this-controller-url> with the URL the new machine reaches this controller at",
+      ]);
+    }
   });
 });

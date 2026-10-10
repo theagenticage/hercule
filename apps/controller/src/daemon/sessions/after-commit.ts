@@ -21,6 +21,12 @@ import { absorbFailures } from "../absorbing";
  * request's actor, so the audit entries the effect writes, such as a stop's,
  * name the person who asked for it.
  *
+ * The fiber does not run inside the caller's admission by the promotion
+ * gate, because the caller may already have finished. So an effect that
+ * writes to the database passes the gate itself (`PromotionState`), as
+ * `Live.stopSession` does. An effect that only sends a frame does not
+ * need to.
+ *
  * A failure is logged with `failureMessage`, not returned, because the
  * caller's write is already durable and the caller has returned. Whether
  * anything tries again is up to the caller: queued input and a queued session

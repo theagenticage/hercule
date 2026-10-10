@@ -20,6 +20,7 @@ import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { PromotionState } from "../../promotion";
 import { RunnerConnections } from "../../runners";
 import { absorbFailures } from "../absorbing";
 
@@ -34,17 +35,21 @@ const CHECK_INTERVAL: Duration.Duration = Duration.seconds(30);
  * longer than the grace, and repeats that every interval. Never returns. A
  * pass that fails is logged, and the next one runs.
  */
-export const sweepUnreachableRunners: Effect.Effect<never, SqlError, RunnerConnections> =
-  Effect.gen(function* () {
-    const connections = yield* RunnerConnections;
-    const pass = Effect.flatMap(Clock.currentTimeMillis, (millis) =>
-      connections.reportUnreachableRunners(
-        new Date(millis - Duration.toMillis(UNREACHABLE_GRACE)).toISOString(),
-      ),
-    );
-    yield* Effect.sleep(UNREACHABLE_GRACE);
-    while (true) {
-      yield* absorbFailures("Reporting unreachable runners failed", pass);
-      yield* Effect.sleep(CHECK_INTERVAL);
-    }
-  });
+export const sweepUnreachableRunners: Effect.Effect<
+  never,
+  SqlError,
+  RunnerConnections | PromotionState
+> = Effect.gen(function* () {
+  const connections = yield* RunnerConnections;
+  const promotion = yield* PromotionState;
+  const pass = Effect.flatMap(Clock.currentTimeMillis, (millis) =>
+    connections.reportUnreachableRunners(
+      new Date(millis - Duration.toMillis(UNREACHABLE_GRACE)).toISOString(),
+    ),
+  );
+  yield* Effect.sleep(UNREACHABLE_GRACE);
+  while (true) {
+    yield* absorbFailures("Reporting unreachable runners failed", promotion.whenServing(pass));
+    yield* Effect.sleep(CHECK_INTERVAL);
+  }
+});

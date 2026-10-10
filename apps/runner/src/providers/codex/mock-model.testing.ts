@@ -11,6 +11,10 @@ export const startMockModel = (version: "v1" | "v2", stopScenario = false) => {
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
+    // A held response sends one chunk and then nothing until the test lets it
+    // go. Bun closes a connection after 10 idle seconds by default, which
+    // would make Codex reconnect in the middle of a test.
+    idleTimeout: 0,
     fetch(request) {
       if (request.method !== "POST") return Response.json({ data: [] });
       const threadId = request.headers.get("thread-id")!;
@@ -195,7 +199,14 @@ export const startMockModel = (version: "v1" | "v2", stopScenario = false) => {
       "[features]",
       "multi_agent = true",
       `multi_agent_v2 = ${version === "v2"}`,
-      ...(stopScenario ? ["[agents]", "max_depth = 2"] : []),
+      // The Stop tree runs three subagents at once: two children and one
+      // descendant. Under Codex's default thread limit, and even under a limit
+      // of exactly 3, Codex sometimes refuses the descendant's spawn with
+      // "agent thread limit reached", and the tree never grows its third
+      // level. A limit well above the tree's size leaves room for that.
+      ...(stopScenario
+        ? ["[agents]", "max_depth = 2", "max_concurrent_threads_per_session = 16"]
+        : []),
       "[model_providers.fixture]",
       'name = "Isolated fixture"',
       `base_url = "${server.url.toString()}v1"`,

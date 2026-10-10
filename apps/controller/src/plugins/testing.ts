@@ -39,6 +39,7 @@ import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { connectionRepository, ConnectionTypesLayer, type StoredConnection } from "../connections";
 import { IngestExecutorLayer } from "../daemon/ingest";
 import { nowIso } from "../db";
+import { ServingPromotionStateLayer } from "../promotion/testing";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
 
 /** Builds a provider definition that supports everything natively. */
@@ -93,6 +94,7 @@ export const buildPluginStack = () => {
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(NotificationServiceTestLayer),
     Layer.provideMerge(AuditLogLayer),
+    Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );

@@ -10,9 +10,10 @@
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
 import { closedStruct } from "../closed";
 import { Conflict, Forbidden, Internal, Unauthenticated, Validation } from "../errors";
-import { Id } from "../ids";
+import { Id, Timestamp } from "../ids";
 import { Authenticated } from "../security";
 
 export const ControllerInfo = Schema.Struct({
@@ -44,6 +45,18 @@ export const ControllerUpdateInput = closedStruct({
 
 export type ControllerUpdateInput = Schema.Schema.Type<typeof ControllerUpdateInput>;
 
+/**
+ * Shown here and nowhere else: the controller keeps only its hash. The
+ * controller does not know the address another machine reaches it at, so the
+ * answer carries none; the CLI prints the address it reached the controller at.
+ */
+export const MintedPromotionToken = Schema.Struct({
+  token: Schema.NonEmptyString,
+  expiresAt: Timestamp,
+});
+
+export type MintedPromotionToken = Schema.Schema.Type<typeof MintedPromotionToken>;
+
 export const controller = HttpApiGroup.make("controller")
   .add(
     HttpApiEndpoint.get("read", "/controller", {
@@ -54,6 +67,10 @@ export const controller = HttpApiGroup.make("controller")
       payload: ControllerUpdateInput,
       success: ControllerInfo,
       error: [Unauthenticated, Forbidden, Validation, Conflict, Internal],
+    }),
+    HttpApiEndpoint.post("createPromotionToken", "/controller/promotion-tokens", {
+      success: HttpApiSchema.status(201)(MintedPromotionToken),
+      error: [Unauthenticated, Forbidden, Internal],
     }),
   )
   .middleware(Authenticated);

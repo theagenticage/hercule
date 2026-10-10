@@ -1,7 +1,8 @@
 /**
  * Reads a bearer token from a request. Used by the routes that are not derived
  * from the contract's HttpApi declaration, and so get none of its security
- * handling: the join exchange and the runner socket.
+ * handling: the runner's join, socket and attachment fetch, and the promotion
+ * transfer, preview and switch.
  */
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 

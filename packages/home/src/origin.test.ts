@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildControllerOrigin, isWildcardHost } from "./origin";
+import { buildControllerOrigin, isLoopbackHost, isWildcardHost } from "./origin";
 
 const WILDCARD_SPELLINGS = ["0.0.0.0", "::", "[::]", "0:0:0:0:0:0:0:0"];
 
@@ -17,6 +17,26 @@ describe("isWildcardHost", () => {
 
   it("returns false for a value that is not a host", () => {
     expect(isWildcardHost("http://[")).toBe(false);
+  });
+});
+
+describe("isLoopbackHost", () => {
+  it.each(["127.0.0.1", "127.1", "127.0.0.255", "localhost", "LocalHost", "::1", "[::1]"])(
+    "recognises %s",
+    (host) => {
+      expect(isLoopbackHost(host)).toBe(true);
+    },
+  );
+
+  it.each(["0.0.0.0", "::", "hercule.local", "100.64.0.1", "192.168.1.1"])(
+    "does not take %s for loopback",
+    (host) => {
+      expect(isLoopbackHost(host)).toBe(false);
+    },
+  );
+
+  it("returns false for a value that is not a host", () => {
+    expect(isLoopbackHost("http://[")).toBe(false);
   });
 });
 
