@@ -14,7 +14,9 @@
  * - a queued input shows above the composer, and Cancel removes it;
  * - a window hidden and shown again while a message streams ends with the
  *   whole message, no word doubled or skipped;
- * - the app opens the last open thread again at launch.
+ * - the app opens the last open thread again at launch;
+ * - a step whose tool returned images opens to their thumbnails, a line for
+ *   an image that could not be kept, and a lightbox.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
@@ -108,6 +110,16 @@ const ANSWER = `${FIRST_PARAGRAPH.markdown}\n\n${SECOND_PARAGRAPH.markdown}`;
  * paragraphs.
  */
 const RENDERED_ANSWER = `${FIRST_PARAGRAPH.rendered}${SECOND_PARAGRAPH.rendered}`;
+
+/**
+ * A real PNG, 4 × 3 pixels of one colour, that Chromium decodes. The unit
+ * tests run in jsdom, which decodes no image, so only this suite proves that
+ * a tool's image is stored, read back and drawn.
+ */
+const PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGOwybsERww4OQBUhhHRUMjhlgAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 describe("the thread view", () => {
   it("opens a thread from the sidebar and shows its transcript", async () => {
@@ -462,5 +474,53 @@ describe("the thread view", () => {
     await page.locator('section[aria-label="Transcript"]').waitFor();
     expect(await readTranscript(page)).toEqual(transcript);
     expect(await readOpenTab(page)).toBe("Why does the checkout test fail?");
+  });
+
+  it("opens a step whose tool returned images to their thumbnails, and one to the lightbox", async () => {
+    const tooLarge = "The image is larger than 10 MB, so it was not kept.";
+    const { url, fleet } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
+    const { thread, played } = await fleet.spawnScriptedThread(
+      { runner, prompt: "How does the checkout page look?" },
+      [
+        {
+          kind: "tool_images",
+          tool: "Screenshot",
+          text: "Took 3 screenshots.",
+          images: [{ bytes: PNG }, { unavailable: tooLarge }, { bytes: PNG }],
+        },
+        { kind: "message", text: "The page looks right." },
+        { kind: "end", state: "completed" },
+      ],
+    );
+    await played;
+    await fleet.waitForTurn(thread.id, 1, "completed");
+
+    const { app, page } = await openSignedIn(url);
+    await keepWindowOnTop(app);
+    await openThread(page, "How does the checkout page look?");
+    await page.locator("button.worked").click();
+    await page.getByRole("button", { name: "Screenshot", exact: true }).click();
+
+    const output = page.locator(".work-output");
+    expect(await output.locator(".work-output-text").textContent()).toBe("Took 3 screenshots.");
+    expect(await output.locator(".tool-result-image-unavailable").allTextContents()).toEqual([
+      tooLarge,
+    ]);
+    const tiles = output.locator(".image-tile img");
+    await expect.poll(() => tiles.count()).toBe(2);
+    for (const tile of await tiles.all()) {
+      await expect
+        .poll(() => tile.evaluate((image: HTMLImageElement) => image.naturalWidth))
+        .toBeGreaterThan(0);
+    }
+
+    await output.getByRole("button", { name: "Preview Image 2" }).click();
+    expect(await page.locator(".lightbox-caption").textContent()).toBe("Image 2 (2/2)");
+    await expect
+      .poll(() =>
+        page.locator(".lightbox-image").evaluate((image: HTMLImageElement) => image.naturalWidth),
+      )
+      .toBe(4);
   });
 });
