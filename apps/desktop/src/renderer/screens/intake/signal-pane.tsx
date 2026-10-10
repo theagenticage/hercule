@@ -22,7 +22,7 @@ import {
   queryKeys,
   readErrorMessage,
   readSignalPluginId,
-  type PluginName,
+  type PluginIdentity,
 } from "@hercule/client-core";
 import { eventQuery, signalQuery } from "../../app/queries";
 import { CheckIcon } from "../../icons/check";
@@ -61,7 +61,7 @@ export function SignalPane({
 }: {
   readonly signalId: string;
   readonly listed: Signal | undefined;
-  readonly plugins: ReadonlyArray<PluginName>;
+  readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly timezone: string;
   readonly focusSuggestedOnOpen: boolean;
   readonly onFocusedSuggested: () => void;
@@ -110,7 +110,7 @@ function SignalDetail({
   ref,
 }: {
   readonly signal: Signal;
-  readonly plugins: ReadonlyArray<PluginName>;
+  readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly timezone: string;
   readonly focusSuggestedOnOpen: boolean;
   readonly onFocusedSuggested: () => void;
@@ -213,7 +213,7 @@ function SignalDetail({
         <header>
           <div className="ad-kind">
             <span className="src">
-              <SourceMark pluginId={readSignalPluginId(signal.kind)} size={14} />
+              <SourceMark pluginId={readSignalPluginId(signal.kind)} plugins={plugins} size={14} />
               {describeSignalProvenance(signal, plugins)}
             </span>
             <span className="spacer" />
@@ -225,8 +225,8 @@ function SignalDetail({
                 target="_blank"
                 rel="noreferrer"
               >
-                Open on {sourceName}
-                <ExternalIcon size={12} />
+                {`Open on ${sourceName}`}
+                <ExternalIcon size={13} />
               </a>
             )}
           </div>

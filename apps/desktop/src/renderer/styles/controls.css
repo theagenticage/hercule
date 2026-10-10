@@ -68,6 +68,11 @@
   font-size: var(--t-12);
   gap: 5px;
 }
+/* A face before a button's label, such as the workflow on a Hand to an agent
+   answer, sits closer to the button's edge, as the book draws it. */
+.btn .cr {
+  margin-left: -6px;
+}
 /* The large button that ends a step of the first run, such as Add project. */
 .btn--lg {
   height: 38px;
@@ -700,4 +705,7 @@ input.field[type="password"]:not(:placeholder-shown) {
   font-size: var(--t-12);
   font-weight: var(--w-bold);
   letter-spacing: 0.005em;
+}
+.section-h .count {
+  height: 17px;
 }

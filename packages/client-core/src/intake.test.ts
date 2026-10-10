@@ -7,6 +7,7 @@ import {
   buildIntakeTabs,
   buildSignalAnswers,
   countToDo,
+  decidePluginMark,
   describeAnswerKey,
   describeBuildFailure,
   describeHerculeSegment,
@@ -123,6 +124,24 @@ describe("describeSignalProvenance", () => {
     expect(
       describeSignalProvenance(buildSignal("a", { kind: "proposal", origin: fromUser() }), PLUGINS),
     ).toBe("You · Proposal");
+  });
+});
+
+describe("decidePluginMark", () => {
+  it("draws the paths of the mark the plugin declares", () => {
+    const plugins = [{ id: "sentry", displayName: "Sentry", mark: { paths: ["M0 0h16v16H0z"] } }];
+    expect(decidePluginMark("sentry", plugins)).toEqual({
+      _tag: "paths",
+      paths: ["M0 0h16v16H0z"],
+    });
+  });
+
+  it("draws the initial of the plugin's name when it declares no mark", () => {
+    expect(decidePluginMark("slack", PLUGINS)).toEqual({ _tag: "initial", initial: "S" });
+  });
+
+  it("draws the initial of the id of a plugin that is not listed", () => {
+    expect(decidePluginMark("jira", PLUGINS)).toEqual({ _tag: "initial", initial: "J" });
   });
 });
 
@@ -327,6 +346,21 @@ describe("buildSignalAnswers", () => {
       "plain",
       "done",
     ]);
+  });
+
+  it("gives a Hand to an agent answer the workflow it starts, and no other answer one", () => {
+    const workflowId = "01a0ec64-6e80-7000-8000-0000000000f8";
+    const [handOff] = buildSignalAnswers(
+      buildSignal("b", {
+        actions: [
+          action("hand", {
+            operation: { op: "run.start", input: { workflowId, inputs: { signalId: "b" } } },
+          }),
+        ],
+      }),
+    );
+    expect(handOff?.workflowId).toBe(workflowId);
+    expect(answers.map((answer) => answer.workflowId)).toEqual([null, null, null, null, null]);
   });
 
   it("finds the primary action as the suggested answer, and the first text box", () => {

@@ -245,7 +245,9 @@ export function IntakeScreen({
                 setPluginId(tab.pluginId);
               }}
             >
-              {tab.pluginId !== null && <SourceMark pluginId={tab.pluginId} size={14} />}
+              {tab.pluginId !== null && (
+                <SourceMark pluginId={tab.pluginId} plugins={plugins} size={14} />
+              )}
               {tab.label}
               {tab.count > 0 && <small>{tab.count}</small>}
             </button>

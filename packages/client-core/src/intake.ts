@@ -10,6 +10,7 @@
 import {
   DONE_ACTION_ID,
   isCoreSignalKind,
+  type PluginMark,
   type Signal,
   type SignalAction,
 } from "@hercule/contract";
@@ -18,6 +19,11 @@ import {
 export interface PluginName {
   readonly id: string;
   readonly displayName: string;
+}
+
+/** A plugin's id, its name and the mark it declares, as `plugin.query` returns them. */
+export interface PluginIdentity extends PluginName {
+  readonly mark?: PluginMark;
 }
 
 /** The name the core's own signals carry as their source, such as an offer of an Ignore Rule. */
@@ -60,6 +66,26 @@ export const nameSignalKind = (kind: string): string => {
 /** Returns the name of the plugin `pluginId`, or the id itself when the plugin is not listed. */
 const namePlugin = (pluginId: string, plugins: ReadonlyArray<PluginName>): string =>
   plugins.find((plugin) => plugin.id === pluginId)?.displayName ?? pluginId;
+
+/** What a client draws as a plugin's mark: the plugin's own paths, or the initial of its name. */
+export type PluginMarkDrawing =
+  | { readonly _tag: "paths"; readonly paths: ReadonlyArray<string> }
+  | { readonly _tag: "initial"; readonly initial: string };
+
+/**
+ * Decides what to draw as the mark of the plugin `pluginId`: the paths of
+ * the mark it declares, or else the first letter of its name in upper case,
+ * which the apps draw in a rounded square. A plugin `plugins` does not list
+ * gets the first letter of its id.
+ */
+export const decidePluginMark = (
+  pluginId: string,
+  plugins: ReadonlyArray<PluginIdentity>,
+): PluginMarkDrawing => {
+  const mark = plugins.find((plugin) => plugin.id === pluginId)?.mark;
+  if (mark !== undefined) return { _tag: "paths", paths: mark.paths };
+  return { _tag: "initial", initial: namePlugin(pluginId, plugins).charAt(0).toUpperCase() };
+};
 
 /**
  * Returns the name of a signal's source, as its row, its pane and its
@@ -263,6 +289,11 @@ export interface SignalAnswer {
   readonly style: SignalAnswerStyle;
   /** Whether this is the signal's suggested answer, its `primary` action. At most one is. */
   readonly suggested: boolean;
+  /**
+   * The workflow a Hand to an agent answer starts, whose face its button
+   * wears, or `null` for every other answer.
+   */
+  readonly workflowId: string | null;
 }
 
 /** Returns how the pane draws `action`. */
@@ -271,6 +302,18 @@ const chooseAnswerStyle = (action: SignalAction): SignalAnswerStyle => {
   if (action.field !== undefined) return "reply";
   if (action.operation === null) return "quiet";
   return "plain";
+};
+
+/**
+ * Returns the workflow an action starts: the `workflowId` of a `run.start`
+ * binding, as the core binds Hand to an agent (spec 10 §9.4), or `null` for
+ * an action that starts no workflow.
+ */
+const readStartedWorkflowId = (action: SignalAction): string | null => {
+  if (action.operation?.op !== "run.start") return null;
+  const input: unknown = action.operation.input;
+  if (typeof input !== "object" || input === null || !("workflowId" in input)) return null;
+  return typeof input.workflowId === "string" ? input.workflowId : null;
 };
 
 /** Returns where an action goes in the pane: the plugin's actions first, then Hand to an agent, then Done. */
@@ -292,6 +335,7 @@ export const buildSignalAnswers = (signal: Signal): ReadonlyArray<SignalAnswer> 
       action,
       style: chooseAnswerStyle(action),
       suggested: action.primary === true,
+      workflowId: readStartedWorkflowId(action),
     }));
 
 /** Returns the suggested answer among `answers`, or `undefined` when the signal suggests none. */

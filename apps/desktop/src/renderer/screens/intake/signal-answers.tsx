@@ -6,6 +6,7 @@
 import type { JSX } from "react";
 import type { DescribeLine, SignalAction } from "@hercule/contract";
 import type { SignalAnswer, SignalAnswerStyle } from "@hercule/client-core";
+import { buildLook, Face } from "../../faces";
 
 /** The classes of an answer's button, by how the pane draws the answer. */
 const BUTTON_CLASSES: Readonly<Record<SignalAnswerStyle, string>> = {
@@ -67,6 +68,8 @@ const groupAnswers = (
 /**
  * Renders the answers of a signal, in the order `answers` holds them.
  *
+ * - A Hand to an agent answer wears the face of the workflow it starts. A
+ *   workflow has no stored look yet, so its face is built from its id.
  * - The answer whose id is `openReplyId` draws as its Reply box: the text
  *   box, the describe line and the send button, which `⌘↩` presses too.
  *   Every other answer is a ledger row.
@@ -175,6 +178,9 @@ function AnswerRow({
         }}
       >
         <span className={suggested ? "btn btn--accent" : BUTTON_CLASSES[style]}>
+          {answer.workflowId !== null && (
+            <Face look={buildLook(answer.workflowId)} pose="idle" size={18} />
+          )}
           {action.label}
         </span>
         <span className="ans-desc" id={describeId}>

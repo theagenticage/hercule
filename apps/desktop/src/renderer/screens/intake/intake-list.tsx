@@ -10,7 +10,7 @@ import {
   isBackFromSnooze,
   readSignalPluginId,
   type IntakeSection,
-  type PluginName,
+  type PluginIdentity,
 } from "@hercule/client-core";
 import { AlarmIcon } from "../../icons/alarm";
 import { AgeLabel } from "../age-label";
@@ -76,7 +76,7 @@ export const IntakeList = memo(function IntakeList({
   onFocusedSelectedRow,
 }: {
   readonly sections: ReadonlyArray<IntakeSection>;
-  readonly plugins: ReadonlyArray<PluginName>;
+  readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly selectedId: string | null;
   /** Asks the list to put the focus on the selected row, as `J` and `K` do from the pane. */
   readonly focusSelectedRow: boolean;
@@ -195,7 +195,7 @@ const SignalRow = memo(function SignalRow({
 }: {
   readonly signal: Signal;
   readonly lastInSection: boolean;
-  readonly plugins: ReadonlyArray<PluginName>;
+  readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly selected: boolean;
   readonly onScreen: boolean;
   readonly ageId: string;
@@ -214,21 +214,24 @@ const SignalRow = memo(function SignalRow({
         }}
       >
         <span className="ask-mark">
-          <SourceMark pluginId={readSignalPluginId(signal.kind)} size={16} />
+          <SourceMark pluginId={readSignalPluginId(signal.kind)} plugins={plugins} size={16} />
         </span>
         <span className="ask-text">
           <span className="ask-title">{signal.title}</span>
+          {/* The separator after "Back" and the row's line are one string, so
+              the line is shaped as one run of text, as the drawing's is. */}
           <span className="ask-sub">
-            {isBackFromSnooze(signal) && (
+            {isBackFromSnooze(signal) ? (
               <>
                 <span className="ask-back">
                   <AlarmIcon size={12} />
                   Back
-                </span>{" "}
-                ·{" "}
+                </span>
+                {` · ${describeSignalRow(signal, plugins)}`}
               </>
+            ) : (
+              describeSignalRow(signal, plugins)
             )}
-            {describeSignalRow(signal, plugins)}
           </span>
         </span>
         <span className="ask-end">

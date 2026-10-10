@@ -227,6 +227,12 @@
   color: var(--ink);
   font-weight: var(--w-medium);
 }
+/* The drawing's system.css softens a source's mark the same way. */
+.ad-kind .src .br,
+.ad-kind .src .ic,
+.ad-kind .src .logo {
+  opacity: 0.8;
+}
 .ad-title {
   margin: 10px 0 0;
   font-size: var(--t-20);

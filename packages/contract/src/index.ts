@@ -155,6 +155,7 @@ export {
   PluginConfigureInput,
   PluginContribution,
   PluginDetail,
+  PluginMark,
   PluginRefusalReason,
   PluginStatus,
 } from "./groups/plugin";

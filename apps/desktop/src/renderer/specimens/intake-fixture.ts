@@ -23,14 +23,15 @@
  * - `closed`: no signal selected, so the list has the full width;
  * - `empty`: nothing on To do.
  */
-import type { Event, PluginDetail, Signal, SignalAction } from "@hercule/contract";
+import type { Event, PluginDetail, PluginMark, Signal, SignalAction } from "@hercule/contract";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { SidebarRecords } from "./shell-page";
 
-/** Builds an installed, active plugin named `displayName`. */
-const buildPlugin = (id: string, displayName: string): PluginDetail => ({
+/** Builds an installed, active plugin named `displayName`, with `mark` when it declares one. */
+const buildPlugin = (id: string, displayName: string, mark?: PluginMark): PluginDetail => ({
   id,
   displayName,
+  ...(mark !== undefined && { mark }),
   hostApi: 1,
   capabilities: [],
   enabled: true,
@@ -39,12 +40,35 @@ const buildPlugin = (id: string, displayName: string): PluginDetail => ({
   contributions: [],
 });
 
+/**
+ * The marks of Sentry, Linear and Slack, as their plugins would declare them:
+ * the Bureau book's brands.js draws them on a 24-unit grid (Simple Icons,
+ * CC0), so each path here is the book's scaled by 2/3 onto the 16-unit grid
+ * a plugin's mark is drawn on. GitHub declares none here, because the app
+ * still keeps its own copy of GitHub's mark (#526).
+ */
+const SENTRY_MARK: PluginMark = {
+  paths: [
+    "M9.273333 1.67c-0.582 -0.965333 -1.981333 -0.965333 -2.562667 0L4.602667 5.28a10.318667 10.318667 0 0 1 5.686667 8.540667h-1.480667A8.867333 8.867333 0 0 0 3.856 6.542667l-1.950667 3.373333a5.1 5.1 0 0 1 2.956667 3.898667H1.462667a0.243333 0.243333 0 0 1 -0.198667 -0.356l0.942 -1.601333a3.44 3.44 0 0 0 -1.076 -0.608667L0.197333 12.85a1.454667 1.454667 0 0 0 0.541333 1.999333 1.493333 1.493333 0 0 0 0.724 0.192h4.655333a6.214667 6.214667 0 0 0 -2.563333 -5.545333l0.74 -1.281333a7.646667 7.646667 0 0 1 3.3 6.826667h3.943333a11.494667 11.494667 0 0 0 -5.256667 -10.186667l1.496 -2.563333a0.246667 0.246667 0 0 1 0.336 -0.086667c0.17 0.093333 6.5 11.138667 6.618667 11.266667a0.243333 0.243333 0 0 1 -0.218 0.362h-1.524667c0.019333 0.408 0.019333 0.815333 0 1.220667h1.531333a1.470667 1.470667 0 0 0 1.281333 -2.206667z",
+  ],
+};
+const LINEAR_MARK: PluginMark = {
+  paths: [
+    "M1.924 2.786667A7.988 7.988 0 0 1 7.993333 0C12.416 0 16 3.584 16 8.006c0 2.426667 -1.08 4.602 -2.786667 6.07L1.924667 2.786667ZM1.211333 3.750667l11.037333 11.037333c-0.349333 0.22 -0.716667 0.413333 -1.1 0.577333L0.634 4.851333c0.164667 -0.383333 0.358 -0.750667 0.577333 -1.1ZM0.214667 6.108667l9.676667 9.676667c-0.473333 0.114667 -0.962 0.188 -1.463333 0.214667L0 7.572a8 8 0 0 1 0.214667 -1.463333Zm-0.113333 3.241333 6.548667 6.549333a8.013333 8.013333 0 0 1 -6.549333 -6.549333Z",
+  ],
+};
+const SLACK_MARK: PluginMark = {
+  paths: [
+    "M3.361333 10.11a1.685333 1.685333 0 0 1 -1.68 1.682A1.685333 1.685333 0 0 1 0 10.11a1.684667 1.684667 0 0 1 1.681333 -1.68h1.68v1.68zM4.208667 10.11a1.684667 1.684667 0 0 1 1.680667 -1.68 1.684667 1.684667 0 0 1 1.680667 1.68v4.208667A1.685333 1.685333 0 0 1 5.889333 16a1.685333 1.685333 0 0 1 -1.680667 -1.681333v-4.208667zM5.889333 3.361333a1.685333 1.685333 0 0 1 -1.680667 -1.68A1.685333 1.685333 0 0 1 5.889333 0a1.685333 1.685333 0 0 1 1.680667 1.681333v1.68H5.889333zM5.889333 4.208667a1.685333 1.685333 0 0 1 1.680667 1.680667 1.685333 1.685333 0 0 1 -1.680667 1.680667H1.681333A1.685333 1.685333 0 0 1 0 5.889333a1.685333 1.685333 0 0 1 1.681333 -1.680667h4.208zM12.637333 5.889333a1.685333 1.685333 0 0 1 1.681333 -1.680667A1.685333 1.685333 0 0 1 16 5.889333a1.685333 1.685333 0 0 1 -1.681333 1.680667h-1.681333V5.889333zM11.792 5.889333a1.685333 1.685333 0 0 1 -1.682 1.680667 1.684667 1.684667 0 0 1 -1.68 -1.680667V1.681333A1.684667 1.684667 0 0 1 10.11 0a1.685333 1.685333 0 0 1 1.682 1.681333v4.208zM10.11 12.637333a1.685333 1.685333 0 0 1 1.682 1.681333A1.685333 1.685333 0 0 1 10.11 16a1.684667 1.684667 0 0 1 -1.68 -1.681333v-1.681333h1.68zM10.11 11.792a1.684667 1.684667 0 0 1 -1.68 -1.682 1.684 1.684 0 0 1 1.68 -1.68h4.208667A1.684667 1.684667 0 0 1 16 10.11a1.685333 1.685333 0 0 1 -1.681333 1.682h-4.208667z",
+  ],
+};
+
 /** The installed plugins, which name each signal's source, in the design's order. */
 const INTAKE_PLUGINS: ReadonlyArray<PluginDetail> = [
-  buildPlugin("sentry", "Sentry"),
+  buildPlugin("sentry", "Sentry", SENTRY_MARK),
   buildPlugin("github", "GitHub"),
-  buildPlugin("linear", "Linear"),
-  buildPlugin("slack", "Slack"),
+  buildPlugin("linear", "Linear", LINEAR_MARK),
+  buildPlugin("slack", "Slack", SLACK_MARK),
 ];
 
 /** The Connection each plugin's signals come through. */
@@ -125,11 +149,22 @@ const buildDone = (system: string): SignalAction => ({
   describeLine: [{ kind: "text", text: `Takes it off your list. ${system} is not told` }],
 });
 
+/**
+ * The ids of the workflows the signals are handed to. A workflow's face is
+ * built from its id, so each id was found by scripts/find-look-seeds.ts to
+ * give the face the design draws for that workflow's name.
+ */
+const WORKFLOW_IDS = {
+  "Address review": "01a0ec64-6e80-7000-8000-0000000000c3",
+  "Review PR": "01a0ec64-6e80-7000-8000-0000000000f8",
+  "Fix bug": "01a0ec64-6e80-7000-8000-0000000001a4",
+} as const;
+
 /** Starts a workflow on the signal: an answer that hands the work to an agent. */
-const buildHandOff = (workflow: string, line: string): SignalAction => ({
+const buildHandOff = (workflow: keyof typeof WORKFLOW_IDS, line: string): SignalAction => ({
   id: "hand-off",
   label: `Start "${workflow}"`,
-  operation: { op: "run.start", input: { workflow } },
+  operation: { op: "run.start", input: { workflowId: WORKFLOW_IDS[workflow], inputs: {} } },
   describeLine: buildDescribeLine(line),
 });
 
@@ -278,9 +313,13 @@ const CHECKS = buildSignal(4, 80, {
   ],
 });
 
-/** Jonas mentioned Rogier on a Linear issue; its fields block is a type this app does not know. */
+/**
+ * Jonas asked Rogier a question on a Linear issue; its fields block is a type
+ * this app does not know. No Linear plugin exists yet, so its kind is named
+ * the way the design labels it, "question for you".
+ */
 const MENTION = buildSignal(5, 40, {
-  kind: "linear/mentioned",
+  kind: "linear/question-for-you",
   title: "Refunds for partial captures",
   asker: "Jonas",
   place: "PAY-212",
@@ -307,9 +346,12 @@ const MENTION = buildSignal(5, 40, {
   ],
 });
 
-/** Pieter tagged Rogier in a Slack thread. */
+/**
+ * Pieter tagged Rogier in a Slack thread. No Slack plugin exists yet, so its
+ * kind is named the way the design labels it, "tagged in a thread".
+ */
 const SLACK = buildSignal(6, 12, {
-  kind: "slack/mentioned",
+  kind: "slack/tagged-in-a-thread",
   title: "Codes with a trailing space are rejected",
   asker: "Pieter",
   place: "#acceptance",

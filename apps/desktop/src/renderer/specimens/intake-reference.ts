@@ -5,8 +5,7 @@
  * page once asks.js has drawn it, and compares the main pane with the
  * Intake specimen's first scene (intake.tsx).
  *
- * The design's asks are the fixture's (intake-fixture.ts), so this module
- * edits no data. It:
+ * The design's asks are the fixture's (intake-fixture.ts). It:
  *
  * 1. stops every animation and transition, so the list and the pane show
  *    where they end;
@@ -14,12 +13,14 @@
  * 3. clicks the review row, as the user would, because the design opens
  *    Slack's ask at first and reads `?ask=` only as it loads, while the
  *    comparison opens both pages with the same address;
- * 4. removes what the design draws ahead of the app, listed below.
+ * 4. removes what the design draws ahead of the app, listed below;
+ * 5. changes the design's words where spec 17 §Intake gives other ones,
+ *    listed below.
  *
  * It fails when the design has no review row, because the design has changed
  * and the comparison would no longer compare what it claims to.
  */
-import { findElement, findElementByText } from "./book-page";
+import { findElement, findElementByText, replaceTextAfterIcon } from "./book-page";
 import { markSheetReady, stillBookPage } from "./sheet-page";
 
 stillBookPage();
@@ -68,5 +69,52 @@ findElement(document, '[data-asks-tabs] [data-filter="all"] small').textContent 
 // The design's clock stands at 11:20 and every specimen's at 09:41 (UTC), so
 // Marta's message, sent 2 hours and 23 minutes before, shows 07:18 in the app.
 findElement(document, ".asks-detail .b-msg-head time").textContent = "07:18";
+
+// Spec 17 §Intake decides where it and the design disagree, so the design's
+// words are changed to the ones the spec gives:
+// - the middle section is "Signals", not "Asks";
+// - the Now row shows its Your work line only when a thread or a Task is on
+//   the signal, and the fixture's alert has neither, so the row shows who
+//   asks, the kind and where;
+// - the provenance line is the source's name and the kind's label, such as
+//   "GitHub · Mentioned", and the place moves to the line under the title,
+//   which names who asks, where and when;
+// - the foot lists the keys this slice has: E and H come with Done and
+//   Snooze (#525), M with Stop asking, which the spec does not have, and Esc
+//   closes the pane.
+const signalsHeading = findElement(document, '[data-flip="sec-asks"]');
+signalsHeading.replaceChildren("Signals ", findElement(signalsHeading, ".count"));
+const alertSub = findElement(document, '.ask-row[data-id="alert"] .ask-sub');
+alertSub.textContent = "Sentry · alert for you · webshop-prod";
+
+const kindLine = findElement(document, ".asks-detail .ad-kind");
+const source = findElement(kindLine, ".src");
+replaceTextAfterIcon(source, "GitHub · Review requested");
+while (source.nextElementSibling?.classList.contains("spacer") === false) {
+  source.nextElementSibling.remove();
+}
+const asked = findElement(document, ".asks-detail .ad-asked");
+const askedTime = document.createElement("time");
+askedTime.textContent = "07:18";
+asked.replaceChildren("Marta asks in payments-api #1294 · ", askedTime);
+
+const keys = findElement(document, ".asks-detail .ad-keys");
+for (const label of ["E done", "H snooze", "M stop asking"]) {
+  findElementByText(keys, "span", label).remove();
+}
+const escKey = document.createElement("span");
+const escKbd = document.createElement("kbd");
+escKbd.textContent = "Esc";
+escKey.append(escKbd, " close");
+keys.append(escKey);
+
+// GitHub labels its kinds itself (spec 05 §4.3). Spec 05 gives
+// `github/review-requested` the label "Review requested", and the app labels
+// `github/checks-failed` "Checks failed" from its id until GitHub declares
+// its labels (#526). The design wrote its own labels for both.
+findElement(document, '.ask-row[data-id="review"] .ask-sub').textContent =
+  "Marta · review requested · payments-api #1294";
+findElement(document, '.ask-row[data-id="checks"] .ask-sub').textContent =
+  "GitHub Actions · checks failed · webshop #1300";
 
 await markSheetReady();
