@@ -302,13 +302,15 @@ describe("replacing the images in a tool result", () => {
     const uploader = createRecordingUploader();
     const replaced = await replace(
       uploader,
-      buildToolResult([{ type: "text", text: `data:image/png;charset=utf-8;base64,${PNG}` }]),
+      buildToolResult([
+        { type: "text", text: `data:image/png;charset=utf-8;name=screen!shot~1.png;base64,${PNG}` },
+      ]),
     );
 
     expect(readContent(replaced)).toEqual([
       {
         type: "text",
-        text: `data:image/png;charset=utf-8;base64,[image ${buildStoredId(PNG)}]`,
+        text: `data:image/png;charset=utf-8;name=screen!shot~1.png;base64,[image ${buildStoredId(PNG)}]`,
       },
     ]);
   });

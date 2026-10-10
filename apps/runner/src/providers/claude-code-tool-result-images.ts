@@ -54,14 +54,15 @@ const SESSION_STOPPED = "The session stopped before the image was kept.";
  * group is the image's base64, which ends at the first character base64
  * does not use, so the text around the URL is kept.
  *
- * A parameter's name and value are plain tokens, as RFC 2397 has them, so
- * a parameter can never hold another `data:` URL. Each part then matches
+ * A parameter's name and value are MIME tokens (RFC 2045, which RFC 2397
+ * uses): they leave out `:`, `;` and `=`, so a parameter can never hold
+ * another `data:` URL. Each part then matches
  * text in only one way, and the work stays linear in the text's length: a
  * looser value let crafted text make the engine give up before the real
  * URL, which was then missed.
  */
 const IMAGE_DATA_URL =
-  /data:image\/[a-z0-9.+_-]+(?:;[a-z0-9.+_-]+=[a-z0-9.+_-]*)*;base64,([A-Za-z0-9+/]+={0,2})/gi;
+  /data:image\/[a-z0-9.+_-]+(?:;[\w!#$%&'*+.^`{|}~-]+=[\w!#$%&'*+.^`{|}~-]*)*;base64,([A-Za-z0-9+/]+={0,2})/gi;
 
 /**
  * The number of base64 characters that decode to the 18 bytes the image
