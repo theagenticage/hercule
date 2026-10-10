@@ -237,7 +237,7 @@ const ITEMS: ReadonlyArray<readonly [Record<string, unknown>, string | null]> = 
   [{ type: "plan", id: "i12", text: "1. look" }, "plan"],
   [{ type: "contextCompaction", id: "i13" }, "context_compaction"],
   [{ type: "hookPrompt", id: "i14", fragments: [] }, "unknown"],
-  [{ type: "imageView", id: "i15", path: "/tmp/a.png" }, "unknown"],
+  [{ type: "imageView", id: "i15", path: "/tmp/a.png" }, "file_read"],
   [{ type: "sleep", id: "i16", durationMs: 10 }, "unknown"],
   [{ type: "imageGeneration", id: "i17" }, "unknown"],
   [{ type: "enteredReviewMode", id: "i18", review: "r" }, "unknown"],
@@ -625,6 +625,18 @@ describe("the detail a surface shows for an item without opening it", () => {
     expect(readItemDetail(mcp)).toEqual({ name: "files/read", kind: "mcp" });
     expect(readItemDetail(dynamic)).toEqual({ name: "lookup", kind: "native" });
     expect(readItemDetail(output)).toEqual({ name: "lookup", kind: "native" });
+  });
+
+  it("includes the path of the image an image view read, and no detail for an empty path", () => {
+    const viewed = normalizeFromStart([
+      buildItemCompleted({ type: "imageView", id: "i15", path: "/tmp/shot.png" }),
+    ]);
+    const unnamed = normalizeFromStart([
+      buildItemCompleted({ type: "imageView", id: "i16", path: "" }),
+    ]);
+
+    expect(readItemDetail(viewed)).toEqual({ path: "/tmp/shot.png" });
+    expect(readItemDetail(unnamed)).toBeUndefined();
   });
 
   it("includes a web search's query and the collab tool a subagent used", () => {

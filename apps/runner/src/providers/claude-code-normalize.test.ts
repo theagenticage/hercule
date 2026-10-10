@@ -637,11 +637,69 @@ describe("item details", () => {
       input: {},
       kind: "mcp",
     });
-    expect(readItemDetail([buildToolUse("Glob")], TOOL, "item.started")).toEqual({
-      name: "Glob",
+    expect(readItemDetail([buildToolUse("WebFetch")], TOOL, "item.started")).toEqual({
+      name: "WebFetch",
       input: {},
       kind: "native",
     });
+  });
+
+  /** Builds one assistant message that calls each tool in turn, ids `toolu_0`, `toolu_1`, ... */
+  const buildToolCalls = (calls: ReadonlyArray<readonly [name: string, input: unknown]>) => ({
+    ...ASSISTANT_TOOL_USE,
+    message: {
+      ...ASSISTANT_TOOL_USE.message,
+      content: calls.map(([name, input], index) => ({
+        type: "tool_use",
+        id: `toolu_${index}`,
+        name,
+        input,
+      })),
+    },
+  });
+
+  const listStartedItems = (messages: ReadonlyArray<unknown>) =>
+    messages
+      .flatMap((message) => normalize(buildTestState(), message as SDKMessage))
+      .flatMap((event) =>
+        event._tag === "item.started" ? [{ kind: event.kind, detail: event.detail }] : [],
+      );
+
+  it("makes a file_read item for each Read and a file_search item for a Grep, with the path or pattern beside the input", () => {
+    const calls = [
+      ["Read", { file_path: "/work/a.ts" }],
+      ["Read", { file_path: "/tmp/shot.png", limit: 20 }],
+      ["Grep", { pattern: "TODO", path: "/work/src", output_mode: "content" }],
+    ] as const;
+    expect(listStartedItems([buildToolCalls(calls)])).toEqual([
+      {
+        kind: "file_read",
+        detail: { name: "Read", input: calls[0][1], path: "/work/a.ts" },
+      },
+      {
+        kind: "file_read",
+        detail: { name: "Read", input: calls[1][1], path: "/tmp/shot.png" },
+      },
+      {
+        kind: "file_search",
+        detail: { name: "Grep", input: calls[2][1], pattern: "TODO", path: "/work/src" },
+      },
+    ]);
+  });
+
+  it("leaves out the path or pattern a file tool was not given", () => {
+    const calls = [
+      ["LS", { path: "/work" }],
+      ["Glob", { pattern: "**/*.ts" }],
+      ["Grep", { pattern: "TODO", path: "" }],
+      ["Read", {}],
+    ] as const;
+    expect(listStartedItems([buildToolCalls(calls)])).toEqual([
+      { kind: "file_search", detail: { name: "LS", input: calls[0][1], path: "/work" } },
+      { kind: "file_search", detail: { name: "Glob", input: calls[1][1], pattern: "**/*.ts" } },
+      { kind: "file_search", detail: { name: "Grep", input: calls[2][1], pattern: "TODO" } },
+      { kind: "file_read", detail: { name: "Read", input: {} } },
+    ]);
   });
 
   it("includes the tool's output on the item the tool result completes", () => {

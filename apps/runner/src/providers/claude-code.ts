@@ -378,13 +378,6 @@ const PERMISSION_MODES: Readonly<Record<AccessMode, PermissionMode>> = {
 };
 
 /**
- * The tools that get a file read approval. Command and file-change approvals
- * are chosen by the item kind from `classifyTool`, so the two cannot disagree,
- * but reading has no item kind of its own, so it needs this list.
- */
-const FILE_READ_TOOLS: ReadonlySet<string> = new Set(["Read", "Glob", "Grep"]);
-
-/**
  * The tool input fields that can hold a path. A tool may have none of them (a
  * `Glob` without a directory searches the workspace), so an empty path list is
  * a correct result, not a failure.
@@ -435,7 +428,8 @@ const buildApprovalRequest = (
   if (kind === "file_change") {
     return { ...common, kind: "file_change_approval", detail: { paths: readInputPaths(input) } };
   }
-  if (FILE_READ_TOOLS.has(toolName)) {
+  // A search or a listing reads files too, so it asks the same question as a read.
+  if (kind === "file_read" || kind === "file_search") {
     return { ...common, kind: "file_read_approval", detail: { paths: readInputPaths(input) } };
   }
   return { ...common, kind: "tool_approval", detail: { toolName: truncateFact(toolName) } };

@@ -148,7 +148,7 @@ const ITEM_KINDS: Readonly<Record<ThreadItem["type"], ItemKind | null>> = {
   plan: "plan",
   contextCompaction: "context_compaction",
   hookPrompt: "unknown",
-  imageView: "unknown",
+  imageView: "file_read",
   sleep: "unknown",
   imageGeneration: "unknown",
   enteredReviewMode: "unknown",
@@ -174,9 +174,10 @@ export const readChangedPaths = (
 
 /**
  * Builds an item's `detail`: the one thing a reader wants to see in a row,
- * such as the command that ran, the file a patch touched, or the tool that was
- * called. Everything else stays in `raw`. A detail shaped like Codex's own
- * data would make the row look different depending on the harness.
+ * such as the command that ran, the file a patch touched or an image view
+ * read, or the tool that was called. Everything else stays in `raw`. A detail
+ * shaped like Codex's own data would make the row look different depending on
+ * the harness.
  */
 const buildDetail = (state: Normalizing, item: ThreadItem): { readonly detail?: Schema.Json } => {
   switch (item.type) {
@@ -206,6 +207,9 @@ const buildDetail = (state: Normalizing, item: ThreadItem): { readonly detail?: 
       return { detail: { name: truncateFact(item.name), kind: "native" } };
     case "webSearch":
       return { detail: { description: truncateMessage(item.query) } };
+    // An empty path is left out for the same reason as in `readChangedPaths`.
+    case "imageView":
+      return item.path === "" ? {} : { detail: { path: truncateFact(item.path) } };
     case "collabAgentToolCall": {
       const subagentIds = item.receiverThreadIds.filter((id) => id !== state.rootThreadId);
       return {

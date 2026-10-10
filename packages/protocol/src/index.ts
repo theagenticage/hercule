@@ -80,6 +80,8 @@ export {
  * - Version 5 added the `output_too_large` failure of a workspace step. An
  *   older controller could not decode it and would close the socket on it,
  *   again after every reconnect, so the two refuse each other at hello.
+ * - Version 6 added the `file_read` and `file_search` item kinds. An older
+ *   controller could not decode an item of either kind, for the same reason.
  * - Version 3 added subagents: the `subagentId` on session events and on
  *   `SessionInterrupt`. A capability with a fallback would not be safe here.
  *   A controller that ignored `subagentId` would book a subagent's turns to
@@ -87,7 +89,7 @@ export {
  *   whole session where the user asked to stop one subagent (spec 03
  *   section 2.2).
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /**
  * The close code and reason the controller uses to end the connection of a

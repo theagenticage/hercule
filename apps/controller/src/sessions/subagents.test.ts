@@ -28,7 +28,10 @@ const applyEvents = (
 ): StoredSubagent =>
   events.reduce((current, event) => computeSubagentAfter(current, event), record);
 
-const itemStarted = (kind: "user_message" | "command_execution" | "reasoning", detail: unknown) =>
+const itemStarted = (
+  kind: "user_message" | "command_execution" | "reasoning" | "file_read" | "file_search",
+  detail: unknown,
+) =>
   ({
     ...base,
     _tag: "item.started",
@@ -124,6 +127,8 @@ describe("computeSubagentAfter", () => {
     const counted = applyEvents(bare, [
       itemStarted("command_execution", {}),
       itemStarted("reasoning", {}),
+      itemStarted("file_read", { path: "src/a.ts" }),
+      itemStarted("file_search", { pattern: "TODO" }),
       {
         ...base,
         _tag: "item.started",
@@ -157,7 +162,7 @@ describe("computeSubagentAfter", () => {
         kind: "subagent",
       },
     ]);
-    expect(counted.toolCalls).toBe(5);
+    expect(counted.toolCalls).toBe(7);
   });
 
   it("takes an empty description from the first line of its first turn's brief", () => {
@@ -422,6 +427,17 @@ describe("buildSubagentActivity", () => {
     expect(buildSubagentActivity("command_execution", { command: "x".repeat(500) })).toHaveLength(
       200,
     );
+  });
+
+  it("names a file read by its path and a file search by its pattern, else its path", () => {
+    expect(
+      buildSubagentActivity("file_read", { name: "Read", input: {}, path: "src/app.ts" }),
+    ).toBe("Reading src/app.ts");
+    expect(buildSubagentActivity("file_search", { pattern: "TODO", path: "src" })).toBe(
+      "Searching TODO",
+    );
+    expect(buildSubagentActivity("file_search", { path: "src" })).toBe("Searching src");
+    expect(buildSubagentActivity("file_search", {})).toBe("Searching");
   });
 
   it("names a delegation by its task, never by the delegating tool", () => {
