@@ -531,21 +531,6 @@ describe("upgrading from the previous edge release", () => {
       const profiles = readListedItems<SeededProfile>(
         await runCli(["profile", "list", "--json"], edge),
       );
-      // A database from before migration 62 has shipped profiles without the
-      // signal grants, so the upgrade must add them. A newer one was seeded
-      // with them, and the checks after the upgrade only show they survived.
-      const signalGrantsMigrated = readMigrationVersion(home) < SIGNAL_GRANTS_MIGRATION;
-      if (signalGrantsMigrated) {
-        for (const name of SIGNAL_PROFILES) {
-          const profile = profiles.find((one) => one.name === name);
-          expect(profile, `the edge database has no ${name} profile`).toBeDefined();
-          for (const grant of SIGNAL_GRANTS) expect(profile?.grants).not.toContain(grant);
-        }
-      } else {
-        console.log(
-          `The edge database already ran migration ${String(SIGNAL_GRANTS_MIGRATION)}: checking that the signal grants survive the upgrade.`,
-        );
-      }
       const unrestricted = profiles.find((profile) => profile.name === "unrestricted");
       if (unrestricted === undefined) {
         throw new Error(
@@ -600,6 +585,24 @@ describe("upgrading from the previous edge release", () => {
       const port = controller.port;
       expect(await controller.stop()).toBe(0);
       controller = undefined;
+
+      // A database from before migration 62 has shipped profiles without the
+      // signal grants, so the upgrade must add them. A newer one was seeded
+      // with them, and the checks after the upgrade only show they survived.
+      // The version is read only now, with the controller stopped, because a
+      // running controller holds the database file locked.
+      const signalGrantsMigrated = readMigrationVersion(home) < SIGNAL_GRANTS_MIGRATION;
+      if (signalGrantsMigrated) {
+        for (const name of SIGNAL_PROFILES) {
+          const profile = profiles.find((one) => one.name === name);
+          expect(profile, `the edge database has no ${name} profile`).toBeDefined();
+          for (const grant of SIGNAL_GRANTS) expect(profile?.grants).not.toContain(grant);
+        }
+      } else {
+        console.log(
+          `The edge database already ran migration ${String(SIGNAL_GRANTS_MIGRATION)}: checking that the signal grants survive the upgrade.`,
+        );
+      }
 
       const sessionId = persistRepresentativeSession({
         home,
