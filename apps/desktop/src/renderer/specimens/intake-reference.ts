@@ -15,7 +15,9 @@
  *    comparison opens both pages with the same address;
  * 4. removes what the design draws ahead of the app, listed below;
  * 5. changes the design's words where spec 17 §Intake gives other ones,
- *    listed below.
+ *    listed below;
+ * 6. adds the avatar spec 17 draws before a message's author, which the
+ *    design does not draw.
  *
  * It fails when the design has no review row, because the design has changed
  * and the comparison would no longer compare what it claims to.
@@ -107,6 +109,38 @@ const escKbd = document.createElement("kbd");
 escKbd.textContent = "Esc";
 escKey.append(escKbd, " close");
 keys.append(escKey);
+
+// Spec 17 draws each message's author's avatar before the name, or the
+// initials when there is none, and the design draws no avatars. The
+// fixture's Marta has no avatar, so the app draws "M". The design has no
+// `.b-avatar` rule, so the app's rule from intake.css is copied in, with the
+// head's centring, which the app uses in place of the design's baseline so
+// an avatar image sits level with the name.
+const avatarStyle = document.createElement("style");
+avatarStyle.textContent = `
+  .b-msg-head {
+    align-items: center;
+  }
+  .b-avatar {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    overflow: hidden;
+    border-radius: 50%;
+    background: var(--sunken);
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: var(--w-bold);
+  }
+`;
+document.head.append(avatarStyle);
+const avatar = document.createElement("span");
+avatar.className = "b-avatar";
+avatar.setAttribute("aria-hidden", "true");
+avatar.textContent = "M";
+findElement(document, ".asks-detail .b-msg-head").prepend(avatar);
 
 // GitHub labels its kinds itself (spec 05 §4.3). Spec 05 gives
 // `github/review-requested` the label "Review requested", and the app labels
