@@ -67,7 +67,14 @@ export const QualifiedId = Schema.String.check(
 
 export type QualifiedId = Schema.Schema.Type<typeof QualifiedId>;
 
-export const isQualifiedId = Schema.is(QualifiedId);
+const matchesQualifiedId = Schema.is(QualifiedId);
+
+/**
+ * Checks that `id` is a qualified id. It returns a plain boolean, not a type
+ * guard: `QualifiedId` is a plain string at the type level, so a guard would
+ * leave the other branch typed `never`.
+ */
+export const isQualifiedId = (id: string): boolean => matchesQualifiedId(id);
 
 /** The longest External Ref. It is an identity, not a document. */
 export const MAX_EXTERNAL_REF_LENGTH = 512;

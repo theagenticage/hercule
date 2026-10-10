@@ -241,9 +241,7 @@ const make = Effect.gen(function* () {
       path: ReadonlyArray<string>,
     ): Effect.Effect<CheckedOperation<Place>, Validation | SqlError> => {
       if (isQualifiedId(operation.op)) return checkPluginAction(place, operation, field, path);
-      // The type guard above leaves `operation.op` typed `never` from here on,
-      // although at run time it holds a contract operation's id.
-      const op: string = operation.op;
+      const op = operation.op;
       const issues: Array<Issue> = [];
       if (operation.connectionId !== undefined) {
         issues.push({
