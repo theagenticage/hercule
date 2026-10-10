@@ -1880,6 +1880,7 @@ Bundle: the first screen is 327.5 kB gzipped before (14 chunks) and 331.6 kB aft
 | Work per streamed token | unchanged | unchanged: images are read from a step's result content only while its stretch is open, with its text |
 | The first screen's JavaScript, gzipped | grows only by the step's image code | 332.3 kB, up 0.7 kB from 331.6 kB, across 20 chunks both times: the agent page's chunk is 16.1 kB, up from 15.5 kB, and the transcript's chunk up 20 bytes. The tiles, the thumbnails and the lazy lightbox were already in the bundle for images in prompts |
 
+- **The numbers above predate a rebase onto #479's branch at a75c13a9,** which changed client-core's row reading only; the share was not measured again.
 - **The memory of a step with many large images was not measured.** It follows the thumbnail rule of images in prompts, whose readings are in [Measured](#measured).
 
 ## Slices
