@@ -42,7 +42,7 @@ const text = (value: string) => ({ kind: "text", text: value }) as const;
 const marked = (value: string) => ({ kind: "marked", text: value }) as const;
 
 /** Returns the describe line of one operation. */
-const describeOperation = (operation: AnswerOperation<"notification.answer">) =>
+const describeOperation = (operation: AnswerOperation) =>
   Effect.flatMap(buildDescribe, (describe) =>
     Effect.map(describe([operation]), (lines) => lines[0]!),
   );
