@@ -27,7 +27,9 @@ import { AgentPage } from "../../../../screens/thread/agent-page";
  *
  * - The queued inputs are prefetched rather than ensured: if the controller
  *   cannot list them, the queued list stays empty, but the thread still
- *   opens, as it did before the list was read here.
+ *   opens, as it did before the list was read here. Their read shares the
+ *   senders' wait below, so a list that never answers cannot hold the
+ *   thread either.
  * - Once the transcript and the queued inputs are in, it reads each agent
  *   that sent one of those messages, once per sender, and the assistants, so
  *   a message and a queued row name their sender at the first paint. It
@@ -44,21 +46,25 @@ export const Route = createFileRoute("/_shell/threads/$sessionId/")({
   loader: async ({ context, params }) => {
     const { client, queryClient } = context;
     const queued = inputsQuery(client, params.sessionId);
-    const [rows] = await Promise.all([
-      queryClient.ensureQueryData(transcriptQuery(client, params.sessionId)),
-      queryClient.prefetchQuery(queued),
-    ]);
-    const inputs = (queryClient.getQueryData(queued.queryKey)?.items ?? []).filter(
-      (input) => input.status === "queued",
-    );
-    const senderSessionIds = collectSenderSessionIds(rows, inputs);
-    if (senderSessionIds.length === 0) return;
+    const queue = queryClient.prefetchQuery(queued);
+    const rows = await queryClient.ensureQueryData(transcriptQuery(client, params.sessionId));
+    // One wait covers the queued inputs and the senders they name, so a
+    // controller that never answers the queue does not hold the thread either.
     await waitForSenderReads([
-      queryClient.prefetchQuery(assistantsQuery(client)),
-      ...senderSessionIds
-        .map((id) => senderSessionQuery(client, id))
-        .filter((sender) => queryClient.getQueryState(sender.queryKey)?.status !== "error")
-        .map((sender) => queryClient.prefetchQuery(sender)),
+      queue.then(() => {
+        const inputs = (queryClient.getQueryData(queued.queryKey)?.items ?? []).filter(
+          (input) => input.status === "queued",
+        );
+        const senderSessionIds = collectSenderSessionIds(rows, inputs);
+        if (senderSessionIds.length === 0) return;
+        return Promise.all([
+          queryClient.prefetchQuery(assistantsQuery(client)),
+          ...senderSessionIds
+            .map((id) => senderSessionQuery(client, id))
+            .filter((sender) => queryClient.getQueryState(sender.queryKey)?.status !== "error")
+            .map((sender) => queryClient.prefetchQuery(sender)),
+        ]);
+      }),
     ]);
   },
   component: ThreadPage,

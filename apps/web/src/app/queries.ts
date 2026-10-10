@@ -187,6 +187,8 @@ export const senderSessionQuery = (client: HerculeClient, id: string) =>
     // Without data, a mounting component reads the query again whatever its
     // `staleTime`; this option alone stops that after an error.
     retryOnMount: false,
+    // Without data the query is stale, so focus would read it again too.
+    refetchOnWindowFocus: false,
   });
 
 /**

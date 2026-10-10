@@ -33,6 +33,12 @@
   grid-area: 1 / lead;
   margin-right: 10px;
 }
+/* A linked chip's hover light reaches 6px past its name and takes the 6px
+   back with a negative margin (sender-chip.css). Its 10px gap keeps that
+   compensation, so the text starts where it does beside an unlinked chip. */
+.queued > a.sender-chip:first-child {
+  margin-right: 4px;
+}
 .queued > .queued-images {
   grid-area: 1 / images;
   margin-right: 10px;

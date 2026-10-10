@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, within } from "@testing-library/react";
 import type { TranscriptRow } from "@hercule/contract";
 import userEvent from "@testing-library/user-event";
+import { focusManager } from "@tanstack/react-query";
 import { queryKeys } from "@hercule/client-core";
 import {
   createLaunchHistory,
@@ -249,7 +250,7 @@ describe("a message another session's agent sent into the thread", () => {
     ).toHaveLength(2);
   });
 
-  it("reads a sender whose read failed only once, however often its messages mount again", async () => {
+  it("reads a sender whose read failed only once, however often its messages mount or the window is focused", async () => {
     const { app, calls } = openApp(`/threads/${sessionId}`, {
       ...buildThreadHandlers({ ...thread, transcript }),
       [`GET ${senderPath}`]: () => {
@@ -270,6 +271,14 @@ describe("a message another session's agent sent into the thread", () => {
         await screen.findAllByRole("group", { name: "Message from another agent" }),
       ).toHaveLength(2);
     }
+    // Focusing the window again does not read it either. A read focus started
+    // would be sent within the wait.
+    await act(async () => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    focusManager.setFocused(undefined);
     expect(calls.filter((call) => call.path === senderPath)).toHaveLength(1);
   });
 });

@@ -664,7 +664,7 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
  * The read is made once per sender and kept: the sender's name comes from
  * fields that never change, and `queryKeys.sender` is outside the `session`
  * prefix, so no push reads it again. Being fresh forever, it is not read
- * again on focus or reconnect either. The web app reads it the same way.
+ * again on focus or reconnect either, once it holds data. The web app reads it the same way.
  *
  * A read that fails is not tried again, neither at once nor when the next
  * message from the same sender mounts: a read that fails for a network error
@@ -681,6 +681,8 @@ export const senderSessionQuery = (client: HerculeClient, id: string) =>
     // Without data, a mounting component reads the query again whatever its
     // `staleTime`; this option alone stops that after an error.
     retryOnMount: false,
+    // Without data the query is stale, so focus would read it again too.
+    refetchOnWindowFocus: false,
   });
 
 /**

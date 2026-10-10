@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { defaultScheduler, notifyManager } from "@tanstack/react-query";
+import { defaultScheduler, focusManager, notifyManager } from "@tanstack/react-query";
 import { buildApprovalCard, formatDuration, formatStamp, queryKeys } from "@hercule/client-core";
 import type {
   Assistant,
@@ -4188,7 +4188,29 @@ describe("Thread: a sender whose read is slow or fails", () => {
     );
   });
 
-  it("reads a sender whose read failed only once, however often its messages mount again", async () => {
+  it("opens the thread while the queued inputs' read gets no answer, and shows them once it answers", async () => {
+    let answer = (): void => {};
+    // `openApp` resolves once the loaders have, so this test times out if the
+    // loader waits for the queued inputs without a limit.
+    await openApp(buildSession({ status: "busy" }), buildTurnWithAgentMessage(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ body: { items: [AGENT_INPUT] } });
+        }),
+    });
+
+    expect(await screen.findByText("Rebasing on main.")).toBeDefined();
+    expect(screen.queryByText("Tag the release")).toBeNull();
+
+    answer();
+    const row = (await screen.findByText("Tag the release")).parentElement;
+    await waitFor(() => {
+      expect(readPageText(row)).toBe("From Fix EU checkout · Tag the releaseSteerCancel");
+    });
+  });
+
+  it("reads a sender whose read failed only once, however often its messages mount or the window is focused", async () => {
     const { api, router } = await openApp(
       buildSession({ status: "idle" }),
       buildTurnWithAgentMessage(),
@@ -4212,6 +4234,14 @@ describe("Thread: a sender whose read is slow or fails", () => {
       });
       await screen.findByRole("group", { name: "Message from another agent" });
     }
+    // Focusing the window again does not read it either. A read focus started
+    // would be sent within the wait.
+    await act(async () => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    focusManager.setFocused(undefined);
     expect(countSessionReads(api.calls, SENDER.id)).toBe(1);
   });
 });
