@@ -1408,8 +1408,8 @@ export const startApp = async (fake: FakeBridge): Promise<RenderedApp> => {
  * Stub the API with `stubApi` first.
  *
  * The app starts where it would at launch, unless `path` is given: at `/`,
- * or at the last open thread when one is stored for the controller (see
- * `last-thread.ts`). A path lets a test open a screen, such as a thread at
+ * or at the last screen when one is stored for the controller (see
+ * `last-screen.ts`). A path lets a test open a screen, such as a thread at
  * `/threads/<id>`, without clicking its way there.
  */
 export const renderApp = async (

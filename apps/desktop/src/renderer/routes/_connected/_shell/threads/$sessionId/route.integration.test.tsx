@@ -1,8 +1,8 @@
 /**
  * Tests the thread route's loading: the reads it makes before the screen
- * renders, the thread it stores as the last open one, what it shows when
- * the thread does not exist or cannot be read, and the sender it names on a
- * message another session's agent sent, which it waits for only briefly.
+ * renders, what it shows when the thread does not exist or cannot be read,
+ * and the sender it names on a message another session's agent sent, which
+ * it waits for only briefly.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, within } from "@testing-library/react";
@@ -10,11 +10,6 @@ import type { TranscriptRow } from "@hercule/contract";
 import userEvent from "@testing-library/user-event";
 import { focusManager } from "@tanstack/react-query";
 import { queryKeys } from "@hercule/client-core";
-import {
-  createLaunchHistory,
-  readLastThread,
-  rememberLastThread,
-} from "../../../../../app/last-thread";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -78,15 +73,7 @@ describe("the thread route", () => {
     ).toEqual([null, "page-2"]);
   });
 
-  it("stores the thread as the last open one for its controller", async () => {
-    const { app } = openApp(`/threads/${sessionId}`);
-    await app;
-    expect(readLastThread(CONTROLLER_URL)).toBe(sessionId);
-    expect(readLastThread("http://another.test")).toBeNull();
-  });
-
-  it("shows that a thread is not found, with a link to a new thread, and forgets it", async () => {
-    rememberLastThread(CONTROLLER_URL, GONE_ID);
+  it("shows that a thread is not found, with a link to a new thread", async () => {
     const { app } = openApp(`/threads/${GONE_ID}`);
     const { router } = await app;
 
@@ -94,7 +81,6 @@ describe("the thread route", () => {
     const heading = screen.getByRole("heading", { name: "This thread was not found." });
     // The screen fills the main pane, beside the sidebar, not the whole window.
     expect(screen.getByRole("main").contains(heading)).toBe(true);
-    expect(readLastThread(CONTROLLER_URL)).toBeNull();
 
     await userEvent.click(screen.getByRole("link", { name: "Start a new thread" }));
     expect(router.state.location.pathname).toBe("/");
@@ -106,16 +92,7 @@ describe("the thread route", () => {
     expect(calls.filter((call) => call.path === `/api/v1/sessions/${GONE_ID}`)).toHaveLength(1);
   });
 
-  it("forgets the thread open before a gone one, so the next launch starts at the new-thread screen", async () => {
-    const { app } = openApp(`/threads/${sessionId}`);
-    const { router } = await app;
-    await act(() => router.navigate({ to: "/threads/$sessionId", params: { sessionId: GONE_ID } }));
-    expect(screen.getByRole("heading", { name: "This thread was not found." })).toBeTruthy();
-    expect(createLaunchHistory(CONTROLLER_URL).location.pathname).toBe("/");
-  });
-
-  it("shows the render failure at once for another error, and keeps the thread stored", async () => {
-    rememberLastThread(CONTROLLER_URL, sessionId);
+  it("shows the render failure at once for another error", async () => {
     const transcriptPath = `/api/v1/sessions/${sessionId}/transcript`;
     const { app, calls } = openApp(`/threads/${sessionId}`, {
       [`GET ${transcriptPath}`]: {
@@ -128,27 +105,6 @@ describe("the thread route", () => {
     expect(screen.getByRole("alert").textContent).toBe("The transcript could not be read.");
     // The controller answered, so asking again would get the same answer.
     expect(calls.filter((call) => call.path === transcriptPath)).toHaveLength(1);
-    expect(readLastThread(CONTROLLER_URL)).toBe(sessionId);
-  });
-
-  it("stores the thread the user opens last", async () => {
-    const { app } = openApp(`/threads/${sessionId}`, buildThreadHandlers(THREAD_FIXTURES.failed));
-    const { router } = await app;
-    await act(() =>
-      router.navigate({
-        to: "/threads/$sessionId",
-        params: { sessionId: THREAD_FIXTURES.failed.session.id },
-      }),
-    );
-    expect(readLastThread(CONTROLLER_URL)).toBe(THREAD_FIXTURES.failed.session.id);
-  });
-
-  it("forgets the thread when the user leaves it for the new-thread screen", async () => {
-    const { app } = openApp(`/threads/${sessionId}`);
-    const { router } = await app;
-    await act(() => router.navigate({ to: "/" }));
-    // The next launch starts where this one quit.
-    expect(createLaunchHistory(CONTROLLER_URL).location.pathname).toBe("/");
   });
 });
 

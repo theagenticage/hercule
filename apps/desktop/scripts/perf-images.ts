@@ -221,7 +221,7 @@ const result = await runWithThreadFixture(async (fixture) => {
     await signInOnce(userDataDir);
     const thread = await fixture.growTranscript(4);
     await fixture.prepareLaunch({ twoMinuteRow: false });
-    await openThreadOnce(userDataDir, thread.title);
+    await openThreadOnce(userDataDir, thread.id);
     await warmUpApp(userDataDir);
 
     const loadAtSpawn = loadavg()[0]!;

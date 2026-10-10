@@ -1,12 +1,7 @@
 import { Suspense, lazy, type JSX } from "react";
-import { Outlet, createFileRoute, notFound, redirect, useMatch } from "@tanstack/react-router";
+import { Outlet, createFileRoute, useMatch } from "@tanstack/react-router";
 import { isNotFound } from "@hercule/client-core";
-import {
-  clearLastThread,
-  forgetLastThread,
-  isReopenedAtLaunch,
-  rememberLastThread,
-} from "../../../../../app/last-thread";
+import { throwScreenNotFound } from "../../../../../app/last-screen";
 import { useSubagentsLive } from "../../../../../app/live";
 import { ensureThreadData } from "../../../../../app/queries";
 import { useKeepRequestDrafts } from "../../../../../app/request-drafts";
@@ -34,43 +29,22 @@ const SidePane = lazy(() =>
  * Its loader reads the session, its subagents, the session's own transcript
  * and its queued inputs before any page renders, so the first frame shows
  * the transcript at its bottom and nothing on the screen waits. A subagent's
- * page reads its own transcript on top. Each time the thread loads, it is
- * stored as the last open one, which the app opens again at launch. Leaving
- * the thread for a screen that shows no thread forgets it, so the app
- * reopens only a thread that was open at quit.
+ * page reads its own transcript on top.
  *
- * When the thread does not exist, the loader clears the last open thread,
- * whichever it is, because the screen now shows no thread, and:
- *
- * - shows `ThreadNotFound` when the user opened the thread, with a link to
- *   the new-thread screen;
- * - goes to the new-thread screen when the app opened it at launch, because
- *   the user did not ask for it this time.
+ * When the thread does not exist, the route shows `ThreadNotFound`, with a
+ * link to the new-thread screen, or goes to the new-thread screen when the
+ * app opened the thread at launch (see `throwScreenNotFound`).
  *
  * Any other failure shows `RenderFailure`, the router's default.
  */
 export const Route = createFileRoute("/_connected/_shell/threads/$sessionId")({
   loader: async ({ context: { controller, queryClient }, params: { sessionId }, location }) => {
-    const { client, url } = controller;
     try {
-      await ensureThreadData(queryClient, client, sessionId);
+      await ensureThreadData(queryClient, controller.client, sessionId);
     } catch (error) {
       if (!isNotFound(error)) throw error;
-      clearLastThread(url);
-      // The router acts on a thrown `redirect` or `notFound`, which are plain
-      // descriptors rather than Errors.
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      if (isReopenedAtLaunch(location.state)) throw redirect({ to: "/", replace: true });
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw notFound();
+      throwScreenNotFound(location);
     }
-    rememberLastThread(url, sessionId);
-  },
-  // The router calls this only when the next screen shows no thread. Going
-  // to another thread keeps this route, and that thread's loader stores it.
-  // Going to one of this thread's subagents keeps it too.
-  onLeave: ({ context, params }) => {
-    forgetLastThread(context.controller.url, params.sessionId);
   },
   component: ThreadLayout,
   notFoundComponent: ThreadNotFound,

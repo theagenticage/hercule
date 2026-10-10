@@ -55,7 +55,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
   reduceTransparency: false,
   density: "comfortable",
   textSize: 2,
-  openOn: "threads",
+  openOn: "lastScreen",
   reduceMotion: false,
   marks: true,
 };

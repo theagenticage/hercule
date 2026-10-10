@@ -27,6 +27,21 @@ import { Appearance, FirstRunProgress } from "../ipc/contract";
 import { DEFAULT_APPEARANCE } from "../ipc/appearance";
 import { isHttpUrl } from "../ipc/http-url";
 
+/**
+ * The Appearance as the settings file holds it. A file saved by an older
+ * build may hold `openOn: "threads"`, the name the choice "Where I left off"
+ * had before; it reads as `"lastScreen"`. Without this, the whole Appearance
+ * of such a file would fail to decode, and the user would lose their theme
+ * and glass along with it. A save always writes `"lastScreen"`.
+ */
+const StoredAppearance = Schema.Struct({
+  ...Appearance.fields,
+  openOn: Schema.Union([
+    Appearance.fields.openOn,
+    Schema.Literal("threads").transform("lastScreen"),
+  ]),
+});
+
 /** The URL of the controller the app connects to. */
 const ControllerUrl = Schema.String.check(
   Schema.makeFilter((url: string) =>
@@ -164,7 +179,8 @@ const make = (file: string) =>
     let windowState = yield* decodeSettingsKey(WindowState, settings, "window", file);
     let firstRun = yield* decodeSettingsKey(FirstRunProgress, settings, "firstRun", file);
     let appearance =
-      (yield* decodeSettingsKey(Appearance, settings, "appearance", file)) ?? DEFAULT_APPEARANCE;
+      (yield* decodeSettingsKey(StoredAppearance, settings, "appearance", file)) ??
+      DEFAULT_APPEARANCE;
     const fileWriteLock = yield* Semaphore.make(1);
 
     /**
@@ -304,7 +320,7 @@ const make = (file: string) =>
         runSave(
           Effect.gen(function* () {
             // The schema encodes every value of its type.
-            const encoded = yield* Effect.orDie(Schema.encodeEffect(Appearance)(next));
+            const encoded = yield* Effect.orDie(Schema.encodeEffect(StoredAppearance)(next));
             yield* writeSettings({ ...settings, appearance: encoded });
             appearance = next;
           }),

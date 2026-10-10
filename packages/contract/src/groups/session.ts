@@ -49,6 +49,9 @@ import { atMost, bounded } from "../strings";
 export { ApprovalDecision, OpenRequest, QuestionAnswers, SubagentId, Usage, UsageReport };
 export type { ApprovalRequest };
 
+/** Checks whether `value` is a subagent's id, such as one read back from storage. */
+export const isSubagentId = Schema.is(SubagentId);
+
 /**
  * A Request one agent of a session is parked on: the request exactly as the
  * harness opened it, and the subagent that asked.

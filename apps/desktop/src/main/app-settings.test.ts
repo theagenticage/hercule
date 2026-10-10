@@ -398,6 +398,11 @@ describe("the Appearance", () => {
     expect(await runWithAppSettings(readAppearance)).toEqual(nile);
   });
 
+  it("reads an older file's openOn of threads as lastScreen, and keeps the rest", async () => {
+    writeFileSync(file, JSON.stringify({ appearance: { ...nile, openOn: "threads" } }));
+    expect(await runWithAppSettings(readAppearance)).toEqual({ ...nile, openOn: "lastScreen" });
+  });
+
   it("is the defaults when its value does not decode, and costs no other key", async () => {
     writeFileSync(
       file,

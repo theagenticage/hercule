@@ -1162,7 +1162,7 @@ const { streaming, longThread, subagents } = await runWithThreadFixture(async (f
       } = {},
     ) => {
       await fixture.prepareLaunch({ twoMinuteRow });
-      if (openThread !== null) await openThreadOnce(userDataDir, openThread.title);
+      if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
       await warmUpApp(userDataDir);
       // Each launch is reported as soon as it is measured, so a launch that
       // fails later in the run does not take the earlier readings with it.

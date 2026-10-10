@@ -68,9 +68,12 @@ export interface AppearanceStore {
  * Returns the store of the Appearance the page shows, which reads and saves
  * it through `bridge`.
  *
- * The saved Appearance is read the first time it is needed, not here:
- * `theme-init.js` has already read it once before the first paint, and a
- * second read at launch would add a second synchronous message to it.
+ * The saved Appearance is read the first time it is needed, not here.
+ * `theme-init.js` has already read it once before the first paint, and each
+ * read is a synchronous message to main. With a saved controller, the
+ * router reads it when it starts, because Open on decides the first screen.
+ * With none, the app opens on the connect screen, and nothing reads it a
+ * second time at launch.
  *
  * Saves run one after another, in the order they were made, so each one
  * writes over what the save before it stored.

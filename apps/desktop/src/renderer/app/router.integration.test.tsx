@@ -3,10 +3,8 @@ import { act, screen, waitFor } from "@testing-library/react";
 import centeredScreenCss from "../screens/centered-screen.css?raw";
 import firstRunCss from "../screens/first-run/first-run.css?raw";
 import shellCss from "../shell/shell.css?raw";
-import { readLastThread, rememberLastThread } from "./last-thread";
 import {
   buildSidebarHandlers,
-  buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
   neverAnswer,
@@ -15,7 +13,6 @@ import {
   SIDEBAR_FIXTURE,
   startApp,
   stubApi,
-  THREAD_FIXTURES,
 } from "./testing";
 
 /**
@@ -121,38 +118,6 @@ describe("where the app starts", () => {
       }),
     );
     expect(router.state.location.pathname).toBe("/first-run");
-  });
-
-  it("opens the thread that was open last on this controller", async () => {
-    const thread = THREAD_FIXTURES.finished;
-    rememberLastThread(CONTROLLER_URL, thread.session.id);
-    rememberLastThread("http://another.test", THREAD_FIXTURES.failed.session.id);
-    stubApi({ ...buildSidebarHandlers(SIDEBAR_FIXTURE), ...buildThreadHandlers(thread) });
-    const { router } = await renderApp(
-      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
-    );
-    expect(router.state.location.pathname).toBe(`/threads/${thread.session.id}`);
-  });
-
-  it("opens the new-thread screen, and forgets the thread, when the last thread is gone", async () => {
-    const goneId = "01a06d02-7400-7000-8000-0000000000ff";
-    rememberLastThread(CONTROLLER_URL, goneId);
-    stubApi(buildSidebarHandlers(SIDEBAR_FIXTURE));
-    const { router } = await renderApp(
-      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
-    );
-    expect(router.state.location.pathname).toBe("/");
-    expect(screen.queryByText("This thread was not found.")).toBeNull();
-    expect(readLastThread(CONTROLLER_URL)).toBeNull();
-  });
-
-  it("ignores a stored last thread that is not an id", async () => {
-    rememberLastThread(CONTROLLER_URL, "../settings");
-    stubApi(buildSidebarHandlers(SIDEBAR_FIXTURE));
-    const { router } = await renderApp(
-      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
-    );
-    expect(router.state.location.pathname).toBe("/");
   });
 
   it("takes a signed-in user off the sign-in screen", async () => {

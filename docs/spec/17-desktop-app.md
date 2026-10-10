@@ -2251,6 +2251,20 @@ Bundle: the first screen is 327.5 kB gzipped before (14 chunks) and 331.6 kB aft
 - **The launches after "500 threads, run 1" were not measured.** Before the long-transcript launch, the perf script opens "Thread 500" from the sidebar, and that step timed out in two runs, one of them at load 2.0. The cause is not this change, which touches neither the sidebar's order nor its folding: with 500 threads the sidebar shows five rows a project and folds the rest under "120 more threads", and "Thread 500" is among the folded rows, so the script finds no row to click. [#538](https://github.com/theagenticage/hercule/issues/538) fixes the step. The launches before it completed, and the script now reports each launch as soon as it is measured, so the failure no longer takes their readings with it.
 - **The switch has no state outside the sidebar.** The face is not saved, and a launch on a screen that keeps the face shows the Threads face, as [The Hercule face](#the-hercule-face) requires.
 
+**Launch on the last screen, slice 36,** measured 2026-10-10 on the reference machine with `pnpm build:desktop`'s size checks and one run of `apps/desktop/scripts/perf.ts` on each side, on `main` at a9fc51cf (Before) and on the working tree of branch `t3/launch-on-last-screen` (After), for [#535](https://github.com/theagenticage/hercule/issues/535). The slice adds no process, no timer, no polling and no live topic. Each navigation writes one `localStorage` entry. Intake is not built yet, so reopening Intake is not measured.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Launch, spawn to window shown, new-thread screen | 500 ms | 346 to 379 ms over five launches | 371 to 399 ms over five launches |
+| Launch steps, page start to first screen, new-thread screen | none new | 128 to 140 ms | 132 to 140 ms |
+| Launch, spawn to the last thread's transcript painted, 501 rows | 800 ms | 417 ms | 414 ms |
+| The first screen's JavaScript, gzipped | none new | 334.1 kB | 334.2 kB; the first-screen chunk is 256.5 kB, up 0.1 kB |
+| Main's startup file, minified | 160 kB | 148.1 kB | 148.2 kB |
+
+- **Launch time is unchanged.** The renderer's part of a launch, from the page's start to its first screen, is the same within 4 ms on both sides. The windows were shown 12 ms later in the median After, but the difference lies before the page starts, in main's Node start and the GPU and renderer processes, which this change does not touch. It is the spread between runs on a machine shared with other worktrees.
+- **A launch with a saved controller reads the Appearance once more,** a synchronous message to main answered from memory, because Open on decides the first screen. `theme-init.js` reads it once already before the first paint. The second read is lost in the spread above, as the first one was ([Settings › Appearance, slice 12](#measured)).
+- **The perf script was repaired to take these numbers.** It could no longer run on `main`: the scripted runner imported a value from the protocol package, which plain Node cannot load, and the script opened threads by their sidebar rows, which the flat sidebar ([#473](https://github.com/theagenticage/hercule/issues/473)) hides behind a section's "more" row. The script now stores the long thread as the last screen instead, and the subagent scenario opens "more" rows and scrolls the sidebar until its thread's row shows. The Before ran the same repaired script, storing the thread under the old `last-thread` key that build reads. Storing the thread is also what fixes the "Thread 500" timeout that [The Hercule face](#measured) entry above reports. The scripted runner's import was fixed on `main` in the meantime as well, the same way.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
