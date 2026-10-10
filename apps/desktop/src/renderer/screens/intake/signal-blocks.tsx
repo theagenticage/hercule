@@ -14,7 +14,7 @@ import type {
   TextBlock,
   ThreadMessage,
 } from "@hercule/contract";
-import { formatMessageTime, readInitials, UNKNOWN_BLOCK_TEXT } from "@hercule/client-core";
+import { formatMessageTime, buildInitials, UNKNOWN_BLOCK_TEXT } from "@hercule/client-core";
 import { ArrowIcon } from "../../icons/arrow";
 import { BranchIcon } from "../../icons/branch";
 import { DiffIcon } from "../../icons/diff";
@@ -173,7 +173,7 @@ function Avatar({ person }: { readonly person: Person }): JSX.Element {
   return (
     <span className="b-avatar" aria-hidden="true">
       {person.avatarUrl === undefined || failed ? (
-        readInitials(person.name)
+        buildInitials(person.name)
       ) : (
         <img
           src={person.avatarUrl}

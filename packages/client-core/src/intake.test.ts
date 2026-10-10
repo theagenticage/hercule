@@ -4,13 +4,14 @@ import {
   DEFAULT_INTAKE_LIST_WIDTH,
   MIN_INTAKE_LIST_WIDTH,
   MIN_INTAKE_PANE_WIDTH,
+  buildInitials,
   buildIntakeTabs,
   buildSignalAnswers,
   countToDo,
   decidePluginMark,
   describeAnswerKey,
   describeBuildFailure,
-  describeHerculeSegment,
+  describeOrchestrationSegment,
   describeResolvedElsewhere,
   describeSignalAsker,
   describeSignalOutcome,
@@ -24,11 +25,10 @@ import {
   isBackFromSnooze,
   listUrgentSignals,
   moveSignalSelection,
-  nameSignalKind,
   nameSignalSource,
   parseIntakeListWidth,
-  readInitials,
-  readSignalPluginId,
+  parseSignalPluginId,
+  trimAnswerEllipsis,
 } from "./intake";
 
 const PLUGINS = [
@@ -68,26 +68,13 @@ const action = (id: string, overrides: Partial<SignalAction> = {}): SignalAction
   ...overrides,
 });
 
-describe("readSignalPluginId", () => {
+describe("parseSignalPluginId", () => {
   it("returns the plugin before the slash of a plugin kind", () => {
-    expect(readSignalPluginId("github/review-requested")).toBe("github");
+    expect(parseSignalPluginId("github/review-requested")).toBe("github");
   });
 
   it("returns null for a core kind", () => {
-    expect(readSignalPluginId("proposal")).toBeNull();
-  });
-});
-
-describe("nameSignalKind", () => {
-  it("makes a plugin kind's word into a label", () => {
-    expect(nameSignalKind("github/mentioned")).toBe("Mentioned");
-    expect(nameSignalKind("github/review-requested")).toBe("Review requested");
-  });
-
-  it("labels the core kinds by hand", () => {
-    expect(nameSignalKind("proposal")).toBe("Proposal");
-    expect(nameSignalKind("fyi")).toBe("FYI");
-    expect(nameSignalKind("unsure")).toBe("Unsure");
+    expect(parseSignalPluginId("proposal")).toBeNull();
   });
 });
 
@@ -125,6 +112,14 @@ describe("describeSignalProvenance", () => {
       describeSignalProvenance(buildSignal("a", { kind: "proposal", origin: fromUser() }), PLUGINS),
     ).toBe("You · Proposal");
   });
+
+  it("makes a plugin kind's word into a label, and labels the core kinds by hand", () => {
+    const labelKind = (kind: string) =>
+      describeSignalProvenance(buildSignal("a", { kind }), PLUGINS).split(" · ")[1];
+    expect(labelKind("github/review-requested")).toBe("Review requested");
+    expect(labelKind("fyi")).toBe("FYI");
+    expect(labelKind("unsure")).toBe("Unsure");
+  });
 });
 
 describe("decidePluginMark", () => {
@@ -145,27 +140,25 @@ describe("decidePluginMark", () => {
   });
 });
 
-describe("countToDo and describeHerculeSegment", () => {
-  const signals = [
-    buildSignal("a"),
-    buildSignal("b", { kind: "slack/mentioned" }),
-    buildSignal("c", { kind: "proposal", origin: fromUser() }),
-  ];
-
-  it("counts every signal for All, core signals included, and a plugin's own for its tab", () => {
-    expect(countToDo(signals, null)).toBe(3);
-    expect(countToDo(signals, "github")).toBe(1);
+describe("countToDo and describeOrchestrationSegment", () => {
+  it("counts every signal on To do, core signals included", () => {
+    expect(
+      countToDo([
+        buildSignal("a"),
+        buildSignal("b", { kind: "slack/mentioned" }),
+        buildSignal("c", { kind: "proposal", origin: fromUser() }),
+      ]),
+    ).toBe(3);
   });
 
-  it("names the count in the segment's accessible name, and leaves it out at zero", () => {
-    expect(describeHerculeSegment(8)).toBe("Hercule, 8 to do");
-    expect(describeHerculeSegment(0)).toBe("Hercule");
+  it("names the count in the segment's accessible name", () => {
+    expect(describeOrchestrationSegment(8)).toBe("Hercule, 8 to do");
   });
 });
 
 describe("buildIntakeTabs", () => {
   it("lists All, then each plugin with a signal, in the plugins' order, never core signals", () => {
-    const tabs = buildIntakeTabs(
+    const { tabs } = buildIntakeTabs(
       [
         buildSignal("a", { kind: "slack/mentioned" }),
         buildSignal("b"),
@@ -173,7 +166,7 @@ describe("buildIntakeTabs", () => {
         buildSignal("d", { kind: "proposal", origin: fromUser() }),
       ],
       PLUGINS,
-      null,
+      new Set(),
     );
     expect(tabs).toEqual([
       { pluginId: null, label: "All", count: 4 },
@@ -182,18 +175,31 @@ describe("buildIntakeTabs", () => {
     ]);
   });
 
-  it("keeps the selected plugin's tab while it holds nothing", () => {
-    expect(buildIntakeTabs([], PLUGINS, "slack")).toEqual([
-      { pluginId: null, label: "All", count: 0 },
+  it("keeps a plugin's tab after its last signal leaves", () => {
+    const first = buildIntakeTabs(
+      [buildSignal("a", { kind: "slack/mentioned" })],
+      PLUGINS,
+      new Set(),
+    );
+    const later = buildIntakeTabs([buildSignal("b")], PLUGINS, first.seenSourceIds);
+    expect(later.tabs).toEqual([
+      { pluginId: null, label: "All", count: 1 },
+      { pluginId: "github", label: "GitHub", count: 1 },
       { pluginId: "slack", label: "Slack", count: 0 },
     ]);
   });
 
+  it("returns the same seen set when no new plugin appears, so the caller stores nothing", () => {
+    const seen = new Set(["github"]);
+    expect(buildIntakeTabs([buildSignal("a")], PLUGINS, seen).seenSourceIds).toBe(seen);
+    expect(buildIntakeTabs([], PLUGINS, seen).seenSourceIds).toBe(seen);
+  });
+
   it("gives an unlisted plugin a tab named by its id, after the listed ones", () => {
-    const tabs = buildIntakeTabs(
+    const { tabs } = buildIntakeTabs(
       [buildSignal("a", { kind: "jira/assigned" }), buildSignal("b")],
       PLUGINS,
-      null,
+      new Set(),
     );
     expect(tabs.map((tab) => tab.label)).toEqual(["All", "GitHub", "jira"]);
   });
@@ -320,7 +326,11 @@ describe("buildSignalAnswers", () => {
   const signal = buildSignal("a", {
     actions: [
       action("done", { label: "Done", operation: null }),
-      action("hand", { label: "Hand to Bugfix", operation: { op: "run.start", input: {} } }),
+      action("hand-to-bugfix", {
+        label: "Hand to Bugfix",
+        operation: { op: "run.start", input: {} },
+      }),
+      action("rerun", { label: "Run again", operation: { op: "run.start", input: {} } }),
       action("approve", { primary: true }),
       action("reply", { label: "Reply…", field: { name: "body", placeholder: "Write a reply" } }),
       action("dismiss", { label: "Dismiss", operation: null }),
@@ -329,17 +339,20 @@ describe("buildSignalAnswers", () => {
   const answers = buildSignalAnswers(signal);
 
   it("orders the actions the plugin gave, then Hand to an agent, then Done", () => {
+    // `rerun` binds run.start too, but the raiser gave it, so it keeps its place.
     expect(answers.map((answer) => answer.action.id)).toEqual([
+      "rerun",
       "approve",
       "reply",
       "dismiss",
-      "hand",
+      "hand-to-bugfix",
       "done",
     ]);
   });
 
   it("styles each answer by what it does", () => {
     expect(answers.map((answer) => answer.style)).toEqual([
+      "plain",
       "plain",
       "reply",
       "quiet",
@@ -370,9 +383,15 @@ describe("buildSignalAnswers", () => {
   });
 
   it("names what the foot's keys do", () => {
-    expect(describeAnswerKey(answers[0]!, "↩")).toBe("approve");
-    expect(describeAnswerKey(answers[1]!, "R")).toBe("reply");
-    expect(describeAnswerKey(answers[1]!, "↩")).toBe("write the reply");
+    expect(describeAnswerKey(answers[1]!, "↩")).toBe("approve");
+    expect(describeAnswerKey(answers[2]!, "R")).toBe("reply");
+    expect(describeAnswerKey(answers[2]!, "↩")).toBe("write the reply");
+  });
+
+  it("drops only an ellipsis at the end of a label", () => {
+    expect(trimAnswerEllipsis("Reply…")).toBe("Reply");
+    expect(trimAnswerEllipsis("Approve")).toBe("Approve");
+    expect(trimAnswerEllipsis("Wait… then go")).toBe("Wait… then go");
   });
 });
 
@@ -409,6 +428,9 @@ describe("describeSignalOutcome and describeResolvedElsewhere", () => {
       by: "by GitHub",
       byUser: false,
     });
+    expect(
+      describeSignalOutcome(resolved("session:01a06d02-7300-7000-8000-000000000001"), PLUGINS)?.by,
+    ).toBe("by an agent");
     expect(describeSignalOutcome(resolved("user", "withdrawn"), PLUGINS)?.label).toBe(
       "Left on its own",
     );
@@ -468,13 +490,13 @@ describe("moveSignalSelection", () => {
   });
 });
 
-describe("readInitials", () => {
+describe("buildInitials", () => {
   it("takes the first letters of the first and the last word", () => {
-    expect(readInitials("Marta de Vries")).toBe("MV");
+    expect(buildInitials("Marta de Vries")).toBe("MV");
   });
 
   it("takes one letter of a one-word name", () => {
-    expect(readInitials(" sanne ")).toBe("S");
+    expect(buildInitials(" sanne ")).toBe("S");
   });
 });
 

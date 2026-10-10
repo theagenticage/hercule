@@ -9,6 +9,7 @@
  */
 import {
   DONE_ACTION_ID,
+  HAND_TO_ACTION_PREFIX,
   isCoreSignalKind,
   type PluginMark,
   type Signal,
@@ -40,11 +41,14 @@ const CORE_KIND_LABELS: Readonly<Record<string, string>> = {
 /** Returns `text` with its first letter in lower case: "Review requested" becomes "review requested". */
 const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
 
+/** Returns `text` with its first letter in upper case: "an agent" becomes "An agent". */
+const upperFirst = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
 /**
  * Returns the id of the plugin whose kind `kind` is, such as `github` for
  * `github/mentioned`, or `null` for a core kind, which no plugin owns.
  */
-export const readSignalPluginId = (kind: string): string | null =>
+export const parseSignalPluginId = (kind: string): string | null =>
   isCoreSignalKind(kind) ? null : kind.slice(0, kind.indexOf("/"));
 
 /**
@@ -56,12 +60,8 @@ export const readSignalPluginId = (kind: string): string | null =>
  * word after the "/": dashes become spaces and the first letter is a
  * capital.
  */
-export const nameSignalKind = (kind: string): string => {
-  const coreLabel = CORE_KIND_LABELS[kind];
-  if (coreLabel !== undefined) return coreLabel;
-  const words = kind.slice(kind.indexOf("/") + 1).replaceAll("-", " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-};
+const nameSignalKind = (kind: string): string =>
+  CORE_KIND_LABELS[kind] ?? upperFirst(kind.slice(kind.indexOf("/") + 1).replaceAll("-", " "));
 
 /** Returns the name of the plugin `pluginId`, or the id itself when the plugin is not listed. */
 const namePlugin = (pluginId: string, plugins: ReadonlyArray<PluginName>): string =>
@@ -88,25 +88,33 @@ export const decidePluginMark = (
 };
 
 /**
+ * Returns who an actor stamp names, as the middle of a sentence: "you" for
+ * the user, the plugin's name for a plugin, "a workflow" for a run, "an
+ * agent" for a session, and "Hercule" for the core. The stamp holds no name
+ * for a run or a session, so those two stay general.
+ */
+const nameActor = (actor: string, plugins: ReadonlyArray<PluginName>): string => {
+  if (actor === "user") return "you";
+  if (actor.startsWith("plugin:")) return namePlugin(actor.slice("plugin:".length), plugins);
+  if (actor.startsWith("run:")) return "a workflow";
+  if (actor.startsWith("session:")) return "an agent";
+  return CORE_SOURCE_NAME;
+};
+
+/**
  * Returns the name of a signal's source, as its row, its pane and its
  * notification show it:
  *
  * - a plugin kind names its plugin: "GitHub";
- * - a core kind names who raised it: "You" for the user, "Hercule" for the
- *   core itself and for an event, the plugin for a plugin's call, "A
- *   workflow" for a run's step and "An agent" for a session. The record
- *   holds no name for a run or a session, so those two stay general.
+ * - a core kind raised from an event names the core: "Hercule";
+ * - any other core kind names who raised it: "You", a plugin's name, "A
+ *   workflow", "An agent" or "Hercule".
  */
 export const nameSignalSource = (signal: Signal, plugins: ReadonlyArray<PluginName>): string => {
-  const pluginId = readSignalPluginId(signal.kind);
+  const pluginId = parseSignalPluginId(signal.kind);
   if (pluginId !== null) return namePlugin(pluginId, plugins);
   if (signal.origin.type === "event") return CORE_SOURCE_NAME;
-  const { actor } = signal.origin;
-  if (actor === "user") return "You";
-  if (actor.startsWith("plugin:")) return namePlugin(actor.slice("plugin:".length), plugins);
-  if (actor.startsWith("run:")) return "A workflow";
-  if (actor.startsWith("session:")) return "An agent";
-  return CORE_SOURCE_NAME;
+  return upperFirst(nameActor(signal.origin.actor, plugins));
 };
 
 /**
@@ -126,25 +134,21 @@ export const describeSignalProvenance = (
 export const isBackFromSnooze = (signal: Signal): boolean => signal.snooze !== undefined;
 
 /**
- * Returns the number of signals on To do the tab of `pluginId` holds, or
- * every signal for the All tab, `null`. The All tab's count is the To do
- * count that the Hercule segment and Intake's row show.
+ * Returns the To do count: the number of signals on To do. The sidebar's
+ * Hercule segment, Intake's row and the All tab all show it.
  */
-export const countToDo = (signals: ReadonlyArray<Signal>, pluginId: string | null): number =>
-  pluginId === null
-    ? signals.length
-    : signals.filter((signal) => readSignalPluginId(signal.kind) === pluginId).length;
+export const countToDo = (signals: ReadonlyArray<Signal>): number => signals.length;
 
 /**
- * Returns the accessible name of the sidebar's Hercule segment: "Hercule, 8
- * to do", or "Hercule" alone when nothing is on To do, because the count is
- * hidden then.
+ * Returns the accessible name of the sidebar's Hercule segment while
+ * something is on To do: "Hercule, 8 to do". The segment draws no count at
+ * 0, so it is not called then.
  */
-export const describeHerculeSegment = (toDoCount: number): string =>
-  toDoCount === 0 ? "Hercule" : `Hercule, ${String(toDoCount)} to do`;
+export const describeOrchestrationSegment = (toDoCount: number): string =>
+  `Hercule, ${String(toDoCount)} to do`;
 
 /** One tab of Intake's bar: All, or one plugin's signals. */
-export interface IntakeTab {
+interface IntakeTab {
   /** The plugin whose signals the tab shows, or `null` for All. */
   readonly pluginId: string | null;
   readonly label: string;
@@ -153,10 +157,15 @@ export interface IntakeTab {
 }
 
 /**
- * Returns Intake's tabs: All, then one per plugin with a signal on To do,
- * in the order `plugins` lists them, so tabs keep their places as signals
- * arrive and leave. The tab of `selectedPluginId` stays while it holds
- * nothing, so the tab the user is on never disappears under them.
+ * Returns Intake's tabs: All, then one per plugin with a signal on To do
+ * now or at any time in `seenSourceIds`, in the order `plugins` lists them.
+ * Also returns the plugins seen so far, which the caller keeps and passes
+ * back on the next call.
+ *
+ * A tab never disappears while the screen is mounted, even after its last
+ * signal leaves, so the tabs keep their places as signals arrive and leave.
+ * The returned set is `seenSourceIds` itself when no new plugin appeared,
+ * so a caller can compare the two to see whether to store it.
  *
  * Core signals have no tab of their own: they show under All only. The
  * Triage tab comes with the triage workflow (#533).
@@ -164,25 +173,30 @@ export interface IntakeTab {
 export const buildIntakeTabs = (
   signals: ReadonlyArray<Signal>,
   plugins: ReadonlyArray<PluginName>,
-  selectedPluginId: string | null,
-): ReadonlyArray<IntakeTab> => {
-  const pluginIds = new Set(signals.map((signal) => readSignalPluginId(signal.kind)));
-  if (selectedPluginId !== null) pluginIds.add(selectedPluginId);
-  const listed = plugins.filter((plugin) => pluginIds.has(plugin.id));
+  seenSourceIds: ReadonlySet<string>,
+): { readonly tabs: ReadonlyArray<IntakeTab>; readonly seenSourceIds: ReadonlySet<string> } => {
+  const current = signals
+    .map((signal) => parseSignalPluginId(signal.kind))
+    .filter((id) => id !== null);
+  const seen = current.every((id) => seenSourceIds.has(id))
+    ? seenSourceIds
+    : new Set([...seenSourceIds, ...current]);
+  const listed = plugins.filter((plugin) => seen.has(plugin.id));
   // A plugin that `plugins` does not list, such as one removed while its
   // signals are still open, still gets its tab, after the listed ones.
-  const unlisted = [...pluginIds]
-    .filter((id): id is string => id !== null && !plugins.some((plugin) => plugin.id === id))
+  const unlisted = [...seen]
+    .filter((id) => !plugins.some((plugin) => plugin.id === id))
     .sort()
     .map((id) => ({ id, displayName: id }));
-  return [
+  const tabs = [
     { pluginId: null, label: "All", count: signals.length },
     ...[...listed, ...unlisted].map((plugin) => ({
       pluginId: plugin.id,
       label: plugin.displayName,
-      count: countToDo(signals, plugin.id),
+      count: current.filter((id) => id === plugin.id).length,
     })),
   ];
+  return { tabs, seenSourceIds: seen };
 };
 
 /** One section of the To do list. */
@@ -223,7 +237,7 @@ export const groupSignalsIntoSections = (
   pluginId: string | null,
 ): ReadonlyArray<IntakeSection> => {
   const shown = signals
-    .filter((signal) => pluginId === null || readSignalPluginId(signal.kind) === pluginId)
+    .filter((signal) => pluginId === null || parseSignalPluginId(signal.kind) === pluginId)
     .toSorted(compareInSection);
   const now = shown.filter((signal) => signal.priority === "urgent");
   const rest = shown.filter((signal) => signal.priority !== "urgent");
@@ -319,7 +333,7 @@ const readStartedWorkflowId = (action: SignalAction): string | null => {
 /** Returns where an action goes in the pane: the plugin's actions first, then Hand to an agent, then Done. */
 const rankAnswer = (action: SignalAction): number => {
   if (action.id === DONE_ACTION_ID) return 2;
-  if (action.operation?.op === "run.start") return 1;
+  if (action.id.startsWith(HAND_TO_ACTION_PREFIX)) return 1;
   return 0;
 };
 
@@ -348,6 +362,13 @@ export const findReplyAnswer = (answers: ReadonlyArray<SignalAnswer>): SignalAns
   answers.find((answer) => answer.style === "reply");
 
 /**
+ * Returns an answer's label without the ellipsis at its end, if it has one:
+ * "Reply…" becomes "Reply". The ellipsis means the answer asks for more,
+ * such as a typed reply, so a button or a sentence that already asks drops it.
+ */
+export const trimAnswerEllipsis = (label: string): string => label.replace(/…$/, "");
+
+/**
  * Returns what a key in the pane's foot does with an answer, in lower case:
  * "approve" for Approve, "reply" for "Reply…". A suggested reply reads
  * "write the reply", because its `↩` puts the focus in the text box.
@@ -355,7 +376,7 @@ export const findReplyAnswer = (answers: ReadonlyArray<SignalAnswer>): SignalAns
 export const describeAnswerKey = (answer: SignalAnswer, key: "↩" | "R"): string =>
   key === "↩" && answer.style === "reply"
     ? "write the reply"
-    : lowerFirst(answer.action.label.replace(/…$/, ""));
+    : lowerFirst(trimAnswerEllipsis(answer.action.label));
 
 /** How a resolved signal's pane names what ended it. */
 export interface SignalOutcome {
@@ -368,15 +389,6 @@ export interface SignalOutcome {
   /** Whether the user's own move ended it, which the pane draws with a filled mark. */
   readonly byUser: boolean;
 }
-
-/** Returns who an actor stamp names, for "by …": "you", "GitHub", "an agent". */
-const nameResolver = (actor: string, plugins: ReadonlyArray<PluginName>): string => {
-  if (actor === "user") return "you";
-  if (actor.startsWith("plugin:")) return namePlugin(actor.slice("plugin:".length), plugins);
-  if (actor.startsWith("run:")) return "a workflow";
-  if (actor.startsWith("session:")) return "an agent";
-  return CORE_SOURCE_NAME;
-};
 
 /**
  * Returns how a resolved signal ended, for the outcome the pane shows in
@@ -395,7 +407,7 @@ export const describeSignalOutcome = (
   return {
     label: byUser ? "What you did" : "Left on its own",
     outcome: resolution.outcome,
-    by: `by ${nameResolver(resolution.actor, plugins)}`,
+    by: `by ${nameActor(resolution.actor, plugins)}`,
     byUser,
   };
 };
@@ -467,7 +479,7 @@ export const moveSignalSelection = (
  * first letter of the first and the last word of `name`, in capitals, such
  * as "MV" for "Marta de Vries", or one letter for a one-word name.
  */
-export const readInitials = (name: string): string => {
+export const buildInitials = (name: string): string => {
   const words = name.split(/\s+/).filter((word) => word !== "");
   const first = words[0]?.charAt(0) ?? "";
   const last = words.length > 1 ? words.at(-1)!.charAt(0) : "";

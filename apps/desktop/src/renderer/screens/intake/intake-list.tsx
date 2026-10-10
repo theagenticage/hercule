@@ -8,7 +8,7 @@ import type { Signal } from "@hercule/contract";
 import {
   describeSignalRow,
   isBackFromSnooze,
-  readSignalPluginId,
+  parseSignalPluginId,
   type IntakeSection,
   type PluginIdentity,
 } from "@hercule/client-core";
@@ -214,7 +214,7 @@ const SignalRow = memo(function SignalRow({
         }}
       >
         <span className="ask-mark">
-          <SourceMark pluginId={readSignalPluginId(signal.kind)} plugins={plugins} size={16} />
+          <SourceMark pluginId={parseSignalPluginId(signal.kind)} plugins={plugins} size={16} />
         </span>
         <span className="ask-text">
           <span className="ask-title">{signal.title}</span>

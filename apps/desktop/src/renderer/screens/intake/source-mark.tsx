@@ -21,7 +21,7 @@ export function SourceMark({
   plugins,
   size,
 }: {
-  /** The plugin the signal comes from, as `readSignalPluginId` returns it, or `null` for the core. */
+  /** The plugin the signal comes from, as `parseSignalPluginId` returns it, or `null` for the core. */
   readonly pluginId: string | null;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly size: number;

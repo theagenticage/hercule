@@ -1,5 +1,5 @@
 import { useRef, type JSX, type KeyboardEvent } from "react";
-import { describeHerculeSegment } from "@hercule/client-core";
+import { describeOrchestrationSegment } from "@hercule/client-core";
 import type { SidebarFace } from "./sidebar-face";
 
 /** The switch's segments, in order, with the label each one shows. */
@@ -62,7 +62,7 @@ export function FaceSwitch({
           onClick={() => onChange(segment.face)}
           aria-label={
             segment.face === "orchestration" && toDoCount > 0
-              ? describeHerculeSegment(toDoCount)
+              ? describeOrchestrationSegment(toDoCount)
               : undefined
           }
         >

@@ -21,7 +21,7 @@ import {
   nameSignalSource,
   queryKeys,
   readErrorMessage,
-  readSignalPluginId,
+  parseSignalPluginId,
   type PluginIdentity,
 } from "@hercule/client-core";
 import { eventQuery, signalQuery } from "../../app/queries";
@@ -213,7 +213,7 @@ function SignalDetail({
         <header>
           <div className="ad-kind">
             <span className="src">
-              <SourceMark pluginId={readSignalPluginId(signal.kind)} plugins={plugins} size={14} />
+              <SourceMark pluginId={parseSignalPluginId(signal.kind)} plugins={plugins} size={14} />
               {describeSignalProvenance(signal, plugins)}
             </span>
             <span className="spacer" />

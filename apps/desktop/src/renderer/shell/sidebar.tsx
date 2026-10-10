@@ -87,7 +87,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const toDoCount = useSuspenseQuery({
     ...signalsToDoQuery(client),
-    select: (signals) => countToDo(signals, null),
+    select: (signals) => countToDo(signals),
   }).data;
   const assistantRows = useAssistantRows();
   const waiting = useWaiting();

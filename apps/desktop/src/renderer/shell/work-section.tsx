@@ -18,7 +18,7 @@ export function WorkSection(): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const toDoCount = useSuspenseQuery({
     ...signalsToDoQuery(client),
-    select: (signals) => countToDo(signals, null),
+    select: (signals) => countToDo(signals),
   }).data;
   return (
     <section className="side-sec">

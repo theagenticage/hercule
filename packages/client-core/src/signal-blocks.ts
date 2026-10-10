@@ -28,7 +28,7 @@ export const UNKNOWN_BLOCK_TEXT = "This part can't be shown here.";
  * decoded block whose type is known always fits that type's schema, because
  * the contract never reads a known type as an unknown block.
  */
-const isKnownBlock = (block: Block): block is KnownBlock =>
+export const isKnownBlock = (block: Block): block is KnownBlock =>
   (KNOWN_BLOCK_TYPES as ReadonlyArray<string>).includes(block.type);
 
 /** Returns `count` and the noun, made plural when the count is not one: "1 file", "3 files". */

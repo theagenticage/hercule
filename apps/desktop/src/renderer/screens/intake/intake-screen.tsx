@@ -97,7 +97,10 @@ export function IntakeScreen({
     };
   }, []);
 
-  const tabs = buildIntakeTabs(signals, plugins, pluginId);
+  const [seenSourceIds, setSeenSourceIds] = useState<ReadonlySet<string>>(() => new Set());
+  const built = buildIntakeTabs(signals, plugins, seenSourceIds);
+  if (built.seenSourceIds !== seenSourceIds) setSeenSourceIds(built.seenSourceIds);
+  const { tabs } = built;
   const sections = groupSignalsIntoSections(signals, pluginId);
   const fits = available === null || fitsIntakePane(available);
   const paneShown = selectedId !== null && !dismissed && fits;

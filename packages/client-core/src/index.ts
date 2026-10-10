@@ -229,7 +229,7 @@ export {
   type BoundActionRow,
   type NotificationMark,
 } from "./notifications";
-export { formatBlocksAsText, UNKNOWN_BLOCK_TEXT } from "./signal-blocks";
+export { formatBlocksAsText, isKnownBlock, UNKNOWN_BLOCK_TEXT } from "./signal-blocks";
 export {
   buildIntakeTabs,
   buildSignalAnswers,
@@ -237,7 +237,7 @@ export {
   decidePluginMark,
   describeAnswerKey,
   describeBuildFailure,
-  describeHerculeSegment,
+  describeOrchestrationSegment,
   describeResolvedElsewhere,
   describeSignalAsker,
   describeSignalOutcome,
@@ -249,10 +249,10 @@ export {
   isBackFromSnooze,
   listUrgentSignals,
   moveSignalSelection,
-  nameSignalKind,
   nameSignalSource,
-  readSignalPluginId,
-  readInitials,
+  parseSignalPluginId,
+  buildInitials,
+  trimAnswerEllipsis,
   DEFAULT_INTAKE_LIST_WIDTH,
   MIN_INTAKE_LIST_WIDTH,
   MIN_INTAKE_PANE_WIDTH,
@@ -260,7 +260,6 @@ export {
   fitsIntakePane,
   fitIntakeListWidth,
   type IntakeSection,
-  type IntakeTab,
   type PluginIdentity,
   type PluginMarkDrawing,
   type PluginName,
