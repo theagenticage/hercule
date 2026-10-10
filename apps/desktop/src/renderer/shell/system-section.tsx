@@ -1,4 +1,8 @@
 import type { JSX } from "react";
+import { connectionNeedsAttention } from "@hercule/client-core";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
+import { connectionsQuery } from "../app/queries";
 import { ConnectionsIcon } from "../icons/connections";
 import { FleetIcon } from "../icons/fleet";
 import {
@@ -10,17 +14,21 @@ import {
 /**
  * Renders the Hercule face's System section: Fleet, which leads to Settings ›
  * Machines, and Connections, which leads to Settings › Connections and ends
- * in the red dot while `someConnectionNeedsAttention` is true. While their sections
+ * in the red dot while a Connection needs attention. While their sections
  * are not built, both rows are drawn but inert, as in the Settings list.
  *
  * The book's last row, Settings, is not drawn: the foot's Settings button,
  * just below, is the same way in (spec 17 §The Hercule face).
+ *
+ * The shell's loader reads the Connections and keeps them cached for the
+ * life of the window, so nothing here waits in practice.
  */
-export function SystemSection({
-  someConnectionNeedsAttention,
-}: {
-  readonly someConnectionNeedsAttention: boolean;
-}): JSX.Element {
+export function SystemSection(): JSX.Element {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const someConnectionNeedsAttention = useSuspenseQuery({
+    ...connectionsQuery(client),
+    select: (connections) => connections.some(connectionNeedsAttention),
+  }).data;
   return (
     <section className="side-sec">
       <h3 className="side-h">

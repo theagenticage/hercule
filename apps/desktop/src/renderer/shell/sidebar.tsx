@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useId, useState, type JSX } from "react";
-import { connectionNeedsAttention } from "@hercule/client-core";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useAssistantRows } from "../app/assistant-rows";
 import { useDraftThread } from "../app/draft-thread";
 import { useUnsentKeys } from "../app/pending-submissions";
 import {
-  connectionsQuery,
   projectsQuery,
   providersQuery,
   resourcesQuery,
@@ -84,13 +82,6 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const { username } = useSuspenseQuery(userQuery(client)).data;
-  // Read here rather than in the System section, so the Connections stay
-  // observed on both faces: a switch to the Hercule face then finds them in
-  // the cache, with no read and nothing to wait for.
-  const someConnectionNeedsAttention = useSuspenseQuery({
-    ...connectionsQuery(client),
-    select: (connections) => connections.some(connectionNeedsAttention),
-  }).data;
   const assistantRows = useAssistantRows();
   const waiting = useWaiting();
   const unsentKeys = useUnsentKeys(controller.pendingSubmissions);
@@ -199,7 +190,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
         onExpand={expandSection}
       >
         {face === "orchestration" ? (
-          <SystemSection someConnectionNeedsAttention={someConnectionNeedsAttention} />
+          <SystemSection />
         ) : (
           items.length === 0 && <p className="side-meta side-empty">No threads yet</p>
         )}

@@ -29,6 +29,7 @@ import {
   stubApi,
   stubElementSize,
   THREAD_FIXTURES,
+  neverAnswer,
   type Handler,
   type SidebarRecords,
 } from "../app/testing";
@@ -699,15 +700,26 @@ describe("the sidebar's faces", () => {
     expect(within(nav).getByRole("button", { name: "Fleet" })).toBeTruthy();
   });
 
-  it("switches to the Hercule face without reading the Connections again, though the first push marks them stale", async () => {
-    const { calls, live } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
-    await live.waitForFirstPushes();
-    const sent = calls.length;
+  it("keeps the app on screen when the Hercule face opens long after the Connections were last drawn", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let connectionReads = 0;
+    // The loader's read answers; any later read hangs, so a screen that waits
+    // for one stays hidden.
+    const readConnections: Handler = () =>
+      ++connectionReads === 1 ? { body: { items: [FIXTURE_GITHUB_CONNECTION] } } : neverAnswer();
+    await startSidebar({
+      path: `/threads/${FIXTURE_THREAD_IDS.flaky}`,
+      handlers: { "GET /api/v1/connections": readConnections },
+    });
 
-    await userEvent.click(getSegment("Hercule"));
+    // Nothing on the Threads face draws the Connections. Query removes a read
+    // no component draws after five minutes, unless its options keep it.
+    await act(() => vi.advanceTimersByTimeAsync(6 * 60_000));
+    fireEvent.click(getSegment("Hercule"));
 
-    expect(screen.getByRole("button", { name: /Connections/ })).toBeTruthy();
-    expect(calls.slice(sent).filter((call) => call.path === "/api/v1/connections")).toEqual([]);
+    // A suspended screen is hidden, and a hidden element has no role.
+    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    expect(within(nav).getByRole("button", { name: /Connections/ })).toBeTruthy();
   });
 
   it("moves between the segments with the arrow keys, keeping one of them in the tab order", async () => {

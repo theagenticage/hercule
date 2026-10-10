@@ -128,6 +128,24 @@ const LIVE_KEPT_READ_OPTIONS = {
   refetchOnReconnect: false,
 } as const;
 
+/**
+ * The options of every read `ensureShellData` loads: the records the shell
+ * shows on every screen. They are kept current like any live-kept read, and
+ * kept in the cache for the life of the window, even while no component on
+ * screen reads them.
+ *
+ * Without that, Query removes a read five minutes after the last component
+ * reading it unmounts. A component that is not always on screen, such as a
+ * section of one sidebar face, would then find the read gone and suspend the
+ * whole app until it is read again. Keeping it here means no component has
+ * to read a record it does not draw just to keep it cached. The records are
+ * few and small, so keeping them costs little memory.
+ */
+const SHELL_READ_OPTIONS = {
+  ...LIVE_KEPT_READ_OPTIONS,
+  gcTime: Infinity,
+} as const;
+
 // The sidebar's list reads below follow the cursor to the last page, because
 // the sidebar needs every record a label can come from. A list cut off after
 // its first page would leave threads without their workspace's label and
@@ -145,7 +163,7 @@ export const threadsQuery = (client: HerculeClient) =>
     queryKey: queryKeys.sessions({ thread: true }),
     queryFn: () =>
       readEveryPage((page) => client.session.query({ query: { thread: true, ...page } })),
-    ...LIVE_KEPT_READ_OPTIONS,
+    ...SHELL_READ_OPTIONS,
   });
 
 /** Reads every project, for the sidebar's project headers. */
@@ -153,7 +171,7 @@ export const projectsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.projects(),
     queryFn: () => readEveryPage((page) => client.project.query({ query: page })),
-    ...LIVE_KEPT_READ_OPTIONS,
+    ...SHELL_READ_OPTIONS,
   });
 
 /**
@@ -164,7 +182,7 @@ export const workspacesQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.workspaces(),
     queryFn: () => readEveryPage((page) => client.workspace.query({ query: page })),
-    ...LIVE_KEPT_READ_OPTIONS,
+    ...SHELL_READ_OPTIONS,
   });
 
 /** Reads every resource. A main workspace is labelled with its repo's name. */
@@ -172,7 +190,7 @@ export const resourcesQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.resources(),
     queryFn: () => readEveryPage((page) => client.resource.query({ query: page })),
-    ...LIVE_KEPT_READ_OPTIONS,
+    ...SHELL_READ_OPTIONS,
   });
 
 /** Reads every runner. A thread on a runner that is offline is drawn as away. */
@@ -180,7 +198,7 @@ export const runnersQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.runners(),
     queryFn: () => readEveryPage((page) => client.runner.query({ query: page })),
-    ...LIVE_KEPT_READ_OPTIONS,
+    ...SHELL_READ_OPTIONS,
   });
 
 /** Reads every provider instance, whose catalogs name the model a thread runs. */
@@ -188,7 +206,7 @@ export const providersQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.providers(),
     queryFn: () => client.provider.query(),
-    ...LIVE_KEPT_READ_OPTIONS,
+    ...SHELL_READ_OPTIONS,
   });
 
 /**
@@ -345,7 +363,7 @@ export const connectionsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.connections(),
     queryFn: () => readEveryPage((page) => client.connection.query({ query: page })),
-    ...LIVE_KEPT_READ_OPTIONS,
+    ...SHELL_READ_OPTIONS,
   });
 
 /**
@@ -356,7 +374,7 @@ export const assistantsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.assistants(),
     queryFn: () => readEveryPage((page) => client.assistant.query({ query: page })),
-    ...LIVE_KEPT_READ_OPTIONS,
+    ...SHELL_READ_OPTIONS,
   });
 
 /**
@@ -394,7 +412,7 @@ export const currentConversationSessionQuery = (client: HerculeClient, conversat
       return page.items[0] ?? null;
     },
     retry: isWorthRetrying,
-    ...LIVE_KEPT_READ_OPTIONS,
+    ...SHELL_READ_OPTIONS,
   });
 
 /**
@@ -589,7 +607,7 @@ export const userQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.user(),
     queryFn: () => client.user.read(),
-    ...LIVE_KEPT_READ_OPTIONS,
+    ...SHELL_READ_OPTIONS,
   });
 
 /**
@@ -766,8 +784,11 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
  * the assistants arrive, without waiting for the other reads.
  *
  * The New project form and the starter threads read the Connections, to know
- * whether a GitHub Connection exists, and the sidebar reads them for the
- * System section's red dot, so none of them waits for them.
+ * whether a GitHub Connection exists, and the sidebar's System section reads
+ * them for the Connections row's red dot, so none of them waits for them.
+ *
+ * Every read it loads uses `SHELL_READ_OPTIONS`, so it stays cached for the
+ * life of the window, whichever screens and sidebar face are showing.
  *
  * The shell's loader calls it, and so does a test that renders one part of a
  * screen alone, so the part finds the same records cached as in the app.
