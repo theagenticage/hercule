@@ -32,6 +32,22 @@ export type Requirement = Grant | "unauthenticated" | "setup-token" | "authentic
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /**
+ * One row of the operation table.
+ *
+ * A GET operation only reads. An operation with another method changes
+ * something, unless its row sets `readOnly`: an operation that changes
+ * nothing but takes its input as a request body, such as validating a
+ * workflow, uses POST and sets it. The controller keeps such an operation
+ * answering while a promotion freezes it, like a GET.
+ */
+interface OperationRow {
+  readonly requires: Requirement;
+  readonly method: Method;
+  readonly path: string;
+  readonly readOnly?: true;
+}
+
+/**
  * Routes use Effect's `:param` path syntax; the published API documents the
  * same routes with `{param}`.
  */
@@ -213,6 +229,7 @@ const TABLE = {
     requires: "workflow.read",
     method: "POST",
     path: "/api/v1/workflows/validate",
+    readOnly: true,
   },
 
   // One operation starts a run, of a stored workflow or of one sent with the
@@ -510,16 +527,18 @@ const TABLE = {
 
   "controller.read": { requires: "infra.read", method: "GET", path: "/api/v1/controller" },
   "controller.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/controller" },
-} as const satisfies Record<string, { requires: Requirement; method: Method; path: string }>;
+  "controller.createPromotionToken": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/controller/promotion-tokens",
+  },
+} as const satisfies Record<string, OperationRow>;
 
 /** Every operation id in the public API. */
 export type OperationId = keyof typeof TABLE;
 
-export interface Operation {
+export interface Operation extends OperationRow {
   readonly id: OperationId;
-  readonly requires: Requirement;
-  readonly method: Method;
-  readonly path: string;
 }
 
 export const OPERATIONS = TABLE;

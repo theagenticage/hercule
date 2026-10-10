@@ -19,10 +19,10 @@ import * as Effect from "effect/Effect";
  * cause, where each failure that came with the interrupt becomes a defect, so
  * the caller has no error left to handle.
  */
-export const absorbFailures = <E>(
+export const absorbFailures = <E, R = never>(
   failureMessage: string,
-  effect: Effect.Effect<void, E>,
-): Effect.Effect<void> =>
+  effect: Effect.Effect<void, E, R>,
+): Effect.Effect<void, never, R> =>
   Effect.catchCause(effect, (cause) =>
     Cause.hasInterrupts(cause)
       ? Effect.failCause(
@@ -42,7 +42,8 @@ export const absorbFailures = <E>(
  * Use this for work that waits on a runner, such as a dispatch or a flush, so
  * that the wait does not hold up the next item.
  */
-export const forkAndAbsorbFailures = <E>(
+export const forkAndAbsorbFailures = <E, R = never>(
   failureMessage: string,
-  effect: Effect.Effect<void, E>,
-): Effect.Effect<void> => Effect.asVoid(Effect.forkChild(absorbFailures(failureMessage, effect)));
+  effect: Effect.Effect<void, E, R>,
+): Effect.Effect<void, never, R> =>
+  Effect.asVoid(Effect.forkChild(absorbFailures(failureMessage, effect)));

@@ -306,11 +306,16 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     workspaceId: null,
   },
   { _tag: "workspaceStepSettle", steps: [STEP_KEY] },
+  {
+    _tag: "forwardingPointer",
+    newAddress: "https://controller-b.example:4937",
+    signature: "dGVzdC1zaWduYXR1cmU=",
+  },
 ];
 
 describe("the protocol version", () => {
-  it("is 5, the version that reports an output too large to send", () => {
-    expect(PROTOCOL_VERSION).toBe(5);
+  it("is 6, the version that forwards runners to a promoted controller", () => {
+    expect(PROTOCOL_VERSION).toBe(6);
   });
 });
 

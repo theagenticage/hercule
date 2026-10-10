@@ -3,11 +3,13 @@ import { dispatch, VERSION } from "./index";
 
 const run = vi.hoisted(() => ({
   controller: vi.fn(),
+  promote: vi.fn(),
   runner: vi.fn(),
   service: vi.fn(),
   cli: vi.fn(),
 }));
 vi.mock("@hercule/controller", () => ({ run: run.controller }));
+vi.mock("@hercule/controller/promote", () => ({ run: run.promote }));
 vi.mock("@hercule/runner", () => ({ run: run.runner }));
 vi.mock("@hercule/service", () => ({ run: run.service }));
 vi.mock("@hercule/cli", () => ({ run: run.cli }));
@@ -30,6 +32,22 @@ describe("dispatch", () => {
   it("sends serve to the controller", async () => {
     await dispatch(["serve"]);
     expect(run.controller).toHaveBeenCalledWith([]);
+  });
+
+  // `promote` writes this machine's Home, so it is not the CLI, and it must
+  // not boot a controller, so it is not `serve` either.
+  it("sends promote to the promote role", async () => {
+    await dispatch(["--home", "/tmp/h", "promote", "--from", "http://a.test", "--token", "t"]);
+    expect(run.promote).toHaveBeenCalledWith([
+      "--home",
+      "/tmp/h",
+      "--from",
+      "http://a.test",
+      "--token",
+      "t",
+    ]);
+    expect(run.controller).not.toHaveBeenCalled();
+    expect(run.cli).not.toHaveBeenCalled();
   });
 
   // `service` acts on this machine's supervisor, not on the controller, so

@@ -14,6 +14,7 @@ import {
   makeRemote,
 } from "../../../../runner/src/workspaces/testing";
 import { get, post, send } from "../../http/testing";
+import { buildRunnerSocketUrl } from "../../runners/testing";
 import { spawnSessionOrFail, waitUntil, type Arranged } from "../../sessions/testing";
 import { FACTS, MODELS, readWorkspace, withFleet } from "../../workspaces/testing";
 
@@ -56,10 +57,9 @@ const bootstrapRunner = async (
   });
   expect(response.status, await response.clone().text()).toBe(201);
   const joined = (await response.json()) as JoinAnswer;
-  const socket = new WebSocket(
-    `${arranged.harness.base.replace(/^http:/, "ws:")}/api/v1/runners/socket`,
-    { headers: { authorization: `Bearer ${joined.credential}` } },
-  );
+  const socket = new WebSocket(buildRunnerSocketUrl(arranged.harness.base), {
+    headers: { authorization: `Bearer ${joined.credential}` },
+  });
   await new Promise<void>((resolveOpened, reject) => {
     socket.onopen = () => {
       socket.send(

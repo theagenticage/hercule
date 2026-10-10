@@ -13,6 +13,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { CronTriggerScheduler, FIRING_TOLERANCE } from "../../workflows";
+import { PromotionState } from "../../promotion";
 import { absorbFailures } from "../absorbing";
 
 /**
@@ -52,10 +53,11 @@ export const checkSchedulerInterval: Effect.Effect<void> = Effect.gen(function* 
  * that fails is logged and the others still fire. A pass whose listing fails
  * is logged too, and the next one runs.
  */
-export const runScheduler: Effect.Effect<never, never, CronTriggerScheduler> = Effect.gen(
-  function* () {
+export const runScheduler: Effect.Effect<never, never, CronTriggerScheduler | PromotionState> =
+  Effect.gen(function* () {
     const scheduler = yield* CronTriggerScheduler;
     const interval = yield* SchedulerInterval;
+    const promotion = yield* PromotionState;
 
     /** Schedules every cron trigger that has work at `now`, each on its own. */
     const scheduleDueTriggers = (now: Date): Effect.Effect<void, SqlError> =>
@@ -72,9 +74,8 @@ export const runScheduler: Effect.Effect<never, never, CronTriggerScheduler> = E
       const millis = yield* Clock.currentTimeMillis;
       yield* absorbFailures(
         "Scheduling cron triggers failed",
-        scheduleDueTriggers(new Date(millis)),
+        promotion.whenServing(scheduleDueTriggers(new Date(millis))),
       );
       yield* Effect.sleep(interval);
     }
-  },
-);
+  });

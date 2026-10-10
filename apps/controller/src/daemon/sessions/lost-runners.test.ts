@@ -11,6 +11,7 @@ import { Effect, Fiber, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { mintUuid, uuidToString } from "../../db";
 import { TestDatabase } from "../../db/testing";
+import { ServingPromotionStateLayer } from "../../promotion/testing";
 import { RunService } from "../../runs";
 import { SessionService } from "../../sessions";
 import { sweepSessionsOnLostRunners } from "./lost-runners";
@@ -62,7 +63,12 @@ describe("sweepSessionsOnLostRunners", () => {
         while (failedSteps.length === 0) yield* Effect.yieldNow;
         yield* Fiber.interrupt(sweeping);
         return { online };
-      }).pipe(Effect.provide(Layer.merge(recording, TestDatabase)), Effect.orDie),
+      }).pipe(
+        Effect.provide(
+          Layer.merge(recording, ServingPromotionStateLayer.pipe(Layer.provideMerge(TestDatabase))),
+        ),
+        Effect.orDie,
+      ),
     );
 
     expect(passes).toEqual([[online]]);

@@ -53,6 +53,7 @@ import {
   resolvedInstance,
   type StoredSnapshot,
 } from "../../providers";
+import { PromotionState } from "../../promotion";
 import { resourceRepository } from "../../resources";
 import {
   DRAINING,
@@ -228,6 +229,7 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const profiles = yield* PermissionProfiles;
   const settings = yield* Settings;
+  const promotion = yield* PromotionState;
   const one = readSessionOrFail(rows);
   const resumableNativeSession = yield* resumable;
   const { dispatch } = yield* Dispatch;
@@ -589,19 +591,25 @@ const make = Effect.gen(function* () {
   /**
    * Writes the workspace and the session in one transaction, then starts the
    * session. Returns the new session. A transaction never waits on a runner.
+   *
+   * Waits while a promotion freezes the controller. A request was already
+   * refused by then, so the wait only holds back a run that places an agent
+   * step's session.
    */
   const place = (open: Placing): Effect.Effect<Session, Validation | NotFound | SqlError> =>
-    Effect.gen(function* () {
-      const { sessionId, frame } = yield* writeSession(open);
-      yield* tellRunnerAndDispatch(open.runnerId, frame);
-      // Read back instead of using the inserted row, so the caller sees
-      // `starting` when dispatch started the session at once, not `queued`.
-      const after = yield* rows.one(sessionId);
-      if (Option.isNone(after)) {
-        return yield* Effect.die("a session that was just inserted could not be read back");
-      }
-      return (yield* recordComposer)(after.value);
-    });
+    promotion.whenServing(
+      Effect.gen(function* () {
+        const { sessionId, frame } = yield* writeSession(open);
+        yield* tellRunnerAndDispatch(open.runnerId, frame);
+        // Read back instead of using the inserted row, so the caller sees
+        // `starting` when dispatch started the session at once, not `queued`.
+        const after = yield* rows.one(sessionId);
+        if (Option.isNone(after)) {
+          return yield* Effect.die("a session that was just inserted could not be read back");
+        }
+        return (yield* recordComposer)(after.value);
+      }),
+    );
 
   return {
     /**
@@ -1062,4 +1070,5 @@ export const PlacementLayer: Layer.Layer<
   | Settings
   | PluginHost
   | Dispatch
+  | PromotionState
 > = Layer.effect(Placement)(make);

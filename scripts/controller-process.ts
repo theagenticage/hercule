@@ -118,6 +118,11 @@ export async function startController(options: {
    * here.
    */
   readonly env?: Readonly<Record<string, string>> | undefined;
+  /**
+   * Extra arguments after `serve`. Used for `hercule serve --force-unseal`
+   * after a promotion.
+   */
+  readonly extraArgs?: ReadonlyArray<string> | undefined;
 }): Promise<Controller> {
   const attempts = options.port === undefined ? 20 : 1;
   const command = options.binary === undefined ? [BUN, ENTRYPOINT] : [options.binary];
@@ -131,6 +136,7 @@ export async function startController(options: {
         port,
         options.timeoutMs,
         options.env,
+        options.extraArgs,
       );
     } catch (error) {
       last = error as Error;
@@ -150,16 +156,21 @@ async function startControllerOnPort(
   port: number,
   timeoutMs: number | undefined,
   env?: Readonly<Record<string, string>>,
+  extraArgs: ReadonlyArray<string> = [],
 ): Promise<Controller> {
   const url = `http://127.0.0.1:${String(port)}`;
   const chunks: Array<string> = [];
 
   const [executable, ...args] = command;
-  const child = spawn(executable!, [...args, "serve", "-c", `bind.port=${String(port)}`], {
-    cwd: ROOT,
-    env: { ...buildCleanEnv(), ...env, HERCULE_HOME: home },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    executable!,
+    [...args, "serve", ...extraArgs, "-c", `bind.port=${String(port)}`],
+    {
+      cwd: ROOT,
+      env: { ...buildCleanEnv(), ...env, HERCULE_HOME: home },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
   child.stdout.setEncoding("utf8").on("data", (chunk: string) => chunks.push(chunk));
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => chunks.push(chunk));
   // `exit` fires when the process ends; `close` fires once its output has

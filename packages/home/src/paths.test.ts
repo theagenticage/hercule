@@ -77,6 +77,7 @@ describe("buildHomePaths", () => {
       credentialsFile: "/srv/hercule/credentials.json",
       dataDir: "/srv/hercule/data",
       databaseFile: "/srv/hercule/data/hercule.db",
+      promotionTransferDir: "/srv/hercule/data/promotion-transfer",
       runnerDir: "/srv/hercule/runner",
       logsDir: "/srv/hercule/logs",
       backupsDir: "/srv/hercule/backups",
@@ -88,6 +89,9 @@ describe("buildHomePaths", () => {
 
   it("accepts a Data Root outside the home, and resolves a relative one against the home", () => {
     expect(buildHomePaths("/srv/hercule", "/mnt/state").dataDir).toBe("/mnt/state");
+    expect(buildHomePaths("/srv/hercule", "/mnt/state").promotionTransferDir).toBe(
+      "/mnt/state/promotion-transfer",
+    );
     expect(buildHomePaths("/srv/hercule", "state").databaseFile).toBe(
       "/srv/hercule/state/hercule.db",
     );

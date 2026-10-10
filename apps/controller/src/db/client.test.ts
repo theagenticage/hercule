@@ -52,7 +52,7 @@ describe("createDatabaseError", () => {
     try {
       const error = await Effect.runPromise(write.pipe(Effect.flip));
       expect(createDatabaseError(file, error).message).toContain(
-        "already open by another Hercule controller",
+        "already open by another Hercule process",
       );
     } finally {
       holder.run("ROLLBACK");
@@ -66,7 +66,7 @@ describe("createDatabaseError", () => {
     });
     const outer = new SqlError({ reason: new UnknownError({ cause: inner }) });
     expect(createDatabaseError(file, outer).message).toContain(
-      "already open by another Hercule controller",
+      "already open by another Hercule process",
     );
   });
 
@@ -99,7 +99,7 @@ describe("one controller per home", () => {
     });
 
     const error = await Effect.runPromise(Effect.scoped(both));
-    expect(error.message).toContain("already open by another Hercule controller");
+    expect(error.message).toContain("already open by another Hercule process");
   });
 
   it("lets the next controller in once the first has closed", async () => {

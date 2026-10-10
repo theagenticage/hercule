@@ -3,12 +3,31 @@
  * rows. This is not an operation and not on `RunnerService`: it checks no
  * grant, and every audit entry is stamped `system`.
  *
- * The only state kept here is which connection each runner is reachable
- * through. A runner can connect again before its old connection has finished
- * closing. Without the map, the old connection's final `unreachable` would
- * overwrite the new connection's `online`. The map is lost when the process
- * stops, which `strandedByTheLastRun` corrects before the server starts
- * listening.
+ * The state kept here is which connection each runner is reachable through,
+ * and the departures not yet written. A runner can connect again before its
+ * old connection has finished closing. Without the map, the old connection's
+ * final `unreachable` would overwrite the new connection's `online`. Both maps
+ * are lost when the process stops, which `strandedByTheLastRun` corrects
+ * before the server starts listening.
+ *
+ * Every database write here passes the promotion gate (spec 03 section 8.2).
+ * A frozen controller must not write, because the copy the new machine
+ * receives would miss the write, and a sealed controller never writes again.
+ * Each write decides what to do while frozen:
+ *
+ * - The hello's write is admitted by the socket, together with the hello's
+ *   answer, so that a seal is ordered after it.
+ * - The write that moves a runner off `online` when its connection ends is
+ *   held in memory while frozen, because it is still true after the thaw.
+ *   The controller daemon calls `recordHeldDepartures` each time the
+ *   controller serves again. Once sealed, it is never written.
+ * - The writes a frame causes while the connection is open (a pong, a facts
+ *   report, a watermark report) are skipped. They are handled one at a time
+ *   with every other frame, so a write that waited would hold up the pongs,
+ *   and the socket would close the connection as silent.
+ * - The boot's correction of stranded rows is skipped on a sealed controller.
+ * - The unreachable-runner notifications are admitted by the sweep that
+ *   raises them.
  */
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -56,6 +75,7 @@ import { hashToken } from "../credentials";
 import { announce, nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Notifier } from "../notifications";
+import { PromotionState } from "../promotion";
 import { runnerRepository, type RunnerHelloRecord } from "./repository";
 
 export type Connection = symbol;
@@ -220,8 +240,16 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
+  const promotion = yield* PromotionState;
 
   const reachable = new Map<string, Reachable>();
+  // The departures whose write a promotion freeze is holding, by runner id.
+  // Each keeps the connection that ended, so an entry that a later connection
+  // replaced is never mistaken for the one that was written.
+  const heldDepartures = new Map<
+    string,
+    { readonly connection: Connection; readonly departure: Departure }
+  >();
   // Unbounded, so a runner's hello never waits for a slow subscriber. It
   // replays recent arrivals, because the subscriber starts on a forked fiber
   // while the server is already starting to listen. Without the replay, a
@@ -366,6 +394,36 @@ const make = Effect.gen(function* () {
       });
     });
 
+  /**
+   * Writes every held departure: sets each runner `offline` or `unreachable`,
+   * as its connection reported, in one transaction. Skipped while a promotion
+   * freezes the controller, and once it is sealed, leaving the departures
+   * held. Fails when the write fails, and the departures then stay held.
+   *
+   * The entries are read inside the transaction, because a hello removes its
+   * runner's entry inside its own transaction, and transactions run one at a
+   * time. A runner that connected again is therefore never moved off the
+   * `online` its new hello wrote. After the commit, an entry is removed only
+   * if it still holds the connection that was written: a connection that
+   * ended in the meantime has its own departure, not yet written.
+   */
+  const recordHeldDepartures: Effect.Effect<void, SqlError> = promotion.runIfServing(
+    Effect.gen(function* () {
+      const written = yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const held = [...heldDepartures];
+          const at = yield* nowIso;
+          for (const [id, { departure }] of held) yield* changeConnectivity(id, departure, at);
+          return held;
+        }),
+      );
+      for (const [id, { connection }] of written) {
+        if (heldDepartures.get(id)?.connection === connection) heldDepartures.delete(id);
+      }
+    }),
+  );
+
   return {
     /** Returns the id of the runner this credential belongs to. Only the hash is stored, and the lookup needs only that. */
     admits: (credential: string): Effect.Effect<Option.Option<string>, SqlError> =>
@@ -381,6 +439,12 @@ const make = Effect.gen(function* () {
      * updated after the transaction commits, because a `Map` does not roll
      * back: a failed write would otherwise leave the map pointing at a
      * connection that never came online.
+     *
+     * Does not pass the promotion gate itself. The socket admits the hello's
+     * signature, this write and the hello's answer as one unit of work, so a
+     * seal is ordered either after the connection is in the map, where the
+     * seal's announcement reaches it, or before the hello is answered, which
+     * is then answered with the new address instead.
      */
     greeted: (
       id: string,
@@ -399,6 +463,11 @@ const make = Effect.gen(function* () {
             // not the connectivity changed, so the row can change without an
             // audit entry. Announce it either way.
             yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
+            // A departure a freeze held for an earlier connection is no longer
+            // true. It is dropped inside the transaction, so that it is ordered
+            // with `recordHeldDepartures`, and after the writes, so that a
+            // write that fails leaves it held.
+            heldDepartures.delete(id);
           }),
         );
         const previous = reachable.get(id);
@@ -575,6 +644,19 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Sends one frame to every runner that has an open connection. A runner
+     * with no connection is skipped. Used to announce a new controller
+     * address during promotion.
+     */
+    tellConnectedRunners: (frame: ControllerToRunner): Effect.Effect<void> =>
+      Effect.forEach([...reachable.keys()], (id) =>
+        Effect.suspend(() => {
+          const held = reachable.get(id);
+          return held === undefined ? Effect.void : held.ask(frame);
+        }),
+      ).pipe(Effect.asVoid),
+
+    /**
      * Adds a runner's session frame to the session queue. A frame from a
      * replaced connection is dropped: an old connection must not overwrite the
      * session state the current one reports.
@@ -681,83 +763,113 @@ const make = Effect.gen(function* () {
     /**
      * Records a pong as the runner's last-seen time. A pong on a replaced
      * connection still counts, because it still shows the runner is up.
+     *
+     * Skipped while a promotion freezes the controller, and once it is
+     * sealed. The socket keeps its own silence clock in memory, so a skipped
+     * write does not make the runner look silent, and the next pong after a
+     * thaw records the time again.
      */
     answered: (id: string): Effect.Effect<void, SqlError> =>
-      Effect.flatMap(nowIso, (at) => runners.touch(id, at)),
+      promotion.runIfServing(Effect.flatMap(nowIso, (at) => runners.touch(id, at))),
 
     /**
      * Stores a runner's facts report and wakes the callers of
      * `refreshedFacts`. A report from a replaced connection is ignored, so an
      * old connection cannot overwrite the current one's facts.
+     *
+     * Skipped while a promotion freezes the controller, and once it is
+     * sealed, and then wakes nobody: a caller of `refreshedFacts` gets
+     * `false` at its deadline. The runner sends its facts with every hello,
+     * so the new machine gets them when the runner connects to it. After a
+     * thaw, this controller shows the skipped facts only once the runner
+     * reports a change, or someone refreshes them.
      */
     reportedFacts: (
       id: string,
       connection: Connection,
       facts: RunnerFacts,
     ): Effect.Effect<void, SqlError> =>
-      Effect.gen(function* () {
-        const recorded = yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            if (reachable.get(id)?.connection !== connection) return false;
-            yield* runners.recordFacts(id, facts, yield* nowIso);
-            // No audit entry: what a runner has installed is not an event anyone
-            // reads back, so clients watching the fleet are notified instead.
-            yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
-            return true;
-          }),
-        );
-        // After the commit, so a woken caller reads the new facts rather than
-        // the old ones. The connection is checked again in case the runner
-        // reconnected in between: callers on the new connection are waiting
-        // for its own report, which has not arrived yet.
-        const held = recorded ? reachable.get(id) : undefined;
-        if (held?.connection === connection) wakeWaiters(held, FACTS_KEY, FACTS_REPORTED);
-      }),
+      promotion.runIfServing(
+        Effect.gen(function* () {
+          const recorded = yield* withTransaction(
+            sql,
+            Effect.gen(function* () {
+              if (reachable.get(id)?.connection !== connection) return false;
+              yield* runners.recordFacts(id, facts, yield* nowIso);
+              // No audit entry: what a runner has installed is not an event anyone
+              // reads back, so clients watching the fleet are notified instead.
+              yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
+              return true;
+            }),
+          );
+          // After the commit, so a woken caller reads the new facts rather than
+          // the old ones. The connection is checked again in case the runner
+          // reconnected in between: callers on the new connection are waiting
+          // for its own report, which has not arrived yet.
+          const held = recorded ? reachable.get(id) : undefined;
+          if (held?.connection === connection) wakeWaiters(held, FACTS_KEY, FACTS_REPORTED);
+        }),
+      ),
 
     /**
      * Stores a runner's watermark report. An audit entry is written only when
      * the runner starts or stops accepting placements, because that is what
      * placement acts on.
+     *
+     * Skipped while a promotion freezes the controller, and once it is
+     * sealed. The runner reports its watermark every minute, and each report
+     * is compared with the stored one, so the first report after a thaw
+     * records any change the skipped ones carried.
      */
     reportedWatermark: (
       id: string,
       connection: Connection,
       watermark: RunnerWatermark,
     ): Effect.Effect<void, SqlError> =>
-      Effect.gen(function* () {
-        const freed = yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            if (reachable.get(id)?.connection !== connection) return false;
-            const at = yield* nowIso;
-            const result = yield* runners.recordWatermark(id, watermark, at);
-            if (!result.crossed) return false;
-            yield* audit.append({
-              kind: "runner.placementsChanged",
-              actor: SYSTEM_ACTOR,
-              record: { topic: "runner", id },
-              payload: { runnerId: id, acceptingPlacements: result.accepting },
-              at,
-            });
-            return result.accepting;
-          }),
-        );
-        // Placement reads the disk space only to compare it with the
-        // watermark. So only a report that brings the runner back above the
-        // watermark gives it room for work. Publishing every routine report
-        // would wake every run waiting for a runner once a minute per runner.
-        // Published after the write, so whoever acts on it reads the new disk
-        // space rather than the old value.
-        if (freed) yield* publish(id, connection, { _tag: "placementsChanged", runnerId: id });
-      }),
+      promotion.runIfServing(
+        Effect.gen(function* () {
+          const freed = yield* withTransaction(
+            sql,
+            Effect.gen(function* () {
+              if (reachable.get(id)?.connection !== connection) return false;
+              const at = yield* nowIso;
+              const result = yield* runners.recordWatermark(id, watermark, at);
+              if (!result.crossed) return false;
+              yield* audit.append({
+                kind: "runner.placementsChanged",
+                actor: SYSTEM_ACTOR,
+                record: { topic: "runner", id },
+                payload: { runnerId: id, acceptingPlacements: result.accepting },
+                at,
+              });
+              return result.accepting;
+            }),
+          );
+          // Placement reads the disk space only to compare it with the
+          // watermark. So only a report that brings the runner back above the
+          // watermark gives it room for work. Publishing every routine report
+          // would wake every run waiting for a runner once a minute per runner.
+          // Published after the write, so whoever acts on it reads the new disk
+          // space rather than the old value.
+          if (freed) yield* publish(id, connection, { _tag: "placementsChanged", runnerId: id });
+        }),
+      ),
 
     /**
-     * Records that a connection ended: removes it from the map and sets the
-     * runner `offline` or `unreachable`. The connection passes the departure,
-     * because only it knows whether a `goodbye` arrived. The ownership check is
-     * inside the transaction, because starting a transaction can wait, and the
-     * runner's next connection could come online in that gap.
+     * Records that a connection ended: removes it from the map, releases
+     * everyone waiting on it, and sets the runner `offline` or `unreachable`.
+     * The connection passes the departure, because only it knows whether a
+     * `goodbye` arrived. A connection that was already replaced changes
+     * nothing. Fails when the write fails.
+     *
+     * The map is updated at once, so nothing is sent to a closed connection.
+     * The departure is then held, and written by `recordHeldDepartures`:
+     *
+     * - while serving, at once;
+     * - while frozen, when the controller daemon calls `recordHeldDepartures`
+     *   after the thaw. The socket's finalizer, which cannot be interrupted,
+     *   never waits for the freeze;
+     * - once sealed, never: the runner follows the forwarding pointer.
      */
     ended: (
       id: string,
@@ -766,24 +878,19 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SqlError> =>
       Effect.suspend(() => {
         const held = reachable.get(id);
-        return Effect.ensuring(
-          withTransaction(
-            sql,
-            Effect.gen(function* () {
-              if (held?.connection !== connection) return;
-              reachable.delete(id);
-              yield* changeConnectivity(id, departure, yield* nowIso);
-            }),
-          ),
-          // The connection has closed, whether or not the row could be moved
-          // off online, so everyone waiting on it is released now rather than
-          // at their own deadline.
-          Effect.sync(() => {
-            if (held?.connection !== connection) return;
-            abandon(held);
-          }),
-        );
+        if (held?.connection !== connection) return Effect.void;
+        reachable.delete(id);
+        // The connection has closed, whether or not the row can be moved off
+        // online now, so everyone waiting on it is released now rather than
+        // at their own deadline.
+        abandon(held);
+        // Held before the phase is checked, so a thaw that lands in between
+        // finds it.
+        heldDepartures.set(id, { connection, departure });
+        return recordHeldDepartures;
       }),
+
+    recordHeldDepartures,
 
     /**
      * Raises one `core.runner-unreachable` notification for each runner that
@@ -817,13 +924,18 @@ const make = Effect.gen(function* () {
      * moves its runner off `online`. Without this, a controller that was
      * killed rather than shut down would show the fleet as online forever.
      */
-    strandedByTheLastRun: withTransaction(
-      sql,
-      Effect.gen(function* () {
-        const at = yield* nowIso;
-        for (const id of yield* runners.connected())
-          yield* changeConnectivity(id, "unreachable", at);
-      }),
+    strandedByTheLastRun: promotion.runIfServing(
+      // Skipped on a controller that boots sealed. It serves no runner, and
+      // its rows are the copy the new machine took, which writes the same
+      // correction on its own boot.
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const at = yield* nowIso;
+          for (const id of yield* runners.connected())
+            yield* changeConnectivity(id, "unreachable", at);
+        }),
+      ),
     ),
   };
 });
@@ -836,5 +948,5 @@ export class RunnerConnections extends Context.Service<
 export const RunnerConnectionsLayer: Layer.Layer<
   RunnerConnections,
   never,
-  SqlClient.SqlClient | AuditLog | Notifier
+  SqlClient.SqlClient | AuditLog | Notifier | PromotionState
 > = Layer.effect(RunnerConnections)(make);

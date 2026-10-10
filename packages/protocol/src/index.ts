@@ -86,8 +86,10 @@ export {
  *   the session's own agent, and a runner that ignored it would stop the
  *   whole session where the user asked to stop one subagent (spec 03
  *   section 2.2).
+ * - Version 6 added controller promotion: the `ForwardingPointer` frame that
+ *   tells a runner where its controller moved (spec 03 section 8.3).
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /**
  * The close code and reason the controller uses to end the connection of a
@@ -571,6 +573,31 @@ export const Goodbye = Schema.Struct({ _tag: Schema.Literal("goodbye") });
 
 export type Goodbye = Schema.Schema.Type<typeof Goodbye>;
 
+/**
+ * Tells the runner that its controller has moved to `newAddress`. A controller
+ * sends it to every connected runner when a promotion seals it, and in place
+ * of a hello to a runner that dials it after that.
+ *
+ * `signature` is the controller identity's Ed25519 signature over
+ * `encodeForwardingPointerBytes(newAddress)`. The runner verifies it against
+ * the public key it pinned when it joined, rewrites the controller URL in
+ * `runner.json`, and reconnects to the new address. The signature is not
+ * bound to a time, so a recorded pointer can be sent again, and it still
+ * verifies after later promotions, because the identity's key never changes.
+ * After two promotions, a pointer from the first one sends the runner back to
+ * an address the controller has left. If the machine there is still sealed,
+ * it answers with its own pointer and the runner moves on again. If nothing
+ * answers there, the runner keeps dialing it until
+ * `hercule runner set-controller` points it at the controller by hand.
+ */
+export const ForwardingPointer = Schema.Struct({
+  _tag: Schema.Literal("forwardingPointer"),
+  newAddress: Fact,
+  signature: Base64,
+});
+
+export type ForwardingPointer = Schema.Schema.Type<typeof ForwardingPointer>;
+
 export const RunnerToController = Schema.Union([
   RunnerHello,
   Pong,
@@ -632,6 +659,13 @@ export const encodeChallengeBytes = (runnerId: string, nonce: string): Uint8Arra
   new TextEncoder().encode(`hercule:runner-hello:${runnerId}:${nonce}`);
 
 /**
+ * Returns the bytes a controller signs in a `ForwardingPointer`. The prefix
+ * keeps the signature from being valid for any other message.
+ */
+export const encodeForwardingPointerBytes = (newAddress: string): Uint8Array<ArrayBuffer> =>
+  new TextEncoder().encode(`hercule:forwarding-pointer:${newAddress}`);
+
+/**
  * Asks the runner to probe its machine now and report what it finds, whether or
  * not anything changed. The hourly report is sent only on a change, so without
  * this, an operator who presses "Refresh facts" on an unchanged machine would
@@ -675,6 +709,7 @@ export const ControllerToRunner = Schema.Union([
   CredentialAnswer,
   WorkspaceStepStart,
   WorkspaceStepSettle,
+  ForwardingPointer,
 ]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;

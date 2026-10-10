@@ -11,6 +11,10 @@ export const startMockModel = (version: "v1" | "v2", stopScenario = false) => {
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
+    // A held response sends one chunk and then nothing until the test lets it
+    // go. Bun closes a connection after 10 idle seconds by default, which
+    // would make Codex reconnect in the middle of a test.
+    idleTimeout: 0,
     fetch(request) {
       if (request.method !== "POST") return Response.json({ data: [] });
       const threadId = request.headers.get("thread-id")!;

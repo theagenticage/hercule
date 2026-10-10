@@ -1,8 +1,8 @@
 /**
  * The controller's HTTP listener, which `hercule serve` starts.
  *
- * The routes are derived from the contract's HttpApi declaration and nothing
- * else. This module sets the order a request passes through:
+ * Almost every route is derived from the contract's HttpApi declaration. This
+ * module sets the order a request passes through:
  *
  * 1. CORS, which answers the desktop app's preflights and lets the desktop
  *    app read every other response (`./cors.ts`);
@@ -10,28 +10,38 @@
  * 3. the web bundle, which serves requests the router matched no route for
  *    (`./static.ts`);
  * 4. routing;
- * 5. the pre-setup gate and the per-request span, both keyed on the operation
- *    the router matched (`./gate.ts`);
+ * 5. the per-request span, the pre-setup gate and the promotion gate, all
+ *    keyed on the route the router matched (`./gate.ts`);
  * 6. the credential middleware and the static grant check (`./middleware.ts`);
  * 7. the derived route's decoding, then the one-line handler.
  *
- * Five routes are not derived from the contract's HttpApi declaration:
+ * Seven paths are not derived from the contract's HttpApi declaration. None
+ * of them reaches steps 6 and 7 or gets the span of step 5, and they differ
+ * in which of the two gates they pass:
  *
- * - The live socket at `GET /ws` stops after step 5. It passes the pre-setup
- *   gate, then authenticates in its own first frame, because a browser cannot
- *   put a credential on a WebSocket handshake.
- * - The join at `POST /api/v1/runners/join` stops before step 5. The caller is
- *   a runner with a single-use join token, not a user, and the controller's
- *   own local runner joins before anyone has set Hercule up.
- * - The runner socket at `GET /api/v1/runners/socket` also stops before step 5,
- *   for the same reason: it presents a runner's durable credential, which no
- *   operation accepts and no grant applies to.
- * - The attachment fetch at `GET /api/v1/runners/attachments/:id` also stops
- *   before step 5, for the same reason: a runner fetches an input's image
- *   with its credential.
- * - The OAuth callback at `GET /oauth/callback` also stops before the
- *   credential middleware: the browser arrives there from the provider with
- *   only a `state`, and gets a redirect rather than a JSON response.
+ * - The live socket at `GET /ws` passes both gates. It then authenticates in
+ *   its own first frame, because a browser cannot put a credential on a
+ *   WebSocket handshake.
+ * - Three paths pass the promotion gate but not the pre-setup gate, because
+ *   their callers are not users:
+ *   - the join at `POST /api/v1/runners/join`, where the caller is a runner
+ *     with a single-use join token, and the controller's own local runner
+ *     joins before anyone has set Hercule up;
+ *   - the attachment fetch at `GET /api/v1/runners/attachments/:id`, where a
+ *     runner fetches an input's image with its credential;
+ *   - the OAuth callback at `GET /oauth/callback`, where the browser arrives
+ *     from the provider with only a `state`, and gets a redirect rather than
+ *     a JSON response.
+ * - Three paths pass neither gate, because they must keep working while the
+ *   controller is frozen or sealed. Each checks the promotion phase itself:
+ *   - the promotion transfer at `/api/v1/controller/promotion-transfer`,
+ *     where GET previews it, POST streams it and DELETE cancels it, for a
+ *     machine holding a promotion token rather than a user credential;
+ *   - the promotion switch at `POST /api/v1/controller/promotion-switch`,
+ *     called by the same machine with the same token;
+ *   - the runner socket at `GET /api/v1/runners/socket`, which presents a
+ *     runner's durable credential that no operation accepts and no grant
+ *     applies to.
  *
  * The body size limits sit outside that order, in two places:
  *
@@ -54,6 +64,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServer from "effect/unstable/http/HttpServer";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
@@ -69,21 +80,26 @@ import {
 import { MAX_FRAME_BYTES } from "@hercule/protocol";
 import { withCors } from "./cors";
 import { buildErrorResponse, withEnvelope } from "./envelope";
-import { setupGate } from "./gate";
+import { promotionGate, setupGate } from "./gate";
 import { AuthenticatedLayer, SetupTokenLayer } from "./middleware";
 import { OAuthCallbackRouteLayer } from "../connections";
 import {
   Arrival,
   Inbound,
   Pipeline,
+  PromotionFleetRouteLayer,
   Provisioning,
   checkSchedulerInterval,
+  recordDeparturesAfterThaws,
   runAttachmentSweepLoop,
   runIngestReconciler,
   runScheduler,
   sweepSessionsOnLostRunners,
   sweepUnreachableRunners,
+  thawExpiredFreezes,
 } from "../daemon";
+import { stopWrites } from "../db";
+import { PromotionState, PromotionTransferRouteLayer } from "../promotion";
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
 import {
@@ -210,10 +226,10 @@ const spanMiddleware = HttpRouter.middleware((httpEffect) =>
   ),
 );
 
-/** The API's routes, with the pre-setup gate, both credential middlewares and the request span. */
+/** The API's routes, with the pre-setup gate, the promotion gate, both credential middlewares and the request span. */
 const routerLayer = HttpApiBuilder.layer(api).pipe(
   Layer.provide(handlerLayers),
-  Layer.provide(spanMiddleware.combine(setupGate).layer),
+  Layer.provide(spanMiddleware.combine(setupGate).combine(promotionGate).layer),
   Layer.provide(AuthenticatedLayer),
   Layer.provide(SetupTokenLayer),
 );
@@ -277,7 +293,23 @@ export const webBundle: Effect.Effect<WebBundle | undefined> = Effect.tryPromise
  * and there is no user yet. But a route should sit outside the gate only for
  * a reason, as the join does, and not by accident.
  */
-const liveLayer = LiveSocketLayer.pipe(Layer.provide(setupGate.layer));
+const liveLayer = LiveSocketLayer.pipe(Layer.provide(setupGate.combine(promotionGate).layer));
+
+/**
+ * The routes outside the operation table that the promotion gate guards. They
+ * sit outside the pre-setup gate: a runner joins with a join token, a runner
+ * fetches an image with its own credential, and the OAuth callback carries a
+ * `state`, none of which need a user.
+ *
+ * The promotion routes and the runner socket are behind neither gate. They
+ * keep working while the controller is frozen or sealed, and each checks the
+ * promotion phase itself.
+ */
+const gatedRouteLayers = Layer.mergeAll(
+  RunnerJoinRouteLayer,
+  RunnerAttachmentRouteLayer,
+  OAuthCallbackRouteLayer,
+).pipe(Layer.provide(promotionGate.layer));
 
 /** Builds the whole application as one effect, which each request runs. */
 const buildApplication = (bundle: WebBundle | undefined) =>
@@ -286,10 +318,10 @@ const buildApplication = (bundle: WebBundle | undefined) =>
       Layer.mergeAll(
         routerLayer,
         liveLayer,
-        RunnerJoinRouteLayer,
+        gatedRouteLayers,
+        PromotionTransferRouteLayer,
+        PromotionFleetRouteLayer,
         RunnerSocketRouteLayer,
-        RunnerAttachmentRouteLayer,
-        OAuthCallbackRouteLayer,
       ),
     ),
     (routes) =>
@@ -356,8 +388,25 @@ export const serve = (bundle: WebBundle | undefined) =>
     // plugins emit reach it. Each ingest runs on a fiber of the Ingest
     // Executor, apart from the reconciler's pass that opened it.
     yield* Effect.forkScoped(runIngestReconciler);
+    // A freeze whose promotion token expires before the new machine switches
+    // over ends on its own, so a new machine that went quiet cannot leave
+    // this controller frozen.
+    yield* Effect.forkScoped(thawExpiredFreezes);
+    // A runner that disconnects while frozen is moved off online once the
+    // controller serves again, because the write was held during the freeze.
+    yield* Effect.forkScoped(recordDeparturesAfterThaws);
     // Runs a restart cut off continue from their rows. Each run executes on
     // a fiber of the Run Executor, so this returns once they are all started.
-    yield* resumeUnfinishedRuns;
+    // A sealed controller resumes nothing: the controller its data moved to
+    // runs them. No controller boots frozen, because the freeze is not stored.
+    // A sealed controller's database refuses writes again once the boot's
+    // own writes are done, as it did before the restart, so no writer the
+    // promotion phase misses can change data that now lives elsewhere.
+    const promotion = yield* PromotionState;
+    if ((yield* promotion.phase)._tag === "Sealed") {
+      yield* Effect.orDie(stopWrites(yield* SqlClient.SqlClient));
+    } else {
+      yield* resumeUnfinishedRuns;
+    }
     yield* Effect.flatMap(buildApplication(bundle), HttpServer.serveEffect());
   });

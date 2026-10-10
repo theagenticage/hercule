@@ -63,6 +63,7 @@ import {
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
 import { readEvent } from "../events/testing";
+import { buildRunnerSocketUrl } from "../runners/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
   collectMessages,
@@ -1187,7 +1188,7 @@ describe("what a runner subscription receives", () => {
     base: string,
     credential: string,
   ): Promise<{ say: (message: unknown) => void; close: () => void }> => {
-    const socket = new WebSocket(`${base.replace(/^http:/, "ws:")}/api/v1/runners/socket`, {
+    const socket = new WebSocket(buildRunnerSocketUrl(base), {
       headers: { authorization: `Bearer ${credential}` },
     });
     await new Promise<void>((resolve, reject) => {

@@ -13,7 +13,8 @@
  * `validation` error.
  *
  * A response carries one error. The service layer and the request middleware
- * decide the order of the checks, not this module: `unauthenticated`, the
+ * decide the order of the checks, not this module: the promotion gate
+ * (`controller_sealed`, `promotion_in_progress`), `unauthenticated`, the
  * static grant check, `validation`, `not_found`, entity-dependent `forbidden`,
  * business rules, then `internal`.
  */
@@ -28,13 +29,15 @@ export const ERROR_CODES = [
   "not_found",
   "conflict",
   "invalid_state",
+  "controller_sealed",
+  "promotion_in_progress",
   "cap_exceeded",
   "internal",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
-/** The HTTP status each code renders as. Two codes share 409 by design. */
+/** The HTTP status each code renders as. Three codes share 409 by design. */
 export const ERROR_STATUS = {
   unauthenticated: 401,
   forbidden: 403,
@@ -42,6 +45,8 @@ export const ERROR_STATUS = {
   not_found: 404,
   conflict: 409,
   invalid_state: 409,
+  controller_sealed: 503,
+  promotion_in_progress: 409,
   cap_exceeded: 422,
   internal: 500,
 } as const satisfies Record<ErrorCode, number>;
@@ -130,6 +135,39 @@ export class InvalidState extends Schema.Error<InvalidState>("hercule/InvalidSta
   { description: "InvalidState", httpApiStatus: ERROR_STATUS.invalid_state },
 ) {}
 
+/**
+ * The controller is sealed: it has promoted its data to another machine. The
+ * message names the new address.
+ */
+export class ControllerSealed extends Schema.Error<ControllerSealed>("hercule/ControllerSealed")(
+  {
+    error: Schema.Struct({
+      code: Schema.Literal("controller_sealed"),
+      message: Schema.String,
+      details: Schema.Struct({
+        newAddress: Schema.NonEmptyString,
+      }),
+    }),
+  },
+  { description: "ControllerSealed", httpApiStatus: ERROR_STATUS.controller_sealed },
+) {}
+
+/**
+ * The controller is frozen for a live promotion: mutating operations are
+ * refused until the switch or until the promotion token expires.
+ */
+export class PromotionInProgress extends Schema.Error<PromotionInProgress>(
+  "hercule/PromotionInProgress",
+)(
+  {
+    error: Schema.Struct({
+      code: Schema.Literal("promotion_in_progress"),
+      message: Schema.String,
+    }),
+  },
+  { description: "PromotionInProgress", httpApiStatus: ERROR_STATUS.promotion_in_progress },
+) {}
+
 /** A declared cap - a size or a count - would be exceeded. */
 export class CapExceeded extends Schema.Error<CapExceeded>("hercule/CapExceeded")(
   {
@@ -161,6 +199,8 @@ export type ApiError =
   | NotFound
   | Conflict
   | InvalidState
+  | ControllerSealed
+  | PromotionInProgress
   | CapExceeded
   | Internal;
 
@@ -171,6 +211,8 @@ const API_ERRORS = [
   NotFound,
   Conflict,
   InvalidState,
+  ControllerSealed,
+  PromotionInProgress,
   CapExceeded,
   Internal,
 ];
@@ -204,6 +246,17 @@ export const createConflictError = (message: string): Conflict =>
 /** Creates the error for an entity whose state does not allow the operation. */
 export const createInvalidStateError = (message: string): InvalidState =>
   new InvalidState({ error: { code: "invalid_state", message } });
+
+/** Creates the error for a sealed controller, naming the new address. */
+export const createControllerSealedError = (
+  message: string,
+  newAddress: string,
+): ControllerSealed =>
+  new ControllerSealed({ error: { code: "controller_sealed", message, details: { newAddress } } });
+
+/** Creates the error for a mutating operation while a promotion transfer is in progress. */
+export const createPromotionInProgressError = (message: string): PromotionInProgress =>
+  new PromotionInProgress({ error: { code: "promotion_in_progress", message } });
 
 /** Creates the error for a size or a count that is more than its cap. */
 export const createCapExceededError = (details: CapDetails, message: string): CapExceeded =>

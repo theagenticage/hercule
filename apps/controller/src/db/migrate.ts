@@ -71,6 +71,21 @@ const pruneBackups = (backupsDir: string): Effect.Effect<void, PlatformError, Fi
   });
 
 /**
+ * Writes a consistent snapshot of the open database to `path` using
+ * `VACUUM INTO`. A file copy would miss writes that still sit in the `-wal`
+ * file after an unclean shutdown.
+ *
+ * A VACUUM statement cannot take the path as a bound parameter, so the path
+ * is inlined with SQLite's quoting. Callers choose the path; it is never a
+ * value from a row. Cannot run inside a transaction.
+ */
+export const copyDatabaseTo = (path: string): Effect.Effect<void, SqlError, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql.unsafe(`VACUUM INTO '${path.replaceAll("'", "''")}'`);
+  });
+
+/**
  * Copies the database into `backupsDir` and prunes the older copies, keeping
  * the newest three (spec 04, Backups). Returns the path of the new copy.
  *
@@ -83,15 +98,11 @@ export const backupBeforeMigration = (
   backupsDir: string,
 ): Effect.Effect<string, SqlError | PlatformError, SqlClient.SqlClient | FileSystem> =>
   Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
     const fs = yield* FileSystem;
     yield* fs.makeDirectory(backupsDir, { recursive: true });
     const now = new Date(yield* Clock.currentTimeMillis);
     const path = `${backupsDir}/${formatTimestamp(now)}${PREMIGRATION_SUFFIX}`;
-    // A VACUUM statement cannot take the path as a bound parameter, so the path
-    // is inlined with SQLite's quoting. Backup paths come from the config,
-    // never from a row.
-    yield* sql.unsafe(`VACUUM INTO '${path.replaceAll("'", "''")}'`);
+    yield* copyDatabaseTo(path);
     yield* pruneBackups(backupsDir);
     return path;
   });
