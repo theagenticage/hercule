@@ -468,9 +468,15 @@ describe("the sidebar", () => {
       const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url);
       const hasWaitingRow = `document.querySelector("a.side-row--wait") !== null`;
       await expect
-        .poll(() => evaluateInPage(`document.querySelectorAll("a.side-row").length`), {
-          timeout: 10_000,
-        })
+        .poll(
+          () =>
+            evaluateInPage(
+              `document.querySelectorAll('nav[aria-label="Threads"] a.side-row').length`,
+            ),
+          {
+            timeout: 10_000,
+          },
+        )
         .toBe(1);
       // The list can be on the page before the window first shows. A window
       // hidden before then would show anyway once its first screen arrives.
