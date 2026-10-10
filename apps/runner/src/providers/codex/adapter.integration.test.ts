@@ -527,7 +527,9 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
       );
       const delayed = createLines();
       let heldMetadata: { line: string; id: string; parentId: string } | undefined;
-      let descendantRequestArrived = false;
+      // Codex can send the descendant's approval request before or after the
+      // answer to the read of its metadata, so both are recorded on their own.
+      const approvalThreadIds = new Set<string>();
       const adapter = makeCodexAdapter({
         appServer:
           target !== "discovering-subtree"
@@ -558,9 +560,9 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
                       }
                       if (
                         frame.method === "item/commandExecution/requestApproval" &&
-                        frame.params?.threadId === heldMetadata?.id
+                        frame.params?.threadId !== undefined
                       )
-                        descendantRequestArrived = true;
+                        approvalThreadIds.add(frame.params.threadId);
                       delayed.push(line);
                     }
                   } finally {
@@ -618,7 +620,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
           () =>
             (target === "discovering-subtree"
               ? heldMetadata !== undefined &&
-                descendantRequestArrived &&
+                approvalThreadIds.has(heldMetadata.id) &&
                 seen.filter((event) => event._tag === "request.opened").length === 2
               : seen.filter((event) => event._tag === "request.opened").length === 3) &&
             model.waitingChildren.size === 1,
