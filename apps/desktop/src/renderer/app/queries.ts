@@ -766,7 +766,8 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
  * the assistants arrive, without waiting for the other reads.
  *
  * The New project form and the starter threads read the Connections, to know
- * whether a GitHub Connection exists, so neither waits for them when it opens.
+ * whether a GitHub Connection exists, and the sidebar's System section reads
+ * them for the Connections row's red dot, so none of them waits for them.
  *
  * The shell's loader calls it, and so does a test that renders one part of a
  * screen alone, so the part finds the same records cached as in the app.

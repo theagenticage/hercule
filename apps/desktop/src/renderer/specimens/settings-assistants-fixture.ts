@@ -107,7 +107,7 @@ export const ASSISTANT_PROFILE: Profile = {
 };
 
 /** A GitHub Connection whose last check failed. */
-const FAILED_CONNECTION: Connection = {
+export const FAILED_CONNECTION: Connection = {
   id: "c-github",
   type: GITHUB_CONNECTION_TYPE,
   label: "rogier",

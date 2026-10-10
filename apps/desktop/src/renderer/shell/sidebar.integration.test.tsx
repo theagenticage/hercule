@@ -16,6 +16,7 @@ import { describePose } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import {
   buildFixtureAssistant,
+  FIXTURE_GITHUB_CONNECTION,
   buildFixtureAssistantSession,
   buildSidebarHandlers,
   buildThreadHandlers,
@@ -56,7 +57,7 @@ afterEach(() => {
 /**
  * Starts the app signed in at `path`, with the controller holding `records`
  * and answering the thread list from `readThreads` when given, and returns
- * the thread list's `nav` with the app. `handlers` replace the controller's
+ * the thread list's `nav` with the app and its fake bridge. `handlers` replace the controller's
  * answers to the operations they name.
  */
 const startSidebar = async ({
@@ -77,12 +78,10 @@ const startSidebar = async ({
       : { "GET /api/v1/sessions": () => ({ body: { items: readThreads() } }) }),
     ...handlers,
   });
-  const app = await renderApp(
-    createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
-    { path },
-  );
+  const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+  const app = await renderApp(fake, { path });
   const nav = await screen.findByRole("navigation", { name: "Threads" });
-  return { calls, nav, ...app };
+  return { calls, nav, fake, ...app };
 };
 
 /** "Sketch the pricing page": idle, in no project. The base of the threads a test makes. */
@@ -614,6 +613,214 @@ describe("the sidebar", () => {
     expect(screen.getByRole("heading", { name: "This thread was not found." })).toBeTruthy();
     expect(within(nav).getByText("No threads yet")).toBeTruthy();
     expect(within(nav).queryAllByRole("link")).toEqual([]);
+  });
+});
+
+describe("the sidebar's faces", () => {
+  /** Returns the face switch's segment named `name`. */
+  const getSegment = (name: "Threads" | "Hercule"): HTMLElement =>
+    within(screen.getByRole("tablist", { name: "Sidebar" })).getByRole("tab", { name });
+
+  /** Returns the names of the segments that are selected. */
+  const readSelectedSegments = (): (string | null)[] =>
+    screen.getAllByRole("tab", { selected: true }).map((segment) => segment.textContent);
+
+  it("draws the switch above New thread, on the Threads face for a thread", async () => {
+    await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
+
+    const tablist = screen.getByRole("tablist", { name: "Sidebar" });
+    const newThread = screen.getByRole("button", { name: "New thread ⌘N" });
+    expect(
+      tablist.compareDocumentPosition(newThread) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      within(tablist)
+        .getAllByRole("tab")
+        .map((segment) => segment.textContent),
+    ).toEqual(["Threads", "Hercule"]);
+    expect(readSelectedSegments()).toEqual(["Threads"]);
+  });
+
+  it("shows Waiting on you and the System section on the Hercule face, without leaving the screen", async () => {
+    const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
+
+    await userEvent.click(getSegment("Hercule"));
+
+    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
+    expect(screen.queryByRole("navigation", { name: "Threads" })).toBeNull();
+    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    expect(
+      within(nav)
+        .getAllByRole("heading")
+        .map((heading) => heading.textContent),
+    ).toEqual(["Waiting on you 1", "System"]);
+    expect(
+      within(nav).getByRole("link", { name: "Write the retry runbook, waiting on you" }),
+    ).toBeTruthy();
+    // New thread, Search, the Office and the foot stay on both faces.
+    expect(screen.getByRole("button", { name: "New thread ⌘N" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Office ⌘⇧O" })).toBeTruthy();
+    expect(document.querySelector(".side-foot")).not.toBeNull();
+  });
+
+  it("draws Fleet and Connections as rows that do nothing yet", async () => {
+    const { calls, router, live } = await startSidebar({
+      path: `/threads/${FIXTURE_THREAD_IDS.flaky}`,
+    });
+    await live.waitForFirstPushes();
+    await userEvent.click(getSegment("Hercule"));
+    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const sent = calls.length;
+
+    for (const name of ["Fleet", "Connections"]) {
+      const row = within(nav).getByRole("button", { name });
+      expect(row.getAttribute("aria-disabled"), name).toBe("true");
+      expect(row.getAttribute("title"), name).toBe("Not built yet");
+      await userEvent.click(row);
+    }
+    expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
+    expect(calls).toHaveLength(sent);
+  });
+
+  it("marks the Connections row while a Connection needs attention", async () => {
+    await startSidebar({
+      handlers: {
+        "GET /api/v1/connections": {
+          body: { items: [{ ...FIXTURE_GITHUB_CONNECTION, status: "error" }] },
+        },
+      },
+    });
+    await userEvent.click(getSegment("Hercule"));
+    const nav = screen.getByRole("navigation", { name: "Hercule" });
+
+    const row = within(nav).getByRole("button", { name: /Connections/ });
+    expect(within(row).getByRole("img", { name: "A Connection needs attention" })).toBeTruthy();
+    expect(within(nav).getByRole("button", { name: "Fleet" })).toBeTruthy();
+  });
+
+  it("moves between the segments with the arrow keys, keeping one of them in the tab order", async () => {
+    await startSidebar();
+    const threads = getSegment("Threads");
+    const hercule = getSegment("Hercule");
+    expect([threads.tabIndex, hercule.tabIndex]).toEqual([0, -1]);
+
+    threads.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    expect(document.activeElement).toBe(getSegment("Hercule"));
+    expect([getSegment("Threads").tabIndex, getSegment("Hercule").tabIndex]).toEqual([-1, 0]);
+
+    await userEvent.keyboard("{ArrowRight}");
+    expect(readSelectedSegments()).toEqual(["Hercule"]);
+
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(readSelectedSegments()).toEqual(["Threads"]);
+    expect(document.activeElement).toBe(getSegment("Threads"));
+  });
+
+  it("switches the face from View › Threads and View › Hercule", async () => {
+    const { fake } = await startSidebar();
+
+    fake.sendMenuCommand("showOrchestrationFace");
+    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    fake.sendMenuCommand("showThreadsFace");
+    expect(readSelectedSegments()).toEqual(["Threads"]);
+  });
+
+  it("keeps the face when the Office or Settings opens, and shows Threads when a thread opens", async () => {
+    const { router } = await startSidebar();
+    await userEvent.click(getSegment("Hercule"));
+
+    await userEvent.click(screen.getByRole("link", { name: "Office ⌘⇧O" }));
+    await screen.findByText("The Office");
+    expect(readSelectedSegments()).toEqual(["Hercule"]);
+
+    await act(() => router.navigate({ to: "/settings" }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toMatch(/^\/settings\//);
+    });
+    expect(readSelectedSegments()).toEqual(["Hercule"]);
+
+    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    await userEvent.click(
+      within(nav).getByRole("link", { name: "Write the retry runbook, waiting on you" }),
+    );
+    await waitFor(() => {
+      expect(readSelectedSegments()).toEqual(["Threads"]);
+    });
+  });
+
+  it("shows the Threads face at launch on a screen that keeps the face", async () => {
+    await startSidebar({ path: "/office" });
+
+    expect(readSelectedSegments()).toEqual(["Threads"]);
+  });
+
+  it("opens a new Draft Thread on the Threads face, also from the new-thread screen", async () => {
+    const { router } = await startSidebar();
+    await userEvent.click(getSegment("Hercule"));
+
+    // A new Draft Thread opens at "/" again, with other search parameters.
+    await act(() =>
+      router.navigate({ to: "/", search: { project: SIDEBAR_FIXTURE.projects[0]!.id } }),
+    );
+
+    expect(readSelectedSegments()).toEqual(["Threads"]);
+  });
+
+  it("keeps the focus on a Waiting on you row opened from the Hercule face", async () => {
+    await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
+    await userEvent.click(getSegment("Hercule"));
+    const name = "Write the retry runbook, waiting on you";
+    within(screen.getByRole("navigation", { name: "Hercule" }))
+      .getByRole("link", { name })
+      .focus();
+
+    await userEvent.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(readSelectedSegments()).toEqual(["Threads"]);
+    });
+    // The thread's Waiting on you row, not its row under its project.
+    const row = screen
+      .getByRole("navigation", { name: "Threads" })
+      .querySelector(`[data-key="waiting:thread:${FIXTURE_THREAD_IDS.runbook}"]`);
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("names the list the segments control", async () => {
+    await startSidebar();
+    const nav = screen.getByRole("navigation", { name: "Threads" });
+
+    expect(nav.id).not.toBe("");
+    for (const name of ["Threads", "Hercule"] as const) {
+      expect(getSegment(name).getAttribute("aria-controls")).toBe(nav.id);
+    }
+  });
+
+  it("sends the Go menu the threads face's rows while the Hercule face shows, and not again on a switch", async () => {
+    let threads: readonly Session[] = SIDEBAR_FIXTURE.threads;
+    const { fake, live } = await startSidebar({ readThreads: () => threads });
+    await waitFor(() => {
+      expect(live.readTopics()).toContain("session");
+    });
+    const sent = fake.goMenus.length;
+
+    await userEvent.click(getSegment("Hercule"));
+    expect(fake.goMenus).toHaveLength(sent);
+
+    // A thread that does not wait, so the Hercule face does not show it.
+    const [newest] = buildThreads(1, { createdAt: "2026-09-10T09:10:00.000Z" });
+    threads = [newest!, ...threads];
+    act(() => {
+      live.pushInvalidation("session", [newest!.id]);
+    });
+
+    await waitFor(() => {
+      expect(fake.goMenus.at(-1)?.map((item) => item.title)).toContain("Thread 1");
+    });
+    expect(fake.goMenus.at(-1)).toHaveLength(SIDEBAR_FIXTURE.threads.length + 1);
   });
 });
 
