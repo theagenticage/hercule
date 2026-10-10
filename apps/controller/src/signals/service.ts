@@ -590,15 +590,21 @@ const make = Effect.gen(function* () {
             ? null
             : yield* operations.check("signal.answer", operation, undefined, []);
         if (checked !== null && isPluginAnswerOperation(checked)) {
-          if (actingOn.has(signal.id)) {
-            return yield* Effect.fail(
-              createInvalidStateError(
-                "another action on this signal is still running; wait for it to finish",
-              ),
-            );
-          }
+          // The check and the claim are one step, so two requests that arrive
+          // together cannot both pass the check.
+          const claimSignal = Effect.suspend(() => {
+            if (actingOn.has(signal.id)) {
+              return Effect.fail(
+                createInvalidStateError(
+                  "another action on this signal is still running; wait for it to finish",
+                ),
+              );
+            }
+            actingOn.add(signal.id);
+            return Effect.void;
+          });
           yield* Effect.acquireUseRelease(
-            Effect.sync(() => actingOn.add(signal.id)),
+            claimSignal,
             () =>
               Effect.gen(function* () {
                 const pluginOutcome = yield* operations.runPluginAction(checked);
