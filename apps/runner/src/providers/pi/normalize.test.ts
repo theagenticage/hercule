@@ -327,15 +327,17 @@ describe("normalizing a file read or a file search on a pi turn", () => {
 
       expect(startTool("read", args)?.detail).toEqual({ name: "read" });
       expect(startTool("grep", args)?.detail).toEqual({ name: "grep" });
+      expect(startTool("edit", args)?.detail).toEqual({ name: "edit" });
     });
   }
 
   it("cuts a long path to the fact bound", () => {
-    const detail = startTool("read", { path: `src/${"a".repeat(10_000)}.ts` })?.detail as {
-      readonly path: string;
-    };
+    const path = `src/${"a".repeat(10_000)}.ts`;
 
-    expect(detail.path.length).toBeLessThanOrEqual(MAX_FACT_LENGTH);
+    expect(startTool("read", { path })?.detail).toEqual({
+      name: "read",
+      path: path.slice(0, MAX_FACT_LENGTH),
+    });
   });
 });
 

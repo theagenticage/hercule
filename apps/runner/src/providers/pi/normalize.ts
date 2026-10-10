@@ -413,7 +413,7 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
  * Returns a tool call's string argument cut to the fact bound, or `undefined`
  * when the argument is missing, not a string, or empty.
  */
-const readFactArg = (
+export const readFactArg = (
   args: Record<string, unknown> | undefined,
   name: string,
 ): string | undefined => {
@@ -453,9 +453,8 @@ const buildToolDetail = (
   }
   const command = args?.["command"];
   if (typeof command === "string") return { command: truncateMessage(command) };
-  const path = args?.["path"];
-  if (typeof path === "string") return { path: truncateFact(path) };
-  return { name: truncateFact(toolName) };
+  const path = readFactArg(args, "path");
+  return path === undefined ? { name: truncateFact(toolName) } : { path };
 };
 
 /** Returns a tool's output so far as one string. */

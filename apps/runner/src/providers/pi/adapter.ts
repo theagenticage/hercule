@@ -60,6 +60,7 @@ import {
   buildNormalizingState,
   buildSubagentState,
   buildUsageEvents,
+  readFactArg,
   type Normalizing,
   type RunningTool,
 } from "./normalize";
@@ -281,9 +282,9 @@ const readStringArg = (item: RunningTool, name: string): string => {
  * when the call has none. An empty path is left out, because the protocol
  * refuses one and a frame it refuses is lost.
  */
-const readPathArgs = (item: RunningTool): ReadonlyArray<string> => {
-  const path = readStringArg(item, "path");
-  return path === "" ? [] : [truncateFact(path)];
+const readPaths = (item: RunningTool): ReadonlyArray<string> => {
+  const path = readFactArg(item.args, "path");
+  return path === undefined ? [] : [path];
 };
 
 /**
@@ -301,7 +302,7 @@ const buildOpenRequest = (requestId: string, item: RunningTool, kind: ParkKind):
     };
   }
   if (kind === "file_change_approval" || kind === "file_read_approval") {
-    return { ...common, kind, detail: { paths: readPathArgs(item) } };
+    return { ...common, kind, detail: { paths: readPaths(item) } };
   }
   return { ...common, kind, detail: { toolName: truncateFact(item.toolName) } };
 };
