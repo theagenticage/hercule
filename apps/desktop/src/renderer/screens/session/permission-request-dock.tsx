@@ -3,7 +3,7 @@
  * for a grant its profile lacks. A thread's agent page and an assistant's
  * Conversation draw it when no agent Request is open.
  */
-import { useId, type JSX, type KeyboardEvent } from "react";
+import { useEffect, useId, type JSX, type KeyboardEvent } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -93,6 +93,12 @@ export function SessionPermissionRequestDock({
  * read is made only while a Permission Request is shown, and the thread's
  * and the Conversation's loaders make it first when one is open already.
  *
+ * No live topic covers the profiles, so the cached list can predate the
+ * profile, such as one another client created and the session then resumed
+ * onto. When the list the dock finds lacks the profile, the dock reads the
+ * profiles once more. It reads them only once: a profile still missing
+ * from that read does not exist, and the answer stays faded.
+ *
  * While the focus is inside the dock, ↩ on the dock itself answers "This
  * session only", ⌥↩ "Add to profile" and esc "Deny", as the keys of the
  * agent Request's dock do. A focused answer takes ↩ as its own press.
@@ -116,8 +122,20 @@ function PermissionRequestDock({
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const titleId = useId();
-  const profiles = useQuery(profilesQuery(client)).data;
-  const profileName = profiles?.find((profile) => profile.id === permissionProfileId)?.name ?? null;
+  const profiles = useQuery(profilesQuery(client));
+  const profileName =
+    profiles.data?.find((profile) => profile.id === permissionProfileId)?.name ?? null;
+  // `isFetchedAfterMount` turns true with the first read that ends after
+  // this dock mounted, so a list read before then is read once more, and a
+  // list the dock read itself is not. A read already running joins the one
+  // asked for here rather than being restarted, so the effect running twice
+  // still makes one read.
+  const isProfileMissingFromCachedList =
+    profiles.isSuccess && profileName === null && !profiles.isFetchedAfterMount;
+  const { refetch: readProfilesAgain } = profiles;
+  useEffect(() => {
+    if (isProfileMissingFromCachedList) void readProfilesAgain({ cancelRefetch: false });
+  }, [isProfileMissingFromCachedList, readProfilesAgain]);
   const card = buildPermissionRequestCard(request, profileName);
   const answers = card.rows.map((row): DockAnswer<PermissionDecisionOutcome> => ({
     ...row,

@@ -19,8 +19,10 @@
  * `?state=permission`, the thread waits on no agent Request and the dock
  * shows a Permission Request instead; `?state=permissions` opens two, so the
  * pager shows, `?state=permission-scrolled` shrinks the composer, as
- * `?state=scrolled` does, and `?state=permission-unnamed` reads no profile of
- * the thread's, so "Add to profile" cannot be given. The book draws no
+ * `?state=scrolled` does, `?state=permission-unnamed` fails to read the
+ * profiles, so "Add to profile" names none and cannot be given, and
+ * `?state=permission-long-profile` names a profile of 128 characters with no
+ * space, which the answer's line wraps. The book draws no
  * Permission Request, so none of these is compared; they are for comparing
  * by eye with its dock.
  */
@@ -68,7 +70,18 @@ if (state === "senders") {
   await mountThreadSpecimen(SENDERS_PAGE_RECORDS, FIX_THREAD_WITH_SENDERS);
 } else if (state?.startsWith("permission") === true) {
   const withRequests = buildFixThreadWithPermissionRequests(state === "permissions");
-  const thread = state === "permission-unnamed" ? { ...withRequests, profiles: [] } : withRequests;
+  const thread =
+    state === "permission-unnamed"
+      ? { ...withRequests, profiles: null }
+      : state === "permission-long-profile"
+        ? {
+            ...withRequests,
+            profiles: (withRequests.profiles ?? []).map((profile) => ({
+              ...profile,
+              name: "staging_release_".repeat(8),
+            })),
+          }
+        : withRequests;
   await mountThreadSpecimen(
     {
       ...THREAD_PAGE_RECORDS,

@@ -2,7 +2,8 @@
  * Tests the Requests dock of a thread's main agent page while it shows the
  * session's Permission Requests, against the stubbed controller: what it
  * shows, the three answers and their keys, that "Add to profile" waits for
- * the profile's name, that an agent Request comes first, and how the pager
+ * the profile's name and reads the profiles once more when the cached list
+ * lacks it, that an agent Request comes first, and how the pager
  * pages between several Permission Requests.
  */
 import { describe, expect, it } from "vitest";
@@ -33,6 +34,13 @@ const PROFILE: Profile = {
   shipped: false,
   createdAt: "2026-09-01T09:00:00.000Z",
   updatedAt: "2026-09-01T09:00:00.000Z",
+};
+
+/** A profile the fixture threads do not run on. */
+const OTHER_PROFILE: Profile = {
+  ...PROFILE,
+  id: "01a06d02-9e00-7000-8000-0000000000ff",
+  name: "reviewer",
 };
 
 const DELETE_TASK: PermissionRequest = {
@@ -101,6 +109,10 @@ const readOutcomes = (calls: readonly Call[]): readonly (readonly [string, unkno
   calls
     .filter((call) => call.method === "POST" && call.path.endsWith("/decide"))
     .map((call) => [call.path, (call.body as { readonly outcome: unknown }).outcome] as const);
+
+/** Returns the reads of the permission profiles among `calls`. */
+const readProfileReads = (calls: readonly Call[]): readonly Call[] =>
+  calls.filter((call) => call.path === "/api/v1/profiles");
 
 /** Returns the dock, which is a group named by its title. */
 const readDock = (): HTMLElement => screen.getByRole("group", { name: "Grant this permission?" });
@@ -276,10 +288,60 @@ describe("the dock for a Permission Request", () => {
     expect(calls.some((call) => call.path === "/api/v1/profiles")).toBe(false);
   });
 
+  it("reads the profiles once more when the cached list lacks the session's profile", async () => {
+    const { calls, queryClient } = await renderDock(IDLE);
+    // The list was read before another client created the session's profile.
+    queryClient.setQueryData(queryKeys.profiles(), [OTHER_PROFILE]);
+    openPermissionRequest(queryClient, DELETE_TASK);
+
+    await waitFor(() => {
+      expect(readAddToProfile().hasAttribute("aria-disabled")).toBe(false);
+    });
+    expect(readAddToProfile().querySelector(".ans-desc")?.textContent).toBe(
+      "Adds task.delete to the profile worker; every session on it gains the grant.",
+    );
+    expect(readProfileReads(calls)).toHaveLength(1);
+  });
+
+  it("reads the profiles only once when the session's profile is still missing", async () => {
+    const { calls, queryClient } = await renderDock(IDLE, {
+      body: { items: [OTHER_PROFILE] },
+    });
+    queryClient.setQueryData(queryKeys.profiles(), [OTHER_PROFILE]);
+    const listReadBefore = queryClient.getQueryState(queryKeys.profiles())!.dataUpdateCount;
+    openPermissionRequest(queryClient, DELETE_TASK);
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(queryKeys.profiles())?.dataUpdateCount).toBe(
+        listReadBefore + 1,
+      );
+    });
+    // Gives a second read, were one asked for, the time to start.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+
+    expect(readProfileReads(calls)).toHaveLength(1);
+    expect(readAddToProfile().getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("does not read the profiles again when its own read lacks the session's profile", async () => {
+    const { calls, queryClient } = await renderDock(IDLE, {
+      body: { items: [OTHER_PROFILE] },
+    });
+    openPermissionRequest(queryClient, DELETE_TASK);
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(queryKeys.profiles())?.status).toBe("success");
+    });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+
+    expect(readProfileReads(calls)).toHaveLength(1);
+    expect(readAddToProfile().getAttribute("aria-disabled")).toBe("true");
+  });
+
   it("names the profile at the first paint when a Permission Request is open as the thread opens", async () => {
     const { calls } = await renderDock(withPermissionRequests(IDLE, [DELETE_TASK]));
 
-    expect(calls.filter((call) => call.path === "/api/v1/profiles")).toHaveLength(1);
+    expect(readProfileReads(calls)).toHaveLength(1);
   });
 
   it("is not shown on a subagent's page, since a Permission Request is the session's own", async () => {

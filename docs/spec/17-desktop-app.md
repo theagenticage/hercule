@@ -2276,7 +2276,7 @@ Bundle: the first screen is 327.5 kB gzipped before (14 chunks) and 331.6 kB aft
 | CSS | none new | - | +57 B |
 
 - **No process, timer, idle work or work per streamed token is added.** The dock draws the waiting pose, which is static.
-- **Profiles are read only while a Permission Request is open.** Opening a thread or Conversation that already has one costs one `profile.query`; one that arrives live costs one the first time, if the profiles are not cached. The list then stays cached. No live topic is added.
+- **Profiles are read only while a Permission Request is open.** Opening a thread or Conversation that already has one costs one `profile.query`; one that arrives live costs one the first time, if the profiles are not cached. The list then stays cached; a dock that finds the cached list lacks the session's profile reads it once more, never twice. No live topic is added.
 
 ## Slices
 
