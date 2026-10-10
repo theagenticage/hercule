@@ -47,6 +47,7 @@ import {
 import { UserMessage } from "../session/messages";
 import { useStartOfToday } from "../session/start-of-today";
 import type { AttachOpenParagraph } from "../session/use-session-live";
+import { AgentSentMessage } from "./agent-sent-message";
 import {
   AgentMessage,
   PendingLine,
@@ -81,6 +82,8 @@ const USER_LINE_HEIGHT = 21.7;
  * 210px tile at 4:3, then the 8px gap or margin under it.
  */
 const SENT_IMAGE_ROW_HEIGHT = 166;
+/** The height the sender's chip adds above a bubble another agent sent, in CSS pixels: its 18px row and the 4px under it. */
+const SENDER_ROW_HEIGHT = 22;
 
 /**
  * Estimates a block's height before it is measured, from the book's
@@ -95,7 +98,8 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
       return (
         40 +
         USER_LINE_HEIGHT * Math.max(1, Math.ceil(block.text.length / USER_CHARS_PER_LINE)) +
-        SENT_IMAGE_ROW_HEIGHT * Math.ceil(block.attachments.length / 2)
+        SENT_IMAGE_ROW_HEIGHT * Math.ceil(block.attachments.length / 2) +
+        (block.senderSessionId === undefined ? 0 : SENDER_ROW_HEIGHT)
       );
     case "agent":
       return (
@@ -240,13 +244,24 @@ export function Transcript({
   const renderBlock = (block: ThreadBlock, onScreen: boolean): JSX.Element => {
     switch (block.kind) {
       case "user":
-        return (
+        return block.senderSessionId === undefined ? (
           <UserMessage
             text={block.text}
             attachments={block.attachments}
             at={block.at}
             timezone={timezone}
             today={today}
+            steered={block.steered}
+          />
+        ) : (
+          <AgentSentMessage
+            senderSessionId={block.senderSessionId}
+            text={block.text}
+            attachments={block.attachments}
+            at={block.at}
+            timezone={timezone}
+            today={today}
+            steered={block.steered}
           />
         );
       case "agent":

@@ -24,10 +24,12 @@
 import type { Input, OpenRequest, TranscriptRow, Workspace } from "@hercule/contract";
 import { buildCheckout, buildWorkspace } from "@hercule/client-core/threads/testing";
 import type { EventBody } from "../app/testing";
+import { ADA, buildAssistantSession } from "./assistant-states-fixture";
 import type { SidebarRecords, ThreadScreenRecords } from "./shell-page";
 import {
   buildSpecimenSession,
   CLAUDE_OPUS,
+  CLAUDE_SONNET,
   FIX_THREAD_ID,
   SPECIMEN_NOW,
   SPECIMEN_RECORDS,
@@ -300,4 +302,123 @@ export const THREAD_PAGE_RECORDS: SidebarRecords = {
         : thread,
   ),
   workspaces: [FIX_WORKSPACE],
+};
+
+/** The thread whose agent sends the Fix thread a message: its face is lime, a loud hue. */
+const STRIPE_THREAD = buildSpecimenSession({
+  id: "01a0ec64-6e80-7000-8000-000000000103",
+  title: "Upgrade Stripe SDK to v15",
+  projectId: "p-webshop",
+  status: "busy",
+  minutesAgo: 30,
+  model: CLAUDE_SONNET,
+});
+
+/** A session that sent the Fix thread a message and can no longer be read: its face is teal. */
+const GONE_SESSION_ID = "01a0ec64-6e80-7000-8000-000000000100";
+
+/** The session of Ada's main conversation, whose agent sends the Fix thread a message as Ada. */
+const ADA_SESSION = buildAssistantSession(ADA, { minutesAgo: 5, status: "busy" });
+
+/** Returns the steps of a message sent into the Fix thread's running turn at `seconds`. */
+const steerMessage = (
+  seconds: number,
+  itemId: string,
+  text: string,
+  senderSessionId?: string,
+): TranscriptStep[] =>
+  runItem([seconds, seconds], itemId, "user_message", {
+    text,
+    steered: true,
+    ...(senderSessionId === undefined ? {} : { senderSessionId }),
+  });
+
+/**
+ * The Fix thread with messages other agents sent into its turn, which the
+ * book never draws:
+ *
+ * - at 09:05, the Stripe thread's agent steers a message in, between two edits;
+ * - at 09:09, after the agent's second message, the user steers one in;
+ * - then Ada sends one, and a session that can no longer be read sends one.
+ */
+const FIX_STEPS_WITH_SENDERS: ReadonlyArray<TranscriptStep> = FIX_STEPS.flatMap((step) => {
+  const [seconds] = step;
+  if (seconds === 190) {
+    return [
+      ...steerMessage(
+        180,
+        "it-from-stripe",
+        "Heads up: I'm bumping `stripe` to v15 in `package.json` on `chore/stripe-15`. v15 " +
+          "renames `requires_action` to `requires_customer_action`. Please match on both so " +
+          "your fix survives my merge.",
+        STRIPE_THREAD.id,
+      ),
+      step,
+    ];
+  }
+  if (seconds === 1740) {
+    return [
+      ...steerMessage(440, "it-from-user", "Also keep the old error copy for real declines."),
+      ...steerMessage(
+        460,
+        "it-from-ada",
+        "Rogier asked me to check: does the fix cover saved cards too?",
+        ADA_SESSION.id,
+      ),
+      ...steerMessage(
+        470,
+        "it-from-gone",
+        "Done with the shared fixture, it's yours.",
+        GONE_SESSION_ID,
+      ),
+      step,
+    ];
+  }
+  return [step];
+});
+
+/** Returns an input another session's agent queued for the Fix thread `minutesAgo` minutes ago. */
+const buildAgentInput = (
+  id: string,
+  senderSessionId: string,
+  text: string,
+  minutesAgo: number,
+): Input => ({
+  ...QUEUED_INPUT,
+  id,
+  actor: `session:${senderSessionId}`,
+  text,
+  createdAt: new Date(SPECIMEN_NOW - minutesAgo * 60_000).toISOString(),
+});
+
+/**
+ * The Fix thread with messages from other agents in its transcript and its
+ * queue, for the thread specimen's `?state=senders`: the user's queued input,
+ * then one the Stripe thread's agent queued, then one from the session that
+ * can no longer be read.
+ */
+export const FIX_THREAD_WITH_SENDERS: ThreadScreenRecords = {
+  session: FIX_SESSION,
+  transcript: buildTranscript(FIX_STEPS_WITH_SENDERS),
+  queuedInputs: [
+    QUEUED_INPUT,
+    buildAgentInput(
+      "in-from-stripe",
+      STRIPE_THREAD.id,
+      "When you're done, rebase on chore/stripe-15 and run the checkout suite against v15",
+      3,
+    ),
+    buildAgentInput("in-from-gone", GONE_SESSION_ID, "Shared fixture is free again.", 2),
+  ],
+  senders: [
+    { id: STRIPE_THREAD.id, session: STRIPE_THREAD },
+    { id: ADA_SESSION.id, session: ADA_SESSION },
+    { id: GONE_SESSION_ID, session: null },
+  ],
+};
+
+/** The shell's lists for `FIX_THREAD_WITH_SENDERS`: the thread page's, with Ada among the assistants. */
+export const SENDERS_PAGE_RECORDS: SidebarRecords = {
+  ...THREAD_PAGE_RECORDS,
+  assistants: [{ assistant: ADA, currentSession: ADA_SESSION }],
 };

@@ -1,10 +1,12 @@
 /**
  * Tests the thread route's loading: the reads it makes before the screen
- * renders, the thread it stores as the last open one, and what it shows when
- * the thread does not exist or cannot be read.
+ * renders, the thread it stores as the last open one, what it shows when
+ * the thread does not exist or cannot be read, and the sender it names on a
+ * message another session's agent sent.
  */
-import { describe, expect, it } from "vitest";
-import { act, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, screen, within } from "@testing-library/react";
+import type { TranscriptRow } from "@hercule/contract";
 import userEvent from "@testing-library/user-event";
 import { queryKeys } from "@hercule/client-core";
 import {
@@ -21,6 +23,7 @@ import {
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
+  stubElementSize,
   THREAD_FIXTURES,
 } from "../../../../../app/testing";
 
@@ -145,5 +148,48 @@ describe("the thread route", () => {
     await act(() => router.navigate({ to: "/" }));
     // The next launch starts where this one quit.
     expect(createLaunchHistory(CONTROLLER_URL).location.pathname).toBe("/");
+  });
+});
+
+describe("a message another session's agent sent into the thread", () => {
+  const thread = THREAD_FIXTURES.finished;
+  const sessionId = thread.session.id;
+  /** "Write the retry runbook", whose agent sent the thread's first message. */
+  const RUNBOOK = SIDEBAR_FIXTURE.threads[0]!;
+  const senderPath = `/api/v1/sessions/${RUNBOOK.id}`;
+
+  /** The finished thread's transcript, with its user message sent by the runbook's agent. */
+  const transcript: TranscriptRow[] = thread.transcript.map((row) => {
+    const { event } = row;
+    if (event._tag !== "item.started" || event.kind !== "user_message") return row;
+    // The fixture's user message detail is an object that holds its text.
+    const detail = { ...(event.detail as Record<string, unknown>), senderSessionId: RUNBOOK.id };
+    return { ...row, event: { ...event, detail } };
+  });
+
+  beforeEach(() => {
+    stubElementSize(800, 800);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reads the sender before the screen renders, and names it in a chip linked to its thread", async () => {
+    const { app, calls } = openApp(`/threads/${sessionId}`, {
+      ...buildThreadHandlers({ ...thread, transcript }),
+      [`GET ${senderPath}`]: { body: RUNBOOK },
+    });
+    const { context } = await app;
+
+    expect(context.queryClient.getQueryData([...queryKeys.session(RUNBOOK.id), "sender"])).toEqual(
+      RUNBOOK,
+    );
+    const message = await screen.findByRole("group", { name: `Message from ${RUNBOOK.title}` });
+    const chip = within(message).getByRole("link", { name: RUNBOOK.title });
+    expect(chip.getAttribute("href")).toBe(`/threads/${RUNBOOK.id}`);
+    expect(within(message).getByText(/Bump the Bun pin to 1\.3\.2/)).toBeTruthy();
+    // One read for the sender, however many of its messages the thread holds.
+    expect(calls.filter((call) => call.path === senderPath)).toHaveLength(1);
   });
 });

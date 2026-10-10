@@ -49,6 +49,25 @@
   color: var(--faint);
   font-size: var(--t-11);
 }
+/* Not in the book. A message another session's agent sent names it in a
+   chip above the bubble, on the right like the bubble, 4px in from its edge
+   where the bubble's corner starts to round. The row keeps its height while
+   the agent is read, so the bubble never moves when the name arrives. */
+.msg-sender {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 18px;
+  margin: 0 4px 4px;
+  font-size: var(--t-13);
+  line-height: 18px;
+}
+/* The agent's bubble takes its hue, as the book's `.chip--who` takes it. In
+   a dark theme the full tint is lighter than the neutral bubble and reads as
+   a block of colour, so it is mixed into the surface there, as the brief
+   card's tint is. */
+.msg--agent .bubble {
+  background: light-dark(var(--who-tint), color-mix(in oklab, var(--who-tint) 45%, var(--surface)));
+}
 
 /* Markdown. The book draws paragraphs, inline code and code blocks; the
    rules for the other elements markdown can hold keep them in the same

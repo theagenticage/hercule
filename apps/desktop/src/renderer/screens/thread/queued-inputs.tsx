@@ -1,37 +1,20 @@
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { canSteerOrCancelQueuedInputs, queryKeys, readErrorMessage } from "@hercule/client-core";
+import {
+  canSteerOrCancelQueuedInputs,
+  queryKeys,
+  readErrorMessage,
+  readInputSender,
+} from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
 import { queuedInputsQuery, sessionQuery } from "../../app/queries";
+import { buildHueStyle } from "../../faces";
 import { ClockIcon } from "../../icons/clock";
-import { QueuedImages, QUEUED_IMAGE_SIZE } from "../attachments/queued-images";
+import { QueuedImages } from "../attachments/queued-images";
+import { buildSenderLook, SenderChip } from "../session/sender-chip";
+import { useSenderReading } from "./use-sender-reading";
 import "./queued-inputs.css";
-
-declare module "react" {
-  interface CSSProperties {
-    /** How far a queued input's note is indented, as `<n>px`, to line up with its text. */
-    "--queued-note-indent"?: string;
-  }
-}
-
-/** The gap between a queued input's clock, its images and its text, in pixels, as `.queued` sets it. */
-const QUEUED_ROW_GAP = 10;
-/** The gap between two image tiles in a queued input, in pixels, as `.queued-images` sets it. */
-const QUEUED_IMAGE_GAP = 4;
-
-/**
- * Returns how far a queued input's note is indented so it starts under the
- * input's text: past the 14px clock and, when the input has images, past
- * their tiles, each with the gap after it.
- */
-const computeNoteIndent = (imageCount: number): number => {
-  const clock = 14 + QUEUED_ROW_GAP;
-  if (imageCount === 0) return clock;
-  return (
-    clock + imageCount * QUEUED_IMAGE_SIZE + (imageCount - 1) * QUEUED_IMAGE_GAP + QUEUED_ROW_GAP
-  );
-};
 
 /**
  * Renders the thread's queued inputs above the dock and the composer, one
@@ -73,6 +56,9 @@ export function QueuedInputs({ sessionId }: { readonly sessionId: string }): JSX
  * row shows why its last delivery failed, when one did, and why Steer or
  * Cancel failed, when one does.
  *
+ * An input another session's agent queued draws that agent's chip in place
+ * of the clock, and the row takes the agent's hue (see `AgentQueuedInputRow`).
+ *
  * Steer delivers the input into the running turn now, rather than after it;
  * Cancel drops the input. Either one, once it succeeds, reads the queue
  * again, so the row leaves the list. Both are disabled while either one
@@ -105,14 +91,12 @@ function QueuedInputRow({
   });
   const running = steer.isPending || cancel.isPending;
   const failure = steer.error ?? cancel.error;
+  const senderSessionId = readInputSender(input);
 
-  return (
-    <div
-      className="queued"
-      style={{ "--queued-note-indent": `${String(computeNoteIndent(input.attachments.length))}px` }}
-    >
-      <ClockIcon size={14} />
-      {input.attachments.length === 0 ? null : <QueuedImages attachments={input.attachments} />}
+  const images =
+    input.attachments.length === 0 ? null : <QueuedImages attachments={input.attachments} />;
+  const main = (
+    <span className="queued-main">
       <span className="queued-text" title={input.text}>
         {input.text}
       </span>
@@ -141,12 +125,86 @@ function QueuedInputRow({
           </button>
         </>
       ) : null}
+    </span>
+  );
+  const notes = (
+    <>
       {input.reason === null ? null : <span className="queued-note faint">{input.reason}</span>}
       {failure === null ? null : (
         <span className="queued-note queued-error" role="alert">
           {readErrorMessage(failure)}
         </span>
       )}
+    </>
+  );
+
+  if (senderSessionId !== undefined) {
+    return (
+      <AgentQueuedInputRow senderSessionId={senderSessionId} images={images} notes={notes}>
+        {main}
+      </AgentQueuedInputRow>
+    );
+  }
+  return (
+    <div className="queued">
+      <span className="queued-lead">
+        <ClockIcon size={14} />
+        {images}
+      </span>
+      {main}
+      {notes}
+    </div>
+  );
+}
+
+/**
+ * Renders the row of an input another session's agent queued: the agent's
+ * chip, then the input's images, `children` and `notes`, as `QueuedInputRow`
+ * lays them out, on glass tinted in the agent's hue. The row is a group
+ * named "Queued message from" and the agent's name.
+ *
+ * While the agent is still being read, which happens only for a sender that
+ * first appears while the thread is open, the chip's place is held empty and
+ * the row is not tinted, rather than naming a sender that may be wrong.
+ */
+function AgentQueuedInputRow({
+  senderSessionId,
+  images,
+  notes,
+  children,
+}: {
+  readonly senderSessionId: string;
+  readonly images: ReactNode;
+  readonly notes: ReactNode;
+  readonly children: ReactNode;
+}): JSX.Element {
+  const sender = useSenderReading(senderSessionId);
+  if (sender === null) {
+    return (
+      <div className="queued">
+        <span className="queued-lead">
+          <span className="queued-sender-pending" />
+          {images}
+        </span>
+        {children}
+        {notes}
+      </div>
+    );
+  }
+  const look = buildSenderLook(sender);
+  return (
+    <div
+      className="queued queued--agent"
+      style={buildHueStyle(look.hue)}
+      role="group"
+      aria-label={`Queued message from ${sender.name}`}
+    >
+      <span className="queued-lead">
+        <SenderChip sender={sender} look={look} />
+        {images}
+      </span>
+      {children}
+      {notes}
     </div>
   );
 }

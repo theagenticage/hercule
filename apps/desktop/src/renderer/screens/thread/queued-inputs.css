@@ -2,9 +2,17 @@
    corners square where it meets them. The rules are the Bureau book's
    `.queued` and `.queued-text`. Each departure from the book says why. */
 .queued {
-  display: flex;
+  /* The book's row is one flex line: clock, text, status, Steer, Cancel,
+     10px apart. Here it is a grid of two columns, the clock with any image
+     tiles, then the rest as the book's flex line, so a note under the row
+     (see `.queued-note`) starts under the text whatever stands before it.
+     The two columns are 10px apart, as the book's items are, so the row
+     draws the same. */
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  column-gap: 10px;
+  row-gap: 2px;
   margin: 0 14px;
   padding: 7px 8px 7px 12px;
   border-radius: 14px 14px 0 0;
@@ -15,6 +23,15 @@
     inset 0 0 0 1px var(--glass-rim),
     inset 0 1px 0 var(--glass-edge);
   font-size: var(--t-12);
+}
+.queued-lead,
+.queued-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.queued-main {
+  min-width: 0;
 }
 .queued-text {
   flex: 1;
@@ -30,18 +47,34 @@
   border-radius: 0;
 }
 /* Not in the book. A failed delivery's reason, or a failed Steer or Cancel,
-   takes a line of its own under the row, lined up with the input's text
-   after the 14px clock, the input's image tiles and the 10px gaps. The row wraps only for these lines:
-   every other item keeps its width, and the text shrinks first. */
-.queued {
-  flex-wrap: wrap;
-  row-gap: 2px;
-}
+   takes a line of its own under the row, lined up with the input's text. */
 .queued-note {
-  flex-basis: 100%;
-  /* Set on the row, past the clock and any image tiles before the text. */
-  padding-left: var(--queued-note-indent);
+  grid-column: 2;
 }
 .queued-error {
   color: var(--fail-ink);
+}
+
+/* Not in the book. An input another session's agent queued draws the
+   agent's chip where the clock is, with the face's left edge where the
+   clock's is, and its glass takes the agent's hue: the tint mixed into the
+   glass, and the agent's colour into the rim. A dark theme's tint is
+   lighter than its glass, so less of it is mixed in there. */
+.queued--agent {
+  background: light-dark(
+    color-mix(in oklab, var(--who-tint) 60%, var(--glass-fill)),
+    color-mix(in oklab, var(--who-tint) 35%, var(--glass-fill))
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--who) 40%, var(--glass-rim)),
+    inset 0 1px 0 var(--glass-edge);
+}
+/* A long title ends in an ellipsis rather than squeezing the input's text. */
+.queued .sender-chip {
+  max-width: 200px;
+}
+/* The chip's place while the agent is still read: a face's size, empty. */
+.queued-sender-pending {
+  width: 18px;
+  height: 18px;
 }

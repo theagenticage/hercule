@@ -9,12 +9,21 @@
  * `?state=scrolled` page has it, and the composer shrinks as it does when
  * the user scrolls there. With `?state=warning`, the thread shows two
  * runtime warnings among its work, which the book never draws, so
- * `pnpm compare:bureau` does not compare that state.
+ * `pnpm compare:bureau` does not compare that state. With `?state=senders`,
+ * other agents' messages are in its transcript and its queue: a thread's,
+ * an assistant's and one from a session the user cannot read, beside the
+ * user's own steered message. The book draws none of them either.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
 import "./fixed-clock";
-import { FIX_THREAD, FIX_THREAD_WITH_WARNINGS, THREAD_PAGE_RECORDS } from "./thread-fixture";
+import {
+  FIX_THREAD,
+  FIX_THREAD_WITH_SENDERS,
+  FIX_THREAD_WITH_WARNINGS,
+  SENDERS_PAGE_RECORDS,
+  THREAD_PAGE_RECORDS,
+} from "./thread-fixture";
 import { mountThreadSpecimen } from "./shell-page";
 import { computeScrolledTop, markSheetReady } from "./sheet-page";
 
@@ -40,10 +49,14 @@ async function scrollTranscriptAway(): Promise<void> {
 }
 
 const state = new URLSearchParams(location.search).get("state");
-await mountThreadSpecimen(
-  THREAD_PAGE_RECORDS,
-  state === "warning" ? FIX_THREAD_WITH_WARNINGS : FIX_THREAD,
-);
+if (state === "senders") {
+  await mountThreadSpecimen(SENDERS_PAGE_RECORDS, FIX_THREAD_WITH_SENDERS);
+} else {
+  await mountThreadSpecimen(
+    THREAD_PAGE_RECORDS,
+    state === "warning" ? FIX_THREAD_WITH_WARNINGS : FIX_THREAD,
+  );
+}
 if (state === "scrolled") {
   await scrollTranscriptAway();
 }

@@ -15,11 +15,17 @@
  * becomes "4 Sep 09:04".
  */
 import { memo, useState, type JSX } from "react";
-import { formatMessageTime, splitStreamingText, type Pose } from "@hercule/client-core";
+import {
+  formatMessageTime,
+  splitStreamingText,
+  type Pose,
+  type SenderReading,
+} from "@hercule/client-core";
 import type { Attachment } from "@hercule/contract";
-import { Face, type Look } from "../../faces";
+import { buildHueStyle, Face, type Look } from "../../faces";
 import { SentImages } from "../attachments/sent-images";
 import { Markdown } from "./markdown";
+import { buildSenderLook, SenderChip } from "./sender-chip";
 import type { AttachOpenParagraph } from "./use-session-live";
 import "./messages.css";
 
@@ -50,9 +56,18 @@ export function AgentFace({
 }
 
 /**
- * Renders a message the user sent: the images sent with it, then the bubble,
- * as markdown with its line breaks kept, and its time under it. A message
- * sent with images and no text draws no bubble.
+ * Renders a message sent into the session: the images sent with it, then
+ * the bubble, as markdown with its line breaks kept, and its time under it.
+ * A message sent with images and no text draws no bubble. A message steered
+ * into the running turn reads "Steered" before its time.
+ *
+ * `sender` is left out for a message the user sent. For a message another
+ * session's agent sent, it is how to show that agent: a chip with its face
+ * and name above the bubble, and the bubble tinted in its hue. The message is
+ * then a group named "Message from" and the agent's name, so a screen reader
+ * never takes it for the user's. While the agent is still being read,
+ * `sender` is null: the chip's row is held empty, so the bubble does not move
+ * when the name arrives, and nothing names a sender that may be wrong.
  */
 export const UserMessage = memo(function UserMessage({
   text,
@@ -60,23 +75,61 @@ export const UserMessage = memo(function UserMessage({
   at,
   timezone,
   today,
+  steered = false,
+  sender,
 }: {
   readonly text: string;
   readonly attachments: readonly Attachment[];
   readonly at: string;
   readonly timezone: string;
   readonly today: number;
+  readonly steered?: boolean;
+  readonly sender?: SenderReading | null;
 }): JSX.Element {
+  const time = formatBlockTime(at, timezone, today);
+  const content = (
+    <>
+      {attachments.length === 0 ? null : <SentImages attachments={attachments} />}
+      {text === "" ? null : (
+        <div className="bubble">
+          <Markdown text={text} breaks />
+        </div>
+      )}
+      <div className="bubble-meta">
+        {steered ? (time === undefined ? "Steered" : `Steered · ${time}`) : time}
+      </div>
+    </>
+  );
+  if (sender === undefined) {
+    return (
+      <div className="msg--me">
+        <div>{content}</div>
+      </div>
+    );
+  }
+  if (sender === null) {
+    return (
+      <div className="msg--me">
+        <div>
+          <div className="msg-sender" />
+          {content}
+        </div>
+      </div>
+    );
+  }
+  const look = buildSenderLook(sender);
   return (
-    <div className="msg--me">
+    <div
+      className="msg--me msg--agent"
+      style={buildHueStyle(look.hue)}
+      role="group"
+      aria-label={`Message from ${sender.name}`}
+    >
       <div>
-        {attachments.length === 0 ? null : <SentImages attachments={attachments} />}
-        {text === "" ? null : (
-          <div className="bubble">
-            <Markdown text={text} breaks />
-          </div>
-        )}
-        <div className="bubble-meta">{formatBlockTime(at, timezone, today)}</div>
+        <div className="msg-sender">
+          <SenderChip sender={sender} look={look} />
+        </div>
+        {content}
       </div>
     </div>
   );

@@ -15,9 +15,12 @@ import {
 } from "@tanstack/react-query";
 import {
   ApiError,
+  buildSessionAgentState,
+  buildTurns,
   collectRunningTurnRows,
   detectLocalRunner,
   mergeNewestMessagePage,
+  readInputSender,
   mergeSentMessage,
   queryKeys,
   readEveryPage,
@@ -652,6 +655,38 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
+ * Reads the session whose agent sent a message into a thread, or queued one
+ * there, so the message can name its sender. Returns null when the sender
+ * cannot be read: the session was deleted, or the user may not read it. The
+ * message still shows, as from "Another agent", so neither answer is a
+ * failure. Any other error fails the read, and the screen shows the same
+ * "Another agent".
+ *
+ * The key sits under the sender's own session key, so a push on the
+ * `session` topic that names the sender, such as a rename, reads it again
+ * with no subscription of its own. A sender that is busy changes status
+ * often, so its read can repeat while the thread is on screen; each repeat
+ * is one small read. The key differs from `sessionQuery`'s because the data
+ * differs: this read holds null where that one fails. The web app keys the
+ * same read the same way.
+ *
+ * A 404 or a 403 is the controller's answer and stays the same, so it is
+ * never retried; a read that got no answer is, as the thread's own reads are.
+ */
+export const senderSessionQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: [...queryKeys.session(id), "sender"],
+    queryFn: (): Promise<Session | null> =>
+      client.session.read({ params: { id } }).catch((error: unknown) => {
+        if (error instanceof ApiError && (error.code === "not_found" || error.code === "forbidden"))
+          return null;
+        throw error;
+      }),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
  * Reads one agent's whole transcript, oldest first, page by page until the
  * last one, because the thread screen draws every row. Without `subagentId`
  * it reads the session's own agent; with it, that subagent's transcript.
@@ -795,9 +830,14 @@ export const ensureFirstRunData = async (
 /**
  * Reads everything the thread's own agent's page shows of the thread
  * `sessionId` into `queryClient`: its session, its subagents, its whole
- * transcript and its queued inputs.
- * Resolves once every read is cached, and fails with the first read that
+ * transcript and its queued inputs, then the session of each agent that sent
+ * a message into the transcript or queued one, once per sender. Resolves once
+ * every read is cached, and fails with the first of the thread's reads that
  * fails, such as a `not_found` `ApiError` when no such session exists.
+ *
+ * A sender's read never fails the thread: a sender that cannot be read is
+ * shown as "Another agent", so its read is only prefetched. The assistants
+ * a sender may answer for are shell data, already cached.
  *
  * The thread's loader calls it, and so do the Office, whose drawer shows the
  * thread's page outside the thread's route, and a test that renders one
@@ -808,12 +848,21 @@ export const ensureThreadData = async (
   client: HerculeClient,
   sessionId: string,
 ): Promise<void> => {
-  await Promise.all([
+  const [session, , rows, inputs] = await Promise.all([
     queryClient.ensureQueryData(sessionQuery(client, sessionId)),
     queryClient.ensureQueryData(subagentsQuery(client, sessionId)),
     queryClient.ensureQueryData(transcriptQuery(client, sessionId)),
     queryClient.ensureQueryData(queuedInputsQuery(client, sessionId)),
   ]);
+  const senderSessionIds = new Set([
+    ...buildTurns(rows, buildSessionAgentState(session)).flatMap((turn) =>
+      turn.userMessages.flatMap((message) => message.senderSessionId ?? []),
+    ),
+    ...inputs.flatMap((input) => readInputSender(input) ?? []),
+  ]);
+  await Promise.all(
+    Array.from(senderSessionIds, (id) => queryClient.prefetchQuery(senderSessionQuery(client, id))),
+  );
 };
 
 /**
