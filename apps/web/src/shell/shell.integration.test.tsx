@@ -119,7 +119,6 @@ describe("the two-face sidebar", () => {
     await renderApp({ path: "/tasks", api: stubApi(buildShellRoutes()).fetch, token: "held" });
 
     expect(readNavLabels()).toEqual([
-      "Intake",
       "Check-in",
       "Tasks",
       "Runs",
@@ -175,7 +174,7 @@ describe("the two-face sidebar", () => {
 
     await user.click(screen.getByRole("radio", { name: /Hercule/ }));
 
-    expect(readNavLabels()[0]).toBe("Intake");
+    expect(readNavLabels()[0]).toBe("Check-in");
   });
 
   it("lets the screen choose the face again after the next navigation", async () => {
@@ -187,12 +186,12 @@ describe("the two-face sidebar", () => {
     });
 
     await user.click(screen.getByRole("radio", { name: /Hercule/ }));
-    await user.click(getOrchestrationNav().getByRole("link", { name: "Intake" }));
+    await user.click(getOrchestrationNav().getByRole("link", { name: "Check-in" }));
 
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/intake");
+      expect(router.state.location.pathname).toBe("/check-in");
     });
-    expect(readNavLabels()[0]).toBe("Intake");
+    expect(readNavLabels()[0]).toBe("Check-in");
 
     await user.click(screen.getByRole("radio", { name: "Threads" }));
     expect(await getThreadsNav().findByText("No threads yet")).toBeDefined();
@@ -499,33 +498,29 @@ describe("the top bar", () => {
     }
   });
 
-  it("shows on Intake the time the user last checked it", async () => {
-    const api = stubApi(buildShellRoutes({ "lastChecked.intake": "2026-09-06T20:10:00.000Z" }));
-    await renderApp({ path: "/intake", api: api.fetch, token: "held" });
-
-    expect(screen.getByText("since Sunday 22:10")).toBeDefined();
-  });
-
-  it("shows the current time on Intake until a last-checked time is stored", async () => {
-    vi.useFakeTimers();
+  it("still renders Notifications, with the current time, when the stored last-checked time is not a date", async () => {
+    // Only the clock is faked: opening Notifications writes the marker, and
+    // that write needs real timers to settle.
+    vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-07T07:14:00.000Z"));
     try {
-      await renderApp({ path: "/intake", api: stubApi(buildShellRoutes()).fetch, token: "held" });
+      const api = stubApi({
+        ...buildShellRoutes({ "lastChecked.notifications": "0000-00-00T00:00:00.000Z" }),
+        "GET /api/v1/notifications": { body: { items: [] } },
+        "PATCH /api/v1/settings": (call) => ({
+          body: {
+            controller: {},
+            user: {
+              "onboarding.completedSteps": ["timezone", "assistant"],
+              timezone: ZONE,
+              ...(call.body as { user: Record<string, unknown> }).user,
+            },
+          },
+        }),
+      });
+      await renderApp({ path: "/notifications", api: api.fetch, token: "held" });
 
-      expect(screen.getByText("Monday 09:14")).toBeDefined();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("still renders Intake, with the current time, when the stored last-checked time is not a date", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-09-07T07:14:00.000Z"));
-    try {
-      const api = stubApi(buildShellRoutes({ "lastChecked.intake": "0000-00-00T00:00:00.000Z" }));
-      await renderApp({ path: "/intake", api: api.fetch, token: "held" });
-
-      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Intake");
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Notifications");
       expect(screen.getByText("Monday 09:14")).toBeDefined();
       expect(screen.queryByText(/^since /)).toBeNull();
       expect(screen.getByRole("navigation", { name: "Hercule" })).toBeDefined();

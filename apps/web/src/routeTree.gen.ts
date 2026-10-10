@@ -15,7 +15,6 @@ import { Route as SetupRouteImport } from './routes/setup'
 import { Route as ShellIndexRouteImport } from './routes/_shell/index'
 import { Route as ShellSplatRouteImport } from './routes/_shell/$'
 import { Route as ShellCheckInRouteImport } from './routes/_shell/check-in'
-import { Route as ShellIntakeRouteImport } from './routes/_shell/intake'
 import { Route as ShellSettingsRouteImport } from './routes/_shell/settings'
 import { Route as OnboardingAssistantRouteImport } from './routes/onboarding/assistant'
 import { Route as OnboardingTimezoneRouteImport } from './routes/onboarding/timezone'
@@ -73,11 +72,6 @@ const ShellSplatRoute = ShellSplatRouteImport.update({
 const ShellCheckInRoute = ShellCheckInRouteImport.update({
   id: '/check-in',
   path: '/check-in',
-  getParentRoute: () => ShellRoute,
-} as any)
-const ShellIntakeRoute = ShellIntakeRouteImport.update({
-  id: '/intake',
-  path: '/intake',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellSettingsRoute = ShellSettingsRouteImport.update({
@@ -238,7 +232,6 @@ export interface FileRoutesByFullPath {
   '/setup': typeof SetupRoute
   '/$': typeof ShellSplatRoute
   '/check-in': typeof ShellCheckInRoute
-  '/intake': typeof ShellIntakeRoute
   '/settings': typeof ShellSettingsRouteWithChildren
   '/onboarding/assistant': typeof OnboardingAssistantRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
@@ -274,7 +267,6 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupRoute
   '/$': typeof ShellSplatRoute
   '/check-in': typeof ShellCheckInRoute
-  '/intake': typeof ShellIntakeRoute
   '/onboarding/assistant': typeof OnboardingAssistantRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
   '/': typeof ShellIndexRoute
@@ -311,7 +303,6 @@ export interface FileRoutesById {
   '/setup': typeof SetupRoute
   '/_shell/$': typeof ShellSplatRoute
   '/_shell/check-in': typeof ShellCheckInRoute
-  '/_shell/intake': typeof ShellIntakeRoute
   '/_shell/settings': typeof ShellSettingsRouteWithChildren
   '/onboarding/assistant': typeof OnboardingAssistantRoute
   '/onboarding/timezone': typeof OnboardingTimezoneRoute
@@ -351,7 +342,6 @@ export interface FileRouteTypes {
     | '/setup'
     | '/$'
     | '/check-in'
-    | '/intake'
     | '/settings'
     | '/onboarding/assistant'
     | '/onboarding/timezone'
@@ -387,7 +377,6 @@ export interface FileRouteTypes {
     | '/setup'
     | '/$'
     | '/check-in'
-    | '/intake'
     | '/onboarding/assistant'
     | '/onboarding/timezone'
     | '/'
@@ -423,7 +412,6 @@ export interface FileRouteTypes {
     | '/setup'
     | '/_shell/$'
     | '/_shell/check-in'
-    | '/_shell/intake'
     | '/_shell/settings'
     | '/onboarding/assistant'
     | '/onboarding/timezone'
@@ -506,13 +494,6 @@ declare module '@tanstack/react-router' {
       path: '/check-in'
       fullPath: '/check-in'
       preLoaderRoute: typeof ShellCheckInRouteImport
-      parentRoute: typeof ShellRoute
-    }
-    '/_shell/intake': {
-      id: '/_shell/intake'
-      path: '/intake'
-      fullPath: '/intake'
-      preLoaderRoute: typeof ShellIntakeRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/settings': {
@@ -771,7 +752,6 @@ const ShellThreadsSessionIdRouteRouteWithChildren =
 interface ShellRouteChildren {
   ShellSplatRoute: typeof ShellSplatRoute
   ShellCheckInRoute: typeof ShellCheckInRoute
-  ShellIntakeRoute: typeof ShellIntakeRoute
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
   ShellThreadsSessionIdRouteRoute: typeof ShellThreadsSessionIdRouteRouteWithChildren
@@ -793,7 +773,6 @@ interface ShellRouteChildren {
 const ShellRouteChildren: ShellRouteChildren = {
   ShellSplatRoute: ShellSplatRoute,
   ShellCheckInRoute: ShellCheckInRoute,
-  ShellIntakeRoute: ShellIntakeRoute,
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,
   ShellThreadsSessionIdRouteRoute: ShellThreadsSessionIdRouteRouteWithChildren,

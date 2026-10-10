@@ -36,14 +36,15 @@ describe("the bounds on a user setting that holds a list", () => {
     Array.from({ length: count }, (_, index) => `step-${String(index)}`);
 
   it("accepts a list at the cap, and rejects a list one longer", () => {
-    for (const key of ["topics.order", "onboarding.completedSteps"]) {
-      expect(decode(SettingsPatch)({ user: { [key]: buildSteps(MAX_SETTING_LIST) } })._tag).toBe(
-        "Success",
-      );
-      expect(
-        decode(SettingsPatch)({ user: { [key]: buildSteps(MAX_SETTING_LIST + 1) } })._tag,
-      ).toBe("Failure");
-    }
+    expect(
+      decode(SettingsPatch)({ user: { "onboarding.completedSteps": buildSteps(MAX_SETTING_LIST) } })
+        ._tag,
+    ).toBe("Success");
+    expect(
+      decode(SettingsPatch)({
+        user: { "onboarding.completedSteps": buildSteps(MAX_SETTING_LIST + 1) },
+      })._tag,
+    ).toBe("Failure");
   });
 
   it("bounds the mute list too", () => {

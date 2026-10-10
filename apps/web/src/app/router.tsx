@@ -38,7 +38,7 @@ declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {
     readonly title?: string;
     /** The user setting that holds the screen's last-checked marker, if it has one. */
-    readonly sinceMarker?: "lastChecked.intake" | "lastChecked.notifications";
+    readonly sinceMarker?: "lastChecked.notifications";
     /** Set by a screen that renders its own top bar, so the shell does not render one. */
     readonly ownsTopBar?: true;
   }

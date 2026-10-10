@@ -7,7 +7,7 @@
  * real data. The fixture is one representative conversation of several owner
  * turns, one named Provider Instance, one session with a few persisted
  * turns, the timezone first-run setup persisted, a project name and a
- * repository remote.
+ * repository remote, and two user settings the new binary retires.
  * After the upgrade the test checks that those records, their content,
  * ordering and associations survived. It is not a matrix of session states or
  * provider behaviour.
@@ -24,7 +24,7 @@
  * skipped and says so. An unsupported platform fails in CI and skips locally.
  */
 import { Database } from "bun:sqlite";
-import { chmodSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -61,6 +61,12 @@ const TURNS = [
 const PROVIDER_NAME = "upgrade-fixture";
 const PROJECT_NAME = "test-project";
 const REPO_REMOTE = "https://github.com/example/repo";
+
+/** User settings the previous release declares and the new binary's migration deletes. */
+const RETIRED_SETTINGS = {
+  "topics.order": ["intake", "checkin"],
+  "lastChecked.intake": "2026-10-01T08:00:00.000Z",
+} as const;
 
 interface SeededMessage {
   readonly id: string;
@@ -469,10 +475,20 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
-      const seededSettings = expectJson<{ user: { timezone: string } }>(
+      // Two settings the new binary no longer declares: its migration deletes
+      // them, so reading settings after the upgrade logs no warning about them.
+      const retired = await runCli(
+        ["settings", "update", "--user", JSON.stringify(RETIRED_SETTINGS)],
+        edge,
+      );
+      expect(retired.code, `${retired.stdout}\n${retired.stderr}`).toBe(0);
+      const seededSettings = expectJson<{ user: Record<string, unknown> }>(
         await runCli(["settings", "read", "--json"], edge),
       );
-      expect(seededSettings.user.timezone).toBe("Europe/Amsterdam");
+      expect(seededSettings.user).toMatchObject({
+        timezone: "Europe/Amsterdam",
+        ...RETIRED_SETTINGS,
+      });
 
       const project = expectJson<{ id: string; name: string }>(
         await runCli(["project", "create", "--name", PROJECT_NAME, "--json"], edge),
@@ -561,10 +577,18 @@ describe("upgrading from the previous edge release", () => {
 
       expectJson(await runCli(["controller", "read", "--json"], upgraded));
 
-      const readSettings = expectJson<{ user: { timezone: string } }>(
+      const readSettings = expectJson<{ user: Record<string, unknown> }>(
         await runCli(["settings", "read", "--json"], upgraded),
       );
-      expect(readSettings.user.timezone).toBe(seededSettings.user.timezone);
+      expect(readSettings.user["timezone"]).toBe(seededSettings.user["timezone"]);
+      for (const key of Object.keys(RETIRED_SETTINGS)) {
+        expect(readSettings.user).not.toHaveProperty([key]);
+      }
+      // The controller writes its log synchronously, so the read above is in
+      // the file by now.
+      expect(readFileSync(join(home, "logs", "controller.log"), "utf8")).not.toContain(
+        "Ignoring the user setting",
+      );
 
       const readProject = expectJson<{ id: string; name: string }>(
         await runCli(["project", "read", project.id, "--json"], upgraded),

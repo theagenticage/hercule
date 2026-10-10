@@ -90,13 +90,13 @@ describe("settings.update", () => {
         const settings = yield* SettingsOperations;
         yield* settings.update({ controller: { "backup.keep": 14 } });
         return yield* settings.update({
-          user: { timezone: "UTC", "topics.order": ["intake", "checkin"] },
+          user: { timezone: "UTC", "onboarding.completedSteps": ["timezone", "assistant"] },
         });
       }),
     );
     expect(state).toEqual({
       controller: { "backup.keep": 14 },
-      user: { timezone: "UTC", "topics.order": ["intake", "checkin"] },
+      user: { timezone: "UTC", "onboarding.completedSteps": ["timezone", "assistant"] },
     });
   });
 

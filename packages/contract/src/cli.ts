@@ -255,7 +255,7 @@ export const CLI = {
       },
       user: {
         flag: "user",
-        help: "The user's own settings as a JSON object: timezone, thread defaults, the default GitHub account (github.defaultConnectionId), topic order, mutes.",
+        help: "The user's own settings as a JSON object: timezone, thread defaults, the default GitHub account (github.defaultConnectionId), mutes.",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },

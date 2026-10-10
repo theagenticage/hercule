@@ -129,9 +129,7 @@ export const SETTING_VALUES = {
   user: {
     /** The IANA zone the user reads times in, chosen during setup. */
     timezone: Timezone,
-    "topics.order": atMost(Schema.NonEmptyString, MAX_SETTING_LIST),
     "notifications.muted": atMost(MuteKey, MAX_SETTING_LIST),
-    "lastChecked.intake": Timestamp,
     "lastChecked.checkin": Timestamp,
     "lastChecked.notifications": Timestamp,
     "onboarding.completedSteps": atMost(Schema.NonEmptyString, MAX_SETTING_LIST),

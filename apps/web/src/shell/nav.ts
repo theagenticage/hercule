@@ -11,7 +11,7 @@ export interface NavItem {
   /** Set only on the entity items (Tasks, Runs, Workflows); the others have no glyph. */
   readonly glyph?: ComponentType<MarkProps>;
   /** Which count this item shows beside its label, when that count is above zero. */
-  readonly count?: "intake" | "checkin" | "notifications";
+  readonly count?: "checkin" | "notifications";
   /** True when the item opens a section of several screens, not a single screen. */
   readonly section?: boolean;
 }
@@ -20,7 +20,6 @@ export const SEPARATOR = "separator" as const;
 
 /** The items of the orchestration face, in their fixed order. */
 export const ORCHESTRATION_NAV: readonly (NavItem | typeof SEPARATOR)[] = [
-  { to: "/intake", label: "Intake", count: "intake" },
   { to: "/check-in", label: "Check-in", count: "checkin" },
   { to: "/tasks", label: "Tasks", glyph: TaskGlyph },
   { to: "/runs", label: "Runs", glyph: RunGlyph },
