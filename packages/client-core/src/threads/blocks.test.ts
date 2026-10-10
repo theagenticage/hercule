@@ -226,6 +226,7 @@ describe("buildThreadBlocks", () => {
         itemId: "u1",
         text: "Say hi",
         attachments: [],
+        steered: false,
         at: buildInstant(0),
       },
       {
@@ -266,6 +267,31 @@ describe("buildThreadBlocks", () => {
     ).toMatchObject({
       text: "",
       attachments: [screenshot],
+    });
+  });
+
+  it("marks a message another session's agent steered in with its sender, and the owner's with none", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Fix the login bug"),
+      buildRow({
+        _tag: "item.started",
+        ...buildEnvelope(1),
+        turnId: "t1",
+        itemId: "u2",
+        kind: "user_message",
+        detail: { text: "Rebase on main", steered: true, senderSessionId: "s-sender" },
+      }),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+
+    expect(findBlock(blocks, "user", "user:u1")).not.toHaveProperty("senderSessionId");
+    expect(findBlock(blocks, "user", "user:u1").steered).toBe(false);
+    expect(findBlock(blocks, "user", "user:u2")).toMatchObject({
+      text: "Rebase on main",
+      steered: true,
+      senderSessionId: "s-sender",
     });
   });
 

@@ -9,11 +9,10 @@ import type { ThreadTurn } from "../threads/turns";
 import { describeBriefSource, findSubagentBrief, splitSubagentBrief } from "./brief";
 import { buildSubagent } from "./subagents.testing";
 
-/** Builds a finished turn with `user` as its user message. */
-const buildTurn = (turnId: string, user: string): ThreadTurn => ({
+/** Builds a finished turn opened by a user message with `text`. */
+const buildTurn = (turnId: string, text: string): ThreadTurn => ({
   turnId,
-  user,
-  userAttachments: [],
+  userMessages: [{ itemId: `u-${turnId}`, text, attachments: [], steered: false }],
   items: [],
   assistantText: "",
   startedAt: "2026-10-05T09:00:00.000Z",
@@ -41,6 +40,7 @@ describe("splitSubagentBrief", () => {
     itemId: text,
     text,
     attachments: [],
+    steered: false,
     at: "2026-10-05T09:00:00.000Z",
   });
   const pending: ThreadBlock = { kind: "pending", key: "pending", since: null };

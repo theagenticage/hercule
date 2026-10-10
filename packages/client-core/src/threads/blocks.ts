@@ -15,7 +15,13 @@ import type { Attachment, TranscriptRow } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
 import type { AgentState } from "./agent-state";
 import { findOpenItem } from "./open-item";
-import { buildThreadItem, readUserAttachments, type ThreadItem } from "./turns";
+import {
+  buildThreadItem,
+  readUserAttachments,
+  readUserSender,
+  isSteeredUserMessage,
+  type ThreadItem,
+} from "./turns";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
@@ -27,7 +33,10 @@ export interface WorkItem extends ThreadItem {
   readonly paths: readonly string[];
 }
 
-/** A message the user sent: the opening one, or one steered into the running turn. */
+/**
+ * A message sent into the thread: the opening one, or one steered into the
+ * running turn. The session's owner sent it, or another session's agent did.
+ */
 export interface UserBlock {
   readonly kind: "user";
   readonly key: string;
@@ -35,6 +44,10 @@ export interface UserBlock {
   readonly text: string;
   /** The images sent with the message, in the order they were attached. Empty when none were. */
   readonly attachments: readonly Attachment[];
+  /** Whether the message was steered into the running turn rather than opening it. */
+  readonly steered: boolean;
+  /** The session whose agent sent the message. Absent when the owner sent it. */
+  readonly senderSessionId?: string;
   readonly at: string;
 }
 
@@ -328,12 +341,15 @@ export const buildThreadBlocks = (
           closeStretch(turn, event.at);
           const detail = readJsonObject(event.detail);
           const text = typeof detail?.text === "string" ? detail.text : "";
+          const senderSessionId = readUserSender(detail);
           slots.push({
             kind: "user",
             key: `user:${event.itemId}`,
             itemId: event.itemId,
             text,
             attachments: readUserAttachments(detail),
+            steered: isSteeredUserMessage(detail),
+            ...(senderSessionId === undefined ? {} : { senderSessionId }),
             at: event.at,
           });
           turn.boundary = event.at;

@@ -7,8 +7,10 @@
  * The assistant's text is never on `item.started` or `item.completed`: it
  * only arrives as `content.delta` events (spec 06 §6.3-6.4). So:
  *
- * - the user's message comes from `detail.text` on the `user_message` item's
- *   `item.started`, and its images from `detail.attachments` there;
+ * - each user message comes from the `user_message` item's `item.started`:
+ *   its text from `detail.text`, its images from `detail.attachments`, whether
+ *   it was steered from `detail.steered`, and the agent that sent it from
+ *   `detail.senderSessionId`;
  * - the assistant's text is the turn's `assistant_text` deltas joined in
  *   transcript order.
  */
@@ -51,11 +53,57 @@ export const readUserAttachments = (detail: unknown): readonly Attachment[] => {
   return Array.isArray(attachments) ? (attachments as readonly unknown[]).filter(isAttachment) : [];
 };
 
+/**
+ * Returns the id of the session whose agent sent a `user_message`, from its
+ * detail's `senderSessionId`. Returns `undefined` for a message the session's
+ * owner sent, which carries no sender.
+ */
+export const readUserSender = (detail: unknown): string | undefined => {
+  const sender = readJsonObject(detail)?.senderSessionId;
+  return typeof sender === "string" && sender !== "" ? sender : undefined;
+};
+
+/**
+ * Checks whether a `user_message` was steered into a turn that was already
+ * running, from its detail's `steered`. Returns `false` for a message that
+ * opened its turn.
+ */
+export const isSteeredUserMessage = (detail: unknown): boolean =>
+  readJsonObject(detail)?.steered === true;
+
+/** One message sent into a turn: by the session's owner, or by another session's agent. */
+export interface ThreadUserMessage {
+  readonly itemId: string;
+  readonly text: string;
+  /** The images sent with the message, in the order they were attached. Empty when none were. */
+  readonly attachments: readonly Attachment[];
+  /** Whether the message was steered into the running turn rather than opening it. */
+  readonly steered: boolean;
+  /** The session whose agent sent the message. Absent when the owner sent it. */
+  readonly senderSessionId?: string;
+}
+
+/**
+ * Returns the message a `user_message` item's `item.started` holds. Each
+ * message is kept on its own, because a message steered into a turn can come
+ * from a different sender than the one that opened it.
+ */
+const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
+  const text = readJsonObject(event.detail)?.text;
+  const senderSessionId = readUserSender(event.detail);
+  return {
+    itemId: event.itemId,
+    text: typeof text === "string" ? text : "",
+    attachments: readUserAttachments(event.detail),
+    steered: isSteeredUserMessage(event.detail),
+    ...(senderSessionId === undefined ? {} : { senderSessionId }),
+  };
+};
+
 export interface ThreadTurn {
   readonly turnId: string;
-  readonly user: string;
-  /** The images the user sent in this turn, across every message steered into it. */
-  readonly userAttachments: readonly Attachment[];
+  /** The messages sent into this turn, in transcript order: the one that opened it, then any steered in. */
+  readonly userMessages: readonly ThreadUserMessage[];
   readonly items: readonly ThreadItem[];
   readonly assistantText: string;
   readonly startedAt: string;
@@ -140,8 +188,7 @@ interface Building {
   startedAt: string;
   completedAt: string | null;
   endState: TurnEndState | null;
-  user: string;
-  userAttachments: Attachment[];
+  userMessages: ThreadUserMessage[];
   items: ThreadItem[];
   itemIndex: Map<string, number>;
   assistantText: string;
@@ -187,8 +234,7 @@ export const buildTurns = (
       startedAt: fallbackAt,
       completedAt: null,
       endState: null,
-      user: "",
-      userAttachments: [],
+      userMessages: [],
       items: [],
       itemIndex: new Map(),
       assistantText: "",
@@ -214,12 +260,7 @@ export const buildTurns = (
       case "item.started": {
         const turn = findOrStartTurn(event.turnId, event.at);
         if (event.kind === "user_message") {
-          // A steered input adds a second `user_message` to the running turn,
-          // so its text is appended to the first and never replaces it.
-          const detail = event.detail as { text?: string } | undefined;
-          const text = detail?.text ?? "";
-          turn.user = turn.user === "" ? text : `${turn.user}\n\n${text}`;
-          turn.userAttachments.push(...readUserAttachments(event.detail));
+          turn.userMessages.push(buildUserMessage(event));
         } else if (event.kind !== "assistant_message") {
           turn.itemIndex.set(event.itemId, turn.items.length);
           turn.items.push(buildThreadItem(event));
@@ -255,8 +296,7 @@ export const buildTurns = (
 
   return Array.from(turns.values()).map((turn) => ({
     turnId: turn.turnId,
-    user: turn.user,
-    userAttachments: turn.userAttachments,
+    userMessages: turn.userMessages,
     // Only a running item can be waiting for an open Request. An item the
     // harness already finished keeps its result, even if a Request still
     // refers to it.
