@@ -36,6 +36,9 @@ import { WorkflowsFrame, type WorkflowsView } from "../../../../screens/workflow
  * specimen the page fails to load (see workflow-queries.ts).
  */
 export const Route = createFileRoute("/_connected/_shell/workflows")({
+  // The loader goes in the component's chunk. The router splits off only the
+  // component by default, so the loader, and every module it imports, would
+  // otherwise load with the first screen.
   codeSplitGroupings: [["loader", "component"]],
   staticData: { title: "Workflows" },
   loader: async ({ context: { controller, queryClient } }) => {

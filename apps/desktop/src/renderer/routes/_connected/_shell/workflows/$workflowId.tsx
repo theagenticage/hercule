@@ -89,6 +89,9 @@ const validateWorkflowSearch = (search: Record<string, unknown>): WorkflowSearch
  * loader reads it before the page shows it.
  */
 export const Route = createFileRoute("/_connected/_shell/workflows/$workflowId")({
+  // The loader goes in the component's chunk. The router splits off only the
+  // component by default, so the loader, and every module it imports, would
+  // otherwise load with the first screen.
   codeSplitGroupings: [["loader", "component"]],
   validateSearch: validateWorkflowSearch,
   loaderDeps: ({ search }) => ({ runsView: search.runsView, daysBack: search.daysBack }),
