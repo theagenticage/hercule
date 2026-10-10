@@ -253,3 +253,34 @@ describe("--image", () => {
     );
   });
 });
+
+// Tests the two signal fields that are content, and so come from stdin.
+describe("signal content on stdin", () => {
+  const signalRaise = lookUpCommand("signal", "raise");
+  const signalAct = lookUpCommand("signal", "act");
+  const raising = ["--kind", "fyi", "--title", "Shipped", "--reason", "Tagged", "--event-id", "7"];
+
+  it("reads raise's blocks from stdin as a JSON list after --blocks-stdin", async () => {
+    const args = await parseArguments(
+      signalRaise,
+      [...raising, "--blocks-stdin"],
+      stubStdin('[{"type":"text","markdown":"Release notes"}]\n'),
+    );
+    expect(args.payload["blocks"]).toEqual([{ type: "text", markdown: "Release notes" }]);
+    expect(args.payload["eventIds"]).toEqual([7]);
+  });
+
+  it("sends raise without blocks, and reads no stdin, when --blocks-stdin is not given", async () => {
+    const args = await parseArguments(signalRaise, raising, refuseStdinRead);
+    expect(args.payload).not.toHaveProperty("blocks");
+  });
+
+  it("reads act's typed reply from stdin as text after --text-stdin", async () => {
+    const args = await parseArguments(
+      signalAct,
+      [ID, "--action", "reply", "--text-stdin"],
+      stubStdin("Thanks, merging now.\n"),
+    );
+    expect(args.payload).toEqual({ actionId: "reply", text: "Thanks, merging now." });
+  });
+});

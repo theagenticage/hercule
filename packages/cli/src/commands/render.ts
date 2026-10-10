@@ -21,6 +21,7 @@ import {
   formatRequestQuestion,
   countUsedTokens,
   describeTokenUsage,
+  formatBlocksAsText,
   readJsonObject,
   readStringList,
   readTimestamps,
@@ -31,6 +32,7 @@ import {
   isSchedule,
   type Input,
   type Notification,
+  type NotificationAction,
   type OpenRequest,
   type OperationId,
   type MintedPromotionToken,
@@ -39,6 +41,10 @@ import {
   type RunStarted,
   type Session,
   type SessionRequest,
+  type Signal,
+  type SignalAction,
+  type SignalRaiseResult,
+  type SignalResolution,
   type RunSummary,
   type StructuredResult,
   type Subagent,
@@ -727,12 +733,16 @@ const renderRun = (run: Run, now: number): ReadonlyArray<string> => [
 ];
 
 /**
- * Returns the answers of a decision as a table: each answer's id, which
- * `notification act --action` takes, its label, what taking it does, and the
- * producer's description. The "does" column shows only for an open decision,
- * because the controller describes only answers that can still be taken.
+ * Returns the answers of a decision or a signal as a table: each answer's id,
+ * which `--action` takes, its label, what taking it does, what a typed reply
+ * asks for, and the producer's description. The "does" column shows only for
+ * an open record, because the controller describes only answers that can
+ * still be taken. The "reply" column shows only when an answer takes a typed
+ * reply, which `signal act --text-stdin` sends.
  */
-const renderAnswerTable = (actions: Notification["actions"]): ReadonlyArray<string> =>
+const renderAnswerTable = (
+  actions: ReadonlyArray<NotificationAction | SignalAction>,
+): ReadonlyArray<string> =>
   renderTable(
     actions.map((action) => ({
       id: action.id,
@@ -740,6 +750,7 @@ const renderAnswerTable = (actions: Notification["actions"]): ReadonlyArray<stri
       ...(action.describeLine === undefined
         ? {}
         : { does: formatDescribeLine(action.describeLine) }),
+      ...(action.field === undefined ? {} : { reply: action.field.placeholder }),
       ...(action.description === undefined ? {} : { description: action.description }),
     })),
   );
@@ -801,6 +812,65 @@ const renderNotificationDecided = (
   const outcome = taken === undefined ? describeResolution(resolution) : `decided: ${taken.label}`;
   return [`notification ${formatCell(notification.id)} ${outcome}`];
 };
+
+/**
+ * Returns a signal as a row of `signal list`: its id, kind, priority, title,
+ * who waits on the user, where the question is asked, and its age. The
+ * blocks and the actions are left to `signal read`, because they do not fit
+ * on one line.
+ */
+const summarizeSignal = (signal: Signal, now: Date): Record<string, unknown> => ({
+  id: signal.id,
+  kind: signal.kind,
+  priority: signal.priority,
+  title: signal.title,
+  asker: signal.asker,
+  place: signal.place,
+  age: formatAge(signal.createdAt, now),
+});
+
+/** Returns the rows of `signal list` as a table. */
+const renderSignalList = (signals: ReadonlyArray<Signal>): ReadonlyArray<string> => {
+  const now = new Date();
+  return renderTable(signals.map((signal) => summarizeSignal(signal, now)));
+};
+
+/**
+ * Returns the lines printed for `signal read`: the signal's fields as
+ * key-value lines, including where it came from and how it was resolved,
+ * then its blocks as text and its actions as a table, each under its own
+ * heading. A heading is left out when there is nothing under it.
+ */
+const renderSignal = (signal: Signal): ReadonlyArray<string> => {
+  const { blocks, actions, ...fields } = signal;
+  return [
+    ...renderKeyValues(fields),
+    ...(blocks.length === 0 ? [] : ["", "blocks", ...formatBlocksAsText(blocks).split("\n")]),
+    ...(actions.length === 0 ? [] : ["", "actions", ...renderAnswerTable(actions)]),
+  ];
+};
+
+/** A signal as `signal.act` and `signal.withdraw` return it: always resolved. */
+type ResolvedSignal = Signal & { readonly resolution: SignalResolution };
+
+/**
+ * Returns the line printed after `signal act` and `signal withdraw`: how the
+ * signal was resolved and the outcome line the Done list shows, such as
+ * "signal 0b1c2d3e decided: Approved #1293". Both operations return only a
+ * resolved signal, because a failed call returns an error instead.
+ */
+const renderSignalResolved = (signal: ResolvedSignal): ReadonlyArray<string> => [
+  `signal ${formatCell(signal.id)} ${signal.resolution.kind}: ${signal.resolution.outcome}`,
+];
+
+/**
+ * Returns the line printed after `signal raise`, with the new signal's full
+ * id. The caller is usually an agent that keeps the id to withdraw the signal
+ * later, and a full id never needs resolving.
+ */
+const renderSignalRaised = (result: SignalRaiseResult): ReadonlyArray<string> => [
+  `signal ${result.signalId} raised`,
+];
 
 /** Returns the lines for the items of a page, or for every item of an `--all` read. */
 type ItemsRenderer = (items: ReadonlyArray<Record<string, unknown>>) => ReadonlyArray<string>;
@@ -897,6 +967,13 @@ const VALUE_RENDERERS: Partial<
   "notification.read": (value) => renderNotification(value as Notification),
   "notification.act": (value) =>
     renderNotificationDecided(value as Notification & { readonly resolution: Resolution }),
+  // `signal.query` returns the whole list rather than a page, like the two
+  // catalog queries above.
+  "signal.query": (value) => renderSignalList(value as ReadonlyArray<Signal>),
+  "signal.read": (value) => renderSignal(value as Signal),
+  "signal.raise": (value) => renderSignalRaised(value as SignalRaiseResult),
+  "signal.act": (value) => renderSignalResolved(value as ResolvedSignal),
+  "signal.withdraw": (value) => renderSignalResolved(value as ResolvedSignal),
   "session.spawn": (value) => renderSpawnedSession(value as Session),
   "session.read": (value) => renderSession(value as Session),
   "session.update": (value) => renderSession(value as Session),

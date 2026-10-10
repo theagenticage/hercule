@@ -114,6 +114,29 @@ describe("a positional whose row resolves tails", () => {
       body: { text: "Actually, start with the test that fails least often." },
     });
   });
+
+  it("resolves a signal tail through signal list, which returns the whole list rather than a page", async () => {
+    const signal = {
+      id: buildId("ccccccc3"),
+      kind: "fyi",
+      origin: { type: "api", actor: "user", eventIds: [7], reason: "Tagged" },
+      title: "Release 4.2 shipped",
+      priority: "normal",
+      blocks: [],
+      actions: [],
+      match: {},
+      status: "open",
+      createdAt: "2026-10-10T09:00:00.000Z",
+    };
+    const { fetch, client } = stubClient(() => (fetch.calls.length === 1 ? [signal] : signal));
+    const command = lookUpCommand("signal", "read");
+    const args = await parseArguments(command, ["0ccccccc3"], refuseStdinRead);
+
+    await execute(client, command, args);
+
+    expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/signals" });
+    expect(fetch.calls[1]).toMatchObject({ method: "GET", path: `/api/v1/signals/${signal.id}` });
+  });
 });
 
 /** Returns a subagent of `sessionId`, as `session subagent list` returns it. */
