@@ -1,5 +1,5 @@
 /**
- * The records of the sidebar states specimen (sidebar-states.tsx): three
+ * The records of the sidebar states specimen (sidebar-states.tsx): four
  * scenes that draw the sidebar states the Bureau book never draws, for a
  * check by eye. `node scripts/capture-sidebar-states.ts` captures each scene
  * in both themes.
@@ -22,6 +22,8 @@
  *   payments-api's "more" row pressed, so the project shows every thread.
  *   With three lines per row, scene 2 expanded would be taller than the
  *   capture's window.
+ * - Scene 4 is scene 2 on the Hercule face, with a GitHub Connection whose
+ *   last check failed, so the Connections row ends in the red dot.
  *
  * The threads run on the sidebar specimen's runner and models
  * (sidebar-fixture.ts), except the one on build-box, a runner that is
@@ -43,6 +45,8 @@ import {
   SPECIMEN_NOW,
   STUDIO_MAC,
 } from "./sidebar-fixture";
+import type { SidebarFace } from "../shell/sidebar-face";
+import { FAILED_CONNECTION } from "./settings-assistants-fixture";
 import type { SidebarRecords } from "./shell-page";
 
 /** A runner that has gone offline. Its thread's row ends in "offline". */
@@ -369,6 +373,8 @@ export interface SidebarScene {
   readonly pressMore: string | null;
   /** The session ids of the threads whose composer holds an unsent message. */
   readonly unsentThreadIds: readonly string[];
+  /** The face the page switches the sidebar to once it is drawn, as a press on the switch would. */
+  readonly face: SidebarFace;
 }
 
 /** The scenes, in order: `?scene=1` is the first. */
@@ -378,12 +384,27 @@ export const SIDEBAR_SCENES: ReadonlyArray<SidebarScene> = [
     path: `/threads/${THREAD_IDS.applePay}`,
     pressMore: null,
     unsentThreadIds: [THREAD_IDS.altText],
+    face: "threads",
   },
-  { records: buildSceneRecords(SCENE_2_THREADS), path: "/", pressMore: null, unsentThreadIds: [] },
+  {
+    records: buildSceneRecords(SCENE_2_THREADS),
+    path: "/",
+    pressMore: null,
+    unsentThreadIds: [],
+    face: "threads",
+  },
   {
     records: buildSceneRecords(PAYMENTS_THREADS),
     path: "/",
     pressMore: "2 more threads",
     unsentThreadIds: [],
+    face: "threads",
+  },
+  {
+    records: { ...buildSceneRecords(SCENE_2_THREADS), connections: [FAILED_CONNECTION] },
+    path: "/",
+    pressMore: null,
+    unsentThreadIds: [],
+    face: "orchestration",
   },
 ];

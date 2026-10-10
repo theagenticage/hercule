@@ -58,11 +58,11 @@ import type {
   OpenRequest,
   PROTOCOL_VERSION,
   ProbeResult,
+  RUNNER_ATTACHMENTS_PATH,
   ProviderEvent,
   RequestResolution,
   RunnerFacts,
   RunnerToController,
-  RUNNER_ATTACHMENTS_PATH,
   SessionBinding,
   SessionInput,
   SessionStart,
@@ -708,10 +708,12 @@ export async function enlistScriptedRunner(
     sessionId: string,
     bytes: Uint8Array<ArrayBuffer>,
   ): Promise<ToolResultAttachment> => {
-    // Plain Node cannot load the protocol package, so the path is written
+    // Plain Node cannot load the protocol package, so the route is written
     // out; `satisfies` fails the typecheck when it changes.
-    const path = "/api/v1/runners/attachments" satisfies typeof RUNNER_ATTACHMENTS_PATH;
-    const route = new URL(path, url);
+    const route = new URL(
+      "/api/v1/runners/attachments" satisfies typeof RUNNER_ATTACHMENTS_PATH,
+      url,
+    );
     route.searchParams.set("sessionId", sessionId);
     const stored = await fetch(route, {
       method: "POST",

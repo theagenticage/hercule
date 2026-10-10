@@ -522,7 +522,7 @@ describe("the sidebar's notifications count", () => {
       notifications,
       user: { "lastChecked.notifications": marker },
     });
-    const { live } = await renderApp({ path: "/intake", api: api.fetch, token: "held" });
+    const { live } = await renderApp({ path: "/check-in", api: api.fetch, token: "held" });
 
     expect(await within(getNotificationsLink()).findByText("2")).toBeDefined();
     const read = api.calls.find((call) => call.path === "/api/v1/notifications");
@@ -545,7 +545,7 @@ describe("the sidebar's notifications count", () => {
     const { api } = buildController({
       notifications: Array.from({ length: 120 }, (_, n) => buildNotification(n, n + 1)),
     });
-    await renderApp({ path: "/intake", api: api.fetch, token: "held" });
+    await renderApp({ path: "/check-in", api: api.fetch, token: "held" });
 
     expect(await within(getNotificationsLink()).findByText("99+")).toBeDefined();
   });
@@ -555,7 +555,7 @@ describe("the sidebar's notifications count", () => {
       notifications: [buildNotification(1, 20), buildNotification(2, 10)],
       user: { "lastChecked.notifications": buildTimestampMinutesAgo(60) },
     });
-    await renderApp({ path: "/intake", api: api.fetch, token: "held" });
+    await renderApp({ path: "/check-in", api: api.fetch, token: "held" });
     expect(await within(getNotificationsLink()).findByText("2")).toBeDefined();
 
     await userEvent.setup().click(getNotificationsLink());

@@ -139,6 +139,11 @@ export interface SidebarRecords {
   readonly runners: ReadonlyArray<Runner>;
   readonly instances: ReadonlyArray<ProviderInstance>;
   readonly user: SignedInUser;
+  /**
+   * The Connections, which decide the red dot on the Connections row of the
+   * Hercule face. None when left out. A screen that reads them too sets its own.
+   */
+  readonly connections?: ReadonlyArray<Connection>;
 }
 
 /** What the thread screen reads of the one thread it shows, as the thread route's loader reads it. */
@@ -316,6 +321,7 @@ const seedQueryCache = (
   queryClient.setQueryData(runnersQuery(client).queryKey, records.runners);
   queryClient.setQueryData(providersQuery(client).queryKey, records.instances);
   queryClient.setQueryData(userQuery(client).queryKey, records.user);
+  queryClient.setQueryData(connectionsQuery(client).queryKey, records.connections ?? []);
   queryClient.setQueryData(
     assistantsQuery(client).queryKey,
     records.assistants.map(({ assistant }) => assistant),

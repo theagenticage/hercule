@@ -277,13 +277,19 @@ const HttpUrl = Schema.String.check(
   ),
 );
 
-/** A menu item the page carries out: Sign Out, New Thread, Office, Settings, or Send. */
+/**
+ * A menu item the page carries out: Sign Out, New Thread, Office, Settings,
+ * Send, or one of View's two faces of the sidebar. `showOrchestrationFace` is
+ * View > Hercule; the identifier leaves out the product name.
+ */
 export const MenuCommand = Schema.Literals([
   "signOut",
   "newThread",
   "openOffice",
   "openSettings",
   "send",
+  "showThreadsFace",
+  "showOrchestrationFace",
 ]);
 export type MenuCommand = typeof MenuCommand.Type;
 
@@ -547,7 +553,7 @@ export interface MainToRendererIpcChannel {
 export const MAIN_TO_RENDERER_IPC_CHANNELS = {
   /**
    * Asks the renderer to carry out a menu item the user chose: Sign Out, New
-   * Thread, Office, Settings, or Send.
+   * Thread, Office, Settings, Send, View > Threads or View > Hercule.
    */
   "menu.command": {
     payload: MenuCommand,

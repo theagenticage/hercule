@@ -219,8 +219,8 @@ rounded square = task, outline triangle = run, speech bubble = session, three-no
 
 **Placement rule: one mark per slot, never two side by side.** A row's leading cell
 holds its state mark and nothing else. Entity glyphs appear only where they are the sole
-mark: the sidebar nav (the four entity items only - Intake, Check-in, Fleet, Connections,
-Notifications and Settings carry no icon) and the decision card's FROM / AGENT fields.
+mark: the sidebar nav (the four entity items only - Intake (in the desktop app), Check-in,
+Fleet, Connections, Notifications and Settings carry no icon) and the decision card's FROM / AGENT fields.
 Strand rows, detail lines and the outcomes digest carry no entity glyph; the domain noun
 in text ("task · in-progress") says it. Priority bars and progress segments count as
 marks under this rule.

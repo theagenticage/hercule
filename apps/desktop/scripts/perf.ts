@@ -15,13 +15,15 @@
  * 1. Through Playwright, to sign in on the sign-in screen, as a user does
  *    once. The app saves the token with the mock keychain, so the run never
  *    touches the real Keychain.
- * 2. Six measured launches: with 40 threads, with 40 threads and one row
+ * 2. Seven measured launches: with 40 threads, with 40 threads and one row
  *    that shows minutes, with 40 threads and Settings › Profile open, the
- *    same with Settings › Assistants open (see `openSettingsSection`), and, after spawning 460 more, with 500 threads,
+ *    same with Settings › Assistants open (see `openSettingsSection`), with
+ *    40 threads and the sidebar's Hercule face showing (see
+ *    `showOrchestrationFace`), and, after spawning 460 more, with 500 threads,
  *    the last time with a thread of 500 transcript rows open (see step 3).
  *    Spec 17 §What Settings costs asks for Settings' memory and idle to be
  *    read with a section open; each section in `SETTINGS_SECTIONS` adds one
- *    launch.
+ *    launch. Spec 17 §What the Hercule face costs asks the same of the face.
  *    Before each of them the fixture restarts the controller with every idle
  *    thread's creation and last activity set hours back. Then the script starts the app
  *    through Playwright, signed in, to warm it up (see `warmUpApp`), and
@@ -286,12 +288,14 @@ interface PlainLaunch {
  * With `opensThread`, the app is expected to open the last open thread, so
  * the first screen is that thread's transcript. With a `settingsSection`,
  * the script opens that section of Settings once the first screen is up (see
- * `openSettingsSection`). The launch times are then still the first
+ * `openSettingsSection`). With `showsOrchestrationFace`, the script switches
+ * the sidebar to its Hercule face once the first screen is up (see
+ * `showOrchestrationFace`). The launch times are then still the first
  * screen's, and the memory, the age labels, the idle samples and the nudges
- * are read with the section open.
+ * are read with the section open or the face showing.
  *
  * Fails when the app does not open its page within 10 s, when the section of
- * Settings has not rendered by the time memory is read, when the window is
+ * Settings or the Hercule face has not rendered by the time memory is read, when the window is
  * not visible while it is sampled, when main showed the window without its
  * first screen, when the first screen is not the shell, or not the thread's
  * transcript when `opensThread` is set, or when the app does not quit
@@ -302,6 +306,7 @@ async function measurePlainLaunch(
   fixture: ThreadFixture,
   opensThread: boolean,
   settingsSection: SettingsSection | null,
+  showsOrchestrationFace: boolean,
 ): Promise<PlainLaunch> {
   const spawnedAt = Date.now();
   const app = await launchPlainApp(userDataDir);
@@ -320,6 +325,9 @@ async function measurePlainLaunch(
         settingsSection,
         pageOpenedAt + MEMORY_READ_AT_MS,
       );
+    }
+    if (showsOrchestrationFace) {
+      await showOrchestrationFace(inspectorUrl, pageSocketUrl, pageOpenedAt + MEMORY_READ_AT_MS);
     }
     await sleepUntil(MEMORY_READ_AT_MS);
     const memory = await readProcessMemory(app.process.pid!);
@@ -419,6 +427,61 @@ async function measurePlainLaunch(
 }
 
 /**
+ * Returns a function that waits until `expression`, evaluated in the page
+ * that `page` is connected to, returns `true`. The function fails with its
+ * `timeoutMessage` when that has not happened by `deadline`, in milliseconds
+ * since the epoch.
+ */
+const buildPageWaiter =
+  (page: Inspector, deadline: number) =>
+  (expression: string, timeoutMessage: string): Promise<true> =>
+    pollUntil(
+      async () =>
+        (await page.evaluate("Runtime.evaluate", { expression, returnByValue: true })) === true
+          ? true
+          : undefined,
+      { timeoutMs: Math.max(0, deadline - Date.now()), intervalMs: 100, timeoutMessage },
+    );
+
+/**
+ * Switches the sidebar of the app's page, which `pageSocketUrl` connects to,
+ * to its Hercule face, and returns once the face has rendered: the sidebar's
+ * list is the `nav` named "Hercule". Fails when that has not happened by
+ * `deadline`, in milliseconds since the epoch.
+ *
+ * Once the page shows the shell, main sends the page the
+ * `showOrchestrationFace` menu command, View › Hercule, through main's
+ * inspector at `inspectorUrl`, without showing the window, as
+ * `openSettingsSection` does. The connection to the page is closed before
+ * the function returns.
+ */
+async function showOrchestrationFace(
+  inspectorUrl: string,
+  pageSocketUrl: string,
+  deadline: number,
+): Promise<void> {
+  const page = await connectInspector(pageSocketUrl);
+  try {
+    const waitInPage = buildPageWaiter(page, deadline);
+    // The sidebar listens for menu commands from the moment it is on screen.
+    await waitInPage(
+      `performance.getEntriesByName("first-screen").length > 0 && document.querySelector("aside") !== null`,
+      "the app did not show the shell before memory was read",
+    );
+    await evaluateInMain(
+      inspectorUrl,
+      `require("electron").BrowserWindow.getAllWindows()[0].webContents.send("menu.command", "showOrchestrationFace")`,
+    );
+    await waitInPage(
+      `document.querySelector('nav[aria-label="Hercule"]') !== null`,
+      "the sidebar did not show the Hercule face before memory was read",
+    );
+  } finally {
+    page.close();
+  }
+}
+
+/**
  * Opens the section of Settings named `section` in the app's page, which
  * `pageSocketUrl` connects to, and returns once the section has rendered:
  * the main pane shows a heading that reads `section`. Fails when that has
@@ -442,14 +505,7 @@ async function openSettingsSection(
 ): Promise<void> {
   const page = await connectInspector(pageSocketUrl);
   try {
-    const waitInPage = (expression: string, timeoutMessage: string) =>
-      pollUntil(
-        async () =>
-          (await page.evaluate("Runtime.evaluate", { expression, returnByValue: true })) === true
-            ? true
-            : undefined,
-        { timeoutMs: Math.max(0, deadline - Date.now()), intervalMs: 100, timeoutMessage },
-      );
+    const waitInPage = buildPageWaiter(page, deadline);
     const sectionName = JSON.stringify(section);
     // The shell listens for menu commands from the moment it is on screen.
     await waitInPage(
@@ -1085,66 +1141,74 @@ function reportLaunch(measured: MeasuredLaunch): void {
   console.log();
 }
 
-const { launches, streaming, longThread, subagents } = await runWithThreadFixture(
-  async (fixture) => {
-    const userDataDir = mkdtempSync(join(tmpdir(), "hercule-desktop-perf-"));
-    try {
-      await fixture.growTo(40);
-      writeSettings(userDataDir, { controllerUrl: fixture.url });
-      await signInOnce(userDataDir);
-      const measured: MeasuredLaunch[] = [];
-      const measure = async (
-        name: string,
-        threadCount: number,
-        twoMinuteRow: boolean,
-        {
-          openThread = null,
-          settingsSection = null,
-        }: {
-          readonly openThread?: LongThread | null;
-          readonly settingsSection?: SettingsSection | null;
-        } = {},
-      ) => {
-        await fixture.prepareLaunch({ twoMinuteRow });
-        if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
-        await warmUpApp(userDataDir);
-        measured.push({
-          name,
-          threadCount,
-          twoMinuteRow,
-          openThread,
-          loadAtSpawn: loadavg()[0]!,
-          ...(await measurePlainLaunch(userDataDir, fixture, openThread !== null, settingsSection)),
-        });
-      };
-      await measure("40 threads, run 1", 40, false);
-      await measure("40 threads, run 2", 40, true);
-      for (const section of SETTINGS_SECTIONS) {
-        await measure(`40 threads, Settings › ${section} open`, 40, false, {
-          settingsSection: section,
-        });
-      }
-      await fixture.growTo(500);
-      await measure("500 threads, run 1", 500, false);
-      const thread = await fixture.growTranscript(LONG_THREAD_ROWS);
-      await measure(
-        `500 threads, a thread of ${String(thread.rowCount)} transcript rows open`,
-        500,
-        false,
-        { openThread: thread },
-      );
-      return {
-        launches: measured,
-        streaming: await measureStreaming(userDataDir, fixture, thread),
-        longThread: thread,
-        subagents: await measureSubagentLaunch(userDataDir, fixture, thread.id),
-      };
-    } finally {
-      rmSync(userDataDir, { recursive: true, force: true });
+const { streaming, longThread, subagents } = await runWithThreadFixture(async (fixture) => {
+  const userDataDir = mkdtempSync(join(tmpdir(), "hercule-desktop-perf-"));
+  try {
+    await fixture.growTo(40);
+    writeSettings(userDataDir, { controllerUrl: fixture.url });
+    await signInOnce(userDataDir);
+    const measure = async (
+      name: string,
+      threadCount: number,
+      twoMinuteRow: boolean,
+      {
+        openThread = null,
+        settingsSection = null,
+        showsOrchestrationFace = false,
+      }: {
+        readonly openThread?: LongThread | null;
+        readonly settingsSection?: SettingsSection | null;
+        readonly showsOrchestrationFace?: boolean;
+      } = {},
+    ) => {
+      await fixture.prepareLaunch({ twoMinuteRow });
+      if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
+      await warmUpApp(userDataDir);
+      // Each launch is reported as soon as it is measured, so a launch that
+      // fails later in the run does not take the earlier readings with it.
+      reportLaunch({
+        name,
+        threadCount,
+        twoMinuteRow,
+        openThread,
+        loadAtSpawn: loadavg()[0]!,
+        ...(await measurePlainLaunch(
+          userDataDir,
+          fixture,
+          openThread !== null,
+          settingsSection,
+          showsOrchestrationFace,
+        )),
+      });
+    };
+    await measure("40 threads, run 1", 40, false);
+    await measure("40 threads, run 2", 40, true);
+    for (const section of SETTINGS_SECTIONS) {
+      await measure(`40 threads, Settings › ${section} open`, 40, false, {
+        settingsSection: section,
+      });
     }
-  },
-);
+    await measure("40 threads, the Hercule face showing", 40, false, {
+      showsOrchestrationFace: true,
+    });
+    await fixture.growTo(500);
+    await measure("500 threads, run 1", 500, false);
+    const thread = await fixture.growTranscript(LONG_THREAD_ROWS);
+    await measure(
+      `500 threads, a thread of ${String(thread.rowCount)} transcript rows open`,
+      500,
+      false,
+      { openThread: thread },
+    );
+    return {
+      streaming: await measureStreaming(userDataDir, fixture, thread),
+      longThread: thread,
+      subagents: await measureSubagentLaunch(userDataDir, fixture, thread.id),
+    };
+  } finally {
+    rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
 
-for (const launch of launches) reportLaunch(launch);
 reportStreaming(streaming, longThread);
 reportSubagentLaunch(subagents);

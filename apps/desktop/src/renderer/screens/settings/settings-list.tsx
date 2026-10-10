@@ -1,5 +1,4 @@
 import type { JSX } from "react";
-import { Link } from "@tanstack/react-router";
 import type { SettingsSectionPath } from "../../app/last-settings-section";
 import type { IconProps } from "../../icons/icon-frame";
 import { BoundIcon } from "../../icons/bound";
@@ -15,7 +14,7 @@ import { ShieldIcon } from "../../icons/shield";
 import { SystemIcon } from "../../icons/system";
 import { ThreadsIcon } from "../../icons/threads";
 import { UserIcon } from "../../icons/user";
-import { SELECTED_LINK_PROPS } from "../selected-link-props";
+import { CONNECTIONS_SECTION, MACHINES_SECTION, SettingsNavRow } from "./settings-nav-row";
 
 /** One row of the Settings list. */
 interface SettingsListRow {
@@ -47,9 +46,14 @@ const SETTINGS_GROUPS: ReadonlyArray<{
     heading: "Crew",
     rows: [
       { label: "Assistants", Icon: CrewIcon, to: "/settings/assistants" },
-      { label: "Connections", Icon: ConnectionsIcon, to: null, carriesConnectionDot: true },
+      {
+        label: "Connections",
+        Icon: ConnectionsIcon,
+        to: CONNECTIONS_SECTION,
+        carriesConnectionDot: true,
+      },
       { label: "Providers", Icon: CpuIcon, to: null },
-      { label: "Machines", Icon: FleetIcon, to: null },
+      { label: "Machines", Icon: FleetIcon, to: MACHINES_SECTION },
     ],
   },
   {
@@ -70,18 +74,12 @@ const SETTINGS_GROUPS: ReadonlyArray<{
   },
 ];
 
-/** The text of the Connections row's dot, as its tooltip and its accessible name. */
-const CONNECTION_ATTENTION = "A Connection needs attention";
-
 /**
  * Renders the Settings list beside a section's body: the book's four groups
  * of rows (spec 17 §Settings, The frame).
  *
- * - A built row is a link to its section, selected while the section is open.
- * - A row whose section is not built yet is drawn but inert: it shows its
- *   hover state, does nothing when pressed, and carries `aria-disabled` and
- *   the tooltip "Not built yet". It is drawn so the list keeps the book's
- *   shape and does not change shape when the section is built.
+ * - A built row is a link to its section; a row whose section is not built
+ *   yet is drawn but inert (`SettingsNavRow`).
  * - The Connections row carries a red dot while `someConnectionNeedsAttention`
  *   is true, whether its section is built or not.
  */
@@ -97,37 +95,17 @@ export function SettingsList({
           <h3 className="side-h">
             <span>{group.heading}</span>
           </h3>
-          {group.rows.map(({ label, Icon, to, carriesConnectionDot }) => {
-            const content = (
-              <>
-                <Icon />
-                <span>{label}</span>
-                {carriesConnectionDot === true && someConnectionNeedsAttention && (
-                  <i
-                    className="dot dot--fail"
-                    role="img"
-                    aria-label={CONNECTION_ATTENTION}
-                    title={CONNECTION_ATTENTION}
-                  />
-                )}
-              </>
-            );
-            return to === null ? (
-              <button
-                key={label}
-                type="button"
-                className="nav-row"
-                aria-disabled="true"
-                title="Not built yet"
-              >
-                {content}
-              </button>
-            ) : (
-              <Link key={label} to={to} className="nav-row" activeProps={SELECTED_LINK_PROPS}>
-                {content}
-              </Link>
-            );
-          })}
+          {group.rows.map(({ label, Icon, to, carriesConnectionDot }) => (
+            <SettingsNavRow
+              key={label}
+              label={label}
+              Icon={Icon}
+              to={to}
+              someConnectionNeedsAttention={
+                carriesConnectionDot === true && someConnectionNeedsAttention
+              }
+            />
+          ))}
         </section>
       ))}
     </nav>

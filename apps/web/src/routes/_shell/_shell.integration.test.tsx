@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderApp, stubApi, type Handler } from "../../app/testing";
+import { NOT_FOUND_HEADLINE } from "../../screens/fallbacks";
 
 const api: Readonly<Record<string, Handler>> = {
   "GET /api/v1/setup": { body: { complete: true } },
@@ -42,7 +43,6 @@ const api: Readonly<Record<string, Handler>> = {
 /** Every screen inside the shell, with its title and the first text it shows. */
 const screens: readonly [path: string, title: string, headline: string][] = [
   ["/", "Sessions", "No runner has been detected on this machine."],
-  ["/intake", "Intake", "Nothing has come in yet."],
   ["/check-in", "Check-in", "Nothing in motion yet."],
   ["/tasks", "Tasks", "No tasks yet."],
   ["/runs", "Runs", "No runs yet."],
@@ -98,13 +98,20 @@ describe("every screen inside the shell", () => {
     expect(screen.queryByRole("navigation", { name: "Hercule" })).toBeNull();
   });
 
-  it("shows an unknown path inside the shell, keeping the sidebar", async () => {
-    await renderApp({ path: "/nope", api: stubApi(api).fetch, token: "held" });
+  // `/intake` was a screen until the web app's Intake was retired (#536); an
+  // old bookmark to it now reaches the not-found screen like any other path.
+  it.each(["/nope", "/intake"])(
+    "shows %s as not found inside the shell, keeping the sidebar",
+    async (path) => {
+      const { router } = await renderApp({ path, api: stubApi(api).fetch, token: "held" });
 
-    expect(screen.getByText("No screen here")).toBeDefined();
-    expect(screen.getByRole("navigation", { name: "Hercule" })).toBeDefined();
-    expect(screen.getByRole("link", { name: "Go to Sessions" })).toBeDefined();
-  });
+      expect(router.state.location.pathname).toBe(path);
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Not found");
+      expect(screen.getByText(NOT_FOUND_HEADLINE)).toBeDefined();
+      expect(screen.getByRole("navigation", { name: "Hercule" })).toBeDefined();
+      expect(screen.getByRole("link", { name: "Go to Sessions" })).toBeDefined();
+    },
+  );
 
   it("shows a path that cannot be decoded as a Hercule screen", async () => {
     // A malformed percent escape fails to decode before any route is matched,

@@ -1,13 +1,14 @@
 /**
- * The app's menu bar: the app menu, File, Edit, Go, Thread and Window, and
- * the MainMenu service, through which main changes it while the app runs.
+ * The app's menu bar: the app menu, File, Edit, View, Go, Thread and Window,
+ * and the MainMenu service, through which main changes it while the app runs.
  *
  * Main carries out none of the app's own items itself. It shows the window
  * and sends the page a menu command, or asks it to open a destination, and
  * the page acts on it.
  *
- * There is no View menu in the packaged app, so it has no page zoom and no
- * reload. In development a View menu adds Reload and Toggle Developer Tools.
+ * The packaged app's View menu holds only the sidebar's two faces, so it has
+ * no page zoom and no reload. In development, View adds Reload and Toggle
+ * Developer Tools.
  *
  * This module imports only Electron's types, and the layer takes Electron's
  * `Menu` as an argument, so unit tests can use the module without Electron.
@@ -31,6 +32,10 @@ import { MainWindow } from "./main-window";
  * - File holds New Thread, ⌘N, which calls `newThread`, and Close Window,
  *   ⌘W, where macOS users look for it. Closing the window hides it; the app
  *   keeps running.
+ * - View holds Threads, ⌥⌘1, which calls `showThreadsFace`, and Hercule,
+ *   ⌥⌘2, which calls `showOrchestrationFace`: they switch the sidebar's
+ *   face. They take ⌥⌘ because ⌘1 to ⌘9 already pick an item in Go.
+ *   `development` adds Reload and Toggle Developer Tools, under a separator.
  * - Go starts with Office, ⌘⇧O, which calls `openOffice`, because the
  *   Office is a place to go, as a thread is. Below a separator it lists
  *   `goItems`, the first nine the page sends, with ⌘1 to ⌘9, each with its
@@ -40,12 +45,11 @@ import { MainWindow } from "./main-window";
  *   cannot tell whether the page has anything to send, and with nothing to
  *   send the page does nothing, as ⏎ in an empty field does.
  * - Edit and Window are Electron's own.
- * - Settings…, Sign Out, New Thread and Office are enabled only when
- *   `signedIn` is true. Only the shell carries them out, and the shell never
+ * - Settings…, Sign Out, New Thread, Threads, Hercule and Office are enabled
+ *   only when `signedIn` is true. Only the shell carries them out, and the shell never
  *   shows while signed out, so they are dimmed then rather than doing
  *   nothing. Main knows only whether a login token is stored, so from the
  *   first run's account step to its end they stay enabled and do nothing.
- * - `development` adds the View menu.
  *
  * The app menu lists its items itself, because Electron's own app menu takes
  * no extra item. Its role still names it after the app.
@@ -62,6 +66,8 @@ const buildMenuTemplate = (options: {
   readonly signOut: () => void;
   readonly newThread: () => void;
   readonly openOffice: () => void;
+  readonly showThreadsFace: () => void;
+  readonly showOrchestrationFace: () => void;
   readonly openSettings: () => void;
   readonly openDestination: (destination: Destination) => void;
   readonly send: () => void;
@@ -94,10 +100,11 @@ const buildMenuTemplate = (options: {
       { role: "quit" },
     ],
   };
-  const view: MenuItemConstructorOptions = {
-    label: "View",
-    submenu: [{ role: "reload" }, { role: "toggleDevTools" }],
-  };
+  const developmentViewItems: Array<MenuItemConstructorOptions> = [
+    { type: "separator" },
+    { role: "reload" },
+    { role: "toggleDevTools" },
+  ];
   return [
     appMenu,
     {
@@ -116,7 +123,24 @@ const buildMenuTemplate = (options: {
       ],
     },
     { role: "editMenu" },
-    ...(options.development ? [view] : []),
+    {
+      label: "View",
+      submenu: [
+        {
+          label: "Threads",
+          accelerator: "Alt+CmdOrCtrl+1",
+          enabled: options.signedIn,
+          click: options.showThreadsFace,
+        },
+        {
+          label: "Hercule",
+          accelerator: "Alt+CmdOrCtrl+2",
+          enabled: options.signedIn,
+          click: options.showOrchestrationFace,
+        },
+        ...(options.development ? developmentViewItems : []),
+      ],
+    },
     {
       label: "Go",
       submenu: [
@@ -149,9 +173,9 @@ export class MainMenu extends Context.Service<
   MainMenu,
   {
     /**
-     * Enables Settings…, Sign Out, New Thread and Office when `signedIn` is
-     * true. Otherwise disables them and removes the Go menu's items, which
-     * the app can no longer open.
+     * Enables Settings…, Sign Out, New Thread, View's Threads and Hercule,
+     * and Office when `signedIn` is true. Otherwise disables them and removes
+     * the Go menu's items, which the app can no longer open.
      */
     readonly setSignedIn: (signedIn: boolean) => Effect.Effect<void>;
 
@@ -170,9 +194,10 @@ export class MainMenu extends Context.Service<
  * Sign Out, start enabled when a login token is stored, and Go lists no
  * item until the page sends its items.
  *
- * Choosing Settings…, Sign Out, New Thread, Office or Send shows the window
- * and sends the page that menu command. Choosing an item in Go shows the
- * window and asks the page to open its destination. `development` adds the View menu.
+ * Choosing Settings…, Sign Out, New Thread, Threads, Hercule, Office or Send
+ * shows the window and sends the page that menu command. Choosing an item in
+ * Go shows the window and asks the page to open its destination.
+ * `development` adds Reload and Toggle Developer Tools to the View menu.
  *
  * Each change builds the menu bar again, because macOS does not show a new
  * label on an item that is already built.
@@ -212,6 +237,8 @@ export const makeMainMenuLayer = (
               signOut: () => sendMenuCommand("signOut"),
               newThread: () => sendMenuCommand("newThread"),
               openOffice: () => sendMenuCommand("openOffice"),
+              showThreadsFace: () => sendMenuCommand("showThreadsFace"),
+              showOrchestrationFace: () => sendMenuCommand("showOrchestrationFace"),
               openSettings: () => sendMenuCommand("openSettings"),
               send: () => sendMenuCommand("send"),
               openDestination: (destination) =>

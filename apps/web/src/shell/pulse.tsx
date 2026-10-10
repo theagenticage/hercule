@@ -3,7 +3,7 @@ import { DisclosureButton, useTabFlag } from "@hercule/ui";
 
 /**
  * The pulse at the foot of the sidebar: a one-line summary of the fleet's
- * signals that expands to the full block. It starts closed, and stays open
+ * status that expands to the full block. It starts closed, and stays open
  * across page loads in this tab once opened. Nothing reports into it yet, so
  * both the line and the block explain that instead of showing an empty list.
  */
@@ -22,8 +22,7 @@ export function Pulse(): JSX.Element {
       </DisclosureButton>
       {open ? (
         <p className="pr-2.5 pb-0.5 pl-[30px] text-fine text-faint">
-          Fleet, assistants and intake report here once a runner joins or a connection brings
-          something in.
+          Fleet and assistants report here once a runner joins.
         </p>
       ) : null}
     </div>

@@ -37,9 +37,9 @@ import { MuteKey } from "./notification";
 export { AccessMode };
 
 /**
- * The longest list a single user setting may hold. The three that are lists -
- * the topic order, the mutes and the onboarding steps - are all short by nature
- * and are replaced whole on every write, so one generous bound covers them.
+ * The longest list a single user setting may hold. The two that are lists, the
+ * mutes and the onboarding steps, are both short by nature and are replaced
+ * whole on every write, so one generous bound covers them.
  */
 export const MAX_SETTING_LIST = 256;
 
@@ -129,9 +129,7 @@ export const SETTING_VALUES = {
   user: {
     /** The IANA zone the user reads times in, chosen during setup. */
     timezone: Timezone,
-    "topics.order": atMost(Schema.NonEmptyString, MAX_SETTING_LIST),
     "notifications.muted": atMost(MuteKey, MAX_SETTING_LIST),
-    "lastChecked.intake": Timestamp,
     "lastChecked.checkin": Timestamp,
     "lastChecked.notifications": Timestamp,
     "onboarding.completedSteps": atMost(Schema.NonEmptyString, MAX_SETTING_LIST),
