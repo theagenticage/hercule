@@ -22,6 +22,7 @@ import {
   type ServiceInstallRequest,
   type Supervisor,
 } from "@hercule/service";
+import { parseErrorEnvelopeMessage } from "./error-envelope";
 import { writeRunnerFile, type RunnerFile } from "./runner-file";
 
 /** The join route is not in the operation table, so its path is written out here. */
@@ -61,18 +62,6 @@ export interface Joined {
 
 const decodeAnswer = Schema.decodeUnknownEffect(JoinAnswer);
 
-const parseRefusalMessage = (status: number, body: string): string => {
-  try {
-    const envelope = JSON.parse(body) as { error?: { message?: unknown } };
-    const message = envelope.error?.message;
-    if (typeof message === "string" && message !== "") return message;
-  } catch {
-    // The body is not JSON, so something other than a controller is
-    // probably listening on that URL.
-  }
-  return `the controller responded with HTTP ${String(status)}`;
-};
-
 const requestJoin = (options: JoinOptions): Effect.Effect<JoinAnswer, JoinError> =>
   Effect.gen(function* () {
     const call = options.fetch ?? fetch;
@@ -107,7 +96,12 @@ const requestJoin = (options: JoinOptions): Effect.Effect<JoinAnswer, JoinError>
     });
     if (!response.ok) {
       return yield* Effect.fail(
-        new JoinError({ message: parseRefusalMessage(response.status, body), retryable: false }),
+        new JoinError({
+          message:
+            parseErrorEnvelopeMessage(body) ??
+            `the controller responded with HTTP ${String(response.status)}`,
+          retryable: false,
+        }),
       );
     }
     const parsed = yield* Effect.try({

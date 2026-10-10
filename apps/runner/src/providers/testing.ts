@@ -6,7 +6,7 @@
  * - waiting for an adapter that reports on its event stream rather than
  *   through the return value of the call;
  * - the User Material of a Thread that has no paths to pass;
- * - a tool image uploader for tests that have no controller.
+ * - an attachment uploader for tests that have no controller.
  *
  * They live here rather than in one adapter's folder so that copies cannot
  * drift apart, for example a wait with a different timeout, or a home one copy
@@ -123,8 +123,8 @@ export const NO_USER_MATERIAL_PATHS: UserMaterial = {
 };
 
 /**
- * A tool image uploader for a test with no controller: it uploads nothing
- * and returns every image as unavailable.
+ * An attachment uploader for a test with no controller: it uploads nothing
+ * and returns every image from a tool's result as unavailable.
  */
 export const NO_CONTROLLER_UPLOADER: AttachmentUploader = {
   upload: () =>

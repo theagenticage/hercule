@@ -241,7 +241,7 @@ const uploadPng = (url: string) =>
     ),
   );
 
-describe("the tool image uploader", () => {
+describe("the attachment uploader", () => {
   it("uploads the bytes with the runner's credential and returns the stored image", async () => {
     const stub = startUploadStub(() => Response.json(STORED, { status: 201 }));
 

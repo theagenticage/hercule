@@ -7,7 +7,7 @@ import * as Effect from "effect/Effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { MAX_ATTACHMENT_BYTES, type ToolResultImage } from "@hercule/protocol";
 import type { AttachmentUploader } from "../attachments";
-import { IMAGE_TOO_LARGE, replaceToolResultImages } from "./claude-code-tool-result-images";
+import { replaceToolResultImages } from "./claude-code-tool-result-images";
 import { PNG_BYTES } from "./testing";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
@@ -104,12 +104,43 @@ describe("replacing the images in a tool result", () => {
     expect(uploader.uploads).toEqual([PNG]);
   });
 
+  it("replaces an image block the tool's structured output repeats, as an MCP tool's does", async () => {
+    const uploader = createRecordingUploader();
+    const text = { type: "text", text: "the screenshot" };
+    const replaced = await replace(
+      uploader,
+      buildToolResult([text, buildImageBlock(PNG)], {
+        content: [text, buildImageBlock(PNG)],
+      }),
+    );
+
+    expect(replaced).toMatchObject({ tool_use_result: { content: [text, buildStored(PNG)] } });
+    expect(JSON.stringify(replaced)).not.toContain(PNG);
+    expect(uploader.uploads).toEqual([PNG]);
+  });
+
+  it("replaces image blocks in a structured output that is an array of blocks", async () => {
+    const uploader = createRecordingUploader();
+    const replaced = await replace(
+      uploader,
+      buildToolResult(
+        [buildImageBlock(PNG), buildImageBlock(OTHER)],
+        [buildImageBlock(OTHER), buildImageBlock(PNG)],
+      ),
+    );
+
+    expect(replaced).toMatchObject({ tool_use_result: [buildStored(OTHER), buildStored(PNG)] });
+    expect(JSON.stringify(replaced)).not.toContain(PNG);
+  });
+
   it("keeps no image larger than the controller stores, and does not upload it", async () => {
     const uploader = createRecordingUploader();
     const large = Buffer.alloc(MAX_ATTACHMENT_BYTES + 1).toString("base64");
     const replaced = await replace(uploader, buildToolResult([buildImageBlock(large)]));
 
-    expect(readContent(replaced)).toEqual([{ type: "image", unavailable: IMAGE_TOO_LARGE }]);
+    expect(readContent(replaced)).toEqual([
+      { type: "image", unavailable: expect.stringContaining("larger than 10 MB") as string },
+    ]);
     expect(uploader.uploads).toEqual([]);
   });
 

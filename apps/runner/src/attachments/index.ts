@@ -4,8 +4,8 @@
  *
  * - the attachment cache fetches the images of an input and caches them on
  *   this machine, so an adapter can hand its harness a local file;
- * - the tool image uploader sends the controller an image an agent's tool
- *   returned, so the session's events carry only a reference to it.
+ * - the attachment uploader sends the controller each image from a tool's
+ *   result, so the session's events carry only a reference to it.
  *
  * A frame on the runner socket carries only a reference to each image. The
  * bytes come over plain HTTP instead, each image on its own request, so a
@@ -41,10 +41,8 @@ import {
   type ToolResultImage,
 } from "@hercule/protocol";
 import type { LocalAttachment } from "../providers";
+import { parseErrorEnvelopeMessage } from "../error-envelope";
 import { truncateFact } from "../providers/text";
-
-/** The route is part of the runner protocol, not the operation table, so its path is written out here. */
-const ATTACHMENT_PATH = "/api/v1/runners/attachments/";
 
 export interface AttachmentCache {
   /**
@@ -100,7 +98,7 @@ export const makeAttachmentCache = (options: {
     path: string,
     signal: AbortSignal,
   ): Promise<void> => {
-    const url = new URL(ATTACHMENT_PATH + reference.id, options.controllerUrl);
+    const url = new URL(`${RUNNER_ATTACHMENTS_PATH}/${reference.id}`, options.controllerUrl);
     let response: Response;
     try {
       response = await fetch(url, {
@@ -190,9 +188,15 @@ export const makeAttachmentCache = (options: {
   };
 };
 
+/**
+ * Uploads the images from a tool's result to the controller, which stores
+ * each one as an Attachment of the session. The runner replaces each image in
+ * a tool's result with the reference this returns before the message becomes
+ * an event, so no event carries an image's bytes.
+ */
 export interface AttachmentUploader {
   /**
-   * Uploads one image an agent's tool returned to the controller, which
+   * Uploads one image from a tool's result to the controller, which
    * stores it for the session, and returns the reference to keep in the
    * image's place. Never fails: an upload that fails, is refused, or does not
    * finish within `ATTACHMENT_UPLOAD_TIMEOUT` returns the image as
@@ -204,18 +208,8 @@ export interface AttachmentUploader {
 const decodeToolResultAttachment = Schema.decodeUnknownSync(ToolResultAttachment);
 
 /**
- * Returns the `message` of the error envelope in a refused upload's body, or
- * undefined when the body is not an error envelope.
- */
-const readErrorMessage = async (response: Response): Promise<string | undefined> => {
-  const body: unknown = await response.json().catch(() => undefined);
-  const message = (body as { readonly error?: { readonly message?: unknown } } | undefined)?.error
-    ?.message;
-  return typeof message === "string" && message !== "" ? message : undefined;
-};
-
-/**
- * Creates the uploader of tool images. The request carries the runner's
+ * Creates the attachment uploader, which uploads each image from a tool's
+ * result to the controller. The request carries the runner's
  * credential, the same one the socket uses, and the image's bytes as its body.
  */
 export const makeAttachmentUploader = (options: {
@@ -248,7 +242,7 @@ export const makeAttachmentUploader = (options: {
     }
     if (response.status !== 201) {
       throw new Error(
-        (await readErrorMessage(response)) ??
+        parseErrorEnvelopeMessage(await response.text().catch(() => "")) ??
           `the controller responded with HTTP ${String(response.status)}`,
       );
     }

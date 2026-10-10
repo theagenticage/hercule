@@ -22,7 +22,7 @@ interface Base64ImageBlock {
 }
 
 /** The reason an image too large for the controller is not kept. */
-export const IMAGE_TOO_LARGE = "The image is larger than 10 MB, so it was not kept.";
+const IMAGE_TOO_LARGE = `The image is larger than ${String(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB, so it was not kept.`;
 
 /** Checks whether a content block is an image with inline base64 data. */
 const isBase64ImageBlock = (block: unknown): block is Base64ImageBlock => {
@@ -76,21 +76,29 @@ const uploadImage = (
 };
 
 /**
- * Returns a copy of `value` in which every `base64` field whose string is the
- * data of an uploaded image holds that image's reference instead. Other
- * base64, such as a PDF's, is left as it is.
+ * Returns a copy of `value`, a tool's structured output, in which each copy
+ * of an uploaded image holds that image's reference instead. An image is
+ * found in two shapes:
+ *
+ * - a `base64` field holding the image's data, as Claude's `Read` writes it;
+ * - an image block with the image's data, as an MCP tool or a subagent
+ *   repeats its result's content.
+ *
+ * Other base64, such as a PDF's, is left as it is.
  */
-const replaceBase64Fields = (
+const replaceUploadedImages = (
   value: unknown,
   references: ReadonlyMap<string, ToolResultImage>,
 ): unknown => {
-  if (Array.isArray(value)) return value.map((item) => replaceBase64Fields(item, references));
+  if (Array.isArray(value)) return value.map((item) => replaceUploadedImages(item, references));
   if (typeof value !== "object" || value === null) return value;
+  const blockReference = isBase64ImageBlock(value) ? references.get(value.source.data) : undefined;
+  if (blockReference !== undefined) return blockReference;
   return Object.fromEntries(
     Object.entries(value).map(([key, field]) => {
       const reference =
         key === "base64" && typeof field === "string" ? references.get(field) : undefined;
-      return [key, reference ?? replaceBase64Fields(field, references)];
+      return [key, reference ?? replaceUploadedImages(field, references)];
     }),
   );
 };
@@ -142,7 +150,7 @@ export const replaceToolResultImages = (
         message: { ...sdk.message, content },
         ...(sdk.tool_use_result === undefined
           ? {}
-          : { tool_use_result: replaceBase64Fields(sdk.tool_use_result, references) }),
+          : { tool_use_result: replaceUploadedImages(sdk.tool_use_result, references) }),
       } as SDKMessage;
     },
   );
