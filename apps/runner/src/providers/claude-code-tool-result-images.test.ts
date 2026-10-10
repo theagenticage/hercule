@@ -266,6 +266,62 @@ describe("replacing the images in a tool result", () => {
     expect(uploader.uploads.toSorted()).toEqual([PNG, OTHER].toSorted());
   });
 
+  it("finds every data URL inside text, and keeps the text around each", async () => {
+    const uploader = createRecordingUploader();
+    const replaced = await replace(
+      uploader,
+      buildToolResult([
+        {
+          type: "text",
+          text: `Before: data:image/png;base64,${PNG}\nand data:image/png;base64,${OTHER}. Saved.`,
+        },
+      ]),
+    );
+
+    expect(readContent(replaced)).toEqual([
+      {
+        type: "text",
+        text: `Before: data:image/png;base64,[image ${buildStoredId(PNG)}]\nand data:image/png;base64,[image ${buildStoredId(OTHER)}]. Saved.`,
+      },
+    ]);
+    expect(uploader.uploads.toSorted()).toEqual([PNG, OTHER].toSorted());
+  });
+
+  it("finds an image whose media type is in capitals", async () => {
+    const uploader = createRecordingUploader();
+    const replaced = await replace(
+      uploader,
+      buildToolResult([{ type: "image", data: PNG, mimeType: "IMAGE/PNG" }]),
+    );
+
+    expect(readContent(replaced)).toEqual([buildStored(PNG)]);
+  });
+
+  it("scrubs an image's base64 from an object key", async () => {
+    const uploader = createRecordingUploader();
+    const replaced = await replace(
+      uploader,
+      buildToolResult([buildImageBlock(PNG)], { [PNG]: "screenshot" }),
+    );
+
+    expect(replaced).toMatchObject({
+      tool_use_result: { [`[image ${buildStoredId(PNG)}]`]: "screenshot" },
+    });
+    expect(JSON.stringify(replaced)).not.toContain(PNG);
+  });
+
+  it("leaves an image block with empty data as it is, and scrubs no text for it", async () => {
+    const uploader = createRecordingUploader();
+    const sdk = buildToolResult([
+      { type: "image", data: "", mimeType: "image/png" },
+      { type: "text", text: "done" },
+    ]);
+    const replaced = await replace(uploader, sdk);
+
+    expect(replaced).toBe(sdk);
+    expect(uploader.uploads).toEqual([]);
+  });
+
   it("scrubs a copy of an image no shape holds, such as structured content repeated as text", async () => {
     const uploader = createRecordingUploader();
     const screenshot = { type: "image", data: PNG, mimeType: "image/png" };

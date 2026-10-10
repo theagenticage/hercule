@@ -11,13 +11,24 @@
  * controller and only a reference to it stays in the message (spec 06,
  * images in tool results).
  *
- * An image is found by its shape (see `readImageData` and
- * `readImageFieldData`). Once found, every copy of its bytes is taken out of
- * the message, whatever shape holds the copy, because the copies are found
- * by the bytes themselves. An image a tool's structured output holds in a
- * shape of the tool's own invention, and nowhere else, is not found: no
- * list of shapes can cover arbitrary JSON. The runner's supervisor still
- * shrinks any event too large for one frame.
+ * What is taken out:
+ *
+ * - an image in a known shape (see `readImageData` and
+ *   `readImageFieldData`) is replaced by its reference;
+ * - an image as a data URL in text has its base64 replaced by a placeholder;
+ * - any other copy of a found image's base64, spelled exactly the same, in
+ *   any text or object key, is replaced by the same placeholder.
+ *
+ * What is not taken out:
+ *
+ * - an image a tool's structured output holds only in a shape of the tool's
+ *   own invention, because no list of shapes covers arbitrary JSON;
+ * - a copy of a found image encoded differently, for example re-padded,
+ *   wrapped over lines, or JSON-escaped (`\/` for `/`), because base64 in
+ *   text has endless equivalent spellings.
+ *
+ * Either stays in the event. The runner's supervisor still shrinks any event
+ * too large for one frame.
  */
 import * as Effect from "effect/Effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -37,8 +48,12 @@ const IMAGE_TOO_LARGE = `The image is larger than ${String(MAX_ATTACHMENT_BYTES 
 /** The reason an image whose upload had not started when the session stopped is not kept. */
 const SESSION_STOPPED = "The session stopped before the image was kept.";
 
-/** Matches the start of a data URL that holds a base64 image. */
-const IMAGE_DATA_URL_PREFIX = /^data:image\/[a-z0-9.+_-]+;base64,/i;
+/**
+ * Matches each data URL that holds a base64 image, anywhere in text. The
+ * first group is the image's base64, which ends at the first character
+ * base64 does not use, so the text around the URL is kept.
+ */
+const IMAGE_DATA_URL = /data:image\/[a-z0-9.+_-]+;base64,([A-Za-z0-9+/]+={0,2})/gi;
 
 /**
  * The number of base64 characters that decode to the 18 bytes the image
@@ -54,7 +69,7 @@ const asRecord = (value: unknown): Readonly<Record<string, unknown>> | undefined
 
 /** Checks whether a declared media type is an image's. */
 const isImageMimeType = (mimeType: unknown): boolean =>
-  typeof mimeType === "string" && mimeType.startsWith("image/");
+  typeof mimeType === "string" && mimeType.toLowerCase().startsWith("image/");
 
 /** Returns `data` when it is a string whose declared media type is an image's, or undefined. */
 const readDeclaredImageData = (data: unknown, mimeType: unknown): string | undefined =>
@@ -126,20 +141,21 @@ const readImageFieldData = (
 };
 
 /**
- * Returns the base64 data of the image `text` is a data URL of, or
- * undefined. Claude's `Bash` keeps the image a command printed this way, in
- * its `stdout`. The text stays text: `scrubImageData` replaces the data in it.
+ * Adds the base64 data of every image inside `value`, at any depth, to
+ * `found`. Text is searched for data URLs: Claude's `Bash` keeps the image a
+ * command printed this way, in its `stdout`. The text stays text, and
+ * `scrubImageData` replaces the data in it. Empty data is not added: it
+ * holds no bytes to take out, and an empty pattern would scrub between
+ * every character.
  */
-const readDataUrlImageData = (text: string): string | undefined => {
-  const prefix = IMAGE_DATA_URL_PREFIX.exec(text);
-  return prefix === null ? undefined : text.slice(prefix[0].length);
-};
-
-/** Adds the base64 data of every image inside `value`, at any depth, to `found`. */
 const findImages = (value: unknown, found: Set<string>): void => {
-  const data = typeof value === "string" ? readDataUrlImageData(value) : readImageData(value);
+  if (typeof value === "string") {
+    for (const match of value.matchAll(IMAGE_DATA_URL)) found.add(match[1]!);
+    return;
+  }
+  const data = readImageData(value);
   if (data !== undefined) {
-    found.add(data);
+    if (data !== "") found.add(data);
     return;
   }
   if (Array.isArray(value)) {
@@ -151,17 +167,17 @@ const findImages = (value: unknown, found: Set<string>): void => {
   for (const [key, field] of Object.entries(record)) {
     const fieldData = readImageFieldData(record, key);
     if (fieldData === undefined) findImages(field, found);
-    else found.add(fieldData);
+    else if (fieldData !== "") found.add(fieldData);
   }
 };
 
 /**
- * Returns `text` with every copy of an uploaded image's base64 replaced by
+ * Returns `text` with every exact copy of a found image's base64 replaced by
  * a short placeholder naming the image, such as `[image <id>]`. Text holds
  * an image as a data URL, or as a copy no shape holds, for example the JSON
  * of an MCP tool's `structuredContent` repeated as text, which MCP
- * recommends. The agent has
- * already read the text; the copy in the transcript is for people.
+ * recommends. The agent has already read the text; the copy in the
+ * transcript is for people.
  */
 const scrubImageData = (text: string, references: ReadonlyMap<string, ToolResultImage>): string => {
   let scrubbed = text;
@@ -177,7 +193,8 @@ const scrubImageData = (text: string, references: ReadonlyMap<string, ToolResult
 /**
  * Returns a copy of `value` in which each image `findImages` found holds its
  * reference from `references`, keyed by the image's data, instead, and every
- * other copy of an image's bytes, in any text, is scrubbed.
+ * other exact copy of an image's base64, in any text or object key, is
+ * scrubbed.
  */
 const replaceImages = (
   value: unknown,
@@ -189,11 +206,13 @@ const replaceImages = (
   if (Array.isArray(value)) return value.map((item) => replaceImages(item, references));
   const record = asRecord(value);
   if (record === undefined) return value;
+  // Two keys that scrub to the same text keep the last field; both held
+  // the same image, so nothing a person reads is lost.
   return Object.fromEntries(
     Object.entries(record).map(([key, field]) => {
       const fieldData = readImageFieldData(record, key);
       return [
-        key,
+        scrubImageData(key, references),
         fieldData === undefined
           ? replaceImages(field, references)
           : (references.get(fieldData) ?? field),
