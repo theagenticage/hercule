@@ -45,7 +45,7 @@ import { claudeCode, makeClaudeCodeAdapter } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import { runProcess } from "./process";
 import type { ProviderRunnerContext } from "./index";
-import { NO_USER_MATERIAL_PATHS } from "./testing";
+import { NO_CONTROLLER_TOOL_IMAGES, NO_USER_MATERIAL_PATHS } from "./testing";
 
 const binary = Bun.which("claude") ?? undefined;
 
@@ -101,6 +101,7 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
       const context: ProviderRunnerContext = {
         cwd: null,
         attachmentsDir: null,
+        toolImages: NO_CONTROLLER_TOOL_IMAGES,
         home: createTemporaryHome(),
         binary: binary!,
         env: { PATH: process.env["PATH"] ?? "" },
@@ -191,6 +192,7 @@ const authed =
             {
               cwd: null,
               attachmentsDir: null,
+              toolImages: NO_CONTROLLER_TOOL_IMAGES,
               home: CONFIG_DIR,
               binary,
               env: process.env,
@@ -305,6 +307,7 @@ const buildContext = (
 ): ProviderRunnerContext => ({
   cwd,
   attachmentsDir: null,
+  toolImages: NO_CONTROLLER_TOOL_IMAGES,
   home: CONFIG_DIR,
   binary: binary!,
   env: {
@@ -714,6 +717,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
     const context: ProviderRunnerContext = {
       cwd: scratch,
       attachmentsDir: null,
+      toolImages: NO_CONTROLLER_TOOL_IMAGES,
       home,
       binary: binary!,
       // `HOME` points into the temporary directory too, so nothing the CLI
@@ -1001,6 +1005,7 @@ const replayFixture = async (
       {
         cwd: "/workspace",
         attachmentsDir: null,
+        toolImages: NO_CONTROLLER_TOOL_IMAGES,
         home: "/var/hercule/runner/providers/replay",
         binary: "/usr/local/bin/claude",
         env: { PATH: "/usr/bin" },

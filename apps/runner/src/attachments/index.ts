@@ -1,6 +1,11 @@
 /**
- * Fetches the images of an input from the controller and caches them on this
- * machine, so an adapter can hand its harness a local file.
+ * Moves images between this runner and the controller over plain HTTP, in
+ * both directions:
+ *
+ * - the attachment cache fetches the images of an input and caches them on
+ *   this machine, so an adapter can hand its harness a local file;
+ * - the tool image uploader sends the controller an image an agent's tool
+ *   returned, so the session's events carry only a reference to it.
  *
  * A frame on the runner socket carries only a reference to each image. The
  * bytes come over plain HTTP instead, each image on its own request, so a
@@ -26,8 +31,17 @@ import { open } from "node:fs/promises";
 import { join as joinPath } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import { ATTACHMENT_DOWNLOAD_TIMEOUT, type AttachmentReference } from "@hercule/protocol";
+import * as Schema from "effect/Schema";
+import {
+  ATTACHMENT_DOWNLOAD_TIMEOUT,
+  StoredToolImage,
+  TOOL_IMAGE_UPLOAD_PATH,
+  TOOL_IMAGE_UPLOAD_TIMEOUT,
+  type AttachmentReference,
+  type ToolResultImage,
+} from "@hercule/protocol";
 import type { LocalAttachment } from "../providers";
+import { truncateFact } from "../providers/text";
 
 /** The route is part of the runner protocol, not the operation table, so its path is written out here. */
 const ATTACHMENT_PATH = "/api/v1/runners/attachments/";
@@ -172,6 +186,87 @@ export const makeAttachmentCache = (options: {
         return Effect.forEach(references, (reference) => cacheOne(dir, reference, signal), {
           concurrency: "unbounded",
         });
+      }),
+  };
+};
+
+export interface ToolImageUploader {
+  /**
+   * Uploads one image an agent's tool returned to the controller, which
+   * stores it for the session, and returns the reference to keep in the
+   * image's place. Never fails: an upload that fails, is refused, or does not
+   * finish within `TOOL_IMAGE_UPLOAD_TIMEOUT` returns the image as
+   * `unavailable`, with the reason for the user.
+   */
+  readonly upload: (sessionId: string, bytes: Uint8Array) => Effect.Effect<ToolResultImage>;
+}
+
+const decodeStoredToolImage = Schema.decodeUnknownSync(StoredToolImage);
+
+/**
+ * Returns the `message` of the error envelope in a refused upload's body, or
+ * undefined when the body is not an error envelope.
+ */
+const readErrorMessage = async (response: Response): Promise<string | undefined> => {
+  const body: unknown = await response.json().catch(() => undefined);
+  const message = (body as { readonly error?: { readonly message?: unknown } } | undefined)?.error
+    ?.message;
+  return typeof message === "string" && message !== "" ? message : undefined;
+};
+
+/**
+ * Creates the uploader of tool images. The request carries the runner's
+ * credential, the same one the socket uses, and the image's bytes as its body.
+ */
+export const makeToolImageUploader = (options: {
+  readonly controllerUrl: string;
+  readonly credential: string;
+}): ToolImageUploader => {
+  /**
+   * Uploads one image and returns the stored image. Throws an error whose
+   * message the user can read. The controller reads the image's type from
+   * its first bytes, so the request names no type.
+   */
+  const send = async (sessionId: string, bytes: Uint8Array): Promise<StoredToolImage> => {
+    const url = new URL(TOOL_IMAGE_UPLOAD_PATH, options.controllerUrl);
+    url.searchParams.set("sessionId", sessionId);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { authorization: `Bearer ${options.credential}` },
+        body: bytes,
+        signal: AbortSignal.timeout(Duration.toMillis(TOOL_IMAGE_UPLOAD_TIMEOUT)),
+      });
+    } catch (error) {
+      throw new Error(
+        error instanceof DOMException && error.name === "TimeoutError"
+          ? `the controller did not store it within ${Duration.format(TOOL_IMAGE_UPLOAD_TIMEOUT)}`
+          : `the controller could not be reached: ${describeError(error)}`,
+        { cause: error },
+      );
+    }
+    if (response.status !== 201) {
+      throw new Error(
+        (await readErrorMessage(response)) ??
+          `the controller responded with HTTP ${String(response.status)}`,
+      );
+    }
+    try {
+      return decodeStoredToolImage(await response.json());
+    } catch (error) {
+      throw new Error("the controller's answer was not a stored image", { cause: error });
+    }
+  };
+
+  return {
+    upload: (sessionId, bytes) =>
+      Effect.match(Effect.tryPromise({ try: () => send(sessionId, bytes), catch: describeError }), {
+        onSuccess: (attachment): ToolResultImage => ({ type: "image", attachment }),
+        onFailure: (why): ToolResultImage => ({
+          type: "image",
+          unavailable: truncateFact(`The image could not be kept: ${why}`),
+        }),
       }),
   };
 };

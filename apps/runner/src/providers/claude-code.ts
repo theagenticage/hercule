@@ -58,7 +58,9 @@ import {
   takeStopsDue,
   type RequestOpened,
 } from "./claude-code-subagents";
+import type { ToolImageUploader } from "../attachments";
 import { appendAttachmentPaths, readAttachmentBase64 } from "./attachments";
+import { replaceToolImages } from "./claude-code-tool-images";
 import type { AdapterTurnInput, ProviderAdapter, ProviderRunnerContext } from "./index";
 import { makeInstall } from "./install";
 import { PROBE_DEADLINE, buildFailedProbe } from "./probe";
@@ -640,6 +642,8 @@ interface Live {
   readonly input: Pushable<SDKUserMessage>;
   readonly stream: ClaudeStream;
   readonly state: Normalizing;
+  /** Uploads the images in the session's tool results, so its events carry only references. */
+  readonly toolImages: ToolImageUploader;
   /**
    * The requests this session is waiting on, by request id: one for each
    * `canUseTool` call still open, from the session's own agent or a subagent.
@@ -917,7 +921,11 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     let reason: ExitReason = "process_exit";
     try {
       for await (const sdk of held.stream) {
-        publishMessageEvents(held, normalize(held.state, sdk));
+        // Awaited one message at a time, so the events keep the harness's order.
+        const withReferences = await Effect.runPromise(
+          replaceToolImages(held.toolImages, sessionId, sdk),
+        );
+        publishMessageEvents(held, normalize(held.state, withReferences));
         sendDueStops(held);
         withdrawRequestsOfDroppedSubagents(held);
       }
@@ -1039,6 +1047,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
                 spec.outputSchema,
                 spec.continue?.subagents,
               ),
+              toolImages: ctx.toolImages,
               parks: new Map(),
               stopping: undefined,
               inputGeneration: 0,

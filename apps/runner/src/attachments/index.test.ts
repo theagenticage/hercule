@@ -1,5 +1,6 @@
 /**
- * Tests the runner's cache of attached images against a stub controller.
+ * Tests the runner's cache of attached images, and its uploader of tool
+ * images, against a stub controller.
  *
  * The stub is `Bun.serve`, because this package must not import controller
  * code. It serves the attachment route and counts the requests, so a test can
@@ -11,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import type { AttachmentReference } from "@hercule/protocol";
-import { makeAttachmentCache } from "./index";
+import { TOOL_IMAGE_UPLOAD_PATH, type AttachmentReference } from "@hercule/protocol";
+import { makeAttachmentCache, makeToolImageUploader } from "./index";
 
 const CREDENTIAL = "runner-credential-for-a-test";
 
@@ -191,5 +192,110 @@ describe("the attachment cache", () => {
       `the image "${IMAGE_A.name}" could not be fetched from the controller: the controller responded with HTTP 404`,
     );
     expect(existsSync(join(dir, IMAGE_A.id))).toBe(false);
+  });
+});
+
+/** One request the stub upload route received. */
+interface Upload {
+  readonly path: string;
+  readonly sessionId: string | null;
+  readonly authorization: string | null;
+  readonly body: Buffer;
+}
+
+/** Starts a stub controller whose upload route records each request and answers with `respond`. */
+const startUploadStub = (
+  respond: () => Response | Promise<Response>,
+): { readonly url: string; readonly uploads: Array<Upload>; readonly stop: () => void } => {
+  const uploads: Array<Upload> = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (request) => {
+      const url = new URL(request.url);
+      uploads.push({
+        path: url.pathname,
+        sessionId: url.searchParams.get("sessionId"),
+        authorization: request.headers.get("authorization"),
+        body: Buffer.from(await request.arrayBuffer()),
+      });
+      return respond();
+    },
+  });
+  servers.push(server);
+  return {
+    url: `http://127.0.0.1:${String(server.port)}`,
+    uploads,
+    stop: () => void server.stop(true),
+  };
+};
+
+const TOOL_SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
+const STORED = { id: "0199e0e7-0000-7000-8000-0000000000c1", mimeType: "image/png", sizeBytes: 70 };
+
+const uploadPng = (url: string) =>
+  Effect.runPromise(
+    makeToolImageUploader({ controllerUrl: url, credential: CREDENTIAL }).upload(TOOL_SESSION, PNG),
+  );
+
+describe("the tool image uploader", () => {
+  it("uploads the bytes with the runner's credential and returns the stored image", async () => {
+    const stub = startUploadStub(() => Response.json(STORED, { status: 201 }));
+
+    expect(await uploadPng(stub.url)).toEqual({ type: "image", attachment: STORED });
+    expect(stub.uploads).toEqual([
+      {
+        path: TOOL_IMAGE_UPLOAD_PATH,
+        sessionId: TOOL_SESSION,
+        authorization: `Bearer ${CREDENTIAL}`,
+        body: PNG,
+      },
+    ]);
+  });
+
+  it("returns the image as unavailable with the controller's reason when it refuses the image", async () => {
+    const stub = startUploadStub(() =>
+      Response.json(
+        {
+          error: { code: "validation", message: "the image is not a PNG, JPEG, GIF or WebP image" },
+        },
+        { status: 400 },
+      ),
+    );
+
+    expect(await uploadPng(stub.url)).toEqual({
+      type: "image",
+      unavailable: "The image could not be kept: the image is not a PNG, JPEG, GIF or WebP image",
+    });
+  });
+
+  it("names the HTTP status when a refusal has no error envelope", async () => {
+    const stub = startUploadStub(() => new Response("Payload Too Large", { status: 413 }));
+
+    expect(await uploadPng(stub.url)).toEqual({
+      type: "image",
+      unavailable: "The image could not be kept: the controller responded with HTTP 413",
+    });
+  });
+
+  it("returns the image as unavailable when the controller's answer is not a stored image", async () => {
+    const stub = startUploadStub(() => Response.json({ id: "not-a-storage-id" }, { status: 201 }));
+
+    expect(await uploadPng(stub.url)).toEqual({
+      type: "image",
+      unavailable: "The image could not be kept: the controller's answer was not a stored image",
+    });
+  });
+
+  it("returns the image as unavailable when the controller cannot be reached", async () => {
+    const stub = startUploadStub(() => Response.json(STORED, { status: 201 }));
+    stub.stop();
+
+    const result = await uploadPng(stub.url);
+
+    expect(result).toMatchObject({ type: "image" });
+    expect("unavailable" in result && result.unavailable).toMatch(
+      /^The image could not be kept: the controller could not be reached/,
+    );
   });
 });

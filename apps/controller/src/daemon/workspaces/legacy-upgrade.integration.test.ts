@@ -38,6 +38,7 @@ import { migrations } from "../../db/migrations";
 import { get, post, PASSWORD, USERNAME } from "../../http/testing";
 import { waitUntil } from "../../sessions/testing";
 import { connectProofRunner, startControllerProcess } from "./transport.testing";
+import { NO_CONTROLLER_TOOL_IMAGES } from "../../../../runner/src/providers/testing";
 
 afterAll(cleanTemporaries);
 const createFixtureId = (): string => uuidToString(mintUuid());
@@ -360,6 +361,7 @@ describe("pre-change controller and provider-state upgrade", () => {
               providersDir: join(fixture.storageDir, "providers"),
               scratchDir: join(fixture.storageDir, "scratch"),
               attachmentsDir: join(fixture.storageDir, "attachments"),
+              toolImages: NO_CONTROLLER_TOOL_IMAGES,
               attachments: makeAttachmentCache({
                 controllerUrl: "https://controller.example:4938",
                 credential: "test",

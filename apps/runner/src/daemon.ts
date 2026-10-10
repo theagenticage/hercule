@@ -16,7 +16,7 @@ import {
   serveCredentialSocket,
   buildSocketPath,
 } from "./credentials";
-import { makeAttachmentCache } from "./attachments";
+import { makeAttachmentCache, makeToolImageUploader } from "./attachments";
 import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { providerLogins } from "./providers";
@@ -155,6 +155,10 @@ export const runDaemon = (
         controllerUrl: pin.controllerUrl,
         credential: pin.credential,
       });
+      const toolImages = makeToolImageUploader({
+        controllerUrl: pin.controllerUrl,
+        credential: pin.credential,
+      });
       const socketPath = buildSocketPath(storageDir);
       // The runner's own git gets its credentials the same way a session's git
       // does: through this socket, with nothing written to disk.
@@ -206,6 +210,7 @@ export const runDaemon = (
             scratchDir,
             attachmentsDir,
             attachments,
+            toolImages,
             workspaces,
             workspaceSteps,
             socketPath,

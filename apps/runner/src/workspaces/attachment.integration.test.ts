@@ -26,6 +26,7 @@ import {
   runGitOrThrow,
 } from "./testing";
 import { makeAttachmentCache } from "../attachments";
+import { NO_CONTROLLER_TOOL_IMAGES } from "../providers/testing";
 
 afterAll(cleanTemporaries);
 
@@ -282,6 +283,7 @@ describe("recovering attachment availability", () => {
       providersDir: join(fixture.storageDir, "providers"),
       scratchDir: join(fixture.storageDir, "scratch"),
       attachmentsDir: join(fixture.storageDir, "attachments"),
+      toolImages: NO_CONTROLLER_TOOL_IMAGES,
       attachments: makeAttachmentCache({
         controllerUrl: "https://controller.example:4938",
         credential: "test",

@@ -13,6 +13,7 @@ import type { Machine } from "../sessions/context";
 import { makeSupervising } from "../sessions/supervisor";
 import { ADAPTER_IDS, findAdapter, adapters } from "./index";
 import { makeAttachmentCache } from "../attachments";
+import { NO_CONTROLLER_TOOL_IMAGES } from "./testing";
 
 describe("the adapters in this runner build", () => {
   it("finds Codex by the provider id and binary name its plugin declares", () => {
@@ -39,6 +40,7 @@ describe("the adapters in this runner build", () => {
       providersDir: "/var/hercule/runner/providers",
       scratchDir: "/var/hercule/runner/scratch",
       attachmentsDir: "/var/hercule/runner/attachments",
+      toolImages: NO_CONTROLLER_TOOL_IMAGES,
       attachments: makeAttachmentCache({
         controllerUrl: "https://controller.example:4938",
         credential: "test",

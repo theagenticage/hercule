@@ -12,7 +12,14 @@ import { join } from "node:path";
 import { Effect, Stream } from "effect";
 import type { ProviderEvent, SessionSpec } from "@hercule/protocol";
 import type { ProviderRunnerContext } from "../index";
-import { CWD, createLines, createScratchHome, filterByTag, waitUntil } from "../testing";
+import {
+  CWD,
+  createLines,
+  createScratchHome,
+  filterByTag,
+  NO_CONTROLLER_TOOL_IMAGES,
+  waitUntil,
+} from "../testing";
 import { makeCodexAdapter, type CodexSeam } from "./adapter";
 
 export {
@@ -31,6 +38,7 @@ export const createCodexHome = (): string => createScratchHome("codex");
 export const buildContext = (home: string, cwd: string | null = null): ProviderRunnerContext => ({
   cwd,
   attachmentsDir: null,
+  toolImages: NO_CONTROLLER_TOOL_IMAGES,
   home,
   binary: "/usr/local/bin/codex",
   env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },

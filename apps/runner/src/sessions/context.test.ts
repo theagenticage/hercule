@@ -37,6 +37,7 @@ import {
   buildProvisionFrame,
 } from "../workspaces/testing";
 import { makeAttachmentCache } from "../attachments";
+import { NO_CONTROLLER_TOOL_IMAGES } from "../providers/testing";
 
 const roots: Array<string> = [];
 
@@ -60,6 +61,7 @@ const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
     providersDir: join(under, "providers"),
     scratchDir: join(under, "scratch"),
     attachmentsDir: join(under, "attachments"),
+    toolImages: NO_CONTROLLER_TOOL_IMAGES,
     attachments: makeAttachmentCache({
       controllerUrl: "https://controller.example:4938",
       credential: "test",

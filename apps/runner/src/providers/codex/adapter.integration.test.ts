@@ -47,7 +47,7 @@ import { codex, makeCodexAdapter } from "./adapter";
 import { runProcess, spawnAppServer } from "../process";
 import { startMockModel } from "./mock-model.testing";
 import type { ProviderRunnerContext } from "../index";
-import { createLines, NO_USER_MATERIAL_PATHS } from "../testing";
+import { createLines, NO_CONTROLLER_TOOL_IMAGES, NO_USER_MATERIAL_PATHS } from "../testing";
 import { buildScriptedSeam, listSentParams, SESSION, SPEC } from "./testing";
 
 const binary = process.env["HERCULE_CODEX_TEST_BINARY"] ?? Bun.which("codex") ?? undefined;
@@ -85,6 +85,7 @@ const createHomeWithLogin = (): string => {
 const buildContext = (home: string): ProviderRunnerContext => ({
   cwd: createScratchDir("cwd"),
   attachmentsDir: null,
+  toolImages: NO_CONTROLLER_TOOL_IMAGES,
   home,
   binary: binary!,
   env: { PATH: process.env["PATH"] ?? "" },
