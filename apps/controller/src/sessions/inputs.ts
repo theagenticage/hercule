@@ -493,9 +493,22 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
       `),
 
-    rewrite: (id: string, text: string): Effect.Effect<void, SqlError> =>
+    /**
+     * Replaces the text of an input still waiting, and makes it the input of
+     * the actor who wrote the new text: the actor is replaced, and the source
+     * becomes `user`, even on an input a subscription created. The receiving
+     * agent is told which session sent an input, and that sender is read from
+     * a `user` input's actor. Keeping the old actor would let one caller's
+     * text pass as another's, and keeping the `subscription` source would let
+     * it pass as a subscription's notice, with no sender named.
+     *
+     * The subscription and event an input came from are kept, so the event
+     * still cannot create a second input, and the input is still cancelled
+     * when its subscription ends.
+     */
+    rewrite: (id: string, text: string, actor: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE session_inputs SET text = ${text}
+        UPDATE session_inputs SET text = ${text}, actor = ${actor}, source = 'user'
         WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
       `),
 

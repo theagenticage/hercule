@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { InputSource } from "@hercule/contract";
 import type { StoredInput } from "./inputs";
-import { buildTurnInput } from "./service";
+import { buildTurnInput } from "./turn-input";
 
 const RECEIVER_ID = "0199f0b7-0000-7000-8000-000000000001";
 const SENDER_ID = "0199f0b7-0000-7000-8000-000000000002";

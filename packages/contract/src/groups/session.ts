@@ -454,12 +454,14 @@ export type SessionUpdateInput = Schema.Schema.Type<typeof SessionUpdateInput>;
 /**
  * The body of `session.input`: one turn's input, and whether to steer it.
  *
- * `steer` is only on this payload, not in `SESSION_INPUT_FIELDS`, because a
- * bound answer and an in-process caller only ever queue. With `steer: true`, a
- * busy session gets the input in its running turn, as `input.steer` would do
- * for a queued input. A session in any other status takes the input as if the
- * flag were absent, because the sender cannot know the status at the moment
- * its call lands. Queueing stays the default.
+ * `steer` is only on this payload, not in `SESSION_INPUT_FIELDS`, because two
+ * other callers only ever queue: a notification's answer that runs
+ * `session.input` when the user picks it, and an in-process caller.
+ *
+ * With `steer: true`, a busy session gets the input in its running turn, as
+ * `input.steer` would do for a queued input. A session in any other status
+ * takes the input as if the flag were absent, because the sender cannot know
+ * the status at the moment its call lands. Queueing stays the default.
  */
 export const SessionInputPayload = closedStruct({
   ...SESSION_INPUT_FIELDS,

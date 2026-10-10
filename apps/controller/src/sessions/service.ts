@@ -41,7 +41,6 @@ import {
   type SessionRespondToQuestion,
   type SessionStart,
   type SessionStop,
-  type TurnInput,
   type WorkspaceStepKey,
 } from "@hercule/protocol";
 import {
@@ -72,7 +71,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, parseSessionStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
+import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
 import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
 import { PluginHost } from "../plugins";
 import {
@@ -139,6 +138,7 @@ import {
   type SubagentEventFacts,
 } from "./subagents";
 import { hasOtherTurn, readAssistantTexts, readOpenTurnId } from "./transcript-log";
+import { buildStepKey, buildTurnInput } from "./turn-input";
 import { addUsageReport, clearProcessShare } from "./usage";
 
 const QueryInput = Schema.Struct({
@@ -486,61 +486,6 @@ const RUNNER_LOST =
  */
 const describeExited = (reason: string): string =>
   `that session's harness exited (${reason}) before this input was sent`;
-
-/**
- * Builds the step key of an agent step's prompt: the run and the step its
- * session was started by, and the prompt's `iteration`.
- *
- * Throws when the session was started by no step. Only an agent step creates
- * a step prompt, in the session it started, so that is a bug. Inside an
- * effect the throw is a defect.
- */
-const buildStepKey = (
-  session: Pick<StoredSession, "id" | "runId" | "stepId">,
-  iteration: number,
-): WorkspaceStepKey => {
-  if (session.runId === null || session.stepId === null) {
-    throw new Error(
-      `session ${session.id} holds the prompt of an agent step, but no step started it`,
-    );
-  }
-  return { runId: session.runId, stepId: session.stepId, iteration };
-};
-
-/**
- * Builds what a frame carries to the runner for one stored input. A
- * `sessionInput` and a `sessionStart` carry the same shape:
- *
- * - its text, and its images when it has any;
- * - the session's current model selection;
- * - for an agent step's prompt, the step's key, so the runner knows the turn
- *   the prompt starts is the step's and reports its result;
- * - `senderSessionId`, when another session's agent sent the input as a
- *   message: the row's source is `user`, its actor is `session:<id>`, and that
- *   id is not the receiving session's own. A session that spawned this one
- *   counts, because the spawn stores its prompt the same way.
- *
- * The sender comes from the stored actor, which the controller took from the
- * caller's credential, so no caller can choose it. Any other input has no
- * sender: the owner's, a run's, a session's message to itself, and every
- * input a subscription, a heartbeat or a reminder created.
- *
- * Throws, as a defect, on a step prompt whose session was started by no step
- * (`buildStepKey`).
- */
-export const buildTurnInput = (
-  session: Pick<StoredSession, "id" | "runId" | "stepId" | "modelSelection">,
-  row: StoredInput,
-): TurnInput => {
-  const senderSessionId = row.source === "user" ? parseSessionStamp(row.actor) : undefined;
-  return {
-    text: row.text,
-    ...(row.attachments.length === 0 ? {} : { attachments: row.attachments }),
-    modelSelection: session.modelSelection,
-    ...(row.stepIteration === null ? {} : { step: buildStepKey(session, row.stepIteration) }),
-    ...(senderSessionId === undefined || senderSessionId === session.id ? {} : { senderSessionId }),
-  };
-};
 
 /**
  * Returns the provider-native session id from a `session.started` event, if
@@ -2700,6 +2645,12 @@ const make = Effect.gen(function* () {
      * still waiting, and dispatch sends whatever text it holds when it claims
      * it. Once the start claims it, it is on the wire and refused like any
      * other sent input.
+     *
+     * The changed input becomes the caller's: its actor is the caller's and
+     * its source is `user`, even on an input a subscription created. It is
+     * sent as the caller's input, images included, and the agent that
+     * receives it is told the caller sent it. The images it already carries stay, and a new image
+     * must have been uploaded by the caller (`readClaimableAttachments`).
      */
     updateInput: (input: InputUpdate): Effect.Effect<Input, InputError> =>
       Effect.gen(function* () {
@@ -2713,7 +2664,8 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const row = yield* queuedInput(id, inputId);
-            yield* inputs.rewrite(inputId, text);
+            const actor = yield* currentStamp;
+            yield* inputs.rewrite(inputId, text, actor);
             if (attachments === undefined) {
               // The payload cannot see the stored images, so an empty text
               // that leaves the input with nothing is refused here.
@@ -2722,7 +2674,7 @@ const make = Effect.gen(function* () {
                   createValidationError([{ path: ["text"], message: EMPTY_PROMPT_MESSAGE }]),
                 );
               yield* announceSessionChangeById(id);
-              return buildInputRecord({ ...row, text });
+              return buildInputRecord({ ...row, source: "user", actor, text });
             }
             const references = yield* provideSql(
               readClaimableAttachments(attachments, row.attachments),
@@ -2738,7 +2690,13 @@ const make = Effect.gen(function* () {
             );
             yield* provideSql(claimAttachments(inputId, references));
             yield* announceSessionChange(session);
-            return buildInputRecord({ ...row, text, attachments: references });
+            return buildInputRecord({
+              ...row,
+              source: "user",
+              actor,
+              text,
+              attachments: references,
+            });
           }),
         );
       }),

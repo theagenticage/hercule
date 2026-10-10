@@ -257,8 +257,8 @@ const readUserInstructions = (
  * Builds the items Codex takes as a turn's input: the prompt
  * `buildHarnessPrompt` builds first (the sender header when another agent
  * sent the input, the text, and a line per image naming the file it is saved
- * in), then one `localImage` item per image. Codex reads each image from that file itself, so its bytes never
- * cross the app-server's pipe.
+ * in), then one `localImage` item per image. Codex reads each image from
+ * that file itself, so its bytes never cross the app-server's pipe.
  */
 const buildUserInput = (input: AdapterTurnInput): Array<UserInput> => [
   { type: "text", text: buildHarnessPrompt(input), text_elements: [] },

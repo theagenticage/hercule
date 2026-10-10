@@ -502,10 +502,10 @@ const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"
  * prompt `buildHarnessPrompt` builds: the sender header when another agent
  * sent the input, the text, and the line naming each image's file. Without
  * images, the content is that text as a plain string. With images, it is the
- * text block followed by one base64 image block per image, in order. Claude shrinks a large image itself. The images are read
- * one at a time, so an input with many images does not read all its files at
- * once. Fails with a message naming the image when a cached file cannot be
- * read.
+ * text block followed by one base64 image block per image, in order. Claude
+ * shrinks a large image itself. The images are read one at a time, so an
+ * input with many images does not read all its files at once. Fails with a
+ * message naming the image when a cached file cannot be read.
  */
 const buildUserContent = (
   turn: AdapterTurnInput,

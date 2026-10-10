@@ -2749,7 +2749,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "the session cannot take it: it left no provider-native session to resume, or its runner is retired, draining or no longer connected; or, with --steer true, the runner refused the steer or could not be reached, and the input is stored and still queued",
+        "the session cannot take it: it left no provider-native session to resume, or its runner is retired, draining or no longer connected",
     },
   },
   "session.interrupt": {

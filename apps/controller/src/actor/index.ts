@@ -122,14 +122,15 @@ export const USER_ACTOR = "user";
  */
 export const SYSTEM_ACTOR = "system";
 
+const SESSION_STAMP_PREFIX = "session:";
+
 /**
  * Returns the actor stamp of the session with this id, `session:<id>`. A write
  * the session caused without a request of its own, such as the reply taken
  * from its turn, is stamped with it.
  */
-export const buildSessionStamp = (sessionId: string): string => `session:${sessionId}`;
-
-const SESSION_STAMP_PREFIX = "session:";
+export const buildSessionStamp = (sessionId: string): string =>
+  `${SESSION_STAMP_PREFIX}${sessionId}`;
 
 /**
  * Parses an actor stamp into the id of the session it names. Returns the id

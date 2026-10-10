@@ -45,6 +45,7 @@ import {
   type Forbidden,
   type Session,
   type SessionInputOutcome,
+  type SessionInputPayload,
   type SessionSelection,
   type Unauthenticated,
   type Validation,
@@ -645,6 +646,14 @@ const make = Effect.gen(function* () {
    * flush at the end of the turn, so each caller decides what that means for
    * it. Fails with `InvalidState` when the runner refused the input or is not
    * connected.
+   *
+   * A native steer cannot race the flush: the claim is one conditional write,
+   * so only one of them sends the input. The interrupt can: it is sent only
+   * while a fresh read still finds the input waiting, but `SessionInterrupt`
+   * names no turn. A turn that ends between that read and the interrupt can
+   * have its flush send this input as the next turn, and the interrupt then
+   * stops the input's own turn. The read makes that window short; it cannot
+   * close it.
    */
   const steerInto = (
     session: StoredSession,
@@ -656,6 +665,15 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const { definition } = yield* resolved(session.instanceId);
       if (definition.declared.steering !== "native") {
+        const stillWaiting = yield* sessions.queuedInput(session.id, row.id).pipe(
+          Effect.as(true),
+          Effect.catchIf(
+            (error): error is InvalidState | NotFound =>
+              error instanceof InvalidState || error instanceof NotFound,
+            () => Effect.succeed(false),
+          ),
+        );
+        if (!stillWaiting) return Option.none();
         yield* interruptTurn(session);
         return Option.some({ inputId: row.id, result: "queued" as const });
       }
@@ -693,19 +711,21 @@ const make = Effect.gen(function* () {
         case "busy":
           return yield* sessions.queuedInput(sessionId, inputId).pipe(
             Effect.flatMap((row) => steerInto(session, row)),
-            Effect.flatMap((steered) =>
-              Option.isSome(steered)
+            Effect.flatMap((outcome) =>
+              Option.isSome(outcome)
                 ? Effect.void
                 : Effect.logInfo("An owner's message was not steered; the flush already sent it", {
                     sessionId,
                   }),
             ),
-            // Not found: the flush at the turn's end already sent the input.
+            // The reason tells which case it was: the input is already sent
+            // or gone, or the steer failed and the input waits for the turn's
+            // end.
             Effect.catchIf(
               (error): error is InvalidState | NotFound =>
                 error instanceof InvalidState || error instanceof NotFound,
               (error) =>
-                Effect.logInfo("An owner's message was not steered; it waits for the turn's end", {
+                Effect.logInfo("An owner's message was not steered", {
                   sessionId,
                   reason: error.error.message,
                 }),
@@ -959,8 +979,9 @@ const make = Effect.gen(function* () {
      * - an idle session with no input on the wire is sent the input here;
      * - a busy session, when `steer` is true, gets the input in its running
      *   turn (`steerInto`), as `input.steer` would do for a queued input. The
-     *   result is `queued` when the provider does not steer natively, or when
-     *   the flush at the turn's end sent the input first;
+     *   result is `queued` when the provider does not steer natively, when
+     *   the flush at the turn's end sent the input first, or when the steer
+     *   did not go through (see below);
      * - a session with any other status, or an idle one whose earlier input
      *   is still on the wire, keeps the input queued, whatever `steer` says;
      * - an exited session that this input resumed is dispatched, which places
@@ -969,8 +990,14 @@ const make = Effect.gen(function* () {
      *
      * With `steer` true the caller also needs the grant `input.steer` needs,
      * checked before anything is stored, so a caller refused the steer is
-     * refused the input as well. A steer the runner refuses fails the call,
-     * as it fails `input.steer`, and leaves the stored input queued.
+     * refused the input as well. Today that is `session.steer`, the same
+     * grant `session.input` itself needs.
+     *
+     * A steer that does not go through (the runner refused it, is not
+     * connected, or did not answer in time) is logged, and the result is
+     * `queued`: the input is stored and waiting, and the flush at the turn's
+     * end sends it. Failing the call would make the sender send it again, and
+     * the agent would get the message twice.
      *
      * A delivered result always comes from the runner, never from the status
      * the controller read: only the adapter knows whether the input started a
@@ -979,7 +1006,10 @@ const make = Effect.gen(function* () {
     input: ({
       steer,
       ...input
-    }: InputInput & { readonly steer?: boolean }): Effect.Effect<SessionInputOutcome, InputError> =>
+    }: InputInput & Pick<SessionInputPayload, "steer">): Effect.Effect<
+      SessionInputOutcome,
+      InputError
+    > =>
       Effect.gen(function* () {
         if (steer === true) yield* requireGrant("input.steer");
         const { session, row } = yield* storeInput(input);
@@ -987,12 +1017,25 @@ const make = Effect.gen(function* () {
         // and a transaction never waits on anything outside the database.
         if (session.status === "exited") yield* dispatch(session.runnerId);
         if (row.sentAt !== null) return yield* deliverClaimed(row);
-        // Only a busy session stores the input waiting with a turn running,
-        // and the claim inside `steerInto` keeps the flush from sending it
-        // a second time.
+        // Only a busy session has a running turn to steer the input into; on
+        // any other status the input is handled as without `steer`.
+        // `steerInto` claims the input before it sends it, so the flush at
+        // the turn's end can never send it a second time.
         if (steer === true && session.status === "busy") {
-          const steered = yield* steerInto(session, row);
-          if (Option.isSome(steered)) return steered.value;
+          const outcome = yield* steerInto(session, row).pipe(
+            Effect.catchIf(
+              (error): error is InvalidState => error instanceof InvalidState,
+              (error) =>
+                Effect.as(
+                  Effect.logInfo("A message was not steered; it waits for the turn's end", {
+                    sessionId: session.id,
+                    reason: error.error.message,
+                  }),
+                  Option.none(),
+                ),
+            ),
+          );
+          if (Option.isSome(outcome)) return outcome.value;
         }
         return { inputId: row.id, result: "queued" };
       }),
@@ -1051,9 +1094,9 @@ const make = Effect.gen(function* () {
         // status is.
         const row = yield* sessions.queuedInput(sessionId, inputId);
         if (session.status !== "busy") return yield* Effect.fail(createInvalidStateError(NOT_BUSY));
-        const steered = yield* steerInto(session, row);
-        if (Option.isNone(steered)) return yield* Effect.fail(createInvalidStateError(NOT_WAITING));
-        return steered.value;
+        const outcome = yield* steerInto(session, row);
+        if (Option.isNone(outcome)) return yield* Effect.fail(createInvalidStateError(NOT_WAITING));
+        return outcome.value;
       }),
 
     /**

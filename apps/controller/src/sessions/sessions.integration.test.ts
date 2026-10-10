@@ -1659,20 +1659,9 @@ describe("input.steer", () => {
 });
 
 describe("session.input with steer", () => {
-  /** Starts a session and reports its prompt's turn as started at sequence number 2, so it is busy. */
-  const startBusySession = async (arranged: Arranged, body: unknown): Promise<Session> => {
-    const session = await spawnSessionOrFail(arranged, body);
-    const events = buildTranscript(session.id);
-    await waitForStartFrames(arranged, session.id, 1);
-    reportEvent(arranged.wire, ...events[0]!);
-    reportEvent(arranged.wire, ...events[1]!);
-    await waitForSession(arranged, session.id, (one) => one.status === "busy");
-    return session;
-  };
-
   it("steers the input into a busy session's running turn, and sends it only once", async () => {
     await withFleet(async (arranged) => {
-      const session = await startBusySession(arranged, { prompt: "hello" });
+      const session = await startBusySession(arranged, "hello");
       arranged.wire.answering(() => "steered");
 
       const response = await sendInput(arranged, session.id, { text: "steer me", steer: true });
@@ -1698,10 +1687,15 @@ describe("session.input with steer", () => {
 
   it("interrupts the running turn and answers queued, on a provider that does not steer natively", async () => {
     await withFleet(async (arranged) => {
-      const session = await startBusySession(arranged, {
+      const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
         instanceId: findInstanceId(arranged, "limited-provider"),
       });
+      const [started, turnStarted] = buildTranscript(session.id);
+      await waitForStartFrames(arranged, session.id, 1);
+      reportEvent(arranged.wire, ...started!);
+      reportEvent(arranged.wire, ...turnStarted!);
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
       const before = listInputFrames(arranged.wire).length;
 
       const response = await sendInput(arranged, session.id, { text: "steer me", steer: true });
@@ -1738,6 +1732,23 @@ describe("session.input with steer", () => {
     });
   });
 
+  it("answers queued with the input's id when the runner refuses the steer, and keeps the input waiting", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startBusySession(arranged, "hello");
+      arranged.wire.answering(() => ({ message: "the harness is not ready" }));
+
+      const response = await sendInput(arranged, session.id, { text: "steer me", steer: true });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const answer = (await response.json()) as { inputId: string; result: string };
+      expect(answer.result).toBe("queued");
+      expect(listInputFrames(arranged.wire).at(-1)!.requestId).toBe(answer.inputId);
+      expect(
+        (await listInputs(arranged, session.id)).find((one) => one.id === answer.inputId),
+      ).toMatchObject({ status: "queued", sentAt: null, reason: "the harness is not ready" });
+    });
+  });
+
   it("opens a turn on an idle session, as without the flag", async () => {
     await withFleet(async (arranged) => {
       const session = await startIdleSession(arranged, "hello");
@@ -1751,9 +1762,9 @@ describe("session.input with steer", () => {
     });
   });
 
-  it("refuses a caller without the grant input.steer needs, as input.steer does, and stores nothing", async () => {
+  it("refuses a caller without the steer grant exactly as input.steer refuses it, and stores nothing", async () => {
     await withFleet(async (arranged) => {
-      const target = await startBusySession(arranged, { prompt: "hello" });
+      const target = await startBusySession(arranged, "hello");
       const queued = await sendInput(arranged, target.id, { text: "waiting" });
       expect(queued.status, await queued.clone().text()).toBe(200);
       const { inputId } = (await queued.json()) as { inputId: string };
@@ -1840,17 +1851,6 @@ describe("the sender an input frame names", () => {
     });
   });
 
-  it("names no sender on the owner's message", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startIdleSession(arranged, "hello");
-
-      const response = await sendInput(arranged, session.id, { text: "again" });
-
-      expect(response.status, await response.clone().text()).toBe(200);
-      expect(listInputFrames(arranged.wire).at(-1)!.input).not.toHaveProperty("senderSessionId");
-    });
-  });
-
   it("names no sender on a session's message to itself", async () => {
     await withFleet(async (arranged) => {
       const { session, token } = await spawnThreadWithGrants(arranged, "self", ["session.steer"]);
@@ -1868,6 +1868,68 @@ describe("the sender an input frame names", () => {
       expect(response.status, await response.clone().text()).toBe(200);
       const frame = listInputFrames(arranged.wire).at(-1)!;
       expect(frame.sessionId).toBe(session.id);
+      expect(frame.input).not.toHaveProperty("senderSessionId");
+    });
+  });
+});
+
+describe("the sender of an input someone else changed", () => {
+  /**
+   * Has a session's agent queue a message on a busy session, has the caller
+   * holding `updaterToken` rewrite it, then ends the busy turn so the flush
+   * sends it. Returns the changed input as `input.update` answered it, and the
+   * frame that carried it.
+   */
+  const rewriteAndSend = async (
+    arranged: Arranged,
+    updaterToken: string,
+  ): Promise<{ readonly changed: StoredInput; readonly frame: SessionInput }> => {
+    const receiver = await startBusySession(arranged, "hello");
+    const author = await spawnThreadWithGrants(arranged, "author", ["session.steer"]);
+    const queued = await post(
+      arranged.harness.base,
+      `/api/v1/sessions/${receiver.id}/input`,
+      { text: "the author's words" },
+      author.token,
+    );
+    expect(queued.status, await queued.clone().text()).toBe(200);
+    const { inputId } = (await queued.json()) as { inputId: string };
+
+    const updated = await send(
+      "PATCH",
+      arranged.harness.base,
+      `/api/v1/sessions/${receiver.id}/inputs/${inputId}`,
+      { body: { text: "the updater's words" }, token: updaterToken },
+    );
+    expect(updated.status, await updated.clone().text()).toBe(200);
+    const changed = (await updated.json()) as StoredInput;
+
+    reportTurnCompleted(arranged, receiver.id, 3);
+    await waitUntil("sent the changed input", async () => {
+      const row = (await listInputs(arranged, receiver.id)).find((one) => one.id === inputId);
+      return row?.status === "delivered" ? row : undefined;
+    });
+    const frame = listInputFrames(arranged.wire).find((one) => one.requestId === inputId)!;
+    expect(frame.input.text).toBe("the updater's words");
+    return { changed, frame };
+  };
+
+  it("names the session that changed another session's message", async () => {
+    await withFleet(async (arranged) => {
+      const updater = await spawnThreadWithGrants(arranged, "updater", ["session.steer"]);
+
+      const { changed, frame } = await rewriteAndSend(arranged, updater.token);
+
+      expect(changed.actor).toBe(`session:${updater.session.id}`);
+      expect(frame.input.senderSessionId).toBe(updater.session.id);
+    });
+  });
+
+  it("names no sender once the owner changed an agent's message", async () => {
+    await withFleet(async (arranged) => {
+      const { changed, frame } = await rewriteAndSend(arranged, arranged.token);
+
+      expect(changed.actor).toBe("user");
       expect(frame.input).not.toHaveProperty("senderSessionId");
     });
   });
