@@ -11,11 +11,17 @@ import { sessionQuery, subagentsQuery } from "../../app/queries";
 import { useShownRequestId } from "../../app/request-drafts";
 import { buildLook } from "../../faces";
 import { RequestDock } from "../session/dock";
+import { SessionPermissionRequestDock } from "../session/permission-request-dock";
 import { RequestPager } from "../session/request-pager";
 
 /**
  * Renders the dock of the Request `buildRequestDock` decides the page
- * shows, or nothing while no Request is open.
+ * shows. While no agent Request is open, the main agent's page shows the
+ * session's Permission Requests instead (`SessionPermissionRequestDock`): an agent
+ * Request blocks the agent and a Permission Request does not, so the agent
+ * Request comes first. A subagent's page shows only that subagent's
+ * Requests, and a Permission Request is never a subagent's. Renders nothing
+ * while neither is open.
  *
  * - `sessionId` is the thread's session.
  * - `pageSubagentId` is the subagent whose page this is, whose own Requests
@@ -40,7 +46,11 @@ export function AgentRequestDock({
   const subagents = useSuspenseQuery(subagentsQuery(client, sessionId)).data;
   const [shownRequestId, setShownRequestId] = useShownRequestId(sessionId);
   const dock = buildRequestDock(session.openRequests, subagents, pageSubagentId, shownRequestId);
-  if (dock === null) return null;
+  if (dock === null) {
+    return pageSubagentId === undefined ? (
+      <SessionPermissionRequestDock session={session} look={buildLook(sessionId)} />
+    ) : null;
+  }
   return (
     <>
       {dock.showsAskerLine ? (

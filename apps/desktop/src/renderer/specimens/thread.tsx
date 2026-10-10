@@ -15,12 +15,20 @@
  * open stretch, so that state is not compared either. With `?state=senders`,
  * other agents' messages are in its transcript and its queue: a thread's,
  * an assistant's and one from a session the user cannot read, beside the
- * user's own steered message. The book draws none of them either.
+ * user's own steered message. The book draws none of them either. With
+ * `?state=permission`, the thread waits on no agent Request and the dock
+ * shows a Permission Request instead; `?state=permissions` opens two, so the
+ * pager shows, `?state=permission-scrolled` shrinks the composer, as
+ * `?state=scrolled` does, and `?state=permission-unnamed` reads no profile of
+ * the thread's, so "Add to profile" cannot be given. The book draws no
+ * Permission Request, so none of these is compared; they are for comparing
+ * by eye with its dock.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
 import "./fixed-clock";
 import {
+  buildFixThreadWithPermissionRequests,
   FIX_THREAD,
   FIX_THREAD_WITH_RESULTS,
   FIX_THREAD_WITH_SENDERS,
@@ -32,11 +40,11 @@ import { mountThreadSpecimen } from "./shell-page";
 import { computeScrolledTop, markSheetReady } from "./sheet-page";
 
 /**
- * Scrolls the transcript away from its bottom, to where the book's
- * `?state=scrolled` page has it, and returns once the composer has shrunk.
- * Fails when the page has no transcript.
+ * Scrolls the transcript away from its bottom, to the top `computeTop`
+ * returns for it, and returns once the composer has shrunk. Fails when the
+ * page has no transcript.
  */
-async function scrollTranscriptAway(): Promise<void> {
+async function scrollTranscriptAway(computeTop: (transcript: Element) => number): Promise<void> {
   const transcript = document.querySelector(".transcript");
   if (transcript === null) throw new Error("The thread specimen draws no transcript.");
   // A reader scrolls only once the page has been drawn. By then the
@@ -45,9 +53,12 @@ async function scrollTranscriptAway(): Promise<void> {
   for (let frame = 0; frame < 2; frame += 1) {
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
-  transcript.scrollTop = computeScrolledTop(transcript);
-  // The composer shrinks after the scroll event, which arrives with a later frame.
+  // The composer shrinks after the scroll event, which arrives with a later
+  // frame. The scroll is made again on each frame until then, because a
+  // late change in the page's height can make the transcript follow its
+  // bottom again before that event arrives.
   while (document.querySelector(".composer.is-scrolled") === null) {
+    transcript.scrollTop = computeTop(transcript);
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
 }
@@ -55,6 +66,18 @@ async function scrollTranscriptAway(): Promise<void> {
 const state = new URLSearchParams(location.search).get("state");
 if (state === "senders") {
   await mountThreadSpecimen(SENDERS_PAGE_RECORDS, FIX_THREAD_WITH_SENDERS);
+} else if (state?.startsWith("permission") === true) {
+  const withRequests = buildFixThreadWithPermissionRequests(state === "permissions");
+  const thread = state === "permission-unnamed" ? { ...withRequests, profiles: [] } : withRequests;
+  await mountThreadSpecimen(
+    {
+      ...THREAD_PAGE_RECORDS,
+      threads: THREAD_PAGE_RECORDS.threads.map((each) =>
+        each.id === thread.session.id ? thread.session : each,
+      ),
+    },
+    thread,
+  );
 } else {
   await mountThreadSpecimen(
     THREAD_PAGE_RECORDS,
@@ -66,6 +89,12 @@ if (state === "senders") {
   );
 }
 if (state === "scrolled") {
-  await scrollTranscriptAway();
+  // Where the book's `?state=scrolled` page has the transcript.
+  await scrollTranscriptAway(computeScrolledTop);
+} else if (state === "permission-scrolled") {
+  // The Fix thread without its agent Request overflows the window by only a
+  // few lines, so a scroll part of the way could land close enough to the
+  // bottom to count as at the bottom. The top is always far enough away.
+  await scrollTranscriptAway(() => 0);
 }
 await markSheetReady();

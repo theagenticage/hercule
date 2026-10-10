@@ -850,6 +850,26 @@ export const ensureFirstRunData = async (
 };
 
 /**
+ * Reads the permission profiles once for this opening of a screen, as
+ * `readOnOpen` does, when `session` has an open Permission Request, and
+ * does nothing otherwise. The Requests dock names the session's profile in
+ * the "Add to profile" answer, and the read lets it do so at the first paint.
+ * A screen with no Permission Request open makes no read: the dock reads the
+ * profiles itself when one opens later.
+ *
+ * Never fails. A failed read must not keep the thread or the Conversation
+ * from opening: the dock then shows the answer without its line.
+ */
+const readProfilesForPermissionRequests = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  session: Session,
+): Promise<void> => {
+  if (session.openPermissionRequests.length === 0) return;
+  await readOnOpen(queryClient, profilesQuery(client)).catch(() => {});
+};
+
+/**
  * Reads everything the thread's own agent's page shows of the thread
  * `sessionId` into `queryClient`: its session, its subagents, its whole
  * transcript and its queued inputs, and the session of each agent that sent
@@ -867,6 +887,10 @@ export const ensureFirstRunData = async (
  * fails the thread, and a sender whose read already failed is not read
  * again. The assistants a sender may answer for are shell data, already
  * cached.
+ *
+ * When the session has an open Permission Request, it also reads the
+ * permission profiles, for the name the dock's "Add to profile" answer
+ * shows (see `readProfilesForPermissionRequests`).
  *
  * The thread's loader calls it, and so do the Office, whose drawer shows the
  * thread's page outside the thread's route, and a test that renders one
@@ -891,7 +915,9 @@ export const ensureThreadData = async (
     () => {},
   );
   await Promise.all([
-    queryClient.ensureQueryData(sessionQuery(client, sessionId)),
+    queryClient
+      .ensureQueryData(sessionQuery(client, sessionId))
+      .then((session) => readProfilesForPermissionRequests(queryClient, client, session)),
     queryClient.ensureQueryData(subagentsQuery(client, sessionId)),
     transcript,
     inputs,
@@ -927,6 +953,11 @@ export const ensureConversationData = async (
     queryClient.ensureQueryData(currentConversationSessionQuery(client, conversationId)),
     queryClient.ensureInfiniteQueryData(conversationMessagesQuery(client, conversationId)),
   ]);
-  if (session !== null) await queryClient.ensureQueryData(runningTurnQuery(client, session.id));
+  if (session !== null) {
+    await Promise.all([
+      queryClient.ensureQueryData(runningTurnQuery(client, session.id)),
+      readProfilesForPermissionRequests(queryClient, client, session),
+    ]);
+  }
   return true;
 };

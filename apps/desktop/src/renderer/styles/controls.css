@@ -160,6 +160,11 @@
 .ans[aria-disabled="true"] {
   pointer-events: none;
 }
+/* An answer that cannot be given yet fades its key with its button, so the
+   key does not read as live beside a faded button. */
+.ans:has(> .btn[data-unready]) kbd {
+  opacity: 0.5;
+}
 
 /* ---------- Pills ---------- */
 /* A floating glass layer holding a few controls, such as the thread header's

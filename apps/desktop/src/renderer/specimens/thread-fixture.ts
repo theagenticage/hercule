@@ -21,7 +21,14 @@
  * the book's thread where the app draws the fixture's words instead of the
  * book's.
  */
-import type { Input, OpenRequest, TranscriptRow, Workspace } from "@hercule/contract";
+import type {
+  Input,
+  OpenRequest,
+  PermissionRequest,
+  Profile,
+  TranscriptRow,
+  Workspace,
+} from "@hercule/contract";
 import { buildCheckout, buildWorkspace } from "@hercule/client-core/threads/testing";
 import type { EventBody } from "../app/testing";
 import { ADA, buildAssistantSession } from "./assistant-states-fixture";
@@ -362,6 +369,47 @@ export const FIX_THREAD_WITH_RESULTS: ThreadScreenRecords = {
   ...FIX_THREAD,
   transcript: buildTranscript(FIX_STEPS_WITH_RESULTS),
 };
+
+/** The Fix thread's agent asks to start the release workflow, which its profile does not allow. */
+const RELEASE_REQUEST: PermissionRequest = {
+  id: "01a0ec64-9e00-7000-8000-000000000001",
+  grant: "run.start",
+  reason: "The fix is ready. I want to start the Release workflow to ship it to staging.",
+  operation: { op: "run.start", input: { workflowId: "release" } },
+  createdAt: new Date(SPECIMEN_NOW - 2 * 60_000).toISOString(),
+};
+
+/** A second request of the Fix thread, which names no operation. */
+const SECRET_REQUEST: PermissionRequest = {
+  id: "01a0ec64-9e00-7000-8000-000000000002",
+  grant: "secret.read",
+  reason: "The staging smoke test needs the 3-D Secure sandbox key.",
+  createdAt: new Date(SPECIMEN_NOW - 60_000).toISOString(),
+};
+
+/** The profile the Fix thread runs on. */
+const WORKER_PROFILE: Profile = {
+  id: FIX_SESSION.permissionProfileId,
+  name: "worker",
+  grants: [],
+  shipped: true,
+  createdAt: new Date(SPECIMEN_NOW - 30 * 24 * 60 * 60_000).toISOString(),
+  updatedAt: new Date(SPECIMEN_NOW - 30 * 24 * 60 * 60_000).toISOString(),
+};
+
+/**
+ * The Fix thread working with no agent Request open and `openPermissionRequests`
+ * open, for the thread specimen's `?state=permission` pages and their variants.
+ */
+export const buildFixThreadWithPermissionRequests = (several: boolean): ThreadScreenRecords => ({
+  ...FIX_THREAD,
+  session: {
+    ...FIX_SESSION,
+    openRequests: [],
+    openPermissionRequests: several ? [RELEASE_REQUEST, SECRET_REQUEST] : [RELEASE_REQUEST],
+  },
+  profiles: [WORKER_PROFILE],
+});
 
 /** Every list the shell reads: the sidebar specimen's, with Fix and Read in `FIX_WORKSPACE`. */
 export const THREAD_PAGE_RECORDS: SidebarRecords = {
