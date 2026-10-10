@@ -295,6 +295,13 @@ export const buildForgePlugin = (options: { readonly tokenUrl?: string } = {}): 
             body: Schema.optionalKey(Schema.String),
           }),
           output: Schema.Struct({ reviewed: Schema.Boolean }),
+          usableIn: ["workflow.step", "signal.answer"],
+          describe: (input) => [
+            { kind: "text", text: "Submit a " },
+            { kind: "marked", text: String((input as { verdict?: unknown }).verdict) },
+            { kind: "text", text: " review" },
+          ],
+          outcome: (input) => `Reviewed: ${String((input as { verdict?: unknown }).verdict)}`,
           execute: (input, context) =>
             Effect.sync(() => {
               contexts.push(context);

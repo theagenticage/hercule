@@ -17,7 +17,9 @@ export { registry } from "./registry";
 export { Plugins, PluginsLayer } from "./service";
 export {
   CONNECTION_PARAM,
+  executePluginAction,
   isBuiltInControllerActionId,
+  isUsableAsAnswer,
   separateConnectionParam,
   runsInWorkspace,
   WORKSPACE_ACTION_IDS,

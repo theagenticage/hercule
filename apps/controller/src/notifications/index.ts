@@ -1,5 +1,4 @@
 /** Notifications: the core's one record of what the user should know or decide. */
-export { BindableOperations, type BindableOperationError } from "./bindable-operations";
 export {
   Notifier,
   NotifierLayer,

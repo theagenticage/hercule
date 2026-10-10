@@ -27,7 +27,7 @@ import type { Change } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
-import { BindableOperations, type BindableOperationError } from "./bindable-operations";
+import { BoundOperations, type BoundOperationError } from "../bound-actions";
 import { NotificationService, NotificationServiceLayer } from "./index";
 import { Notifier, NotifierLayer } from "./notifier";
 import { notificationRepository } from "./repository";
@@ -1083,9 +1083,9 @@ describe("notification.act", () => {
 
   /** Runs one operation for a test. It is handed the notifier, so it can resolve decisions. */
   type RunOperation = (
-    operation: AnswerOperation<"notification.answer">,
+    operation: AnswerOperation,
     notifier: Notifier["Service"],
-  ) => Effect.Effect<void, BindableOperationError>;
+  ) => Effect.Effect<void, BoundOperationError>;
 
   /**
    * Builds the notification service over a real database and a fake port
@@ -1094,11 +1094,13 @@ describe("notification.act", () => {
   const buildLayer = (run: RunOperation) =>
     NotificationServiceLayer.pipe(
       Layer.provide(
-        Layer.effect(BindableOperations)(
+        Layer.effect(BoundOperations)(
           Effect.gen(function* () {
             const notifier = yield* Notifier;
-            return BindableOperations.of({
+            return BoundOperations.of({
+              check: () => Effect.die("the notification service checks its own answers"),
               run: (operation) => run(operation, notifier),
+              runPluginAction: () => Effect.die("a notification's answer runs no plugin action"),
               describe: () => Effect.succeed([]),
             });
           }),
@@ -1117,7 +1119,7 @@ describe("notification.act", () => {
    * then ends with `firstOutcome`. Later calls succeed at once. `calls`
    * counts every call.
    */
-  const buildHeldRun = (firstOutcome: Effect.Effect<void, BindableOperationError>) => {
+  const buildHeldRun = (firstOutcome: Effect.Effect<void, BoundOperationError>) => {
     const entered = Effect.runSync(Deferred.make<void>());
     const release = Effect.runSync(Deferred.make<void>());
     const counter = { calls: 0 };

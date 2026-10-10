@@ -105,6 +105,9 @@ export const AUDIT_KINDS = [
   "notification.created",
   "notification.decided",
   "notification.withdrawn",
+  "signal.raised",
+  "signal.decided",
+  "signal.withdrawn",
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -171,6 +174,9 @@ const RECORD_KINDS = {
   "notification.created": "created",
   "notification.decided": "updated",
   "notification.withdrawn": "updated",
+  "signal.raised": "created",
+  "signal.decided": "updated",
+  "signal.withdrawn": "updated",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;

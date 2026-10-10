@@ -1,15 +1,15 @@
 /**
  * The describe line of an answer: what taking it does, written from its
  * operation with the current names of what the operation acts on, such as
- * "Start a run of Bugfix". This is the `describe` half of the notifications
- * domain's `BindableOperations` port.
+ * "Start a run of Bugfix". This is the `describe` half of the
+ * `BoundOperations` port.
  *
- * It reads the tasks, projects, workflows, sessions and Connections an
- * operation names, and those domains depend on the notifications domain, so
- * the domain cannot read them itself. It reads their repositories rather than
- * their services: a describe line is part of reading a notification, not a
- * read of the task or session on the caller's behalf, so their grant checks do
- * not apply.
+ * It reads the tasks, projects, workflows, sessions, signals and Connections
+ * an operation names, and those domains depend on the domains that hold Bound
+ * Actions, so those domains cannot read them themselves. It reads their
+ * repositories rather than their services: a describe line is part of reading
+ * a notification or a signal, not a read of the task or session on the
+ * caller's behalf, so their grant checks do not apply.
  *
  * Because it reads the rows directly, a read rule a service enforces applies
  * here only if this module repeats it. This module repeats one: a deleted task
@@ -20,6 +20,10 @@
  * The user decides from this line, so it shows everything the operation will
  * run in full: the text an answer sends, every changed field, every run input.
  * Nothing is cut short or left out; a screen that runs out of room wraps.
+ *
+ * A plugin action's line is written by the plugin's own `describe`, from the
+ * stored input, and this module adds the plugin's name and the Connection's
+ * label after it: "Merges pull request #113 · GitHub · as work".
  *
  * An entity that no longer exists is named by its id, so a describe line is
  * always written. Names and the values an answer carries are `marked` parts,
@@ -33,7 +37,6 @@ import {
   isId,
   type ApprovalDecision,
   dispatchAnswerOperation,
-  type AnswerOperation,
   type AnswerOperationHandlers,
   type AnswerOperationInput,
   type DescribeLine,
@@ -41,9 +44,17 @@ import {
   type OpenRequest,
   type WorkflowDefinition,
 } from "@hercule/contract";
+import type { AnswerPlace } from "@hercule/plugin-host";
+import {
+  isPluginAnswerOperation,
+  type CheckedOperation,
+  type PluginAnswerOperation,
+} from "../../bound-actions";
 import { connectionRepository } from "../../connections";
+import { PluginHost } from "../../plugins";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
+import { signalRepository } from "../../signals";
 import { taskRepository } from "../../tasks";
 import { workflowRepository } from "../../workflows";
 
@@ -58,8 +69,7 @@ const joinParts = (groups: ReadonlyArray<DescribeLine>, separator: string): Desc
   groups.flatMap((parts, index) => (index === 0 ? parts : [buildTextPart(separator), ...parts]));
 
 /**
- * Formats a list of labels for a task update, such as `label a` or
- * `labels a, b`.
+ * Formats a list of labels for a task, such as `label a` or `labels a, b`.
  */
 const formatLabels = (labels: ReadonlyArray<string>): string =>
   `${labels.length === 1 ? "label" : "labels"} ${labels.join(", ")}`;
@@ -67,7 +77,7 @@ const formatLabels = (labels: ReadonlyArray<string>): string =>
 /**
  * Returns `read` wrapped so that each id is read at most once. The returned
  * function keeps its results for as long as it exists, so a new one is built
- * for each `describe` call: the answers of one decision usually name the same
+ * for each `describe` call: the answers of one record usually name the same
  * entity, and a name read for one call must not go stale in the next.
  */
 const readOncePerId = <A>(read: (id: string) => Effect.Effect<A, SqlError>) => {
@@ -154,7 +164,7 @@ const describeDecision = (
 };
 
 /**
- * Lists what each provenance entry of a task update records, such as
+ * Lists what each provenance entry of a task write records, such as
  * "ref «github:issue:1», run «…»". An entry holds at least one of the three.
  */
 const describeProvenance = (
@@ -179,28 +189,79 @@ const describeProvenance = (
   );
 
 /**
- * Builds the `describe` function of the `BindableOperations` port, which
- * reads the rows of the entities each operation names. It needs only the
- * database.
+ * Lists the fields of a new task after its title, separated by commas, such
+ * as "description «…», priority high, labels a, b". Every value is written in
+ * full. The caller reads the project's name.
+ */
+const describeNewTaskFields = (
+  input: AnswerOperationInput<"task.create">,
+  projectName: string | undefined,
+): DescribeLine =>
+  joinParts(
+    [
+      [buildTextPart("description "), buildMarkedPart(input.description)],
+      ...(input.priority === undefined ? [] : [[buildTextPart(`priority ${input.priority}`)]]),
+      ...(input.labels === undefined || input.labels.length === 0
+        ? []
+        : [[buildTextPart(formatLabels(input.labels))]]),
+      ...(projectName === undefined
+        ? []
+        : [[buildTextPart("in project "), buildMarkedPart(projectName)]]),
+      ...(input.provenance === undefined || input.provenance.length === 0
+        ? []
+        : [
+            [
+              buildTextPart("recording where it came from: "),
+              ...describeProvenance(input.provenance),
+            ],
+          ]),
+    ],
+    ", ",
+  );
+
+/**
+ * Runs a plugin action's `describe` on a stored input and returns its parts,
+ * or `undefined` when the action has no `describe` or it throws. The plugin's
+ * code runs on every read of an open record, so a bug in it must not fail the
+ * read: the caller names the action by its id instead.
+ */
+const runPluginDescribe = (
+  describe: ((input: unknown) => ReadonlyArray<DescribeLinePart>) | undefined,
+  input: unknown,
+): DescribeLine | undefined => {
+  if (describe === undefined) return undefined;
+  try {
+    return describe(input);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Builds the `describe` function of the `BoundOperations` port, which reads
+ * the rows of the entities each operation names, and asks the plugin host for
+ * a plugin action's own line.
  */
 export const buildDescribe: Effect.Effect<
   (
-    operations: ReadonlyArray<AnswerOperation<"notification.answer">>,
+    operations: ReadonlyArray<CheckedOperation>,
   ) => Effect.Effect<ReadonlyArray<DescribeLine>, SqlError>,
   never,
-  SqlClient.SqlClient
+  SqlClient.SqlClient | PluginHost
 > = Effect.gen(function* () {
   const tasks = yield* taskRepository;
   const projects = yield* projectRepository;
   const workflows = yield* workflowRepository;
   const sessions = yield* sessionRepository;
+  const signals = yield* signalRepository;
   const connections = yield* connectionRepository;
+  const host = yield* PluginHost;
 
   /**
-   * Builds the describers for one `describe` call, each reading an entity at
+   * Builds the describer for one `describe` call, reading each entity at
    * most once however many answers name it.
    */
-  const buildDescribers = () => {
+  const buildDescriber = () => {
     /** Returns a task's title, or its id once it is deleted. */
     const readTaskTitle = readOncePerId((id) =>
       Effect.map(tasks.live(id), Option.match({ onNone: () => id, onSome: (task) => task.title })),
@@ -230,6 +291,16 @@ export const buildDescribe: Effect.Effect<
         ? Effect.map(
             connections.one(id),
             Option.map((connection) => connection.label),
+          )
+        : Effect.succeed(Option.none<string>()),
+    );
+
+    /** Returns a signal's title, or nothing when no signal has this id. */
+    const readSignalTitle = readOncePerId((id) =>
+      isId(id)
+        ? Effect.map(
+            signals.readKindAndTitle(id),
+            Option.map((signal) => signal.title),
           )
         : Effect.succeed(Option.none<string>()),
     );
@@ -298,9 +369,9 @@ export const buildDescribe: Effect.Effect<
     /**
      * Returns the parts that list every input of a run, each value in full,
      * such as "issue «42», repo connection «Acme GitHub»". An input the
-     * workflow declares as a Connection is named by the Connection's label;
-     * any other value, and a Connection id that matches no Connection, is
-     * written as JSON.
+     * workflow declares as a Connection is named by the Connection's label,
+     * and one it declares as a signal by the signal's title. Any other value,
+     * and an id that matches nothing, is written as JSON.
      */
     const describeRunInputs = (
       inputs: Readonly<Record<string, unknown>>,
@@ -314,21 +385,66 @@ export const buildDescribe: Effect.Effect<
         const described: Array<DescribeLine> = [];
         for (const [key, value] of Object.entries(inputs)) {
           const declaration = declarations.find((declared) => declared.name === key);
-          const label =
+          const connectionLabel =
             declaration?.connection !== undefined && typeof value === "string"
               ? yield* readConnectionLabel(value)
               : Option.none<string>();
+          const signalTitle =
+            declaration?.signal !== undefined && typeof value === "string"
+              ? yield* readSignalTitle(value)
+              : Option.none<string>();
           described.push(
-            Option.match(label, {
-              onNone: () => [buildTextPart(`${key} `), buildMarkedPart(JSON.stringify(value))],
-              onSome: (found) => [buildTextPart(`${key} connection `), buildMarkedPart(found)],
-            }),
+            Option.isSome(connectionLabel)
+              ? [buildTextPart(`${key} connection `), buildMarkedPart(connectionLabel.value)]
+              : Option.isSome(signalTitle)
+                ? [buildTextPart(`${key} signal `), buildMarkedPart(signalTitle.value)]
+                : [buildTextPart(`${key} `), buildMarkedPart(JSON.stringify(value))],
           );
         }
         return joinParts(described, ", ");
       });
 
-    return {
+    /**
+     * Returns the line a plugin action's own `describe` writes for its stored
+     * input, followed by the plugin's name and the label of the Connection it
+     * acts through. When the action is gone, or its `describe` throws, the
+     * line names the action by its id, so a line is always written.
+     */
+    const describePluginAction = (
+      operation: PluginAnswerOperation,
+    ): Effect.Effect<DescribeLine, SqlError> =>
+      Effect.gen(function* () {
+        const action = Option.getOrUndefined(yield* host.findWorkflowAction(operation.op));
+        const plugin = (yield* host.loaded()).find((loaded) => loaded.id === action?.owner);
+        const own = runPluginDescribe(action?.describe, operation.input);
+        const connectionLabel =
+          operation.connectionId === undefined
+            ? undefined
+            : Option.getOrElse(
+                yield* readConnectionLabel(operation.connectionId),
+                () => operation.connectionId!,
+              );
+        return [
+          ...(own ?? [buildTextPart("Run "), buildMarkedPart(operation.op)]),
+          ...(plugin === undefined ? [] : [buildTextPart(` · ${plugin.displayName}`)]),
+          ...(connectionLabel === undefined
+            ? []
+            : [buildTextPart(" · as "), buildMarkedPart(connectionLabel)]),
+        ];
+      });
+
+    const contractDescribers = {
+      "task.create": (input) =>
+        Effect.gen(function* () {
+          const projectName =
+            input.projectId === undefined ? undefined : yield* readProjectName(input.projectId);
+          return [
+            buildTextPart("Create task "),
+            buildMarkedPart(input.title),
+            buildTextPart(" with "),
+            ...describeNewTaskFields(input, projectName),
+          ];
+        }),
       "task.update": ({ taskId, ...changes }) =>
         Effect.gen(function* () {
           const title = yield* readTaskTitle(taskId);
@@ -382,17 +498,14 @@ export const buildDescribe: Effect.Effect<
             session.markedName,
           ),
         ),
-    } satisfies AnswerOperationHandlers<
-      "notification.answer",
-      Effect.Effect<DescribeLine, SqlError>
-    >;
+    } satisfies AnswerOperationHandlers<AnswerPlace, Effect.Effect<DescribeLine, SqlError>>;
+
+    return (operation: CheckedOperation): Effect.Effect<DescribeLine, SqlError> =>
+      isPluginAnswerOperation(operation)
+        ? describePluginAction(operation)
+        : dispatchAnswerOperation(contractDescribers, operation);
   };
 
-  return (operations: ReadonlyArray<AnswerOperation<"notification.answer">>) =>
-    Effect.suspend(() => {
-      const describers = buildDescribers();
-      return Effect.forEach(operations, (operation) =>
-        dispatchAnswerOperation(describers, operation),
-      );
-    });
+  return (operations: ReadonlyArray<CheckedOperation>) =>
+    Effect.suspend(() => Effect.forEach(operations, buildDescriber()));
 });

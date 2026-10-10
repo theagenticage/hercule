@@ -24,6 +24,7 @@ import {
   type Grant,
   type OperationId,
   type Requirement,
+  type ResolutionOrigin,
   type Run,
   type Unauthenticated,
 } from "@hercule/contract";
@@ -172,6 +173,24 @@ export const buildActorStamp = (actor: UserActor | SessionActor | RunActor): str
       return buildSessionStamp(actor.sessionId);
     case "run":
       return `run:${actor.runId}`;
+  }
+};
+
+/**
+ * Returns where a Notification's decision or a Signal was resolved, from the
+ * actor who resolved it: the web app for a user signed in there, the API for
+ * a user with an API key, the session for a session, and the core for
+ * anything the controller did itself.
+ */
+export const buildResolutionOrigin = (actor: Actor): ResolutionOrigin => {
+  switch (actor._tag) {
+    case "user":
+      return actor.credential.kind === "login" ? "web" : "api";
+    case "session":
+      return buildSessionStamp(actor.sessionId);
+    case "run":
+    case "none":
+      return "core";
   }
 };
 

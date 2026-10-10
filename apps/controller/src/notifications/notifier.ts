@@ -59,17 +59,15 @@ import {
   type NotificationCreateResult,
   type NotificationProducer,
   type NotificationSubject,
-  type ResolutionOrigin,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
 import {
-  buildSessionStamp,
+  buildResolutionOrigin,
   CurrentActor,
   currentStamp,
   requireGrant,
   SYSTEM_ACTOR,
-  type Actor,
   type RunActor,
   type SessionActor,
 } from "../actor";
@@ -261,23 +259,6 @@ const checkActions = (
       return { ...action, operation };
     }),
   );
-
-/**
- * Returns where a decision was resolved, from the actor who resolved it: the
- * web app for a user signed in there, the API for a user with an API key, the
- * session for a session, and the core for anything the controller did itself.
- */
-const buildResolutionOrigin = (actor: Actor): ResolutionOrigin => {
-  switch (actor._tag) {
-    case "user":
-      return actor.credential.kind === "login" ? "web" : "api";
-    case "session":
-      return buildSessionStamp(actor.sessionId);
-    case "run":
-    case "none":
-      return "core";
-  }
-};
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

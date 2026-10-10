@@ -18,14 +18,14 @@ import type {
 } from "@hercule/contract";
 import { connectionRepository } from "../../connections";
 import { mintUuid, uuidToString } from "../../db";
-import { TestDatabase } from "../../db/testing";
+import { buildPluginStack } from "../../plugins/testing";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
 import { taskRepository } from "../../tasks";
 import { workflowRepository } from "../../workflows";
 import { buildDescribe } from "./describer";
 
-const layer = TestDatabase;
+const layer = buildPluginStack();
 
 const AT = "2026-09-07T10:00:00.000Z";
 

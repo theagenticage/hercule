@@ -8,7 +8,7 @@
  * domains below this service use too.
  *
  * An open decision is returned to the user with each answer's describe line,
- * written from the current names by the `BindableOperations` port. Taking an
+ * written from the current names by the `BoundOperations` port. Taking an
  * answer runs its operation through the same port, as the user, in the
  * transaction that resolves the decision.
  */
@@ -61,7 +61,7 @@ import {
   withTransaction,
 } from "../db";
 import { AuditLog } from "../events";
-import { BindableOperations, type BindableOperationError } from "./bindable-operations";
+import { BoundOperations, type BoundOperationError } from "../bound-actions";
 import { Notifier } from "./notifier";
 import { notificationRepository } from "./repository";
 
@@ -136,7 +136,7 @@ const make = Effect.gen(function* () {
   const notifications = yield* notificationRepository;
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
-  const operations = yield* BindableOperations;
+  const operations = yield* BoundOperations;
 
   /**
    * Checks an answer's stored operation again before it is described. A
@@ -368,7 +368,7 @@ const make = Effect.gen(function* () {
      *   run, or its input no longer fits; the decision stays open;
      * - the operation's own error when it fails; the decision stays open.
      */
-    act: (input: ActInput): Effect.Effect<Notification, BindableOperationError> =>
+    act: (input: ActInput): Effect.Effect<Notification, BoundOperationError> =>
       Effect.gen(function* () {
         yield* requireUserActor("notification.act", ONLY_THE_USER);
         yield* withTransaction(
@@ -413,5 +413,5 @@ export class NotificationService extends Context.Service<
 export const NotificationServiceLayer: Layer.Layer<
   NotificationService,
   never,
-  SqlClient.SqlClient | AuditLog | Notifier | BindableOperations
+  SqlClient.SqlClient | AuditLog | Notifier | BoundOperations
 > = Layer.effect(NotificationService)(make);

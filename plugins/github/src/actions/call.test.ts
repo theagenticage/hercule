@@ -67,7 +67,7 @@ describe("the Connection's token", () => {
   it("fails without calling GitHub when the step has no Connection", async () => {
     const stub = stubAnswer(200, {});
     const { run, signal } = buildActionContext();
-    const context = { run, signal };
+    const context = { ...(run === undefined ? {} : { run }), signal };
 
     const error = await readFailure(stub, context);
 

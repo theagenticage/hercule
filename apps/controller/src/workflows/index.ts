@@ -1,6 +1,7 @@
 /** Workflows: the stored YAML sources of execution plans, and the triggers they declare. */
 export { workflowRepository } from "./repository";
 export { TriggeredRuns, WorkflowRuns } from "./runs";
+export { WorkflowSignals } from "./signals";
 export { admitsEvent } from "./trigger-selection";
 export { CronTriggerScheduler, CronTriggerSchedulerLayer, FIRING_TOLERANCE } from "./cron-triggers";
 export {

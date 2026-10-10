@@ -92,8 +92,8 @@ const FAILING_DEFINITION = {
  * flight and check that it did fail after the cancel.
  */
 const buildFailOnAbortAction = () => {
-  const started: Array<string> = [];
-  const failed: Array<string> = [];
+  const started: Array<string | undefined> = [];
+  const failed: Array<string | undefined> = [];
   const plugin = buildActionPlugin("refuse", {
     id: "on_abort",
     displayName: "Fail on abort",
@@ -102,9 +102,9 @@ const buildFailOnAbortAction = () => {
     output: Schema.Struct({}),
     execute: (_input, context) =>
       Effect.callback<object, ActionError>((resume) => {
-        started.push(context.run.runId);
+        started.push(context.run?.runId);
         context.signal.addEventListener("abort", () => {
-          failed.push(context.run.runId);
+          failed.push(context.run?.runId);
           resume(
             Effect.fail(new ActionError({ code: "aborted", message: "The run was cancelled." })),
           );

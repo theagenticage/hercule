@@ -14,7 +14,7 @@ import { EventKindCatalogLayer, PluginHost } from "../plugins";
 import { insertOpenDecision, readStoredNotification } from "../notifications/testing";
 import { buildPluginStack } from "../plugins/testing";
 import { SettingsLayer } from "../settings";
-import { WorkflowRuns, WorkflowService, WorkflowServiceLayer } from "./index";
+import { WorkflowRuns, WorkflowService, WorkflowServiceLayer, WorkflowSignals } from "./index";
 import { buildFileTaskSource, buildTaskStep } from "./testing";
 
 type Deps = WorkflowService | PluginHost | SqlClient.SqlClient;
@@ -27,6 +27,7 @@ type Deps = WorkflowService | PluginHost | SqlClient.SqlClient;
 const layer = WorkflowServiceLayer.pipe(
   Layer.provideMerge(EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer))),
   Layer.provide(Layer.succeed(WorkflowRuns)({ hasUnfinishedRun: () => Effect.succeed(false) })),
+  Layer.provide(Layer.succeed(WorkflowSignals)({ readKind: () => Effect.succeedNone })),
   Layer.provideMerge(SettingsLayer),
   Layer.provideMerge(buildPluginStack()),
 );

@@ -341,11 +341,17 @@ export interface ActionContext {
     readonly credentials: Record<string, string>;
     readonly config: unknown;
   };
-  readonly run: { readonly runId: string; readonly stepId: string };
   /**
-   * Aborts when the run is cancelled while the action executes. An action
-   * that waits on something outside the controller, such as an HTTP request,
-   * passes it on so the wait ends with the run.
+   * The run and the step that called the action. Absent when the action
+   * runs as the user's answer to a Notification or a Signal, because no run
+   * is involved then.
+   */
+  readonly run?: { readonly runId: string; readonly stepId: string };
+  /**
+   * Aborts when the run is cancelled while the action executes, or when the
+   * controller stops the work that runs an answer. An action that waits on
+   * something outside the controller, such as an HTTP request, passes it on
+   * so the wait ends with the work.
    */
   readonly signal: AbortSignal;
 }
@@ -426,10 +432,13 @@ export interface WorkflowStepAction extends WorkflowActionFields {
  *
  * - `describe` returns the describe line for one frozen input. It must be
  *   pure: it reads only `input`. The plugin writes the line, so the producer
- *   that binds the action cannot make it say something else.
+ *   that binds the action cannot make it say something else. It gets the
+ *   input as it is stored on the answer, before decoding, and without the
+ *   text of a typed reply: the user has not typed it yet.
  * - `outcome` returns the one line a Signal keeps once this action, taken as
  *   its answer, succeeds: "Replied to Marta Visser". It must be pure too.
- *   Without it, the core writes the line from the answer's label.
+ *   It gets the stored input with the typed reply filled in. Without it, the
+ *   core writes the line from the answer's label.
  */
 export interface AnswerAction extends WorkflowActionFields {
   readonly usableIn: readonly [BindingPlace, ...ReadonlyArray<BindingPlace>];
