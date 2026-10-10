@@ -1,10 +1,12 @@
 /**
- * Images a user attached to an input, as the runner sees them.
+ * Attachments as the runner sees them: the images a user attached to an
+ * input, and the images an agent's tool returned.
  *
  * A frame on the runner socket carries only a reference to each image, never
  * its bytes: one image can be 10 MiB, and the socket also carries every other
- * session's events. The runner fetches the bytes over HTTP before it hands the
- * turn to the harness.
+ * session's events. Both directions use plain HTTP for the bytes: the runner
+ * fetches an input's images before it hands the turn to the harness, and
+ * uploads a tool's image before it reports the tool's result.
  */
 import { Duration, Schema } from "effect";
 
@@ -28,6 +30,9 @@ export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/
 export const ImageMimeType = Schema.Literals(IMAGE_MIME_TYPES);
 
 export type ImageMimeType = Schema.Schema.Type<typeof ImageMimeType>;
+
+/** The largest image the controller stores: 10 MiB, for an upload and a tool's image alike. */
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 /** A SHA-256 digest as 64 lowercase hex characters. */
 const Sha256 = Schema.String.check(
@@ -72,3 +77,51 @@ export const SESSION_INPUT_DEADLINE: Duration.Duration = Duration.seconds(10);
  * controller send the input again.
  */
 export const ATTACHMENT_DOWNLOAD_TIMEOUT: Duration.Duration = Duration.minutes(2);
+
+/**
+ * The Attachment the controller stored for an image in a tool's result: what
+ * a client needs to show it. The bytes are read through
+ * `attachment.readContent` with this id.
+ */
+export const ToolResultAttachment = Schema.Struct({
+  id: StorageId,
+  mimeType: ImageMimeType,
+  sizeBytes: Schema.Int.check(Schema.isGreaterThan(0)),
+});
+
+export type ToolResultAttachment = Schema.Schema.Type<typeof ToolResultAttachment>;
+
+/**
+ * One image in a tool's result, as `item.completed.detail.content` holds it
+ * in place of the harness's image block. The runner uploads the bytes and
+ * keeps only this reference, so the event never carries them:
+ *
+ * - `attachment` is the stored image when the upload succeeded;
+ * - `unavailable` says, for the user, why the image could not be kept: it was
+ *   larger than `MAX_ATTACHMENT_BYTES`, or the upload failed.
+ */
+export const ToolResultImage = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("image"), attachment: ToolResultAttachment }),
+  Schema.Struct({ type: Schema.Literal("image"), unavailable: Fact }),
+]);
+
+export type ToolResultImage = Schema.Schema.Type<typeof ToolResultImage>;
+
+/**
+ * The HTTP resource a runner moves Attachments through with its credential.
+ * It is part of the runner protocol, not the operation table:
+ *
+ * - `GET <path>/<id>` fetches an input's image;
+ * - `POST <path>?sessionId=<id>`, with the raw bytes as the body, stores an
+ *   image from a tool's result and answers `201` with a
+ *   `ToolResultAttachment`.
+ */
+export const RUNNER_ATTACHMENTS_PATH = "/api/v1/runners/attachments";
+
+/**
+ * The longest a runner waits for the upload of one image from a tool's
+ * result. The session's events wait behind it, so a controller that does
+ * not answer must not hold them for long. An upload that runs out of time leaves the image
+ * `unavailable`.
+ */
+export const ATTACHMENT_UPLOAD_TIMEOUT: Duration.Duration = Duration.seconds(30);

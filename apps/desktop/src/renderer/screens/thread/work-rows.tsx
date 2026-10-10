@@ -3,7 +3,7 @@
  * step or group of steps, from `buildWorkRows`. A row is its icon, its label
  * and target, its result when that is not "completed", the time it started,
  * shown while the pointer is on the row, and a chevron when there is
- * something to open: a group's steps, or a step's output.
+ * something to open: a group's steps, or a step's output and images.
  *
  * The book draws no expanded stretch, so the rows are built from its parts:
  * the divider's type and inks, the icons, and the code block's sunken box
@@ -24,6 +24,7 @@ import { PuzzleIcon } from "../../icons/puzzle";
 import { SearchIcon } from "../../icons/search";
 import { SparkleIcon } from "../../icons/sparkle";
 import { TerminalIcon } from "../../icons/terminal";
+import { ToolResultImages } from "../attachments/tool-result-images";
 import { formatBlockTime } from "../session/messages";
 
 /** The icon each `WorkRowIcon` name is drawn with. */
@@ -42,7 +43,8 @@ const WORK_ROW_ICONS: Record<WorkRowIcon, (props: IconProps) => JSX.Element> = {
 };
 
 /**
- * Renders `rows` as a list, and below each open row its steps or its output.
+ * Renders `rows` as a list, and below each open row its steps, or its output
+ * and images.
  *
  * - `openKeys` holds the keys of the rows the reader opened. It belongs to
  *   the transcript, so a row stays open while its stretch scrolls out of the
@@ -94,7 +96,7 @@ export function WorkRowList({
                 today={today}
               />
             ) : (
-              <WorkRowOutput text={row.output} />
+              <WorkRowOutput text={row.output} images={row.images} />
             )}
           </li>
         );
@@ -189,10 +191,21 @@ function WorkRowResult({ result }: { readonly result: WorkRow["result"] }): JSX.
 }
 
 /**
- * Renders the text an open step returned, in a box that scrolls past its
- * maximum height. It is a component of its own because a step's images will
- * be drawn beside the text here.
+ * Renders what an open step returned: its text, in a box that scrolls past
+ * its maximum height, and under it the images, as tiles. A step that
+ * returned only images draws no empty box.
  */
-function WorkRowOutput({ text }: { readonly text: string }): JSX.Element {
-  return <pre className="work-output">{text}</pre>;
+function WorkRowOutput({
+  text,
+  images,
+}: {
+  readonly text: string;
+  readonly images: WorkRow["images"];
+}): JSX.Element {
+  return (
+    <div className="work-output">
+      {text === "" ? null : <pre className="work-output-text">{text}</pre>}
+      {images.length === 0 ? null : <ToolResultImages images={images} />}
+    </div>
+  );
 }

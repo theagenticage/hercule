@@ -53,6 +53,7 @@ import {
 } from "./workspace-steps";
 
 export * from "./attachments";
+export * from "./image-signatures";
 export * from "./identity-port";
 export * from "./output-schema";
 export * from "./remote";

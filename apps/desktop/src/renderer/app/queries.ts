@@ -590,10 +590,10 @@ export const userQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads an image a user sent, at full size, as a `Blob`, for the lightbox.
- * An image never changes once uploaded, so the entry never goes stale. It is
- * dropped a minute after the lightbox closes, so a full-size image is not
- * held after it is shown.
+ * Reads a stored image, one a user sent or one a tool returned, at full
+ * size, as a `Blob`, for the lightbox. An image never changes once
+ * uploaded, so the entry never goes stale. It is dropped a minute after the
+ * lightbox closes, so a full-size image is not held after it is shown.
  *
  * An upload puts its file here as soon as it succeeds, so the image the user
  * just sent is not read back from the controller.
@@ -607,8 +607,9 @@ export const attachmentContentQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
- * Builds a thumbnail of an image a user sent, `width` × `height` device
- * pixels, for the images above their bubble and in a queued input's row.
+ * Builds a thumbnail of a stored image, `width` × `height` device pixels,
+ * for the images above a user's bubble, in a queued input's row, and under
+ * a tool's step.
  * Only the small WebP is cached: the image's full bytes are taken from the
  * cache when an upload left them there, and read from the controller
  * otherwise, and are dropped once the thumbnail is built.

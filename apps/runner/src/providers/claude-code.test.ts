@@ -51,6 +51,7 @@ const CONTEXT: ProviderRunnerContext = {
   env: { PATH: "/usr/local/bin:/usr/bin" },
   secrets: {},
   herculeTool: HERCULE_TOOL,
+  attachmentUploader: testing.NO_CONTROLLER_UPLOADER,
 };
 
 afterAll(testing.cleanupHomes);
@@ -2997,5 +2998,75 @@ describe("a background task that finishes between turns", () => {
       event._tag === "content.delta" && event.turnId === answerTurn ? [event.delta] : [],
     );
     expect(text.join("")).toBe(FOLLOW_UP);
+  });
+});
+
+describe("an image a tool returns", () => {
+  it("reaches the item's content and raw payload as a reference, never as bytes", async () => {
+    const run = createDriving();
+    const data = testing.PNG_BYTES.toString("base64");
+    const uploaded: Array<{ readonly sessionId: string; readonly bytes: Uint8Array }> = [];
+    const stored = {
+      id: "0199e0e7-0000-7000-8000-0000000000c1",
+      mimeType: "image/png",
+      sizeBytes: testing.PNG_BYTES.length,
+    } as const;
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, SPEC, {
+        ...WORKING,
+        attachmentUploader: {
+          upload: (sessionId, bytes) =>
+            Effect.sync(() => {
+              uploaded.push({ sessionId, bytes });
+              return { type: "image", attachment: stored };
+            }),
+        },
+      }),
+    );
+    run.say({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "toolu_read", name: "Read", input: { file_path: "/tmp/a.png" } },
+        ],
+      },
+      parent_tool_use_id: null,
+      session_id: SESSION,
+    });
+    run.say({
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_read",
+            content: [{ type: "image", source: { type: "base64", media_type: "image/png", data } }],
+          },
+        ],
+      },
+      tool_use_result: {
+        type: "image",
+        file: { base64: data, type: "image/png", originalSize: testing.PNG_BYTES.length },
+      },
+      parent_tool_use_id: null,
+      session_id: SESSION,
+    });
+
+    await waitUntil("completed the read", () =>
+      run.seen.some((event) => event._tag === "item.completed"),
+    );
+    const completed = run.seen.find((event) => event._tag === "item.completed");
+    const reference = { type: "image", attachment: stored };
+    expect(completed?.detail).toMatchObject({ content: [reference] });
+    expect(completed?.raw?.payload).toMatchObject({
+      tool_use_result: { file: { base64: reference } },
+    });
+    expect(JSON.stringify(completed)).not.toContain(data);
+    // The same image in the content and in the structured output is one upload.
+    expect(uploaded.map((upload) => ({ ...upload, bytes: Buffer.from(upload.bytes) }))).toEqual([
+      { sessionId: SESSION, bytes: testing.PNG_BYTES },
+    ]);
   });
 });

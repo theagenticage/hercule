@@ -1,12 +1,22 @@
 /**
  * The attachment operations of the API, `attachment.create`,
  * `attachment.readContent` and `attachment.delete`, plus what the rest of the
- * controller needs from attachments: the runner's fetch and one pass of the
- * sweep, which the controller daemon repeats.
+ * controller needs from attachments: the runner's fetch, the runner's upload
+ * of a tool result's attachment, and one pass of the sweep, which the
+ * controller daemon repeats.
  *
- * An attachment's bytes are one immutable file at `<dataDir>/attachments/<id>`
- * and its metadata is a row in `attachments`. The two are written in this
- * order, and no transaction ever waits on the disk:
+ * An attachment is an image the controller stores and a transcript
+ * references. It has one of two owners:
+ *
+ * - An input. A user, or an agent, uploads the image with
+ *   `attachment.create`, then sends it with an input.
+ * - A tool's result. The runner uploads the image an agent's tool returned
+ *   (`storeToolResultAttachment`), and the event keeps only a reference to it.
+ *
+ * Both kinds are stored the same way. An attachment's bytes are one
+ * immutable file at `<dataDir>/attachments/<id>` and its metadata is a row
+ * in `attachments`. The two are written in this order, and no transaction
+ * ever waits on the disk:
  *
  * - An upload is written to a temp file, which is renamed to the id, and only
  *   then is the row inserted. A rename is atomic, so a half-written file never
@@ -18,10 +28,17 @@
  * sweep removes such files, and leftover temp files, once they are older than
  * a day.
  *
- * An attachment is "claimed" when an input references it. An attachment no
- * input references can no longer be claimed a day after its upload
- * (`UNCLAIMED_LIFETIME`), and the sweep deletes it. That also covers one that
- * `input.update` removed from a queued input.
+ * The two owners keep their images for different lengths of time:
+ *
+ * - An input's image is "claimed" when an input references it. One no input
+ *   references can no longer be claimed a day after its upload
+ *   (`UNCLAIMED_LIFETIME`), and the sweep deletes it. That also covers one
+ *   that `input.update` removed from a queued input.
+ * - A tool result's attachment is referenced by its session's transcript
+ *   from the moment it is stored, so the sweep never deletes it and it never
+ *   counts against the uploader's quota. It lives as long as the session's
+ *   transcript. No operation deletes a session today, so for now it is kept
+ *   for good.
  */
 import { createHash } from "node:crypto";
 import { readdir, rename, rm, stat, writeFile, mkdir } from "node:fs/promises";
@@ -45,12 +62,12 @@ import {
   type NotFound,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant } from "../actor";
+import { detectImageMimeType, type ToolResultAttachment } from "@hercule/protocol";
+import { buildSessionStamp, currentStamp, requireGrant } from "../actor";
 import { HerculeHome } from "../config";
 import { mintUuid, nowIso, UUID_PATTERN, uuidToString, withTransaction } from "../db";
 import { excludeDigest, readUnclaimedCutoff, UNCLAIMED_LIFETIME } from "./claims";
 import { attachmentRepository, type StoredAttachment, type UnclaimedUpload } from "./repository";
-import { detectImageMimeType } from "./sniff";
 
 /** A disk operation on an attachment file failed. `action` is the verb the message uses. */
 class AttachmentFileError extends Schema.TaggedError<AttachmentFileError>()("AttachmentFileError", {
@@ -63,6 +80,17 @@ class AttachmentFileError extends Schema.TaggedError<AttachmentFileError>()("Att
 interface NewAttachment {
   readonly name: string;
   readonly bytes: Uint8Array;
+}
+
+/** An image about to be stored, by either owner. */
+interface NewImage {
+  readonly bytes: Uint8Array;
+  /** The actor stamp the row keeps. */
+  readonly actor: string;
+  /** The name the row keeps. Without one, the image is named for its type, as in `image.png`. */
+  readonly name: string | undefined;
+  /** How a refusal refers to the image, as in `"cat.png"` or `the image`. */
+  readonly label: string;
 }
 
 /** Where an attachment's bytes are on disk, and what type they are. */
@@ -98,6 +126,10 @@ const computeQuotaWait = (
   return Duration.toMillis(UNCLAIMED_LIFETIME);
 };
 
+/** Describes a number of bytes in whole mebibytes, as "10 MB". */
+const describeMegabytes = (bytes: number): string =>
+  `${String(Math.round(bytes / (1024 * 1024)))} MB`;
+
 /**
  * Describes a wait as "about 3 hours" or "about 25 minutes". Rounded up, so
  * the user who waits that long finds the room there. The wait is relative
@@ -112,6 +144,7 @@ const describeWait = (millis: number): string => {
 
 const NOT_FOUND = "no attachment with that id";
 
+const NO_SESSION_ON_RUNNER = "no session with that id is placed on this runner";
 /** Returns the directory that holds the attachment files of the Data Root at `dataDir`. */
 export const buildAttachmentsDirectory = (dataDir: string): string => join(dataDir, "attachments");
 
@@ -191,9 +224,14 @@ const make = Effect.gen(function* () {
       yield* Effect.forEach(stray, (name) => removeFile(buildPath(name)), { discard: true });
     });
 
-  /** Fails with `Validation` with one issue, at no field, that has this message. */
+  /**
+   * Fails with `Validation` with one issue, at no field, that has this
+   * message. The error's own message is the same text, so a caller that
+   * reads only `error.message`, such as the runner after it uploads a tool
+   * result's attachment, still learns what was wrong.
+   */
   const failValidation = (message: string): Effect.Effect<never, Validation> =>
-    Effect.fail(createValidationError([{ path: [], message }]));
+    Effect.fail(createValidationError([{ path: [], message }], message));
 
   /**
    * Inserts the attachment's row unless the actor's uploads that still count
@@ -217,13 +255,62 @@ const make = Effect.gen(function* () {
         if (held + stored.sizeBytes > MAX_UNCLAIMED_BYTES) {
           const wait = computeQuotaWait(counted, stored.sizeBytes, yield* Clock.currentTimeMillis);
           return yield* failValidation(
-            `"${stored.name}" would take your images that are not sent yet past 200 MB. ` +
+            `"${stored.name}" would take your images that are not sent yet ` +
+              `past ${describeMegabytes(MAX_UNCLAIMED_BYTES)}. ` +
               `Remove some images, or try again in ${describeWait(wait)}.`,
           );
         }
         yield* attachments.insert(stored);
       }),
     );
+
+  /**
+   * Checks the image and returns the row it is to be stored as, with a new
+   * id. Writes nothing. The type is read from the bytes, never from a name.
+   * Fails with `Validation` when the bytes are more than
+   * `MAX_ATTACHMENT_BYTES`, or are not a PNG, JPEG, GIF or WebP image.
+   */
+  const buildStoredAttachment = (image: NewImage): Effect.Effect<StoredAttachment, Validation> =>
+    Effect.gen(function* () {
+      const sizeBytes = image.bytes.byteLength;
+      if (sizeBytes > MAX_ATTACHMENT_BYTES)
+        return yield* failValidation(
+          `${image.label} is larger than ${describeMegabytes(MAX_ATTACHMENT_BYTES)}, ` +
+            "the most an image may be",
+        );
+      const mimeType = detectImageMimeType(image.bytes);
+      if (mimeType === undefined)
+        return yield* failValidation(`${image.label} is not a PNG, JPEG, GIF or WebP image`);
+      return {
+        id: uuidToString(mintUuid()),
+        name: image.name ?? `image.${mimeType.slice("image/".length)}`,
+        mimeType,
+        sizeBytes,
+        sha256: createHash("sha256").update(image.bytes).digest("hex"),
+        actor: image.actor,
+        createdAt: yield* nowIso,
+      };
+    });
+
+  /**
+   * Writes the attachment's file, then inserts its row with `insertRow`.
+   * Fails with whatever the write or `insertRow` fails with.
+   *
+   * The file is written before the row, outside any transaction, so no
+   * transaction waits on the disk. When the row is not inserted, the file is
+   * removed.
+   */
+  const writeAttachment = <E>(
+    stored: StoredAttachment,
+    bytes: Uint8Array,
+    insertRow: (stored: StoredAttachment) => Effect.Effect<void, E>,
+  ): Effect.Effect<void, E | AttachmentFileError> =>
+    Effect.gen(function* () {
+      yield* writeFileAtomically(stored.id, bytes);
+      yield* insertRow(stored).pipe(
+        Effect.tapError(() => Effect.ignore(removeFile(buildPath(stored.id)))),
+      );
+    });
 
   return {
     /**
@@ -252,46 +339,80 @@ const make = Effect.gen(function* () {
      * - the bytes are not a PNG, JPEG, GIF or WebP image;
      * - the actor's uploads that still count would pass `MAX_UNCLAIMED_BYTES`
      *   with this one (`insertWithinQuota`).
-     *
-     * The file is written before the row, outside the transaction, so no
-     * transaction waits on the disk. When the row is not inserted, the file
-     * is removed.
      */
     create: (
       upload: NewAttachment,
     ): Effect.Effect<Attachment, Forbidden | Validation | AttachmentFileError | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("attachment.create");
-        const sizeBytes = upload.bytes.byteLength;
-        if (sizeBytes > MAX_ATTACHMENT_BYTES)
-          return yield* failValidation(
-            `"${upload.name}" is larger than 10 MB, the most an image may be`,
-          );
-        const mimeType = detectImageMimeType(upload.bytes);
-        if (mimeType === undefined)
-          return yield* failValidation(`"${upload.name}" is not a PNG, JPEG, GIF or WebP image`);
-        const stored: StoredAttachment = {
-          id: uuidToString(mintUuid()),
-          name: upload.name,
-          mimeType,
-          sizeBytes,
-          sha256: createHash("sha256").update(upload.bytes).digest("hex"),
+        const stored = yield* buildStoredAttachment({
+          bytes: upload.bytes,
           actor: yield* currentStamp,
-          createdAt: yield* nowIso,
-        };
-        yield* writeFileAtomically(stored.id, upload.bytes);
-        yield* insertWithinQuota(stored).pipe(
-          Effect.tapError(() => Effect.ignore(removeFile(buildPath(stored.id)))),
-        );
+          name: upload.name,
+          label: `"${upload.name}"`,
+        });
+        yield* writeAttachment(stored, upload.bytes, insertWithinQuota);
         return excludeDigest(stored);
       }),
 
     /**
+     * Stores an image from a tool's result in the session with that id, for
+     * the runner with that id, and returns what a client needs to show it.
+     * The attachment is referenced by the session's transcript from the
+     * start, so it is kept as long as the session, and no quota applies to
+     * it. It is stamped with the session as its actor, because the session's
+     * agent produced it.
+     *
+     * When the session already holds a tool result's attachment with the
+     * same bytes, that attachment is returned and nothing new is stored. An
+     * agent that reads the same screenshot again then costs no more disk,
+     * and a runner that retries an upload whose answer it never got reuses
+     * the stored copy. Fails with:
+     *
+     * - `NotFound` unless the session exists and is placed on that runner, so
+     *   a runner cannot store images in another runner's sessions;
+     * - `Validation` when the bytes are more than `MAX_ATTACHMENT_BYTES`, or
+     *   are not a PNG, JPEG, GIF or WebP image.
+     */
+    storeToolResultAttachment: (
+      sessionId: string,
+      runnerId: string,
+      bytes: Uint8Array,
+    ): Effect.Effect<
+      ToolResultAttachment,
+      NotFound | Validation | AttachmentFileError | SqlError
+    > =>
+      Effect.gen(function* () {
+        const placed = UUID_PATTERN.test(sessionId)
+          ? yield* attachments.isSessionPlacedOn(sessionId, runnerId)
+          : false;
+        if (!placed) return yield* Effect.fail(createNotFoundError(NO_SESSION_ON_RUNNER));
+        const candidate = yield* buildStoredAttachment({
+          bytes,
+          actor: buildSessionStamp(sessionId),
+          // An image from a tool's result has no name of its own.
+          name: undefined,
+          label: "the image",
+        });
+        const existing = yield* attachments.findToolResultAttachment(sessionId, candidate.sha256);
+        if (Option.isNone(existing))
+          yield* writeAttachment(candidate, bytes, (row) =>
+            withTransaction(sql, attachments.insertToolResultAttachment(row, sessionId)),
+          );
+        const stored = Option.getOrElse(existing, () => candidate);
+        return { id: stored.id, mimeType: stored.mimeType, sizeBytes: stored.sizeBytes };
+      }),
+
+    /**
      * Returns where the image's bytes are and their type
-     * (`attachment.readContent`). The caller may read an image some input
-     * references, or one it uploaded itself that no input references yet.
-     * Fails with `Forbidden` without the grant, and with `NotFound` for any
-     * other image, so a caller cannot tell another's upload from a missing one.
+     * (`attachment.readContent`). The caller may read an image something
+     * references (an input, or a session's transcript as a tool result's
+     * attachment), or
+     * one it uploaded itself that nothing references yet. The grant is
+     * `session.read`, the same as reading a transcript, so whoever may read a
+     * transcript may read the images in it. Fails with `Forbidden` without
+     * the grant, and with `NotFound` for any other image, so a caller cannot
+     * tell another's upload from a missing one.
      */
     readContent: (id: string): Effect.Effect<AttachmentFile, Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
@@ -302,7 +423,7 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Deletes an image the caller uploaded that no input references yet, and
+     * Deletes an image the caller uploaded that nothing references yet, and
      * its file (`attachment.delete`). A client calls it when the user removes
      * an image before sending, so the upload stops counting against the
      * quota at once. Fails with `Forbidden` without the grant, and with

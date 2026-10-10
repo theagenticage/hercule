@@ -24,6 +24,20 @@ const buildItem = (kind: WorkItem["kind"], fields: Partial<WorkItem> = {}): Work
   ...fields,
 });
 
+const STORED_IMAGE = {
+  type: "image",
+  attachment: {
+    id: "01a06d02-7700-7000-8000-0000000000b1",
+    mimeType: "image/png",
+    sizeBytes: 2048,
+  },
+} as const;
+
+const UNAVAILABLE_IMAGE = {
+  type: "image",
+  unavailable: "The image is larger than 10 MB, so it was not kept.",
+} as const;
+
 describe("buildWorkRows", () => {
   it.each([
     ["reasoning", "sparkle", "Thought"],
@@ -64,6 +78,7 @@ describe("buildWorkRows", () => {
         startedAt: "2026-09-30T09:00:05.000Z",
         result: "failed",
         output: "1 test failed",
+        images: [],
         steps: [],
         canOpen: true,
       },
@@ -97,14 +112,32 @@ describe("buildWorkRows", () => {
     expect(rows.map((row) => row.targetIsCode)).toEqual([true, false]);
   });
 
-  it("lets a step be opened only when it returned text", () => {
+  it("lets a step be opened only when it returned text or a well-formed image", () => {
     const rows = buildWorkRows([
       buildItem("command_execution", { resultContent: "ok" }),
       buildItem("file_change", { resultContent: [{ type: "image" }] }),
+      buildItem("tool_call", { resultContent: [UNAVAILABLE_IMAGE] }),
       buildItem("plan"),
     ]);
 
-    expect(rows.map((row) => row.canOpen)).toEqual([true, false, false]);
+    expect(rows.map((row) => row.canOpen)).toEqual([true, false, true, false]);
+  });
+
+  it("reads a step's images, in order, beside its text", () => {
+    const [row] = buildWorkRows([
+      buildItem("tool_call", {
+        resultContent: [
+          STORED_IMAGE,
+          { type: "text", text: "Took a screenshot." },
+          UNAVAILABLE_IMAGE,
+        ],
+      }),
+    ]);
+
+    expect(row).toMatchObject({
+      output: "Took a screenshot.",
+      images: [STORED_IMAGE, UNAVAILABLE_IMAGE],
+    });
   });
 
   it.each([
@@ -199,7 +232,7 @@ describe("buildWorkRows", () => {
     const rows = buildWorkRows(items);
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ label, target: "", output: "", canOpen: true });
+    expect(rows[0]).toMatchObject({ label, target: "", output: "", images: [], canOpen: true });
     expect(rows[0]!.steps.map((step) => step.key)).toEqual(
       items.map((item) => `step:${item.itemId}`),
     );

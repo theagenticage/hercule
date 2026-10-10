@@ -5,7 +5,8 @@
  * - a stream of lines a test pushes into;
  * - waiting for an adapter that reports on its event stream rather than
  *   through the return value of the call;
- * - the User Material of a Thread that has no paths to pass.
+ * - the User Material of a Thread that has no paths to pass;
+ * - an attachment uploader for tests that have no controller.
  *
  * They live here rather than in one adapter's folder so that copies cannot
  * drift apart, for example a wait with a different timeout, or a home one copy
@@ -15,7 +16,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
+import * as Effect from "effect/Effect";
 import type { ProviderEvent } from "@hercule/protocol";
+import type { AttachmentUploader } from "../attachments";
 import type { LocalAttachment, UserMaterial } from "./index";
 
 const homes: Array<string> = [];
@@ -117,6 +120,15 @@ export const NO_USER_MATERIAL_PATHS: UserMaterial = {
   skillDirs: [],
   promptTemplateDirs: [],
   instructionsFile: undefined,
+};
+
+/**
+ * An attachment uploader for a test with no controller: it uploads nothing
+ * and returns every image from a tool's result as unavailable.
+ */
+export const NO_CONTROLLER_UPLOADER: AttachmentUploader = {
+  upload: () =>
+    Effect.succeed({ type: "image", unavailable: "This test has no controller to keep images." }),
 };
 
 /** A one-pixel PNG, small enough for every harness. */

@@ -6,9 +6,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { BubbleImageGrid, type BubbleImageTile } from "./bubble-image";
+import { BubbleImageGrid } from "./bubble-image";
+import type { TileImage } from "./image-tile";
 
-const buildImages = (count: number): readonly BubbleImageTile[] =>
+const buildImages = (count: number): readonly TileImage[] =>
   Array.from({ length: count }, (_, index) => ({
     key: `a-${String(index)}`,
     name: `shot-${String(index)}.png`,

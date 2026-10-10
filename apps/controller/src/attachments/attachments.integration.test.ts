@@ -1,8 +1,9 @@
 /**
  * Tests images in prompts over the real listener: the upload and the read,
  * the route a runner fetches an image from, the check that a turn's images
- * can go to its runner and model, the edit of a queued input's images, and
- * the sweep of images nobody claimed.
+ * can go to its runner and model, the edit of a queued input's images, the
+ * route a runner uploads a tool result's attachment to, and the sweep of
+ * images nobody claimed.
  */
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
@@ -11,7 +12,14 @@ import { describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type { Attachment, Input, RunnerDetail, Session } from "@hercule/contract";
-import type { ImageInputCapability, SessionInput, SessionStart } from "@hercule/protocol";
+import {
+  MAX_ATTACHMENT_BYTES,
+  RUNNER_ATTACHMENTS_PATH,
+  type ImageInputCapability,
+  type SessionInput,
+  type SessionStart,
+  type ToolResultAttachment,
+} from "@hercule/protocol";
 import { get, post, send } from "../http/testing";
 import {
   at,
@@ -62,6 +70,28 @@ const fetchAsRunner = (arranged: Arranged, id: string, credential?: string): Pro
   fetch(`${arranged.harness.base}/api/v1/runners/attachments/${id}`, {
     headers: credential === undefined ? {} : { authorization: `Bearer ${credential}` },
   });
+
+/** Uploads an image from a tool's result the way a runner does, with `credential` as its bearer, or none for `null`. */
+const uploadToolResultAttachment = (
+  arranged: Arranged,
+  sessionId: string,
+  bytes: Uint8Array = PNG,
+  credential: string | null = arranged.credential,
+): Promise<Response> =>
+  fetch(`${arranged.harness.base}${RUNNER_ATTACHMENTS_PATH}?sessionId=${sessionId}`, {
+    method: "POST",
+    headers: credential === null ? {} : { authorization: `Bearer ${credential}` },
+    body: bytes,
+  });
+
+const uploadToolResultAttachmentOrFail = async (
+  arranged: Arranged,
+  sessionId: string,
+): Promise<ToolResultAttachment> => {
+  const response = await uploadToolResultAttachment(arranged, sessionId);
+  expect(response.status, await response.clone().text()).toBe(201);
+  return (await response.json()) as ToolResultAttachment;
+};
 
 /** Spawns a session with the image as its prompt, answers its start, and waits until it is busy. */
 const startSessionWithAttachment = async (
@@ -842,6 +872,169 @@ describe("a runner fetching an image", () => {
   );
 });
 
+describe("a runner uploading a tool result's attachment", () => {
+  it(
+    "stores the image in a session on the runner, and anyone who may read transcripts reads it",
+    async () => {
+      await withAgentFleet(async (arranged) => {
+        const session = await spawnSessionOrFail(arranged, { prompt: "look" });
+        const stored = await uploadToolResultAttachmentOrFail(arranged, session.id);
+        expect(stored).toEqual({ id: stored.id, mimeType: "image/png", sizeBytes: PNG.byteLength });
+
+        // The image is not theirs and no input carries it: the reader sees it
+        // only because a session's transcript references it.
+        const reader = await spawnThreadWithGrants(arranged, "reader", ["session.read"]);
+        const read = await get(
+          arranged.harness.base,
+          `/api/v1/attachments/${stored.id}/content`,
+          reader.token,
+        );
+        expect(read.status).toBe(200);
+        expectAttachmentHeaders(read);
+        expect(new Uint8Array(await read.arrayBuffer())).toEqual(PNG);
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "takes an image larger than the general body limit, and refuses one past the image limit",
+    async () => {
+      await withAgentFleet(async (arranged) => {
+        const session = await spawnSessionOrFail(arranged, { prompt: "look" });
+        const large = await uploadToolResultAttachment(
+          arranged,
+          session.id,
+          buildPng(3 * MEBIBYTE),
+        );
+        expect(large.status, await large.clone().text()).toBe(201);
+        expect(await large.json()).toMatchObject({ sizeBytes: 3 * MEBIBYTE });
+
+        const tooLarge = await uploadToolResultAttachment(
+          arranged,
+          session.id,
+          buildPng(MAX_ATTACHMENT_BYTES + 1),
+        );
+        expect(tooLarge.status).toBe(413);
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "refuses bytes that are not an image, and keeps no file",
+    async () => {
+      await withAgentFleet(async (arranged) => {
+        const session = await spawnSessionOrFail(arranged, { prompt: "look" });
+        const directory = join(arranged.harness.home, "data", "attachments");
+        const filesBefore = listFiles(directory);
+
+        const response = await uploadToolResultAttachment(
+          arranged,
+          session.id,
+          new TextEncoder().encode("hello"),
+        );
+        expect(response.status).toBe(400);
+        const message = "the image is not a PNG, JPEG, GIF or WebP image";
+        expect(await response.json()).toMatchObject({
+          error: { code: "validation", message, details: { issues: [{ message }] } },
+        });
+        expect(listFiles(directory)).toEqual(filesBefore);
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "refuses a caller without a runner's credential, and a session not placed on the runner",
+    async () => {
+      await withAgentFleet(async (arranged) => {
+        const session = await spawnSessionOrFail(arranged, { prompt: "look" });
+        expect((await uploadToolResultAttachment(arranged, session.id, PNG, null)).status).toBe(
+          401,
+        );
+        expect(
+          (await uploadToolResultAttachment(arranged, session.id, PNG, "a-made-up-credential"))
+            .status,
+        ).toBe(401);
+        // A user's token is not a runner's credential.
+        expect(
+          (await uploadToolResultAttachment(arranged, session.id, PNG, arranged.token)).status,
+        ).toBe(401);
+
+        const noSessionId = await fetch(`${arranged.harness.base}${RUNNER_ATTACHMENTS_PATH}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${arranged.credential}` },
+          body: PNG,
+        });
+        expect(noSessionId.status).toBe(404);
+        expect((await uploadToolResultAttachment(arranged, "not-an-id")).status).toBe(404);
+        expect((await uploadToolResultAttachment(arranged, NO_SUCH_ATTACHMENT)).status).toBe(404);
+        const joined = await send("POST", arranged.harness.base, "/api/v1/runners/join", {
+          body: {},
+          token: await arranged.harness.joinToken(),
+        });
+        const { credential } = (await joined.json()) as { credential: string };
+        const otherRunner = await uploadToolResultAttachment(arranged, session.id, PNG, credential);
+        expect(otherRunner.status).toBe(404);
+        expect(await otherRunner.json()).toMatchObject({ error: { code: "not_found" } });
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "stores the same bytes once per session, and again in another session",
+    async () => {
+      await withAgentFleet(async (arranged) => {
+        const directory = join(arranged.harness.home, "data", "attachments");
+        const filesBefore = listFiles(directory);
+        const session = await spawnSessionOrFail(arranged, { prompt: "look" });
+        const first = await uploadToolResultAttachmentOrFail(arranged, session.id);
+        const second = await uploadToolResultAttachmentOrFail(arranged, session.id);
+        expect(second).toEqual(first);
+        expect(listFiles(directory)).toEqual([...filesBefore, first.id].sort());
+
+        const other = await spawnSessionOrFail(arranged, { prompt: "look" });
+        const elsewhere = await uploadToolResultAttachmentOrFail(arranged, other.id);
+        expect(elsewhere.id).not.toBe(first.id);
+        const rows = await Effect.runPromise(
+          arranged.harness.sql<{ readonly count: number }>`
+            SELECT COUNT(*) AS count FROM session_tool_result_attachments
+          `,
+        );
+        expect(rows[0]?.count).toBe(2);
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "counts nothing against the session's quota, and cannot be deleted as an unsent upload",
+    async () => {
+      await withAgentFleet(async (arranged) => {
+        const agent = await spawnThreadWithGrants(arranged, "uploader", [
+          "session.steer",
+          "session.read",
+        ]);
+        const stored = await uploadToolResultAttachmentOrFail(arranged, agent.session.id);
+        // The tool result's attachment has the session as its actor, as the session's own
+        // uploads do. Were it counted, this size would fill the quota.
+        await Effect.runPromise(
+          arranged.harness.sql`UPDATE attachments SET size_bytes = ${MAX_UNCLAIMED_BYTES}`,
+        );
+
+        const own = await upload(arranged, "own.png", PNG, agent.token);
+        expect(own.status, await own.clone().text()).toBe(201);
+        expect((await deleteAttachment(arranged, stored.id, agent.token)).status).toBe(404);
+        const directory = join(arranged.harness.home, "data", "attachments");
+        expect(existsSync(join(directory, stored.id))).toBe(true);
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
 describe("the sweep", () => {
   it(
     "deletes an image no input claimed within a day, with its file, and stray files, and keeps a claimed one",
@@ -869,6 +1062,39 @@ describe("the sweep", () => {
           expect((await read(unclaimed.id)).status).toBe(404);
           expect((await read(claimed.id)).status).toBe(200);
           expect(existsSync(join(directory, claimed.id))).toBe(true);
+        },
+        { attachmentSweepInterval: Duration.millis(50) },
+      );
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps a tool result's attachment, row and file, long after a day",
+    async () => {
+      await withAgentFleet(
+        async (arranged) => {
+          const session = await spawnSessionOrFail(arranged, { prompt: "look" });
+          const toolResultAttachment = await uploadToolResultAttachmentOrFail(arranged, session.id);
+          const unclaimed = await uploadOrFail(arranged, "old.png");
+          const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+          await Effect.runPromise(
+            arranged.harness.sql`UPDATE attachments SET created_at = ${dayAgo}`,
+          );
+          const directory = join(arranged.harness.home, "data", "attachments");
+
+          // The unclaimed upload going is the sign that a sweep has run.
+          await waitUntil("swept the unclaimed image", () =>
+            existsSync(join(directory, unclaimed.id)) ? undefined : true,
+          );
+          expect(existsSync(join(directory, toolResultAttachment.id))).toBe(true);
+          const read = await get(
+            arranged.harness.base,
+            `/api/v1/attachments/${toolResultAttachment.id}/content`,
+            arranged.token,
+          );
+          expect(read.status).toBe(200);
+          expect(new Uint8Array(await read.arrayBuffer())).toEqual(PNG);
         },
         { attachmentSweepInterval: Duration.millis(50) },
       );

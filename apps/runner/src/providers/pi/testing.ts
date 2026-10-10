@@ -20,7 +20,14 @@ import { Effect, Stream } from "effect";
 import type { ProviderEvent, SessionSpec } from "@hercule/protocol";
 import type { ProviderRunnerContext } from "../index";
 import type { Ran } from "../process";
-import { CWD, createLines, createScratchHome, filterByTag, waitUntil } from "../testing";
+import {
+  CWD,
+  createLines,
+  createScratchHome,
+  filterByTag,
+  NO_CONTROLLER_UPLOADER,
+  waitUntil,
+} from "../testing";
 import { makePiAdapter, type PiSeam } from "./adapter";
 
 export {
@@ -46,6 +53,7 @@ export const buildContext = (
 ): ProviderRunnerContext => ({
   cwd,
   attachmentsDir: null,
+  attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,
   binary: "/usr/local/bin/pi",
   env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },

@@ -55,7 +55,7 @@ import {
   MAX_WORKSPACE_STEPS,
   type WorkspaceReport,
 } from "@hercule/protocol";
-import type { AttachmentCache } from "./attachments";
+import type { AttachmentCache, AttachmentUploader } from "./attachments";
 import type { CredentialRelay } from "./credentials";
 import { refreshFacts } from "./probe";
 import type { ControllerMove } from "./repoint";
@@ -145,6 +145,8 @@ export interface ConnectOptions {
   readonly attachmentsDir: string;
   /** Fetches the images of an input from the controller. It outlives this connection. */
   readonly attachments: AttachmentCache;
+  /** Uploads the images a session's tools return to the controller. It outlives this connection. */
+  readonly attachmentUploader: AttachmentUploader;
   /** The workspaces on this machine. Creates new ones when the controller asks. */
   readonly workspaces: Workspaces;
   /** The workspace steps on this machine. They outlive this connection. */
@@ -370,6 +372,7 @@ export const connect = (
         // a login never load the skill.
         herculeTool: options.herculeTool,
         attachmentsDir: null,
+        attachmentUploader: options.attachmentUploader,
       };
     };
 
@@ -385,6 +388,7 @@ export const connect = (
         scratchDir: options.scratchDir,
         attachmentsDir: options.attachmentsDir,
         attachments: options.attachments,
+        attachmentUploader: options.attachmentUploader,
         binDir: options.binDir,
         herculeTool: options.herculeTool,
         controllerUrl: pin.controllerUrl,

@@ -17,11 +17,13 @@ import { Id } from "../ids";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
 
-/** Re-exported from the protocol, where the runner reads it, so both use the same list. */
-export { IMAGE_MIME_TYPES, ImageMimeType } from "@hercule/protocol";
-
-/** The largest image an upload accepts: 10 MiB. */
-export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+/** Re-exported from the protocol, where the runner reads them, so both use the same values. */
+export {
+  IMAGE_MIME_TYPES,
+  ImageMimeType,
+  MAX_ATTACHMENT_BYTES,
+  ToolResultImage,
+} from "@hercule/protocol";
 
 /** The most images one input may carry. */
 export const MAX_ATTACHMENTS_PER_INPUT = 10;
@@ -84,7 +86,9 @@ export const attachment = HttpApiGroup.make("attachment")
     // Deletes an upload the caller's actor made and no input references yet,
     // such as an image the user removed before sending. Any other id is
     // `not_found`, by the same rule as `readContent`, so a caller cannot tell
-    // someone else's upload from an id that does not exist.
+    // someone else's upload from an id that does not exist. An image an
+    // agent's tool returned is never deleted here: it lives as long as the
+    // session's transcript does.
     HttpApiEndpoint.delete("delete", "/attachments/:id", {
       params: { id: AttachmentId },
       success: Schema.Struct({}),

@@ -196,7 +196,7 @@ const REMOVE_PLAIN = `(() => {
 const SEND = `document.querySelector('button.send[title="Send"]').click()`;
 
 /** True once the sent message's bubble draws every image and the shelf is empty. */
-const BUBBLE_READY = `document.querySelectorAll('.bubble-image img').length === ${String(IMAGE_COUNT)} && document.querySelectorAll('.shelf-tile').length === 0`;
+const BUBBLE_READY = `document.querySelectorAll('.bubble-images .image-tile img').length === ${String(IMAGE_COUNT)} && document.querySelectorAll('.shelf-tile').length === 0`;
 
 /** One reading of the app's memory, after one step. */
 interface Reading {

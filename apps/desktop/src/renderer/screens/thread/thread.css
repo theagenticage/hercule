@@ -198,14 +198,22 @@ button.work-row:hover > .ic {
 .work-row[aria-expanded="true"] > .ic:last-child {
   transform: rotate(90deg);
 }
-/* An open step's output, in the book's code block made quieter: the sunken
-   box with its soft rim, the mono face at 11px in the muted ink, and the
-   small radius. It starts at the label column and, like the code block,
-   keeps each line whole and scrolls sideways; it scrolls down past ten
-   lines or so. The last thing in a stretch takes no space below it, so the
-   gap to the next block stays the transcript's own. */
+/* What an open step returned: its text, then its images (attachments.css),
+   6px apart, as the images' own tiles and lines are. It starts at the label
+   column. The last thing in a stretch takes no space below it, so the gap
+   to the next block stays the transcript's own. */
 .work-output {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin: 2px 0 6px 24px;
+}
+/* The text, in the book's code block made quieter: the sunken box with its
+   soft rim, the mono face at 11px in the muted ink, and the small radius.
+   Like the code block, it keeps each line whole and scrolls sideways; it
+   scrolls down past ten lines or so. */
+.work-output-text {
+  margin: 0;
   /* Ten lines of 17.6px plus the border. The inset is a transparent border,
      not padding, because a scroll box clips its text at the padding edge:
      with padding, the eleventh line would show cut in half below the tenth. */

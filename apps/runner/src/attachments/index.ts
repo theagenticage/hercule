@@ -1,6 +1,11 @@
 /**
- * Fetches the images of an input from the controller and caches them on this
- * machine, so an adapter can hand its harness a local file.
+ * Moves images between this runner and the controller over plain HTTP, in
+ * both directions:
+ *
+ * - the attachment cache fetches the images of an input and caches them on
+ *   this machine, so an adapter can hand its harness a local file;
+ * - the attachment uploader sends the controller each image from a tool's
+ *   result, so the session's events carry only a reference to it.
  *
  * A frame on the runner socket carries only a reference to each image. The
  * bytes come over plain HTTP instead, each image on its own request, so a
@@ -26,11 +31,18 @@ import { open } from "node:fs/promises";
 import { join as joinPath } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import { ATTACHMENT_DOWNLOAD_TIMEOUT, type AttachmentReference } from "@hercule/protocol";
+import * as Schema from "effect/Schema";
+import {
+  ATTACHMENT_DOWNLOAD_TIMEOUT,
+  ToolResultAttachment,
+  RUNNER_ATTACHMENTS_PATH,
+  ATTACHMENT_UPLOAD_TIMEOUT,
+  type AttachmentReference,
+  type ToolResultImage,
+} from "@hercule/protocol";
 import type { LocalAttachment } from "../providers";
-
-/** The route is part of the runner protocol, not the operation table, so its path is written out here. */
-const ATTACHMENT_PATH = "/api/v1/runners/attachments/";
+import { parseErrorEnvelopeMessage } from "../error-envelope";
+import { truncateFact } from "../providers/text";
 
 export interface AttachmentCache {
   /**
@@ -86,7 +98,7 @@ export const makeAttachmentCache = (options: {
     path: string,
     signal: AbortSignal,
   ): Promise<void> => {
-    const url = new URL(ATTACHMENT_PATH + reference.id, options.controllerUrl);
+    const url = new URL(`${RUNNER_ATTACHMENTS_PATH}/${reference.id}`, options.controllerUrl);
     let response: Response;
     try {
       response = await fetch(url, {
@@ -173,5 +185,104 @@ export const makeAttachmentCache = (options: {
           concurrency: "unbounded",
         });
       }),
+  };
+};
+
+/**
+ * Uploads the images from a tool's result to the controller, which stores
+ * each one as an Attachment of the session. The runner replaces each image in
+ * a tool's result with the reference this returns before the message becomes
+ * an event, so no event carries an image's bytes.
+ */
+export interface AttachmentUploader {
+  /**
+   * Uploads one image from a tool's result to the controller, which
+   * stores it for the session, and returns the reference to keep in the
+   * image's place. Aborting `signal`, when the session stops, ends the
+   * request. Never fails: an upload that fails, is refused, is aborted, or
+   * does not finish within `ATTACHMENT_UPLOAD_TIMEOUT` returns the image as
+   * `unavailable`, with the reason for the user.
+   */
+  readonly upload: (
+    sessionId: string,
+    bytes: Uint8Array,
+    signal: AbortSignal,
+  ) => Effect.Effect<ToolResultImage>;
+}
+
+const decodeToolResultAttachment = Schema.decodeUnknownSync(ToolResultAttachment);
+
+/**
+ * Creates the attachment uploader, which uploads each image from a tool's
+ * result to the controller. The request carries the runner's
+ * credential, the same one the socket uses, and the image's bytes as its body.
+ */
+export const makeAttachmentUploader = (options: {
+  readonly controllerUrl: string;
+  readonly credential: string;
+}): AttachmentUploader => {
+  /**
+   * Uploads one image and returns the stored image. Throws an error whose
+   * message the user can read, except when `signal` is aborted: `upload`
+   * explains an abort, because it can come at any step, the body included.
+   * The controller reads the image's type from its first bytes, so the
+   * request names no type.
+   */
+  const send = async (
+    sessionId: string,
+    bytes: Uint8Array,
+    signal: AbortSignal,
+  ): Promise<ToolResultAttachment> => {
+    const url = new URL(RUNNER_ATTACHMENTS_PATH, options.controllerUrl);
+    url.searchParams.set("sessionId", sessionId);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { authorization: `Bearer ${options.credential}` },
+        body: bytes,
+        signal,
+      });
+    } catch (error) {
+      throw new Error(`the controller could not be reached: ${describeError(error)}`, {
+        cause: error,
+      });
+    }
+    if (response.status !== 201) {
+      throw new Error(
+        parseErrorEnvelopeMessage(await response.text().catch(() => "")) ??
+          `the controller responded with HTTP ${String(response.status)}`,
+      );
+    }
+    try {
+      return decodeToolResultAttachment(await response.json());
+    } catch (error) {
+      throw new Error("the controller's answer was not a stored image", { cause: error });
+    }
+  };
+
+  return {
+    upload: (sessionId, bytes, signal) => {
+      const timeout = AbortSignal.timeout(Duration.toMillis(ATTACHMENT_UPLOAD_TIMEOUT));
+      return Effect.match(
+        Effect.tryPromise({
+          try: () => send(sessionId, bytes, AbortSignal.any([signal, timeout])),
+          // An abort is checked first: it fails whichever step was running.
+          catch: (error) =>
+            signal.aborted
+              ? "the session stopped before it was stored"
+              : timeout.aborted
+                ? `the controller did not store it within ${Duration.format(ATTACHMENT_UPLOAD_TIMEOUT)}`
+                : describeError(error),
+        }),
+        {
+          onSuccess: (attachment): ToolResultImage => ({ type: "image", attachment }),
+          onFailure: (why): ToolResultImage => ({
+            type: "image",
+            unavailable: truncateFact(`The image could not be kept: ${why}`),
+          }),
+        },
+      );
+    },
   };
 };

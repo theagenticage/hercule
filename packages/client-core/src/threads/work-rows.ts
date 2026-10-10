@@ -7,8 +7,10 @@
  * The web app keeps spec 14's rows (`ThreadItem.verb`); these rows are the
  * desktop's own (spec 17 §The thread).
  */
+import type { ToolResultImage } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
 import type { WorkItem } from "./blocks";
+import { readToolResultImages } from "./tool-result-images";
 import { countDistinctFiles, formatCount } from "./work-summary";
 
 /**
@@ -57,9 +59,17 @@ export interface WorkRow {
    * while the step runs or when it returned no text.
    */
   readonly output: string;
+  /**
+   * The images the step returned (`readToolResultImages`), in order. Empty
+   * for a group, and while the step runs or when it returned none.
+   */
+  readonly images: readonly ToolResultImage[];
   /** A group's steps, in order. Empty for a single step. */
   readonly steps: readonly WorkRow[];
-  /** Whether the row has something to open: it is a group, or a step whose output is not empty. */
+  /**
+   * Whether the row has something to open: it is a group, or a step that
+   * returned text or images.
+   */
   readonly canOpen: boolean;
 }
 
@@ -188,6 +198,7 @@ const foldsWith = (first: WorkItem, next: WorkItem): boolean =>
 const buildStepRow = (item: WorkItem, key: string): WorkRow => {
   const words = STEP_WORDS[item.kind];
   const output = readResultText(item.resultContent);
+  const images = readToolResultImages(item.resultContent);
   return {
     key,
     icon: words.icon,
@@ -197,8 +208,9 @@ const buildStepRow = (item: WorkItem, key: string): WorkRow => {
     startedAt: item.startedAt,
     result: item.result,
     output,
+    images,
     steps: [],
-    canOpen: output !== "",
+    canOpen: output !== "" || images.length > 0,
   };
 };
 
@@ -218,6 +230,7 @@ const buildRunRow = (run: readonly WorkItem[]): WorkRow => {
     result:
       GROUP_RESULTS.find((result) => run.some((item) => item.result === result)) ?? "completed",
     output: "",
+    images: [],
     steps: run.map((item) => buildStepRow(item, `step:${item.itemId}`)),
     canOpen: true,
   };
@@ -230,8 +243,8 @@ const buildRunRow = (run: readonly WorkItem[]): WorkRow => {
  * calls of the same tool. Reasoning, subagents, plans, compactions, errors and
  * unknown steps never fold.
  *
- * Each step's result text is read here, so the desktop calls this only while
- * a stretch is open.
+ * Each step's result text and images are read here, so the desktop calls
+ * this only while a stretch is open.
  */
 export const buildWorkRows = (items: readonly WorkItem[]): readonly WorkRow[] => {
   const rows: WorkRow[] = [];
