@@ -18,8 +18,6 @@ import * as Effect from "effect/Effect";
 import {
   encodeForwardingPointerBytes,
   PROTOCOL_VERSION,
-  type ControllerToRunner,
-  type ForwardingPointer,
   type RunnerHello,
 } from "@hercule/protocol";
 import { buildHomePaths, locateRunnerFile } from "@hercule/home";
@@ -37,13 +35,13 @@ import {
 import { promote } from "./promote";
 import { createPromotionToken, findFreePort } from "./testing";
 import { get, post, readErrorBody, send } from "../http/testing";
+import { dialRunnerSocket, takeFrameWithTag } from "../runners/testing";
 
 const ENTRYPOINT = join(ROOT, "packages/hercule/src/main.ts");
 const BUN = process.execPath.endsWith("/bun") ? process.execPath : "bun";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 const SECRET_OWNER = "0198e4b0-0000-7000-8000-000000000001";
 const SECRET_VALUE = "ghp_promotion-two-home-secret";
-const SOCKET_PATH = "/api/v1/runners/socket";
 const TEST_TIMEOUT_MS = 180_000;
 const RUNNER_WAIT_MS = 45_000;
 
@@ -57,12 +55,6 @@ interface ControllerInfo {
   readonly id: string;
   readonly publicKey: string;
   readonly localRunnerId: string | null;
-}
-
-interface Wire {
-  readonly send: (message: object) => void;
-  readonly next: () => Promise<ControllerToRunner>;
-  readonly close: () => void;
 }
 
 const homes: Array<string> = [];
@@ -295,55 +287,6 @@ const verifyAddressSignature = async (
   );
 };
 
-const buildSocketUrl = (base: string): string => `${base.replace(/^http:/, "ws:")}${SOCKET_PATH}`;
-
-const dial = (base: string, credential: string): Promise<Wire> =>
-  new Promise((resolve, reject) => {
-    const socket = new WebSocket(buildSocketUrl(base), {
-      headers: { authorization: `Bearer ${credential}` },
-    });
-    const frames: Array<ControllerToRunner> = [];
-    let taken = 0;
-    let ending: { readonly code: number; readonly reason: string } | undefined;
-
-    socket.onmessage = (event) => {
-      frames.push(JSON.parse(String(event.data)) as ControllerToRunner);
-    };
-    socket.onclose = (event) => {
-      ending = { code: event.code, reason: event.reason };
-    };
-    socket.onopen = () => {
-      resolve({
-        send: (message) => socket.send(JSON.stringify(message)),
-        next: async () => {
-          for (let attempt = 0; attempt < 400 && frames.length <= taken; attempt++) {
-            await delay(5);
-          }
-          if (frames.length <= taken) {
-            throw new Error(
-              ending === undefined
-                ? "the controller sent nothing"
-                : `the controller closed (${String(ending.code)} ${ending.reason}) instead of answering`,
-            );
-          }
-          return frames[taken++]!;
-        },
-        close: () => socket.close(),
-      });
-    };
-    setTimeout(
-      () =>
-        reject(
-          new Error(
-            ending === undefined
-              ? "the controller never upgraded the connection"
-              : `the controller refused the upgrade (${String(ending.code)} ${ending.reason})`,
-          ),
-        ),
-      8_000,
-    );
-  });
-
 const buildHello = (): RunnerHello => ({
   _tag: "runnerHello",
   protocolVersion: PROTOCOL_VERSION,
@@ -362,14 +305,6 @@ const buildHello = (): RunnerHello => ({
   },
 });
 
-const waitForTag = async <T extends ControllerToRunner>(wire: Wire, tag: T["_tag"]): Promise<T> => {
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const frame = await wire.next();
-    if (frame._tag === tag) return frame as T;
-  }
-  throw new Error(`the controller never sent ${tag}`);
-};
-
 const expectSealedWithPointer = async (
   base: string,
   token: string,
@@ -383,9 +318,9 @@ const expectSealedWithPointer = async (
   expect(body.code).toBe("controller_sealed");
   expect(body.message).toContain(newAddress);
 
-  const wire = await dial(base, credential);
+  const wire = await dialRunnerSocket(base, credential);
   wire.send(buildHello());
-  const pointer = await waitForTag<ForwardingPointer>(wire, "forwardingPointer");
+  const pointer = await takeFrameWithTag(wire, "forwardingPointer");
   expect(pointer.newAddress).toBe(newAddress);
   expect(await verifyAddressSignature(publicKey, pointer.newAddress, pointer.signature)).toBe(true);
   wire.close();

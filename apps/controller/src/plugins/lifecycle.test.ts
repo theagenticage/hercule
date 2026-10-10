@@ -27,6 +27,7 @@ import { connectionStateRepository } from "../connections";
 import { DEACTIVATE_TIMEOUT_SECONDS } from "./host";
 import { IngestLoops, PluginHost, Plugins } from "./index";
 import { PromotionState } from "../promotion";
+import { awaitHeldWork } from "../promotion/testing";
 import { pluginRepository } from "./repository";
 import {
   asUser,
@@ -551,7 +552,7 @@ describe("the key-value store a plugin is given", () => {
           yield* promotion.copyDatabaseAndStopWrites(tokenId, join(directory, "copy.db"));
 
           const write = yield* Effect.forkChild(readKeyValueStore(alpha).set("cursor", "frozen"));
-          yield* Effect.sleep(Duration.millis(50));
+          yield* awaitHeldWork(promotion, 1);
           const whileFrozen = yield* readKeyValueStore(alpha).get("cursor");
 
           yield* promotion.thaw(tokenId);

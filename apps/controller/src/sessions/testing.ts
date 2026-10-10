@@ -45,8 +45,7 @@ import {
   type ServerHarness,
   type ServerOptions,
 } from "../http/testing";
-
-const SOCKET_PATH = "/api/v1/runners/socket";
+import { buildRunnerSocketUrl } from "../runners/testing";
 
 /**
  * The capabilities a runner of this build lists at hello: every workspace
@@ -154,7 +153,7 @@ const dial = (
   capabilities: ReadonlyArray<string> = CURRENT_CAPABILITIES,
 ): Promise<Wire> =>
   new Promise((resolve, reject) => {
-    const socket = new WebSocket(`${base.replace(/^http:/, "ws:")}${SOCKET_PATH}`, {
+    const socket = new WebSocket(buildRunnerSocketUrl(base), {
       headers: { authorization: `Bearer ${credential}` },
     });
     const frames: Array<ControllerMessage> = [];

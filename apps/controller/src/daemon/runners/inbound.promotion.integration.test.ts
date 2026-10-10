@@ -13,13 +13,17 @@
  *
  * The cost is a known loss: an event the runner reports between the copy and
  * its reconnect to the new machine is on neither machine. A test asserts it.
+ *
+ * A test knows the exit has reached the controller when the exit waits at the
+ * promotion gate. Work that waits there has not run, so the checks that
+ * follow cannot pass only because the exit had not arrived yet.
  */
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SessionStart } from "@hercule/protocol";
 import type { Session } from "@hercule/contract";
@@ -27,11 +31,13 @@ import { buildHomePaths, type HomePaths } from "@hercule/home";
 import { openDatabase, uuidFromString } from "../../db";
 import { send } from "../../http/testing";
 import {
+  awaitHeldWork,
   freezeController,
   pullTransfer,
   receiveTransferIntoHome,
   requestTransfer,
   sealController,
+  QUIET_LOOP_TIMINGS,
 } from "../../promotion/testing";
 import {
   WAIT_DEADLINE_MS,
@@ -131,6 +137,26 @@ const readSessionFromHome = (
     ),
   );
 
+/**
+ * Waits until the work held while the controller was frozen is held again
+ * after the seal, and never runs. Frozen work that sees the seal stops being
+ * held for a moment and then waits at the gate for good, so the held count
+ * drops to zero and comes back to one. Waiting for the count to read one is
+ * not enough: a read before the held work saw the seal also reads one.
+ *
+ * Call it before the seal: it subscribes to the gate at once, and the seal
+ * must not happen before that.
+ */
+const awaitHeldAgainAfterSeal = (arranged: Arranged): Promise<unknown> =>
+  Effect.runPromise(
+    arranged.harness.promotion.gateChanges.pipe(
+      Stream.filter((state) => state.phase._tag === "Sealed"),
+      Stream.dropWhile((state) => state.held !== 0),
+      Stream.filter((state) => state.held === 1),
+      Stream.runHead,
+    ),
+  );
+
 /** Returns the start frames the runner received for the session. */
 const listStartFrames = (arranged: Arranged, sessionId: string): ReadonlyArray<SessionStart> =>
   listFrames<SessionStart>(arranged.wire, "sessionStart").filter(
@@ -144,7 +170,7 @@ describe("session traffic during a promotion", () => {
       const promotionToken = await freezeController(arranged.harness.base, arranged.token);
 
       reportExited(arranged, running.id);
-      await delay(200);
+      await Effect.runPromise(awaitHeldWork(arranged.harness.promotion, 1));
       // Reading still works while frozen.
       expect((await readSession(arranged, running.id)).status).not.toBe("exited");
       expect((await readSession(arranged, queued.id)).status).toBe("queued");
@@ -154,7 +180,7 @@ describe("session traffic during a promotion", () => {
       expect(cancelled.status).toBe(204);
       await waitForSession(arranged, running.id, (one) => one.status === "exited");
       await waitForStartFrames(arranged, queued.id, 1);
-    });
+    }, QUIET_LOOP_TIMINGS);
   });
 
   it("never records the exit or starts the queued session on a sealed controller", async () => {
@@ -164,12 +190,12 @@ describe("session traffic during a promotion", () => {
       await sealController(arranged.harness.base, promotionToken);
 
       reportExited(arranged, running.id);
-      await delay(200);
+      await Effect.runPromise(awaitHeldWork(arranged.harness.promotion, 1));
       // A sealed controller answers no request, so the sessions are read from its database.
       expect(await readStatusFromDatabase(arranged, running.id)).not.toBe("exited");
       expect(await readStatusFromDatabase(arranged, queued.id)).toBe("queued");
       expect(listStartFrames(arranged, queued.id)).toEqual([]);
-    });
+    }, QUIET_LOOP_TIMINGS);
   });
 
   it("loses a session event the runner reports between the copy and the switch: it is on neither machine", async () => {
@@ -186,11 +212,12 @@ describe("session traffic during a promotion", () => {
         );
 
         const eventId = reportExited(arranged, session.id);
-        await delay(200);
+        await Effect.runPromise(awaitHeldWork(arranged.harness.promotion, 1));
+        const heldAgain = awaitHeldAgainAfterSeal(arranged);
         await sealController(arranged.harness.base, promotionToken);
-        // The freeze holds the event instead of dropping it. The wait gives a
-        // seal that wrote the held event after all the time to do so.
-        await delay(200);
+        // The seal does not write the held event: the event goes on waiting
+        // at the gate, now for good.
+        await heldAgain;
         const onA = await Effect.runPromise(
           Effect.orDie(isEventOnStream(arranged.harness.sql, session.id, eventId)),
         );
@@ -204,7 +231,7 @@ describe("session traffic during a promotion", () => {
         const onB = await readSessionFromHome(pathsB, session.id, eventId);
         expect(onB.hasEvent).toBe(false);
         expect(onB.status).not.toBe("exited");
-      });
+      }, QUIET_LOOP_TIMINGS);
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }

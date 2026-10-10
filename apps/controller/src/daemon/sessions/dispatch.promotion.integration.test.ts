@@ -8,11 +8,17 @@
  * a freeze can begin while the controller is still waiting. The new
  * machine's copy of the data then holds the input as not yet answered. So an
  * answer that arrives during the freeze must not be recorded until the freeze
- * ends.
+ * ends. The test knows the answer has arrived when recording it waits at the
+ * promotion gate.
  */
-import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
-import { freezeController, requestTransfer } from "../../promotion/testing";
+import * as Effect from "effect/Effect";
+import {
+  awaitHeldWork,
+  freezeController,
+  requestTransfer,
+  QUIET_LOOP_TIMINGS,
+} from "../../promotion/testing";
 import {
   WAIT_DEADLINE_MS,
   listInputs,
@@ -33,7 +39,7 @@ describe("the answer to a session's start", () => {
       const promotionToken = await freezeController(arranged.harness.base, arranged.token);
 
       arranged.wire.release("opened");
-      await delay(200);
+      await Effect.runPromise(awaitHeldWork(arranged.harness.promotion, 1));
       // Reading still works while frozen.
       expect((await listInputs(arranged, session.id)).map((input) => input.status)).not.toContain(
         "delivered",
@@ -45,6 +51,6 @@ describe("the answer to a session's start", () => {
         const inputs = await listInputs(arranged, session.id);
         return inputs.some((input) => input.status === "delivered") ? inputs : undefined;
       });
-    });
+    }, QUIET_LOOP_TIMINGS);
   });
 });

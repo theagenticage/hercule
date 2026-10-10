@@ -11,8 +11,11 @@
  * sees it.
  */
 import { describe, expect, it, vi } from "vitest";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import type { SessionInput } from "@hercule/protocol";
-import { createPromotionToken, requestTransfer } from "../../promotion/testing";
+import { createPromotionToken, requestTransfer, QUIET_LOOP_TIMINGS } from "../../promotion/testing";
 import {
   WAIT_DEADLINE_MS,
   at,
@@ -58,7 +61,17 @@ describe("a message steered into a conversation session's turn", () => {
         copied = true;
         return response;
       });
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      // The freeze copies the data only once no counted work is running. The
+      // steer is the one unit of work running when the freeze starts, and it
+      // runs until the runner answers, so the copy waits for that answer.
+      const frozen = await Effect.runPromise(
+        arranged.harness.promotion.gateChanges.pipe(
+          Stream.filter((state) => state.phase._tag === "Frozen"),
+          Stream.runHead,
+          Effect.map(Option.getOrThrow),
+        ),
+      );
+      expect(frozen.running).toBe(1);
       expect(copied).toBe(false);
 
       arranged.wire.release("steered");
@@ -72,6 +85,6 @@ describe("a message steered into a conversation session's turn", () => {
       expect(steered).toMatchObject({ status: "delivered", delivery: "steered" });
       const cancelled = await requestTransfer(arranged.harness.base, promotionToken, "DELETE");
       expect(cancelled.status).toBe(204);
-    });
+    }, QUIET_LOOP_TIMINGS);
   });
 });

@@ -8,15 +8,11 @@
  *   forwarding pointer, a runner that dials afterwards gets one instead of a
  *   hello, and API writes then return `controller_sealed`.
  */
-import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import {
   encodeForwardingPointerBytes,
   PROTOCOL_VERSION,
-  type ControllerHello,
-  type ControllerToRunner,
-  type ForwardingPointer,
   type JoinAnswer,
   type RunnerHello,
 } from "@hercule/protocol";
@@ -31,8 +27,7 @@ import {
   requestTransfer,
   sealController,
 } from "../../promotion/testing";
-
-const SOCKET_PATH = "/api/v1/runners/socket";
+import { dialRunnerSocket, takeFrameWithTag } from "../../runners/testing";
 
 const postSwitch = (
   base: string,
@@ -78,61 +73,6 @@ const verifyAddressSignature = async (
   );
 };
 
-const buildSocketUrl = (base: string): string => `${base.replace(/^http:/, "ws:")}${SOCKET_PATH}`;
-
-interface Wire {
-  readonly send: (message: object) => void;
-  readonly next: () => Promise<ControllerToRunner>;
-  readonly close: () => void;
-}
-
-const dial = (base: string, credential: string): Promise<Wire> =>
-  new Promise((resolve, reject) => {
-    const socket = new WebSocket(buildSocketUrl(base), {
-      headers: { authorization: `Bearer ${credential}` },
-    });
-    const frames: Array<ControllerToRunner> = [];
-    let taken = 0;
-    let ending: { readonly code: number; readonly reason: string } | undefined;
-
-    socket.onmessage = (event) => {
-      frames.push(JSON.parse(String(event.data)) as ControllerToRunner);
-    };
-    socket.onclose = (event) => {
-      ending = { code: event.code, reason: event.reason };
-    };
-    socket.onopen = () => {
-      resolve({
-        send: (message) => socket.send(JSON.stringify(message)),
-        next: async () => {
-          for (let attempt = 0; attempt < 400 && frames.length <= taken; attempt++) {
-            await delay(5);
-          }
-          if (frames.length <= taken) {
-            throw new Error(
-              ending === undefined
-                ? "the controller sent nothing"
-                : `the controller closed (${String(ending.code)} ${ending.reason}) instead of answering`,
-            );
-          }
-          return frames[taken++]!;
-        },
-        close: () => socket.close(),
-      });
-    };
-    setTimeout(
-      () =>
-        reject(
-          new Error(
-            ending === undefined
-              ? "the controller never upgraded the connection"
-              : `the controller refused the upgrade (${String(ending.code)} ${ending.reason})`,
-          ),
-        ),
-      3000,
-    );
-  });
-
 const buildHello = (overrides: Partial<RunnerHello> = {}): RunnerHello => ({
   _tag: "runnerHello",
   protocolVersion: PROTOCOL_VERSION,
@@ -159,14 +99,6 @@ const enlist = async (base: string, joinToken: string): Promise<JoinAnswer> => {
   });
   expect(response.status, await response.clone().text()).toBe(201);
   return (await response.json()) as JoinAnswer;
-};
-
-const waitForTag = async <T extends ControllerToRunner>(wire: Wire, tag: T["_tag"]): Promise<T> => {
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const frame = await wire.next();
-    if (frame._tag === tag) return frame as T;
-  }
-  throw new Error(`the controller never sent ${tag}`);
 };
 
 describe("promotion preview", () => {
@@ -297,15 +229,15 @@ describe("promotion switch", () => {
       const user = await completeSetup(harness.base);
       await Effect.runPromise(Effect.orDie(harness.sql.unsafe(`DELETE FROM provider_instances`)));
       const joined = await enlist(harness.base, await harness.joinToken());
-      const wire = await dial(harness.base, joined.credential);
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
       wire.send(buildHello());
-      const hello = await waitForTag<ControllerHello>(wire, "controllerHello");
+      const hello = await takeFrameWithTag(wire, "controllerHello");
       expect(hello.identityId).toBe(joined.controllerIdentityId);
 
       const token = await freezeController(harness.base, user);
       await sealController(harness.base, token);
 
-      const announcement = await waitForTag<ForwardingPointer>(wire, "forwardingPointer");
+      const announcement = await takeFrameWithTag(wire, "forwardingPointer");
       expect(announcement.newAddress).toBe(NEW_CONTROLLER_ADDRESS);
       expect(
         await verifyAddressSignature(
@@ -316,9 +248,9 @@ describe("promotion switch", () => {
       ).toBe(true);
       wire.close();
 
-      const again = await dial(harness.base, joined.credential);
+      const again = await dialRunnerSocket(harness.base, joined.credential);
       again.send(buildHello());
-      const pointer = await waitForTag<ForwardingPointer>(again, "forwardingPointer");
+      const pointer = await takeFrameWithTag(again, "forwardingPointer");
       expect(pointer.newAddress).toBe(NEW_CONTROLLER_ADDRESS);
       expect(
         await verifyAddressSignature(

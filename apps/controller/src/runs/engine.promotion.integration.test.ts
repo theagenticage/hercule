@@ -6,15 +6,22 @@
  * releases it. The test spends a promotion token while the action waits,
  * which freezes the controller, and then releases the action. The step's
  * record must not end on the frozen controller: the new machine's copy was
- * taken before, and a write after it would be missing there.
+ * taken before, and a write after it would be missing there. The test knows
+ * the action has returned when the write that ends the step waits at the
+ * promotion gate.
  *
  * No runner is connected: action steps run on the controller.
  */
-import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 import { uuidFromString } from "../db";
-import { freezeController, requestTransfer, sealController } from "../promotion/testing";
+import {
+  awaitHeldWork,
+  freezeController,
+  requestTransfer,
+  sealController,
+  QUIET_LOOP_TIMINGS,
+} from "../promotion/testing";
 import { WAIT_DEADLINE_MS } from "../sessions/testing";
 import { withSetUpController } from "../workflows/testing";
 import { buildHeldAction, readRun, startHeldRun, waitForRunToFinish } from "./testing";
@@ -25,12 +32,12 @@ describe("runs during a promotion", () => {
   it("holds a step's end while frozen, and ends it once the transfer is cancelled", async () => {
     const held = buildHeldAction();
     await withSetUpController(
-      async ({ base, token }) => {
+      async ({ harness, base, token }) => {
         const runId = await startHeldRun(base, token, held);
         const promotionToken = await freezeController(base, token);
 
         held.release();
-        await delay(200);
+        await Effect.runPromise(awaitHeldWork(harness.promotion, 1));
         const frozen = await readRun(base, token, runId);
         expect(frozen.status, JSON.stringify(frozen)).toBe("running");
 
@@ -40,6 +47,7 @@ describe("runs during a promotion", () => {
         expect(finished.status, JSON.stringify(finished)).toBe("completed");
       },
       [held.plugin],
+      QUIET_LOOP_TIMINGS,
     );
   });
 
@@ -52,7 +60,7 @@ describe("runs during a promotion", () => {
         await sealController(base, promotionToken);
 
         held.release();
-        await delay(200);
+        await Effect.runPromise(awaitHeldWork(harness.promotion, 1));
         // A sealed controller answers no request, so the run is read from its database.
         const rows = await Effect.runPromise(
           Effect.orDie(
@@ -64,6 +72,7 @@ describe("runs during a promotion", () => {
         expect(rows.map((row) => row.status)).toEqual(["running"]);
       },
       [held.plugin],
+      QUIET_LOOP_TIMINGS,
     );
   });
 });

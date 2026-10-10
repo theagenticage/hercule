@@ -231,10 +231,11 @@ describe("receiveTransfer", () => {
       ),
     );
     await started;
-    const interrupted = Effect.runPromise(Fiber.interrupt(fiber));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The interrupt is sent synchronously, so it has reached the fiber
+    // before the add is allowed to finish.
+    fiber.interruptUnsafe();
     finishAdd();
-    await interrupted;
+    await Effect.runPromise(Fiber.await(fiber));
     expect(items.size).toBe(0);
     expect(existsSync(paths.home)).toBe(false);
 

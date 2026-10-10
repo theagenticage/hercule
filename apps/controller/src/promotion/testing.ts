@@ -8,17 +8,20 @@
  * - `pullTransfer` and `receiveTransferIntoHome`, which copy a running
  *   controller's data into a new Home, as `hercule promote` does;
  * - `awaitHeldWork` and `awaitRunningWork`, which wait for the promotion
- *   gate to reach a state, so a test never waits for a fixed time;
+ *   gate to reach a state, so a test never waits for a fixed time, and
+ *   `QUIET_LOOP_TIMINGS`, which keeps the controller's own loops away from
+ *   the gate so a count of held work is exact;
  * - helpers to create promotion tokens, request transfers and find a free port.
  */
 import { writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { HomePaths } from "@hercule/home";
-import { post } from "../http/testing";
+import { post, type ServerOptions } from "../http/testing";
 import { AuditLogLayer } from "../events";
 import { ControllerIdentity } from "../identity";
 import { decodePromotionToken } from "./crypto";
@@ -49,6 +52,22 @@ export const ServingPromotionStateLayer: Layer.Layer<PromotionState, never, SqlC
       ),
     ),
   );
+
+/**
+ * Loop intervals that keep the controller's frequent background loops away
+ * from the promotion gate while a test runs. The event pipeline, the
+ * Scheduler and the Ingest Reconciler otherwise pass the gate every second or
+ * two. A pass that arrives while frozen waits there next to the work the test
+ * sent, and a test that counts held work would count it too. The Scheduler
+ * runs once at boot and then not again for 59 seconds, the longest interval
+ * it accepts; the other two loops do not run again for an hour. Every other
+ * loop already waits a minute or more between passes.
+ */
+export const QUIET_LOOP_TIMINGS = {
+  eventRoutingInterval: Duration.hours(1),
+  schedulerInterval: Duration.seconds(59),
+  ingestReconcileInterval: Duration.hours(1),
+} satisfies ServerOptions;
 
 /** Waits until the gate's state matches, including when it already does. */
 const awaitGateState = (

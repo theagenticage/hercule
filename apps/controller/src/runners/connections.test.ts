@@ -8,6 +8,10 @@
  * that claim runners are ready when nothing is connected, and nothing later
  * corrects them. `strandedByTheLastRun` is the correction. It is tested here
  * rather than over the socket, because it is about the previous run.
+ *
+ * The tests at the end cover when a connection that ends during a promotion
+ * freeze is written. They run here rather than over the socket, because
+ * nothing on the socket shows when the controller has handled a close.
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber, Layer, Option, Stream } from "effect";
@@ -30,10 +34,18 @@ import { hashToken } from "../credentials";
 import { nowIso } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
+import { ControllerIdentity } from "../identity";
 import { NotifierLayer } from "../notifications";
+import { PromotionState, PromotionStateLayer } from "../promotion";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { readEventsOfKind } from "../events/testing";
-import { mintConnection, RunnerConnections, RunnerConnectionsLayer } from "./connections";
+import {
+  mintConnection,
+  RunnerConnections,
+  RunnerConnectionsLayer,
+  type Connection,
+  type Departure,
+} from "./connections";
 import { runnerRepository } from "./repository";
 
 const layer = RunnerConnectionsLayer.pipe(
@@ -477,5 +489,186 @@ describe("sendFrameCarryingInput", () => {
     // The runner may have the input, so the caller must not treat it as never sent.
     expect(written).toEqual([INPUT_FRAME]);
     expect(sent).toEqual({ _tag: "sent", answer: Option.none() });
+  });
+});
+
+/**
+ * The connections over a promotion state that can freeze and seal. The
+ * identity signs with a fixed run of bytes: these tests check what is written
+ * around a promotion, not the key.
+ */
+const promotableLayer = RunnerConnectionsLayer.pipe(
+  Layer.provideMerge(NotifierLayer),
+  Layer.provideMerge(
+    PromotionStateLayer.pipe(
+      Layer.provide(
+        Layer.succeed(ControllerIdentity, {
+          ensure: Effect.die("not used"),
+          readOrDie: Effect.die("not used"),
+          sign: () => Effect.succeed(new Uint8Array(64).fill(7)),
+        }),
+      ),
+    ),
+  ),
+  Layer.provideMerge(AuditLogLayer),
+  Layer.provideMerge(TestDatabase),
+);
+
+/** The promotion token every freeze in these tests is for. */
+const PROMOTION_TOKEN = "0199f0b7-0000-7000-8000-00000000aaaa";
+
+const HELLO = {
+  binaryVersion: "0.1.0",
+  protocolVersion: PROTOCOL_VERSION,
+  negotiatedCapabilities: [],
+  facts: FACTS,
+};
+
+/**
+ * Inserts an offline runner, connects it over `connection`, and returns its
+ * id. The hello moves the row to online, which records the first change.
+ */
+const connectRunner = (connection: Connection) =>
+  Effect.gen(function* () {
+    const connections = yield* RunnerConnections;
+    const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+    yield* connections.greeted(runner!.id, connection, HELD, HELLO);
+    return runner!.id;
+  });
+
+/**
+ * Freezes the controller for `PROMOTION_TOKEN`, as a promotion transfer does.
+ * The database copy is left out, so the database still accepts writes: a
+ * write that ignores the freeze then shows up in the row instead of failing.
+ */
+const freeze = Effect.flatMap(PromotionState, (promotion) =>
+  promotion.freeze(PROMOTION_TOKEN, new Date(Date.now() + 3_600_000)),
+);
+
+/**
+ * Ends the freeze, as a cancelled transfer does, and then writes the held
+ * departures, as the controller daemon does each time the controller serves
+ * again.
+ */
+const thawAndRecordHeldDepartures = Effect.gen(function* () {
+  const promotion = yield* PromotionState;
+  const connections = yield* RunnerConnections;
+  expect(yield* promotion.thaw(PROMOTION_TOKEN)).toBe(true);
+  yield* connections.recordHeldDepartures;
+});
+
+/**
+ * Reads the runner's connectivity now, and every connectivity change the
+ * audit log recorded, oldest first. Each test has one runner, so every change
+ * is about it.
+ */
+const readConnectivity = (id: string) =>
+  Effect.gen(function* () {
+    const runners = yield* runnerRepository;
+    const row = Option.getOrThrow(yield* runners.read(id));
+    const changes = yield* readEventsOfKind("runner.stateChanged");
+    return { now: row.connectivity, changes: changes.map((entry) => entry.payload["state"]) };
+  });
+
+/**
+ * A promotion freeze copies the database, so a write after the copy would be
+ * lost on the new machine. A connection that ends while frozen therefore
+ * leaves its runner online until the freeze ends, and once the controller is
+ * sealed it never moves the runner off online: the runner follows the new
+ * address instead. The socket holds a hello that arrives while frozen until
+ * the thaw, so these tests call `greeted` only while serving.
+ */
+describe("a connection that ends during a promotion freeze", () => {
+  it.each(["unreachable", "offline"] as const)(
+    "moves its runner to %s only once the freeze ends",
+    async (departure: Departure) => {
+      const { frozen, thawed } = await Effect.runPromise(
+        Effect.gen(function* () {
+          const connections = yield* RunnerConnections;
+          const connection = mintConnection();
+          const id = yield* connectRunner(connection);
+          yield* freeze;
+
+          yield* connections.ended(id, connection, departure);
+          const frozen = yield* readConnectivity(id);
+          yield* thawAndRecordHeldDepartures;
+          return { frozen, thawed: yield* readConnectivity(id) };
+        }).pipe(Effect.provide(promotableLayer), Effect.orDie),
+      );
+
+      expect(frozen, "the copy the new machine took has the runner online").toEqual({
+        now: "online",
+        changes: ["online"],
+      });
+      // The held departure keeps its kind: a runner that said goodbye was not
+      // lost, so it never reads as unreachable.
+      expect(thawed).toEqual({ now: departure, changes: ["online", departure] });
+    },
+  );
+
+  it.each([
+    { written: "the hello is written first", helloFirst: true, changes: ["online"] },
+    {
+      written: "the held departure is written first",
+      helloFirst: false,
+      changes: ["online", "unreachable", "online"],
+    },
+  ])(
+    "keeps a runner online that connects again once the freeze ends, when $written",
+    async ({ helloFirst, changes }) => {
+      const connectivity = await Effect.runPromise(
+        Effect.gen(function* () {
+          const connections = yield* RunnerConnections;
+          const promotion = yield* PromotionState;
+          const first = mintConnection();
+          const id = yield* connectRunner(first);
+          yield* freeze;
+          yield* connections.ended(id, first, "unreachable");
+
+          // The socket admits the new connection's hello once the controller
+          // serves again, and the controller daemon writes the held
+          // departures then too. Either can go first.
+          expect(yield* promotion.thaw(PROMOTION_TOKEN)).toBe(true);
+          const greetAgain = connections.greeted(id, mintConnection(), HELD, HELLO);
+          if (helloFirst) {
+            yield* greetAgain;
+            yield* connections.recordHeldDepartures;
+          } else {
+            yield* connections.recordHeldDepartures;
+            yield* greetAgain;
+          }
+          return yield* readConnectivity(id);
+        }).pipe(Effect.provide(promotableLayer), Effect.orDie),
+      );
+
+      expect(connectivity).toEqual({ now: "online", changes });
+    },
+  );
+
+  it.each([
+    { ends: "while frozen, before the seal", endsBeforeSeal: true },
+    { ends: "after the seal", endsBeforeSeal: false },
+  ])("never moves its runner off online when it ends $ends", async ({ endsBeforeSeal }) => {
+    const connectivity = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const promotion = yield* PromotionState;
+        const connection = mintConnection();
+        const id = yield* connectRunner(connection);
+        yield* freeze;
+
+        const end = connections.ended(id, connection, "unreachable");
+        if (endsBeforeSeal) yield* end;
+        yield* promotion.seal(PROMOTION_TOKEN, "http://b.test:4937");
+        if (!endsBeforeSeal) yield* end;
+        // The controller daemon never writes held departures on a sealed
+        // controller, because it never serves again. Running the write here
+        // shows that it skips them even so.
+        yield* connections.recordHeldDepartures;
+        return yield* readConnectivity(id);
+      }).pipe(Effect.provide(promotableLayer), Effect.orDie),
+    );
+
+    expect(connectivity).toEqual({ now: "online", changes: ["online"] });
   });
 });
