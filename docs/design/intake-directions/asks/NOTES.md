@@ -1,5 +1,13 @@
 # Intake, direction D: Asks
 
+> **Superseded 2026-10-10 ([#395](https://github.com/theagenticage/hercule/issues/395)).** These notes
+> are kept as history. The model they led to is written in
+> [spec 10 §9](../../../spec/10-triage-intake-and-notifications.md#9-signals), the desktop screen in
+> [spec 17 §Intake](../../../spec/17-desktop-app.md#intake), and the decision in
+> [ADR 0040](../../../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md). Where
+> these notes disagree with those documents, the documents win: an "ask" is now a **Signal**, and a
+> signal is its own record, not a Notification.
+
 Intake is the running list of what other people and systems ask of you, and you work through it
 all day. Someone requests your review, mentions you with a question, tags you in a thread about
 something you merged: each of these is one item, and each can be answered from where it sits,

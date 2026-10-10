@@ -13,20 +13,20 @@ Start with [01-overview-and-scope.md](./01-overview-and-scope.md) (what ships, w
 | [01-overview-and-scope.md](./01-overview-and-scope.md) | product overview, identity features, standing decisions, v1 scope in and out, architecture at a glance |
 | [02-domain-model.md](./02-domain-model.md) | every entity: purpose, fields, relationships, status axes, identity rules, platform events |
 | [03-controller-and-runners.md](./03-controller-and-runners.md) | controller/runner split, runner protocol, join, placement, runner states, execution substrate (workspaces, checkouts, teardown), promotion |
-| [04-state-store.md](./04-state-store.md) | the SQLite store, repositories, event log and session streams, queues and cursors, retention, backups, migrations |
+| [04-state-store.md](./04-state-store.md) | the SQLite store, repositories, event log and session streams, queues and cursors, retention, signal rows, event search, backups, migrations |
 | [05-plugins.md](./05-plugins.md) | the plugin model: manifest, register/activate, extension points, host API and plugin capabilities, plugin state, lifecycle |
 | [06-providers.md](./06-providers.md) | provider definitions and adapters, session spec, capability snapshots, the normalized event taxonomy, access modes, structured output, per-provider build notes |
 | [07-workflows.md](./07-workflows.md) | workflow definitions, triggers, steps, routing and cycles, CEL, runs and re-runs, the agent-to-graph contract, built-in actions |
 | [08-events-and-connections.md](./08-events-and-connections.md) | the event pipeline and envelope, event sources, subscriptions, Connections and their setup flows |
 | [09-tasks.md](./09-tasks.md) | the Task model: fields, status axis, labels, provenance, search |
-| [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) | triage as a workflow pattern, spawn bounds, Notifications (record, router, sinks, bound actions), Intake and check-in model requirements |
+| [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) | triage as a workflow pattern, spawn bounds, Notifications (record, router, sinks, bound actions), Signals (the record, kinds, screening and the Screener, snooze, Ignore Rules, Intake's events), Intake and check-in model requirements |
 | [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) | the public API contract, actors, session tokens, permission enforcement, the `hercule` CLI, session subscriptions |
 | [12-assistants.md](./12-assistants.md) | assistants, conversations, channel bindings, rotation, memory, heartbeat, channel plugins |
 | [13-security.md](./13-security.md) | perimeter, secrets and master key, user auth, grants and shipped profiles, escalation, git credentials, taint, audit |
-| [14-web-app.md](./14-web-app.md) | the web app: architecture, live topics, screens, check-in and Intake views, workflow editor, design language pointer |
+| [14-web-app.md](./14-web-app.md) | the web app: architecture, live topics, screens, the check-in view, workflow editor, design language pointer |
 | [15-packaging-and-operations.md](./15-packaging-and-operations.md) | the single binary, Hercule Home, service install, first run, migrations, upgrade, backups, Bun build notes |
 | [16-open-items.md](./16-open-items.md) | the register of open questions, implementer choices, build-time verifications, and standing risks |
-| [17-desktop-app.md](./17-desktop-app.md) | the desktop app: process model, reaching the controller, token storage, Electron security, the IPC contract, native behaviour, the Crew Bureau design system, performance budgets, slices |
+| [17-desktop-app.md](./17-desktop-app.md) | the desktop app: process model, reaching the controller, token storage, Electron security, the IPC contract, native behaviour, the Crew Bureau design system, the Intake screen, performance budgets, slices |
 
 ## Conventions inside the documents
 

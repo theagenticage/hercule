@@ -120,11 +120,53 @@ The five monitoring axes (from #20's reaction) and their pinned encodings:
   (~0.82 opacity, smaller type).
 - Radii: 10px cards/groups, 6px controls.
 - A "last check-in" divider marks what the user has already seen.
-- *(Added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355).)* The thread's
+- *(Added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355).)* ~~The thread's
   **side pane** is a split that stays open, beside the thread's column, with the thread's own
   `--surface` behind it ([spec 14](./spec/14-web-app.md) §The thread surface). Intake's rule
   "detail lives in a drawer, never a page or a permanent split" is about Intake's detail and
-  does not apply to it: the user opens the pane on purpose and works beside it, as in an editor.
+  does not apply to it: the user opens the pane on purpose and works beside it, as in an editor.~~
+  *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#386](https://github.com/theagenticage/hercule/issues/386).)* The thread's side pane is the first user of
+  [The split](#the-split), below; the one-off exemption is now a rule of its own.
+
+## The split
+
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided by [#386](https://github.com/theagenticage/hercule/issues/386).)* A screen's main content area may divide into
+two columns side by side, both in the layout flow: the **main column** and the **side pane**, with
+a handle between them. Only the main content area splits: never a card, a dialog or a pane, and a
+split never holds another split. A screen uses the split when the user works beside the content:
+reading a list and its item together, stepping through items, or keeping a tool open while
+working. The thread's side pane and Intake's open item use it. A drawer is a different thing: it
+overlays the content and is not resizable, and this rule does not change drawers. "Detail pane"
+and "split view" are not used as names.
+
+- **Size.** One column has a width and the other takes the rest; the screen says which (thread:
+  the pane; Intake: the list). The handle runs the split's full height: an 8px hit area that draws
+  a 2px accent line on hover, while dragging, and on keyboard focus. With the handle focused, ←/→
+  resize in 16px steps. The width is kept per screen and per device, never as a Setting, and is
+  clamped to the minimums whenever it is drawn.
+- **Minimums.** Each screen sets a minimum for both columns. When the window can't fit both, the
+  side pane hides, its toggle is dimmed with the reason ("Widen the window to show the pane"), and
+  the pane comes back when the window widens.
+- **Above the split.** A bar about both columns spans both, above the split (Intake). A bar about
+  one column sits inside that column, and the side pane brings its own (thread).
+- **Open and closed.** A side pane that shows the selected row opens with the page whenever
+  something is selected, and closes when nothing is left. Closing it yourself lasts until you
+  leave the screen. A tool pane starts closed and stays as you left it. The toggle sits at the
+  right end of the bar, and its tooltip names its key.
+- **Esc** closes a side pane that shows the selected row, once anything smaller has been let go.
+  It never closes a tool pane.
+- **Focus.** Tab goes main column → handle → side pane. Opening the pane doesn't move focus.
+  Closing it while focus is inside returns focus to the selected row, or to the toggle for a tool
+  pane.
+- **Motion.** The pane slides by its own width while the other column changes width on the same
+  curve, so the two edges meet at every frame. This holds only where that column keeps its height
+  as its width changes (Intake's list); elsewhere the pane opens at once. With reduce motion on,
+  nothing moves. The desktop's performance rules name this as their one exception for a `width`
+  transition ([spec 17](./spec/17-desktop-app.md) §Performance, Rules).
+
+Each screen's own numbers and keys (its minimums, which column is sized, what Esc does after the
+pane closes) are written with the screen: the thread in [spec 14](./spec/14-web-app.md) §The
+thread surface, Intake in [spec 17](./spec/17-desktop-app.md#intake).
 
 ## Monitoring semantics (pinned by ticket #20, 2026-08-28)
 
@@ -192,46 +234,61 @@ pause, heartbeat for working); the amber diamond for decisions (`?` is more univ
 entity glyphs beside state marks (round 1's A and B: too much to read); a words-only page
 (variant C: quiet, but the glyphs earn their place under the rule).
 
-## Intake semantics (pinned by ticket #30, 2026-08-28)
+**Plugin marks** *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided by [#389](https://github.com/theagenticage/hercule/issues/389) and [#394](https://github.com/theagenticage/hercule/issues/394).)* Brand
+marks are not a fixed list. Each plugin contributes one mark, its own, declared in its manifest
+([spec 05](./spec/05-plugins.md#2-manifest) §2). It is drawn in `currentColor` like the family,
+never in brand colours. A system reached through another
+plugin is text, never a mark: "Sentry, via Gmail". A plugin without a valid mark gets its name's
+initial in a rounded square. Hercule's own signals carry [Hercule's face](./spec/17-desktop-app.md#the-hercule-face) as their mark. How the
+apps draw a mark safely is owned by [spec 17](./spec/17-desktop-app.md#intake).
 
-The Intake prototype (four rounds) settled how prepared work is presented. Intake and
-check-in are **separate views** for now; merging is a post-dogfooding question.
+## Intake semantics
 
-- **Intake is a morning brief.** The page is framed around "since you last checked": one
-  calm headline sentence leads with what burns ("1 burning · 6 proposals from 212 events ·
-  2 need a call · 3 FYI · 198 handled quietly").
-- **Topic tabs** group the page (All / Code / Business / Personal / Ops). A topic is a
-  label: a Connection may carry a topic it files into, and may have none; triage agents
-  label a proposal with the connection's topic, when it has one, unless the content says
-  otherwise *(amended 2026-10-02, [#323](https://github.com/theagenticage/hercule/issues/323))*. Tabs show every
-  topic in use, user-ordered; a "Manage topics" affordance sits at the tabs' right edge.
-- **Needs a call** is verdict-based, never priority-based: it holds what triage could not
-  decide (an unsure verdict, a tripped spawn bound). Its label says so.
-- **Priority tiers make urgency legible**: proposals sit under Now / Today / When you can.
-  The Now tier carries a pulsing attention-hue dot on its label, on the burning card, and on
-  the topic tab that contains it - the one place a colored dot marks urgency.
-- **Lead card + condensed rows.** The burning proposal is one lead card (title, made-from
-  marks, gist, the proactive link, actions, "Open the full picture"); every other proposal
-  is a condensed row: title · priority bars · system marks · "→ suggested action" · age.
-- **Made from** is mandatory on every proposal: one entry per source system with the
-  system's monochrome mark. Marks show the *system* (GitHub, Gmail, Sentry, Tailscale,
-  Hetzner, Dependabot, cron, Hercule itself); the connection that carried it is a mono
-  suffix. Brand marks are 12px monochrome `currentColor` paths - never brand colours.
-- **Detail lives in a drawer**, never a page or a permanent split: proposal detail (Next +
-  actions · Why + links · Made from as signal cards with the source excerpt and "Open in
-  <system>" · the triage verdict block · History), connection events, and the Topics sheet
-  all open in the same right-hand drawer over the rail. Esc closes.
-- **The events view is the context.** A connection opens to every event since the last
-  check, each stamped with what triage made of it (→ proposal, unsure, FYI, ignored, filed,
-  held), filterable by that verdict. Held events from a tripped breaker are listed there.
-- **What came in** rows (one per connection: mark, name, summary, event count, "Events →")
-  and a one-line receipt ("212 events → 6 proposals · 2 routed · 1 attached · 3 FYI ·
-  198 ignored") close the page. Anything that opens says so with "Open →" / "Events →".
-- **Rejected on the record**: narrative brief prose at the top of the page (round 2), a
-  time-first ledger as the page (round 1), master/detail split (round 3: too little room for
-  the overview), a full detail page (round 3: the light card reads better).
+*(Rewritten 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided by [#384](https://github.com/theagenticage/hercule/issues/384) to [#394](https://github.com/theagenticage/hercule/issues/394), [#397](https://github.com/theagenticage/hercule/issues/397) and [#398](https://github.com/theagenticage/hercule/issues/398). First
+pinned by ticket #30, 2026-08-28.)* ~~Intake is a morning brief framed on "since you last
+checked", grouped by topic tabs, with proposals under Now / Today / When you can, a "Needs a call"
+section, a lead card over condensed rows, "Made from" with a fixed list of system marks, detail in
+a drawer, and a per-connection events view stamped with triage's verdicts.~~ The Asks direction
+replaced it: what the user works through all day is what other people and systems ask of them,
+not only triage's findings. The old text is in git history.
 
-Amended 2026-08-31 by ticket #42 (Notification lifecycle and shipped triage conventions):
+The model is [spec 10 §9](./spec/10-triage-intake-and-notifications.md#9-signals); the desktop
+screen is [spec 17 §Intake](./spec/17-desktop-app.md#intake). These are the rules every app's
+Intake follows:
+
+- **A list you work through, not a brief you read.** Intake holds Signals: what people, systems
+  and Hercule's agents ask of the user. The goal is inbox zero. A signal sits on To do only while
+  a move is asked of the user, and leaves the moment they make it, here or on its source.
+- **Four views over the same records:** To do (what waits on you), Later (what you snoozed), Done
+  (what left the list, and how), and Everything (the events behind it all, with what came of
+  each). Only To do is counted, and its count takes in every row on it, so inbox zero is never a
+  lie.
+- **One urgent tier.** `urgent` signals are pinned under **Now**, the longest-burning first. `high`
+  is a small marigold mark at the row's end and does not reorder the list. The user may lower a
+  Now signal (Not urgent) but never raise one.
+- **Triage reads quieter.** What triage prepared (proposals, offers, FYIs, unsure) sits in its own
+  section under the signals. A signal from another workflow, an assistant or Hercule sits among
+  the signals, labelled with where it came from.
+- **Provenance on every signal**: the plugin's name and mark, the workflow's name, the assistant's
+  name, "You", or "Hercule". Systems behind a plugin are text (see Plugin marks under Marks).
+- **The open item sits in [the split](#the-split)**, beside the list, never in a drawer or on a
+  page. Its answers are a ledger (the #50 amendment below), the suggested one in ink. No answer
+  that sends anything or runs an operation is taken from the list: opening a row puts focus on its
+  suggested answer, whose describe line is then in view.
+- **Row controls** are only the moves that send nothing (the ledger exception below).
+- **Everything is the context.** It lists Intake's events, newest first, back to the retention
+  horizon, each with what came of it ("→ signal", "ended", "→ ignored", "known", "no action").
+  It has no counts and no row controls. The event pane captions that block "What came of it";
+  the word "handling" is never shown.
+- **Nothing leaves silently.** An event an Ignore Rule caught still shows in Everything, naming the
+  rule. A signal that ended on its source says how, in Done ("Replied in Gmail").
+- **Rejected on the record**: narrative brief prose at the top of the page (round 2), a time-first
+  ledger as the page (round 1), a full detail page (round 3: the light card reads better); with
+  the Asks direction, the morning brief, topic tabs, the Now / Today / When you can tiers and
+  "Needs a call". The master/detail split (round 3: too little room for the overview) was
+  reversed by [#386](https://github.com/theagenticage/hercule/issues/386): Asks has no brief, tabs or tiers; the list is the overview.
+
+~~Amended 2026-08-31 by ticket #42 (Notification lifecycle and shipped triage conventions):
 proposal answers are **Accept / Start *X* / Dismiss** - park is dropped for v1 ("not now" is
 Accept: the task waits in the backlog); the dossier has no separate verdict block, the
 notification body carries the agent's reasoning; **offers** (an immediate action with no task)
@@ -239,7 +296,7 @@ sit beside proposals with their own answers; the events-view stamp vocabulary is
 (proposal / attached), offer, FYI, unsure, known, held, pending triage, no action - "filed",
 "routed", "ignored" and "filtered" are retired; the receipt line reads "212 events →
 6 proposals · 1 attached · 2 offers · 3 FYI · 2 unsure · 198 no action" and a "last triage"
-line (time + summary) closes the page. Owner: spec 10 §2-3.
+line (time + summary) closes the page. Owner: spec 10 §2-3.~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): superseded by Intake semantics above.)*
 
 Amended 2026-09-01 by ticket #50 (Prototype: rendering bound actions in the Focus card): a
 decision's answers render as a **ledger** - one full-width row per answer, the row is the
@@ -249,6 +306,16 @@ under it. Nothing behind hover or a confirm step; no glyph prefix on describe li
 card's height follows its answers ("uniform-height" above is withdrawn); the arrow row stays
 below the card. Chat sinks use the same hierarchy: "label · describe", description as
 subtext. Owner: spec 14 §The check-in view, spec 12 §11.6.
+
+Amended 2026-10-10 by ticket [#395](https://github.com/theagenticage/hercule/issues/395) (row controls, [#387](https://github.com/theagenticage/hercule/issues/387), with Not urgent from [#394](https://github.com/theagenticage/hercule/issues/394)): the
+ledger rule gets one narrow exception. A list row may show controls on hover or keyboard focus
+only for moves that send nothing to any system and change no Task: **Snooze**, **Unsnooze**,
+**Done** and **Not urgent**, plus the row's checkbox. Each of them also appears in the open item,
+with its describe line; on a row, Done's describe line is its tooltip ("Takes it off your list.
+GitHub is not told"). An answer that sends something or runs an operation never appears on a row,
+and neither does Dismiss: turning down what an agent suggested is a judgement made from the open
+item, where its reasoning shows. A broad "list rows excepted" line was rejected, because it would
+let a later screen put Approve one hover-click away with no describe line. Owner: spec 17 §Intake.
 
 Amended 2026-09-01 by ticket #51 (Prototype: the app shell and navigation): the **app shell** is one
 sidebar with two faces behind a segmented switch (Threads: the t3-code list; Hercule: the orchestration
@@ -290,4 +357,6 @@ Lucide, a bespoke family and a words-only page; round 2 synthesised variant D, p
 Intake: four reaction rounds on `prototype/intake-view` (ticket #30) - round 1 settled
 two-views-not-one-spine and the Desk skeleton; round 2 settled topic tabs, the morning-brief
 framing and system marks; round 3 settled the drawer, priority tiers and the events view;
-round 4 is the converged single design.
+round 4 is the converged single design. The Asks direction
+(`docs/design/intake-directions/asks/`, decided on the map
+[#380](https://github.com/theagenticage/hercule/issues/380)) replaced it in 2026-10.

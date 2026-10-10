@@ -25,7 +25,7 @@ A unit of human intent: a described piece of work someone wants done. Work-type-
 _Avoid_: ticket, issue (reserved for external trackers)
 
 **Provenance**:
-A task's append-only record of what created or touched it: entries pointing at events, runs, and external refs. What lets a duplicate signal find its existing task.
+A task's append-only record of what created or touched it: entries pointing at events, runs, and external refs. What lets a later event about the same thing find its existing task.
 _Avoid_: history, audit trail (reserved for the event log)
 
 **External Ref**:
@@ -477,31 +477,59 @@ A trigger's limit on how many runs it may spawn per window. Exceeding it trips t
 _Avoid_: rate limit (bare), throttle
 
 **Notification**:
-A persisted message from Hercule to its user ("run failed", "trigger paused", "agent needs a decision"). Produced by the core, by workflow notify steps, by sessions, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins. A decision stays open until its question is answered, wherever that happens, and is withdrawn when the question stops existing; nothing else about it ever changes.
-_Avoid_: alert, ping, notice (a conversation message saying an assistant could not answer)
+A persisted message from Hercule to its user about Hercule itself ("run failed", "trigger paused", "agent needs a decision"), shown in Check-in and never on Intake. Produced by the core, by workflow notify steps, by sessions, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins. A decision stays open until its question is answered, wherever that happens, and is withdrawn when the question stops existing; nothing else about it ever changes.
+_Avoid_: alert, ping, notice (a conversation message saying an assistant could not answer); signal (what Intake holds is a **Signal**, its own record)
 
 **Bound Action**:
-One answer on a decision Notification, carrying the single frozen operation that runs as the user when chosen. Proposed by whoever produced the notification (an agent, a run, a plugin, the core); authorised only by the user's informed choice, never by the proposer's own permissions. The operation is one on a short curated list of bindable operations, or none at all; beside its label, every answer shows a **Describe Line**.
-_Avoid_: button (as the domain term), callback, quick action
+One choice laid out for the user on a decision Notification or a Signal, ready to run: a label, an optional note from whoever laid it out, and at most one operation whose input is already filled in and frozen ("bound"). Laying it out does nothing. Only when the user picks it does it run, as the user; the pick is the user's answer. A choice with no operation (Dismiss, Done) closes the item and runs nothing. Each choice shows a **Describe Line**, written by the core, saying what the click will do. An operation can be bound only where it declares itself usable (`notification.answer`, `signal.answer`).
+_Avoid_: answer (that is the user's pick, not the choice), proposed operation, button, callback, quick action
 
 **Describe Line**:
 The line the core writes under a Bound Action to say what taking it does to the system ("Start a run of *Bugfix*", "Send *continue* to session *Design ordering module*"), built from the frozen operation with the current names of what it acts on. The producer never writes, changes or hides it; that is what makes the user's choice an informed one.
 _Avoid_: summary, preview, action description (the producer's own `description` of what an answer means)
 
 **Intake**:
-The formation boundary where external signals become work: signals are triaged, grouped, and enriched by agents before they spawn tasks or reach the user, so decisions are made on prepared, high-value material rather than raw input. Also the name of the view that presents it (confirmed by ticket #30).
-_Avoid_: command center, inbox, dashboard
+Where events become something for the user to deal with: Signals they handle one by one, among them what triage prepares across many events (Proposals, Offers). Which events triage may read is set per event kind by the plugin, with your overrides for the plugin and per Connection; Intake never shows the full event stream. Also the name of the view that presents it: To do, Later and Done over Signals, and Everything over the events behind them.
+_Avoid_: command center, inbox, dashboard; "considered for Intake" (retired: an event kind is *available to triage*, a signal kind is *on* or *off*)
+
+**Signal**:
+Something put in front of the user on Intake because a move is asked of them: a review request, a mention, an email that asks something of them, or work an agent prepared. Someone or something is waiting on the user; they may answer it, mark it done, snooze it, or let it be. A plugin declares its own signal kinds and the core raises them from its events; the core's kinds (`proposal`, `offer`, `unsure`, `fyi`) are raised by workflows, assistants or the core itself. It leaves the moment the user makes their move, or when none is asked of them any more; never when the work behind it finishes. Its own record, never a Notification.
+_Avoid_: ask, item, request (a Permission Request or an agent's request); "signal" for any incoming event (that is an **Event**; a signal trigger is a workflow concept)
+
+**Block**:
+One part of a Signal's body: data a producer fills, drawn by each app in its own way.
+_Avoid_: widget, card, section
+
+**Snooze**:
+Hiding an open Signal from To do until a chosen time, when it comes back marked "Back". Snoozing is not an answer: the signal stays open and its source is told nothing. Only Signals are snoozed, never Notifications.
+_Avoid_: remind me, defer, park
+
+**Screener**:
+The shipped, editable workflow that reads one event when a signal kind's rule answers *undecided*, and decides whether it becomes a Signal of that kind, using the guidance the kind declares. Unlike Triage, it sees one event at a time, and it writes no content: the signal's body comes from the plugin.
+_Avoid_: filter, classifier
+
+**Screening**:
+One request for the Screener to decide whether one event becomes a signal of one kind, and the decision it gets.
+_Avoid_: review, check
+
+**Ignore Rule**:
+The user's rule that keeps signals of one kind, with given field values, from being raised ("review requests from dependabot in webshop"). Made by the user from a signal, or accepted from a suggestion Hercule offers after the user marked several such signals done without answering. Never edited, only deleted; always visible in Intake settings. The events it catches still show in Everything, with the rule named.
+_Avoid_: filter, mute (a Notification delivery setting)
+
+**Handling**:
+What came of an event in Intake, or what is still to come: raised a signal, ended one, caught by an Ignore Rule, evidence for triage's signals, on a Task, known work, pending triage, or no action. Worked out when read, never stored. Shown to the user as "What came of it".
+_Avoid_: stamp, outcome (a resolved signal's line), result
 
 **Proposal**:
-A task the agents prepared and are asking the user to accept or dismiss: a Task labelled `proposed` together with its open go/no-go Notification. Accepting means "this is work" and leaves the task in the backlog; starting it is a separate act. The unit Intake presents; a vocabulary term, not a separate entity.
-_Avoid_: suggestion, recommendation, candidate
+A `proposal` Signal: work an agent prepared and asks the user to accept or dismiss. No Task exists until the user accepts; Accept creates the Task and leaves it in the backlog, and starting it is a separate act. Dismiss runs nothing.
+_Avoid_: suggestion, recommendation, candidate; "a Task labelled `proposed`" (retired)
 
 **Offer**:
-An immediate action triage proposes with no task behind it ("merge these three dependency bumps"): a decision Notification whose answers carry the action and a dismiss. Decided by its answers alone; leaves nothing when dismissed.
+An `offer` Signal: an immediate action proposed with no task behind it ("merge these three dependency bumps"), raised by triage or by Hercule itself (an Ignore Rule suggestion). Decided by its actions alone; leaves nothing when dismissed.
 _Avoid_: quick fix, shortcut, suggestion
 
 **Topic**:
-A label that groups Intake: a Connection may carry a topic its events file into, and triage labels a proposal with a topic (the connection's when it has one, unless the content says otherwise). A new Connection starts with none. User-defined and ordered; a label, never a domain state.
+A label that groups Tasks: a Connection may carry a topic its events file into, and triage puts a topic on the Task a proposal would create (the connection's when it has one, unless the content says otherwise). A new Connection starts with none. User-defined; a label, never a domain state. Intake's tabs are its sources, not topics.
 _Avoid_: category, area, folder
 
 ### Office

@@ -7,8 +7,8 @@ This document pins the shape of every Hercule domain entity: the fields the desi
 These rules hold for every entity below.
 
 1. **All links are optional; no mandatory parents.** A session needs no task, run, workspace, or conversation. A run needs no task or workflow. A task needs no project. Every relationship in this document is optional unless it says "required". Rationale: the predecessor's mandatory `task_id` was its biggest structural mistake ([Domain model & ubiquitous language](https://github.com/theagenticage/hercule/issues/6)).
-2. **One fixed status axis per entity, no user-definable domain states.** Where an entity has a status, its enum is fixed by this document or the owning document it links. No entity accepts user-defined states. Kanban-style groupings, "needs a call", "proposed", tiers like Now / Today / When you can, and topic tabs are presentation over labels and fixed fields, never domain states.
-3. **Labels are not states.** Labels are bare strings in a flat namespace, created implicitly on first use. There is no label registry entity; the core blesses no label (shipped workflows may use conventional ones such as `proposed`; topics are labels). Colours and descriptions of labels are presentation. A label never gates, transitions, or auto-derives a status.
+2. **One fixed status axis per entity, no user-definable domain states.** Where an entity has a status, its enum is fixed by this document or the owning document it links. No entity accepts user-defined states. Kanban-style groupings~~, "needs a call", "proposed", tiers like Now / Today / When you can, and topic tabs~~ are presentation over labels and fixed fields, never domain states. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392): the Intake words this rule listed are retired, and a Proposal is now a Signal of its own, below.)*
+3. **Labels are not states.** Labels are bare strings in a flat namespace, created implicitly on first use. There is no label registry entity; the core blesses no label (shipped workflows may use conventional ones ~~such as `proposed`~~; topics are labels). *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392): `proposed` is retired; a Proposal is a `proposal` Signal and no Task exists until Accept.)* Colours and descriptions of labels are presentation. A label never gates, transitions, or auto-derives a status.
 4. **The controller owns all domain state; runners own material state.** Every entity here is a row in the controller's one SQLite database ([04-state-store.md](./04-state-store.md)). Workspace files, provider-native session data and the runner's event outbox live on runner disk and are referenced from the controller only by id ([03-controller-and-runners.md](./03-controller-and-runners.md), [ADR 0002](../adr/0002-orchestration-stays-on-the-controller.md)).
 5. **Controller records hold no absolute paths; runner paths are runner-owned facts keyed by id.** The rules are in [04-state-store.md](./04-state-store.md) (Relocatable Data Root).
 6. **Every mutation is actor-stamped** (`user` or `session:<id>`) in the event log; no entity carries a separate audit trail ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
@@ -69,12 +69,21 @@ erDiagram
   NOTIFICATION }o--o| RUN : "about (optional)"
   NOTIFICATION }o--o| TASK : "about (optional)"
   NOTIFICATION }o--o| SESSION : "about (optional)"
+  SIGNAL }o--o| EVENT : "origin and resolution (optional)"
+  SIGNAL }o--o| RUN : "raised by (optional)"
+  SIGNAL ||--o| SNOOZE : "hidden until (optional)"
+  IGNORE_RULE ||--o{ IGNORE_RULE_CATCH : "caught"
+  IGNORE_RULE_CATCH ||--|| EVENT : "eventId"
+  SCREENING }o--|| EVENT : "one per event and kind"
+  SCREENING }o--o| RUN : "screened by (optional)"
 ```
+
+*(Diagram amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Signal, Snooze, Ignore Rule with its catches, and Screening.)*
 
 In prose, the model has five clusters:
 
 - **Work triangle**: Task (intent), Run (execution of a plan), Session (agent conversation). Any two are linked only when the link is meaningful; links live on the Run and Session side, and a Task's runs and sessions are derived by query.
-- **Automation**: Workflow owns Triggers and Steps; a Run freezes an Execution Plan and holds Subscriptions; Events flow through one pipeline stamped with their Connection; Notifications are the output to the user.
+- **Automation**: Workflow owns Triggers and Steps; a Run freezes an Execution Plan and holds Subscriptions; Events flow through one pipeline stamped with their Connection; Notifications are ~~the output to the user~~ Hercule's own messages to the user, and Signals are what Intake asks of the user (*(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [ADR 0040](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md).)*); Ignore Rules and Screenings decide which events become Signals.
 - **Actors and access**: Agent (with a Permission Profile), Assistant (an Agent plus Conversations, Channel Bindings and Memory), Thread (a session the user drives with no Agent), Platform Identities (owner / trusted), Actor stamps, Session Tokens, API Keys, Grants and Permission Requests.
 - **Organization**: Project spans Resources; Resources are checked out into Workspaces on Runners as Checkouts; Resources may reference the Connection that reaches them.
 - **Infrastructure and extension**: Controller identity, Runners (with states and capabilities), Provider instances with Capability Snapshots, Plugins with their state, Connections, Secrets.
@@ -104,7 +113,7 @@ Not present in v1: assignee, subtasks, task-to-task dependencies, comments, a su
 
 Status axis: `open` -> `in-progress` -> `done`, plus `cancelled`. Any-to-any transitions; no state machine enforcement; no core auto-transitions; no completion gating. Status changes only via an explicit `task.update`. "Done means the PR merged" is a shipped-workflow convention implemented by the work run's own signal trigger and a final `task.update` step ([09-tasks.md](./09-tasks.md)). `cancelled` means decided not to do; delete (soft, `deletedAt`) means it should never have existed: the row stays for history, `task.read` answers `not_found`, and the event log keeps the audit (Deletion rules, below).
 
-Relationships: `projectId` optional. Run and Session links to a task live on the Run and Session rows; the task's run and session lists are derived by query. Proposal (a Task labelled `proposed` plus its pending decision Notification) and Topic (a label) are vocabulary over this row, not fields.
+Relationships: `projectId` optional. Run and Session links to a task live on the Run and Session rows; the task's run and session lists are derived by query. ~~Proposal (a Task labelled `proposed` plus its pending decision Notification) and~~ Topic (a label) ~~are~~ is vocabulary over this row, not a field. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392).)* A Proposal is a `proposal` Signal (below), not a Task: no Task exists until the user presses Accept.
 
 Identity: Hercule id only. External refs live in provenance and are never unique across tasks.
 
@@ -116,7 +125,7 @@ Purpose: one append-only record of an event, run or external thing that created 
 
 Shape (pinned): `{ ref?: ExternalRef, eventId?: Hercule id, runId?: Hercule id, at: timestamp, actor: Actor }`. Entries are never edited or removed.
 
-External Ref canonical form: a fully-qualified id `<type>:<kind>:<identity>`, for example `github:issue:owner/repo#42`, `gmail:thread:<id>`, `sentry:issue:123`. The plugin that defines the type owns canonicalization. The Connection an event arrived through is excluded from the identity. No uniqueness constraint across tasks: the `task.query` guard convention treats "any open task with this ref" as the duplicate signal ([09-tasks.md](./09-tasks.md), [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). Refs typically originate from the event envelope's `refs` field and are copied here by triage.
+External Ref canonical form: a fully-qualified id `<type>:<kind>:<identity>`, for example `github:issue:owner/repo#42`, `gmail:thread:<id>`, `sentry:issue:123`. The plugin that defines the type owns canonicalization. The Connection an event arrived through is excluded from the identity. No uniqueness constraint across tasks: the `task.query` guard convention treats "any open task with this ref" as ~~the duplicate signal~~ a later event about the same thing *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* ([09-tasks.md](./09-tasks.md), [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). Refs typically originate from the event envelope's `refs` field and are copied here by triage.
 
 Relationships: `eventId` points into the event log (the referenced event may be TTL-pruned; the entry survives), `runId` into Runs.
 
@@ -156,7 +165,7 @@ Purpose: the executable content a run executes, frozen at run start. Contents: i
 
 Purpose: what one node (step or signal trigger) did in one iteration of one run.
 
-Fields: owned by [07-workflows.md](./07-workflows.md) (`StepRecord`): `stepId` (a step id or a signal trigger id), `iteration`, `status`, `startedAt`, `finishedAt`, `output`, `sessionId` (agent steps), `error`. The triage agent's stored structured verdict that Intake surfaces is the `output` of the triage agent step ([10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). A signal node gets one ~~`completed`~~ record per firing, holding its mapped event. The Event Router writes it `pending` when an event matches, and the run marks it `completed` as it fires the node's edges *(amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83))*.
+Fields: owned by [07-workflows.md](./07-workflows.md) (`StepRecord`): `stepId` (a step id or a signal trigger id), `iteration`, `status`, `startedAt`, `finishedAt`, `output`, `sessionId` (agent steps), `error`. The triage agent's stored structured verdict ~~that Intake surfaces~~ is the `output` of the triage agent step *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Intake shows the reasoning triage writes as a `text` block on the Signal it raises, [spec 10 §9.5](./10-triage-intake-and-notifications.md#95-blocks).)* ([10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)). A signal node gets one ~~`completed`~~ record per firing, holding its mapped event. The Event Router writes it `pending` when an event matches, and the run marks it `completed` as it fires the node's edges *(amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83))*.
 
 Status axis (mirrored from 07), monotonic per record: `pending` (a queued iteration behind a busy step) -> `running` -> `completed` | `failed` | `cancelled`; `skipped` is set at creation and final. A re-entered step never leaves `completed`: the next iteration is a new record.
 
@@ -562,13 +571,47 @@ Status axis: none on the definition; runtime status lives on the Step record.
 
 Purpose: one persisted message from Hercule to its user ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)).
 
-Fields: owned by [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) (section 7.1): `id`, `kind`, `title`, markdown `body`, `producer` (core / run step / plugin / session), `subject` entity refs, `eventId`, `actions` (empty for informational, non-empty makes it a decision), `status`, `resolution`, `createdAt`. No read state. Kinds evidenced by the tickets: run failed, trigger paused (breaker), trigger filter error, runner unreachable, permission request, the `triage.*` kinds (proposal, offer, FYI, unsure), update available, plugin error, plugin-raised (e.g. an expiring OAuth token).
+Fields: owned by [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) (section 7.1): `id`, `kind`, `title`, markdown `body`, `producer` (core / run step / plugin / session), `subject` entity refs, `eventId`, `actions` (empty for informational, non-empty makes it a decision), `status`, `resolution`, `createdAt`. No read state. Kinds evidenced by the tickets: run failed, trigger paused (breaker), trigger filter error, runner unreachable, permission request, ~~the `triage.*` kinds (proposal, offer, FYI, unsure),~~ update available, plugin error, plugin-raised (e.g. an expiring OAuth token). *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#388](https://github.com/theagenticage/hercule/issues/388).)* The `triage.*` kinds are retired: what triage prepares is a Signal (below). `core.signal-build-failed` joins the list ([10 section 7.1](./10-triage-intake-and-notifications.md#71-the-record)). A Notification is Hercule's message about itself, shown in Check-in and never on Intake.
 
-**Bound action**: ~~`{ id, label, description?, operation: { op, input }, primary? }`~~ `{ id, label, description?, operation: { op, input } | null, primary? }`, declared at creation as a ~~public-API contract operation~~ bindable operation plus validated input, frozen, and executed by the user's click through `notification.act` as actor `user`. *(Amended 2026-09-28, [#85](https://github.com/theagenticage/hercule/issues/85).)* A bindable operation is one on the curated list in 10 section 7.4. A `null` operation runs nothing when the answer is taken, as 10 section 7.4 already allowed. Only the user takes an answer; a session or a run gets `forbidden`. Proposing is not doing ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): the producer's permission profile is never checked; the informed click is the authorisation. Shape and rules: [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4.
+**Bound action**: ~~`{ id, label, description?, operation: { op, input }, primary? }`~~ `{ id, label, description?, operation: { op, input } | null, primary? }`, declared at creation as a ~~public-API contract operation~~ bindable operation plus validated input, frozen, and executed by the user's click through `notification.act` as actor `user`. *(Amended 2026-09-28, [#85](https://github.com/theagenticage/hercule/issues/85).)* ~~A bindable operation is one on the curated list in 10 section 7.4.~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#391](https://github.com/theagenticage/hercule/issues/391).)* A bindable operation is one whose `usableIn` lists `notification.answer` ([11 section 2](./11-public-api-and-agent-surface.md#notification)); a Signal's answers need `signal.answer`. A `null` operation runs nothing when the answer is taken, as 10 section 7.4 already allowed. Only the user takes an answer; a session or a run gets `forbidden`. Proposing is not doing ([ADR 0022](../adr/0022-proposing-is-not-doing.md)): the producer's permission profile is never checked; the informed click is the authorisation. Shape and rules: [10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.4.
 
-Status axis: `open` | `resolved` ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). A decision is born `open` and resolves exactly once, as `decided` (an answer taken, on the notification or wherever else the question is answered), `handled` (an assistant holding a subscription covered it) or `withdrawn` (the question stopped existing; producers may withdraw only their own); an informational notification is born `resolved` and never changes. The record is immutable apart from resolution. "Needs you" in check-in and "Needs a call" in Intake are the `open` decisions of the same records; the notification center shows everything. No second store.
+Status axis: `open` | `resolved` ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). A decision is born `open` and resolves exactly once, as `decided` (an answer taken, on the notification or wherever else the question is answered), `handled` (an assistant holding a subscription covered it) or `withdrawn` (the question stopped existing; producers may withdraw only their own); an informational notification is born `resolved` and never changes. The record is immutable apart from resolution. "Needs you" in check-in ~~and "Needs a call" in Intake are~~ is the `open` decisions ~~of the same records~~; the notification center shows everything. No second store. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392): "Needs a call" is retired, and Intake shows Signals, not Notifications.)*
 
 Delivery: the notification center always records; per-sink deliveries are outbox rows to enabled channel Connections (deliver-to-all-enabled in v1). Delivery attempts are not notification fields.
+
+### Signal
+
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided by [#388](https://github.com/theagenticage/hercule/issues/388) and [#392](https://github.com/theagenticage/hercule/issues/392); [ADR 0040](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md).)*
+
+Purpose: one thing a person, a system or one of Hercule's agents asks of the user, shown on Intake. A Signal is never a Notification.
+
+Fields: owned by [10 section 9.1](./10-triage-intake-and-notifications.md#91-the-record). A plugin kind is qualified (`github/review-requested`); the core kinds are `proposal`, `offer`, `unsure` and `fyi`. A `proposal` carries the Task that Accept would create; no Task exists until then.
+
+Relationships: raised from one event, or through `signal.raise` by a run, an assistant or the user, naming the events behind it; resolved, optionally, by a later event on its source. The events it names stay alive under the retention rule ([04-state-store.md](./04-state-store.md#event-log-as-audit-log-and-retention)). Its answers are Bound Actions (above), allowed where an operation's `usableIn` lists `signal.answer`.
+
+Status axis: `open` | `resolved`, resolving once as `decided` or `withdrawn` ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). There is no `handled`. Apart from its resolution, only its priority may change, when the user lowers `urgent` to `high`. No operation deletes a Signal in v1.
+
+**Snooze**: a per-user hide-until on one open Signal, never an answer: the Signal stays `open` and its source is not told. One row per snoozed Signal, deleted on unsnooze and when the Signal resolves ([10 section 9.7](./10-triage-intake-and-notifications.md#97-snooze-and-not-urgent)). Notifications have no snooze.
+
+### Screening
+
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided by [#399](https://github.com/theagenticage/hercule/issues/399).)*
+
+Purpose: the question whether one event becomes a Signal of one kind, asked when the kind's rule answers `undecided`, and answered by the shipped Screener workflow.
+
+Fields: owned by [10 section 9.8](./10-triage-intake-and-notifications.md#98-screening-and-the-screener). Keyed by event and signal kind.
+
+Status axis: `pending` -> `yes` | `no` | `failed`. Pruned with its event, and never keeps that event alive.
+
+### Ignore Rule
+
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided by [#398](https://github.com/theagenticage/hercule/issues/398).)*
+
+Purpose: the user's rule that keeps Signals of one plugin kind, with given field values, from being raised. It never applies to a core kind.
+
+Fields: owned by [10 section 9.9](./10-triage-intake-and-notifications.md#99-ignore-rules). Each event it stops leaves one **catch** row naming the rule, so Intake's Everything still says why.
+
+Status axis: none. A rule is never edited or paused: only the user creates or deletes one, and deleting it works forward only. A catch is pruned with its event, and never keeps that event alive.
 
 ## Extension
 
@@ -597,6 +640,13 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 
 *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* Permission Profile joins that list: deleting one is refused with `invalid_state` while an Agent names it, because an Agent without a profile has nothing to bound the sessions it spawns.
 
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* The Intake records:
+
+- **Signal**: no operation deletes one in v1. A Signal leaves the user's list by resolving.
+- **Snooze**: deleted on unsnooze and when its Signal resolves.
+- **Ignore Rule**: hard-deleted by the user, with nothing to refuse it; its catches stay and keep the rule's text.
+- **Screening** and **Ignore Rule catch**: pruned with their event ([04-state-store.md](./04-state-store.md#event-log-as-audit-log-and-retention)).
+
 ## Status axes at a glance
 
 | Entity | Axis | Terminal | Owner of the enum |
@@ -615,8 +665,10 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Workspace | `provisioning`, `ready`, `failed`, `disposing`, `deleted`, `lost` | `deleted`, `lost` | 03 |
 | Connection | `connected`, `needs-reauth`, `error`, `disabled` | none | 08 |
 | Notification | `open`, `resolved` (resolution kind `decided` / `handled` / `withdrawn`; informational born `resolved`) | `resolved` | 10 |
+| Signal *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `open`, `resolved` (resolution kind `decided` / `withdrawn`; no `handled`) | `resolved` | 10 |
+| Screening *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `pending`, `yes`, `no`, `failed` | `yes`, `no`, `failed` | 10 |
 | Plugin | `enabled`, `disabled` | none | this document |
-| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Resource, Checkout, Provider instance, Event, Memory document, Permission Profile | no status axis | | |
+| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Resource, Checkout, Provider instance, Event, Memory document, Permission Profile, Ignore Rule *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | no status axis | | |
 
 ## Identity rules at a glance
 
@@ -641,6 +693,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Task | `task.deleted` | `{taskId, snapshot}`, the final row |
 | Run | `run.completed`, `run.failed`, `run.cancelled` | owned by [08-events-and-connections.md](./08-events-and-connections.md) |
 | Cron trigger (core emitter) | `cron.tick` | `{workflowId, triggerId, scheduledFor}` *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82): and `previousFiredAt`, [08-events-and-connections.md](./08-events-and-connections.md) section 5.3)* |
+| Signal (core emitter) *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `signal.screening-requested` | owned by [08-events-and-connections.md](./08-events-and-connections.md#55-platform-events-core) |
 | Security (audit kinds) | login success/failure, token minted/revoked, permission request raised/decided, secret created/rotated | [13-security.md](./13-security.md) |
 
 No other entity emits platform events in v1; the set grows additively. Sessions emit into their own normalized stream, not the domain event log. Inbound chat messages are not pipeline events in v1 (Open in [12-assistants.md](./12-assistants.md)).
@@ -689,6 +742,7 @@ Tickets:
 - [Prototype: the Intake view](https://github.com/theagenticage/hercule/issues/30)
 - [Prototype: assistant memory interface](https://github.com/theagenticage/hercule/issues/31)
 - [Domain model residue: id format, remaining status axes, identity rules](https://github.com/theagenticage/hercule/issues/46)
+- [Write the Intake changes and the build tickets](https://github.com/theagenticage/hercule/issues/395), deciding tickets #388, #391, #392, #398 and #399
 
 ADRs:
 
@@ -715,3 +769,4 @@ ADRs:
 - [ADR 0030 Sessions copy their configuration, and a Thread has no Agent](../adr/0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md)
 - [ADR 0032 Threads link the user's own material, live and wholesale](../adr/0032-threads-link-the-users-own-material.md)
 - [ADR 0034 A catalog contribution is identified by its qualified id](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)
+- [ADR 0040 Intake holds Signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md)

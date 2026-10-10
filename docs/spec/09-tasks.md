@@ -52,7 +52,7 @@ Ids are UUIDv7 like every Hercule-owned entity; format, storage and the short fo
 
 ## Status axis and lifecycle
 
-The status axis is fixed: `open -> in-progress -> done`, plus `cancelled`. There are no user-definable domain states. Triage-ish states ("proposed", "needs a call") are labels or notification verdicts, never statuses.
+The status axis is fixed: `open -> in-progress -> done`, plus `cancelled`. There are no user-definable domain states. ~~Triage-ish states ("proposed", "needs a call") are labels or notification verdicts, never statuses.~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392).)* What triage prepares is never a Task status: a proposal is a `proposal` Signal, and no Task exists until the user presses Accept ([./10](./10-triage-intake-and-notifications.md#93-core-kinds-and-signalraise)).
 
 Rules:
 
@@ -82,7 +82,7 @@ One field, fixed enum `urgent` / `high` / `normal` / `low`, default `normal`. Co
 
 The user and agents write the same field through the same `task.update` operation. There is no separate "suggested priority" field: because every mutation is stamped with its actor on the event envelope ([./08](./08-events-and-connections.md), [./11](./11-public-api-and-agent-surface.md)), the log already tells who set which priority when. Priority is not a status and does not affect transitions.
 
-Rendering (bars and weight, never color) is pinned in [../design-language.md](../design-language.md) ("Importance"); the Intake tiers Now / Today / When you can are a presentation of this field ([./14](./14-web-app.md)).
+Rendering (bars and weight, never color) is pinned in [../design-language.md](../design-language.md) ("Importance"); ~~the Intake tiers Now / Today / When you can are a presentation of this field ([./14](./14-web-app.md)).~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392).)* A Signal carries the same priority values; on Intake, `urgent` shows as Now and `high` as a small mark ([./17](./17-desktop-app.md#intake)).
 
 ## Labels
 
@@ -91,18 +91,18 @@ Rendering (bars and weight, never color) is pinned in [../design-language.md](..
 - Colors, descriptions, and orderings for labels are presentation-layer concerns of the web app ([./14](./14-web-app.md)); the core stores none of them.
 - `labels` is an array field: `task.update` takes `addLabels?` and `removeLabels?` and never a whole `labels` array, and `task.updated` reports `{added, removed}` for it. The user and a triage agent write the same task, and a whole-array replace would silently undo whichever of them wrote first; a label named on both lists stays on the task and is reported as neither.
 
-Two conventional labels are load-bearing for Intake ([./10](./10-triage-intake-and-notifications.md)):
+~~Two conventional labels are load-bearing for Intake ([./10](./10-triage-intake-and-notifications.md)):~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392).)* One label convention remains ([./10](./10-triage-intake-and-notifications.md)):
 
-- **`proposed`** - a Task carrying `proposed` together with its pending go/no-go Notification is a Proposal, the unit Intake presents. Proposal is vocabulary, not an entity.
+- ~~**`proposed`** - a Task carrying `proposed` together with its pending go/no-go Notification is a Proposal, the unit Intake presents. Proposal is vocabulary, not an entity.~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* The `proposed` label is retired. A Proposal is a `proposal` Signal ([./10](./10-triage-intake-and-notifications.md#93-core-kinds-and-signalraise)).
 - **Topic labels** - a Topic is a label that groups Intake (for example `code`, `business`, `personal`, `ops`). ~~Each Connection files its events into one default topic chosen at setup~~ A Connection may carry a topic its events file into, and may have none ([./08](./08-events-and-connections.md)); triage labels a proposal with the connection's topic, when it has one, unless the content says otherwise *(amended 2026-10-02, [#323](https://github.com/theagenticage/hercule/issues/323))*. Topics are user-defined and user-ordered; the ordering is presentation state, not a task field.
 
-Which labels a triage workflow sets, and when `proposed` is removed, is owned by [./10](./10-triage-intake-and-notifications.md).
+Which labels a triage workflow sets~~, and when `proposed` is removed,~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* is owned by [./10](./10-triage-intake-and-notifications.md).
 
 ## Provenance and External Refs
 
 Provenance is a task's append-only record of what created or touched it. Each entry is `{ref?, eventId?, runId?, at, actor}`; every field except `at` and `actor` is optional, and an entry may carry any combination (an event that was the trigger, the run that enriched the task, a ref the triage agent recognised inside an email). Entries are never edited or removed; a deleted task is soft-deleted, so its entries stay with the row (see [Delete](#delete)).
 
-Provenance is what lets a duplicate signal find its existing task, and what the Intake "made from" line and the proactive "related to task X" link are rendered from.
+Provenance is what lets a ~~duplicate signal~~ later event about the same thing *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* find its existing task, and what the Intake "made from" line and the proactive "related to task X" link are rendered from.
 
 *(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* A task that a run's `task.create` step creates always records its run: the core adds the entry `{ runId }` after the entries the step's params give, unless one of those already names the run. The entry is the core's own, so it does not count toward the limit on how many entries one request may add. A run's `task.update` step adds no such entry, because the run did not create the task ([./07-workflows.md](./07-workflows.md) section 8).
 
@@ -112,7 +112,7 @@ An External Ref is a fully-qualified canonical identifier for a thing outside He
 
 - The plugin that defines the ref type owns canonicalization. Two events about the same external thing MUST produce byte-identical refs.
 - The Connection an event arrived through is **not** part of the identity. The same GitHub issue seen through two connections yields one ref.
-- Refs are **not unique across tasks.** Several tasks may carry the same ref. The `task.query` guard convention treats "any *open* task with this ref" as the duplicate signal, so a closed task does not block a new one for a recurring signal.
+- Refs are **not unique across tasks.** Several tasks may carry the same ref. The `task.query` guard convention treats "any *open* task with this ref" as ~~the duplicate signal~~ a later event about the same thing, so a closed task does not block a new one for a ~~recurring signal~~ recurring event *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)*.
 - A ref is an identity, not a location. The URL used for "Open in <system>" is the event envelope's `url` field ([./08](./08-events-and-connections.md)), not part of provenance.
 
 For systems with no plugin in v1 (Sentry, Tailscale, Hetzner notices arriving through Gmail), the core pins only the **grammar** - `<system>:<kind>:<identity>`, lowercase system, no whitespace - and validates it at write. The gmail plugin's sender rules stamp `system` only ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.2); the **triage agent owns identity extraction**, guided by worked per-system examples in the triage skill and by checking existing refs (`task.query`) before minting one. When a real plugin for such a system lands post-v1, it takes ownership of its prefix; the grammar keeps old refs valid.
@@ -161,7 +161,7 @@ Rules:
 - One update operation produces exactly one `task.updated` event, however many fields it changed. `changes` contains only fields that changed.
 - Scalar fields report `{old, new}`; array fields report `{added, removed}`. Provenance is append-only, so its `removed` is always empty.
 - A provenance-only append fires `task.updated` too. Shipped workflow defaults MUST filter on the fields they care about (for example `has(event.changes.status)`) rather than on the bare event kind, and thereby demonstrate field-filtering.
-- Example CEL filters: `event.changes.status.new == "done"`, `has(event.changes.status)`, `"proposed" in event.changes.labels.removed`. Whether payload fields sit under `event.payload` or are flattened onto `event` follows the envelope rules in [./08](./08-events-and-connections.md) and the CEL context in [./07](./07-workflows.md).
+- Example CEL filters: `event.changes.status.new == "done"`, `has(event.changes.status)`, ~~`"proposed" in event.changes.labels.removed`~~ `"ready-for-agent" in event.changes.labels.added` *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): `proposed` is retired.)*. Whether payload fields sit under `event.payload` or are flattened onto `event` follows the envelope rules in [./08](./08-events-and-connections.md) and the CEL context in [./07](./07-workflows.md).
 
 **`task.deleted`** carries the final snapshot, because the row is unreadable afterwards:
 
@@ -189,7 +189,9 @@ The FTS5 table is external-content over `tasks` with the tokenizer `unicode61 re
 
 **Order.** With `text` the order is relevance (`bm25` ascending) and the walk pages by offset. With `text` and an explicit `sort`, `task.query` fails `validation` naming both: honouring both would pick one of two paging strategies per request, and ignoring the sort would be a silent substitution. ~~Without `text` the order is keyset over `updatedAt`, `createdAt`, `priority` or `status`, default `updatedAt desc`.~~ *(Amended 2026-10-03, [#300](https://github.com/theagenticage/hercule/issues/300).)* Without `text` the order is keyset over one or more of `updatedAt`, `createdAt`, `priority` and `status` ([./11](./11-public-api-and-agent-surface.md) section 1.6), default `updatedAt desc`. `priority` ascends low, normal, high, urgent; `status` ascends open, in-progress, done, cancelled.
 
-No vector search and no embeddings. The semantic part of triage - grouping heterogeneous signals, spotting connections - is the agent iterating its own queries and reading results; that is why agent task search is a hard v1 requirement (ticket #16 handoff).
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided by [#393](https://github.com/theagenticage/hercule/issues/393).)* Event search is the named exception to relevance order. `event.query` with `text` searches the envelope's `title` and `author` with the same tokenizer, but returns events newest first and pages by keyset, because a user looking for an event remembers roughly when it came ([./04](./04-state-store.md#event-search), [./11](./11-public-api-and-agent-surface.md#event)).
+
+No vector search and no embeddings. The semantic part of triage - grouping heterogeneous ~~signals~~ events *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)*, spotting connections - is the agent iterating its own queries and reading results; that is why agent task search is a hard v1 requirement (ticket #16 handoff).
 
 ## Delete
 
@@ -211,21 +213,21 @@ Task operations are ordinary public-API operations defined in the service layer 
 
 Every mutation is stamped with the calling actor (`user`, `session:<id>`, `run:<id>` or `plugin:<id>`) on the event envelope; a provenance entry appended by the call carries the same actor. All operations return fast; nothing blocks.
 
-Notification actions that bind a task operation ("Start Bugfix" = start workflow X with task Y) are owned by [./10](./10-triage-intake-and-notifications.md).
+~~Notification actions that bind a task operation ("Start Bugfix" = start workflow X with task Y) are owned by [./10](./10-triage-intake-and-notifications.md).~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#391](https://github.com/theagenticage/hercule/issues/391), [#392](https://github.com/theagenticage/hercule/issues/392).)* Bound actions that touch tasks are owned by [./10](./10-triage-intake-and-notifications.md): Accept on a proposal runs `task.create` ([§9.3](./10-triage-intake-and-notifications.md#93-core-kinds-and-signalraise)), and Hand to an agent runs `run.start` with a signal input ([§9.4](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)). "Start *X*" on a proposal is dropped, because the Task does not exist yet.
 
 ## Built-in workflow actions on tasks
 
-Three of the five built-in actions act on tasks: `task.create` (agent-less graphs, "every cron tick, file a task"), `task.update` (the closing step of the done-means-merged convention), and `task.query` (exact identity matching; the guard-before-agent pattern that routes duplicate signals to `task.update` without spawning an agent, [./10](./10-triage-intake-and-notifications.md)). Their parameters and outputs are defined once in [./07](./07-workflows.md#8-built-in-actions). They call the same service layer as the API and so emit the same platform events.
+Three of the ~~five~~ six *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): `signal.screen` joined them.)* built-in actions that are operations act on tasks: `task.create` (agent-less graphs, "every cron tick, file a task"), `task.update` (the closing step of the done-means-merged convention), and `task.query` (exact identity matching; the guard-before-agent pattern that routes ~~duplicate signals~~ later events about the same thing *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* to `task.update` without spawning an agent, [./10](./10-triage-intake-and-notifications.md)). Their parameters and outputs are defined once in [./07](./07-workflows.md#8-built-in-actions). They call the same service layer as the API and so emit the same platform events.
 
 An in-run action step stamps `run:<runId>` and is ungated: the recipe is the user's ([./11](./11-public-api-and-agent-surface.md) section 3.1).
 
 ## Presentation over the status axis
 
-Kanban-style groupings, columns, swimlanes, and the Intake tiers are presentation-layer constructs over the fixed axis, priority, and labels. They are explicitly not domain states: the core stores no grouping, and no grouping may introduce a status. Where such groupings live and how they are configured is the web app's concern ([./14](./14-web-app.md)); the domain model provides only `status`, `priority`, `labels`, and `projectId` to group by.
+Kanban-style groupings, columns, swimlanes~~, and the Intake tiers~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): the Intake tiers are retired.)* are presentation-layer constructs over the fixed axis, priority, and labels. They are explicitly not domain states: the core stores no grouping, and no grouping may introduce a status. Where such groupings live and how they are configured is the web app's concern ([./14](./14-web-app.md)); the domain model provides only `status`, `priority`, `labels`, and `projectId` to group by.
 
 ## Not in v1
 
-- **Subtasks** and **task-to-task dependencies** - grouping is expressed by shared labels, a shared project, or provenance refs pointing at another task's signals.
+- **Subtasks** and **task-to-task dependencies** - grouping is expressed by shared labels, a shared project, or provenance refs pointing at another task's ~~signals~~ events *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*.
 - **Comments** - enrichment edits the description or appends provenance.
 - **Assignee** - who works a task is visible from the runs and sessions that reference it and from the actor stamps; there is no assignment field.
 - **Suggested-priority shadow field** - the actor-stamped event log covers it.
@@ -247,3 +249,5 @@ Kanban-style groupings, columns, swimlanes, and the Intake tiers are presentatio
 - [ADR 0019 - The task model is thin; workflows own task semantics](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)
 - [ADR 0011 - Triage is a workflow pattern inside core-enforced bounds](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md)
 - [ADR 0013 - Agents operate Hercule through the public API](../adr/0013-agents-operate-hercule-through-the-public-api.md)
+- [Write the Intake changes and the build tickets](https://github.com/theagenticage/hercule/issues/395), deciding tickets #391, #392 and #393
+- [ADR 0040 - Intake holds Signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md)
