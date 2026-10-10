@@ -94,6 +94,7 @@ const BUILT_IN_ACTION_IDS = [
  * not one of them: a trigger fires on a schedule by writing it under `on`.
  */
 const PLATFORM_EVENT_KINDS = [
+  "permission.decided",
   "run.cancelled",
   "run.completed",
   "run.failed",

@@ -2,8 +2,8 @@
  * Deleting a permission profile, which must check what other domains still
  * use it.
  *
- * A profile is the set of grants a session copies at spawn, and that an Agent
- * names for the sessions it will spawn. Deleting the profile under either one
+ * A profile is the set of grants a session holds, read again on its calls,
+ * and that an Agent names for the sessions it will spawn. Deleting the profile under either one
  * would leave an actor with a credential that resolves to nothing, so the
  * delete is rejected while a live session or an Agent uses the profile.
  * Sessions and agents belong to other domains, so this operation lives in the
@@ -62,10 +62,10 @@ const make = Effect.gen(function* () {
             // The permissions domain's own checks: the profile exists and is
             // not one of the three built-in profiles.
             const profile = yield* profiles.requireDeletable(input.id);
-            // A session keeps the grants it copied from this profile for as
-            // long as it runs. Deleting the profile would silently break that
-            // session's credential, so the delete must wait until those
-            // sessions have ended.
+            // A session reads its grants from this profile for as long as it
+            // runs. Deleting the profile would silently break that session's
+            // credential, so the delete must wait until those sessions have
+            // ended.
             const live = yield* refuseCursor(
               sessions.list({
                 limit: 1,

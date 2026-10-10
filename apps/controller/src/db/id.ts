@@ -11,6 +11,10 @@
 /** Creates a new id and returns it as the 16 bytes stored in the column. */
 export const mintUuid = (): Uint8Array => new Uint8Array(Bun.randomUUIDv7("buffer"));
 
+/** Inserts the dashes of the canonical form into 32 lowercase hex digits. */
+const insertUuidDashes = (hex: string): string =>
+  `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+
 /** Converts stored bytes to the canonical lowercase string. Throws when there are not 16 bytes. */
 export const uuidToString = (bytes: Uint8Array): string => {
   if (bytes.length !== 16) {
@@ -20,7 +24,19 @@ export const uuidToString = (bytes: Uint8Array): string => {
   for (const byte of bytes) {
     hex += byte.toString(16).padStart(2, "0");
   }
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return insertUuidDashes(hex);
+};
+
+/**
+ * Converts the hex SQLite's `hex()` returns for a stored id to the canonical
+ * lowercase string. A query that returns ids inside a JSON value uses it,
+ * because JSON cannot carry the bytes. Throws when there are not 32 hex digits.
+ */
+export const uuidHexToString = (hex: string): string => {
+  if (!/^[0-9a-fA-F]{32}$/.test(hex)) {
+    throw new TypeError(`A Hercule id is 32 hex digits, got ${JSON.stringify(hex)}`);
+  }
+  return insertUuidDashes(hex.toLowerCase());
 };
 
 /**

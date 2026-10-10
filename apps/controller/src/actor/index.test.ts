@@ -32,6 +32,7 @@ const agent: Actor = {
   sessionId: SESSION_ID,
   profileId: "0199f0b7-0003-7000-8000-000000000000",
   grants: ["task.read", "task.create", "session.spawn"],
+  profileGrants: ["task.read", "task.create", "session.spawn"],
   assistantId: null,
 };
 

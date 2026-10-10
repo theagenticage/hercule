@@ -18,11 +18,13 @@ const quoteAsCelString = (value: string): string => JSON.stringify(value);
 /**
  * Returns the CEL source that matches the events a target waits on.
  *
- * The session and request expansions read platform events that this version
- * does not emit yet. They are written out because workflows and Permission
- * Requests will depend on them, and because `subscription.create` rejects
- * those target kinds by name rather than storing a condition that can never
- * match.
+ * The session expansion reads platform events that this version does not
+ * emit yet. It is written out because workflows will depend on it, and
+ * because `subscription.create` rejects that target kind by name rather than
+ * storing a condition that can never match.
+ *
+ * A request target is never given to `subscription.create`: `permission.request`
+ * opens it for the asking session itself.
  */
 export const expandTarget = (target: SubscriptionTarget): string => {
   switch (target.kind) {
@@ -42,11 +44,11 @@ export const expandTarget = (target: SubscriptionTarget): string => {
         `event.payload.sessionId == ${quoteAsCelString(target.sessionId)}`
       );
     case "request":
-      // A caller waiting on a Permission Request waits for its decision.
-      // `permission.decided` is the event kind the security spec gives that
-      // decision.
+      // A session waiting on a Permission Request waits for its decision,
+      // the `permission.decided` platform event. As for a run target, an
+      // event of the same kind from a plugin must not pass for the decision.
       return (
-        `event.kind == "permission.decided" && ` +
+        `event.source == "platform" && event.kind == "permission.decided" && ` +
         `event.payload.requestId == ${quoteAsCelString(target.requestId)}`
       );
   }
