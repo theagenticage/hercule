@@ -35,6 +35,11 @@
   color: var(--muted);
   line-height: 1.5;
 }
+/* The error is a paragraph too, and keeps the fail colour over the muted
+   one the rule above gives every paragraph. */
+.confirm-dialog-body > .fl-err {
+  color: var(--fail-ink);
+}
 .confirm-dialog-acts {
   display: flex;
   justify-content: flex-end;
