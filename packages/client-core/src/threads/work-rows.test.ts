@@ -15,6 +15,7 @@ const buildItem = (kind: WorkItem["kind"], fields: Partial<WorkItem> = {}): Work
   kind,
   verb: "verb",
   target: "",
+  targetIsCode: false,
   result: "completed",
   paths: [],
   startedAt: "2026-09-30T09:00:00.000Z",
@@ -47,6 +48,7 @@ describe("buildWorkRows", () => {
     const item = buildItem("command_execution", {
       itemId: "c1",
       target: "pnpm test",
+      targetIsCode: true,
       startedAt: "2026-09-30T09:00:05.000Z",
       result: "failed",
       resultContent: "1 test failed",
@@ -86,19 +88,13 @@ describe("buildWorkRows", () => {
     ]);
   });
 
-  it.each([
-    ["command_execution", true],
-    ["file_change", true],
-    ["file_read", true],
-    ["file_search", true],
-    ["web_search", false],
-    ["tool_call", false],
-    ["subagent", false],
-    ["error", false],
-  ] as const)("marks whether a %s step's target is code: %s", (kind, targetIsCode) => {
-    const [row] = buildWorkRows([buildItem(kind, { target: "x" })]);
+  it("takes whether a step's target is code from the step", () => {
+    const rows = buildWorkRows([
+      buildItem("command_execution", { target: "ls", targetIsCode: true }),
+      buildItem("web_search", { target: "stripe 3ds" }),
+    ]);
 
-    expect(row!.targetIsCode).toBe(targetIsCode);
+    expect(rows.map((row) => row.targetIsCode)).toEqual([true, false]);
   });
 
   it("lets a step be opened only when it returned text", () => {
@@ -155,6 +151,29 @@ describe("buildWorkRows", () => {
     ]);
 
     expect(row!.output).toBe("x".repeat(4095));
+  });
+
+  it("drops the broken half of a character the adapter's cut left at the end", () => {
+    // The adapter cuts a string result to 4096 characters, which can split
+    // the last character in two: here the emoji's second half is gone.
+    const cutByAdapter = `${"x".repeat(4095)}😀`.slice(0, 4096);
+    const [row] = buildWorkRows([buildItem("command_execution", { resultContent: cutByAdapter })]);
+
+    expect(row!.output).toBe("x".repeat(4095));
+  });
+
+  it("cuts the output to 4096 characters when one text block is huge", () => {
+    const huge = "y".repeat(1_000_000);
+    const [row] = buildWorkRows([
+      buildItem("command_execution", {
+        resultContent: [
+          { type: "text", text: "x".repeat(3000) },
+          { type: "text", text: huge },
+        ],
+      }),
+    ]);
+
+    expect(row!.output).toHaveLength(4096);
   });
 
   it.each([

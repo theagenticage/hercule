@@ -1003,15 +1003,15 @@ describe("buildThreadBlocks", () => {
       "work:read",
     );
 
-    expect(work.items.map((item) => [item.target, item.paths])).toEqual([
-      ["src/a.ts", ["src/a.ts"]],
-      ["TODO in src", []],
-      ["**/*.ts", []],
-      ["src", []],
+    expect(work.items.map((item) => [item.target, item.targetIsCode, item.paths])).toEqual([
+      ["src/a.ts", true, ["src/a.ts"]],
+      ["TODO in src", true, []],
+      ["**/*.ts", true, []],
+      ["src", true, []],
     ]);
   });
 
-  it("gives a tool call the target its input names, never its tool's name", () => {
+  it("gives a tool call the target its input names, never its tool's name, and marks a command or path as code", () => {
     const rows = [
       buildTurnStarted("t1", 0),
       ...buildUserMessage("t1", "u1", 0, "Look"),
@@ -1020,6 +1020,14 @@ describe("buildThreadBlocks", () => {
         input: { description: "Fetch the release notes\nand more" },
       }),
       buildItemStarted("t1", "todo", "tool_call", 2, { name: "TodoWrite", input: { todos: [] } }),
+      buildItemStarted("t1", "exec", "tool_call", 3, {
+        name: "mcp__tools__exec",
+        input: { command: "git status" },
+      }),
+      buildItemStarted("t1", "open", "tool_call", 4, {
+        name: "mcp__files__open",
+        input: { file_path: "src/a.ts" },
+      }),
     ];
 
     const work = findBlock(
@@ -1028,7 +1036,12 @@ describe("buildThreadBlocks", () => {
       "work:fetch",
     );
 
-    expect(work.items.map((item) => item.target)).toEqual(["Fetch the release notes", ""]);
+    expect(work.items.map((item) => [item.target, item.targetIsCode])).toEqual([
+      ["Fetch the release notes", false],
+      ["", false],
+      ["git status", true],
+      ["src/a.ts", true],
+    ]);
   });
 
   it("keeps each tool item's result content as its completion sent it", () => {

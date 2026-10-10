@@ -42,12 +42,7 @@ export interface WorkRow {
   readonly label: string;
   /** What the step acted on: a path, a command, a query. Empty for a group, and when the step names none. */
   readonly target: string;
-  /**
-   * Whether the target is code, such as a command, a path or a search
-   * pattern, which the desktop draws in the mono face. A web search's query,
-   * a subagent's or a tool's description, and an error's message are words,
-   * drawn in the UI face.
-   */
+  /** Whether the target is code, drawn in the mono face (`WorkItem.targetIsCode`). */
   readonly targetIsCode: boolean;
   /** When the step started, or a group's first step. */
   readonly startedAt: string;
@@ -71,14 +66,12 @@ export interface WorkRow {
 type ItemKind = WorkItem["kind"];
 
 /**
- * How a kind of step is drawn: its icon, its verb, whether its target is
- * code, and, for a kind whose consecutive steps fold together, the label of
- * the group they fold into.
+ * How a kind of step is drawn: its icon, its verb, and, for a kind whose
+ * consecutive steps fold together, the label of the group they fold into.
  */
 interface StepWords {
   readonly icon: WorkRowIcon;
   readonly verb: string;
-  readonly targetIsCode?: true;
   readonly describeGroup?: (steps: readonly WorkItem[]) => string;
 }
 
@@ -89,25 +82,21 @@ const STEP_WORDS: Record<ItemKind, StepWords> = {
   command_execution: {
     icon: "terminal",
     verb: "Ran",
-    targetIsCode: true,
     describeGroup: (steps) => `Ran ${formatCount(steps.length, "command")}`,
   },
   file_change: {
     icon: "file",
     verb: "Edited",
-    targetIsCode: true,
     describeGroup: (steps) => `Edited ${formatCount(countDistinctFiles(steps), "file")}`,
   },
   file_read: {
     icon: "eye",
     verb: "Read",
-    targetIsCode: true,
     describeGroup: (steps) => `Read ${formatCount(countDistinctFiles(steps), "file")}`,
   },
   file_search: {
     icon: "search",
     verb: "Searched",
-    targetIsCode: true,
     describeGroup: (steps) => `Searched ${formatCount(steps.length, "time")}`,
   },
   web_search: {
@@ -142,41 +131,44 @@ const GROUP_RESULTS = ["awaiting approval", "running", "failed", "declined"] as 
 const MAX_RESULT_TEXT_LENGTH = 4096;
 
 /**
- * Returns `text` cut to `MAX_RESULT_TEXT_LENGTH` characters. A cut that would
- * leave the first half of a surrogate pair at the end drops that half too, so
- * the text never ends in a broken character.
+ * Returns `text` cut to `length` characters. When the text ends in the first
+ * half of a surrogate pair, that half is dropped, so the text never ends in a
+ * broken character. A cut here leaves one when it splits a character in two,
+ * and so does the adapter's cut of a string result, which reaches this
+ * function already short enough.
  */
-const cutResultText = (text: string): string => {
-  if (text.length <= MAX_RESULT_TEXT_LENGTH) return text;
-  const last = text.charCodeAt(MAX_RESULT_TEXT_LENGTH - 1);
-  const isHighSurrogate = last >= 0xd800 && last <= 0xdbff;
-  return text.slice(0, isHighSurrogate ? MAX_RESULT_TEXT_LENGTH - 1 : MAX_RESULT_TEXT_LENGTH);
+const cutResultText = (text: string, length: number): string => {
+  const cut = text.slice(0, length);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
 };
 
 /**
- * Returns the text of a step's result (`WorkItem.resultContent`), cut by
- * `cutResultText`:
+ * Returns the text of a step's result (`WorkItem.resultContent`), cut to
+ * `MAX_RESULT_TEXT_LENGTH` characters by `cutResultText`:
  *
  * - a string is used as it is;
  * - a list of content blocks (Claude Code's tool result) gives the `text` of
  *   its `{ type: "text" }` blocks, joined by line breaks. Any other block,
- *   such as an image, is skipped, and reading stops once the text is long
- *   enough to be cut;
+ *   such as an image, is skipped. Each block is cut to the room left before
+ *   it is joined, so a long result never builds a long string;
  * - anything else, or no content, gives "".
  */
 const readResultText = (content: unknown): string => {
-  if (typeof content === "string") return cutResultText(content);
+  if (typeof content === "string") return cutResultText(content, MAX_RESULT_TEXT_LENGTH);
   if (!Array.isArray(content)) return "";
-  const texts: string[] = [];
-  let length = 0;
+  let text = "";
+  let blockCount = 0;
   for (const block of content as readonly unknown[]) {
     const object = readJsonObject(block);
     if (object?.type !== "text" || typeof object.text !== "string") continue;
-    texts.push(object.text);
-    length += object.text.length + 1;
-    if (length > MAX_RESULT_TEXT_LENGTH) break;
+    const separator = blockCount === 0 ? "" : "\n";
+    const room = MAX_RESULT_TEXT_LENGTH - text.length - separator.length;
+    if (room < 0) break;
+    text += separator + object.text.slice(0, room);
+    blockCount += 1;
   }
-  return cutResultText(texts.join("\n"));
+  return cutResultText(text, MAX_RESULT_TEXT_LENGTH);
 };
 
 /**
@@ -202,7 +194,7 @@ const buildStepRow = (item: WorkItem, key: string): WorkRow => {
     icon: words.icon,
     label: item.kind === "tool_call" && item.toolName !== "" ? item.toolName : words.verb,
     target: item.kind === "reasoning" ? "" : item.target,
-    targetIsCode: words.targetIsCode === true,
+    targetIsCode: item.targetIsCode,
     startedAt: item.startedAt,
     result: item.result,
     output,

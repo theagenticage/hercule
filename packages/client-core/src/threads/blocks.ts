@@ -39,6 +39,12 @@ export interface WorkItem extends ThreadItem {
    */
   readonly target: string;
   /**
+   * Whether `target` is code, such as a command, a path or a search pattern,
+   * which the desktop draws in the mono face. A web search's query, a
+   * subagent's or a tool's description, and an error's message are words.
+   */
+  readonly targetIsCode: boolean;
+  /**
    * The files a file change touched or a file read read, as its detail names
    * them. Empty for any other item.
    */
@@ -225,25 +231,39 @@ const readItemPaths = (event: ItemStarted): readonly string[] => {
   return typeof path === "string" ? [path] : [];
 };
 
+/** The kinds of item whose target, as the web's row shows it, is code. */
+const CODE_TARGET_KINDS: ReadonlySet<ItemStarted["kind"]> = new Set([
+  "command_execution",
+  "file_change",
+]);
+
 /**
  * Returns what a work item acted on, as its row in the desktop shows it (see
- * `WorkItem.target`). Reads only the fixed fields of a file read's and a file
- * search's detail, never the tool's input, which differs from one harness to
- * the next.
+ * `WorkItem.target`), and whether that is code. Reads only the fixed fields
+ * of a file read's and a file search's detail, never the tool's input, which
+ * differs from one harness to the next.
  */
-const readWorkItemTarget = (event: ItemStarted, threadItem: ThreadItem): string => {
+const readWorkItemTarget = (
+  event: ItemStarted,
+  threadItem: ThreadItem,
+): { readonly target: string; readonly targetIsCode: boolean } => {
   switch (event.kind) {
     case "file_read":
     case "file_search": {
       const detail = readJsonObject(event.detail);
       const pattern = typeof detail?.pattern === "string" ? detail.pattern : "";
       const path = typeof detail?.path === "string" ? detail.path : "";
-      return pattern !== "" && path !== "" ? `${pattern} in ${path}` : pattern || path;
+      return {
+        target: pattern !== "" && path !== "" ? `${pattern} in ${path}` : pattern || path,
+        targetIsCode: true,
+      };
     }
-    case "tool_call":
-      return describeToolCallTarget(event.detail);
+    case "tool_call": {
+      const { text, isCode } = describeToolCallTarget(event.detail);
+      return { target: text, targetIsCode: isCode };
+    }
     default:
-      return threadItem.target;
+      return { target: threadItem.target, targetIsCode: CODE_TARGET_KINDS.has(event.kind) };
   }
 };
 
@@ -418,7 +438,7 @@ export const buildThreadBlocks = (
           const name = event.kind === "tool_call" ? readJsonObject(event.detail)?.name : undefined;
           stretch.items.push({
             ...threadItem,
-            target: readWorkItemTarget(event, threadItem),
+            ...readWorkItemTarget(event, threadItem),
             paths: readItemPaths(event),
             startedAt: event.at,
             toolName: typeof name === "string" ? name : "",
