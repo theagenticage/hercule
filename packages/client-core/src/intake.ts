@@ -1,0 +1,419 @@
+/**
+ * How Intake reads the signals on To do: the count, the tabs, the sections
+ * and their order, what a row and the pane say, and the answers in the order
+ * the pane draws them. Spec 17 §Intake owns the screen; spec 10 §9 owns the
+ * Signal record.
+ *
+ * Every client that draws Intake uses these functions, so the desktop app,
+ * its notifications and the sidebar's count never disagree about a signal.
+ */
+import {
+  DONE_ACTION_ID,
+  isCoreSignalKind,
+  type Signal,
+  type SignalAction,
+} from "@hercule/contract";
+
+/** A plugin's id and the name the user knows it by, as `plugin.query` returns them. */
+export interface PluginName {
+  readonly id: string;
+  readonly displayName: string;
+}
+
+/** The name the core's own signals carry as their source, such as an offer of an Ignore Rule. */
+const CORE_SOURCE_NAME = "Hercule";
+
+/** The labels of the core's kinds. A plugin kind is labelled from its id instead. */
+const CORE_KIND_LABELS: Readonly<Record<string, string>> = {
+  proposal: "Proposal",
+  offer: "Offer",
+  unsure: "Unsure",
+  fyi: "FYI",
+};
+
+/** Returns `text` with its first letter in lower case: "Review requested" becomes "review requested". */
+const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
+
+/**
+ * Returns the id of the plugin whose kind `kind` is, such as `github` for
+ * `github/mentioned`, or `null` for a core kind, which no plugin owns.
+ */
+export const readSignalPluginId = (kind: string): string | null =>
+  isCoreSignalKind(kind) ? null : kind.slice(0, kind.indexOf("/"));
+
+/**
+ * Returns the label of a signal's kind: "Mentioned" for `github/mentioned`,
+ * "Review requested" for `github/review-requested`, "Proposal" for
+ * `proposal`.
+ *
+ * A plugin declares no label for its kinds, so the label is made from the
+ * word after the "/": dashes become spaces and the first letter is a
+ * capital.
+ */
+export const nameSignalKind = (kind: string): string => {
+  const coreLabel = CORE_KIND_LABELS[kind];
+  if (coreLabel !== undefined) return coreLabel;
+  const words = kind.slice(kind.indexOf("/") + 1).replaceAll("-", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
+/** Returns the name of the plugin `pluginId`, or the id itself when the plugin is not listed. */
+const namePlugin = (pluginId: string, plugins: ReadonlyArray<PluginName>): string =>
+  plugins.find((plugin) => plugin.id === pluginId)?.displayName ?? pluginId;
+
+/**
+ * Returns the name of a signal's source, as its row, its pane and its
+ * notification show it:
+ *
+ * - a plugin kind names its plugin: "GitHub";
+ * - a core kind names who raised it: "You" for the user, "Hercule" for the
+ *   core itself and for an event, the plugin for a plugin's call, "A
+ *   workflow" for a run's step and "An agent" for a session. The record
+ *   holds no name for a run or a session, so those two stay general.
+ */
+export const nameSignalSource = (signal: Signal, plugins: ReadonlyArray<PluginName>): string => {
+  const pluginId = readSignalPluginId(signal.kind);
+  if (pluginId !== null) return namePlugin(pluginId, plugins);
+  if (signal.origin.type === "event") return CORE_SOURCE_NAME;
+  const { actor } = signal.origin;
+  if (actor === "user") return "You";
+  if (actor.startsWith("plugin:")) return namePlugin(actor.slice("plugin:".length), plugins);
+  if (actor.startsWith("run:")) return "A workflow";
+  if (actor.startsWith("session:")) return "An agent";
+  return CORE_SOURCE_NAME;
+};
+
+/**
+ * Returns the provenance line at the top of the pane: the source and the
+ * kind, such as "GitHub · Mentioned" or "You · Proposal".
+ */
+export const describeSignalProvenance = (
+  signal: Signal,
+  plugins: ReadonlyArray<PluginName>,
+): string => `${nameSignalSource(signal, plugins)} · ${nameSignalKind(signal.kind)}`;
+
+/**
+ * Checks whether a signal on To do is back from a snooze. The To do view
+ * holds no signal that is still snoozed, so a snooze on a signal there has
+ * run out.
+ */
+export const isBackFromSnooze = (signal: Signal): boolean => signal.snooze !== undefined;
+
+/**
+ * Returns the number of signals on To do the tab of `pluginId` holds, or
+ * every signal for the All tab, `null`. The All tab's count is the To do
+ * count that the Hercule segment and Intake's row show.
+ */
+export const countToDo = (signals: ReadonlyArray<Signal>, pluginId: string | null): number =>
+  pluginId === null
+    ? signals.length
+    : signals.filter((signal) => readSignalPluginId(signal.kind) === pluginId).length;
+
+/**
+ * Returns the accessible name of the sidebar's Hercule segment: "Hercule, 8
+ * to do", or "Hercule" alone when nothing is on To do, because the count is
+ * hidden then.
+ */
+export const describeHerculeSegment = (toDoCount: number): string =>
+  toDoCount === 0 ? "Hercule" : `Hercule, ${String(toDoCount)} to do`;
+
+/** One tab of Intake's bar: All, or one plugin's signals. */
+export interface IntakeTab {
+  /** The plugin whose signals the tab shows, or `null` for All. */
+  readonly pluginId: string | null;
+  readonly label: string;
+  /** The tab's To do count. The tab hides it at 0. */
+  readonly count: number;
+}
+
+/**
+ * Returns Intake's tabs: All, then one per plugin with a signal on To do,
+ * in the order `plugins` lists them, so tabs keep their places as signals
+ * arrive and leave. The tab of `selectedPluginId` stays while it holds
+ * nothing, so the tab the user is on never disappears under them.
+ *
+ * Core signals have no tab of their own: they show under All only. The
+ * Triage tab comes with the triage workflow (#533).
+ */
+export const buildIntakeTabs = (
+  signals: ReadonlyArray<Signal>,
+  plugins: ReadonlyArray<PluginName>,
+  selectedPluginId: string | null,
+): ReadonlyArray<IntakeTab> => {
+  const pluginIds = new Set(signals.map((signal) => readSignalPluginId(signal.kind)));
+  if (selectedPluginId !== null) pluginIds.add(selectedPluginId);
+  const listed = plugins.filter((plugin) => pluginIds.has(plugin.id));
+  // A plugin that `plugins` does not list, such as one removed while its
+  // signals are still open, still gets its tab, after the listed ones.
+  const unlisted = [...pluginIds]
+    .filter((id): id is string => id !== null && !plugins.some((plugin) => plugin.id === id))
+    .sort()
+    .map((id) => ({ id, displayName: id }));
+  return [
+    { pluginId: null, label: "All", count: signals.length },
+    ...[...listed, ...unlisted].map((plugin) => ({
+      pluginId: plugin.id,
+      label: plugin.displayName,
+      count: countToDo(signals, plugin.id),
+    })),
+  ];
+};
+
+/** One section of the To do list. */
+export interface IntakeSection {
+  /** `now` holds the `urgent` signals; `signals` holds every other one. */
+  readonly key: "now" | "signals";
+  readonly label: "Now" | "Signals";
+  /** The section's signals, in the order the list draws them. Never empty. */
+  readonly signals: ReadonlyArray<Signal>;
+}
+
+/**
+ * Compares two signals for the order inside a section: the signals back from
+ * a snooze first, the one whose snooze ended earliest first, then the rest,
+ * the oldest first. Timestamps are ISO strings in UTC, so they sort as text.
+ */
+const compareInSection = (a: Signal, b: Signal): number => {
+  if (a.snooze !== undefined && b.snooze !== undefined)
+    return a.snooze.until.localeCompare(b.snooze.until);
+  if (a.snooze !== undefined) return -1;
+  if (b.snooze !== undefined) return 1;
+  return a.createdAt.localeCompare(b.createdAt);
+};
+
+/**
+ * Groups the signals on To do into the sections the list draws, for the tab
+ * of `pluginId`, or for All when it is `null`:
+ *
+ * - **Now**, the `urgent` signals, drawn only while it holds one;
+ * - **Signals**, every other signal.
+ *
+ * A section with no signal is left out. Inside each, the signals back from a
+ * snooze come first, then the oldest first, so the one that waited longest
+ * leads. `high` does not reorder the list.
+ */
+export const groupSignalsIntoSections = (
+  signals: ReadonlyArray<Signal>,
+  pluginId: string | null,
+): ReadonlyArray<IntakeSection> => {
+  const shown = signals
+    .filter((signal) => pluginId === null || readSignalPluginId(signal.kind) === pluginId)
+    .toSorted(compareInSection);
+  const now = shown.filter((signal) => signal.priority === "urgent");
+  const rest = shown.filter((signal) => signal.priority !== "urgent");
+  return [
+    ...(now.length > 0 ? [{ key: "now", label: "Now", signals: now } as const] : []),
+    ...(rest.length > 0 ? [{ key: "signals", label: "Signals", signals: rest } as const] : []),
+  ];
+};
+
+/**
+ * Returns the second line of a signal's row: who asks, the kind and where,
+ * such as "Marta · review requested · acme/webshop#1296". A core signal
+ * with no asker names its source in the asker's place. An `unsure` signal
+ * leaves its kind out, because its row labels it "Unsure" already.
+ */
+export const describeSignalRow = (signal: Signal, plugins: ReadonlyArray<PluginName>): string => {
+  const asker =
+    signal.asker ?? (isCoreSignalKind(signal.kind) ? nameSignalSource(signal, plugins) : undefined);
+  const kind = signal.kind === "unsure" ? undefined : lowerFirst(nameSignalKind(signal.kind));
+  return [asker, kind, signal.place].filter((part) => part !== undefined).join(" · ");
+};
+
+/**
+ * Returns the line under the pane's title: who asks and where, such as
+ * "Marta asks in acme/webshop#1296". The time is drawn beside it, so it is
+ * not part of the line. Returns `null` when the signal names neither.
+ */
+export const describeSignalAsker = (signal: Signal): string | null => {
+  if (signal.asker !== undefined && signal.place !== undefined)
+    return `${signal.asker} asks in ${signal.place}`;
+  if (signal.asker !== undefined) return `${signal.asker} asks`;
+  if (signal.place !== undefined) return `In ${signal.place}`;
+  return null;
+};
+
+/**
+ * Returns the line the pane shows when the plugin could not draw the signal
+ * and the core wrote it from the event instead, or `null` when the plugin
+ * drew it.
+ */
+export const describeBuildFailure = (
+  signal: Signal,
+  plugins: ReadonlyArray<PluginName>,
+): string | null =>
+  signal.buildError === undefined
+    ? null
+    : `${nameSignalSource(signal, plugins)} couldn't draw this signal. Showing the event as it came in.`;
+
+/** How the pane draws an answer. */
+export type SignalAnswerStyle =
+  /** An action with a `field`: a text box with its button. */
+  | "reply"
+  /** Done, which the core adds and the user's own list keeps. */
+  | "done"
+  /** An answer that runs nothing, such as Dismiss: drawn quiet. */
+  | "quiet"
+  /** Any other answer. */
+  | "plain";
+
+/** One answer of a signal, as the pane draws it. */
+export interface SignalAnswer {
+  readonly action: SignalAction;
+  readonly style: SignalAnswerStyle;
+  /** Whether this is the signal's suggested answer, its `primary` action. At most one is. */
+  readonly suggested: boolean;
+}
+
+/** Returns how the pane draws `action`. */
+const chooseAnswerStyle = (action: SignalAction): SignalAnswerStyle => {
+  if (action.id === DONE_ACTION_ID) return "done";
+  if (action.field !== undefined) return "reply";
+  if (action.operation === null) return "quiet";
+  return "plain";
+};
+
+/** Returns where an action goes in the pane: the plugin's actions first, then Hand to an agent, then Done. */
+const rankAnswer = (action: SignalAction): number => {
+  if (action.id === DONE_ACTION_ID) return 2;
+  if (action.operation?.op === "run.start") return 1;
+  return 0;
+};
+
+/**
+ * Returns a signal's answers in the order the pane draws them: the plugin's
+ * or the raiser's actions as they were given, then each Hand to an agent,
+ * then Done. The `primary` action is the suggested answer.
+ */
+export const buildSignalAnswers = (signal: Signal): ReadonlyArray<SignalAnswer> =>
+  signal.actions
+    .toSorted((a, b) => rankAnswer(a) - rankAnswer(b))
+    .map((action) => ({
+      action,
+      style: chooseAnswerStyle(action),
+      suggested: action.primary === true,
+    }));
+
+/** Returns the suggested answer among `answers`, or `undefined` when the signal suggests none. */
+export const findSuggestedAnswer = (
+  answers: ReadonlyArray<SignalAnswer>,
+): SignalAnswer | undefined => answers.find((answer) => answer.suggested);
+
+/** Returns the first answer with a text box, which `R` opens, or `undefined` when there is none. */
+export const findReplyAnswer = (answers: ReadonlyArray<SignalAnswer>): SignalAnswer | undefined =>
+  answers.find((answer) => answer.style === "reply");
+
+/**
+ * Returns what a key in the pane's foot does with an answer, in lower case:
+ * "approve" for Approve, "reply" for "Reply…". A suggested reply reads
+ * "write the reply", because its `↩` puts the focus in the text box.
+ */
+export const describeAnswerKey = (answer: SignalAnswer, key: "↩" | "R"): string =>
+  key === "↩" && answer.style === "reply"
+    ? "write the reply"
+    : lowerFirst(answer.action.label.replace(/…$/, ""));
+
+/** How a resolved signal's pane names what ended it. */
+export interface SignalOutcome {
+  /** "What you did" when the user's move ended it; "Left on its own" otherwise. */
+  readonly label: string;
+  /** The resolution's one line, such as "Approved #1293". */
+  readonly outcome: string;
+  /** Who ended it: "by you", "by GitHub", "by an agent". */
+  readonly by: string;
+  /** Whether the user's own move ended it, which the pane draws with a filled mark. */
+  readonly byUser: boolean;
+}
+
+/** Returns who an actor stamp names, for "by …": "you", "GitHub", "an agent". */
+const nameResolver = (actor: string, plugins: ReadonlyArray<PluginName>): string => {
+  if (actor === "user") return "you";
+  if (actor.startsWith("plugin:")) return namePlugin(actor.slice("plugin:".length), plugins);
+  if (actor.startsWith("run:")) return "a workflow";
+  if (actor.startsWith("session:")) return "an agent";
+  return CORE_SOURCE_NAME;
+};
+
+/**
+ * Returns how a resolved signal ended, for the outcome the pane shows in
+ * place of the answers, or `null` while the signal is open.
+ *
+ * A signal the user decided reads "What you did"; one withdrawn, or decided
+ * by someone else on the source, reads "Left on its own".
+ */
+export const describeSignalOutcome = (
+  signal: Signal,
+  plugins: ReadonlyArray<PluginName>,
+): SignalOutcome | null => {
+  const { resolution } = signal;
+  if (signal.status === "open" || resolution === undefined) return null;
+  const byUser = resolution.kind === "decided" && resolution.actor === "user";
+  return {
+    label: byUser ? "What you did" : "Left on its own",
+    outcome: resolution.outcome,
+    by: `by ${nameResolver(resolution.actor, plugins)}`,
+    byUser,
+  };
+};
+
+/**
+ * Returns the line the pane shows when the open signal was resolved while
+ * the user had it open, by someone or something other than this pane:
+ * "Resolved elsewhere: approved #1293, by GitHub". Returns `null` while
+ * the signal is open.
+ */
+export const describeResolvedElsewhere = (
+  signal: Signal,
+  plugins: ReadonlyArray<PluginName>,
+): string | null => {
+  const outcome = describeSignalOutcome(signal, plugins);
+  return outcome === null
+    ? null
+    : `Resolved elsewhere: ${lowerFirst(outcome.outcome)}, ${outcome.by}`;
+};
+
+/** A Now signal as a native notification shows it. The shape main takes on `urgentSignals.set`. */
+export interface UrgentSignal {
+  readonly signalId: string;
+  /** The notification's title: the signal's source, such as "GitHub". */
+  readonly title: string;
+  /** The notification's text: the signal's title. */
+  readonly body: string;
+}
+
+/**
+ * Returns the Now signals on To do as their notifications show them, the
+ * oldest first. Main notifies for each one it has not shown yet, while the
+ * window is not focused.
+ */
+export const listUrgentSignals = (
+  signals: ReadonlyArray<Signal>,
+  plugins: ReadonlyArray<PluginName>,
+): ReadonlyArray<UrgentSignal> =>
+  signals
+    .filter((signal) => signal.priority === "urgent")
+    .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .map((signal) => ({
+      signalId: signal.id,
+      title: nameSignalSource(signal, plugins),
+      body: signal.title,
+    }));
+
+/**
+ * Returns the id of the signal `step` rows away from `selectedId` in the
+ * list's order, for `J`, `K` and the arrow keys. With no selection, or a
+ * selected signal that has left the list, `J` selects the first row and `K`
+ * the last. At either end the selection stays where it is. Returns `null`
+ * when the list is empty.
+ */
+export const moveSignalSelection = (
+  sections: ReadonlyArray<IntakeSection>,
+  selectedId: string | null,
+  step: 1 | -1,
+): string | null => {
+  const ids = sections.flatMap((section) => section.signals.map((signal) => signal.id));
+  if (ids.length === 0) return null;
+  const index = selectedId === null ? -1 : ids.indexOf(selectedId);
+  if (index < 0) return step === 1 ? ids[0]! : ids.at(-1)!;
+  return ids[Math.min(ids.length - 1, Math.max(0, index + step))]!;
+};

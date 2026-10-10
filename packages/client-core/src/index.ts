@@ -230,6 +230,35 @@ export {
   type NotificationMark,
 } from "./notifications";
 export { formatBlocksAsText, UNKNOWN_BLOCK_TEXT } from "./signal-blocks";
+export {
+  buildIntakeTabs,
+  buildSignalAnswers,
+  countToDo,
+  describeAnswerKey,
+  describeBuildFailure,
+  describeHerculeSegment,
+  describeResolvedElsewhere,
+  describeSignalAsker,
+  describeSignalOutcome,
+  describeSignalProvenance,
+  describeSignalRow,
+  findReplyAnswer,
+  findSuggestedAnswer,
+  groupSignalsIntoSections,
+  isBackFromSnooze,
+  listUrgentSignals,
+  moveSignalSelection,
+  nameSignalKind,
+  nameSignalSource,
+  readSignalPluginId,
+  type IntakeSection,
+  type IntakeTab,
+  type PluginName,
+  type SignalAnswer,
+  type SignalAnswerStyle,
+  type SignalOutcome,
+  type UrgentSignal,
+} from "./intake";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
