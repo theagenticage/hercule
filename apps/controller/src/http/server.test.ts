@@ -17,6 +17,7 @@ import {
   USERNAME,
   withServer,
 } from "./testing";
+import { TOOL_IMAGE_UPLOAD_PATH } from "@hercule/protocol";
 import { MAX_REQUEST_BODY_BYTES, MAX_UPLOAD_BODY_BYTES } from "./server";
 
 describe("before setup completes", () => {
@@ -352,6 +353,31 @@ describe("the body size limit", () => {
       bytes.set(PNG_SIGNATURE);
 
       const lookAlike = await uploadBytes(base, token, "/api/v1/Attachments?name=a.png", bytes);
+      expect(lookAlike.status).toBe(413);
+    });
+  });
+
+  /**
+   * The limit runs before the route checks the runner's credential, so a
+   * `401` rather than a `411` or `413` shows the request passed the limit.
+   */
+  it("holds a runner's tool image upload to the upload limit too, at its exact path only", async () => {
+    await withServer(async ({ base }) => {
+      const chunked = await fetch(`${base}${TOOL_IMAGE_UPLOAD_PATH}?sessionId=x`, {
+        method: "POST",
+        headers: { authorization: "Bearer a-made-up-credential" },
+        body: streamBody(PNG_SIGNATURE),
+      });
+      expect(chunked.status).toBe(401);
+
+      const bytes = new Uint8Array(MAX_REQUEST_BODY_BYTES + 1);
+      bytes.set(PNG_SIGNATURE);
+      const lookAlike = await uploadBytes(
+        base,
+        "a-made-up-credential",
+        `${TOOL_IMAGE_UPLOAD_PATH.toUpperCase()}?sessionId=x`,
+        bytes,
+      );
       expect(lookAlike.status).toBe(413);
     });
   });

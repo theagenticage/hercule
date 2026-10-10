@@ -15,7 +15,7 @@
  * 6. the credential middleware and the static grant check (`./middleware.ts`);
  * 7. the derived route's decoding, then the one-line handler.
  *
- * Five routes are not derived from the contract's HttpApi declaration:
+ * Six routes are not derived from the contract's HttpApi declaration:
  *
  * - The live socket at `GET /ws` stops after step 5. It passes the pre-setup
  *   gate, then authenticates in its own first frame, because a browser cannot
@@ -29,6 +29,9 @@
  * - The attachment fetch at `GET /api/v1/runners/attachments/:id` also stops
  *   before step 5, for the same reason: a runner fetches an input's image
  *   with its credential.
+ * - The tool image upload at `POST /api/v1/runners/tool-images` also stops
+ *   before step 5, for the same reason: a runner uploads an image an agent's
+ *   tool returned with its credential.
  * - The OAuth callback at `GET /oauth/callback` also stops before the
  *   credential middleware: the browser arrives there from the provider with
  *   only a `state`, and gets a redirect rather than a JSON response.
@@ -39,9 +42,10 @@
  *   `maxRequestBodySize` and the protocol's `MAX_FRAME_BYTES` as the sockets'
  *   `maxPayloadLength`, so the transport rejects a larger body or frame before
  *   reading any of it, and before this module runs at all.
- * - `limitRequestBody`, between steps 1 and 2: only an image upload may be
- *   that large, so every other request is held to `MAX_REQUEST_BODY_BYTES`
- *   by its `Content-Length`, again before any of the body is read.
+ * - `limitRequestBody`, between steps 1 and 2: only an image upload, a
+ *   user's or a runner's, may be that large, so every other request is held
+ *   to `MAX_REQUEST_BODY_BYTES` by its `Content-Length`, again before any of
+ *   the body is read.
  *
  * Both answer with a bare `413`, the one response the API sends outside the
  * error envelope, on purpose: an enveloped response would mean reading the
@@ -66,7 +70,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   OPERATIONS,
 } from "@hercule/contract";
-import { MAX_FRAME_BYTES } from "@hercule/protocol";
+import { MAX_FRAME_BYTES, TOOL_IMAGE_UPLOAD_PATH } from "@hercule/protocol";
 import { withCors } from "./cors";
 import { buildErrorResponse, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
@@ -91,6 +95,7 @@ import {
   RunnerJoinRouteLayer,
   RunnerConnections,
   RunnerSocketRouteLayer,
+  RunnerToolImageRouteLayer,
 } from "../runners";
 import { resumeUnfinishedRuns } from "../runs";
 import { handlerLayers } from "./routes";
@@ -116,8 +121,9 @@ import { withWebBundle, type WebBundle } from "./static";
 export const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
 
 /**
- * The largest body of an image upload (`attachment.create`), which is the
- * largest image an input accepts. Bun enforces it on every request as
+ * The largest body of an image upload, which is the largest image the
+ * controller stores: a user's upload (`attachment.create`) or a runner's
+ * upload of a tool's image. Bun enforces it on every request as
  * `maxRequestBodySize`, so it also bounds an upload sent without a
  * `Content-Length`.
  */
@@ -137,19 +143,27 @@ export const bodyLimits = {
   websocket: { maxPayloadLength: MAX_FRAME_BYTES },
 } as const;
 
-/** The path of `attachment.create`, the one route whose body may exceed `MAX_REQUEST_BODY_BYTES`. */
-const UPLOAD_PATH = OPERATIONS["attachment.create"].path;
+/**
+ * The two routes whose body may exceed `MAX_REQUEST_BODY_BYTES`, as
+ * `<method> <path>`: a user's image upload (`attachment.create`) and a
+ * runner's upload of a tool's image.
+ */
+const UPLOAD_ROUTES: ReadonlySet<string> = new Set([
+  `${OPERATIONS["attachment.create"].method} ${OPERATIONS["attachment.create"].path}`,
+  `POST ${TOOL_IMAGE_UPLOAD_PATH}`,
+]);
 
 /**
- * Checks whether a request is an image upload. The method and the path must
- * match exactly, with the query string removed. A path the router would also
- * accept, such as one in another case, is not treated as an upload, so it is
- * held to the smaller limit rather than slipping past it.
+ * Checks whether a request is an image upload, to either route in
+ * `UPLOAD_ROUTES`. The method and the path must match exactly, with the query
+ * string removed. A path the router would also accept, such as one in
+ * another case, is not treated as an upload, so it is held to the smaller
+ * limit rather than slipping past it.
  */
 const isUpload = (request: HttpServerRequest.HttpServerRequest): boolean => {
   const end = request.url.search(/[?#]/);
   const path = end === -1 ? request.url : request.url.slice(0, end);
-  return request.method === OPERATIONS["attachment.create"].method && path === UPLOAD_PATH;
+  return UPLOAD_ROUTES.has(`${request.method} ${path}`);
 };
 
 /** Builds a bare refusal of a request whose body was not read, closing its connection. */
@@ -164,8 +178,8 @@ const refuseUnreadBody = (status: 411 | 413): HttpServerResponse.HttpServerRespo
  * - a `Content-Length` over the limit gets a bare `413`, like the one Bun
  *   sends for a body over `maxRequestBodySize`;
  * - a body sent with `Transfer-Encoding` gets a bare `411`, because its
- *   length is known only after reading it. The upload is exempt, because
- *   Bun's own limit bounds it.
+ *   length is known only after reading it. An image upload is exempt,
+ *   because Bun's own limit bounds it.
  *
  * Both refusals close the connection. The body was never read, so the
  * connection cannot be trusted for another request. Bun also keeps such a
@@ -289,6 +303,7 @@ const buildApplication = (bundle: WebBundle | undefined) =>
         RunnerJoinRouteLayer,
         RunnerSocketRouteLayer,
         RunnerAttachmentRouteLayer,
+        RunnerToolImageRouteLayer,
         OAuthCallbackRouteLayer,
       ),
     ),
