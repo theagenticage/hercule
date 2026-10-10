@@ -72,7 +72,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
+import { currentStamp, parseSessionStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
 import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
 import { PluginHost } from "../plugins";
 import {
@@ -508,25 +508,39 @@ const buildStepKey = (
 };
 
 /**
- * Builds what a frame carries to the runner for one stored input: its text,
- * its images when it has any, the session's current model selection, and,
- * for an agent step's prompt,
- * the step's key, so the runner knows the turn the prompt starts is the
- * step's and reports its result. A `sessionInput` and a `sessionStart` carry
- * the same shape.
+ * Builds what a frame carries to the runner for one stored input. A
+ * `sessionInput` and a `sessionStart` carry the same shape:
+ *
+ * - its text, and its images when it has any;
+ * - the session's current model selection;
+ * - for an agent step's prompt, the step's key, so the runner knows the turn
+ *   the prompt starts is the step's and reports its result;
+ * - `senderSessionId`, when another session's agent sent the input as a
+ *   message: the row's source is `user`, its actor is `session:<id>`, and that
+ *   id is not the receiving session's own. A session that spawned this one
+ *   counts, because the spawn stores its prompt the same way.
+ *
+ * The sender comes from the stored actor, which the controller took from the
+ * caller's credential, so no caller can choose it. Any other input has no
+ * sender: the owner's, a run's, a session's message to itself, and every
+ * input a subscription, a heartbeat or a reminder created.
  *
  * Throws, as a defect, on a step prompt whose session was started by no step
  * (`buildStepKey`).
  */
-const buildTurnInput = (
+export const buildTurnInput = (
   session: Pick<StoredSession, "id" | "runId" | "stepId" | "modelSelection">,
   row: StoredInput,
-): TurnInput => ({
-  text: row.text,
-  ...(row.attachments.length === 0 ? {} : { attachments: row.attachments }),
-  modelSelection: session.modelSelection,
-  ...(row.stepIteration === null ? {} : { step: buildStepKey(session, row.stepIteration) }),
-});
+): TurnInput => {
+  const senderSessionId = row.source === "user" ? parseSessionStamp(row.actor) : undefined;
+  return {
+    text: row.text,
+    ...(row.attachments.length === 0 ? {} : { attachments: row.attachments }),
+    modelSelection: session.modelSelection,
+    ...(row.stepIteration === null ? {} : { step: buildStepKey(session, row.stepIteration) }),
+    ...(senderSessionId === undefined || senderSessionId === session.id ? {} : { senderSessionId }),
+  };
+};
 
 /**
  * Returns the provider-native session id from a `session.started` event, if

@@ -8,20 +8,18 @@ import * as Effect from "effect/Effect";
 import type { LocalAttachment } from "./index";
 
 /**
- * Returns the prompt text an adapter sends to its harness: the user's text,
- * then a blank line, then one line per image naming the file the runner saved
- * it in, for example `[Attached image "image.png" is saved at: /path]`.
- * Returns the text unchanged when the input has no images, and only the lines
- * when the text is empty.
+ * Returns the user's text, then a blank line, then one line per image naming
+ * the file the runner saved it in, for example
+ * `[Attached image "image.png" is saved at: /path]`. Returns the text
+ * unchanged when the input has no images, and only the lines when the text is
+ * empty. `buildHarnessPrompt` calls it to build the prompt the harness gets.
  *
  * The name is written as a JSON string, so a name with a quote or a line
  * break stays inside its own line and cannot pass for another line of the
  * prompt.
  *
  * The harness sees each image itself; the line is there so the agent can use
- * the file too, for example to copy a screenshot into the repository. Only
- * the harness gets the lines: the stored input and the user's message in the
- * transcript keep the original text.
+ * the file too, for example to copy a screenshot into the repository.
  */
 export const appendAttachmentPaths = (
   text: string,

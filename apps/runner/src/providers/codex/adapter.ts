@@ -35,9 +35,9 @@ import type {
   ProviderRunnerContext,
   UserMaterial,
 } from "../index";
-import { appendAttachmentPaths } from "../attachments";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
+import { buildHarnessPrompt } from "../prompt";
 import { runProcess, spawnAppServer, type Run } from "../process";
 import { truncateMessage } from "../text";
 import { now } from "../../report";
@@ -254,13 +254,14 @@ const readUserInstructions = (
 };
 
 /**
- * Builds the items Codex takes as a turn's input: the text first, with a line
- * per image naming the file it is saved in, then one `localImage` item per
- * image. Codex reads each image from that file itself, so its bytes never
+ * Builds the items Codex takes as a turn's input: the prompt
+ * `buildHarnessPrompt` builds first (the sender header when another agent
+ * sent the input, the text, and a line per image naming the file it is saved
+ * in), then one `localImage` item per image. Codex reads each image from that file itself, so its bytes never
  * cross the app-server's pipe.
  */
 const buildUserInput = (input: AdapterTurnInput): Array<UserInput> => [
-  { type: "text", text: appendAttachmentPaths(input.text, input.attachments), text_elements: [] },
+  { type: "text", text: buildHarnessPrompt(input), text_elements: [] },
   ...(input.attachments ?? []).map((attachment): UserInput => ({
     type: "localImage",
     path: attachment.path,
@@ -953,6 +954,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
               turnId: sent.turnId,
               text: input.text,
               attachments: input.attachments,
+              senderSessionId: input.senderSessionId,
               steered: sent.delivery === "steered",
               providerRefs: { threadId: held.binding.nativeSessionId },
             })) {

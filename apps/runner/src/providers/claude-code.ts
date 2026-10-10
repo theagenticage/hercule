@@ -58,7 +58,7 @@ import {
   takeStopsDue,
   type RequestOpened,
 } from "./claude-code-subagents";
-import { appendAttachmentPaths, readAttachmentBase64 } from "./attachments";
+import { readAttachmentBase64 } from "./attachments";
 import type { AdapterTurnInput, ProviderAdapter, ProviderRunnerContext } from "./index";
 import { makeInstall } from "./install";
 import { PROBE_DEADLINE, buildFailedProbe } from "./probe";
@@ -66,6 +66,7 @@ import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
 import { truncateFact, truncateMessage } from "./text";
 import { buildUserMessage, ensureId } from "./events";
+import { buildHarnessPrompt } from "./prompt";
 import {
   buildDenyResult,
   openPark,
@@ -497,10 +498,11 @@ const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"
 ];
 
 /**
- * Returns the content of the user message an input becomes. Text alone stays
- * a plain string. With images, the content is the text block, which ends with
- * the line naming each image's file, followed by one base64 image block per
- * image, in order. Claude shrinks a large image itself. The images are read
+ * Returns the content of the user message an input becomes. Its text is the
+ * prompt `buildHarnessPrompt` builds: the sender header when another agent
+ * sent the input, the text, and the line naming each image's file. Without
+ * images, the content is that text as a plain string. With images, it is the
+ * text block followed by one base64 image block per image, in order. Claude shrinks a large image itself. The images are read
  * one at a time, so an input with many images does not read all its files at
  * once. Fails with a message naming the image when a cached file cannot be
  * read.
@@ -509,9 +511,10 @@ const buildUserContent = (
   turn: AdapterTurnInput,
 ): Effect.Effect<SDKUserMessage["message"]["content"], string> => {
   const attachments = turn.attachments ?? [];
-  if (attachments.length === 0) return Effect.succeed(turn.text);
+  const text = buildHarnessPrompt(turn);
+  if (attachments.length === 0) return Effect.succeed(text);
   return Effect.map(Effect.forEach(attachments, readAttachmentBase64), (images) => [
-    { type: "text", text: appendAttachmentPaths(turn.text, attachments) },
+    { type: "text", text },
     ...images.map((data, at) => ({
       type: "image" as const,
       source: { type: "base64" as const, media_type: attachments[at]!.mimeType, data },
@@ -1106,6 +1109,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           text: turn.text,
           steered,
           attachments: turn.attachments,
+          senderSessionId: turn.senderSessionId,
         })) {
           emit(event);
         }

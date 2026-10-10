@@ -6,6 +6,7 @@ import {
   currentStamp,
   checkGrant,
   buildActorStamp,
+  parseSessionStamp,
   requireUserActor,
   type Actor,
 } from ".";
@@ -52,6 +53,20 @@ describe("buildActorStamp", () => {
 
   it("is run:<id> for a run, whichever of its steps is executing", () => {
     expect(buildActorStamp(run)).toBe(`run:${RUN_ID}`);
+  });
+});
+
+describe("parseSessionStamp", () => {
+  it("returns the session's id from the stamp buildActorStamp gives a session", () => {
+    expect(parseSessionStamp(buildActorStamp(agent))).toBe(SESSION_ID);
+  });
+
+  it.each([
+    ["the user", "user"],
+    ["the system", "system"],
+    ["a run", `run:${RUN_ID}`],
+  ])("returns undefined for the stamp of %s", (_, stamp) => {
+    expect(parseSessionStamp(stamp)).toBeUndefined();
   });
 });
 
