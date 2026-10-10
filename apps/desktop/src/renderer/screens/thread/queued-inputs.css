@@ -3,15 +3,18 @@
    `.queued` and `.queued-text`. Each departure from the book says why. */
 .queued {
   /* The book's row is one flex line: clock, text, status, Steer, Cancel,
-     10px apart. Here it is a grid of two columns, the clock with any image
-     tiles, then the rest as the book's flex line, so a note under the row
-     (see `.queued-note`) starts under the text whatever stands before it.
-     The two columns are 10px apart, as the book's items are, so the row
-     draws the same. */
+     10px apart. Here the same items sit in a grid of one track each, with
+     a track for any image tiles after the clock, so a note under the row
+     (see `.queued-note`) can start under the text whatever stands before
+     it. An item the row does not draw leaves its track empty and 0px wide.
+     The 10px between items are margins on the items beside the text, not
+     a column gap, so empty tracks add no space and the text's track starts
+     where the text does. The row draws as the book's does. */
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-columns:
+    [lead] max-content [images] max-content [text] minmax(0, 1fr)
+    [status] max-content [steer] max-content [cancel] max-content;
   align-items: center;
-  column-gap: 10px;
   row-gap: 2px;
   margin: 0 14px;
   padding: 7px 8px 7px 12px;
@@ -24,21 +27,34 @@
     inset 0 1px 0 var(--glass-edge);
   font-size: var(--t-12);
 }
-.queued-lead,
-.queued-main {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+/* The clock, the sender's chip, or the chip's empty placeholder is the
+   row's first item. */
+.queued > :first-child {
+  grid-area: 1 / lead;
+  margin-right: 10px;
 }
-.queued-main {
-  min-width: 0;
+.queued > .queued-images {
+  grid-area: 1 / images;
+  margin-right: 10px;
 }
 .queued-text {
-  flex: 1;
+  grid-area: 1 / text;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.queued-status {
+  grid-area: 1 / status;
+  margin-left: 10px;
+}
+.queued-steer {
+  grid-area: 1 / steer;
+  margin-left: 10px;
+}
+.queued-cancel {
+  grid-area: 1 / cancel;
+  margin-left: 10px;
 }
 
 /* Not in the book, which draws one queued input. Several stack into one
@@ -58,7 +74,7 @@
 /* Not in the book. A failed delivery's reason, or a failed Steer or Cancel,
    takes a line of its own under the row, lined up with the input's text. */
 .queued-note {
-  grid-column: 2;
+  grid-column: text / -1;
 }
 .queued-error {
   color: var(--fail-ink);

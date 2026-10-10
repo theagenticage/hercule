@@ -104,46 +104,42 @@ function QueuedInputRow({
         role={agent === undefined ? undefined : "group"}
         aria-label={agent === undefined ? undefined : `Queued message from ${agent.label}`}
       >
-        <span className="queued-lead">
-          {sender === undefined ? (
-            <ClockIcon size={14} />
-          ) : agent === undefined ? (
-            <SenderChipPlaceholder />
-          ) : (
-            <SenderChip sender={agent} />
-          )}
-          {input.attachments.length === 0 ? null : <QueuedImages attachments={input.attachments} />}
+        {sender === undefined ? (
+          <ClockIcon size={14} />
+        ) : agent === undefined ? (
+          <SenderChipPlaceholder />
+        ) : (
+          <SenderChip sender={agent} />
+        )}
+        {input.attachments.length === 0 ? null : <QueuedImages attachments={input.attachments} />}
+        <span className="queued-text" title={input.text}>
+          {input.text}
         </span>
-        <span className="queued-main">
-          <span className="queued-text" title={input.text}>
-            {input.text}
-          </span>
-          <span className="faint">{runsNext ? "queued · runs next" : "queued"}</span>
-          {offersActions ? (
-            <>
-              <button
-                type="button"
-                className="btn btn--quiet btn--sm"
-                aria-disabled={running || undefined}
-                onClick={() => {
-                  if (!running) steer.mutate();
-                }}
-              >
-                Steer
-              </button>
-              <button
-                type="button"
-                className="btn btn--quiet btn--sm"
-                aria-disabled={running || undefined}
-                onClick={() => {
-                  if (!running) cancel.mutate();
-                }}
-              >
-                Cancel
-              </button>
-            </>
-          ) : null}
-        </span>
+        <span className="queued-status faint">{runsNext ? "queued · runs next" : "queued"}</span>
+        {offersActions ? (
+          <>
+            <button
+              type="button"
+              className="queued-steer btn btn--quiet btn--sm"
+              aria-disabled={running || undefined}
+              onClick={() => {
+                if (!running) steer.mutate();
+              }}
+            >
+              Steer
+            </button>
+            <button
+              type="button"
+              className="queued-cancel btn btn--quiet btn--sm"
+              aria-disabled={running || undefined}
+              onClick={() => {
+                if (!running) cancel.mutate();
+              }}
+            >
+              Cancel
+            </button>
+          </>
+        ) : null}
         {input.reason === null ? null : <span className="queued-note faint">{input.reason}</span>}
         {failure === null ? null : (
           <span className="queued-note queued-error" role="alert">
