@@ -22,14 +22,22 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  ACCEPT_ACTION_ID,
+  countJsonBytes,
   createForbiddenError,
   createInvalidStateError,
   createNotFoundError,
   createValidationError,
+  DISMISS_ACTION_ID,
   DONE_ACTION_ID,
+  HAND_TO_ACTION_PREFIX,
+  listSchemaIssues,
+  MAX_BOUND_INPUT_BYTES,
+  Signal,
   Validation,
   type BoundAction,
   type CoreSignalKind,
@@ -39,7 +47,6 @@ import {
   type InvalidState,
   type Issue,
   type NotFound,
-  type Signal,
   type SignalAction,
   type SignalActInput,
   type SignalFilter,
@@ -82,15 +89,6 @@ export interface WithdrawInput extends SignalWithdrawInput {
   readonly id: Id;
 }
 
-/** The id of the core's Accept action on a proposal. */
-export const ACCEPT_ACTION_ID = "accept";
-
-/** The id of the core's Dismiss action on a proposal and an offer. */
-export const DISMISS_ACTION_ID = "dismiss";
-
-/** The prefix of the id of each Hand to an agent action, followed by the workflow's id. */
-export const HAND_TO_ACTION_PREFIX = "hand-to-";
-
 const NO_SUCH_SIGNAL = "no such signal";
 
 /** The describe line of an action that runs nothing. */
@@ -111,18 +109,30 @@ const ONLY_THE_USER =
   "only the user may take a signal's action: it runs its operation as the user, so a session or a workflow step may not take one; ask the user instead";
 
 const ALREADY_RESOLVED = "the signal is already resolved, so its actions can no longer be taken";
-const ANOTHER_ACTION_RUNNING =
-  "another action on this signal is still running; wait for it to finish";
 
-/**
- * Returns the core's Dismiss: a null operation that resolves the signal and
- * runs nothing.
- */
-const buildDismissAction = (): BoundAction => ({
+/** The refusal of `act` while another `act` or a `withdraw` on the same signal runs. */
+const SIGNAL_BUSY_FOR_ACT =
+  "another action or a withdrawal on this signal is still running; wait for it to finish, then read the signal again";
+
+/** The refusal of `withdraw` while an action on the same signal runs. */
+const SIGNAL_BUSY_FOR_WITHDRAW =
+  "an action on this signal is running; withdraw it once it finishes";
+
+/** The core's Dismiss: an action that resolves the signal and runs nothing. */
+const DISMISS_ACTION: BoundAction = {
   id: DISMISS_ACTION_ID,
   label: "Dismiss",
   operation: null,
-});
+};
+
+/**
+ * An action's describe line before the describer runs: the checked operation
+ * the describer writes the line from, or the line itself when the action runs
+ * nothing or its operation no longer passes the check.
+ */
+type PendingDescribeLine =
+  | { readonly _tag: "checked"; readonly operation: CheckedOperation }
+  | { readonly _tag: "written"; readonly describeLine: DescribeLine };
 
 /**
  * Returns the actions the core lays out for a kind, before the Hand to an
@@ -141,10 +151,10 @@ const buildCoreActions = (input: SignalRaiseInput): ReadonlyArray<BoundAction> =
           primary: true,
           operation: { op: "task.create", input: input.task },
         },
-        buildDismissAction(),
+        DISMISS_ACTION,
       ];
     case "offer":
-      return [buildDismissAction()];
+      return [DISMISS_ACTION];
     case "fyi":
       return [{ id: DONE_ACTION_ID, label: "Done", operation: null }];
     case "unsure":
@@ -207,8 +217,13 @@ const listCollisionIssues = (
 /**
  * Returns the reply-filled operation of an action for `act`: the stored
  * operation with the typed text in the field the action names. Fails with
- * `Validation` when the text is missing for a typed reply, or given to an
- * action that takes none.
+ * `Validation` when:
+ *
+ * - the text is missing for a typed reply, or given to an action that takes
+ *   none;
+ * - the filled input is larger than `MAX_BOUND_INPUT_BYTES` of JSON. The
+ *   reply's own limit counts characters, and a character can take several
+ *   bytes.
  */
 const fillTypedReply = (
   action: BoundAction,
@@ -236,11 +251,21 @@ const fillTypedReply = (
       ]),
     );
   }
-  const input = action.operation.input as Readonly<Record<string, unknown>>;
-  return Effect.succeed({
-    ...action.operation,
-    input: { ...input, [action.field.name]: text },
-  });
+  const input = {
+    ...(action.operation.input as Readonly<Record<string, unknown>>),
+    [action.field.name]: text,
+  };
+  if (countJsonBytes(input) > MAX_BOUND_INPUT_BYTES) {
+    return Effect.fail(
+      createValidationError([
+        {
+          path: ["text"],
+          message: `With this reply, the action's input is larger than ${MAX_BOUND_INPUT_BYTES} bytes of JSON. Shorten the reply.`,
+        },
+      ]),
+    );
+  }
+  return Effect.succeed({ ...action.operation, input });
 };
 
 const make = Effect.gen(function* () {
@@ -252,10 +277,33 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const operations = yield* BoundOperations;
 
-  // The signals whose plugin action is running. A plugin action runs outside
-  // any transaction, so this set is what stops a second click on the same
-  // signal from running a second action before the first resolves it.
+  // The signals an action or a withdrawal is running on. A plugin action runs
+  // outside any transaction, so this set is what stops a second click, or a
+  // withdrawal, from acting on a signal whose first action has not resolved
+  // it yet.
   const actingOn = new Set<string>();
+
+  /**
+   * Runs `effect` while it holds the claim on one signal, and gives the claim
+   * up when `effect` ends, however it ends. Fails with `InvalidState`, with
+   * the message `refusal`, when another caller holds the claim. Checking and
+   * taking the claim is one synchronous step, so two requests that arrive
+   * together cannot both take it.
+   */
+  const withSignalClaimed = <A, E, R>(
+    signalId: string,
+    refusal: string,
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E | InvalidState, R> =>
+    Effect.acquireUseRelease(
+      Effect.suspend(() => {
+        if (actingOn.has(signalId)) return Effect.fail(createInvalidStateError(refusal));
+        actingOn.add(signalId);
+        return Effect.void;
+      }),
+      () => effect,
+      () => Effect.sync(() => actingOn.delete(signalId)),
+    );
 
   const readOrFail = (id: string): Effect.Effect<Signal, NotFound | SqlError> =>
     Effect.flatMap(
@@ -349,34 +397,67 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns the describe line of each action of an open signal, for the
-   * user. A stored operation is checked again first: one that no longer
-   * passes, because a plugin was disabled or a schema changed, reads
-   * "Cannot be taken: <why>".
+   * Checks an action's stored operation again before it is described. One
+   * that no longer passes, because a plugin was disabled or a schema
+   * changed, gets the line "Cannot be taken: <why>".
    */
-  const addDescribeLines = (signal: Signal): Effect.Effect<Signal, SqlError> =>
+  const checkForDescribeLine = (
+    action: SignalAction,
+  ): Effect.Effect<PendingDescribeLine, SqlError> => {
+    if (action.operation === null) {
+      return Effect.succeed({
+        _tag: "written",
+        describeLine:
+          action.id === DONE_ACTION_ID ? DONE_DESCRIBE_LINE : NO_OPERATION_DESCRIBE_LINE,
+      });
+    }
+    return Effect.map(
+      checkOperation(action.operation, action.field, []),
+      (checked): PendingDescribeLine =>
+        Result.isSuccess(checked)
+          ? { _tag: "checked", operation: checked.success }
+          : {
+              _tag: "written",
+              describeLine: [
+                {
+                  kind: "text",
+                  text: `Cannot be taken: ${checked.failure.error.details.issues[0]?.message ?? checked.failure.error.message}`,
+                },
+              ],
+            },
+    );
+  };
+
+  /**
+   * Returns the signals with the describe line on each action of each open
+   * signal, for the user. A resolved signal's actions can no longer be
+   * taken, so it is returned as stored. The operations of every action of
+   * every signal are described in one call to the describer.
+   */
+  const addDescribeLines = (
+    list: ReadonlyArray<Signal>,
+  ): Effect.Effect<ReadonlyArray<Signal>, SqlError> =>
     Effect.gen(function* () {
-      if (signal.status !== "open") return signal;
-      const lines = yield* Effect.forEach(signal.actions, (action) =>
-        Effect.gen(function* () {
-          if (action.operation === null) {
-            return action.id === DONE_ACTION_ID ? DONE_DESCRIBE_LINE : NO_OPERATION_DESCRIBE_LINE;
-          }
-          const checked = yield* checkOperation(action.operation, action.field, []);
-          if (Result.isSuccess(checked)) {
-            const [line] = yield* operations.describe([checked.success]);
-            return line!;
-          }
-          const why =
-            checked.failure.error.details.issues[0]?.message ?? checked.failure.error.message;
-          return [{ kind: "text", text: `Cannot be taken: ${why}` }] satisfies DescribeLine;
-        }),
+      const pending = yield* Effect.forEach(list, (signal) =>
+        signal.status === "open"
+          ? Effect.forEach(signal.actions, checkForDescribeLine)
+          : Effect.succeed([]),
       );
-      const actions = signal.actions.map((action, index): SignalAction => ({
-        ...action,
-        describeLine: lines[index]!,
-      }));
-      return { ...signal, actions };
+      const lines = yield* operations.describe(
+        pending.flat().flatMap((entry) => (entry._tag === "checked" ? [entry.operation] : [])),
+      );
+      // The describer returns the lines in the order of the operations it
+      // was given, which is the order this walk visits them in.
+      let nextLine = 0;
+      return list.map((signal, signalIndex) => {
+        if (signal.status !== "open") return signal;
+        const actions = signal.actions.map((action, index): SignalAction => {
+          const entry = pending[signalIndex]![index]!;
+          const describeLine = entry._tag === "written" ? entry.describeLine : lines[nextLine++]!;
+          return { ...action, describeLine };
+        });
+        return { ...signal, actions };
+      });
     });
 
   /**
@@ -387,6 +468,9 @@ const make = Effect.gen(function* () {
    * - Dismiss: "Dismissed";
    * - a plugin action: its own `outcome` line, when it writes one;
    * - anything else: the action's label.
+   *
+   * The action is told apart by its id. That is sound because only the core
+   * uses these ids: `signal.raise` refuses a raiser's action with one.
    */
   const writeOutcome = (
     signal: Signal,
@@ -467,7 +551,7 @@ const make = Effect.gen(function* () {
           ...(filter.kind === undefined ? {} : { kind: filter.kind }),
           ...(filter.source === undefined ? {} : { source: filter.source }),
         });
-        return caller._tag === "user" ? yield* Effect.forEach(open, addDescribeLines) : open;
+        return caller._tag === "user" ? yield* addDescribeLines(open) : open;
       }),
 
     /**
@@ -478,7 +562,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const caller = yield* requireGrant("signal.read");
         const signal = yield* readOrFail(id);
-        return caller._tag === "user" ? yield* addDescribeLines(signal) : signal;
+        if (caller._tag !== "user") return signal;
+        const [described] = yield* addDescribeLines([signal]);
+        return described!;
       }),
 
     /**
@@ -492,6 +578,11 @@ const make = Effect.gen(function* () {
      *   input or Connection does not pass the check;
      * - has a typed reply that does not fit its operation;
      * - has the id or the label of an action the core adds.
+     *
+     * It also fails with `Validation` when the signal, with the core's
+     * actions added, does not fit the `Signal` schema. The input's own
+     * limits are meant to rule that out, so this check is what catches a
+     * limit that drifted.
      */
     raise: (
       input: SignalRaiseInput,
@@ -510,25 +601,29 @@ const make = Effect.gen(function* () {
         const origin = yield* buildApiOrigin(caller, input);
         const actor = buildActorStamp(caller);
         const createdAt = yield* nowIso;
+        const signal: Signal = {
+          id,
+          kind: input.kind,
+          origin,
+          title: input.title,
+          priority: input.priority ?? "normal",
+          blocks: input.blocks ?? [],
+          actions: [...own, ...core],
+          match: {},
+          ...(input.task === undefined ? {} : { task: input.task }),
+          status: "open",
+          createdAt,
+        };
+        yield* Effect.mapError(Schema.encodeEffect(Signal)(signal), (error) =>
+          createValidationError(
+            listSchemaIssues(error.issue),
+            "the signal does not fit the Signal schema once the core adds its own actions",
+          ),
+        );
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* signals.insert(
-              {
-                id,
-                kind: input.kind,
-                origin,
-                title: input.title,
-                priority: input.priority ?? "normal",
-                blocks: input.blocks ?? [],
-                actions: [...own, ...core],
-                match: {},
-                ...(input.task === undefined ? {} : { task: input.task }),
-                status: "open",
-                createdAt,
-              },
-              input.eventIds,
-            );
+            yield* signals.insert(signal, input.eventIds);
             yield* audit.append({
               kind: "signal.raised",
               actor,
@@ -558,14 +653,17 @@ const make = Effect.gen(function* () {
      *   signal, so both commit or neither does.
      * - A plugin action reaches outside the controller, so it runs outside any
      *   transaction (ADR 0004), and the signal is resolved after it succeeds.
-     *   While it runs, a second action on the same signal is refused.
+     * - Every action holds the claim on the signal while it runs, and the
+     *   signal is read only once the claim is held. So a second action, or a
+     *   withdrawal, is refused until the first action ends, and an action
+     *   never runs on a signal that was resolved a moment before.
      *
      * Fails with:
      *
      * - `Forbidden` for any caller but the user;
      * - `NotFound` if the signal does not exist or has no such action;
      * - `InvalidState` if the signal is already resolved, or another action
-     *   on it is running;
+     *   or a withdrawal on it is running;
      * - `Validation` if the typed reply is missing or not wanted, or the
      *   operation no longer passes the check; the signal stays open;
      * - the operation's own error when it fails; the signal stays open.
@@ -573,60 +671,45 @@ const make = Effect.gen(function* () {
     act: (input: ActInput): Effect.Effect<Signal, BoundOperationError> =>
       Effect.gen(function* () {
         const caller = yield* requireUserActor("signal.act", ONLY_THE_USER);
-        const signal = yield* readOrFail(input.id);
-        if (signal.status !== "open") {
-          return yield* Effect.fail(createInvalidStateError(ALREADY_RESOLVED));
-        }
-        const action = signal.actions.find((candidate) => candidate.id === input.actionId);
-        if (action === undefined) {
-          const offered = signal.actions.map((offer) => offer.id).join(", ");
-          return yield* Effect.fail(
-            createNotFoundError(
-              `the signal has no action "${input.actionId}"; its actions are ${offered}`,
-            ),
-          );
-        }
-        const operation = yield* fillTypedReply(action, input.text);
-        const checked =
-          operation === null
-            ? null
-            : yield* operations.check("signal.answer", operation, undefined, []);
-        if (checked !== null && isPluginAnswerOperation(checked)) {
-          // The check and the claim are one step, so two requests that arrive
-          // together cannot both pass the check.
-          const claimSignal = Effect.suspend(() => {
-            if (actingOn.has(signal.id)) {
-              return Effect.fail(createInvalidStateError(ANOTHER_ACTION_RUNNING));
+        return yield* withSignalClaimed(
+          input.id,
+          SIGNAL_BUSY_FOR_ACT,
+          Effect.gen(function* () {
+            const signal = yield* readOrFail(input.id);
+            if (signal.status !== "open") {
+              return yield* Effect.fail(createInvalidStateError(ALREADY_RESOLVED));
             }
-            actingOn.add(signal.id);
-            return Effect.void;
-          });
-          yield* Effect.acquireUseRelease(
-            claimSignal,
-            () =>
-              Effect.gen(function* () {
-                const pluginOutcome = yield* operations.runPluginAction(checked);
-                const outcome = yield* writeOutcome(signal, action, pluginOutcome);
-                yield* withTransaction(sql, decide(caller, signal, action, checked, outcome));
-              }),
-            () => Effect.sync(() => actingOn.delete(signal.id)),
-          );
-        } else {
-          // A plugin action still running on this signal would find it
-          // resolved only after its effect outside the controller happened.
-          if (actingOn.has(signal.id)) {
-            return yield* Effect.fail(createInvalidStateError(ANOTHER_ACTION_RUNNING));
-          }
-          yield* withTransaction(
-            sql,
-            Effect.gen(function* () {
-              if (checked !== null) yield* operations.run(checked);
-              const outcome = yield* writeOutcome(signal, action, undefined);
-              yield* decide(caller, signal, action, checked, outcome);
-            }),
-          );
-        }
-        return yield* readOrFail(input.id);
+            const action = signal.actions.find((candidate) => candidate.id === input.actionId);
+            if (action === undefined) {
+              const offered = signal.actions.map((offer) => offer.id).join(", ");
+              return yield* Effect.fail(
+                createNotFoundError(
+                  `the signal has no action "${input.actionId}"; its actions are ${offered}`,
+                ),
+              );
+            }
+            const operation = yield* fillTypedReply(action, input.text);
+            const checked =
+              operation === null
+                ? null
+                : yield* operations.check("signal.answer", operation, undefined, []);
+            if (checked !== null && isPluginAnswerOperation(checked)) {
+              const pluginOutcome = yield* operations.runPluginAction(checked);
+              const outcome = yield* writeOutcome(signal, action, pluginOutcome);
+              yield* withTransaction(sql, decide(caller, signal, action, checked, outcome));
+            } else {
+              yield* withTransaction(
+                sql,
+                Effect.gen(function* () {
+                  if (checked !== null) yield* operations.run(checked);
+                  const outcome = yield* writeOutcome(signal, action, undefined);
+                  yield* decide(caller, signal, action, checked, outcome);
+                }),
+              );
+            }
+            return yield* readOrFail(input.id);
+          }),
+        );
       }),
 
     /**
@@ -639,7 +722,9 @@ const make = Effect.gen(function* () {
      * - `Forbidden` if the caller did not raise the signal, which includes
      *   every signal the core raised from an event;
      * - `NotFound` if the signal does not exist;
-     * - `InvalidState` if it is already resolved.
+     * - `InvalidState` if it is already resolved, or an action on it is
+     *   running. Withdrawing then could resolve the signal under an action
+     *   whose effect is already on its way.
      */
     withdraw: (
       input: WithdrawInput,
@@ -652,7 +737,7 @@ const make = Effect.gen(function* () {
         if (caller._tag === "none")
           return yield* Effect.die("signal.withdraw reached with no actor");
         const actor = buildActorStamp(caller);
-        return yield* withTransaction(
+        const withdrawInTransaction = withTransaction(
           sql,
           Effect.gen(function* () {
             const signal = yield* readOrFail(input.id);
@@ -660,7 +745,7 @@ const make = Effect.gen(function* () {
               return yield* Effect.fail(
                 createForbiddenError(
                   "signal.write",
-                  "only the actor that raised a signal may withdraw it",
+                  "only the actor that raised a signal may withdraw it; leave it for the user to answer, or ask its raiser to withdraw it",
                 ),
               );
             }
@@ -684,6 +769,7 @@ const make = Effect.gen(function* () {
             return { ...signal, status: "resolved" as const, resolution };
           }),
         );
+        return yield* withSignalClaimed(input.id, SIGNAL_BUSY_FOR_WITHDRAW, withdrawInTransaction);
       }),
   };
 });

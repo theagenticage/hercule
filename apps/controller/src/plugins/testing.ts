@@ -260,13 +260,19 @@ export interface ForgePlugin {
  * The plugin config accepts `clientId`, which a refresh needs. When
  * `reviewHeldUntil` is given, every review records its call and then waits
  * for that promise before it returns, so a test can act while one runs.
+ * `reviewOutcome` replaces the review's outcome line, which is
+ * "Reviewed: <verdict>" by default.
  */
 export const buildForgePlugin = (
-  options: { readonly tokenUrl?: string; readonly reviewHeldUntil?: Promise<void> } = {},
+  options: {
+    readonly tokenUrl?: string;
+    readonly reviewHeldUntil?: Promise<void>;
+    readonly reviewOutcome?: string;
+  } = {},
 ): ForgePlugin => {
   const contexts: Array<ActionContext> = [];
   const inputs: Array<unknown> = [];
-  const { tokenUrl, reviewHeldUntil } = options;
+  const { tokenUrl, reviewHeldUntil, reviewOutcome } = options;
   const plugin: Plugin = {
     manifest: {
       id: "forge",
@@ -305,7 +311,8 @@ export const buildForgePlugin = (
             { kind: "marked", text: String((input as { verdict?: unknown }).verdict) },
             { kind: "text", text: " review" },
           ],
-          outcome: (input) => `Reviewed: ${String((input as { verdict?: unknown }).verdict)}`,
+          outcome: (input) =>
+            reviewOutcome ?? `Reviewed: ${String((input as { verdict?: unknown }).verdict)}`,
           execute: (input, context) =>
             Effect.sync(() => {
               contexts.push(context);

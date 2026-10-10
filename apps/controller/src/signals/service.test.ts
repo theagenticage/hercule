@@ -9,16 +9,20 @@
  * HTTP in `signals.integration.test.ts`.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Fiber, Layer } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
-import type {
-  BoundAction,
-  Grant,
-  Signal,
-  SignalRaiseInput,
-  WorkflowDefinition,
+import {
+  decodeAnswerOperation,
+  isQualifiedId,
+  MAX_BOUND_INPUT_BYTES,
+  type BoundAction,
+  type Grant,
+  type Signal,
+  type SignalRaiseInput,
+  type WorkflowDefinition,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
+import { BoundOperations } from "../bound-actions";
 import { FakeBoundOperationsLayer } from "../bound-actions/testing";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
@@ -65,6 +69,65 @@ const as =
 
 const run = <A, E>(effect: Effect.Effect<A, E, Deps>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, layer));
+
+/**
+ * Builds a `BoundOperations` port whose operations wait until the test lets
+ * them finish, so a test can act on a signal while an action on it runs:
+ *
+ * - `check` lets a plugin action through, and checks a contract operation as
+ *   the fake port does;
+ * - `run` and `runPluginAction` wait for `release`; `started` succeeds once
+ *   the first of them is waiting;
+ * - `pluginRuns` counts the calls of `runPluginAction`.
+ */
+const buildHeldOperations = () => {
+  let markStarted!: () => void;
+  let markReleased!: () => void;
+  const started = new Promise<void>((resolve) => (markStarted = resolve));
+  const released = new Promise<void>((resolve) => (markReleased = resolve));
+  const counts = { pluginRuns: 0 };
+  const hold = Effect.promise(() => {
+    markStarted();
+    return released;
+  });
+  const port = BoundOperations.of({
+    check: (place, operation, _field, path) =>
+      isQualifiedId(operation.op)
+        ? Effect.succeed(operation)
+        : decodeAnswerOperation(place, operation, [...path, "operation"]),
+    run: () => hold,
+    runPluginAction: () =>
+      Effect.andThen(
+        Effect.sync(() => counts.pluginRuns++),
+        Effect.as(hold, undefined),
+      ),
+    describe: (operations) =>
+      Effect.succeed(operations.map((operation) => [{ kind: "text", text: operation.op }])),
+  });
+  return {
+    run: <A, E>(effect: Effect.Effect<A, E, Deps>): Promise<A> =>
+      Effect.runPromise(
+        Effect.provide(
+          effect,
+          SignalServiceLayer.pipe(
+            Layer.provide(Layer.succeed(BoundOperations, port)),
+            Layer.provideMerge(AuditLogLayer),
+            Layer.provideMerge(TestDatabase),
+          ),
+        ),
+      ),
+    started: Effect.promise(() => started),
+    release: Effect.sync(() => markReleased()),
+    counts,
+  };
+};
+
+/** A plugin action an offer carries, which the held port lets through. */
+const PLUGIN_ACTION: BoundAction = {
+  id: "approve",
+  label: "Approve",
+  operation: { op: "forge/review", input: {} },
+};
 
 /** Runs `effect` and returns the error it fails with. Fails the test if it succeeds. */
 const fail = <A, E>(effect: Effect.Effect<A, E, Deps>): Promise<E> => run(Effect.flip(effect));
@@ -241,6 +304,36 @@ describe("signal.raise", () => {
     expect(issues[0]?.path).toEqual(["actions", "0", "operation", "op"]);
   });
 
+  it("refuses a proposal whose task Accept could not bind, as the signal it would store", async () => {
+    const error = await fail(
+      as(TRIAGE)(
+        Effect.flatMap(service, (signals) =>
+          signals.raise({
+            ...PROPOSAL,
+            task: { title: "Too long", description: "x".repeat(MAX_BOUND_INPUT_BYTES) },
+          }),
+        ),
+      ),
+    );
+
+    expect(error).toMatchObject({ error: { code: "validation" } });
+    const issues = (error as { error: { details: { issues: ReadonlyArray<{ path: unknown }> } } })
+      .error.details.issues;
+    expect(issues[0]?.path).toEqual(["actions", "0", "operation", "input"]);
+  });
+
+  it("lays out Hand to for a workflow whose name is as long as a workflow name may be", async () => {
+    const name = "w".repeat(128);
+    const signal = await run(
+      Effect.gen(function* () {
+        yield* insertEnabledWorkflow(buildSignalInputWorkflow(name, ["offer"]));
+        return yield* raiseAndRead(OFFER);
+      }),
+    );
+
+    expect(signal.actions[0]?.label).toBe(`Hand to ${name}`);
+  });
+
   it("refuses a caller without signal.write", async () => {
     const error = await fail(
       as(buildSessionActor(UNKNOWN_ID, ["signal.read"]))(
@@ -352,6 +445,58 @@ describe("signal.act", () => {
     });
     expect(errors.still.status).toBe("open");
   });
+
+  it("refuses a plugin action while a core action on the same signal runs", async () => {
+    const held = buildHeldOperations();
+    const { refused, acted } = await held.run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const own: BoundAction = {
+          id: "file",
+          label: "File it",
+          operation: { op: "task.create", input: { title: "File it", description: "" } },
+        };
+        const { signalId } = yield* as(TRIAGE)(
+          signals.raise({ ...OFFER, actions: [own, PLUGIN_ACTION] }),
+        );
+        const first = yield* Effect.forkChild(
+          as(USER)(signals.act({ id: signalId, actionId: "file" })),
+        );
+        yield* held.started;
+        const refused = yield* Effect.flip(
+          as(USER)(signals.act({ id: signalId, actionId: "approve" })),
+        );
+        yield* held.release;
+        return { refused, acted: yield* Fiber.join(first) };
+      }),
+    );
+
+    expect(refused).toMatchObject({ error: { code: "invalid_state" } });
+    expect(held.counts.pluginRuns).toBe(0);
+    expect(acted.resolution).toMatchObject({ kind: "decided", actionId: "file" });
+  });
+
+  it("runs the same plugin action once when it is taken twice at once", async () => {
+    const held = buildHeldOperations();
+    const { refused, acted } = await held.run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const { signalId } = yield* as(TRIAGE)(
+          signals.raise({ ...OFFER, actions: [PLUGIN_ACTION] }),
+        );
+        const take = as(USER)(signals.act({ id: signalId, actionId: "approve" }));
+        const first = yield* Effect.forkChild(take);
+        yield* held.started;
+        const refused = yield* Effect.flip(take);
+        yield* held.release;
+        return { refused, acted: yield* Fiber.join(first) };
+      }),
+    );
+
+    expect(refused).toMatchObject({ error: { code: "invalid_state" } });
+    expect(held.counts.pluginRuns).toBe(1);
+    expect(acted.resolution).toMatchObject({ kind: "decided", actionId: "approve" });
+  });
 });
 
 describe("signal.withdraw", () => {
@@ -394,5 +539,34 @@ describe("signal.withdraw", () => {
     expect(errors.other).toMatchObject({ error: { code: "forbidden" } });
     expect(errors.user).toMatchObject({ error: { code: "forbidden" } });
     expect(errors.twice).toMatchObject({ error: { code: "invalid_state" } });
+  });
+
+  it("refuses a withdrawal while an action on the signal runs, and the action still resolves it", async () => {
+    const held = buildHeldOperations();
+    const { refused, acted } = await held.run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const { signalId } = yield* as(TRIAGE)(
+          signals.raise({ ...OFFER, actions: [PLUGIN_ACTION] }),
+        );
+        const first = yield* Effect.forkChild(
+          as(USER)(signals.act({ id: signalId, actionId: "approve" })),
+        );
+        yield* held.started;
+        const refused = yield* Effect.flip(
+          as(TRIAGE)(signals.withdraw({ id: signalId, reason: "Not needed." })),
+        );
+        yield* held.release;
+        return { refused, acted: yield* Fiber.join(first) };
+      }),
+    );
+
+    expect(refused).toMatchObject({
+      error: {
+        code: "invalid_state",
+        message: "an action on this signal is running; withdraw it once it finishes",
+      },
+    });
+    expect(acted.resolution).toMatchObject({ kind: "decided", actionId: "approve" });
   });
 });

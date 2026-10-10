@@ -127,7 +127,7 @@ const isProducer = (actor: Actor, producer: NotificationProducer): actor is Sess
  * An answer's operation after the check at read time: decoded, or refused,
  * with a describe line that shows the user why the answer cannot be taken.
  */
-type CheckedOperation =
+type StoredOperationCheck =
   | { readonly _tag: "decoded"; readonly operation: AnswerOperation<"notification.answer"> }
   | { readonly _tag: "refused"; readonly describeLine: DescribeLine };
 
@@ -144,10 +144,10 @@ const make = Effect.gen(function* () {
    * list of operations an answer may run or a schema changed since it was
    * created, cannot be taken, and its describe line shows the user why.
    */
-  const checkStoredOperation = (operation: BoundOperation): Effect.Effect<CheckedOperation> =>
+  const checkStoredOperation = (operation: BoundOperation): Effect.Effect<StoredOperationCheck> =>
     decodeAnswerOperation("notification.answer", operation, []).pipe(
       Effect.match({
-        onFailure: (refused): CheckedOperation => ({
+        onFailure: (refused): StoredOperationCheck => ({
           _tag: "refused",
           describeLine: [
             {
@@ -156,7 +156,7 @@ const make = Effect.gen(function* () {
             },
           ],
         }),
-        onSuccess: (decoded): CheckedOperation => ({ _tag: "decoded", operation: decoded }),
+        onSuccess: (decoded): StoredOperationCheck => ({ _tag: "decoded", operation: decoded }),
       }),
     );
 
@@ -171,7 +171,7 @@ const make = Effect.gen(function* () {
       if (notification.status !== "open") return notification;
       const checked = yield* Effect.forEach(notification.actions, (action) =>
         action.operation === null
-          ? Effect.succeed<CheckedOperation>({
+          ? Effect.succeed<StoredOperationCheck>({
               _tag: "refused",
               describeLine: NO_OPERATION_DESCRIBE_LINE,
             })

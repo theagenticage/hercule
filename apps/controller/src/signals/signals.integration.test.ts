@@ -8,13 +8,21 @@
  *   with the signal's id;
  * - a run's signal input takes only the id of a signal of a kind it lists;
  * - a plugin action bound as a typed reply runs with the text the user typed,
- *   outside any run, and writes the line the Done list keeps;
+ *   outside any run, and writes the line the Done list keeps, cut to the
+ *   longest outcome;
+ * - a typed reply that makes the input too large is refused;
  * - while a plugin action runs, a second action on its signal is refused.
  *
  * The rules that need no real operation are tested in `service.test.ts`.
  */
 import { describe, expect, it } from "vitest";
-import type { Run, Signal, SignalRaiseInput, Task } from "@hercule/contract";
+import {
+  MAX_SIGNAL_OUTCOME_LENGTH,
+  type Run,
+  type Signal,
+  type SignalRaiseInput,
+  type Task,
+} from "@hercule/contract";
 import { completeSetup, get, post, readErrorBody, withServer } from "../http/testing";
 import {
   buildForgePlugin,
@@ -270,6 +278,17 @@ describe("a plugin action as a typed reply", () => {
         expect(missing.status).toBe(400);
         expect((await readErrorBody(missing)).issues).toEqual([["text"]]);
 
+        // Under the reply's limit in characters, but "€" takes three bytes,
+        // so the filled input is over its limit in bytes.
+        const tooLarge = await requestAct(base, token, id, {
+          actionId: "review",
+          text: "€".repeat(6000),
+        });
+        const tooLargeRefusal = await readErrorBody(tooLarge);
+        expect(tooLarge.status, tooLargeRefusal.text).toBe(400);
+        expect(tooLargeRefusal.issues).toEqual([["text"]]);
+        expect(forge.inputs).toEqual([]);
+
         const acted = await actOrFail(base, token, id, { actionId: "review", text: "Looks good." });
 
         expect(acted.resolution).toMatchObject({
@@ -279,6 +298,37 @@ describe("a plugin action as a typed reply", () => {
         expect(forge.inputs).toEqual([{ verdict: "comment", body: "Looks good." }]);
         expect(forge.contexts[0]!.run).toBeUndefined();
         expect(forge.contexts[0]!.connection?.credentials).toEqual({ token: "a-forge-token" });
+      },
+      { plugins: [forge.plugin] },
+    );
+  });
+
+  it("cuts an outcome line that is longer than a signal's outcome may be", async () => {
+    const forge = buildForgePlugin({ reviewOutcome: "x".repeat(MAX_SIGNAL_OUTCOME_LENGTH + 100) });
+    await withServer(
+      async ({ base }) => {
+        const token = await completeSetup(base);
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const id = await raiseOrFail(base, token, {
+          ...OFFER,
+          actions: [
+            {
+              id: "approve",
+              label: "Approve",
+              operation: {
+                op: FORGE_REVIEW_ACTION_ID,
+                connectionId,
+                input: { verdict: "approve" },
+              },
+            },
+          ],
+        });
+
+        const acted = await actOrFail(base, token, id, { actionId: "approve" });
+
+        expect(acted.resolution?.outcome).toBe(`${"x".repeat(MAX_SIGNAL_OUTCOME_LENGTH - 1)}…`);
       },
       { plugins: [forge.plugin] },
     );

@@ -19,7 +19,6 @@ export {
   CONNECTION_PARAM,
   executePluginAction,
   isBuiltInControllerActionId,
-  isUsableAsAnswer,
   separateConnectionParam,
   runsInWorkspace,
   WORKSPACE_ACTION_IDS,

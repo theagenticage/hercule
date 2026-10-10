@@ -32,7 +32,6 @@ import {
   WorkflowActionNames,
   type ActionContext,
   type AnswerAction,
-  type AnswerPlace,
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
 import {
@@ -107,10 +106,6 @@ export interface RegisteredWorkflowAction {
   /** Writes the line a Signal keeps once the action, taken as its answer, succeeds. */
   readonly outcome?: AnswerAction["outcome"];
 }
-
-/** Checks whether a registered action may be bound in an answer place. */
-export const isUsableAsAnswer = (action: RegisteredWorkflowAction, place: AnswerPlace): boolean =>
-  action.usableIn.includes(place);
 
 /**
  * The fields of a workflow action, other than its id and display name, that

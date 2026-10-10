@@ -25,6 +25,8 @@ import {
   isId,
   isQualifiedId,
   listSchemaIssues,
+  MAX_SIGNAL_OUTCOME_LENGTH,
+  nameAnswerRecord,
   type AnswerOperationHandlers,
   type BoundAction,
   type BoundOperation,
@@ -39,20 +41,11 @@ import {
   type PluginAnswerOperation,
 } from "../../bound-actions";
 import { connectionRepository, ConnectionTypes } from "../../connections";
-import {
-  executePluginAction,
-  isUsableAsAnswer,
-  PluginHost,
-  type RegisteredWorkflowAction,
-} from "../../plugins";
+import { executePluginAction, PluginHost, type RegisteredWorkflowAction } from "../../plugins";
 import { RunService } from "../../runs";
 import { TaskService } from "../../tasks";
 import { Live } from "../sessions";
 import { buildDescribe } from "./describer";
-
-/** Returns the record an answer place belongs to, for messages: "notification" or "signal". */
-const nameRecord = (place: AnswerPlace): string =>
-  place === "signal.answer" ? "signal" : "notification";
 
 /**
  * Lists the problems with a typed reply's field on a plugin action. The field
@@ -192,12 +185,12 @@ const make = Effect.gen(function* () {
           ]),
         );
       }
-      if (!isUsableAsAnswer(action, place)) {
+      if (!action.usableIn.includes(place)) {
         return yield* Effect.fail(
           createValidationError([
             {
               path: [...operationPath, "op"],
-              message: `The action ${action.id} does not list ${place} in its usableIn, so an answer on a ${nameRecord(place)} cannot run it.`,
+              message: `The action ${action.id} does not list ${place} in its usableIn, so an answer on a ${nameAnswerRecord(place)} cannot run it.`,
             },
           ]),
         );
@@ -323,16 +316,25 @@ const make = Effect.gen(function* () {
 
 /**
  * Returns the line a plugin action writes about its success, or `undefined`
- * when it declares no `outcome`. The action has already run, so a bug in its
- * `outcome` must not turn the success into an error: the caller writes the
- * line from the answer's label instead.
+ * when it declares no `outcome`. The action has already run, so neither a bug
+ * in its `outcome` nor a line that is too long may turn the success into an
+ * error:
+ *
+ * - when `outcome` throws, this returns `undefined`, and the caller writes
+ *   the line from the answer's label instead;
+ * - a line longer than `MAX_SIGNAL_OUTCOME_LENGTH` is cut to that length and
+ *   ends in "…", so the reader sees it was cut.
  */
 const writeOutcome = (action: RegisteredWorkflowAction, input: unknown): string | undefined => {
+  let line: string | undefined;
   try {
-    return action.outcome?.(input);
+    line = action.outcome?.(input);
   } catch {
     return undefined;
   }
+  return line === undefined || line.length <= MAX_SIGNAL_OUTCOME_LENGTH
+    ? line
+    : `${line.slice(0, MAX_SIGNAL_OUTCOME_LENGTH - 1)}…`;
 };
 
 /**
