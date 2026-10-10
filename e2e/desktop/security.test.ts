@@ -34,7 +34,7 @@ const APP_ORIGIN = "app://hercule";
  * (§Content-Security-Policy) writes it: `connect-src` is `'none'`.
  */
 const POLICY_WITHOUT_CONTROLLER =
-  "default-src 'self'; script-src 'self'; connect-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'";
+  "default-src 'self'; script-src 'self'; connect-src 'none'; img-src 'self' data: blob: https:; font-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'";
 
 /**
  * Makes the page break its own policy with a request `connect-src` refuses,
