@@ -8,12 +8,12 @@ Hercule has one plugin concept. A plugin is a container that requests plugin cap
 - One plugin may contribute several things that share one configuration and one set of credentials. The `github` plugin contributes an event source and workflow actions; the `gmail` plugin likewise.
 - **Plugin capabilities** are what a plugin may *call*: named slices of the host API requested in the manifest and granted at load (section 5). **Contributions** are what a plugin *provides*: named things registered into extension points through the granted capability APIs (section 4). The manifest lists capabilities, never contributions.
 - The v1 extension points are fixed at four: **provider**, **channel**, **event source**, **workflow action**. Plugins cannot define new extension points. The notification sink is not a fifth point: it is an optional facet of a channel contribution (section 11).
-- A catalog contribution is identified by its **qualified id**, `<pluginId>/<word>`: the plugin declares the bare word, the host mints the qualified form at registration, and that is the identity everywhere downstream ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)). It holds for every extension point - connection types (`github/github`), workflow actions (`github/pr.merge`), channel contributions (`discord/discord`), provider definitions - so the dotted plugin prefix the tickets use (`github.merge`) is retired. The word may contain dots (`pr.merge`) but never a `/`. Built-in core actions are operations and keep the operation id (`task.create`, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1); event kinds are dotted, with a namespace before the first dot, not by this rule (`github.issue.opened`); the namespace is not always the event's source (`task.created` has the source `platform`). A workflow step names an action contribution by id; an assistant binding names a channel contribution by id.
+- A catalog contribution is identified by its **qualified id**, `<pluginId>/<word>`: the plugin declares the bare word, the host mints the qualified form at registration, and that is the identity everywhere downstream ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)). It holds for every extension point - connection types (`github/github`), workflow actions (`github/pr.merge`), channel contributions (`discord/discord`), provider definitions - so the dotted plugin prefix the tickets use (`github.merge`) is retired. The word may contain dots (`pr.merge`) but never a `/`. Built-in core actions are operations and keep the operation id (`task.create`, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 1); event kinds are dotted, with a namespace before the first dot, not by this rule (`github.issue.opened`); the namespace is not always the event's source (`task.created` has the source `platform`). A workflow step names an action contribution by id; an assistant binding names a channel contribution by id. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#389](https://github.com/theagenticage/hercule/issues/389).)* **Signal kinds are qualified the same way** (`github/review-requested`, `gmail/mail`), although a signal kind is a facet of an event source, not a contribution of its own (section 4.3). Event kinds stay dotted. Core signal kinds (`proposal`, `offer`, `unsure`, `fyi`) are unprefixed ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#93-core-kinds-and-signalraise)).
 - Everything a plugin defines that names things outside Hercule is namespaced by the plugin: connection types (declared `gmail`, `github`; identified `gmail/gmail`, `github/github`) and External Ref canonicalization (`github:issue:owner/repo#42`) are owned by the defining plugin ([ADR 0010](../adr/0010-external-accounts-are-core-owned-connections.md); Task provenance in [./09-tasks.md](./09-tasks.md)).
 
 ## 2. Manifest
 
-The manifest is deliberately coarse. It carries exactly four things:
+The manifest is deliberately coarse. It carries exactly ~~four~~ five things *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): the mark joined, below)*:
 
 | Part | Content |
 |---|---|
@@ -21,6 +21,7 @@ The manifest is deliberately coarse. It carries exactly four things:
 | `hostApi` | one integer naming the core host contract the plugin was built against; checked at load |
 | Plugin capabilities | the list of capability names the plugin requests, scope-style ("the channels API", "the notifications API") |
 | Config schema | an Effect Schema for the plugin's own configuration, persisted as the JSON Schema derived from it; the web app generates the plugin's settings form from that ([./14-web-app.md](./14-web-app.md)) |
+| Mark | *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* the plugin's small icon, as SVG path data only; optional |
 
 ```ts
 interface PluginManifest {
@@ -29,8 +30,16 @@ interface PluginManifest {
   hostApi: number            // core host contract version integer
   capabilities: string[]     // requested plugin capabilities, e.g. ["event-sources", "workflow-actions", "connections", "events", "notifications", "secrets", "kv"]
   configSchema: Schema       // plugin-level configuration, in Effect Schema
+  mark?: { paths: string[] } // added 2026-10-10: SVG path `d` strings on a fixed 16x16 viewBox
 }
 ```
+
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#394](https://github.com/theagenticage/hercule/issues/394) and [#389](https://github.com/theagenticage/hercule/issues/389).)* **The mark.** Intake shows the mark of the plugin a signal or an event came from.
+
+- `mark.paths` holds path `d` strings only, drawn on a fixed 16×16 viewBox. There is no SVG document, no `<style>`, no other element and no colour, so a mark cannot carry script or tracking, and the apps draw it in the theme's colour.
+- The core checks the mark when it loads the plugin: each string must be path data only (path commands and numbers), and all strings together must stay under about 4 KB.
+- The API returns the mark with the plugin, so every client draws it the same way. How the apps draw it, and what they draw for a plugin with no valid mark, is in [./17-desktop-app.md](./17-desktop-app.md).
+- A plugin has one mark, its own. A system reached through another plugin is shown as text ("Sentry, via Gmail"), never as a mark.
 
 *(Amended 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* `configSchema` is an **Effect Schema**, not a JSON Schema, which is what section 5's "authored in Effect Schema, persisted as JSON Schema" always said; this snippet was the stale spelling. The host derives the JSON Schema from it and persists that, and it decodes the stored config against the live schema before handing it to `activate()` - neither is possible from JSON alone. It is the one thing in the manifest that is not plain data, which is why the manifest is static data shipped with the package rather than a serializable record. The derivation refuses shapes the generated form cannot render: the supported set is a flat struct of string, number, integer, boolean, enum and array-of-string properties, and a plugin whose schema goes beyond it is refused at load with the reason shown in Settings > Plugins.
 
@@ -38,7 +47,7 @@ Rules:
 
 - No contribution appears in the manifest. A VS Code-style declarative contribution list was rejected ([ADR 0006](../adr/0006-plugins-request-capabilities-and-register-contributions-in-code.md)).
 - The manifest is static data shipped with the plugin package; the controller reads it before running any plugin code.
-- The tickets pin the four parts and the name `hostApi`; the other field names above are this spec's spelling and MUST be used consistently.
+- The tickets pin the ~~four~~ five parts *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* and the name `hostApi`; the other field names above are this spec's spelling and MUST be used consistently.
 
 ## 3. Loading: `register()` and `activate()`
 
@@ -173,9 +182,86 @@ Division of labour in one line: **core clock, plugin numbers.**
 - The core drives the lifecycle exactly as it does for channels: ~~`open()` once per `connected` Connection of the type after `activate()`, `close()` on disable, deactivate, Connection removal or status change~~ `open()` once per Connection of the type that is `connected` or `error` while the plugin is active, and `close()` once the Connection is deleted, disabled or `needs-reauth`, or the plugin stops. A change to the Connection's config or feed intervals closes the handle and opens a new one. *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The core owns the timers - one per (Connection, feed), fired at the per-Connection interval, ~~paused during controller promotion,~~ backed off on errors (section 8.1) - and reports health uniformly. *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89): promotion is not built, so there is nothing to pause for yet.)*
 - The plugin owns the cadence *numbers*: each feed declares its `defaultIntervalSeconds` (and optionally a `minIntervalSeconds` floor), and `poll()` may return `nextAfterSeconds` as a per-tick floor derived from what the wire said (`X-Poll-Interval`, `Retry-After`, quota math); the core never fires sooner. The user may override the interval per Connection, per feed, ~~clamped to the plugin's floor~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* in `feedIntervals` ([./08-events-and-connections.md](./08-events-and-connections.md) section 8.1). An override below the feed's floor is refused, not clamped. The floor is `minIntervalSeconds`, or `defaultIntervalSeconds` when the feed declares no minimum.
 - ~~**Push sources declare no feeds**: a source holding a persistent connection (a websocket, post-v1 webhook delivery) opens it inside `open()`, emits whenever the wire says so,~~ ~~reports `status()`, and never implements `poll`. The core restarts a dead handle with backoff.~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* ~~and is never polled. The core retries a failed `open()` with backoff. A handle has no way to report that its connection died after `open()`, so the core cannot restart it yet.~~ Poll and push are one contribution shape (ADR 0009's push-agnostic boundary); the Discord channel plugin's gateway socket already proves the always-on pattern in v1. *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* A source with no feeds is refused (above), so a purely push-driven source cannot be written. A source that holds a persistent connection (a websocket, post-v1 webhook delivery) opens it inside `open()` and emits whenever the wire says so, but it must declare at least one feed as well. No v1 event source is push-driven, so the first one decides what its feed polls. A handle has no way to report that its connection died after `open()`, so the core cannot restart it.
-- **Kind names are prefixed** with the plugin id (`github.`), enforced at `register()`. Kinds and their payload schemas are catalog data, so ~~trigger filters and UI validate against them~~ the UI can show them, and old events still render, while the plugin is disabled. *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* A trigger cannot name a kind of a plugin that is disabled or did not start: its source ingests nothing, so the trigger could never match, and validation refuses it. A plugin may not declare a kind the core declares ([./08-events-and-connections.md](./08-events-and-connections.md) section 2), because a trigger names a kind by its name alone; the registration fails.
+- **Kind names are prefixed** with the plugin id (`github.`), enforced at `register()`. Kinds and their payload schemas are catalog data, so ~~trigger filters and UI validate against them~~ the UI can show them, and old events still render, while the plugin is disabled. *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* A trigger cannot name a kind of a plugin that is disabled or did not start: its source ingests nothing, so the trigger could never match, and validation refuses it. A plugin may not declare a kind the core declares ([./08-events-and-connections.md](./08-events-and-connections.md) section 2), because a trigger names a kind by its name alone; the registration fails. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* This prefix rule is for event kinds. A signal kind's word is qualified by the host instead, as a contribution id is (section 1).
 - **Emit is the whole output**: the plugin supplies `kind`, `dedupKey`, `occurredAt`, `payload`, `refs` (canonicalized by this plugin: `github:issue:owner/repo#42`), `url`, `system` and `raw` per the envelope in [./08-events-and-connections.md](./08-events-and-connections.md); the host stamps `connectionId`. The core persists, deduplicates, matches and dispatches; a plugin never sees triggers, subscriptions or dispatch.
 - **Baseline at now**: a newly established connection emits no history. *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* As built, the first poll of each feed only records where the feed stands. The same happens after Reset plugin state (section 6), and for a GitHub repo that joins the watch list ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.1).
+
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#389](https://github.com/theagenticage/hercule/issues/389), [#397](https://github.com/theagenticage/hercule/issues/397) and [#393](https://github.com/theagenticage/hercule/issues/393).)* **Signal kinds, Intake settings and the user's identity.** An event source gains the parts below. None of them is built yet.
+
+```ts
+interface EventSourceContribution {
+  // ...the fields above, plus:
+  signalKinds?: SignalKindDeclaration[]        // the kinds of Signal this source's events can raise; none when left out
+}
+
+interface EventKindDeclaration {
+  description: string
+  schema: Schema
+  availableToTriage: boolean                   // required: the default of the kind's Intake switch (section 8.2)
+}
+
+interface SignalKindDeclaration {
+  word: string                                 // "review-requested"; identified as "github/review-requested"
+  label: string                                // "Review requested"
+  description: string                          // one line for the user, shown in Settings > Intake
+  from: string[]                               // the event kinds the rule reads
+  rule: string                                 // CEL over `event`; returns "yes", "no" or "undecided"
+  guidance: string                             // what the Screener reads when the rule returns "undecided"
+  threadRef: string                            // CEL over `event`; the thread the signal is about
+  namesYou: boolean                            // the kind names the user directly, not a team
+  priority: TaskPriority                       // the default; `build` may change it
+  matchFields: { name: string; label: string; path: string }[]  // what an Ignore Rule may match on; `path` is CEL over `event`
+  ends: SignalEndDeclaration[]                 // the events that end an open signal of this kind
+  build(event: Event, ctx: SignalBuildContext): Effect<SignalDraft, PluginError>
+}
+
+interface SignalEndDeclaration {
+  eventKind: string
+  condition?: string                           // CEL over `event`
+  resolution: "decided" | "withdrawn"
+  outcome: string                              // CEL returning the line the signal shows once it has ended ("Merged by Marta")
+  actionId?: string                            // the action this end stands for, when there is one: an approval on GitHub and Approve
+}
+
+interface SignalBuildContext {
+  connection: IngestConnection                 // the Connection the event arrived through
+  credentials(): Effect<Record<string, string>, ConnectionUnavailable>
+}
+
+interface SignalDraft {
+  title: string
+  asker?: string
+  place?: string
+  priority?: TaskPriority
+  blocks: Block[]
+  actions: BoundAction[]                       // this plugin's own actions only; never Done
+}
+
+interface IngestConnection {
+  // ...the fields above, plus:
+  accountId: string                            // the user's account on the service, from the Connection
+  displayName: string
+}
+
+interface IngestContext {
+  // ...the members above, plus:
+  openSignals(): Effect<{ kind: string; threadRef: string; raisedAt: string }[]>  // the open signals on this Connection
+}
+
+interface EmittedEvent {
+  // ...the fields above, plus:
+  title: string                                // one line, built from the payload
+  author: string | null                        // who caused the event on its own system
+}
+```
+
+- **A signal kind is a facet of the event source**, like an event kind. It is not a contribution and not a fifth extension point, so a plugin update can add a kind without registering anything new. The host qualifies the word to `<pluginId>/<word>` (section 1). Everything but `build` is data: the plugin never writes a Signal, and the core evaluates the rule, the thread, the match fields and the ends.
+- **What the core does with a kind**: it runs the rule, checks known work and Ignore Rules, replaces an older signal on the same thread, sends an `undecided` event to the Screener, and calls `build`. That path is in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#92-how-a-plugins-signal-is-raised), and what happens when `build` fails is in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent). How a kind's `ends` end a signal is in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#96-when-a-signal-leaves). The `Block` types are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#95-blocks), and `BoundAction` in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent). Whether a kind is on is an Intake setting (section 8.2).
+- **`build` is the one piece of plugin code.** It turns the event into the signal's content. It binds only its own plugin's actions, and the core fills in each one's Connection with the signal's own (section 4.4). It never declares Done: the core adds Done and the workflows that can take the signal ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)). It may read the service through `ctx.credentials()`, as Gmail's `build` reads the thread.
+- **`availableToTriage` is required**, so every plugin author decides for every event kind whether triage may read it. Adding it is a change to the host contract (section 9).
+- **The user's identity lives on the Connection** (`accountId` and `displayName`, [./08-events-and-connections.md](./08-events-and-connections.md) section 8.1). The core hands both to the source, and the source works out at ingest the facts its rules need, such as `byYou`, `toYou` and `reviewer: you | team`, and writes them into the payload. Platform Identity is not widened.
+- **`openSignals()`** lists the open signals of this Connection, so a source can watch the threads that have one: for example, read a pull request's reviews only while a review request on it is open.
+- **`title` and `author`** are new envelope fields, set at emit and never changed ([./08-events-and-connections.md](./08-events-and-connections.md) section 2).
 
 ### 4.4 Workflow action
 
@@ -185,7 +271,7 @@ A workflow action is what an action step invokes ([ADR 0008](../adr/0008-workflo
 interface WorkflowActionContribution {
   id: string                                   // the bare word "<entity>.<verb>", e.g. "pr.merge"; identified as "github/pr.merge"
   displayName: string
-  description: string                          // shown in pickers; raw material for a bound action's describe line
+  description: string                          // shown in pickers only (amended 2026-10-10: no longer raw material for a describe line)
   input: Schema
   output: Schema                               // what edge conditions route on: steps.<id>.output.*
   connection?: { type: string }                // this action acts through one Connection of this type
@@ -201,13 +287,31 @@ interface ActionContext {
 
 *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The block above is now the shape as shipped. `api` is not in it (see the bullets on #79 below), and `credentials` holds the Connection's credential fields by name.
 
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#391](https://github.com/theagenticage/hercule/issues/391).)* **Where an action may be bound, and its describe line.** An action contribution gains two fields. Neither is built yet.
+
+```ts
+interface WorkflowActionContribution {
+  // ...the fields above, plus:
+  usableIn?: ("workflow.step" | "notification.answer" | "signal.answer")[]   // default ["workflow.step"]
+  describe?(input: unknown): DescribeLinePart[]   // pure; required when an *.answer place is listed
+}
+
+type DescribeLinePart = { kind: "text" | "marked"; text: string }
+```
+
+- **`usableIn`** says where the action may be bound: as a workflow step, as a Bound Action on a Notification, or as an action on a Signal. It is the plugin's side of the `usableIn` column that core operations declare in the operation table ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#2-operation-catalogue)). What a Bound Action is, and the safety test every `*.answer` operation passes, are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#74-bound-actions).
+- **`describe`** returns the describe line for one frozen input. It must be pure: it reads only `input`, and never calls the service. Registration fails when an `*.answer` place is listed without it, and TypeScript refuses it too. The plugin that owns an action writes its describe line; the producer that binds it cannot change it, so [ADR 0022](../adr/0022-proposing-is-not-doing.md) holds. The core appends the source and the Connection: "Merges pull request **#113** in **acme/api** · GitHub · as **work**". The text a user types into a `field` is left out of the line.
+- **`description`** ~~is raw material for a bound action's describe line~~ is shown in pickers only *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*.
+- **The Connection is bound beside the input**, never inside it: `BoundOperation { op, connectionId?, input }`, with `connectionId` required exactly when the action declares a Connection. For the actions a signal kind's `build` binds, the core fills in the signal's own Connection. Who binds what, and the check at raise and at the click, are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent).
+- **A typed reply** is a Bound Action with `field?: { name, placeholder }`, where `name` is one top-level text field of the input (`body` on `github/issue.comment`). It exists on Signals only ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)). The plugin declares nothing for it beyond a text field in its input.
+
 Rules at the boundary:
 
 - **Failure is a throw.** An action throws `ActionError { code, message, detail? }`; anything else thrown is wrapped as `code: "unexpected"`. The step record stores `{code, message}` and the run fails (`step-failed`, [./07-workflows.md](./07-workflows.md)). No retries, and actions never redirect the graph ([ADR 0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md)).
 - **Connection is resolved by the core.** The step's `params` carry the Connection id, usually mapped from the triggering event's connection stamp so reply-as-the-triggering-account needs no special machinery ([ADR 0010](../adr/0010-external-accounts-are-core-owned-connections.md)); the core validates its type against the declaration and hands `execute` the decoded credential. The plugin never lists or picks Connections.
 - **Actions may call the host** through `ctx.api`, a public-API client whose mutations are stamped `run:<runId>` with the `stepId` in the audit entry, on the same ungated parity footing as built-in actions ([ADR 0026](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md); [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 3.1). Every `ctx.api` mutation is also summarised on the step record (op + entity id), so the run view reports what a step did beyond its declared output.
 - *(Amended 2026-10-05, [#89](https://github.com/theagenticage/hercule/issues/89).)* **`execute()` relies only on its `input` and its `ActionContext`.** It must not depend on anything `activate()` set up, such as a client or a cache, because it can run when the plugin is not active: a run that has already started still executes the actions of a plugin that is disabled meanwhile, or that failed to start (section 8).
-- **No event emission from `execute()`.** An action wanting to inject a signal calls the `event.emit` operation explicitly, which stamps `source: "manual"` and the actor; the `events` capability's emit belongs to ingest loops only.
+- **No event emission from `execute()`.** An action wanting to inject ~~a signal~~ an event *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): "signal" now names the Intake record)* calls the `event.emit` operation explicitly, which stamps `source: "manual"` and the actor; the `events` capability's emit belongs to ingest loops only.
 - **No blocking waits**: an action that would wait for something external is instead expressed as a subscription-holding run, not an action that sleeps ([./07-workflows.md](./07-workflows.md)). This generalises ticket 16's no-blocking rule, stated for API endpoints, to action contributions.
 - **Single-purpose is the shipped convention, not a mechanism.** The v1 rosters below each do one external thing and return output; routing decisions belong in the graph. `ctx.api` is the escape hatch for deterministic logic (fan-out bookkeeping over a list) that would otherwise demand a pointless agent step; routing written into `execute()` is the smell the review bar catches.
 
@@ -227,8 +331,36 @@ The v1 rosters (the words follow the entity-verb shape of the operation vocabula
 
 | Plugin | Actions |
 |---|---|
-| `github` | `github/issue.read`, `github/issue.comment`, `github/issue.update` (labels, assignees, state); `github/pr.read`, `github/pr.comment`, `github/pr.review` (approve / request-changes / comment), `github/pr.update` (labels, reviewers, draft/ready, base), `github/pr.merge` (method, delete-branch), `github/pr.create` (from an already-pushed branch) |
-| `gmail` | `gmail/message.read` (full body, parsed text + html), `gmail/thread.read`, `gmail/message.search` (Gmail query syntax, headers only), `gmail/message.send`, `gmail/message.reply` (in-thread), `gmail/message.modify` (add/remove labels: archive, mark read, star) |
+| `github` | `github/issue.read`, `github/issue.comment`, `github/issue.update` (labels, assignees, state); `github/pr.read`, `github/pr.comment`, `github/pr.review` (approve / request-changes / comment), `github/pr.update` (labels, reviewers, draft/ready, base), `github/pr.merge` (method, delete-branch), `github/pr.create` (from an already-pushed branch); `github/checks.rerun` (re-runs a pull request's failed checks) *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#391](https://github.com/theagenticage/hercule/issues/391))* |
+| `gmail` | `gmail/message.read` (full body, parsed text + html), `gmail/thread.read`, `gmail/message.search` (Gmail query syntax, headers only), `gmail/message.send`, `gmail/message.reply` (in-thread), `gmail/message.modify` (add/remove labels: archive, mark read, star); `gmail/thread.archive` (archives the whole thread) *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#519](https://github.com/theagenticage/hercule/issues/519))* |
+
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#391](https://github.com/theagenticage/hercule/issues/391) and [#519](https://github.com/theagenticage/hercule/issues/519).)* **Which actions may answer a signal.** Each of these lists `usableIn: ["workflow.step", "signal.answer"]` and has a pure `describe`. Every other action in the rosters is a workflow step only.
+
+- `github`: `pr.review`, `pr.comment`, `issue.comment`, `pr.merge` and `checks.rerun`. The read actions do not. No kind's `build` binds `pr.merge`; it is listed so that a `signal.raise` caller, such as triage's "Merge dev bumps" offer, can bind it ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#93-core-kinds-and-signalraise)).
+- `gmail`: `message.reply` and `thread.archive`. `message.read`, `thread.read`, `message.search`, `message.send` and `message.modify` are workflow steps only, because a new mail is not an answer to a signal.
+
+Which kind binds which action, as which button, is in [./08-events-and-connections.md](./08-events-and-connections.md) sections 5.1 and 5.2.
+
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#519](https://github.com/theagenticage/hercule/issues/519).)* **Gmail's answers send what Gmail would send.**
+
+- **`thread.archive`** archives every mail in the thread. `message.modify` acts on one message, so archiving through it would leave the earlier mails in the inbox. `message.modify` stays a workflow step only.
+- **`markRead?: boolean`** is an input of `message.reply` and `thread.archive`, false unless set, and marks the whole thread read. A workflow step that replies or archives does not mark mail read on its own; an agent's "received, will look Monday" reply should leave the mail unread. `gmail/mail`'s `build` sets it to true, because the user has read the mail in Hercule before answering.
+- **What `build` freezes into a reply's input**, so what the user sees is what is sent:
+  - **Recipients.** Reply goes to the sender, or to their `Reply-To` address when the mail has one. Reply all adds the latest mail's other `to` and `cc` recipients, minus the user.
+  - **The sending address.** The address the mail was sent to, when it is one of the user's send-as addresses (an alias such as billing@acme.dev on the noor@acme.dev mailbox); otherwise the mailbox's own address.
+  - **The signature.** The user's Gmail signature for the sending address. A mailbox with no signature adds nothing.
+- **What `message.reply` sends.** It answers the signal's own mail, which is always the thread's latest, because a newer mail replaces the signal. It sets `In-Reply-To` and `References`, and the subject gets "Re: ". The body is, in order:
+  1. the user's text;
+  2. the frozen signature, placed as Gmail places it;
+  3. the answered mail, quoted in full below an "On <date>, <name> <address> wrote:" line, including whatever that mail quoted itself.
+
+  It is sent as plain text and HTML, as Gmail sends it.
+- **The describe lines**, for a Connection labelled `work`:
+  - Reply: "Sends your reply to **Marta Visser** (marta@brightline.nl), with her mail quoted below, and marks the thread read · Gmail · as **work**"
+  - Reply all: "Sends your reply to **Marta Visser** (marta@brightline.nl), cc **Joost Bakker** (joost@brightline.nl), with her mail quoted below, and marks the thread read · Gmail · as **work**"
+  - Archive: "Archives **Invoice INV-2291 has our old company name** and marks it read · Gmail · as **work**"
+
+  Every recipient is named with their address, never "and N more": a reply all to 40 people is exactly what the line must show, and the address makes a look-alike sender (marta@brightIine.nl) visible. "from **billing@acme.dev**" is added only when the sending address is not the mailbox's own. The typed text is left out.
 
 *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The nine `github` actions are built. Each acts through a `github/github` Connection. `issue.update` and `pr.update` also change the title, body and open or closed state; `pr.merge` also takes the commit title and message and the expected head commit.
 
@@ -240,7 +372,7 @@ The v1 rosters (the words follow the entity-verb shape of the operation vocabula
 - The error codes: `unauthenticated` for a 401, `rate_limited` for a 429 or a 403 that is a rate limit (a secondary one included), `forbidden` for any other 403 and for GraphQL's `INSUFFICIENT_SCOPES`, `not_found` for a 404 or a 410, `conflict` for a 405 or 409, `validation` for a 422, and `unavailable` when GitHub cannot be reached, does not answer, or fails with a 5xx. A `rate_limited` message says when to try again.
 - Every request to GitHub, from an action or a feed, times out after 30 seconds, counted until the whole body is read. The token is sent only to `https://api.github.com`: a request to any other origin, such as a next-page link that points elsewhere, is not sent.
 
-~~Anything git (clone, push, branch) is not an action: it happens in the run's workspace.~~ *(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257); [ADR 0035](../adr/0035-an-action-declares-where-it-runs.md): git is a built-in workspace action, below.)* Gmail bodies stay out of ingest and are fetched on demand through `gmail/message.read` / `gmail/thread.read` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.2).
+~~Anything git (clone, push, branch) is not an action: it happens in the run's workspace.~~ *(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257); [ADR 0035](../adr/0035-an-action-declares-where-it-runs.md): git is a built-in workspace action, below.)* ~~Gmail bodies stay out of ingest and are fetched on demand through `gmail/message.read` / `gmail/thread.read`~~ Gmail bodies stay out of the event's payload. A workflow fetches them on demand through `gmail/message.read` / `gmail/thread.read`, and `gmail/mail`'s `build` reads the thread to lay out the signal *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*. Where mail text is kept is in [./08-events-and-connections.md](./08-events-and-connections.md) section 5.2.
 
 *(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257); [ADR 0035](../adr/0035-an-action-declares-where-it-runs.md).)* **Git is a built-in workspace action, implemented in the runner.**
 
@@ -274,6 +406,7 @@ Rules:
 - `channels` and `notifications` are the capability names pinned by the tickets; the remaining spellings are this spec's and MUST be used consistently. The `events` capability has one method, `emit`; "`events.emit`" in [./08-events-and-connections.md](./08-events-and-connections.md) names that method, not a separate capability. The *set* of services is pinned: contribution registration per extension point, events emit, notifications emit, connections, resources read, secrets, KV, public-API client.
 - A capability's registration surface is what `register()` receives; its runtime surface is what `activate()` receives. `register()` never sees a runtime surface.
 - *(Added 2026-09-06, [#63](https://github.com/theagenticage/hercule/issues/63).)* **~~Three~~ ~~Six~~ Eight of the eleven exist so far**: `providers`, `kv` and `secrets` ([#63](https://github.com/theagenticage/hercule/issues/63)), `connections` ([#71](https://github.com/theagenticage/hercule/issues/71)), `event-sources` ([#77](https://github.com/theagenticage/hercule/issues/77)), ~~and~~ `workflow-actions` ([#78](https://github.com/theagenticage/hercule/issues/78), registration only; executed since [#79](https://github.com/theagenticage/hercule/issues/79)), and `events` and `resources` ([#89](https://github.com/theagenticage/hercule/issues/89)). *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78): the count was not updated when `connections` and `event-sources` shipped.)* All eleven names are valid in a manifest, so a manifest never has to be rewritten as the rest arrive, but a plugin requesting one that is not implemented is refused at load with that capability named, on the same footing as a `hostApi` mismatch (section 8). Nothing is granted silently and nothing is granted empty.
+- *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* **Signals need no capability of their own.** A plugin's signal kinds are part of its event source, so `event-sources` declares them and the core raises them (section 4.3). A Signal is not a Notification, so `notifications` plays no part in it (section 11).
 - Everything crossing a capability API is plain serializable data.
 - **Interfaces are Effect-typed natively** ([ADR 0031](../adr/0031-the-backend-is-written-on-effect.md)): every hook and capability method returns an `Effect` (typed failures; deactivation interrupts whatever `activate()` started) and anything stream-shaped is a `Stream`. V1 plugins are in-process built-ins, so there is no promise-shaped facade; one can be added post-v1 if third-party loading wants it.
 - **Schemas are authored in Effect Schema, persisted as JSON Schema.** Every schema crossing the host API (manifest `configSchema`, event payload kinds, action input/output, per-Connection config, credential fields) is written as an Effect Schema in plugin code; the catalog persists the JSON Schema Effect derives from it, which is what workflow validation and the web app's generated forms consume.
@@ -314,6 +447,8 @@ Three levels of configuration exist and MUST not be confused:
 | Per-connection config | ~~event-source contribution's per-connection schema~~ the Connection type's `configSchema` *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* | controller state, one per Connection | GitHub: ~~watched-repo list for this account~~ extra repositories to watch, and how many days of check results to watch *(amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89))* |
 | Provider-instance config | `ProviderDefinition.configSchema` | one per provider instance; logical settings on the controller, path resolution per [./06-providers.md](./06-providers.md) section 2.1 and its Conflict line | Claude Code instance: isolated provider home |
 
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Intake settings are not a fourth level of configuration. They are core-owned data that sits beside these three, and changing them restarts nothing (section 8.2).
+
 Lifecycle rules:
 
 - **Installed = compiled in.** The set of installed plugins is fixed by the binary. Settings > Plugins lists them ([./14-web-app.md](./14-web-app.md)); management operations sit under the `infra` grant family ([./13-security.md](./13-security.md)).
@@ -347,12 +482,52 @@ Failure handling:
 - A rate limit is not a failure: the plugin returns `nextAfterSeconds`, and the core waits that long when it is longer than the interval. *(Amended again 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The wait is at most 86,400 seconds, and a value that is not a finite number is ignored.
 - A status change never overwrites `disabled`. *(Amended again 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* This holds for every status a plugin or a failed OAuth refresh reports too, not only for the ingest loop's.
 
+### 8.2 Intake settings
+
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#397](https://github.com/theagenticage/hercule/issues/397).)*
+
+Intake settings decide what a plugin's events put into Intake. Only the core reads them: a signal kind's rule runs in the core, and so do triage's query and Everything. The plugin's code never reads them. So they are core-owned data, not plugin config. They sit beside the three levels of configuration in section 8, not inside them, and a change needs no reload of the plugin and reopens no ingest handle ([./08-events-and-connections.md](./08-events-and-connections.md) section 8.2). There is no general key-value store for plugin settings: it would have no second consumer.
+
+**Two switches, independent of each other:**
+
+- **Available to triage**, per event kind. When it is on, triage may read every event of the kind, and Everything lists them. The plugin declares its default in the kind's `availableToTriage` (section 4.3). A kind that is off still reaches workflows and subscriptions, and its events stay in the event log.
+- **On or off**, per signal kind. When it is on, the kind's rule runs on its `from` events, whatever their event kind's switch says. When it is off, the kind is never raised. A signal kind declares no default: every kind is on until the user switches it off, and a kind that a plugin update adds arrives on.
+
+Example: `github.pr.checks-completed` is not available to triage, and `github/checks-failed` is on. A failed check on the user's pull request raises a signal, and triage never reads the hundreds of green check runs a day.
+
+Which events these switches make into Intake's events, the set triage reads and Everything lists, is in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#910-intakes-events-and-handlings).
+
+**Three levels.** Each level stores only the kinds where it differs from the level below:
+
+1. the plugin's declared default, in code;
+2. the user's choice for the plugin, for all its Connections;
+3. the user's choice for one Connection.
+
+Both switches exist at levels 2 and 3. A stored entry always wins, and a kind with no entry follows the level below. Choosing the value the level below already gives removes the entry, so the kind follows the level below again. The server applies this on every write.
+
+- Example: the user switches `github/team-review-requested` off for the GitHub plugin, then on for the Connection "work". Two entries are stored: off for the plugin, on for "work". The Connection "personal" has no entry, so it follows the plugin and is off.
+- Example: `github.pr.labeled` is off by default. The user switches it on, then off again. Nothing is stored, so if a plugin update later turns the default on, the change reaches the user.
+
+The writes are `plugin.updateIntake` for level 2 ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#runner-plugin-provider-controller-grant-family-infra)) and the `intake` field of `connection.update` for level 3 ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#connection); the Connection's field is in [./08-events-and-connections.md](./08-events-and-connections.md) section 8.1). `plugin.read` and `connection.read` return the value in effect for every kind, with the level it comes from. The server works out the levels; no client merges them.
+
+What a change affects:
+
+- A signal kind switched on is raised only from new events. Nothing is backfilled.
+- A signal kind switched off raises no new signals. Its open signals stay and end the usual way.
+- An event kind switched on or off changes Intake's events at once, on read ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#910-intakes-events-and-handlings)).
+- When a Connection is deleted, its entries are deleted with it.
+- When a plugin is disabled, its entries are kept.
+- An entry for a kind that a plugin update removed is ignored on read and dropped on the next write.
+
+Core events (`run.failed`, `cron.tick`) have no plugin and no Connection, so in v1 they have no Intake settings: they are never available to triage and never raise a signal by themselves. This is a v1 scope line, not a rule. A workflow on `run.failed` may still raise a core signal through `signal.raise` ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#93-core-kinds-and-signalraise)).
+
 ## 9. Versioning
 
 - One `hostApi` integer names the core host contract (hook signatures, manifest shape, catalog semantics). It is checked at load and is the only version number in the plugin system.
 - **Capability APIs evolve additively.** New optional fields, new methods, new event kinds and new contribution facets are added without renaming.
 - **A breaking change mints a new capability name** (`channels.v2`). The old name keeps working until it is retired; a plugin requests whichever it was built against. There is no per-capability version matrix and no version field on a capability. Load-time compatibility is one integer check plus name lookup.
 - Contribution schemas (event kinds, action input/output schemas) follow the same rule inside a plugin: add, do not rename; a breaking change is a new contribution id. This extends ticket 11's rule, pinned for capability APIs, to contributions; it is the spec's extension.
+- *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* **Intake's additions to the host contract.** Two of them are required, so they change the core host contract and raise `hostApi`: `availableToTriage` on every event kind, and `title` on every emitted event (section 4.3). The rest are additive: `signalKinds`, `openSignals()`, the identity on `IngestConnection`, `author`, `usableIn`, `describe` and the manifest's `mark`. This spec does not fix the new integer; the ticket that builds the change does.
 
 ## 10. Connections and plugin-defined connection types
 
@@ -438,6 +613,7 @@ Rationale and the full Notification model: [ADR 0012](../adr/0012-notifications-
 - **User control.** The user toggles delivery per channel connection. V1 routing policy is deliver-to-all-enabled. **Producer-side muting** (silence a chatty plugin's notifications) is a separate control from sink-side toggles.
 - **Sink contract grows additively.** V1 sinks implement `deliver` (returning a delivery ref) and `resolved` (edit the delivered message when the decision is taken anywhere), and report clicks to the core, which authenticates and executes them ([./12-assistants.md](./12-assistants.md) section 11.6). Post-v1 fields (device class, presence, receipts) are optional; a sink that reports nothing is treated as always available. Presence-aware routing lands as a router upgrade touching no plugin.
 - **No second path.** A plugin MUST NOT deliver a user-facing notification by any route other than the `notifications` capability, even when it has a channel connection in hand. Assistants speaking unprompted in a conversation are not notifications; the no-double-fire rule and its router mechanism are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.5.
+- *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* **Signals are not Notifications.** A review request, or a mail the user has to answer, becomes a Signal in Intake, raised by the core from the plugin's signal kinds (section 4.3). It is its own record, never a Notification, and the `notifications` capability plays no part in it ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#91-the-record)). A plugin's Notifications are messages about the plugin itself, such as Gmail's expiring token. Signals are not delivered to chat sinks in v1.
 
 ## 12. V1 inventory
 
@@ -445,8 +621,8 @@ Rationale and the full Notification model: [ADR 0012](../adr/0012-notifications-
 
 | Plugin | Contributions | Connection types | Notes |
 |---|---|---|---|
-| `github` | event source (watched-repo polling: issue and PR lifecycle, notifications); workflow actions | `github/github` (~~PAT paste; BYO OAuth app + device flow optional~~ device flow through Hercule's own OAuth App, PAT paste as the fallback *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*) | per-connection watch list ~~seeded from repo Resources~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* made of the linked repo Resources and the repos in the Connection's config, read on every poll; git credentials for runners derive from these Connections ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)) |
-| `gmail` | event source (`history.list` polling: headers, subject, snippet, ids); workflow actions (body fetch on demand) | `gmail/gmail` (BYO Google OAuth client, redirect flow) | emits `system` enrichment where a sender rule recognises the originating system |
+| `github` | event source (watched-repo polling: issue and PR lifecycle, notifications); workflow actions | `github/github` (~~PAT paste; BYO OAuth app + device flow optional~~ device flow through Hercule's own OAuth App, PAT paste as the fallback *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*) | per-connection watch list ~~seeded from repo Resources~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* made of the linked repo Resources and the repos in the Connection's config, read on every poll; git credentials for runners derive from these Connections ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)). *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Its event source declares six signal kinds, from `github/review-requested` to `github/checks-failed` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.1), and the manifest ships its mark |
+| `gmail` | event source (`history.list` polling: headers, subject, snippet, ids); workflow actions (body fetch on demand) | `gmail/gmail` (BYO Google OAuth client, redirect flow) | emits `system` enrichment where a sender rule recognises the originating system. *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* A sender rule matches subdomains too: `em.sentry.io` counts as Sentry. Its event source declares one signal kind, `gmail/mail` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.2), and the manifest ships its mark |
 | `discord` | channel (+ notification sink) | `discord/discord` (bot token paste) | conversation container = channel or DM |
 | `slack` | channel (+ notification sink) | `slack/slack` (bot token paste) | conversation container = thread |
 | `claude-code` | provider definition | none | adapter built into the runner |
@@ -459,7 +635,7 @@ Behaviour per plugin: providers in [./06-providers.md](./06-providers.md), event
 
 - **Cron**: a core scheduler emitting `cron.tick` into the pipeline; schedules live in workflow start triggers.
 - **Manual**: direct run creation and the synthetic-event API.
-- **Platform events**: `run.completed`, `run.failed`, `run.cancelled`, `task.created`, `task.updated`, emitted by the controller.
+- **Platform events**: `run.completed`, `run.failed`, `run.cancelled`, `task.created`, `task.updated`, emitted by the controller. *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Also `signal.screening-requested`, which the core emits when a signal kind's rule cannot decide and which starts the Screener ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.5).
 - **Built-in workflow actions**: ~~`workflow.run`~~ `run.start` *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*, ~~`notify`~~ `notification.create`, `task.create`, `task.update`, `task.query`; the first two join with their operations (section 3; *amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79): `workflow.run` has joined, `notification.create` joins with [#84](https://github.com/theagenticage/hercule/issues/84)*). *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78): the core declares `run.cancelled` beside the other platform kinds, and `notify` is spelled as its operation.)*
 - **Hercule-as-a-tool**: the runner-shipped `hercule` CLI plus skill files the runner materializes into sessions; not a plugin contribution ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 - **Notification center**: the web app's always-on notification sink, part of the web app, not a channel plugin.
@@ -496,6 +672,13 @@ Tickets:
 - Controller packaging & install story - https://github.com/theagenticage/hercule/issues/24
 - Research: smoothest Connection-setup path - https://github.com/theagenticage/hercule/issues/32
 - Plugin contribution interfaces and v1 event kinds - https://github.com/theagenticage/hercule/issues/41
+- The signal kind contract: what a plugin declares - https://github.com/theagenticage/hercule/issues/389
+- Answers: plugin actions, the Reply and Done - https://github.com/theagenticage/hercule/issues/391
+- Everything: events, handlings and search - https://github.com/theagenticage/hercule/issues/393
+- The desktop Intake screen in spec 17 (plugin marks) - https://github.com/theagenticage/hercule/issues/394
+- Write the Intake changes and the build tickets that replace #91 - https://github.com/theagenticage/hercule/issues/395
+- Plugin intake settings - https://github.com/theagenticage/hercule/issues/397
+- Gmail's answers: what a gmail/mail signal offers - https://github.com/theagenticage/hercule/issues/519
 
 ADRs:
 

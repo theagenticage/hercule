@@ -15,7 +15,7 @@ This document covers:
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*. *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* Slice 9 adds [the Office](#the-office). *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Slices 11 to 19 add [Settings](#settings). *(Amended 2026-10-06, [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448).)* Slices 20 to 22 add [the assistant](#design-system).
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*. *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* Slice 9 adds [the Office](#the-office). *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Slices 11 to 19 add [Settings](#settings). *(Amended 2026-10-06, [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448).)* Slices 20 to 22 add [the assistant](#design-system). *(Amended 2026-10-10, [Write the Intake changes and the build tickets that replace #91 (#395)](https://github.com/theagenticage/hercule/issues/395).)* Slice 24 adds [the Hercule face](#the-hercule-face), slices 25 to 35 add [Intake](#intake), and slice 36 reopens the last screen at launch.
 
 ## Scope of the first milestone
 
@@ -28,7 +28,7 @@ The first milestone is threads, in a native shell:
 - connecting to a controller, and signing in and out
 - the native behaviour below: the window, the menu and shortcuts, the dock badge and notifications
 
-Everything else comes later (see [Post-v1](#post-v1)). That includes the Hercule face and its screens, ~~assistants,~~ All sessions, ~~Settings,~~ the desktop app as installer, and Windows and Linux.
+Everything else comes later (see [Post-v1](#post-v1)). That includes ~~the Hercule face and its screens,~~ the Hercule face's other screens *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, ~~assistants,~~ All sessions, ~~Settings,~~ the desktop app as installer, and Windows and Linux.
 
 *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run moves into v1: from "the app is installed" to a first thread, with no browser and no terminal ([The first run](#the-first-run)). It brings three pieces with it:
 
@@ -43,6 +43,8 @@ Everything else comes later (see [Post-v1](#post-v1)). That includes the Hercule
 *(Amended 2026-10-04, [Write the Settings port into spec 17, and its build tickets (#402)](https://github.com/theagenticage/hercule/issues/402).)* Settings moves into v1, as a port of the web app's Settings drawn in Bureau, with an Appearance page the web app does not have ([Settings](#settings)). Providers stays out until the provider remodel ([#406](https://github.com/theagenticage/hercule/issues/406)).
 
 *(Amended 2026-10-06, [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448).)* Assistants move into v1: the sidebar lists them, and an assistant's Conversation opens in the main pane ([The assistant](#design-system) under Design system). It is a port of the web's conversation screen, and adds no operation to the public API. The stored look stays post-v1, and so do memory, reminders and channels.
+
+*(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394), [#512](https://github.com/theagenticage/hercule/issues/512).)* The Hercule face and Intake move into v1. Intake is the list of what a source or an agent asks of the user, and it needs a way in; the way in is the sidebar's second face, which [./14-web-app.md](./14-web-app.md) §App shell already settled and the book draws ([The Hercule face](#the-hercule-face), [Intake](#intake)). The face's other screens stay post-v1: Check-in, Tasks, Runs, Workflows and Notifications.
 
 ## Architecture
 
@@ -273,7 +275,7 @@ Motion, as the book's Motion table draws it ([Rules](#rules), rule 2):
 Main sends this header with every file the `app` scheme serves. `<controller>` is the saved controller's origin, and `<controller-ws>` is the same origin with `ws:` or `wss:`.
 
 ```
-default-src 'self'; script-src 'self'; connect-src <controller> <controller-ws>; img-src 'self' data: blob:; font-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
+default-src 'self'; script-src 'self'; connect-src <controller> <controller-ws>; img-src 'self' data: blob: https:; font-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
 ```
 
 - **`connect-src` names exactly one controller.** The web app's policy has to allow ten loopback ports for its local-runner probe. The desktop policy does not, because main runs that probe (below).
@@ -281,6 +283,7 @@ default-src 'self'; script-src 'self'; connect-src <controller> <controller-ws>;
 - **`style-src` has no `'unsafe-inline'`.** No component in the first milestone needs a `<style>` element at run time. React sets element styles through the CSSOM, which `style-src` does not govern.
 - **Any relaxation is recorded here, with its reason,** as spec 14 does for the web app.
   - *(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465).)* **`img-src` allows `blob:`.** The images attached to prompts are read with the bearer token in a header (`attachment.readContent`), never with the token in a URL, so the renderer shows them through object URLs, which are `blob:` URLs. A `blob:` URL names bytes the renderer itself holds and loads nothing from another origin. The web app's policy has the same relaxation ([./14-web-app.md](./14-web-app.md) §Auth in the client).
+  - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#390](https://github.com/theagenticage/hercule/issues/390).)* **`img-src` allows `https:`.** A signal's blocks carry images from the source, such as an avatar or an image in a GitHub comment ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#95-blocks)), and Intake draws them inline. The renderer loads them only for the open signal, never for a row in the list, so a list of 200 signals fetches no image. Loading an image tells its host that the user opened the signal; what that leaks, and whether images should be proxied, is [Content from untrusted sources: images, tracking and the CSP (#503)](https://github.com/theagenticage/hercule/issues/503). The header becomes `img-src 'self' data: blob: https:`. The web app's policy has the same relaxation ([./14-web-app.md](./14-web-app.md)).
 
 ### The "local" runner
 
@@ -410,19 +413,22 @@ The first milestone's channels. *(Amended 2026-09-30, [#275](https://github.com/
 | ~~`notification.show` / `notification.close`~~ | ~~renderer → main~~ | ~~a thread's notification, keyed by session id~~ |
 | ~~`waitingThreads.set`~~ | ~~renderer → main~~ | ~~every thread waiting on the user, for the dock badge and the threads' notifications~~ |
 | `waiting.set` | renderer → main | *(Added 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453), replacing `waitingThreads.set`.)* ~~every Request waiting on the user, one per thread or assistant: its destination, its request id, and the title and question its notification shows~~ every thread and assistant waiting on the user, once each: its destination, the id of its newest open Request, the ids of all its open Requests, and the title and body its notification shows *(amended 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453): the notification shows the newest Request and counts the others, and main must tell a Request that opened from one that closed, so it is sent every open id)*. Main keys each notification by its destination and counts the list on the dock badge. A destination whose newest Request was not open in the last list gets a new notification, replacing its old one; a notification whose Request is no longer open is removed, and none takes its place |
+| `urgentSignals.set` | renderer → main | *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394).)* every open signal on To do whose priority is `urgent`, the ones Intake shows under Now: its signal id, and the title and body its notification shows. Main keys each notification by signal id. A signal that was not in the last list gets a notification while the window is not focused; a notification whose signal left the list is removed. A signal back from snooze is new to the list, so it notifies again. Main counts none of them on the dock badge. It works as `waiting.set` does, so main keeps what it has shown across a reload of the page |
 | `link.open` | renderer → main | opening an `http:` or `https:` link in the default browser. ~~Not built yet: it arrives with the draft's Log in button, which is its first caller.~~ Built with the first run *(2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*. A link the user clicks already opens in the default browser without it (see [Security baseline](#security-baseline)) |
 | `appearance.read` | renderer → main | *(Added 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* the Appearance kept in the settings file, answered synchronously from main's memory. `theme-init.js` calls it once per page load, before the first paint |
 | `appearance.save` | renderer → main | *(Added 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* saves the Appearance to the settings file, and repaints the window's background for the theme in use |
 | `firstScreen.report` | renderer → main | the frame that draws the first screen, fonts included, has reached the window, so main can show the window (see [Native behaviour](#native-behaviour)) |
 | ~~`thread.open`~~ | ~~main → renderer~~ | ~~a notification click or a Go menu item asks for a thread~~ |
-| `destination.open` | main → renderer | *(Added 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453), replacing `thread.open`.)* a notification click or a Go menu item asks for a destination: `{ kind: "thread", sessionId }` or `{ kind: "assistant", assistantId }`. Main passes it back as the renderer sent it and never acts on its kind |
-| `menu.command` | main → renderer | a menu item the renderer carries out, such as New Thread, Send or Settings… |
+| `destination.open` | main → renderer | *(Added 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453), replacing `thread.open`.)* a notification click or a Go menu item asks for a destination: `{ kind: "thread", sessionId }` or `{ kind: "assistant", assistantId }`. Main passes it back as the renderer sent it and never acts on its kind. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* A third kind, `{ kind: "signal", signalId }`, opens Intake with that signal selected |
+| `menu.command` | main → renderer | a menu item the renderer carries out, such as New Thread, Send or Settings… *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Go › Intake and View's two faces add one command each |
 
 A new channel is added to the contract, and to this table, in the same change.
 
 *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* [Settings](#settings) adds `appearance.read` and `appearance.save`, and the `openSettings` command on `menu.command`. `appearance.read` is the contract's only synchronous channel, because the page needs its theme before it paints.
 
 *(Amended 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453).)* An assistant waiting on the user gets the dock badge, a notification and a Go menu item, as a waiting thread does. So `waiting.set` replaces `waitingThreads.set`, `destination.open` replaces `thread.open`, and `goMenu.set` takes destinations: a destination is a thread or an assistant, and only the renderer knows how to open each.
+
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* [Intake](#intake) adds `urgentSignals.set`, the `signal` destination and three commands on `menu.command`: open Intake, show the Threads face and show the Hercule face. Their names leave the product name out, as every identifier does. A Now signal gets its own channel, not a row in `waiting.set`, because it is not an agent waiting: it never counts on the dock badge, and its notification says what a source asks, not what an agent asks. `goMenu.set` is unchanged, because the Go menu lists no signals.
 
 ## Native behaviour
 
@@ -452,9 +458,19 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - The renderer stores the open thread's id per controller URL. Opening a thread stores it; leaving it for a screen that is not a thread removes it, so a quit on the new-thread screen launches on the new-thread screen.
   - When the stored thread is gone at launch, the id is removed and the new-thread screen shows, because the user did not ask for that thread this time. A gone thread the user opens during use shows "This thread was not found." with a link to start a new thread.
   - *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* With Appearance's Open on set to The office, a launch opens the Office instead.
+- *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394) §12.)* **~~The last open thread~~ The last screen reopens at launch.** It replaces the stored thread above:
+  - The renderer stores the last screen per controller URL, in place of the thread id. Every screen counts: a thread, the new-thread screen, an assistant's Conversation, the Office, Intake, and each later screen with no rule of its own.
+  - Settings, the first run, the connect screen and sign-in are not stored. Opening one leaves the stored screen as it was, so Intake, then Settings, then a quit reopens Intake.
+  - Only the screen is restored: not Intake's tab or view, not a selection, not a scroll position. The split's widths are kept as they always are.
+  - A stored screen that is gone at launch, such as a deleted thread, falls back to the new-thread screen, as a gone thread does above.
+  - A thread id stored before this change reads as that thread's screen, so the first launch after the update still reopens the thread.
+  - When the app restarts itself to install an update, it should reopen exactly where the user was, Settings section included, so they can look at the new version. The app does not update itself yet ([Post-v1](#post-v1)), so this waits for that.
+  - With Open on set to The office, a launch still opens the Office.
 - **Menu:**
   - The standard app, Edit and Window menus, so text editing shortcuts work in every field.
   - The menus, in order: the app menu, File, Edit, Go, Thread, Window. The development build adds View, with Reload and Toggle Developer Tools, after Edit.
+  - *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* The release build has a View menu too, after Edit: View › Threads `⌥⌘1` and View › Hercule `⌥⌘2` switch [the sidebar's face](#the-hercule-face). They are `⌥⌘` because `⌘1` to `⌘9` already pick an item in Go. The development build adds Reload and Toggle Developer Tools to the same menu, under a separator.
+  - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Go › Intake `⌘⇧I`, after Go › Office, opens [Intake](#intake).
   - File › New Thread `⌘N`.
   - Thread › Send `⌘↵`. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* It is always enabled. It sends what the open thread's composer or the draft holds, as ⏎ in the message field does, and does nothing when there is nothing to send.
   - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Go › Office `⌘⇧O`, the first item of Go, opens [the Office](#the-office).
@@ -462,10 +478,11 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - While the project picker is open, `⌘1` to `⌘9` pick a project instead, as spec 14 says. Choosing a thread in Go with the mouse closes the picker.
   - Sign Out, in the app menu.
   - *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Settings… `⌘,`, in the app menu under About, opens [Settings](#settings).
-  - *(Amended 2026-10-05, [#410](https://github.com/theagenticage/hercule/issues/410).)* File › New Thread, Go › Office and Settings… are dimmed while signed out, as Sign Out is, because only the shell carries them out: on the connect and sign-in screens, choosing one would do nothing.
+  - *(Amended 2026-10-05, [#410](https://github.com/theagenticage/hercule/issues/410).)* File › New Thread, Go › Office and Settings… are dimmed while signed out, as Sign Out is, because only the shell carries them out: on the connect and sign-in screens, choosing one would do nothing. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So are Go › Intake, View › Threads and View › Hercule.
 - **Dock badge:** the number of threads waiting on you. A thread waits on you while its session has an open Request (~~`Session.openRequest`~~ `Session.openRequests` is not empty, whoever asked: its own agent or a subagent *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
   - *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* macOS shows an app's dock badge only once the user has allowed the app to notify. The app asks when the user signs in, so the badge can show from the first waiting thread.
   - *(Amended 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453).)* The badge also counts the assistants waiting on you. An assistant waits on you while its current session, the newest session of its main conversation, has an open Request (see [The assistant](#design-system)).
+  - *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394) §3.)* The badge keeps one meaning, an agent is blocked on you, so it counts threads and assistants only, never signals. Intake's count shows on the sidebar instead ([The Hercule face](#the-hercule-face)). Waiting on you stays agent Requests only, for the same reason.
 - **Notifications:**
   - When a thread starts waiting on you and the window is not focused, main shows a native notification.
   - Clicking it focuses the window and opens the thread.
@@ -476,6 +493,12 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - Signing out, or connecting to another controller, hides the badge, removes every notification and empties Go. They stay empty until the user signs in again.
   - *(Added 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453).)* An assistant waiting on you gets a notification by the same rules as a thread. Its title is the assistant's name, and clicking it opens the assistant's Conversation, `/assistants/$assistantId`. *(Amended 2026-10-09, [#505](https://github.com/theagenticage/hercule/issues/505).)* While the Office is open, the click opens the Conversation in the Office's drawer instead ([The Office](#the-office)).
   - *(Added 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453).)* Main keys each notification by where its click goes: the thread, or the assistant, never the session. So an assistant has at most one notification, as a thread does, also when rotation gives its Conversation a new session.
+  - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394) §3.)* **A new Now signal** gets a notification while the window is not focused: a signal of priority `urgent` that arrives on To do. No other signal notifies.
+    - Its title is the signal's source and its body is the signal's title, such as "PagerDuty" and "Checkout error rate above 5%".
+    - Clicking it focuses the window and opens Intake with that signal selected.
+    - A Now signal back from snooze counts as new, so it notifies again. A snoozed signal never notifies ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#97-snooze-and-not-urgent)).
+    - The rules above hold for it too: launching the app or signing in shows no notification for Now signals already open; signing out or connecting to another controller removes them.
+    - A signal that leaves Now, because it is resolved anywhere, snoozed or lowered with Not urgent, loses its notification when the `signal` push arrives.
 - **Answered anywhere clears everywhere** ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)):
   - When a Request is answered anywhere - here, in the web app or from the CLI - its notification is removed and the badge drops, at the moment the `session` nudge arrives.
   - A Request opening or closing already sends that nudge ([./14-web-app.md](./14-web-app.md) §Live model).
@@ -507,7 +530,7 @@ The first edition stays in `docs/design/crew-bureau/`, byte for byte as above, a
 
 **Where Bureau changes a behaviour, the desktop follows Bureau.** The changes the first milestone takes from the book's Spec section:
 
-1. **Waiting on you tops the sidebar,** above the threads. The first milestone has only the Threads face, so the section sits at the sidebar's top.
+1. **Waiting on you tops the sidebar,** above the threads. ~~The first milestone has only the Threads face, so the section sits at the sidebar's top.~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#512](https://github.com/theagenticage/hercule/issues/512).)* It sits above both faces, under the face switch, as the book draws it ([The Hercule face](#the-hercule-face)).
 2. **No monospace outside code.** Monospace is kept for code, commands and diffs. Spec 14's monospace time separators, workspace labels and branch values use the UI face.
 3. **Six marks.** Queued, cancelled and skipped lose their marks and become words.
 
@@ -567,8 +590,8 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - Asleep and away threads are not counted, so a fleet with hundreds of old threads reads "3 working · 2 waiting · 4 idle", not "470 idle".
   - The book's "paused" count is left out, because no thread is paused yet.
   - Every count shows at 0. The waiting count takes `--you-ink` only above 0, because the attention hue means something needs the user.
-- *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* **New thread, Search and Office share one row** at the sidebar's top. The book draws New thread and Search as two rows, and puts the office's row in the Hercule face's Work section. The desktop has only the Threads face, and the Office belongs to both faces, so its way in sits in the part of the sidebar both faces share. New thread keeps its label and `⌘N`. Search (`⌘K`, still inert) and Office (`⌘⇧O`) are icon buttons, each with a tooltip that gives its name and shortcut. The Office button shows as pressed while the Office is open.
-- **Search `⌘K`, the hide-sidebar button ~~and Settings~~ are drawn and inert** until their slices build them, like the composer's ~~`+` and~~ voice ~~buttons~~ button *(amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465))*: they show their hover states, do nothing when pressed, and carry `aria-disabled`. `⌘K` is not registered. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* The foot's Settings button opens [Settings](#settings), and shows as pressed while Settings is open.
+- *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* **New thread, Search and Office share one row** at the sidebar's top. The book draws New thread and Search as two rows, and puts the office's row in the Hercule face's Work section. ~~The desktop has only the Threads face, and~~ The Office belongs to both faces, so its way in sits in the part of the sidebar both faces share *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): the desktop now has both faces, and the Office's row is still not repeated under Work)*. New thread keeps its label and `⌘N`. Search (`⌘K`, still inert) and Office (`⌘⇧O`) are icon buttons, each with a tooltip that gives its name and shortcut. The Office button shows as pressed while the Office is open.
+- **Search `⌘K`, the hide-sidebar button ~~and Settings~~ are drawn and inert** until their slices build them, like the composer's ~~`+` and~~ voice ~~buttons~~ button *(amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465))*: they show their hover states, do nothing when pressed, and carry `aria-disabled`. `⌘K` is not registered. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* The foot's Settings button opens [Settings](#settings), and shows as pressed while Settings is open. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* The foot is the same on both faces, and its Settings button is the Hercule face's Settings row ([The Hercule face](#the-hercule-face)).
 - **The thread list reads every page** of `session.query`, so no thread is left out. The web app reads the first 500.
 
 **The thread** *(added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275))* follows spec 14's thread surface and the book's session pages, with these differences:
@@ -638,7 +661,7 @@ A compact workspace details surface shows runner, actual or last-observed branch
 - **A new thread joins only a ready workspace.** ~~A workspace label's `+` and~~ The thread header's `+` *(amended 2026-10-08, [#473](https://github.com/theagenticage/hercule/issues/473): the sidebar has no workspace labels)* shows only while the workspace is ready, because the controller refuses to start a thread in a workspace that is still being set up, failed, was deleted or was lost. A draft whose workspace stops being ready while it is open cannot start, and says why: "The workspace it joins could not be set up". Neither can a draft whose machine is retired after the user picked it: the reason is "moss is retired", and the lip's machine reads "moss · retired". The web app does the same, because both read `@hercule/client-core`.
 - **The start cards** are the book's "Start from Intake" section under the lip, which spec 14 does not have. ~~They are up to three open Tasks of the draft's project, the most urgent first.~~ *(Amended 2026-10-03, [#300](https://github.com/theagenticage/hercule/issues/300).)* They are up to three open Tasks of the draft's project, the most urgent first and newest first within one priority. Each card shows:
   - the GitHub mark when the Task came from GitHub, else the tasks glyph;
-  - "Proposal" when the Task has the `proposed` label, else "Task";
+  - ~~"Proposal" when the Task has the `proposed` label, else "Task";~~ "Task" *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#392](https://github.com/theagenticage/hercule/issues/392): a proposal is now a signal on Intake, and its Task exists only once the user accepts it, so every open Task is a Task)*;
   - its priority as bars at the right: 4 for urgent, drawn in `--fail` as the book does, 3 for high, 2 for normal, 1 for low;
   - its title.
 
@@ -648,13 +671,13 @@ A compact workspace details surface shows runner, actual or last-observed branch
   - "Start working on task <id>: <title>" otherwise.
 
   The thread's agent reads the rest itself, with `gh` or `hercule task read`. The message stays short, and text written outside Hercule, such as an issue's body, is never sent as the user's own words. The line goes after a blank line when the field already holds text, and the click focuses the field. The section shows only when the project has open Tasks. The book's "2 new events" is not drawn, because nothing counts new events.
-- *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **Starter threads take the start cards' place while Intake is empty,** as the book's `session-empty.html?state=first` and `?state=first-no-repo` draw them. A new user then still has something to start from.
+- *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **Starter threads take the start cards' place while ~~Intake is empty~~ the project has no open Task,** *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Intake now holds Signals, and the start cards draw open Tasks, so the condition names Tasks)* as the book's `session-empty.html?state=first` and `?state=first-no-repo` draw them. A new user then still has something to start from.
   - Three starters sit under "Or start from one of these", each with the book's glyph and title, such as "Get to know it" or "Something to plan". `@hercule/client-core` picks the set:
     - a project with a repository gets starters about code, such as "Walk me through how webshop is put together";
     - a project without one gets starters about knowledge work: "Make me a short presentation about …", "Research … and summarise what you find, with sources" and "Write a one-page plan for …". Hercule is for work that is not code too, and a thread in such a project runs without a checkout.
   - Picking a starter fills the composer and focuses it. It does not send, so the user can finish the sentence.
   - Under the starters, one line says what fills Intake: Triage brings what needs work from GitHub, or, without a GitHub Connection, the line says to connect GitHub. The line names no time of day, because Triage is not built yet ([#91](https://github.com/theagenticage/hercule/issues/91)).
-  - Once Intake holds anything, the draft shows the start cards as above.
+  - Once ~~Intake holds anything~~ the project has an open Task, the draft shows the start cards as above *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*.
 - **The open draft is a row in the sidebar,** as the book draws it: "New thread", ~~with its workspace and machine on the second line,~~ and "draft" at its end. ~~It is the last row of the workspace it joins, as its tab is the header's last. A draft that starts a new workspace has a group of its own under the project's header, and a draft with no project is the last row of "No project".~~ *(Amended 2026-10-08, [#473](https://github.com/theagenticage/hercule/issues/473).)* It is the first row of its project, because it is the newest thread there, and has a thread row's three lines: "New thread", the model's name, and where it will work and on which machine.
 - **The draft's text and picks are kept while the app runs,** like a thread's Message Draft, one draft per project and workspace.
 
@@ -715,6 +738,7 @@ A compact workspace details surface shows runner, actual or last-observed branch
 - **Kept as they are:** `tokens.css` and the font files. They are the design system's source. Token names match the web app's (`--bg`, `--surface`, `--raised`, `--ink`, `--muted`, `--faint`, `--line`, `--line-soft`), except that `--attn` becomes `--you` / `--you-ink`.
 - **Rebuilt one component at a time:** `system.css` is never copied whole. Each React component takes the rules it needs, so no CSS ships that no component uses.
 - **Rewritten as typed modules:** `crew.js` becomes typed modules for faces, poses, icons and marks. Components render their SVG as React elements, never through `innerHTML`.
+  - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394) §11.)* **A plugin's mark comes from the plugin,** with the plugin's record ([./05-plugins.md](./05-plugins.md#2-manifest)). The app draws each of its paths as a React `<path d={…} fill="currentColor">` in a 16 × 16 `<svg>`, so the mark takes the colour of the text around it and follows the theme. It draws nothing else from the plugin: no SVG document, no `<style>`, no colour. A plugin with no valid mark gets its name's initial in a rounded square. The Bureau's GitHub and Gmail marks move into those two plugins, and the app keeps no copy of them.
 - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **A button that cannot act yet is drawn at half opacity,** in its own colours, as the book's first-run page draws it, and takes no hover or press. Before the second edition the book drew no disabled button, and the app followed macOS: the button lost its accent and its label turned faint. This changes Sign in and the dock's buttons too.
 - **Self-hosted fonts:** fonts are served from the app bundle, and nothing is fetched from a third party.
   - Bricolage Grotesque is the UI face.
@@ -847,6 +871,282 @@ The prototype's Post Room, Parlour, Library, Records, Dispatch and Reading Room 
 - the book's "Office: List | Floor" switch, because the List is All sessions, which is post-v1;
 - ~~assistants and~~ the sessions of workflow runs, because the app lists only threads. *(Amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* The app now lists assistants too. ~~The Office still seats only threads, until a ticket decides where an assistant sits.~~ *(Amended 2026-10-09, [#505](https://github.com/theagenticage/hercule/issues/505).)* Assistants sit in the Secretariat, so only the sessions of workflow runs are left out.
 
+## The Hercule face
+
+*(Added 2026-10-10, [Write the Intake changes and the build tickets that replace #91 (#395)](https://github.com/theagenticage/hercule/issues/395); decided in [The desktop Hercule face (#512)](https://github.com/theagenticage/hercule/issues/512) and [#394](https://github.com/theagenticage/hercule/issues/394) §1.)* The sidebar has two faces, as [./14-web-app.md](./14-web-app.md) §App shell settled and the book's sidebar draws them (`crew.js`): **Threads**, the user's threads and assistants, and **Hercule**, the places of Hercule itself. [Intake](#intake) is the Hercule face's first screen. #512 builds the face, as slice 24.
+
+A row for Intake above the threads, on the Threads face, was considered and dropped: it is the "Stack" form that spec 14 rejected after its prototype rounds ([#51](https://github.com/theagenticage/hercule/issues/51)).
+
+**The switch.** A segmented control, **Threads | Hercule**, sits at the top of the sidebar, under the traffic lights' strip, as the book draws it.
+
+- Under it come the shared row of New thread, Search and Office, then Waiting on you. Both show on both faces. Then comes the face's own list, and the foot, which is the same on both faces.
+- The control is reachable with Tab, and ← and → move between its two segments, like any segmented control. View › Threads `⌥⌘1` and View › Hercule `⌥⌘2` switch it from anywhere ([Native behaviour](#native-behaviour)).
+- **The Hercule segment shows Intake's To do count,** "Hercule 8", in marigold, the book's `count--you`, and hides it at 0. So the work that waits on Intake stays in sight while the user works in threads. The count is defined under [Intake](#intake). The segment's accessible name carries it: "Hercule, 8 to do".
+
+**The face follows the screen:**
+
+- Intake shows the Hercule face.
+- A thread, the new-thread screen and an assistant's Conversation show the Threads face.
+- The Office and Settings keep the face that was showing, because their ways in sit on both faces: the Office in the shared row, Settings at the foot. So nothing on the sidebar moves when Settings opens, as [The frame](#the-frame) requires.
+- The switch changes the face without leaving the open screen. The next screen that has a face of its own sets it again.
+- At launch, a screen that keeps the face shows the Threads face.
+
+**The rows.** Only rows whose screen exists are drawn, in the book's order, and each new screen adds its row. No row is drawn inert. With Intake built, the face reads:
+
+- **Work:** Intake, with its To do count in marigold, hidden at 0. The Office's row is not repeated here: it is in the shared row, because it belongs to both faces ([#332](https://github.com/theagenticage/hercule/issues/332)).
+- **System:** Fleet, which opens Settings › Machines, and Connections, which opens Settings › Connections and carries the red dot Settings' list carries ([The frame](#the-frame)).
+- **Settings is the foot's Settings button.** The book draws Settings twice, as a row in System and as the foot's button, and both open Settings. The desktop draws it once, at the foot, on both faces; on the Hercule face it sits below Fleet and Connections, where the System section's last row would be.
+- A row is selected while its screen is open. Fleet and Connections are selected while their Settings section is open, as the foot's button is pressed.
+- Before Intake is built (slice 24 alone), the face holds the System section only, and the segment shows no count.
+
+**The face's rows are a plain list,** not a virtualized one. The list is bounded: it holds one row per screen, so rule 1, which virtualizes every unbounded list, does not reach it ([Rules](#rules)).
+
+### What the Hercule face costs
+
+The plan for slice 24, measured by it and recorded in [Measured](#measured):
+
+| Cost | Expected | Measured by |
+|---|---|---|
+| Processes | none added | the perf script's process count |
+| Memory | the face's rows only | the perf script, with the Hercule face showing |
+| Idle | no work: no timer, no polling, no animation | the perf script's idle sample, with the Hercule face showing |
+| Reads | none beyond Intake's To do count, which arrives on the `signal` topic the app holds once Intake is built. Before that, none | the Network panel, once |
+| The first screen's JavaScript | grows by the switch, the face's rows and the two View commands; they join the first screen's chunk | `pnpm build:desktop`'s bundle check, before and after |
+
+## Intake
+
+*(Added 2026-10-10, [Write the Intake changes and the build tickets that replace #91 (#395)](https://github.com/theagenticage/hercule/issues/395); decided in [The desktop Intake screen in spec 17 (#394)](https://github.com/theagenticage/hercule/issues/394) and the tickets it draws on: [#385](https://github.com/theagenticage/hercule/issues/385), [#386](https://github.com/theagenticage/hercule/issues/386), [#387](https://github.com/theagenticage/hercule/issues/387), [#388](https://github.com/theagenticage/hercule/issues/388), [#390](https://github.com/theagenticage/hercule/issues/390), [#391](https://github.com/theagenticage/hercule/issues/391), [#392](https://github.com/theagenticage/hercule/issues/392), [#393](https://github.com/theagenticage/hercule/issues/393), [#397](https://github.com/theagenticage/hercule/issues/397), [#398](https://github.com/theagenticage/hercule/issues/398).)* Intake is the list of what a source or an agent asks of the user: each item is a Signal. This section owns how the desktop draws it. What a signal is, how it is raised, when it leaves, and what its answers do are owned by [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) §9, starting at [The record](./10-triage-intake-and-notifications.md#91-the-record). Every operation named here is in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#signal). Intake shows no Notification: Notifications are Hercule's reports on itself, and go to Check-in.
+
+- **The pixel reference** is the Intake drawing, [`docs/design/intake-directions/asks/desktop/intake.html`](../design/intake-directions/asks/desktop/intake.html), drawn on the book's tokens and system. Where the drawing and this section disagree, this section decides: #394 changed the section names, `↩`, the toast, Undo and inbox zero's motion after the drawing was made.
+- **The route** is `/intake`, a child of the shell, and a chunk of its own (rule 6). The way in is the Hercule face's Intake row and Go › Intake `⌘⇧I`.
+- **The screen,** top to bottom: the bar, with the tabs, the views and the header menu; under it [the split](../design-language.md#the-split), with the list as its main column and the open signal in its side pane; under the list, the foot.
+
+### The count and attention
+
+- **The To do count** is every open signal on To do, across every tab, `fyi` and the triage workflow's rows included. A snoozed signal never counts, until its snooze runs out. Example: 1 Now, 4 from GitHub and 3 from triage show as 8. A count that left rows out would make inbox zero untrue.
+- It shows on the Hercule segment, on Intake's row, and on Intake's tabs. It hides at 0.
+- **A new Now signal notifies** while the window is not focused ([Native behaviour](#native-behaviour)). Nothing else on Intake notifies.
+- **The dock badge, Waiting on you and the Go menu show no signals.** They stay about agents waiting on the user.
+
+### Tabs
+
+- **The tab set is stable:** All, then each plugin with at least one signal kind on, with its mark, then Triage, only while a triage workflow is named ([The Triage tab](#the-triage-tab)). A plugin's tab stays while it has nothing open, so tabs never move under the pointer.
+- **Core signals have no tab of their own** unless the triage workflow raised them. Those from another workflow, an assistant, the user or Hercule show under All, each labelled with its source.
+- **A tab's count is its To do count,** in every view, hidden at 0.
+- **When the tabs do not fit the bar:**
+  1. The plugin tabs drop their names and keep the mark and the count. The name moves to the tooltip and the accessible name.
+  2. If they still do not fit, tabs from the end move into a trailing **More ▾** menu, each with its name, mark and count. More shows the summed To do count of what it holds, in marigold, when it is above 0.
+  - All and Triage never shrink and never move into More.
+- A tab shrunk to its mark keeps the mark when Appearance's Marks is off, because nothing else names it. Rows follow the Marks setting, as every row with a source mark does ([Appearance](#appearance)).
+
+### Views
+
+The bar's four views: **To do**, **Later**, **Done** and **Everything**. To do, Later and Done list signals, as `signal.query`'s views define them ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#97-snooze-and-not-urgent)). Everything lists events ([Everything](#everything)). The view and the tab combine: GitHub's tab in Later lists GitHub's snoozed signals.
+
+- **Later** shows when each signal comes back: "Back Monday 09:00".
+- **Done** shows each signal's outcome, newest first, as [When a signal leaves](./10-triage-intake-and-notifications.md#96-when-a-signal-leaves) records it. A replaced signal reads "Replaced by a newer one" and links its successor.
+
+### The list on To do
+
+- **Sections on the All tab:**
+  - **Now:** the signals of priority `urgent`, pinned at the top. The section is drawn only while it holds a row.
+  - **Signals:** plugin signals, and core signals from other workflows, from assistants, from the user and from Hercule, each labelled with its source. "Signals" is the one word for them across the app, the CLI and the docs.
+  - **From triage:** the rows the named triage workflow raised, drawn quieter.
+  - A plugin's tab shows Now and Signals for that plugin only. The Triage tab shows From triage only.
+- **Hercule's offers,** the Ignore Rule suggestions ([Ignore Rules](./10-triage-intake-and-notifications.md#99-ignore-rules)), sit in Signals with Hercule's face as their mark. They are not on the Triage tab, because triage did not raise them.
+- **Order inside each section:** the rows marked "Back" first, oldest `until` first, then the rest oldest first. Now too: the signal that has waited longest comes first.
+- **A row** is one line, cut with an ellipsis, in both densities: the source's mark, the title, then who asks, the kind and where, then the age. The split's motion depends on rows of one line ([The split and its minimums](#the-split-and-its-minimums)).
+  - A signal of priority `high` shows a small marigold mark at the row's end. It does not reorder the list.
+  - A Now row shows its Your work line, such as "Fixing in *Fix 3-D Secure checkout*", when a thread or a Task is on it; otherwise who asks, the kind and where. "Escalates at 11:23" waits for a `when` block, which has no schema yet.
+  - `unsure` shows its kind: "Unsure".
+  - A row whose snooze ran out shows "Back".
+
+### Row controls and the bulk bar
+
+A row shows its controls on hover and on keyboard focus. Every control here only changes the user's own list and sends nothing to the source, which is why the design language lets them sit on a row ([../design-language.md](../design-language.md)). An answer, which sends something, is never on a row.
+
+| Row | Controls |
+|---|---|
+| To do: a plugin kind, or `fyi` | Snooze, Done, checkbox |
+| To do: `proposal`, `offer` or `unsure` | Snooze, checkbox |
+| Now | Snooze, Done, Not urgent, checkbox |
+| Back | as its kind |
+| Later | Unsnooze, and Done when its kind has one |
+| Done view | none |
+| Everything | none |
+
+- **Done's tooltip is its describe line,** such as "Takes it off your list. GitHub is not told". Done is the core's action ([Actions, Done and Hand to an agent](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)); the app calls `signal.markDone`.
+- **Dismiss is never on a row.** It is an answer, in the pane.
+- **Checks.** A checked row wears the selected tint. Checks belong to one view, and switching views clears them.
+- **The bulk bar** shows while any row is checked: "3 selected", then its buttons.
+  - Snooze always shows. Done shows when at least one checked row has it. In Later, the bar offers Unsnooze and Done.
+  - The app sends only the ids the action applies to. With one `github/mentioned` and two `proposal` rows checked, Done sends one id.
+  - Rows the action skipped stay checked, so the bar then reads "2 selected · Snooze".
+  - There is no confirmation step: the highlight below shows what a button will do before the click.
+- **The bulk highlight.** While the pointer or keyboard focus is on a bulk button:
+  - the checked rows it skips fade to 40% opacity;
+  - the rows it acts on get a 2px accent rule at their left edge, in green, because it marks the move the user is about to make;
+  - the bar names the split: "Done 3 · keeps 2 proposals". The wording names kinds, never "from triage", because any run can raise a core kind.
+  - When the button acts on every checked row, nothing fades and every row gets the rule.
+  - The highlight shows with no delay, so it keeps up with the pointer. On `E` or a click, the acted-on rows hold for one beat, `--dur-2`, then leave; the skipped rows return to full opacity, still checked. With Reduce motion, the highlight shows with no transition and the beat is skipped.
+- **No Undo** in v1. A mistaken Done stays done and is found in the Done view; a mistaken snooze is undone with Unsnooze in Later.
+
+### Snooze and Not urgent
+
+- **Snooze** opens a menu of five choices, from client-core, in the user's time zone setting:
+  1. In 1 hour
+  2. This afternoon at 14:00, shown before 13:00; This evening at 18:00, from 13:00 until 17:00; greyed out after 17:00, so the keys never move
+  3. Tomorrow 09:00
+  4. Monday 09:00, a week ahead on a Monday
+  5. Pick a time
+  - The app calls `signal.snooze`; Unsnooze calls `signal.unsnooze`. What a snooze does to a signal is [Snooze and Not urgent](./10-triage-intake-and-notifications.md#97-snooze-and-not-urgent)'s. A Now signal can be snoozed.
+- **Not urgent** sits on a Now row, and in the pane of a Now signal. It calls `signal.lowerPriority`, which lowers the signal from `urgent` to `high`: the row moves to Signals and wears the `high` mark. It sends nothing to the source. It only lowers: v1 has no way to raise a signal to Now.
+
+### The pane
+
+The open signal fills the split's side pane. Top to bottom:
+
+- **The provenance line:** the source's mark and name, and the kind's label, such as "GitHub · Mentioned". A plugin signal's line links its kind's row in Settings › Intake, with the signal's Connection selected: `/settings/intake?kind=github/mentioned&connection=<id>` ([Settings](#settings)). A core signal's line names its source, links nothing, and reads "Hercule" for the core's own offers.
+- **The title,** who asks, where, and when.
+- **The blocks,** drawn as [Blocks](./10-triage-intake-and-notifications.md#95-blocks) defines them, at most 8:
+  - Text as markdown.
+  - Messages as a conversation: each message with its author's avatar, or initials when there is none, its time and text. The message that mentions the user carries a marigold rule at its left. A message's file and line, its recipients, its attachments' names, "and N more" for the messages left out, and "Read the rest" for a cut message, which opens its `url`.
+  - Change as the branch pair, the file count, additions and deletions, and the checks' summary.
+  - Checks as one row per failed or pending check, with its log in monospace when it has one, then the passed count and "and N more".
+  - A block of a type the app does not know draws one quiet line, "This part can't be shown here.", never nothing, so the user knows something was left out.
+  - Images inside blocks load only here, for the open signal ([Content-Security-Policy](#content-security-policy)).
+- **Your work and Sources** have fixed places outside the blocks, under them: Your work names the threads and Tasks on the signal, such as "Fixing in *Fix 3-D Secure checkout*" or "Triage at 11:00 added 38 events to this task"; Sources links the events behind it. Both are computed on read, never stored.
+- **The build-failed line.** When the plugin could not draw the signal, a quiet line reads "GitHub couldn't draw this signal. Showing the event as it came in." ([Actions, Done and Hand to an agent](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)).
+- **A Screening line,** when the signal was raised without one: "Not screened: the Screener failed" or "Not screened: no workflow screens signals" ([Screening and the Screener](./10-triage-intake-and-notifications.md#98-screening-and-the-screener)).
+- **The answers,** at the foot of the pane, in this order: the plugin's actions, then Hand to an agent (one per workflow that takes the signal's kind), then Done. At most one is primary, drawn as the suggested answer. Each answer shows its describe line on hover and on focus. What each does is [Actions, Done and Hand to an agent](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)'s.
+  - **The Reply box.** An action with a `field`, such as Reply, Request changes or Comment, opens a text box with its placeholder. The box shows the typed text in full, and the describe line leaves it out. `⌘↩` or the button calls `signal.act { signalId, actionId, text }`.
+  - Every other answer calls `signal.act { signalId, actionId }`, except Done, which calls `signal.markDone`.
+  - **A proposal** offers Accept, the primary answer, which creates the Task, and Dismiss. The pane shows the Task Accept will create.
+  - **Hercule's offer** offers Ignore, the primary answer, and Dismiss. Its pane counts the matching open signals when it opens: "3 open now".
+  - **A failed answer** shows its error under its button, in `--fail`, as a failed save does in Settings. The typed text stays, so the user can try again. It never goes in a toast.
+  - In the Done view, the outcome shows in place of the answers. A "Handed to *workflow*" outcome shows the run's state, such as running or failed, read-only; it never puts the signal back on To do.
+  - A teammate's review on a team review request shows as context in the pane. It does not end the signal.
+- **Resolved elsewhere.** When the open signal is resolved while it is open, from GitHub, the CLI or another client, the pane stays, and the outcome shows in place of the answers: "Resolved elsewhere: answered on GitHub by Ana". A reply being typed is kept. The pane changes only when the user moves on.
+- **The pane's menu** holds "Open on GitHub" (the source's name), and "Ignore signals like this…" for a plugin kind. It is hidden for core kinds, and never on a row.
+  - **The Ignore dialog** lists the kind's match fields, each a checkbox with its label and the signal's value, all checked. At least one must stay checked. It says how many open signals the rule will also take off the list: "This also takes 3 open signals off your list". It links the kind's row in Settings › Intake: "To stop all review requests, switch the kind off". Create calls `ignoreRule.create` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#ignorerule)); what a rule does is [Ignore Rules](./10-triage-intake-and-notifications.md#99-ignore-rules)'s.
+- **The pane's foot** lists the keys.
+
+### The Triage tab
+
+The Triage tab shows the signals the named triage workflow raised: the workflow the user setting `intake.triageWorkflowId` names, set at the first run to the shipped Triage. What triage does is [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) §1 and §2's.
+
+- **The header:** "Last ran 11:00 · 212 events · next 13:00". The count is Intake's events inside the last run's window ([Intake's events and handlings](./10-triage-intake-and-notifications.md#910-intakes-events-and-handlings)); "next" is the workflow's trigger's `nextFireAt`. After a failed run it reads "Last run failed 11:00"; the failure itself goes to Check-in.
+- **The summary:** the run's final message, under the header, in a quiet tone, on the Triage tab only.
+- **The header's menu** has "Use another workflow…", a picker of workflows. When the named workflow is deleted or disabled, the tab shows "No triage workflow. Pick one", with the same picker, and the header hides.
+- There is no Run now in v1.
+
+### Everything
+
+Everything lists events, not signals: Intake's events, newest first, back to the retention horizon. Which events those are, and what came of each, is [Intake's events and handlings](./10-triage-intake-and-notifications.md#910-intakes-events-and-handlings)'s. The app reads them with `event.query` and its `intake` flag ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#event)).
+
+- **The header** states the horizon: "Events from the last 90 days".
+- **A search field** searches titles and authors. Typing waits about 200ms before it queries.
+- **The filter menu** has no title and no counts. Its options are captions: "All events", "Raised a signal", "Pending triage" and the others. Its accessible label is "What came of it". The word "handling" is never shown.
+- **A row** shows the system's mark, the title, the author, the time, and what came of the event: the first 2 handlings, in spec 10's order, then "+N" for the rest, such as "→ signal · on your To do list · +2". A fixed number needs no measuring on resize, and a test can check it.
+  - "→ ignored · rule *text*" links the rule's row in Settings › Intake, or reads "deleted" when the rule is gone.
+- **No counts and no row controls** on Everything.
+- **The event pane** holds, top to bottom: the system's mark, the event kind and "Open in *system*"; the title and the time it was received; **What came of it**, one block per handling, each with its link; then the Connection and the event's refs. No body and no payload. The kind links its row in Settings › Intake, with the event's Connection selected.
+- **It does not update live.** It reads again when it opens and when the search or the filter changes. It is virtualized (rule 1) and read page by page.
+
+### The split and its minimums
+
+Intake uses [the split](../design-language.md#the-split): the list is the main column and has the width, and the pane takes the rest.
+
+- The list's width starts at the drawing's 432px. Its minimum is 360pt and the pane's is 400pt. Below a window of about 1032pt, with the sidebar showing, the pane hides and its toggle says why: "Widen the window to show the pane".
+- With the pane closed, rows are at most 960px wide.
+- A click on a row selects it and opens the pane. The pane closes when nothing is selected.
+- **Esc:** the first Esc closes the pane and keeps the row selected; a second Esc clears the selection. Anything smaller, such as an open menu, is let go first.
+- Opening and closing animate the list's width with the pane's slide, the one width animation rule 2 allows ([Rules](#rules)), because every row is one line. A row that wraps would end the exception.
+
+### Keys
+
+Keys work only while focus is in the list or the pane, never while it is in a text field.
+
+| Key | Does |
+|---|---|
+| `J` / `K`, `↓` / `↑` | moves the selection down or up |
+| `X`, `⇧J` / `⇧K`, `⇧↓` / `⇧↑` | checks the selected row; the shifted keys check while moving |
+| `↩` | on a row: opens the pane and puts focus on the suggested answer, whose describe line is then in view. A second `↩` presses it |
+| `E` | Done, on the checked rows or else the selected one |
+| `H`, then `1` to `5` | Snooze, with the menu's choice |
+| `U` | Unsnooze, in Later |
+| `R` | opens the Reply box; nothing when the signal has no action with a field |
+| `⌘↩` | sends the Reply box |
+| `O` | opens the signal on its source, in the default browser |
+| Esc | steps back, as above |
+
+`↩` never answers from the list in one press. The drawing's `↩` took the suggested answer at once, so `J`, `J`, `↩` could approve a pull request the user never read. The Requests dock already answers from the keyboard only while it has focus.
+
+### Motion
+
+Every animation here is `transform` or `opacity` on an HTML element, at most `--dur-3` per step, and stops with Reduce motion. Rule 2's amendments allow it ([Rules](#rules)).
+
+**Inbox zero's arrival** plays only when the user's own action empties To do. Opening Intake on an empty list, or a change made elsewhere that empties it, shows the same picture still. With Reduce motion, it shows still.
+
+1. The last row fades, over `--dur-1`, and the pane slides shut.
+2. The sunburst draws itself: 24 brass rays, each its own HTML `<span>`, long and short in turn, grow outward from their inner end, `scaleY` from 0 to 1 over 320ms, each 12ms after the one before, clockwise from the top. The drawing animated SVG paths, which rule 2 forbids.
+3. At 120ms, Hercule hops in: the face scales from 0.6 to 1 on `--ease-spring` while its wrapper hops 8px, in the pose `done`.
+4. At 260ms, six brass sparks fly out from behind Hercule and fade, once.
+5. From 240ms, "Inbox zero", the line, the cleared count, the source pills and the triage line rise 6px each, 60ms apart.
+
+The arrival takes 800ms, and then nothing runs. **The line** follows the moment, in the user's time zone setting:
+
+- "The rest of the morning is yours." before 12:00;
+- "The rest of the afternoon is yours." from 12:00;
+- "Go home." from 18:00;
+- "Have a good weekend." on Friday from 12:00;
+- "Nothing needs you this weekend." all day on Saturday and Sunday.
+
+With a triage workflow named, the triage line under it reads "triage runs at 13:00", from its trigger's `nextFireAt`.
+
+**Changes the user did not make:**
+
+- A new signal fades in and drops into place over `--dur-2`. The rows below make room with a transform, never by animating height.
+- A signal resolved elsewhere leaves as the user's own Done does: it fades, then the gap closes.
+- A burst animates as one block: a triage run that raises 30 signals slides in once, not as 30 rows one after another.
+- **Nothing moves under the pointer.** While the pointer is over the list, arrivals and departures wait, and apply with their motion once it leaves. Otherwise the user aims at Approve on #1294, a Now row arrives above it, and they approve the wrong signal.
+- The keyboard selection stays on the same signal, never on the same position.
+- Only rows on screen animate. A change to a row out of view applies at once.
+
+### The foot, the toast and failures
+
+- **The foot** sits under the list: "7 cleared today. 3 left on their own: answered elsewhere or withdrawn. See Done." With none left on their own: "7 cleared today. See Done." With none cleared, there is no foot. "Today" starts at midnight in the user's time zone setting. A replaced signal is not counted.
+- **The toast** says what the user's last move did: "Approved #1294", "Snoozed until Monday 09:00", "Marked 3 done. Kept 2 proposals". It fades after 5 seconds, stays while the pointer is on it, and the next toast replaces it. It has no Undo.
+- A failed answer shows under its button, never in a toast ([The pane](#the-pane)). A failed Done, Snooze or Not urgent shows its error in the toast's place, in `--fail`, and the rows stay where they were.
+
+### What the screen reads
+
+- `signal.query`'s To do view, read whole, because it is short by nature; Later and Done page by page.
+- `event.query` with `intake` for Everything, page by page.
+- The triage workflow's last run, and its trigger's `nextFireAt`.
+- `plugin.query`, for each plugin's name and mark.
+- The `signal` live topic. A push names the signals that changed, and the app reads To do again. The topic stays subscribed while the window is hidden, as `session` does, because the Hercule segment's count and Now's notifications depend on it ([Rules](#rules), rule 3). The shell subscribes to it, not the screen.
+- The To do list is virtualized like every list (rule 1), though it is read whole.
+- The first page of Later, soonest first, gives the soonest snooze's `until` for the snooze timer ([Rules](#rules), rule 4). The shell reads it with the count, so the timer runs while Intake is closed.
+
+**Interpretation goes to `@hercule/client-core`,** each function with its own tests: the sections and their order, which controls a row gets, the tab set and what moves into More, which checked rows a bulk action takes with the bar's and the toast's wording, the foot's two numbers, the triage header, the snooze choices, the handlings' cut-off, and the inbox zero line. How that splits into functions, and their names, is the implementer's choice. One possible split: `groupSignalsIntoSections`, `decideSignalRowControls`, `buildIntakeTabs`, `planBulkAction`, `countClearedToday`, `describeTriageHeader`, `buildSnoozeChoices`, `cutHandlings`, `describeInboxZero`.
+
+### What Intake costs
+
+The plan for slices 25 to 35, each measuring its part and recording it in [Measured](#measured). No prototype measurement comes first: Intake is lists and text, the work the thread list already measured.
+
+| Cost | Expected | Measured by |
+|---|---|---|
+| Processes | none added | the perf script's process count |
+| Idle | no work, except one timer, set for the soonest snooze's `until`. It fires once; the app then reads To do again and sets the next. The app also reads To do again when the Mac wakes. The `signal` topic sends nothing while nothing changes. The toast's 5-second fade is a one-shot timer after a user action, not idle work | the perf script's idle sample, with Intake open and a snooze due in an hour |
+| Lists | To do read whole; Later and Done page by page; Everything virtualized and page by page, with no live updates | the perf script, with 200 signals on To do |
+| Memory | within the app's memory row with Intake open and 200 signals on To do | the perf script |
+| Per push | one compositor-only animation, only for rows on screen; a burst is one animation | the Performance panel, once, with a burst of 30 |
+| Inbox zero | 800ms of compositor-only animation per arrival, nothing after | the Performance panel, once |
+| Opening or closing the split | layout on each frame of the transition, no dropped frame with 50 rows in the list, nothing after | the Performance panel, once |
+| Images | loaded only for the open signal | the Network panel, once |
+| The first screen's JavaScript | grows only by the Go item, the `/intake` route stub, the `signal` subscription and the count. Intake is a chunk of its own, loaded the first time it opens | `pnpm build:desktop`'s bundle check, before and after |
+
 ## Settings
 
 *(Added 2026-10-04, [Write the Settings port into spec 17, and its build tickets (#402)](https://github.com/theagenticage/hercule/issues/402), for [Desktop Settings: a quick port, and a new model for providers (#401)](https://github.com/theagenticage/hercule/issues/401).)* Settings is a port. It brings the web app's Settings to the desktop, drawn in Bureau, with the Appearance page added. It adds no operation to the public API. The one new piece of state is the Appearance, which main keeps in its settings file.
@@ -860,17 +1160,17 @@ The prototype's Post Room, Parlour, Library, Records, Dispatch and Reading Room 
 
 The frame is the book's: the app's sidebar stays, and the main pane holds the Settings list beside one centred column.
 
-- **Three columns.** The sidebar is the Threads face, unchanged, 272px. The main pane holds the book's `.settings` grid: the Settings list, 216px, then the section's body, whose column is at most 760px wide and is centred.
-  - The book draws the sidebar on its Hercule face, with a Settings row selected. The desktop has only the Threads face ([Scope](#scope-of-the-first-milestone)), so the sidebar shows the threads, and the foot's Settings button shows as pressed while Settings is open, as the Office button does for the Office.
+- **Three columns.** The sidebar is ~~the Threads face, unchanged~~ the face that was showing, unchanged *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#512](https://github.com/theagenticage/hercule/issues/512))*, 272px. The main pane holds the book's `.settings` grid: the Settings list, 216px, then the section's body, whose column is at most 760px wide and is centred.
+  - The book draws the sidebar on its Hercule face, with a Settings row selected. ~~The desktop has only the Threads face ([Scope](#scope-of-the-first-milestone)), so the sidebar shows the threads, and~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#512](https://github.com/theagenticage/hercule/issues/512).)* Settings keeps the face that was showing ([The Hercule face](#the-hercule-face)). The foot's Settings button shows as pressed while Settings is open, as the Office button does for the Office.
   - *(Decided 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* The Settings list does not replace the sidebar, as [#401](https://github.com/theagenticage/hercule/issues/401) first proposed. The book's frame keeps the threads one click away, and nothing on the sidebar moves when Settings opens.
 - **The way in:**
   - the sidebar foot's Settings button, which is no longer inert;
   - the app menu's Settings… `⌘,`, under About, as macOS places it. It sends `openSettings` on `menu.command`.
   - Both open the section last opened while the app runs, and Appearance the first time, as the book's foot button links to it. The section is not kept across launches. *(Amended 2026-10-09, [#494](https://github.com/theagenticage/hercule/issues/494).)* For Permission profiles, the section remembered is its list, `/settings/permission-profiles`, never one profile's page.
-- **The way back** is the sidebar: a thread, New thread or the Office leaves Settings. Settings has no close button and no back button, because the sidebar never left.
+- **The way back** is the sidebar: a thread, New thread~~ or the Office~~, the Office or Intake *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* leaves Settings. Settings has no close button and no back button, because the sidebar never left.
 - **The header** is the book's `.bar`: the crumb "Settings /", the section's name as the title, and on the right either the section's primary button ("New assistant", "Add a Connection", "Add a machine") or, on Appearance, "Saved on this Mac". The other sections have nothing on the right. *(Amended 2026-10-09, [#494](https://github.com/theagenticage/hercule/issues/494).)* Permission profiles' list has the primary button "New profile". The page of one profile has the crumb "Settings / Permission profiles /", with "Permission profiles" a link back to the list, the profile's name as the title, and nothing on the right.
 - **The Settings list** is the book's, in its order:
-  - You: Profile, Appearance, Threads
+  - You: Profile, Appearance, Threads, Intake *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): the book's list has no Intake row; it sits under You, after Threads, because what Intake shows is the user's own choice)*
   - Crew: Assistants, Connections, Providers, Machines
   - Safety: Identities, Permission profiles, Secrets, Bounds
   - System: Plugins, System
@@ -880,7 +1180,7 @@ The frame is the book's: the app's sidebar stays, and the main pane holds the Se
   - Identities, ~~Permission profiles~~ and Bounds are empty states in the web app too. *(Amended 2026-10-09, [#494](https://github.com/theagenticage/hercule/issues/494).)* Permission profiles is built on the desktop: the web app's screen still says "Permission profiles are not editable yet" ([./14-web-app.md](./14-web-app.md) §V1 screen inventory). Secrets is left out of this port: the secrets a section needs, such as a Connection's token or a provider's key, are set from that section.
 - **A narrow window.** At the window's smallest width, 800, the body column is about 230px. While the body is narrower than 520px, a `set-row` stacks its control under its label, and a table drops to one column per row. Nothing clips and nothing scrolls sideways. This is a container query on the body, so the sidebar and the list keep their widths.
 - **Saving.** A control saves when it changes, because the book draws no Save button. A text field saves when it loses focus, or on `⌘↵`. A failed save puts the field back to the saved value and shows the error, in `--fail`, under its row. *(Amended 2026-10-09, [#494](https://github.com/theagenticage/hercule/issues/494).)* A toggle button, such as a grant's verb on Permission profiles, saves when it is pressed and goes back to its saved state when the save fails.
-- **Routes.** Settings is the layout route `/settings`, a child of the shell, with one child route per section: `/settings/appearance`, `/settings/assistants` and so on. Each is a chunk of its own (rule 6), and none is on the bundle check's list of first-screen routes. Each section's loader prefetches what it reads, and the section subscribes to its live topics only while it is open. *(Amended 2026-10-09, [#494](https://github.com/theagenticage/hercule/issues/494).)* Permission profiles has two routes: `/settings/permission-profiles`, its list, and `/settings/permission-profiles/$id`, one profile's page. Each is a chunk of its own. The page of an id that names no profile navigates to the list instead, replacing its entry in the history.
+- **Routes.** Settings is the layout route `/settings`, a child of the shell, with one child route per section: `/settings/appearance`, `/settings/assistants` and so on. Each is a chunk of its own (rule 6), and none is on the bundle check's list of first-screen routes. Each section's loader prefetches what it reads, and the section subscribes to its live topics only while it is open. *(Amended 2026-10-09, [#494](https://github.com/theagenticage/hercule/issues/494).)* Permission profiles has two routes: `/settings/permission-profiles`, its list, and `/settings/permission-profiles/$id`, one profile's page. Each is a chunk of its own. The page of an id that names no profile navigates to the list instead, replacing its entry in the history. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Intake's section is `/settings/intake`. It takes two optional search parameters: `kind`, a signal kind or an event kind, whose row it scrolls to and highlights, and `connection`, a Connection id, which it selects in the plugin's Connection control. Intake's provenance line and Everything's event pane link it this way, such as `/settings/intake?kind=github/mentioned&connection=<id>`. A kind or a Connection that no longer exists is ignored, and the section opens as plain `/settings/intake`.
 
 ### Appearance
 
@@ -894,14 +1194,14 @@ Appearance draws every control on the book's page. Every control is saved on thi
 | Text size | four steps | the second | the size of text everywhere except titles, see below |
 | Glass | 0 to 100% | 40% | `--glass-level` |
 | Reduce transparency | on or off | off | every glass surface solid, whatever the Glass level |
-| Open on | Threads or The office | Threads | what the app shows at launch |
+| Open on | ~~Threads or The office~~ Where I left off or The office *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | ~~Threads~~ Where I left off | what the app shows at launch |
 | Reduce motion | on or off | off | every animation stopped, as macOS's Reduce motion stops them |
 | Marks | on or off | on | the source marks on rows |
 
 - **The theme cards.** The card of the theme in use is pressed. Picking a card turns Follow the system off and uses that theme. With Follow the system on, the two selects pick the day and the night theme. A day theme is light and a night theme is dark, so the window's frame always matches macOS's.
 - **Density** is saved on this Mac, like every other row. It is a choice about how one client draws its rows, and the desktop and the web draw them differently, so a user may want a different density in each.
   - Compact draws each thread row in the sidebar on one line: its face, its title, its mark and its age. Waiting on you keeps its second line, because the open Request is what the user acts on.
-  - The book's line, "Compact fits 30% more rows in Intake and the roster", names screens the desktop does not have. The desktop's line is "Compact draws each thread on one line, so more fit in the sidebar."
+  - The book's line, "Compact fits 30% more rows in Intake and the roster", names screens the desktop does not have. The desktop's line is "Compact draws each thread on one line, so more fit in the sidebar." *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Intake's rows are one line in both densities ([The list on To do](#the-list-on-to-do)), so Density does not change them, and the desktop's line stays.
   - The desktop neither reads nor writes `ui.threadRows`, the user setting the web's Threads › Display row saves on the controller ([./14-web-app.md](./14-web-app.md) §V1 screen inventory, Settings > Threads). That setting stays the web's own.
 - **Text size** has four steps. Each step moves the text tokens `--t-11` to `--t-16` by one pixel: the second step is the tokens as they are, the first is one pixel smaller, and the third and fourth are one and two pixels larger. The title tokens, `--t-18`, `--t-20` and `--t-num`, do not change, as the book's line says: "Transcripts follow; titles stay modest." Rows grow with their text; none has a fixed height that clips it.
 - **Glass and Reduce transparency.** The page's `--glass-level` is the Glass level.
@@ -909,8 +1209,8 @@ Appearance draws every control on the book's page. Every control is saved on thi
   - The app's toggle and macOS's setting both count: either one makes the glass solid. While macOS's is on, the app's toggle shows as on and is disabled, because turning it off would change nothing. Reduce motion works the same way.
   - `tokens.css` stays the book's file. The renderer never writes `--glass-level` itself: an inline value on the root element would beat the Office's rule, which is not `!important`. It sets a custom property of its own on the root, and a `:root` rule in `base.css` derives `--glass-level` from it. The Office's rule and the Reduce transparency rules are more specific or `!important`, so both still win.
 - **Reduce motion** stops what macOS's Reduce motion stops: the CSS animations and transitions, the Office's colleagues (which then stand still) and the first run's room. One renderer function answers whether the app should hold still, from both settings. Every place that reads `prefers-reduced-motion` today calls it instead.
-- **Open on.** With Threads, a launch opens the last open thread or the new-thread screen ([Native behaviour](#native-behaviour)). With The office, a launch opens the Office, with no thread in its drawer. The stored last thread is kept, not removed, so switching back to Threads still reopens it. A first run, the connect screen and sign-in come first either way.
-- **Marks** shows or hides the source marks: the mark of the system a row's work came from, such as GitHub on a start card. Today only the draft's start cards draw one. A row that later draws a source mark follows the same setting.
+- **Open on.** With ~~Threads, a launch opens the last open thread or the new-thread screen~~ Where I left off, a launch opens the last screen, such as a thread or Intake *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394))* ([Native behaviour](#native-behaviour)). A settings file saved before this change holds `threads`, which reads as Where I left off. With The office, a launch opens the Office, with no thread in its drawer. The stored ~~last thread~~ last screen is kept, not removed, so switching back to ~~Threads~~ Where I left off still reopens it *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*. A first run, the connect screen and sign-in come first either way.
+- **Marks** shows or hides the source marks: the mark of the system a row's work came from, such as GitHub on a start card. Today only the draft's start cards draw one. A row that later draws a source mark follows the same setting. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Intake's rows, its pane's provenance line and Everything's rows follow it. A tab shrunk to its mark keeps it, because nothing else names the tab ([Tabs](#tabs)).
 
 **How the Appearance reaches the window before its first paint.** Main reads the settings file at launch, before it creates the window, so main knows the Appearance before any page exists. Main holds the Appearance though the renderer holds it too, an exception to rule 7, for the reason it holds the window state: it paints the window's background before a renderer exists.
 
@@ -935,6 +1235,20 @@ Each section lists what it reads and writes through the contract, its live topic
 - Reads `settings.read`, `runner.query`, `provider.query` and `profile.query`. Writes `settings.update` (`thread.instanceId`, `thread.model`, `thread.accessMode`, `thread.profileId`, `thread.workspace`). Live topic: `provider`.
 - The defaults a new thread starts with: provider instance and model, access mode and permission profile, and the workspace a thread opens in.
 - Differs from the web screen: no Display row. The desktop's density is Density on Appearance, saved on this Mac.
+
+**Intake.** Not drawn by the book. *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#397](https://github.com/theagenticage/hercule/issues/397) and [#394](https://github.com/theagenticage/hercule/issues/394).)*
+
+- Reads `plugin.read` and `connection.read`, which return the value in effect for every kind with the level it comes from, and `ignoreRule.query` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#ignorerule)). Writes `plugin.updateIntake` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#plugin)), the `intake` field of `connection.update` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#connection)) and `ignoreRule.delete`. Live topics: `plugin` and `connection`. What the switches mean, and how the three levels combine, is [./05-plugins.md](./05-plugins.md#82-intake-settings)'s; the server works out the levels, so the section merges nothing.
+- A lead line at the top: "Workflows and subscriptions receive every event, whatever you choose here."
+- One `set-sec` per plugin that declares a signal kind or an event kind, with its mark and name. Under the heading, a segmented control: "All GitHub connections | work | personal", one segment per Connection of the plugin. "All" edits the plugin's level, and a Connection's segment edits that Connection's.
+- Three lists in each `set-sec`:
+  - **Signals:** one row per signal kind, with its label, its description and a toggle.
+  - **Events available to triage:** one row per event kind, with its label and a toggle.
+  - **Ignore Rules:** one row per rule of the plugin's kinds, with the rule's text, "caught 142 in the last 90 days", and Delete. A rule belongs to no Connection, so the list is the same under every segment. With no rules, the list is not drawn.
+- **A row that differs from the level below shows where its value comes from,** under its label: "Off · all GitHub connections" when a Connection follows the plugin's choice, or "On · this connection" when the Connection has its own. Such a row has Reset, which writes the value the level below gives, so the server removes the entry.
+- Saves on change, as every section does. A toggle that fails goes back to its saved value and shows the error under its row.
+- The search parameters `kind` and `connection` ([The frame](#the-frame)) select the segment, then scroll to the kind's row and highlight it once, with the selected tint, which fades over `--dur-3`.
+- Differs from the web screen: the web app has no Intake in v1, so it has no such section ([./14-web-app.md](./14-web-app.md#the-intake-view)).
 
 **Assistants.** The book's `settings-assistants.html`.
 
@@ -1035,6 +1349,7 @@ The rules apply as everywhere ([Rules](#rules)); the costs below are what each s
 | Settings' chunks | one per section, loaded the first time it opens. Appearance, the largest, draws five theme previews from components the first screen already holds | the bundle check's table, which lists every chunk |
 | Memory | within the app's memory row with any section open: Settings holds one section's reads at a time | the perf script, with Appearance and then Machines open *(Amended 2026-10-09, [#494](https://github.com/theagenticage/hercule/issues/494).)* and then Permission profiles |
 | Idle | the idle row, with any section open: no timer, no polling, and no animation; the heartbeat timeline's "now" line moves only when the section is opened again | the perf script's idle sample, with Machines open *(Amended 2026-10-09, [#494](https://github.com/theagenticage/hercule/issues/494).)* and then Permission profiles |
+| Intake's reads *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* | `plugin.read` once per plugin and `connection.read` once per Connection of it, each time the section opens or a segment changes; `ignoreRule.query` once; `plugin` and `connection` as its live topics, which the shell already holds. No polling | the perf script, with Settings › Intake open |
 | Permission profiles' reads *(Amended 2026-10-09, [#494](https://github.com/theagenticage/hercule/issues/494).)* | `profile.query` and `agent.query` once each time the section opens, no polling, and `assistant` as its only live topic. The page draws one toggle for each of the 42 grants and one row for each user of the profile | the perf script, with Permission profiles open |
 | Launch | `appearance.read` adds one synchronous message, answered from memory, before the first paint | the perf script's launch steps, before and after |
 | A change of theme or text size | one frame that restyles the page; the Office redraws once, from its existing watch on `data-theme` | the Performance panel, once, recorded in [Measured](#measured) |
@@ -1174,7 +1489,7 @@ These are starting budgets. The first performance pass measures the real thread 
 
 | Budget | Limit |
 |---|---|
-| Launch | The window shows within 500 ms of spawn (warm), and the last open thread's transcript paints within 800 ms |
+| Launch | The window shows within 500 ms of spawn (warm), and ~~the last open thread's transcript paints~~ the last screen's content paints within 800 ms *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394): the app reopens the last screen, which may be Intake, so the budget is measured with Intake reopening too.)* |
 | Processes | The four of the baseline. No hidden windows, and no workers unless a slice justifies one. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* [The first run](#the-first-run) starts short-lived commands: the `hercule` binary, the login shell once and `git` once per folder. Each exits or is stopped before the step that started it ends, and none stays running. The controller and runner it starts are Hercule's own processes, under the Service Unit, not the app's |
 | Memory | Summed physical footprint at most 220 MB, and the renderer at most 100 MB *(amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): with a text field focused and with none, because a focused field costs the GPU process 400 MB more while the glass blur is on screen; see [Measured](#measured))* |
 | Idle, window visible, no thread working *(amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275): and no text field focused)* | Renderer: no wakeups from the app except the live connection's 30-second keepalive *(amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): and the change of a time label on screen, which rule 4 allows)*. GPU: at most 12 wakeups a second, the still-page level |
@@ -1229,6 +1544,7 @@ These rules keep the budgets:
    - route-level code splitting with a CI bundle budget
    - TanStack Query for every HTTP read
 2. **Nothing animates unless something is happening:**
+   - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394).)* Motion may tell the user that something happened. Such motion plays once, on `transform` and `opacity` of HTML elements, at most `--dur-3`, and only on elements on screen. It never loops or repeats. [Intake](#motion)'s arriving and leaving signals are the first.
    - Faces are drawn still in their pose everywhere. Bureau's idle blink is left out of the first milestone, because of the measurement above. It comes back once research finds a way to draw it within the idle budget (see [Post-v1](#post-v1)).
    - Only one continuous animation is allowed: the working pose of the face of the message the open thread's agent is writing, while its turn runs. *(Amended 2026-10-09, [#504](https://github.com/theagenticage/hercule/issues/504): a face is drawn only beside text, so no face animates while the thread shows only a status line or a work divider.)* *(Amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* On an assistant's Conversation, it is the face of the newest reply, while its turn runs. The sidebar and every other list show still poses and still marks.
      - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The one other is a spinner, and only while Hercule starts or a login waits in [the first run](#the-first-run) or the draft's Log in. Each is a wait the user started, and each ends: the start after at most 90 seconds for the command and 30 for the answer, a login when it ends or its code expires.
@@ -1236,16 +1552,19 @@ These rules keep the budgets:
      - *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The Office's colleagues live: they walk, type, sip tea and sleep, at most 30 frames a second, while the Office is on screen and does not stand still ([The Office's budgets](#the-offices-budgets)). The Office draws them into one WebGL canvas, and the rules below for CSS animations do not apply inside it. The Office's panels and its drawer follow those rules.
    - Animations change only `transform` and `opacity`, and only of an HTML element. Chromium runs such an animation on the compositor thread alone. When the animated element is an SVG element, even an outer `<svg>`, the renderer's main thread also runs style, layout and paint on every frame: 120 times a second on a 120 Hz display. So the working pose's paws are each drawn in an `<svg>` of their own, inside a `<span>` that moves.
    - Transitions answer a user action, last at most `--dur-3`, and change only paint properties: color, background, border-color, box-shadow, opacity and transform. A transition of a layout property, such as `width`, `padding` or `grid-template-rows`, runs layout on every frame. Bureau's composer transitions some of these; slice 6 ports the composer without them, and uses a transform if its growth animates.
+     - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394).)* [The split](../design-language.md#the-split) is the one exception. Opening or closing its side pane may animate its sized column's width, for at most `--dur-3`, and only while that column's rows are one line cut with an ellipsis. One-line rows do not wrap, so a frame of the transition lays out the column without measuring text again. Intake is the first to use it ([The split and its minimums](#the-split-and-its-minimums)), and [What Intake costs](#what-intake-costs) measures it.
+     - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394).)* A one-shot arrival the user's own action caused may chain steps, each within `--dur-3`, at most 800ms in all. Intake's inbox zero is the first ([Motion](#motion)).
    - A change of appearance snaps: the page switches in one frame, with no transition, as the window's native frame does.
    - Reduce motion turns every animation off. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* macOS's Reduce motion or the Appearance page's. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* With Reduce motion, the Office stands still as it does on battery, and its camera moves in one step where it would glide.
 3. **Work stops when nobody is looking.** While the window is hidden or minimized:
    - The renderer drops the open thread's `session:<id>:tap` subscription, and the open subagent's `session:<id>:subagent:<subagentId>:tap` *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*, and the open Conversation's newest session's `:tap` *(amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448))*. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.
-   - The `session` topic stays subscribed, because the dock badge and notifications depend on it.
+   - The `session` topic stays subscribed, because the dock badge and notifications depend on it. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So does the `signal` topic, because the Hercule segment's count and Now's notifications depend on it ([Intake](#what-the-screen-reads)).
    - `backgroundThrottling` stays on.
    - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The Office draws its frames from `requestAnimationFrame`, which Chromium stops in a hidden, minimized or covered window. The colleagues' timers count only the time the window is shown, so they pause with the frames, and the first frame after the window is shown again advances the colleagues by one frame, not by the time it was hidden. While the Office stands still, it runs no timer that repeats~~.~~ *(amended 2026-10-09, [#505](https://github.com/theagenticage/hercule/issues/505))*, except the Secretariat's clock, which moves its hands once a minute. The clock's timer counts only the time the window is shown, as the colleagues' timers do, so a hidden window gets no wakeups from it, and the hands jump to the time when the window shows again. An Office with no assistants has no clock, so it runs no clock timer either.
 4. **No polling, and no timers while idle:**
    - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. [#279](https://github.com/theagenticage/hercule/issues/279) adds the topics.)* *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The shell also subscribes to the `connection` topic, so a GitHub Connection made in the web app while the desktop app runs reaches the New project form and the starters' line without a reload. *(Amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* It also subscribes to the `assistant` topic, so the sidebar's Assistants section follows an assistant made, renamed or deleted elsewhere.
    - A label that counts time (such as `Worked for 31s`, or a Request's `10m`) runs one timer, only while the label is on screen and the window is visible.
+   - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Intake runs one timer, set for the soonest snooze's `until`, because a snooze ends with no push: nothing changes on the controller when its time comes. It fires once; the app reads To do again and sets the next. It runs whether the window is visible or not, because Now's notifications must reach the user while the window is hidden. A Mac that wakes from sleep reads To do again.
    - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Two waits in [the first run](#the-first-run) poll, because nothing else can tell the app their outcome. Both are bounded waits the user started, and neither runs while the app is idle:
      - GitHub's device flow: the protocol requires the client to ask, so the renderer calls `connection.pollDeviceFlow` at the interval GitHub gives, until the flow is done, expires or is denied.
      - The connect check after `hercule service install`: main checks every half second for at most 30 seconds, because the controller announces nothing while it starts.
@@ -1259,7 +1578,7 @@ These rules keep the budgets:
    - Only the Latin subset of Bricolage Grotesque (131 kB) is preloaded.
    - Limelight and Recursive load the first time text uses them.
    - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Everything the first screen imports statically is built into one chunk, the first-screen chunk. Split into files, the first screen costs more bytes: each file is compressed apart, and the files import and export names from each other, which the minifier cannot shorten across a file boundary. One chunk measured 7.4 kB smaller gzipped (see [Measured](#measured)). The app's files are read from the local disk, so splitting buys no caching in return.
-   - A screen or dialog that is not on the first screen is imported with `import()`, and is a chunk of its own, loaded the first time it shows: the first run, the project picker, the New project and provider login dialogs, and the draft's starter threads. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Each section of [Settings](#settings) is a chunk of its own too.
+   - A screen or dialog that is not on the first screen is imported with `import()`, and is a chunk of its own, loaded the first time it shows: the first run, the project picker, the New project and provider login dialogs, and the draft's starter threads. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Each section of [Settings](#settings) is a chunk of its own too. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So is [Intake](#intake).
    - App code imports each icon from its own module, never from the icons folder's list of every icon, and eslint enforces it. The bundler places a module by what imports it, so an icon only a lazy screen draws then loads with that screen.
    - The V8 code cache keeps warm launches from compiling the same scripts twice.
 7. **Main does no recurring work.** Main runs nothing on a timer, and it holds no data the renderer already holds. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run's start of Hercule is the one exception, and it ends: the half-second connect check of rule 4, the 90-second limit on `hercule service install`, and the 5-second limit on reading the login shell's `PATH`.
@@ -1943,6 +2262,22 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
     - the confirmation for a change to `unrestricted`, and the refusal shown in the delete confirmation
     - the Bureau comparison of the four states of the book's page
 
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Slice 24 builds [the Hercule face](#the-hercule-face) ([#512](https://github.com/theagenticage/hercule/issues/512)). Slices 25 to 35 build [Intake](#intake), in order, after slice 24. Each of them is vertical: it ships its backend, as the specs that own it describe, and its desktop part together. So Intake shows from slice 25, and fills in as each feature lands. Slice 36 stands alone and needs none of them. Each slice records its costs in [Measured](#measured), as [What the Hercule face costs](#what-the-hercule-face-costs) and [What Intake costs](#what-intake-costs) list them; a slice that changes the bundle or the work done while idle names the rows it records.
+
+24. **The Hercule face.** The sidebar gains the Threads | Hercule switch, with the System section's Fleet and Connections rows, the face rule, and View › Threads `⌥⌘1` and View › Hercule `⌥⌘2`. Records: the first screen's JavaScript, memory and idle, with the Hercule face showing.
+25. **The first signal on screen.** A signal raised with `hercule signal raise` shows on Intake. The slice adds the Signal record and `signal.raise`, `signal.query`'s To do view, `signal.read`, `signal.act` and `signal.withdraw`; the Intake row, Go › Intake `⌘⇧I` and the Hercule segment's count; the list in its Now and Signals sections; the pane with all four block types and the fallback line; the answers with their describe lines and the Reply box; the keys; the split and its minimums; and the notification for a new Now signal, with `urgentSignals.set`. Blocked by slice 24 ([#512](https://github.com/theagenticage/hercule/issues/512)). Records: the first screen's JavaScript, Intake's chunk, idle with Intake open, and opening or closing the split.
+26. **Done, Snooze and Not urgent.** A signal can leave To do by the user's hand. The slice adds `signal.markDone`, `signal.snooze`, `signal.unsnooze` and `signal.lowerPriority`; the row controls and checks; the bulk bar and its highlight; the snooze menu and "Back" rows; the Later and Done views; the foot; and the toast. Records: idle with a snooze due in an hour, because the snooze timer is the screen's one idle timer.
+27. **GitHub review requests and mentions.** The first plugin signals arrive: a review request and a mention raise signals on their own. The slice adds the plugin path that raises them, the manifest's marks on tabs, rows and the provenance line, the GitHub tab, GitHub's answers, and "Resolved elsewhere" when the source answers.
+28. **GitHub's other kinds.** Assignment, requested changes and failed checks raise signals too. The slice adds those kinds, and the Checks block's log lines.
+29. **Settings › Intake.** The user can switch each signal kind on or off, and choose which event kinds are available to triage. The slice adds the [Intake section](#the-sections) with its Signals and Events available to triage lists, `plugin.updateIntake`, `connection.update`'s `intake`, and the provenance line's link with its `kind` and `connection` parameters. Records: the section's chunk.
+30. **Everything.** The Everything view lists Intake's events and what came of each. The slice adds `event.query`'s `intake` flag, the handlings, the search and the filter, and the event pane. Records: the view's memory with a long list.
+31. **Screening and the Screener.** A signal can wait for the shipped Screener before it shows. The slice adds the Screener and the Screening path, the "Waiting for the Screener" and "Screened out" handlings, and the "Not screened" lines in the pane.
+32. **Gmail signals.** Mail that needs the user shows on Intake. The slice adds Gmail's signal kinds, its tab and mark, and the Messages block's recipients and attachments.
+33. **Ignore Rules.** The user can stop a kind of signal by its match fields. The slice adds Ignore Rules, Hercule's offer in Signals, "Ignore signals like this…" and its dialog, the Ignore Rules list in Settings › Intake, and the "ignored" handling in Everything.
+34. **The Triage tab.** Triage's signals get their own place. The slice adds the shipped Triage workflow raising core signals, the From triage section, the Triage tab with its header, summary and workflow picker, and the proposal's Accept with the Task it creates.
+35. **Inbox zero and changes from elsewhere.** Intake moves when something happens. The slice adds inbox zero's arrival and its line, the motion of signals that arrive and leave without the user, bursts as one block, and nothing moving under the pointer. Records: per push with a burst of 30, and inbox zero.
+36. **Launch on the last screen.** The app reopens where the user left it. The slice adds the stored last screen for each controller URL, Open on's Where I left off, and reading a stored `threads` value and an old stored thread id. It needs no other slice. Records: the launch budget, reopening a thread and reopening Intake.
+
 ## Testing
 
 - **Unit tests** sit next to the code they test (AGENTS.md §Source layout). They cover:
@@ -1984,13 +2319,33 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
   - `pnpm compare:bureau` compares the Conversation's column with the book's `assistant.html`, item by item, then pixel for pixel, in Whitehaven and Orient Express: a reply, an owner's message, a day stamp, a notice and the composer. The book's page is edited where the app leaves something out or draws other words: the quiet check-ins, the refs chips, the reminder card, the action buttons, "heartbeat · 09:00", the mention chip, the channel pick and the model pill go, and the notice loses its bold. *(Amended 2026-10-07, [#454](https://github.com/theagenticage/hercule/issues/454): the composer's lip goes too, because memory and heartbeats are not built yet.)* The header and the drawer are not compared, because the book draws a bar and a rail; they are checked by eye, against the prototype.
   - `pnpm --filter @hercule/desktop capture:assistant` captures ~~the Conversation and the open drawer in all five themes, and the sidebar with an assistant in each pose,~~ *(amended 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453): the sidebar with an assistant in each pose, plus the assistant screen (header pill, empty Conversation, not found), in all five themes; ~~the Conversation and the open drawer join it with slice 22~~)* *(amended 2026-10-07, [#454](https://github.com/theagenticage/hercule/issues/454): the Conversation's scenes join it with slice 21, in all five themes; the open drawer joins it with slice 22)* for a check by eye.
   - An end-to-end test opens an assistant from the sidebar, sends a message, answers a Request on the dock and stops a turn, against a real controller whose assistant runs on a scripted runner, as the composer's test does. A second checks that the window, hidden while a reply streams, drops the tap and shows the whole reply when shown again.
+- *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* **Intake's tests:**
+  - Unit tests cover each `client-core` function Intake calls ([What the screen reads](#what-the-screen-reads)): the sections and their order, the row controls, the tabs and More, the bulk plan with its wording, the foot's counts, the triage header, the snooze choices at each hour that changes them, the handlings' cut-off, and the inbox zero line at each moment, the weekend included.
+  - `pnpm compare:bureau` compares the app's Intake with the Intake drawing, [`docs/design/intake-directions/asks/desktop/intake.html`](../design/intake-directions/asks/desktop/intake.html), item by item, then pixel for pixel, in Whitehaven and Orient Express. The app is fed the drawing's signals at the drawing's time. As for the thread, the drawing's page is edited where the app draws other words: the section names, the `↩` hint and the toast. The sidebar is compared against `session-active.html` as before, and the Hercule face is checked by eye.
+  - `pnpm --filter @hercule/desktop capture:intake` captures the states the drawing does not show, in all five themes, for a check by eye: each block type and the fallback line, the build-failed line, a failed answer, Resolved elsewhere, the bulk highlight, Later, Done, Everything and its event pane, the Triage tab with a failed run, the Ignore dialog, inbox zero, tabs moved into More, and the pane hidden in a narrow window. It writes them to `apps/desktop/out/intake/`.
+  - End-to-end tests, each against the compiled binary in a scratch `HERCULE_HOME`. The tests of the screen raise their signals with `hercule signal raise`:
+    - Intake opens from the Hercule face's row and from `⌘⇧I`, and the face follows the screen; `⌥⌘1`, `⌥⌘2` and the switch's arrow keys change the face without leaving the screen.
+    - The Hercule segment's count follows a raised signal, a Done and a snooze.
+    - A new Now signal notifies only while the window is not focused, and a click on the notification opens Intake with the signal selected.
+    - The keys answer a signal: `J`, `↩`, a second `↩`, and `E` on a checked row.
+    - Settings › Intake switches a kind off for one Connection, and Reset brings it back.
+    - The app relaunches on Intake, and on a thread, when that was the last screen.
+    - With the window hidden, the snooze timer still brings a signal back and its notification shows.
 - **The check commands.** The four check commands (AGENTS.md §Check commands) cover `apps/desktop` like every other package.
 
 ## Post-v1
 
 The desktop app is itself post-v1 in [./01-overview-and-scope.md](./01-overview-and-scope.md). These are what later milestones add after the first:
 
-- **The Hercule face and its screens:** Intake, Check-in, Tasks, Runs, Workflows, Fleet, Connections and Notifications. Bureau adds the office to them.
+- **The Hercule face's other screens:** ~~Intake,~~ Check-in, Tasks, Runs, Workflows~~, Fleet, Connections~~ and Notifications. Bureau adds the office to them. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#512](https://github.com/theagenticage/hercule/issues/512).)* The face and Intake are slices 24 to 35. Fleet and Connections are rows that open Settings › Machines and Settings › Connections; screens of their own come later, if ever.
+- *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394).)* **On Intake:**
+  - Undo, for Done, snooze and answers;
+  - raising a signal to Now, the reverse of Not urgent;
+  - "Accept and start *agent*" on a proposal, which creates the Task and starts work on it;
+  - ordering the list by hand ([#513](https://github.com/theagenticage/hercule/issues/513));
+  - Run now on the Triage tab;
+  - the web app's Intake ([./14-web-app.md](./14-web-app.md#the-intake-view));
+  - images in blocks loaded through the controller, not from their source ([#503](https://github.com/theagenticage/hercule/issues/503)).
 - ~~**Assistants,** with~~ *(Amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448): assistants are slices 20 to 22.)* **The stored look:** the book's stored look (Spec change 3) and a run that wears its workflow's face (Spec change 4).
 - *(Added 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* **On an assistant's Conversation** ([#450](https://github.com/theagenticage/hercule/issues/450)): the drawer's Heartbeat, Reminders and Memory live, once heartbeats fire ([#94](https://github.com/theagenticage/hercule/issues/94)) and operations read reminders and memory ([#93](https://github.com/theagenticage/hercule/issues/93)); the header pill's numbers and the composer's lip with them; the refs chips; and channels, with Slack and Discord conversations.
 - **All sessions ~~and Settings,~~ ~~including Appearance: Bureau's five themes, System, and the glass level~~.** *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Settings is slices 11 to 19, except its Providers section, which comes with the provider remodel ([#406](https://github.com/theagenticage/hercule/issues/406)).
@@ -2016,6 +2371,7 @@ Tickets:
 - [Desktop Settings: a quick port, and a new model for providers (#401)](https://github.com/theagenticage/hercule/issues/401) and [Write the Settings port into spec 17, and its build tickets (#402)](https://github.com/theagenticage/hercule/issues/402)
 - [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448), with its prototype on branch `prototype/desktop-assistant`
 - [Web app architecture: observability-first, desktop-shell-ready (#19)](https://github.com/theagenticage/hercule/issues/19)
+- *(Added 2026-10-10.)* [Write the Intake changes and the build tickets that replace #91 (#395)](https://github.com/theagenticage/hercule/issues/395), [The desktop Intake screen in spec 17 (#394)](https://github.com/theagenticage/hercule/issues/394), [The desktop Hercule face (#512)](https://github.com/theagenticage/hercule/issues/512), and the Intake decisions they draw on: [#385](https://github.com/theagenticage/hercule/issues/385), [#386](https://github.com/theagenticage/hercule/issues/386), [#387](https://github.com/theagenticage/hercule/issues/387), [#388](https://github.com/theagenticage/hercule/issues/388), [#390](https://github.com/theagenticage/hercule/issues/390), [#391](https://github.com/theagenticage/hercule/issues/391), [#392](https://github.com/theagenticage/hercule/issues/392), [#393](https://github.com/theagenticage/hercule/issues/393), [#397](https://github.com/theagenticage/hercule/issues/397), [#398](https://github.com/theagenticage/hercule/issues/398)
 
 ADRs:
 
@@ -2023,5 +2379,8 @@ ADRs:
 - [ADR 0017 - The web app is a static pure client of the public API](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)
 - [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
 - [ADR 0027 - A decision resolves when its question is answered, wherever](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)
+- *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* [ADR 0040 - Intake holds Signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md)
 
 Prototype: the Crew Bureau book, ~~[`docs/design/crew-bureau/index.html`](../design/crew-bureau/index.html)~~ its second edition, [`docs/design/crew-bureau-2/index.html`](../design/crew-bureau-2/index.html) *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.
+
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Intake's pixel reference: the Intake drawing, [`docs/design/intake-directions/asks/desktop/intake.html`](../design/intake-directions/asks/desktop/intake.html).
