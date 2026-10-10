@@ -38,8 +38,13 @@ const CORE_KIND_LABELS: Readonly<Record<string, string>> = {
   fyi: "FYI",
 };
 
-/** Returns `text` with its first letter in lower case: "Review requested" becomes "review requested". */
-const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
+/**
+ * Returns `text` with its first letter in lower case: "Review requested"
+ * becomes "review requested". Text that starts with an acronym, such as
+ * "FYI", is returned unchanged, because "fYI" would misspell it.
+ */
+const lowerFirst = (text: string): string =>
+  /^\p{Lu}{2}/u.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1);
 
 /** Returns `text` with its first letter in upper case: "an agent" becomes "An agent". */
 const upperFirst = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);

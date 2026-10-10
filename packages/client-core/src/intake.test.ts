@@ -289,6 +289,12 @@ describe("describeSignalRow", () => {
     ).toBe("You · proposal");
   });
 
+  it("keeps an acronym kind in capitals", () => {
+    expect(describeSignalRow(buildSignal("a", { kind: "fyi", origin: fromUser() }), PLUGINS)).toBe(
+      "You · FYI",
+    );
+  });
+
   it("leaves the kind out of an unsure row, which carries its own label", () => {
     expect(
       describeSignalRow(
