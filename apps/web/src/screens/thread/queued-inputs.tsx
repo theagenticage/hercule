@@ -17,8 +17,8 @@ import { useSenderReading } from "./use-sender-reading";
 /**
  * The list of queued messages above the composer, each with Steer and Cancel,
  * and with small thumbnails of its images before its text. A message another
- * session's agent queued starts with "From" and its sender, so it never looks
- * like one the owner queued; the owner can steer or cancel it all the same.
+ * session's agent queued starts with "From" and its sender, set apart from the
+ * message by a "·", so it never looks like one the owner queued; the owner can steer or cancel it all the same.
  * The query returns the session's whole input history; this component shows
  * only the inputs still `queued`, because sent, delivered or cancelled ones
  * can no longer be acted on.
@@ -124,10 +124,12 @@ function QueuedRow({
 }
 
 /**
- * Shows "From" and the sender of a message another session's agent queued.
- * Every row from one sender shares one cached read, so a long queue reads
- * each sender once. While the sender is still being read, it shows nothing
- * rather than a name that may be wrong.
+ * Shows "From", the sender of a message another session's agent queued, and
+ * a "·" that parts the sender from the message, so the name never reads as
+ * the message's first words. A long name is cut with an ellipsis and shows
+ * whole as a tooltip. Every row from one sender shares one cached read, so a
+ * long queue reads each sender once. While the sender is still being read,
+ * it shows nothing rather than a name that may be wrong.
  */
 function QueuedSender({
   senderSessionId,
@@ -137,9 +139,17 @@ function QueuedSender({
   const sender = useSenderReading(senderSessionId);
   if (sender === "loading") return null;
   return (
-    <span className="max-w-[40%] shrink-0 truncate text-row text-muted">
-      From <ActorLink actor={sender} plainClassName="text-muted" />
-    </span>
+    <>
+      <span className="flex min-w-0 max-w-[40%] shrink-0 gap-1 text-row text-muted">
+        {/* The space keeps "From" apart from the name in the text a screen
+            reader reads; on screen, the gap does that. */}
+        <span className="shrink-0">{"From "}</span>
+        <ActorLink actor={sender} plainClassName="text-muted" truncates />
+      </span>
+      <span aria-hidden="true" className="shrink-0 text-row text-faint">
+        {" · "}
+      </span>
+    </>
   );
 }
 

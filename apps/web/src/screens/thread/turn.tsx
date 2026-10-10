@@ -3,10 +3,10 @@
  *
  * - a centred time separator, when the screen passes one;
  * - each message sent into the turn, with its images, as its own
- *   right-aligned bubble in transcript order, unless `hidesUserMessage`
- *   leaves them out. A message steered into the running turn is marked
- *   "steered", and a message another session's agent sent names its sender
- *   under the bubble;
+ *   right-aligned bubble in transcript order. `hidesOpeningMessage` leaves
+ *   out the message that opened the turn, and only that one. A message
+ *   steered into the running turn is marked "steered", and a message another
+ *   session's agent sent names its sender under the bubble;
  * - one line per subagent the turn started;
  * - the assistant's prose at full width;
  * - the divider that shows how long the agent worked, or how the turn ended,
@@ -31,7 +31,7 @@ export function Turn({
   live,
   tailRef,
   stamp,
-  hidesUserMessage = false,
+  hidesOpeningMessage = false,
 }: {
   readonly turn: ThreadTurn;
   /** The lines of the subagents the turn started, drawn under the turn's messages. */
@@ -43,20 +43,19 @@ export function Turn({
   /** The time separator to show above the turn; none when undefined. */
   readonly stamp: string | undefined;
   /**
-   * Whether to leave out the turn's messages. A subagent's page sets it on
-   * the first turn, whose input is the brief the page's brief card already
-   * shows.
+   * Whether to leave out the message that opened the turn. A subagent's page
+   * sets it on the first turn, whose opening message is the brief the page's
+   * brief card already shows. A message steered into that turn later is not
+   * part of the brief, so it still shows.
    */
-  readonly hidesUserMessage?: boolean;
+  readonly hidesOpeningMessage?: boolean;
 }): JSX.Element {
   return (
     <div className="flex flex-col gap-2">
       {stamp === undefined ? null : <TimeSeparator stamp={stamp} />}
-      {hidesUserMessage
-        ? null
-        : turn.userMessages.map((message) => (
-            <UserMessage key={message.itemId} message={message} />
-          ))}
+      {(hidesOpeningMessage ? turn.userMessages.slice(1) : turn.userMessages).map((message) => (
+        <UserMessage key={message.itemId} message={message} />
+      ))}
       {spawnLines}
       {turn.assistantText === "" && !live ? null : (
         // Until the first word streams into the tail, the prose is hidden, so
@@ -88,9 +87,9 @@ function UserMessage({ message }: { readonly message: ThreadUserMessage }): JSX.
   const bubble = <MessageBubble text={message.text} images={images} imagesRef={observe} />;
   if (message.senderSessionId !== undefined) {
     return (
-      <AgentMessage senderSessionId={message.senderSessionId} steered={message.steered}>
+      <AgentSentMessage senderSessionId={message.senderSessionId} steered={message.steered}>
         {bubble}
-      </AgentMessage>
+      </AgentSentMessage>
     );
   }
   if (!message.steered) return <div className="flex justify-end">{bubble}</div>;
@@ -110,9 +109,11 @@ function UserMessage({ message }: { readonly message: ThreadUserMessage }): JSX.
  *
  * While the sender is still being read, which happens only for a sender that
  * first appears while the thread streams, the sender is left out of the line
- * rather than filled with a name that may be wrong.
+ * rather than filled with a name that may be wrong. The message is not a
+ * named group until then either, because a group with no name tells a
+ * screen reader nothing.
  */
-function AgentMessage({
+function AgentSentMessage({
   senderSessionId,
   steered,
   children,
@@ -124,7 +125,7 @@ function AgentMessage({
   const sender = useSenderReading(senderSessionId);
   return (
     <div
-      role="group"
+      role={sender === "loading" ? undefined : "group"}
       aria-label={sender === "loading" ? undefined : `Message from ${sender.label}`}
       className="flex flex-col items-end gap-1"
     >
@@ -133,7 +134,7 @@ function AgentMessage({
         <p className="text-meta text-faint">
           {sender === "loading" ? null : (
             <>
-              Sent by <ActorLink actor={sender} plainClassName="text-muted" />
+              Sent by <ActorLink actor={sender} plainClassName="text-faint" />
             </>
           )}
           {sender !== "loading" && steered ? " · " : null}

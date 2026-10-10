@@ -4143,6 +4143,9 @@ describe("Thread: an agent message that arrives while the thread is open", () =>
     await screen.findByText("The 3DS fix is merged", { selector: "p" });
     expect(readPageText()).toContain("Added a test too.");
     expect(screen.queryByText(/^Sent by/)).toBeNull();
+    // Until its sender is known, the message is no group, since a group with
+    // no name tells a screen reader nothing.
+    expect(screen.queryByRole("group")).toBeNull();
 
     answer();
     const agentMessage = await screen.findByRole("group", { name: "Message from Fix EU checkout" });
@@ -4170,7 +4173,9 @@ describe("Thread: a queued message another agent sent", () => {
     const link = await screen.findByRole("link", { name: "Fix EU checkout" });
     expect(link.getAttribute("href")).toBe(`/threads/${SENDER.id}`);
     expect(readPageText(link.parentElement)).toBe("From Fix EU checkout");
-    expect(readPageText()).toContain("From Fix EU checkoutThe 3DS fix is merged");
+    // A name too long for the row is cut, so its whole text is the tooltip.
+    expect(link.getAttribute("title")).toBe("Fix EU checkout");
+    expect(readPageText()).toContain("From Fix EU checkout · The 3DS fix is merged");
     // The owner's row has no sender.
     expect(screen.getAllByText(/^From/)).toHaveLength(1);
     expect(screen.getByText("Also check the logs").previousElementSibling).toBeNull();
@@ -4186,7 +4191,7 @@ describe("Thread: a queued message another agent sent", () => {
     // row the loader did not read, or whose sender it did not read, would
     // not be drawn yet, or be drawn without "From".
     const row = screen.getByText("The 3DS fix is merged").parentElement;
-    expect(readPageText(row)).toBe("From Fix EU checkoutThe 3DS fix is mergedSteerCancel");
+    expect(readPageText(row)).toBe("From Fix EU checkout · The 3DS fix is mergedSteerCancel");
   });
 
   it("starts the row with From another agent when the sender cannot be read", async () => {
@@ -4200,7 +4205,7 @@ describe("Thread: a queued message another agent sent", () => {
 
     const row = (await screen.findByText("The 3DS fix is merged")).parentElement;
     await waitFor(() => {
-      expect(readPageText(row)).toBe("From another agentThe 3DS fix is mergedSteerCancel");
+      expect(readPageText(row)).toBe("From another agent · The 3DS fix is mergedSteerCancel");
     });
     expect(within(row!).queryByRole("link")).toBeNull();
   });
