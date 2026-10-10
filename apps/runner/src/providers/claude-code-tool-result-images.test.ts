@@ -61,8 +61,11 @@ const buildToolResult = (content: ReadonlyArray<unknown>, toolUseResult?: unknow
     session_id: "native",
   }) as SDKMessage;
 
-const replace = (uploader: AttachmentUploader, sdk: SDKMessage) =>
-  Effect.runPromise(replaceToolResultImages(uploader, SESSION, sdk));
+const replace = (
+  uploader: AttachmentUploader,
+  sdk: SDKMessage,
+  signal = new AbortController().signal,
+) => Effect.runPromise(replaceToolResultImages(uploader, SESSION, sdk, signal));
 
 /** Returns the content of the first tool result in a replaced message. */
 const readContent = (sdk: SDKMessage): unknown =>
@@ -163,6 +166,22 @@ describe("replacing the images in a tool result", () => {
     expect(uploader.uploads).toEqual([PNG]);
   });
 
+  it("replaces an image in an MCP tool's structured content, in MCP's own block shape", async () => {
+    const uploader = createRecordingUploader();
+    const replaced = await replace(
+      uploader,
+      buildToolResult([buildImageBlock(PNG)], {
+        structuredContent: { screenshot: { type: "image", data: PNG, mimeType: "image/png" } },
+      }),
+    );
+
+    expect(replaced).toMatchObject({
+      tool_use_result: { structuredContent: { screenshot: buildStored(PNG) } },
+    });
+    expect(JSON.stringify(replaced)).not.toContain(PNG);
+    expect(uploader.uploads).toEqual([PNG]);
+  });
+
   it("replaces image blocks in a structured output that is an array of blocks", async () => {
     const uploader = createRecordingUploader();
     const replaced = await replace(
@@ -208,6 +227,35 @@ describe("replacing the images in a tool result", () => {
 
     expect(readContent(replaced)).toEqual([unavailable]);
     expect(JSON.stringify(replaced)).not.toContain(PNG);
+  });
+
+  it("starts no more uploads once the session stops, and keeps none of the bytes", async () => {
+    const stopping = new AbortController();
+    const started: Array<string> = [];
+    const uploader: AttachmentUploader = {
+      upload: (_sessionId, bytes) =>
+        Effect.sync(() => {
+          started.push(Buffer.from(bytes).toString("base64"));
+          // The session stops while the first uploads are in progress.
+          stopping.abort();
+          return buildStored(PNG);
+        }),
+    };
+    const images = Array.from({ length: 10 }, (_, i) =>
+      Buffer.concat([PNG_BYTES, Buffer.from([i])]).toString("base64"),
+    );
+    const replaced = await replace(
+      uploader,
+      buildToolResult(images.map(buildImageBlock)),
+      stopping.signal,
+    );
+
+    expect(started.length).toBeLessThanOrEqual(4);
+    expect(readContent(replaced)).toContainEqual({
+      type: "image",
+      unavailable: "The session stopped before the image was kept.",
+    });
+    for (const data of images) expect(JSON.stringify(replaced)).not.toContain(data);
   });
 
   it("returns a message with no image in a tool result as the same object, without uploading", async () => {

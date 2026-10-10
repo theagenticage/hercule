@@ -233,11 +233,12 @@ const startUploadStub = (
 const TOOL_SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const STORED = { id: "0199e0e7-0000-7000-8000-0000000000c1", mimeType: "image/png", sizeBytes: 70 };
 
-const uploadPng = (url: string) =>
+const uploadPng = (url: string, signal = new AbortController().signal) =>
   Effect.runPromise(
     makeAttachmentUploader({ controllerUrl: url, credential: CREDENTIAL }).upload(
       TOOL_SESSION,
       PNG,
+      signal,
     ),
   );
 
@@ -287,6 +288,20 @@ describe("the attachment uploader", () => {
     expect(await uploadPng(stub.url)).toEqual({
       type: "image",
       unavailable: "The image could not be kept: the controller's answer was not a stored image",
+    });
+  });
+
+  it("ends the request and returns the image as unavailable when the session stops", async () => {
+    const stopping = new AbortController();
+    // The stub never answers, so only the abort can end the request.
+    const stub = startUploadStub(() => {
+      stopping.abort();
+      return new Promise<Response>(() => undefined);
+    });
+
+    expect(await uploadPng(stub.url, stopping.signal)).toEqual({
+      type: "image",
+      unavailable: "The image could not be kept: the session stopped before it was stored",
     });
   });
 

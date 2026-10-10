@@ -198,11 +198,16 @@ export interface AttachmentUploader {
   /**
    * Uploads one image from a tool's result to the controller, which
    * stores it for the session, and returns the reference to keep in the
-   * image's place. Never fails: an upload that fails, is refused, or does not
-   * finish within `ATTACHMENT_UPLOAD_TIMEOUT` returns the image as
+   * image's place. Aborting `signal`, when the session stops, ends the
+   * request. Never fails: an upload that fails, is refused, is aborted, or
+   * does not finish within `ATTACHMENT_UPLOAD_TIMEOUT` returns the image as
    * `unavailable`, with the reason for the user.
    */
-  readonly upload: (sessionId: string, bytes: Uint8Array) => Effect.Effect<ToolResultImage>;
+  readonly upload: (
+    sessionId: string,
+    bytes: Uint8Array,
+    signal: AbortSignal,
+  ) => Effect.Effect<ToolResultImage>;
 }
 
 const decodeToolResultAttachment = Schema.decodeUnknownSync(ToolResultAttachment);
@@ -221,7 +226,11 @@ export const makeAttachmentUploader = (options: {
    * message the user can read. The controller reads the image's type from
    * its first bytes, so the request names no type.
    */
-  const send = async (sessionId: string, bytes: Uint8Array): Promise<ToolResultAttachment> => {
+  const send = async (
+    sessionId: string,
+    bytes: Uint8Array,
+    signal: AbortSignal,
+  ): Promise<ToolResultAttachment> => {
     const url = new URL(RUNNER_ATTACHMENTS_PATH, options.controllerUrl);
     url.searchParams.set("sessionId", sessionId);
     let response: Response;
@@ -230,13 +239,18 @@ export const makeAttachmentUploader = (options: {
         method: "POST",
         headers: { authorization: `Bearer ${options.credential}` },
         body: bytes,
-        signal: AbortSignal.timeout(Duration.toMillis(ATTACHMENT_UPLOAD_TIMEOUT)),
+        signal: AbortSignal.any([
+          signal,
+          AbortSignal.timeout(Duration.toMillis(ATTACHMENT_UPLOAD_TIMEOUT)),
+        ]),
       });
     } catch (error) {
       throw new Error(
-        error instanceof DOMException && error.name === "TimeoutError"
-          ? `the controller did not store it within ${Duration.format(ATTACHMENT_UPLOAD_TIMEOUT)}`
-          : `the controller could not be reached: ${describeError(error)}`,
+        signal.aborted
+          ? "the session stopped before it was stored"
+          : error instanceof DOMException && error.name === "TimeoutError"
+            ? `the controller did not store it within ${Duration.format(ATTACHMENT_UPLOAD_TIMEOUT)}`
+            : `the controller could not be reached: ${describeError(error)}`,
         { cause: error },
       );
     }
@@ -254,13 +268,16 @@ export const makeAttachmentUploader = (options: {
   };
 
   return {
-    upload: (sessionId, bytes) =>
-      Effect.match(Effect.tryPromise({ try: () => send(sessionId, bytes), catch: describeError }), {
-        onSuccess: (attachment): ToolResultImage => ({ type: "image", attachment }),
-        onFailure: (why): ToolResultImage => ({
-          type: "image",
-          unavailable: truncateFact(`The image could not be kept: ${why}`),
-        }),
-      }),
+    upload: (sessionId, bytes, signal) =>
+      Effect.match(
+        Effect.tryPromise({ try: () => send(sessionId, bytes, signal), catch: describeError }),
+        {
+          onSuccess: (attachment): ToolResultImage => ({ type: "image", attachment }),
+          onFailure: (why): ToolResultImage => ({
+            type: "image",
+            unavailable: truncateFact(`The image could not be kept: ${why}`),
+          }),
+        },
+      ),
   };
 };

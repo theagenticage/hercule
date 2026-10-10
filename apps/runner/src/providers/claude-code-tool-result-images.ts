@@ -34,6 +34,9 @@ const IMAGE_DATA_KEYS: ReadonlySet<string> = new Set(["base64", "image_data"]);
 /** The reason an image too large for the controller is not kept. */
 const IMAGE_TOO_LARGE = `The image is larger than ${String(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB, so it was not kept.`;
 
+/** The reason an image whose upload had not started when the session stopped is not kept. */
+const SESSION_STOPPED = "The session stopped before the image was kept.";
+
 /** Checks whether a content block is an image with inline base64 data. */
 const isBase64ImageBlock = (block: unknown): block is Base64ImageBlock => {
   if (typeof block !== "object" || block === null) return false;
@@ -41,6 +44,21 @@ const isBase64ImageBlock = (block: unknown): block is Base64ImageBlock => {
   if (type !== "image" || typeof source !== "object" || source === null) return false;
   const { type: sourceType, data, media_type } = source as Record<string, unknown>;
   return sourceType === "base64" && typeof data === "string" && typeof media_type === "string";
+};
+
+/**
+ * Returns the base64 data of an image block in a tool's structured output,
+ * or undefined for any other value. An image block has one of two shapes:
+ *
+ * - the Messages API's, with the data in `source.data`, as Claude's
+ *   subagents and most MCP tools repeat their result's content;
+ * - MCP's own, with the data in `data`, as an MCP tool's
+ *   `structuredContent` holds it.
+ */
+const readImageBlockData = (value: object): string | undefined => {
+  if (isBase64ImageBlock(value)) return value.source.data;
+  const { type, data } = value as { readonly type?: unknown; readonly data?: unknown };
+  return type === "image" && typeof data === "string" ? data : undefined;
 };
 
 /** Returns the content array of a `tool_result` block, or undefined for any other block. */
@@ -71,19 +89,26 @@ const computeDecodedSize = (data: string): number => {
 };
 
 /**
- * Uploads one image and returns its reference. An image larger than
- * `MAX_ATTACHMENT_BYTES` is not uploaded: the controller would refuse it.
+ * Uploads one image and returns its reference. The image is decoded only
+ * when its upload starts. These images are not uploaded:
+ *
+ * - an image larger than `MAX_ATTACHMENT_BYTES`, which the controller would
+ *   refuse;
+ * - any image once `signal` is aborted, because the session stopped.
  */
 const uploadImage = (
   uploader: AttachmentUploader,
   sessionId: string,
   image: Base64ImageBlock,
-): Effect.Effect<ToolResultImage> => {
-  if (computeDecodedSize(image.source.data) > MAX_ATTACHMENT_BYTES) {
-    return Effect.succeed({ type: "image", unavailable: IMAGE_TOO_LARGE });
-  }
-  return uploader.upload(sessionId, Buffer.from(image.source.data, "base64"));
-};
+  signal: AbortSignal,
+): Effect.Effect<ToolResultImage> =>
+  Effect.suspend(() => {
+    if (signal.aborted) return Effect.succeed({ type: "image", unavailable: SESSION_STOPPED });
+    if (computeDecodedSize(image.source.data) > MAX_ATTACHMENT_BYTES) {
+      return Effect.succeed({ type: "image", unavailable: IMAGE_TOO_LARGE });
+    }
+    return uploader.upload(sessionId, Buffer.from(image.source.data, "base64"), signal);
+  });
 
 /**
  * Returns a copy of `value`, a tool's structured output, in which each copy
@@ -94,8 +119,8 @@ const uploadImage = (
  *   writes it;
  * - an `image_data` field holding the image's data, as Claude's `Read` of a
  *   notebook writes a cell output's image;
- * - an image block with the image's data, as an MCP tool or a subagent
- *   repeats its result's content.
+ * - an image block with the image's data, in either shape
+ *   `readImageBlockData` reads.
  *
  * Other base64, such as a PDF's, is left as it is.
  */
@@ -105,7 +130,8 @@ const replaceUploadedImages = (
 ): unknown => {
   if (Array.isArray(value)) return value.map((item) => replaceUploadedImages(item, references));
   if (typeof value !== "object" || value === null) return value;
-  const blockReference = isBase64ImageBlock(value) ? references.get(value.source.data) : undefined;
+  const data = readImageBlockData(value);
+  const blockReference = data === undefined ? undefined : references.get(data);
   if (blockReference !== undefined) return blockReference;
   return Object.fromEntries(
     Object.entries(value).map(([key, field]) => {
@@ -122,13 +148,15 @@ const replaceUploadedImages = (
  * alike. Each distinct image is uploaded once, and up to
  * `MAX_PARALLEL_UPLOADS` uploads of one message run in parallel. A message with no such image is returned as the
  * same object, with no work done, because every SDK message passes through
- * here. Never fails: an image that cannot be kept becomes `unavailable`, and
- * its bytes are dropped all the same.
+ * here. Aborting `signal`, when the session stops, ends the uploads in
+ * progress and starts no more. Never fails: an image that cannot be kept
+ * becomes `unavailable`, and its bytes are dropped all the same.
  */
 export const replaceToolResultImages = (
   uploader: AttachmentUploader,
   sessionId: string,
   sdk: SDKMessage,
+  signal: AbortSignal,
 ): Effect.Effect<SDKMessage> => {
   const images = findToolResultImages(sdk);
   if (images.length === 0 || sdk.type !== "user") return Effect.succeed(sdk);
@@ -138,7 +166,7 @@ export const replaceToolResultImages = (
       distinct,
       ([data, image]) =>
         Effect.map(
-          uploadImage(uploader, sessionId, image),
+          uploadImage(uploader, sessionId, image, signal),
           (reference) => [data, reference] as const,
         ),
       { concurrency: MAX_PARALLEL_UPLOADS },

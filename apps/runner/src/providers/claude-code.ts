@@ -644,6 +644,8 @@ interface Live {
   readonly state: Normalizing;
   /** Uploads the images in the session's tool results, so its events carry only references. */
   readonly attachmentUploader: AttachmentUploader;
+  /** Aborted by `stopSession`, so a stop does not wait for the images still uploading. */
+  readonly uploads: AbortController;
   /**
    * The requests this session is waiting on, by request id: one for each
    * `canUseTool` call still open, from the session's own agent or a subagent.
@@ -923,7 +925,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       for await (const sdk of held.stream) {
         // Awaited one message at a time, so the events keep the harness's order.
         const withReferences = await Effect.runPromise(
-          replaceToolResultImages(held.attachmentUploader, sessionId, sdk),
+          replaceToolResultImages(held.attachmentUploader, sessionId, sdk, held.uploads.signal),
         );
         publishMessageEvents(held, normalize(held.state, withReferences));
         sendDueStops(held);
@@ -1048,6 +1050,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
                 spec.continue?.subagents,
               ),
               attachmentUploader: ctx.attachmentUploader,
+              uploads: new AbortController(),
               parks: new Map(),
               stopping: undefined,
               inputGeneration: 0,
@@ -1157,6 +1160,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         held.stopping = reason;
         // Do not end the parks here: closing the stream ends the pump, and the
         // pump's `finally` ends the parks on every exit.
+        held.uploads.abort();
         held.input.end();
         held.stream.close();
       }),
