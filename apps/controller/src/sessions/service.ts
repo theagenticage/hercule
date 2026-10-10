@@ -2649,8 +2649,9 @@ const make = Effect.gen(function* () {
      * The changed input becomes the caller's: its actor is the caller's and
      * its source is `user`, even on an input a subscription created. It is
      * sent as the caller's input, images included, and the agent that
-     * receives it is told the caller sent it. The images it already carries stay, and a new image
-     * must have been uploaded by the caller (`readClaimableAttachments`).
+     * receives it is told the caller sent it. The images it already carries
+     * stay, and a new image must have been uploaded by the caller
+     * (`readClaimableAttachments`).
      */
     updateInput: (input: InputUpdate): Effect.Effect<Input, InputError> =>
       Effect.gen(function* () {

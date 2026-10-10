@@ -1749,6 +1749,26 @@ describe("session.input with steer", () => {
     });
   });
 
+  it("fails with the steer's error when the session exited while the steer was out, and the input was cancelled", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startBusySession(arranged, "hello");
+      arranged.wire.answering(() => undefined);
+
+      const pending = sendInput(arranged, session.id, { text: "steer me", steer: true });
+      await waitForFrames(arranged.wire, "sessionInput", 1);
+      reportExited(arranged.wire, session.id, 3);
+      await waitForSession(arranged, session.id, (one) => one.status === "exited");
+      arranged.wire.release({ message: "the harness exited" });
+      const response = await pending;
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      const [input] = (await listInputs(arranged, session.id)).filter(
+        (one) => one.text === "steer me",
+      );
+      expect(input).toMatchObject({ status: "cancelled" });
+    });
+  });
+
   it("opens a turn on an idle session, as without the flag", async () => {
     await withFleet(async (arranged) => {
       const session = await startIdleSession(arranged, "hello");

@@ -993,11 +993,13 @@ const make = Effect.gen(function* () {
      * refused the input as well. Today that is `session.steer`, the same
      * grant `session.input` itself needs.
      *
-     * A steer that does not go through (the runner refused it, is not
+     * A steer that fails for any reason (the runner refused it, is not
      * connected, or did not answer in time) is logged, and the result is
-     * `queued`: the input is stored and waiting, and the flush at the turn's
-     * end sends it. Failing the call would make the sender send it again, and
-     * the agent would get the message twice.
+     * `queued` as long as the input still waits: the flush at the turn's end
+     * sends it. Failing the call would make the sender send it again, and
+     * the agent would get the message twice. When the input no longer waits
+     * (it was cancelled because the session exited, or it was sent with
+     * no confirmed answer), the steer's error is returned.
      *
      * A delivered result always comes from the runner, never from the status
      * the controller read: only the adapter knows whether the input started a
@@ -1023,16 +1025,22 @@ const make = Effect.gen(function* () {
         // the turn's end can never send it a second time.
         if (steer === true && session.status === "busy") {
           const outcome = yield* steerInto(session, row).pipe(
-            Effect.catchIf(
-              (error): error is InvalidState => error instanceof InvalidState,
-              (error) =>
-                Effect.as(
-                  Effect.logInfo("A message was not steered; it waits for the turn's end", {
-                    sessionId: session.id,
-                    reason: error.error.message,
-                  }),
-                  Option.none(),
-                ),
+            Effect.catch((error) =>
+              sessions.queuedInput(session.id, row.id).pipe(
+                Effect.matchEffect({
+                  onSuccess: () =>
+                    Effect.as(
+                      Effect.logInfo("A message was not steered; it waits for the turn's end", {
+                        sessionId: session.id,
+                        reason: "error" in error ? error.error.message : error.message,
+                      }),
+                      Option.none(),
+                    ),
+                  // `queued` would claim the input still waits, which is no
+                  // longer true, so the steer's own error is the answer.
+                  onFailure: () => Effect.fail(error),
+                }),
+              ),
             ),
           );
           if (Option.isSome(outcome)) return outcome.value;
