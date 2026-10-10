@@ -5,7 +5,11 @@
  */
 import type { JSX } from "react";
 import type { DescribeLine, SignalAction } from "@hercule/contract";
-import type { SignalAnswer, SignalAnswerStyle } from "@hercule/client-core";
+import {
+  trimAnswerEllipsis,
+  type SignalAnswer,
+  type SignalAnswerStyle,
+} from "@hercule/client-core";
 import { buildLook, Face } from "../../faces";
 
 /** The classes of an answer's button, by how the pane draws the answer. */
@@ -241,7 +245,7 @@ function ReplyBox({
           className="ad-compose-input"
           data-compose-for={action.id}
           rows={3}
-          aria-label={action.label.replace(/…$/, "")}
+          aria-label={trimAnswerEllipsis(action.label)}
           aria-describedby={error === null ? describeId : `${describeId} ${errorId}`}
           placeholder={action.field?.placeholder}
           value={draft}
@@ -267,7 +271,7 @@ function ReplyBox({
             data-unready={empty || undefined}
             onClick={send}
           >
-            {action.label.replace(/…$/, "")} <kbd>⌘↩</kbd>
+            {trimAnswerEllipsis(action.label)} <kbd>⌘↩</kbd>
           </button>
         </div>
       </div>

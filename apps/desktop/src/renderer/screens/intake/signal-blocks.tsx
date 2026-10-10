@@ -11,10 +11,14 @@ import type {
   MessagesBlock,
   Person,
   TaskCreateInput,
-  TextBlock,
   ThreadMessage,
 } from "@hercule/contract";
-import { formatMessageTime, buildInitials, UNKNOWN_BLOCK_TEXT } from "@hercule/client-core";
+import {
+  buildInitials,
+  formatMessageTime,
+  isKnownBlock,
+  UNKNOWN_BLOCK_TEXT,
+} from "@hercule/client-core";
 import { ArrowIcon } from "../../icons/arrow";
 import { BranchIcon } from "../../icons/branch";
 import { DiffIcon } from "../../icons/diff";
@@ -52,11 +56,7 @@ export function SignalBlocks({
   );
 }
 
-/**
- * Renders one block. A block whose type is known always fits that type's
- * schema, because the contract never reads a known type as an unknown block,
- * so each case reads the block as its type.
- */
+/** Renders one block, or one quiet line for a block of a type this app does not know. */
 function SignalBlock({
   block,
   timezone,
@@ -64,21 +64,20 @@ function SignalBlock({
   readonly block: Block;
   readonly timezone: string;
 }): JSX.Element {
+  if (!isKnownBlock(block)) return <p className="b-quiet">{UNKNOWN_BLOCK_TEXT}</p>;
   switch (block.type) {
     case "text":
       return (
         <div className="b-words">
-          <Markdown text={(block as TextBlock).markdown} />
+          <Markdown text={block.markdown} inlineImages />
         </div>
       );
     case "messages":
-      return <MessagesBlockView block={block as MessagesBlock} timezone={timezone} />;
+      return <MessagesBlockView block={block} timezone={timezone} />;
     case "change":
-      return <ChangeBlockView block={block as ChangeBlock} />;
+      return <ChangeBlockView block={block} />;
     case "checks":
-      return <ChecksBlockView block={block as ChecksBlock} />;
-    default:
-      return <p className="b-quiet">{UNKNOWN_BLOCK_TEXT}</p>;
+      return <ChecksBlockView block={block} />;
   }
 }
 
@@ -147,7 +146,7 @@ function Message({
         </p>
       )}
       <div className="b-msg-text b-words">
-        <Markdown text={message.text} breaks />
+        <Markdown text={message.text} breaks inlineImages />
       </div>
       {(attachments !== undefined || readTheRest) && (
         <p className="b-msg-meta">
