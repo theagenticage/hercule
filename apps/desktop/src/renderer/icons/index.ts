@@ -13,10 +13,14 @@
 // fills small dots (radius .4 to .6) at runtime; here the fill is written on
 // the dot itself.
 export { IconFrame, type IconProps } from "./icon-frame";
+export { AgentIcon } from "./agent";
+export { BoltIcon } from "./bolt";
 export { BoundIcon } from "./bound";
 export { BranchIcon } from "./branch";
 export { ChatIcon } from "./chat";
 export { CheckIcon } from "./check";
+export { ChevronDownIcon } from "./chevron-down";
+export { ChevronLeftIcon } from "./chevron-left";
 export { ChevronRightIcon } from "./chevron-right";
 export { ClockIcon } from "./clock";
 export { CloseIcon } from "./close";
@@ -37,14 +41,17 @@ export { KeyIcon } from "./key";
 export { LaptopIcon } from "./laptop";
 export { ListIcon } from "./list";
 export { MicIcon } from "./mic";
+export { MinusIcon } from "./minus";
 export { MoonIcon } from "./moon";
 export { MoreIcon } from "./more";
 export { OfficeIcon } from "./office";
 export { PaletteIcon } from "./palette";
 export { PauseIcon } from "./pause";
+export { PlayIcon } from "./play";
 export { PlusIcon } from "./plus";
 export { PuzzleIcon } from "./puzzle";
 export { QuestionIcon } from "./question";
+export { RunsIcon } from "./runs";
 export { SearchIcon } from "./search";
 export { SendIcon } from "./send";
 export { ServerIcon } from "./server";
@@ -60,4 +67,5 @@ export { TerminalIcon } from "./terminal";
 export { ThreadsIcon } from "./threads";
 export { UndoIcon } from "./undo";
 export { UserIcon } from "./user";
+export { WorkflowsIcon } from "./workflows";
 export { WorkspaceIcon } from "./workspace";

@@ -1410,13 +1410,16 @@ export const startApp = async (fake: FakeBridge): Promise<RenderedApp> => {
  * The app starts where it would at launch, unless `path` is given: at `/`,
  * or at the last open thread when one is stored for the controller (see
  * `last-thread.ts`). A path lets a test open a screen, such as a thread at
- * `/threads/<id>`, without clicking its way there.
+ * `/threads/<id>`, without clicking its way there. `seed` fills the query
+ * cache before the first navigation, for a screen whose reads the stubbed API
+ * cannot answer, such as the Workflows prototype's.
  */
 export const renderApp = async (
   fake: FakeBridge,
-  { path }: { readonly path?: string } = {},
+  { path, seed }: { readonly path?: string; readonly seed?: (context: RouterContext) => void } = {},
 ): Promise<RenderedApp> => {
   const { context, live } = await buildTestContext(fake);
+  seed?.(context);
   const router = createAppRouter(context);
   if (path !== undefined) router.history.replace(path);
   await router.load();

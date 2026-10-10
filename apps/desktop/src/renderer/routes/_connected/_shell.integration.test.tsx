@@ -13,6 +13,11 @@ import type { OpenRequest, Session, SessionRequest } from "@hercule/contract";
 import { ageClock } from "../../app/age-clock";
 import { projectsQuery, threadsQuery } from "../../app/queries";
 import {
+  triggersQuery,
+  waitingRunSessionsQuery,
+  workflowListQuery,
+} from "../../screens/workflows/workflow-queries";
+import {
   buildErrorBody,
   buildFixtureAssistant,
   buildFixtureAssistantSession,
@@ -453,6 +458,28 @@ describe("File > New Thread", () => {
         .map((row) => row.textContent),
     ).toEqual(["No project", "New project"]);
     expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.runbook}`);
+  });
+});
+
+describe("Go > Workflows", () => {
+  it("opens Workflows, and closes the project picker", async () => {
+    const { context, fake, router } = await startShell({
+      path: `/threads/${FIXTURE_THREAD_IDS.runbook}`,
+    });
+    // The list's reads need a contract addition the controller does not
+    // have yet, so the cache holds what they would read: no workflow.
+    const client = context.controller!.client;
+    context.queryClient.setQueryData(workflowListQuery().queryKey, []);
+    context.queryClient.setQueryData(triggersQuery(client).queryKey, []);
+    context.queryClient.setQueryData(waitingRunSessionsQuery().queryKey, []);
+    fake.sendMenuCommand("newThread");
+    await screen.findByRole("dialog", { name: "New thread in" });
+
+    fake.sendMenuCommand("openWorkflows");
+
+    expect(await screen.findByText("No workflows yet")).toBeTruthy();
+    expect(router.state.location.href).toBe("/workflows");
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 

@@ -20,10 +20,13 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { buildLook, Face, UserAvatar } from "../faces";
 import {
+  BoltIcon,
   BoundIcon,
   BranchIcon,
   ChatIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
   ChevronRightIcon,
   ClockIcon,
   CloseIcon,
@@ -49,9 +52,11 @@ import {
   OfficeIcon,
   PaletteIcon,
   PauseIcon,
+  PlayIcon,
   PlusIcon,
   PuzzleIcon,
   QuestionIcon,
+  RunsIcon,
   SearchIcon,
   SendIcon,
   ServerIcon,
@@ -67,6 +72,7 @@ import {
   ThreadsIcon,
   UndoIcon,
   UserIcon,
+  WorkflowsIcon,
   WorkspaceIcon,
   type IconProps,
 } from "../icons";
@@ -77,10 +83,13 @@ import { applySheetTheme, markSheetReady } from "./sheet-page";
 // The screens import each icon by its own name, so a screen ships only the
 // icons it uses. The sheet draws every icon, so it may look them up by name.
 const ICONS: { readonly [Name in IconName]: (props: IconProps) => JSX.Element } = {
+  bolt: BoltIcon,
   bound: BoundIcon,
   branch: BranchIcon,
   chat: ChatIcon,
   check: CheckIcon,
+  "chevron-down": ChevronDownIcon,
+  "chevron-left": ChevronLeftIcon,
   "chevron-right": ChevronRightIcon,
   clock: ClockIcon,
   close: CloseIcon,
@@ -106,9 +115,11 @@ const ICONS: { readonly [Name in IconName]: (props: IconProps) => JSX.Element } 
   office: OfficeIcon,
   palette: PaletteIcon,
   pause: PauseIcon,
+  play: PlayIcon,
   plus: PlusIcon,
   puzzle: PuzzleIcon,
   question: QuestionIcon,
+  runs: RunsIcon,
   search: SearchIcon,
   send: SendIcon,
   server: ServerIcon,
@@ -124,6 +135,7 @@ const ICONS: { readonly [Name in IconName]: (props: IconProps) => JSX.Element } 
   threads: ThreadsIcon,
   undo: UndoIcon,
   user: UserIcon,
+  workflows: WorkflowsIcon,
   workspace: WorkspaceIcon,
 };
 

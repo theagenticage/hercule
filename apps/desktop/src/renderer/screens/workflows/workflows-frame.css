@@ -1,0 +1,67 @@
+/* PROTOTYPE. The Workflows page: the list and the open workflow, at the
+   list's three widths.
+
+   - Table: the list fills the main pane.
+   - Column: the list is a 340px column, as wide as the book's web thread
+     pane (`.web-split`, 280px) plus the room a workflow's status needs, with
+     the open workflow beside it.
+   - Full: the open workflow fills the main pane, for a graph too big for
+     the column's room.
+
+   The page is the box the floating header (`.top`) is placed in, so one
+   header serves every width, and the box the header's pills measure, see
+   workflow-list-header.css. It is a flex row rather than a grid, because a
+   container query cannot change the container's own columns: below, the
+   column is hidden instead. */
+.wf {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  container: workflows-pane / inline-size;
+}
+.wf-list,
+.wf-open {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+/* The column. The hairline between it and the open workflow is drawn as the
+   main pane's edge is (`.main` in shell.css), but as a border rather than a
+   shadow: a shadow would fall in the open workflow's box, under its opaque
+   sticky cap and tab band. */
+.wf--column > .wf-list {
+  flex: none;
+  width: 340px;
+  border-right: 1px solid var(--line-soft);
+}
+
+/* Not in the book, which draws no pane arriving. A workflow the user opens
+   settles in from 14px to the right, the side the list opens it towards, as
+   what arrives in the Office settles (office.css). Its page is keyed by the
+   workflow, so opening another one plays it again, and widening the page to
+   full does not. */
+@media (prefers-reduced-motion: no-preference) {
+  .wf-open {
+    animation: wf-open-in var(--dur-3) var(--ease-out);
+  }
+}
+@keyframes wf-open-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+
+/* Not in the book, whose pages are drawn at one width. Below 800px the
+   column would leave the open workflow less room than its graph and its
+   tables need, so the open workflow fills the pane, as in the full view, and
+   the button that would show the list again goes too. */
+@container workflows-pane (max-width: 799px) {
+  .wf--column > .wf-list,
+  .wf-list-toggle {
+    display: none;
+  }
+}

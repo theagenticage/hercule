@@ -17,6 +17,7 @@ import { Route as ConnectedLoginRouteImport } from './routes/_connected/login'
 import { Route as ConnectedShellIndexRouteImport } from './routes/_connected/_shell/index'
 import { Route as ConnectedShellOfficeRouteImport } from './routes/_connected/_shell/office'
 import { Route as ConnectedShellSettingsRouteRouteImport } from './routes/_connected/_shell/settings/route'
+import { Route as ConnectedShellWorkflowsRouteRouteImport } from './routes/_connected/_shell/workflows/route'
 import { Route as ConnectedShellAssistantsAssistantIdRouteImport } from './routes/_connected/_shell/assistants/$assistantId'
 import { Route as ConnectedShellSettingsIndexRouteImport } from './routes/_connected/_shell/settings/index'
 import { Route as ConnectedShellSettingsAppearanceRouteImport } from './routes/_connected/_shell/settings/appearance'
@@ -24,6 +25,7 @@ import { Route as ConnectedShellSettingsAssistantsRouteRouteImport } from './rou
 import { Route as ConnectedShellSettingsProfileRouteImport } from './routes/_connected/_shell/settings/profile'
 import { Route as ConnectedShellSettingsSystemRouteImport } from './routes/_connected/_shell/settings/system'
 import { Route as ConnectedShellThreadsSessionIdRouteRouteImport } from './routes/_connected/_shell/threads/$sessionId/route'
+import { Route as ConnectedShellWorkflowsWorkflowIdRouteImport } from './routes/_connected/_shell/workflows/$workflowId'
 import { Route as ConnectedShellSettingsPermissionProfilesIndexRouteImport } from './routes/_connected/_shell/settings/permission-profiles/index'
 import { Route as ConnectedShellSettingsPermissionProfilesIdRouteImport } from './routes/_connected/_shell/settings/permission-profiles/$id'
 import { Route as ConnectedShellThreadsSessionIdIndexRouteImport } from './routes/_connected/_shell/threads/$sessionId/index'
@@ -68,6 +70,12 @@ const ConnectedShellSettingsRouteRoute =
     path: '/settings',
     getParentRoute: () => ConnectedShellRoute,
   } as any)
+const ConnectedShellWorkflowsRouteRoute =
+  ConnectedShellWorkflowsRouteRouteImport.update({
+    id: '/workflows',
+    path: '/workflows',
+    getParentRoute: () => ConnectedShellRoute,
+  } as any)
 const ConnectedShellAssistantsAssistantIdRoute =
   ConnectedShellAssistantsAssistantIdRouteImport.update({
     id: '/assistants/$assistantId',
@@ -110,6 +118,12 @@ const ConnectedShellThreadsSessionIdRouteRoute =
     path: '/threads/$sessionId',
     getParentRoute: () => ConnectedShellRoute,
   } as any)
+const ConnectedShellWorkflowsWorkflowIdRoute =
+  ConnectedShellWorkflowsWorkflowIdRouteImport.update({
+    id: '/$workflowId',
+    path: '/$workflowId',
+    getParentRoute: () => ConnectedShellWorkflowsRouteRoute,
+  } as any)
 const ConnectedShellSettingsPermissionProfilesIndexRoute =
   ConnectedShellSettingsPermissionProfilesIndexRouteImport.update({
     id: '/permission-profiles/',
@@ -141,6 +155,7 @@ export interface FileRoutesByFullPath {
   '/connect': typeof ConnectRoute
   '/login': typeof ConnectedLoginRoute
   '/settings': typeof ConnectedShellSettingsRouteRouteWithChildren
+  '/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
   '/office': typeof ConnectedShellOfficeRoute
   '/settings/assistants': typeof ConnectedShellSettingsAssistantsRouteRoute
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRouteRouteWithChildren
@@ -148,6 +163,7 @@ export interface FileRoutesByFullPath {
   '/settings/appearance': typeof ConnectedShellSettingsAppearanceRoute
   '/settings/profile': typeof ConnectedShellSettingsProfileRoute
   '/settings/system': typeof ConnectedShellSettingsSystemRoute
+  '/workflows/$workflowId': typeof ConnectedShellWorkflowsWorkflowIdRoute
   '/settings/': typeof ConnectedShellSettingsIndexRoute
   '/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
   '/settings/permission-profiles/': typeof ConnectedShellSettingsPermissionProfilesIndexRoute
@@ -159,12 +175,14 @@ export interface FileRoutesByTo {
   '/': typeof ConnectedShellIndexRoute
   '/connect': typeof ConnectRoute
   '/login': typeof ConnectedLoginRoute
+  '/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
   '/office': typeof ConnectedShellOfficeRoute
   '/settings/assistants': typeof ConnectedShellSettingsAssistantsRouteRoute
   '/assistants/$assistantId': typeof ConnectedShellAssistantsAssistantIdRoute
   '/settings/appearance': typeof ConnectedShellSettingsAppearanceRoute
   '/settings/profile': typeof ConnectedShellSettingsProfileRoute
   '/settings/system': typeof ConnectedShellSettingsSystemRoute
+  '/workflows/$workflowId': typeof ConnectedShellWorkflowsWorkflowIdRoute
   '/settings': typeof ConnectedShellSettingsIndexRoute
   '/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
   '/settings/permission-profiles': typeof ConnectedShellSettingsPermissionProfilesIndexRoute
@@ -179,6 +197,7 @@ export interface FileRoutesById {
   '/_connected/_shell': typeof ConnectedShellRouteWithChildren
   '/_connected/login': typeof ConnectedLoginRoute
   '/_connected/_shell/settings': typeof ConnectedShellSettingsRouteRouteWithChildren
+  '/_connected/_shell/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
   '/_connected/_shell/office': typeof ConnectedShellOfficeRoute
   '/_connected/_shell/': typeof ConnectedShellIndexRoute
   '/_connected/_shell/settings/assistants': typeof ConnectedShellSettingsAssistantsRouteRoute
@@ -187,6 +206,7 @@ export interface FileRoutesById {
   '/_connected/_shell/settings/appearance': typeof ConnectedShellSettingsAppearanceRoute
   '/_connected/_shell/settings/profile': typeof ConnectedShellSettingsProfileRoute
   '/_connected/_shell/settings/system': typeof ConnectedShellSettingsSystemRoute
+  '/_connected/_shell/workflows/$workflowId': typeof ConnectedShellWorkflowsWorkflowIdRoute
   '/_connected/_shell/settings/': typeof ConnectedShellSettingsIndexRoute
   '/_connected/_shell/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
   '/_connected/_shell/settings/permission-profiles/': typeof ConnectedShellSettingsPermissionProfilesIndexRoute
@@ -201,6 +221,7 @@ export interface FileRouteTypes {
     | '/connect'
     | '/login'
     | '/settings'
+    | '/workflows'
     | '/office'
     | '/settings/assistants'
     | '/threads/$sessionId'
@@ -208,6 +229,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/profile'
     | '/settings/system'
+    | '/workflows/$workflowId'
     | '/settings/'
     | '/settings/permission-profiles/$id'
     | '/settings/permission-profiles/'
@@ -219,12 +241,14 @@ export interface FileRouteTypes {
     | '/'
     | '/connect'
     | '/login'
+    | '/workflows'
     | '/office'
     | '/settings/assistants'
     | '/assistants/$assistantId'
     | '/settings/appearance'
     | '/settings/profile'
     | '/settings/system'
+    | '/workflows/$workflowId'
     | '/settings'
     | '/settings/permission-profiles/$id'
     | '/settings/permission-profiles'
@@ -238,6 +262,7 @@ export interface FileRouteTypes {
     | '/_connected/_shell'
     | '/_connected/login'
     | '/_connected/_shell/settings'
+    | '/_connected/_shell/workflows'
     | '/_connected/_shell/office'
     | '/_connected/_shell/'
     | '/_connected/_shell/settings/assistants'
@@ -246,6 +271,7 @@ export interface FileRouteTypes {
     | '/_connected/_shell/settings/appearance'
     | '/_connected/_shell/settings/profile'
     | '/_connected/_shell/settings/system'
+    | '/_connected/_shell/workflows/$workflowId'
     | '/_connected/_shell/settings/'
     | '/_connected/_shell/settings/permission-profiles/$id'
     | '/_connected/_shell/settings/permission-profiles/'
@@ -317,6 +343,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectedShellSettingsRouteRouteImport
       parentRoute: typeof ConnectedShellRoute
     }
+    '/_connected/_shell/workflows': {
+      id: '/_connected/_shell/workflows'
+      path: '/workflows'
+      fullPath: '/workflows'
+      preLoaderRoute: typeof ConnectedShellWorkflowsRouteRouteImport
+      parentRoute: typeof ConnectedShellRoute
+    }
     '/_connected/_shell/assistants/$assistantId': {
       id: '/_connected/_shell/assistants/$assistantId'
       path: '/assistants/$assistantId'
@@ -365,6 +398,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/threads/$sessionId'
       preLoaderRoute: typeof ConnectedShellThreadsSessionIdRouteRouteImport
       parentRoute: typeof ConnectedShellRoute
+    }
+    '/_connected/_shell/workflows/$workflowId': {
+      id: '/_connected/_shell/workflows/$workflowId'
+      path: '/$workflowId'
+      fullPath: '/workflows/$workflowId'
+      preLoaderRoute: typeof ConnectedShellWorkflowsWorkflowIdRouteImport
+      parentRoute: typeof ConnectedShellWorkflowsRouteRoute
     }
     '/_connected/_shell/settings/permission-profiles/': {
       id: '/_connected/_shell/settings/permission-profiles/'
@@ -427,6 +467,21 @@ const ConnectedShellSettingsRouteRouteWithChildren =
     ConnectedShellSettingsRouteRouteChildren,
   )
 
+interface ConnectedShellWorkflowsRouteRouteChildren {
+  ConnectedShellWorkflowsWorkflowIdRoute: typeof ConnectedShellWorkflowsWorkflowIdRoute
+}
+
+const ConnectedShellWorkflowsRouteRouteChildren: ConnectedShellWorkflowsRouteRouteChildren =
+  {
+    ConnectedShellWorkflowsWorkflowIdRoute:
+      ConnectedShellWorkflowsWorkflowIdRoute,
+  }
+
+const ConnectedShellWorkflowsRouteRouteWithChildren =
+  ConnectedShellWorkflowsRouteRoute._addFileChildren(
+    ConnectedShellWorkflowsRouteRouteChildren,
+  )
+
 interface ConnectedShellThreadsSessionIdRouteRouteChildren {
   ConnectedShellThreadsSessionIdIndexRoute: typeof ConnectedShellThreadsSessionIdIndexRoute
   ConnectedShellThreadsSessionIdSubagentsSubagentIdRoute: typeof ConnectedShellThreadsSessionIdSubagentsSubagentIdRoute
@@ -447,6 +502,7 @@ const ConnectedShellThreadsSessionIdRouteRouteWithChildren =
 
 interface ConnectedShellRouteChildren {
   ConnectedShellSettingsRouteRoute: typeof ConnectedShellSettingsRouteRouteWithChildren
+  ConnectedShellWorkflowsRouteRoute: typeof ConnectedShellWorkflowsRouteRouteWithChildren
   ConnectedShellOfficeRoute: typeof ConnectedShellOfficeRoute
   ConnectedShellIndexRoute: typeof ConnectedShellIndexRoute
   ConnectedShellThreadsSessionIdRouteRoute: typeof ConnectedShellThreadsSessionIdRouteRouteWithChildren
@@ -456,6 +512,8 @@ interface ConnectedShellRouteChildren {
 const ConnectedShellRouteChildren: ConnectedShellRouteChildren = {
   ConnectedShellSettingsRouteRoute:
     ConnectedShellSettingsRouteRouteWithChildren,
+  ConnectedShellWorkflowsRouteRoute:
+    ConnectedShellWorkflowsRouteRouteWithChildren,
   ConnectedShellOfficeRoute: ConnectedShellOfficeRoute,
   ConnectedShellIndexRoute: ConnectedShellIndexRoute,
   ConnectedShellThreadsSessionIdRouteRoute:

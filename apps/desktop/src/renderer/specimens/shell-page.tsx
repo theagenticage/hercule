@@ -15,7 +15,9 @@
  *   main pane `pnpm compare:bureau` compares with the book's;
  * - settings-profiles.tsx, which opens Settings > Permission profiles, the
  *   list or one profile's page, and whose main pane `pnpm compare:bureau`
- *   compares with the book's.
+ *   compares with the book's;
+ * - workflows.tsx, the Workflows prototype, which opens the workflow list
+ *   and one workflow.
  *
  * The page builds a router whose routes have the app's route ids, so the
  * sidebar and the screens find the controller in their route context, and
@@ -112,8 +114,24 @@ import { Route as AppearanceSettingsRoute } from "../routes/_connected/_shell/se
 import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/settings/assistants/route";
 import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/index";
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
+import { Route as WorkflowsRoute } from "../routes/_connected/_shell/workflows/route";
+import { Route as WorkflowRoute } from "../routes/_connected/_shell/workflows/$workflowId";
+import { computeTimelineDay, computeTimelineReadRange } from "../screens/workflows/run-timeline";
+import {
+  runQuery,
+  runSessionsQuery,
+  triggersQuery,
+  waitingRunSessionsQuery,
+  workflowActionsQuery,
+  workflowListQuery,
+  workflowQuery,
+  workflowRunningRunsQuery,
+  workflowRunsBetweenQuery,
+  workflowRunsQuery,
+} from "../screens/workflows/workflow-queries";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
+import type { WorkflowsRecords } from "./workflows-fixture";
 
 /**
  * An assistant, the current session of its main conversation, or `null`
@@ -198,6 +216,12 @@ export interface AppearanceSettingsRecords {
   readonly connections: ReadonlyArray<Connection>;
 }
 
+/** The client a shell specimen's routes read with, and the query cache they read. */
+export interface MountedSpecimen {
+  readonly client: HerculeClient;
+  readonly queryClient: QueryClient;
+}
+
 /** The screens a shell specimen opens beside the sidebar. It opens at most one of them. */
 interface OpenScreens {
   readonly thread?: ThreadScreenRecords;
@@ -205,6 +229,7 @@ interface OpenScreens {
   readonly assistantsSettings?: AssistantsSettingsRecords;
   readonly permissionProfilesSettings?: PermissionProfilesSettingsRecords;
   readonly appearanceSettings?: AppearanceSettingsRecords;
+  readonly workflows?: WorkflowsRecords;
 }
 
 /** An address that never answers. The client sends nothing to it. */
@@ -295,6 +320,14 @@ const REFUSING_BRIDGE: Bridge = {
 };
 
 /**
+ * How many days the workflows specimen seeds for the Runs tab's timeline,
+ * today included: ten weeks, which covers every run of the workflows that
+ * run more than once a week. A day further back fails to load, as any read
+ * the specimen does not seed does.
+ */
+const TIMELINE_DAYS = 70;
+
+/**
  * Stores every list of `records` in the query cache, and the records of each
  * screen in `screens`, each under the key the page reads it by.
  *
@@ -312,6 +345,7 @@ const seedQueryCache = (
     assistantsSettings,
     permissionProfilesSettings,
     appearanceSettings,
+    workflows,
   }: OpenScreens,
 ): void => {
   queryClient.setQueryData(threadsQuery(client).queryKey, records.threads);
@@ -361,6 +395,52 @@ const seedQueryCache = (
   }
   if (appearanceSettings !== undefined) {
     queryClient.setQueryData(connectionsQuery(client).queryKey, appearanceSettings.connections);
+  }
+  if (workflows !== undefined) {
+    // The fixture's times are in UTC, as SPECIMEN_NOW is.
+    queryClient.setQueryData(settingsQuery(client).queryKey, {
+      controller: {},
+      user: { timezone: "UTC" },
+    });
+    queryClient.setQueryData(workflowListQuery().queryKey, workflows.workflows);
+    queryClient.setQueryData(triggersQuery(client).queryKey, workflows.triggers);
+    queryClient.setQueryData(
+      waitingRunSessionsQuery().queryKey,
+      workflows.runSessions.filter((session) => session.openRequests.length > 0),
+    );
+    queryClient.setQueryData(agentsQuery(client).queryKey, workflows.agents);
+    queryClient.setQueryData(workflowActionsQuery(client).queryKey, workflows.workflowActions);
+    for (const workflow of workflows.definitions) {
+      queryClient.setQueryData(workflowQuery(workflow.id).queryKey, workflow);
+      // One page holds every run of the workflow.
+      const summaries = workflows.runSummaries.get(workflow.id) ?? [];
+      queryClient.setQueryData(workflowRunsQuery(client, workflow.id).queryKey, {
+        pages: [{ items: summaries }],
+        pageParams: [undefined],
+      });
+      // The timeline reads one day at a time. Each day the stepper reaches
+      // holds the runs `run.query` would return for it: the ones created in
+      // its range, both ends included.
+      for (let daysBack = 0; daysBack < TIMELINE_DAYS; daysBack++) {
+        const day = computeTimelineDay(new Date(), daysBack, "UTC");
+        const { since, until } = computeTimelineReadRange(day, "UTC");
+        queryClient.setQueryData(
+          workflowRunsBetweenQuery(client, workflow.id, since, until).queryKey,
+          summaries.filter((run) => run.createdAt >= since && run.createdAt <= until),
+        );
+      }
+      queryClient.setQueryData(
+        workflowRunningRunsQuery(client, workflow.id).queryKey,
+        summaries.filter((run) => run.status === "running"),
+      );
+    }
+    for (const run of workflows.runs) {
+      queryClient.setQueryData(runQuery(client, run.id).queryKey, run);
+      queryClient.setQueryData(
+        runSessionsQuery(client, run.id).queryKey,
+        workflows.runSessions.filter((session) => session.runId === run.id),
+      );
+    }
   }
   if (thread !== undefined) {
     const sessionId = thread.session.id;
@@ -421,7 +501,8 @@ function AssistantRoute(): JSX.Element {
  * and their context through their own `Route`. The Assistants route is
  * attached without its loader: the loader reads the permission profiles and
  * the settings again each time the section opens, and the query cache
- * already holds both. The Permission profiles routes are attached the same way.
+ * already holds both. The Permission profiles routes are attached the same
+ * way, and so are the Workflows prototype's two routes.
  */
 const buildRouter = (
   client: HerculeClient,
@@ -482,6 +563,18 @@ const buildRouter = (
     path: "/appearance",
     getParentRoute: () => settingsRoute,
   } as never);
+  const workflowsRoute = WorkflowsRoute.update({
+    id: "/workflows",
+    path: "/workflows",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
+  const workflowRoute = WorkflowRoute.update({
+    id: "/$workflowId",
+    path: "/$workflowId",
+    getParentRoute: () => workflowsRoute,
+    loader: undefined,
+  } as never);
   const routeTree = rootRoute.addChildren([
     connectedRoute.addChildren([
       shellRoute.addChildren([
@@ -505,6 +598,7 @@ const buildRouter = (
           permissionProfilesSettingsRoute,
           permissionProfileSettingsRoute,
         ]),
+        workflowsRoute.addChildren([workflowRoute]),
       ]),
     ]),
   ]);
@@ -564,6 +658,11 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
       "Settings > Permission profiles drew no list and no profile. Check the page's console for the error.",
     );
   }
+  if (screens.workflows !== undefined && document.querySelector(".wl-row, .wf-open") === null) {
+    throw new Error(
+      "Workflows drew no workflow row and no workflow. Check the page's console for the error.",
+    );
+  }
   if (screens.appearanceSettings !== undefined && document.querySelector(".themes") === null) {
     throw new Error(
       "Settings > Appearance drew no theme cards. Check the page's console for the error.",
@@ -592,16 +691,17 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
  * with the app's address at `path`, and the records of each screen in
  * `screens`. A draft's picks, and a message in the composer of each thread in
  * `unsentThreadIds`, are written to their pending submissions before the
- * first render, as if the user had made them. Returns once the page is in the
- * document. Fails when the page has no `#root`, draws nothing, or tries to
- * read a record the cache does not hold.
+ * first render, as if the user had made them. Returns the client and the
+ * query cache the page reads, once the page is in the document. Fails when
+ * the page has no `#root`, draws nothing, or tries to read a record the
+ * cache does not hold.
  */
 async function mountShellSpecimen(
   records: SidebarRecords,
   path: string,
   screens: OpenScreens,
   unsentThreadIds: readonly string[] = [],
-): Promise<void> {
+): Promise<MountedSpecimen> {
   applySheetTheme();
   const client = createClient({ baseUrl: CONTROLLER_URL, fetch: refuseRequest });
   const queryClient = createQueryClient();
@@ -632,6 +732,7 @@ async function mountShellSpecimen(
   // the first time they show, so they arrive after the first render.
   if (screens.draft !== undefined) await waitForElement(".start");
   assertShellDrawn(queryClient, screens);
+  return { client, queryClient };
 }
 
 /**
@@ -733,4 +834,22 @@ export async function mountAppearanceSettingsSpecimen(
   settings: AppearanceSettingsRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, "/settings/appearance", { appearanceSettings: settings });
+}
+
+/**
+ * PROTOTYPE. Applies the URL's theme and draws the shell into `#root` from
+ * `records`, with Workflows open at `path`: `/workflows` for the list, or
+ * `/workflows/<id>` for one workflow beside it. The main pane shows the
+ * app's real Workflows routes, which read what `workflows` holds. Returns
+ * the client and the query cache the page reads, so the page can change a
+ * record while it shows, once a workflow row or the open workflow is in the
+ * document. Fails when the page has no `#root`, draws neither, or tries to
+ * read a record the cache does not hold.
+ */
+export async function mountWorkflowsSpecimen(
+  records: SidebarRecords,
+  path: string,
+  workflows: WorkflowsRecords,
+): Promise<MountedSpecimen> {
+  return mountShellSpecimen(records, path, { workflows });
 }

@@ -277,14 +277,16 @@ const HttpUrl = Schema.String.check(
 );
 
 /**
- * A menu item the page carries out: Sign Out, New Thread, Office, Settings,
- * Send, or one of View's two faces of the sidebar. `showOrchestrationFace` is
- * View > Hercule; the identifier leaves out the product name.
+ * A menu item the page carries out: Sign Out, New Thread, Office, Workflows,
+ * Settings, Send, or one of View's two faces of the sidebar.
+ * `showOrchestrationFace` is View > Hercule; the identifier leaves out the
+ * product name.
  */
 export const MenuCommand = Schema.Literals([
   "signOut",
   "newThread",
   "openOffice",
+  "openWorkflows",
   "openSettings",
   "send",
   "showThreadsFace",

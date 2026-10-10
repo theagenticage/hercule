@@ -43,6 +43,8 @@ import {
   ThreadRow,
   WaitingAssistantRow,
   WaitingHeader,
+  WaitingRunRow,
+  WaitingRunsLabel,
   WaitingThreadRow,
 } from "./sidebar-rows";
 import { ThreadHoverCard } from "./thread-hover-card";
@@ -114,6 +116,19 @@ const renderItem = (
           name={item.name}
           question={item.question}
           officeOpen={officeOpen}
+        />
+      );
+    case "waiting-runs-label":
+      return <WaitingRunsLabel key={item.key} itemKey={item.key} leading={item.leading} />;
+    case "waiting-run-row":
+      return (
+        <WaitingRunRow
+          key={item.key}
+          itemKey={item.key}
+          leading={item.leading}
+          sessionId={item.sessionId}
+          title={item.title}
+          question={item.question}
         />
       );
     case "project-header":

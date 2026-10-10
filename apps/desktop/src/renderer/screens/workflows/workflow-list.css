@@ -1,0 +1,332 @@
+/* PROTOTYPE. The workflow list, at its two widths. Nothing here is new
+   styling: the table is the Bureau book's Connections and Permission
+   profiles table (`.tbl-h` and `.prof`, desktop/settings-profiles.html), and
+   the column is the sidebar's thread list (`.side-h` and `.side-row`, in
+   shell/sidebar.css). Each rule names the book's rule it follows, and each
+   departure from it is explained. */
+
+/* The scrolling element. The table's 20px side padding puts a row's mark
+   under the floating title pill's text: the header's 14px, the pill's 4px
+   and the title's 10px make 28px, as do the 20px here and a row's 8px. */
+.wl {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  /* The virtualizer places the items itself; the browser must not move the
+     scroll position when items mount above the visible part. */
+  overflow-anchor: none;
+  container: workflow-list / inline-size;
+  padding: 0 20px;
+}
+.wl--column {
+  padding: 0 8px;
+}
+
+/* Not in the book. The head above the items, which scrolls with the list
+   and sticks to its top: the room for the floating pills, then the table's
+   column heads or the column's search field. It is opaque, so rows scroll
+   out of sight under it, and the pills float over the plain pane rather
+   than over rows cut in half. Its negative margins reach the list's padding,
+   so no row shows beside it. */
+.wl-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  margin: 0 -20px;
+  padding: 0 20px;
+  background: var(--surface);
+}
+.wl--column .wl-head {
+  margin: 0 -8px;
+  padding: 0 8px 8px;
+}
+
+/* `flow-root` keeps the first item's top margin inside the list, as the
+   sidebar's `.side-list` does. */
+.wl-items {
+  display: flow-root;
+}
+
+/* A group's heading: the book's `.side-h`. */
+.wl-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
+  padding: 0 4px 0 10px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.wl--column .wl-group > :first-child {
+  flex: 1;
+}
+/* Not in the book, whose headings sit in a 272px column. Across the table,
+   the count follows the group's name instead of ending the row, a whole
+   window away from it. The heading's padding is a row's, so the name starts
+   above the marks. */
+.wl--table .wl-group {
+  padding: 0 8px;
+}
+
+/* ---------- The table ---------- */
+
+/* The book's `.tbl-h` and `.prof`: one grid for the heads and every row.
+   The columns: the mark, the name, what starts the workflow, its recent
+   runs, how many of them succeeded, its last run's status and time, and
+   when it next starts. The strip is 20 marks of 10px with 1px between them. */
+.wl-grid {
+  display: grid;
+  grid-template-columns:
+    14px minmax(0, 1.4fr) minmax(0, 1fr) 219px 44px minmax(0, 1.4fr)
+    44px 72px;
+  align-items: center;
+  gap: 14px;
+}
+
+/* The book's `.tbl-h`, 32px tall here so the heads end the sticky head.
+   Not in the book: a hairline under the heads, which the book does not need
+   because its table never scrolls under them. */
+.wl-cols {
+  height: 32px;
+  padding: 0 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+
+/* The book's `.prof`, at 40px rather than 52px: a workflow's row has one
+   line where a profile's has two. The open workflow's tables draw their rows
+   the same way (workflow-detail.css). As in the book, the hairline above the
+   row is drawn by `::before`: a top border would follow the row's rounded
+   corners and curve down at both ends. */
+.wl-trow {
+  position: relative;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  white-space: nowrap;
+  transition: background var(--dur-1);
+}
+.wl-trow::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  border-top: 1px solid var(--line-soft);
+}
+.wl-trow:is(a, button):hover {
+  background: var(--hover);
+}
+/* Not in the book, whose table has no selection: the sidebar's `.is-on`. A
+   workflow's row shows it only for the moment between a click and the
+   column taking the table's place; a run's row shows the run the graph
+   draws. A row that is not a link or a button, such as a trigger's, takes
+   no hover. */
+.wl-trow.is-on {
+  background: var(--selected);
+}
+.wl-trow:is(a, button):is(:hover, .is-on)::before,
+.wl-trow:is(a, button):is(:hover, .is-on) + .wl-trow::before {
+  border-top-color: transparent;
+}
+:is(.wl-row, .wl-trow) > * {
+  min-width: 0;
+}
+
+/* ---------- The cells ---------- */
+
+.wl-mark {
+  display: grid;
+  place-items: center;
+}
+/* The book's `.nm b`. */
+.wl-name {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+}
+.wl-row.is-off .wl-name {
+  color: var(--muted);
+}
+/* The book's `.topic`, in the second line's size. */
+.wl-starts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.wl-starts .ic {
+  flex: none;
+  color: var(--faint);
+}
+.wl-cols .wl-starts {
+  font-size: inherit;
+  color: inherit;
+}
+.wl-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The strip ends at its column's right edge, so every workflow's latest run
+   sits in the same place, beside how many of its runs succeeded. */
+.wl-strip {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1px;
+}
+/* The book's `.n` and `.held`: numbers, right-aligned in the faint ink of a
+   second line. */
+.wl-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+:is(.wl-row, .wl-trow) .wl-num {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+}
+/* The book's `.health`, with its three tones: marigold for a run that waits
+   on the user, the failure ink for a failed run, and muted for the rest. */
+.wl-status {
+  overflow: hidden;
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+}
+.wl-status--muted {
+  color: var(--muted);
+}
+.wl-status--you {
+  color: var(--you-ink);
+}
+.wl-status--fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+
+/* A narrower pane drops what starts each workflow, then the strip of recent
+   runs with the share of them that succeeded, as the book's profiles table
+   drops Used by. The open workflow shows all three in full. Each column
+   goes while the names still have about 160px: below 1000px, the 1fr of
+   what starts a workflow leaves less than that, and below 820px so does the
+   strip's fixed 219px. */
+@container workflow-list (max-width: 1000px) {
+  .wl-grid {
+    grid-template-columns: 14px minmax(0, 1.4fr) 219px 44px minmax(0, 1.4fr) 44px 72px;
+  }
+  .wl-grid > .wl-starts {
+    display: none;
+  }
+}
+@container workflow-list (max-width: 820px) {
+  .wl-grid {
+    grid-template-columns: 14px minmax(0, 1fr) minmax(0, 1fr) 44px 72px;
+  }
+  .wl-grid > :is(.wl-strip, .wl-success) {
+    display: none;
+  }
+}
+
+/* ---------- The column ---------- */
+
+/* The book's `.side-row`, two lines tall as a thread's row is. */
+.wl--column .wl-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 1px 8px 1px 10px;
+  border-radius: var(--r-sm);
+  transition: background var(--dur-1);
+}
+.wl--column .wl-row:hover {
+  background: var(--hover);
+}
+.wl--column .wl-row.is-on {
+  background: var(--selected);
+}
+/* The book's `.side-text`. */
+.wl-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.wl--column .wl-time {
+  flex: none;
+}
+
+/* ---------- The search field and the empty list ---------- */
+
+/* The book's `.side-search`, as a text field: the sidebar's opens a search,
+   and this one filters the list as the user types. */
+.wl-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-sm);
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+  color: var(--muted);
+}
+.wl-search:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+/* The padding is zeroed for the reason `.field > input` gives in
+   controls.css. */
+.wl-search > input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+}
+/* The placeholder in the faint ink of `.field > input::placeholder`: the
+   book's `.side-search` draws its label muted, but its label is a button's. */
+.wl-search > input::placeholder {
+  color: var(--faint);
+}
+/* The browser's own clear button would sit beside ⌘F. */
+.wl-search > input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.wl-empty {
+  margin: 0;
+  padding: 24px 8px;
+  color: var(--muted);
+}
+
+/* A workflow's mark that changed while the list was open pops in, as a
+   graph mark does, so the eye finds the workflow that moved; so does a run's
+   mark in the strip. When a run joins a strip, the older marks step left one
+   slot, a 10px mark and its 1px gap, while the new one pops in at the right
+   end. A row drawn when the list opens, or scrolled into view, stays still
+   (workflow-list-rows.tsx). */
+@media (prefers-reduced-motion: no-preference) {
+  .wl-mark.is-new > .mark,
+  .wl-strip > .mark.is-new {
+    animation: mark-in var(--dur-3) var(--ease-spring);
+  }
+  .wl-strip.is-advanced > .mark:not(.is-new) {
+    animation: wl-strip-step var(--dur-3) var(--ease-out);
+  }
+}
+@keyframes wl-strip-step {
+  from {
+    transform: translateX(11px);
+  }
+}

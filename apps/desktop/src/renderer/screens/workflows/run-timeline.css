@@ -1,0 +1,259 @@
+/* PROTOTYPE. The Runs tab's timeline. Not in the book, which has no
+   timeline: every part is drawn from the book's tokens, and each is
+   explained where it is drawn. A place across the day, `--rt-at`, is a
+   percentage of the page's content width, in the axis and on the board
+   alike, so the two line up. */
+
+/* The day stepper: the book's `.icon-btn` arrows around the day, whose room
+   fits "Yesterday", so the arrows stay put as the user steps. */
+.rt-stepper {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.rt-stepper > .btn {
+  margin-right: 6px;
+}
+.rt-day {
+  min-width: 76px;
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+/* Not in the book, which draws no disabled icon button: the book's
+   `.btn:disabled`. */
+.rt-stepper > .icon-btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ---------- The axis ---------- */
+
+/* Where the list's column heads are, as tall, and in their type
+   (`.wl-cols`). */
+.rt-axis {
+  position: relative;
+  height: 32px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+.rt-tick {
+  position: absolute;
+  top: 0;
+  left: var(--rt-at);
+  line-height: 32px;
+  transform: translateX(-50%);
+}
+/* The time now, over the line it starts: a pill in ink and the page's
+   colour, as the book's switch is when on (`.toggle`). Its stem reaches the
+   axis's hairline, and the board's now line goes on from there. */
+.rt-now-pill {
+  position: absolute;
+  top: 7px;
+  left: var(--rt-at);
+  z-index: 1;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+  font-weight: var(--w-bold);
+  line-height: 16px;
+  transform: translateX(-50%);
+}
+.rt-now-pill::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1px;
+  height: 7px;
+  background: var(--ink);
+}
+
+/* ---------- The board ---------- */
+
+/* A track is 24px: a 16px bar and the room between two. */
+.rt-board {
+  position: relative;
+  height: calc(var(--rt-tracks) * 24px + 16px);
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+/* The hour lines, behind everything, in the hairline's colour. */
+.rt-line,
+.rt-now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--rt-at);
+  width: 1px;
+  background: var(--line-soft);
+}
+.rt-now {
+  background: var(--ink);
+}
+
+/* A fire still to come: a dashed tick on the top track, in the faint ink
+   of what has not happened, and its time beside it. */
+.rt-fire {
+  position: absolute;
+  top: 13px;
+  left: var(--rt-at);
+  height: 14px;
+  border-left: 1.5px dashed var(--faint);
+}
+.rt-fire > span {
+  position: absolute;
+  left: 5px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+}
+
+/* The book's `.wl-empty` text, over the hour lines. */
+.rt-empty {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  margin: 0;
+  padding-right: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  transform: translateY(-50%);
+}
+
+/* A run: a line from when it started to when it ended, with its mark at
+   the end. The bar is at least half a mark long, so a run of a few minutes
+   is drawn as its mark alone, starting where the run started. A bar that
+   would start in the last 7px is drawn inside the board. */
+.rt-bar {
+  position: absolute;
+  top: calc(var(--rt-track) * 24px + 12px);
+  left: min(var(--rt-at), calc(100% - 7px));
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: max(var(--rt-span), 7px);
+  height: 16px;
+}
+/* The hover and the selection: the book's `--hover` and `--selected`, as a
+   list row has them, on a pill around the line and its mark. */
+.rt-bar::before {
+  content: "";
+  position: absolute;
+  inset: -2px -11px -2px -6px;
+  border-radius: var(--r-pill);
+}
+.rt-bar:hover::before {
+  background: var(--hover);
+}
+.rt-bar.is-on::before {
+  background: var(--selected);
+}
+/* A 4px line: in the book's hairline colour for a run that went as it
+   should, and in the colour of its mark for one that waits on the user or
+   failed. */
+.rt-fill {
+  position: absolute;
+  inset: 6px 0;
+  border-radius: var(--r-pill);
+  background: var(--line);
+}
+.rt-bar--you > .rt-fill {
+  background: var(--you);
+}
+.rt-bar--fail > .rt-fill {
+  background: var(--fail);
+}
+.rt-bar.is-cut-start > .rt-fill {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.rt-bar.is-cut-end > .rt-fill {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* The mark sits on the line's end, on a disc of the colour behind it, so
+   the hour lines and the now line pass behind it. Under the hover or the
+   selection, the disc is the pill's colour laid over the page's. A bar cut
+   at the day's end keeps its mark inside the board. */
+.rt-bar > .mark {
+  position: relative;
+  margin-right: -7px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.rt-bar:hover > .mark {
+  background: linear-gradient(var(--hover), var(--hover)), var(--surface);
+}
+.rt-bar.is-on > .mark {
+  background: linear-gradient(var(--selected), var(--selected)), var(--surface);
+}
+.rt-bar.is-cut-end > .mark {
+  margin-right: 0;
+}
+/* The chevrons of a bar cut at the day's start or end, in the page's side
+   padding. */
+.rt-cut {
+  position: absolute;
+  top: 2px;
+  display: inline-grid;
+  color: var(--faint);
+}
+.rt-cut--start {
+  left: -18px;
+}
+.rt-cut--end {
+  right: -18px;
+}
+
+/* Not in the book, whose pages are drawn at one width. A narrow page labels
+   only every third hour, so no two labels touch. */
+@container workflow-detail (max-width: 899px) {
+  .rt-tick:not(.is-major) {
+    display: none;
+  }
+}
+
+/* When the user opens the timeline or steps to a day, the day's bars arrive
+   one after another, each sweeping from where its run started to where it
+   ended, and then its mark pops in (`mark-in`, in marks/mark.css). The ninth
+   bar and the ones after it arrive together, so the whole arrival takes
+   640ms at most. The board is drawn afresh for each day, so stepping to
+   another day plays it again.
+
+   A bar that arrives or changes later, because a run started or changed,
+   draws its line at once and only pops in its mark, with no wait
+   (`.is-late`, run-timeline-board.tsx). A chain of steps is for what the
+   user did, not for what happened while they watched (spec 17 §Performance,
+   rule 2). */
+@media (prefers-reduced-motion: no-preference) {
+  .rt-fill {
+    transform-origin: left;
+    animation: rt-sweep var(--dur-3) var(--ease-out) backwards;
+    animation-delay: calc(min(var(--rt-order), 8) * 30ms);
+  }
+  .rt-bar > .mark {
+    animation: mark-in var(--dur-2) var(--ease-spring) backwards;
+    animation-delay: calc(min(var(--rt-order), 8) * 30ms + var(--dur-2));
+  }
+  .rt-bar.is-late > .rt-fill {
+    animation: none;
+  }
+  .rt-bar.is-late > .mark {
+    animation: mark-in var(--dur-3) var(--ease-spring);
+  }
+}
+@keyframes rt-sweep {
+  from {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+}

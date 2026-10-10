@@ -112,9 +112,14 @@ const reactFlowFence = fenceLibrary(
   ["@xyflow"],
   `The graph library is imported only in ${workflowEditor}/graph-view/, so that it can be replaced there alone. Use the GraphView of that folder.`,
 );
+// PROTOTYPE. The desktop renderer cannot import the web app, so its workflow
+// graph lays itself out in a copy of the web app's layout.ts. The Workflows
+// ticket moves the layout to one place both apps import, and the fence
+// shrinks back to that one file.
+const desktopGraphLayout = "apps/desktop/src/renderer/screens/workflows/graph-layout.ts";
 const dagreFence = fenceLibrary(
   ["@dagrejs"],
-  `The layout engine is imported only in ${workflowEditor}/graph-view/layout.ts, so that it can be replaced there alone. Use computeGraphLayout from that file.`,
+  `The layout engine is imported only in ${workflowEditor}/graph-view/layout.ts and ${desktopGraphLayout}, so that it can be replaced there alone. Use computeGraphLayout from your app's file.`,
 );
 const editorLibraryFences = [codeMirrorFence, reactFlowFence, dagreFence];
 const editorLibraryPatterns = editorLibraryFences.map((fence) => fence.pattern);
@@ -404,6 +409,21 @@ export default tseslint.config(
     rules: {
       "no-restricted-imports": browserImports({ allowed: dagreFence }),
       "no-restricted-syntax": browserSyntax({ allowed: dagreFence }),
+    },
+  },
+  {
+    // It keeps the desktop renderer's bans, because a rule's options here
+    // replace the ones above.
+    files: [desktopGraphLayout],
+    rules: {
+      "no-restricted-imports": browserImports({
+        allowed: dagreFence,
+        more: [specimensPattern, iconListPattern],
+      }),
+      "no-restricted-syntax": browserSyntax({
+        allowed: dagreFence,
+        more: [...desktopRendererSyntax, ...markupSyntax],
+      }),
     },
   },
   {

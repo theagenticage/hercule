@@ -112,6 +112,30 @@ export const computeMinutesOfDay = (instant: Date, timezone: string): number | u
 };
 
 /**
+ * Computes the first instant of the calendar day `instant` falls on in
+ * `timezone`: its midnight, or the first instant the date has on a date whose
+ * clock skips midnight for daylight saving time. Returns `undefined` in the
+ * same cases as `formatTimeContext`.
+ *
+ * Going back by the clock's reading lands on midnight unless the clock moved
+ * since then. When it moved, the first guess reads an hour or so off, and is
+ * corrected by its own reading: back to midnight when it fell on the same
+ * date, forward to the date's first instant when it fell on the date before.
+ */
+export const computeDayStart = (instant: Date, timezone: string): Date | undefined => {
+  const date = readCalendarDate(instant, timezone);
+  const minutes = computeMinutesOfDay(instant, timezone);
+  if (date === undefined || minutes === undefined) return undefined;
+
+  const guess = new Date(Math.floor(instant.getTime() / 60_000) * 60_000 - minutes * 60_000);
+  const guessDate = readCalendarDate(guess, timezone);
+  const guessMinutes = computeMinutesOfDay(guess, timezone);
+  if (guessDate === undefined || guessMinutes === undefined) return undefined;
+  const correction = guessDate.dayNumber === date.dayNumber ? -guessMinutes : 1440 - guessMinutes;
+  return new Date(guess.getTime() + correction * 60_000);
+};
+
+/**
  * Formats an instant as the stamp shown beside a record: "4 Sep 17:21". The
  * year is left out because these stamps sit in lists of recent records.
  * Returns `undefined` in the same cases as `formatTimeContext`.

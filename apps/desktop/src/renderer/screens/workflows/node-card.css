@@ -1,0 +1,135 @@
+/* PROTOTYPE. The card of details over a node of the workflow graph. Not in
+   the Bureau book: a proposed extension. It is the book's `.pop` from its
+   glance page, with `.pop-h`, `.pop-sec`, `.q-h` and `.line`, opened next
+   to the card it describes. Its facts are the assistant page's `.rem` rows:
+   a label column, then the value. */
+
+/* The browser draws a popover centred in the window. The card is placed by
+   its `left` and `top`, which the graph sets beside the node. */
+.wfn {
+  inset: auto;
+  margin: 0;
+  width: 320px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+/* The node's id, set as the header's title, and its Agent, action or event
+   at the right. The id can be long, so both give way. */
+.wfn .pop-h {
+  color: var(--muted);
+}
+.wfn .pop-h b {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wfn .pop-h span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Where the run is at the node. What the session asks the user goes under
+   it, as the glance page's `.q-what` sets a Request under its thread. */
+.wfn-status .grow {
+  white-space: normal;
+}
+.wfn-status .grow b {
+  font-weight: var(--w-bold);
+}
+.wfn-status.is-you .grow b {
+  color: var(--you-ink);
+}
+.wfn-status.is-fail .grow b {
+  color: var(--fail-ink);
+}
+.wfn-status .grow small {
+  margin-top: 2px;
+  color: var(--ink);
+  font-size: var(--t-12);
+  white-space: normal;
+}
+/* A state with no mark keeps the mark's slot, so the text starts where it
+   would after one. */
+.wfn-no-mark {
+  flex: none;
+  width: 14px;
+}
+
+/* The facts, as the assistant page's `.rem` rows: a fixed label column, then
+   the value, at 12px. A value wraps once, then is cut short; its tooltip
+   holds it whole. */
+.wfn-facts {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+  padding: 6px;
+  font-size: var(--t-12);
+}
+.wfn-facts > div {
+  display: contents;
+}
+.wfn-facts dt {
+  color: var(--muted);
+}
+.wfn-facts dd {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.wfn-facts dd.is-code {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+  line-height: 18px;
+}
+.wfn-facts dd.is-fail {
+  color: var(--fail-ink);
+}
+
+/* An agent step's prompt, as written: its first three lines. */
+.wfn-prompt {
+  display: -webkit-box;
+  margin: 0;
+  padding: 0 6px 6px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+/* An iteration's number, before how it stands. */
+.wfn .line .grow b {
+  font-variant-numeric: tabular-nums;
+}
+.wfn .line-note {
+  font-variant-numeric: tabular-nums;
+}
+.wfn button.line > .ic:last-child {
+  flex: none;
+  color: var(--faint);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* The card drops 4px into place as it opens, which ties it to the node it
+     came from. It closes in one frame. */
+  .wfn:popover-open {
+    animation: wfn-in var(--dur-2) var(--ease-out);
+  }
+}
+@keyframes wfn-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}

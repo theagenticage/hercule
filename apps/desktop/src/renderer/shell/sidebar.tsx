@@ -15,7 +15,7 @@ import {
 } from "../app/queries";
 import { useRelatedReads } from "../app/related-reads";
 import { useSendOnChange } from "../app/send-on-change";
-import { useWaiting } from "../app/waiting";
+import { useWaiting, useWaitingRuns } from "../app/waiting";
 import { ComposeIcon } from "../icons/compose";
 import { OfficeIcon } from "../icons/office";
 import { SearchIcon } from "../icons/search";
@@ -40,7 +40,8 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *   and the Office as square icon buttons, where the book draws New thread
  *   and Search as two rows and has no Office button;
  * - the list: Waiting on you, with the threads and the assistants that wait
- *   on the user, then the face's own rows.
+ *   on the user, and under "From runs" the runs that do (PROTOTYPE), then
+ *   the face's own rows.
  *   - On the threads face, the threads of each project, newest created
  *     first, with the Draft Thread's row, while one is open, first in its
  *     project. A row whose composer holds unsent work is tinted. Then the
@@ -84,6 +85,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const assistantRows = useAssistantRows();
   const waiting = useWaiting();
+  const waitingRuns = useWaitingRuns();
   const unsentKeys = useUnsentKeys(controller.pendingSubmissions);
   useRelatedReads(threads, projects, workspaces);
   // The Draft Thread the new-thread screen shows, while that screen is open.
@@ -138,6 +140,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   const { items, counts } = buildSidebar({
     threads,
     waiting,
+    waitingRuns,
     projects,
     workspaces,
     resources,

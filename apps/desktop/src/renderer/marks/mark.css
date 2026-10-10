@@ -2,9 +2,10 @@
    currentColor, so each state's colour is set here, on the mark. Colour helps
    but is never the only cue: each state also has its own glyph.
 
-   Nothing animates: the book fades the working mark's dots in turn, and the
-   app draws them still, so a list full of working rows draws no frames
-   (spec 17 §Performance, rule 2). */
+   Nothing animates on its own: the book fades the working mark's dots in
+   turn, and the app draws them still, so a list full of working rows draws
+   no frames (spec 17 §Performance, rule 2). A screen may pop in a mark
+   whose state has just changed, once, with `mark-in` below. */
 .mark {
   display: inline-grid;
   place-items: center;
@@ -28,4 +29,14 @@
 }
 .mark--idle {
   color: var(--faint);
+}
+
+/* A mark that has just changed grows in from 60% on the spring, so the eye
+   finds what moved. The workflow graph, its timeline and the workflow list
+   play it. */
+@keyframes mark-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
 }

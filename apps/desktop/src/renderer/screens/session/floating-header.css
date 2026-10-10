@@ -22,13 +22,6 @@
 .top:has(~ .has-scrollbar) {
   right: calc(14px + var(--classic-scrollbar-width));
 }
-/* The width of a classic scroll bar on macOS. An overlay scroll bar is drawn
-   inside the same strip. */
-.top,
-.top ~ .transcript,
-.top ~ .hello {
-  --classic-scrollbar-width: 15px;
-}
 /* What scrolls under the header is hidden across the whole header row and
    fades in below it: text left there, even faint, would show between the
    pills, cut in half at their edges. Text is fully visible again at

@@ -55,6 +55,11 @@
 :root {
   --glass-level: calc(var(--glass-percent, 40) / 100);
 }
+/* The width of a classic scroll bar on macOS, as it draws one with a mouse
+   attached. An overlay scroll bar is drawn inside the same strip. */
+:root {
+  --classic-scrollbar-width: 15px;
+}
 
 html,
 body {

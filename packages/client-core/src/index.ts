@@ -316,6 +316,8 @@ export {
 } from "./onboarding";
 export {
   chooseStamps,
+  computeDayStart,
+  computeMinutesOfDay,
   formatDayStamp,
   formatPreciseStamp,
   formatSince,
@@ -471,7 +473,7 @@ export {
 } from "./threads/question-draft";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";
-export { describeAgent } from "./threads/model-name";
+export { describeAgent, findModelName } from "./threads/model-name";
 export {
   buildThreadGroups,
   type DraftPlace,

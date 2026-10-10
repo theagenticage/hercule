@@ -1,0 +1,387 @@
+/* PROTOTYPE. The workflow graph: steps and triggers as cards, edges as
+   hairlines between them. Not in the Bureau book yet: a proposed addition.
+
+   A step card is the book's card (raised, the large radius, a soft rim and the
+   first shadow). A trigger card is sunken, because a trigger listens rather
+   than works. Edges are drawn in ink tones only: a run's progress shows in the
+   marks and the rings, never in a colour of its own, except where the user is
+   asked something or a step failed.
+
+   Each card is a button that opens its card of details. Hovering it tints
+   it, as the book's `.btn:hover` does, and the card whose details are open
+   is lifted to the second shadow. Those answer the user, so they transition.
+
+   A run's progress is not a user action, so it never transitions (spec 17,
+   §Performance, rule 2). It plays one-shot animations of `opacity` and
+   `transform` on HTML elements instead, which the compositor runs alone, and
+   only while the graph is on screen: a card the run reaches brightens, one it
+   passes by dims, a ring fades in, and a mark whose state changed pops in.
+   When the run comes to ask the user something or fails, the ring sends out
+   one ping. Edges are SVG, which Chromium animates on the main thread, so
+   they change in one frame. */
+
+/* The pane the graph is drawn in, with the zoom controls over it. The frame
+   reaches past its box by the pane's padding (`PANE_PADDING` in
+   workflow-graph.tsx), so the cards line up with the text above and below
+   the graph, and the zoom controls with its right edge. */
+.wfg-frame {
+  position: relative;
+  margin-inline: -12px;
+}
+/* The pane scrolls a graph that is zoomed larger than itself, and takes the
+   keyboard's zoom keys while focused. */
+.wfg-pane {
+  position: relative;
+  overflow: auto;
+  border-radius: var(--r-lg);
+  outline: none;
+}
+.wfg-pane:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+/* Not in the book. A graph zoomed wider than its pane is cut off at the
+   pane's edge, and a card cut in half there reads as a rendering fault. So
+   the pane fades the side it cuts the graph at over 48px, as the book fades
+   the transcript under the floating header (`.top ~ .transcript`). A strip
+   along the bottom, as tall as a classic scroll bar, stays unmasked, so the
+   horizontal scroll bar never fades. */
+.wfg-pane:is(.is-cut-left, .is-cut-right) {
+  mask-image:
+    linear-gradient(
+      to right,
+      var(--cut-left-edge, #000),
+      #000 48px,
+      #000 calc(100% - 48px),
+      var(--cut-right-edge, #000)
+    ),
+    linear-gradient(#000 0 0);
+  mask-size:
+    100% 100%,
+    100% var(--classic-scrollbar-width);
+  mask-position: bottom;
+  mask-repeat: no-repeat;
+}
+.wfg-pane.is-cut-left {
+  --cut-left-edge: transparent;
+}
+.wfg-pane.is-cut-right {
+  --cut-right-edge: transparent;
+}
+/* The drawing, at its own size. The pane scales it as one piece, so a zoom
+   never lays the graph out again. */
+.wfg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.wfg-edges {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+
+/* Edges. They are SVG, which Chromium animates on the main thread, a
+   reason of its own for them to change colour in one frame. */
+.wfg-edge {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  color: var(--line);
+}
+.wfg-edge.is-fired {
+  color: var(--muted);
+}
+.wfg-edge.is-active {
+  color: var(--ink);
+}
+.wfg-edge.is-notTaken {
+  stroke-dasharray: 3 4;
+}
+.wfg-edge.is-notYet {
+  color: var(--line-soft);
+}
+.wfg-edge.is-failed {
+  color: var(--fail);
+}
+/* From the step a signal correlates on to the signal: the run follows no
+   such edge, it only listens once the step has given its output. */
+.wfg-edge--correlation {
+  stroke-dasharray: 2 3;
+}
+.wfg-arrow {
+  fill: var(--line);
+}
+.wfg-arrow.is-fired {
+  fill: var(--muted);
+}
+.wfg-arrow.is-active {
+  fill: var(--ink);
+}
+.wfg-arrow.is-notYet {
+  fill: var(--line-soft);
+}
+.wfg-arrow.is-failed {
+  fill: var(--fail);
+}
+/* Where the start triggers fan out to the entry steps. */
+.wfg-bus {
+  fill: var(--muted);
+}
+/* Where the run ends, after the step that ends it. */
+.wfg-end {
+  fill: var(--ink);
+}
+
+/* An edge's condition or limit. Expressions are code, so they are set in the
+   mono face, whose every glyph is 0.6em wide: the layout knows a label's
+   width from its length before anything renders. */
+.wfg-label {
+  position: absolute;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  background: var(--surface);
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+  line-height: 15px;
+  white-space: nowrap;
+}
+.wfg-label.is-fired,
+.wfg-label.is-active {
+  color: var(--muted);
+}
+.wfg-label.is-failed {
+  color: var(--fail-ink);
+}
+
+/* Cards. A card's fill, rim and shadow are properties, so hovering and
+   opening it change one of them and keep the rest. A trigger has no shadow:
+   `0 0 #0000` is a shadow that draws nothing, so the open card's lift
+   transitions from it. */
+.wfg-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--r-lg);
+  background: var(--wfg-fill);
+  box-shadow:
+    inset 0 0 0 1px var(--wfg-rim),
+    var(--wfg-lift);
+  text-align: left;
+  transition:
+    background var(--dur-1),
+    box-shadow var(--dur-1);
+}
+.wfg-node--step {
+  --wfg-fill: var(--raised);
+  --wfg-rim: var(--line-soft);
+  --wfg-lift: var(--shadow-1);
+}
+.wfg-node--trigger {
+  --wfg-fill: var(--sunken);
+  --wfg-rim: var(--line-soft);
+  --wfg-lift: 0 0 #0000;
+}
+.wfg-node:hover {
+  background: color-mix(in oklab, var(--ink) 5%, var(--wfg-fill));
+}
+.wfg-node.is-open {
+  --wfg-rim: var(--line);
+  --wfg-lift: var(--shadow-2);
+}
+/* The focus ring follows the card's corners. */
+.wfg-node:focus-visible {
+  border-radius: var(--r-lg);
+}
+/* The box at a card's left that holds what the card is: an Agent, an
+   action, a schedule or an event. */
+.wfg-lead {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--muted);
+}
+.wfg-node--trigger .wfg-lead {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.wfg-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+.wfg-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.wfg-title b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.wfg-node--trigger .wfg-title b {
+  font-weight: var(--w-medium);
+}
+/* How often the run came to the step, `×2`, after its name. */
+.wfg-iteration {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.wfg-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* The run's state at the card, on its top-right corner. */
+.wfg-mark {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+/* A step that waits for every edge into it, on its top-left corner. */
+.wfg-join {
+  position: absolute;
+  top: -8px;
+  left: 10px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  line-height: 15px;
+}
+
+/* A run's state at each card. A dimmed card's opacity is where
+   `wfg-node-brighten` starts and `wfg-node-dim` ends. */
+.wfg-node.is-unreached,
+.wfg-node.is-quiet,
+.wfg-node.is-cancelled,
+.wfg-node.is-skipped {
+  opacity: 0.5;
+}
+.wfg-node.is-waiting {
+  --wfg-ring: var(--you);
+}
+.wfg-node.is-waiting .wfg-detail {
+  color: var(--you-ink);
+}
+.wfg-node.is-failed {
+  --wfg-ring: var(--fail);
+}
+.wfg-node.is-failed .wfg-detail {
+  color: var(--fail-ink);
+}
+.wfg-node.is-listening {
+  --wfg-ring: var(--line);
+}
+/* The ring of a card that waits on the user, failed, or listens. It lies
+   over the card's rim, so the rim can change under it on hover. It comes
+   first in the card, so the join and the mark draw over it. */
+.wfg-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1.5px var(--wfg-ring);
+  pointer-events: none;
+}
+
+/* The zoom controls, on the pane's bottom-right corner. */
+.wfg-zoom {
+  position: absolute;
+  right: var(--s-3);
+  bottom: var(--s-3);
+}
+.wfg-zoom output {
+  min-width: 42px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* A card the run reaches while the graph is open brightens from dimmed, so
+     the run's progress travels along the graph. One the run skips or cancels
+     dims the same way back. */
+  .wfg-node.is-brightening {
+    animation: wfg-node-brighten var(--dur-3) var(--ease-out);
+  }
+  .wfg-node.is-dimming {
+    animation: wfg-node-dim var(--dur-3) var(--ease-out);
+  }
+  /* A mark whose state changed while the graph was open pops in, so the eye
+     finds the step that moved. Marks drawn when the graph opens stay still. */
+  .wfg-mark.is-new > .mark {
+    animation: mark-in var(--dur-3) var(--ease-spring);
+  }
+  /* A ring fades in with its mark. When the run comes to ask the user
+     something or fails, a copy of the ring grows past the card's edge and
+     fades, once. */
+  .wfg-ring.is-new {
+    animation: wfg-ring-in var(--dur-3) var(--ease-out);
+  }
+  .wfg-node:is(.is-waiting, .is-failed) > .wfg-ring.is-new::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 0 0 1.5px var(--wfg-ring);
+    opacity: 0;
+    animation: wfg-ring-ping var(--dur-3) var(--ease-out);
+  }
+}
+@keyframes wfg-node-brighten {
+  from {
+    opacity: 0.5;
+  }
+}
+@keyframes wfg-node-dim {
+  from {
+    opacity: 1;
+  }
+}
+@keyframes wfg-ring-in {
+  from {
+    opacity: 0;
+  }
+}
+/* The card is 176 by 48 pixels, so these scales grow it by about 3.5px on
+   every side. */
+@keyframes wfg-ring-ping {
+  from {
+    opacity: 0.7;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.04, 1.15);
+  }
+}

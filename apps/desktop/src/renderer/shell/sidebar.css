@@ -215,6 +215,26 @@
   min-height: 38px;
   padding-left: 6px;
 }
+/* PROTOTYPE, not in the book. "From runs", the Workflows low-fi's label over
+   the runs in Waiting on you: the section heading's ink and size, in
+   sentence case, indented to the rows' text as the low-fi's is. */
+.side-sub {
+  margin: 0;
+  padding-left: 10px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+}
+/* PROTOTYPE, not in the book. A run's row leads with its state mark where a
+   thread's row draws its face, so the mark takes the face's 24px and every
+   row's text starts at the same place. */
+.side-lead {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
 .side-row--more {
   min-height: 28px;
   color: var(--muted);

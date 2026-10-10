@@ -116,7 +116,7 @@ describe("the requests of the renderer-to-main channels", () => {
 describe("the menu commands", () => {
   const decode = Schema.decodeUnknownSync(MenuCommand);
 
-  it.each(["signOut", "newThread", "openOffice", "openSettings", "send"])(
+  it.each(["signOut", "newThread", "openOffice", "openWorkflows", "openSettings", "send"])(
     "decodes %s",
     (command) => {
       expect(decode(command)).toBe(command);

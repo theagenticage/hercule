@@ -182,6 +182,65 @@
     var(--glass-shadow);
 }
 
+/* A tab inside a pill, such as a thread of the open workspace in the thread
+   header, or a view of the Office. The selected tab is drawn as a selected
+   row. The `small` after its label is a count or an age. */
+.ptab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.ptab:hover {
+  background: var(--hover);
+}
+.ptab.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+.ptab small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+/* A tab in a page's own bar, such as the tabs of an open workflow. The book's
+   `.tabs` and `.tab`; the background fades as the pill's tab's does. The
+   `small` after its label is a count. */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  transition: background var(--dur-1);
+}
+.tab:hover {
+  background: var(--hover);
+}
+.tab.is-on {
+  color: var(--ink);
+  background: var(--selected);
+}
+.tab small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- Segmented controls ---------- */
 /* A row of buttons that picks one of a few values, such as a model option's
    choices. The pressed button is the value in use. */
@@ -272,8 +331,9 @@ button.nav-row {
 
 /* ---------- Chips ---------- */
 /* A small pill naming one thing in a list of a few, such as a tool family an
-   assistant may never use. The book also has tinted variants; the app draws
-   only the plain chip so far. */
+   assistant may never use. Of the book's tinted variants, the app draws only
+   `.chip--fail` so far: something in the list failed, such as a trigger in
+   error. */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -286,6 +346,10 @@ button.nav-row {
   font-size: var(--t-12);
   font-weight: var(--w-medium);
   white-space: nowrap;
+}
+.chip--fail {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
 }
 
 /* ---------- Inputs ---------- */

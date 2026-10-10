@@ -64,6 +64,26 @@ window.ResizeObserver = class {
 };
 
 /**
+ * jsdom has no `IntersectionObserver`. The workflow graph watches whether it
+ * is on screen with one, so each test that opens a workflow would fail
+ * without it. The stub reports nothing, so the graph plays no motion. A test
+ * that needs an element on screen replaces it with
+ * `vi.stubGlobal("IntersectionObserver", ...)`.
+ */
+window.IntersectionObserver = class {
+  readonly root = null;
+  readonly rootMargin = "0px";
+  readonly scrollMargin = "0px";
+  readonly thresholds = [0];
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+  takeRecords(): Array<IntersectionObserverEntry> {
+    return [];
+  }
+};
+
+/**
  * jsdom has no `window.matchMedia`. The Office room asks it whether the user
  * reduced motion each time its shot or its contents change, so each test that
  * moves the first run from one step to the next would fail without it. The

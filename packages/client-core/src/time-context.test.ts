@@ -1,5 +1,6 @@
 import { assert, describe, it } from "vitest";
 import {
+  computeDayStart,
   computeMinutesOfDay,
   chooseStamps,
   formatDay,
@@ -292,5 +293,68 @@ describe("computeMinutesOfDay", () => {
 
   it("returns undefined for a zone this runtime does not know", () => {
     assert.isUndefined(computeMinutesOfDay(AT, "Mars/Olympus"));
+  });
+});
+
+describe("computeDayStart", () => {
+  const readStart = (instant: string, timezone: string): string | undefined =>
+    computeDayStart(new Date(instant), timezone)?.toISOString();
+
+  it("returns midnight of the date in the zone", () => {
+    assert.strictEqual(readStart("2026-10-07T21:10:42.5Z", "UTC"), "2026-10-07T00:00:00.000Z");
+    // 23:10 in Amsterdam; midnight there is 22:00 UTC the day before.
+    assert.strictEqual(
+      readStart("2026-10-07T21:10:00Z", "Europe/Amsterdam"),
+      "2026-10-06T22:00:00.000Z",
+    );
+    // 02:55 the next day in Kathmandu, which is UTC+05:45.
+    assert.strictEqual(
+      readStart("2026-10-07T21:10:00Z", "Asia/Kathmandu"),
+      "2026-10-07T18:15:00.000Z",
+    );
+  });
+
+  it("returns midnight itself for an instant at midnight", () => {
+    assert.strictEqual(
+      readStart("2026-10-06T22:00:00Z", "Europe/Amsterdam"),
+      "2026-10-06T22:00:00.000Z",
+    );
+  });
+
+  it("finds midnight on a day the clock moves forward", () => {
+    // 29 March 2026 in Amsterdam is 23 hours long: 02:00 CET becomes 03:00 CEST.
+    // 10:00 CEST is 08:00 UTC, and midnight is still 23:00 UTC the day before.
+    assert.strictEqual(
+      readStart("2026-03-29T08:00:00Z", "Europe/Amsterdam"),
+      "2026-03-28T23:00:00.000Z",
+    );
+  });
+
+  it("finds midnight on a day the clock moves back, inside the repeated hour too", () => {
+    // 25 October 2026 in Amsterdam is 25 hours long: 03:00 CEST becomes 02:00 CET.
+    // Midnight is 22:00 UTC the day before, in summer time.
+    assert.strictEqual(
+      readStart("2026-10-25T09:00:00Z", "Europe/Amsterdam"),
+      "2026-10-24T22:00:00.000Z",
+    );
+    // 02:30 the second time, in winter time.
+    assert.strictEqual(
+      readStart("2026-10-25T01:30:00Z", "Europe/Amsterdam"),
+      "2026-10-24T22:00:00.000Z",
+    );
+  });
+
+  it("returns the first instant of a date whose clock skips midnight", () => {
+    // In Santiago on 6 September 2026, 00:00 becomes 01:00, so the date
+    // starts at 01:00 local, which is 04:00 UTC.
+    assert.strictEqual(
+      readStart("2026-09-06T13:00:00Z", "America/Santiago"),
+      "2026-09-06T04:00:00.000Z",
+    );
+  });
+
+  it("returns undefined for an invalid date or a zone this runtime does not know", () => {
+    assert.isUndefined(computeDayStart(new Date("not a date"), "UTC"));
+    assert.isUndefined(computeDayStart(new Date("2026-10-07T21:10:00Z"), "Mars/Olympus"));
   });
 });

@@ -1,0 +1,90 @@
+/* PROTOTYPE. The pills over the workflow list. */
+
+/* The Bureau book's `.pill-title`, from its Office page (desktop/office.html),
+   the one page that has it so far. The Office keeps its copy inside the
+   Office, and this copy stays inside the Workflows page. Here the title is
+   the page's heading, so the heading's own margin and size are undone. */
+.wf .pill-title {
+  margin: 0;
+  padding: 0 8px 0 10px;
+  font-size: inherit;
+  font-weight: var(--w-bold);
+}
+
+/* Not in the book: over the column, the page's name is a tab that leads
+   back to the table, set as the title is. */
+.wf-back {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+
+/* Not in the book, whose search is a button in the sidebar (`.side-search`).
+   The search field floats in a pill of its own at the header's far end, as
+   the Office's counts do, and filters the table as the user types. The
+   input's padding is zeroed for the reason `.field > input` gives in
+   controls.css. */
+.wf-find {
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  color: var(--muted);
+}
+.wf-find:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.wf-find > input {
+  width: 168px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+}
+.wf-find > input::placeholder {
+  color: var(--faint);
+}
+/* The browser's own clear button would sit beside ⌘F. */
+.wf-find > input::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* ---------- A narrow pane ---------- */
+
+/* Not in the book, whose pages are drawn at one width. The filters never
+   shrink: a tab cut in half is a tab the user cannot read. The search field
+   gives up its width first. */
+.wf-filters {
+  flex: none;
+}
+.wf-find {
+  min-width: 0;
+}
+.wf-find > input {
+  min-width: 0;
+}
+
+/* Below 780px the filters and the search field do not fit side by side, so
+   the tabs drop their counts. Every group's heading in the list shows its
+   count too. */
+@container workflows-pane (max-width: 780px) {
+  .wf-filters .ptab small {
+    display: none;
+  }
+}
+/* Below 640px, the narrowest the window allows beside the sidebar, the page's
+   name and ⌘F go as well. The name stays the page's heading for a screen
+   reader, and the sidebar's Workflows link shows where the user is. */
+@container workflows-pane (max-width: 640px) {
+  .wf-filters .pill-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .wf-find > kbd {
+    display: none;
+  }
+}

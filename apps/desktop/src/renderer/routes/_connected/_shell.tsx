@@ -87,11 +87,11 @@ function ShellLayout(): JSX.Element {
     "Could not update the dock badge and the notifications:",
   );
 
-  // Only a signed-in user can start a thread, open the Office or open
-  // Settings, so only the shell listens for File > New Thread, Go > Office and
-  // the app menu's Settings. The Office and Settings, like a thread opened
-  // from the menu, replace whatever the user was doing, the project picker
-  // included.
+  // Only a signed-in user can start a thread, open the Office, Workflows or
+  // Settings, so only the shell listens for File > New Thread, Go > Office,
+  // Go > Workflows and the app menu's Settings. Each of those pages, like a
+  // thread opened from the menu, replaces whatever the user was doing, the
+  // project picker included.
   useEffect(
     () =>
       bridge.menu.onCommand((command) => {
@@ -99,6 +99,10 @@ function ShellLayout(): JSX.Element {
         if (command === "openOffice") {
           setDialog(null);
           void navigate({ to: "/office" });
+        }
+        if (command === "openWorkflows") {
+          setDialog(null);
+          void navigate({ to: "/workflows" });
         }
         if (command === "openSettings") {
           setDialog(null);

@@ -16,31 +16,8 @@
   color: var(--faint);
   font-weight: var(--w-regular);
 }
-/* A thread of this workspace, as a tab: its state mark, its title, and an
-   age when idle. */
-.ptab {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 28px;
-  padding: 0 10px 0 8px;
-  border-radius: 8px;
-  color: var(--muted);
-  font-weight: var(--w-medium);
-  transition: background var(--dur-1);
-}
-.ptab:hover {
-  background: var(--hover);
-}
-.ptab.is-on {
-  background: var(--selected);
-  color: var(--ink);
-}
-.ptab small {
-  color: var(--faint);
-  font-size: var(--t-12);
-  font-weight: var(--w-regular);
-}
+/* A thread of this workspace is a tab, the `.ptab` of controls.css: its
+   state mark, its title, and an age when idle. */
 
 /* Not in the book, whose titles are short. When the header runs out of
    room, the tabs' pill shrinks and the pills on the right keep their place:
@@ -62,8 +39,10 @@
    tabs give way first, and only then the open thread's tab. A tab that is
    not open stops at 72px: its padding, its mark, the gap and about four
    letters with an ellipsis. On a subagent's page, the earlier crumbs give
-   way the same way (subagent-header.css). */
-.top nav.pill .ptab:not(.is-on) {
+   way the same way (subagent-header.css). The rule names the two pills it
+   is for: a page whose tabs are views, such as Workflows' filters, keeps
+   every tab whole. */
+:is(.thread-tabs, .subagent-crumbs) .ptab:not(.is-on) {
   flex-shrink: 1000;
   min-width: 72px;
 }

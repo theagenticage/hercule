@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "@babel/core": "8.0.1",
+    "@dagrejs/dagre": "3.1.1",
     "@effect/platform-node-shared": "4.0.0-rc.112",
     "@hercule/client-core": "workspace:*",
     "@hercule/contract": "workspace:*",

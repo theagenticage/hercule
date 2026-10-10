@@ -1,6 +1,6 @@
 /**
  * The items of the sidebar's thread list: section headers, thread rows, the
- * waiting assistants' rows, the draft's row and "more" rows,
+ * waiting assistants' and runs' rows, the draft's row and "more" rows,
  * drawn as the Bureau book's crew.js draws them.
  *
  * Each item draws itself at its kind's fixed height, with the space above it
@@ -216,6 +216,72 @@ export const WaitingAssistantRow = memo(function WaitingAssistantRow({
         </span>
       </span>
     </ConversationLink>
+  );
+});
+
+/**
+ * PROTOTYPE. Renders "From runs", the label over the runs in Waiting on you.
+ * Not in the book: the Workflows low-fi's `.side-sub`. It is a heading
+ * under Waiting on you's, so a screen reader lists the runs as a group.
+ */
+export const WaitingRunsLabel = memo(function WaitingRunsLabel({
+  itemKey,
+  leading,
+}: Placement): JSX.Element {
+  return (
+    <h4
+      className="side-sub side-item"
+      data-key={itemKey}
+      tabIndex={-1}
+      style={{ marginTop: leading, height: ITEM_HEIGHTS["waiting-runs-label"] }}
+    >
+      From runs
+    </h4>
+  );
+});
+
+/**
+ * PROTOTYPE. Renders a run's session that waits on the user, under "From
+ * runs": the waiting mark where a thread's row draws a face, because a run's
+ * agents have no face, its title, "<workflow name> · <step id>", and the
+ * question its step asks. The link is named "<title>, waiting on you" and
+ * described by the question. It opens the session on its own screen, where
+ * the Request is answered, also while the Office is open, because a run's
+ * session has no colleague there.
+ */
+export const WaitingRunRow = memo(function WaitingRunRow({
+  itemKey,
+  leading,
+  sessionId,
+  title,
+  question,
+}: Placement & {
+  readonly sessionId: string;
+  readonly title: string;
+  readonly question: string;
+}): JSX.Element {
+  const questionId = useId();
+  return (
+    <Link
+      to="/threads/$sessionId"
+      params={{ sessionId }}
+      activeProps={SELECTED_LINK_PROPS}
+      className="side-row side-row--wait side-item"
+      data-key={itemKey}
+      style={{ marginTop: leading, height: ITEM_HEIGHTS["waiting-run-row"] }}
+      aria-label={`${title}, ${describePose("waiting")}`}
+      aria-describedby={questionId}
+    >
+      <span className="side-lead">
+        <Mark state="waiting" />
+      </span>
+      <span className="side-text">
+        <span className="side-name">{title}</span>
+        <span className="side-ask" id={questionId}>
+          {question}
+        </span>
+      </span>
+    </Link>
   );
 });
 

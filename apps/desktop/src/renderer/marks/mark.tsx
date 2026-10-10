@@ -44,20 +44,37 @@ const MARK_GLYPHS: { readonly [State in MarkState]: JSX.Element } = {
 };
 
 /**
- * Renders a state mark: the state's glyph, 14 CSS pixels square, in the
- * state's colour. The mark is hidden from assistive technology, because
- * every place that draws one also names the state in words, such as a thread
- * row's name "Fix checkout, working".
+ * Renders a state mark: the state's glyph, `size` CSS pixels square (14 by
+ * default), in the state's colour. A workflow row's strip of recent runs
+ * draws its marks at 10, so twenty of them fit beside the row's name.
+ *
+ * The mark is hidden from assistive technology, because every place that
+ * draws one also names the state in words, such as a thread row's name "Fix
+ * checkout, working".
  *
  * Nothing in a mark moves. The book fades the working mark's dots in turn;
  * the app draws them still. The app allows one continuous animation, the face
  * beside the open thread's running turn, so a list full of working rows draws
- * no frames (spec 17 §Performance, rule 2).
+ * no frames (spec 17 §Performance, rule 2). `className` is added to the
+ * mark's own classes, so a list can pop in a mark whose state just changed.
  */
-export function Mark({ state }: { readonly state: MarkState }): JSX.Element {
+export function Mark({
+  state,
+  size = 14,
+  className,
+}: {
+  readonly state: MarkState;
+  readonly size?: number;
+  readonly className?: string | undefined;
+}): JSX.Element {
   return (
-    <span className={`mark mark--${state}`} aria-hidden="true">
-      <IconFrame size={14}>{MARK_GLYPHS[state]}</IconFrame>
+    <span
+      className={
+        className === undefined ? `mark mark--${state}` : `mark mark--${state} ${className}`
+      }
+      aria-hidden="true"
+    >
+      <IconFrame size={size}>{MARK_GLYPHS[state]}</IconFrame>
     </span>
   );
 }

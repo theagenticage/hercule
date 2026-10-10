@@ -41,17 +41,26 @@
   font-size: var(--t-11);
   font-weight: var(--w-medium);
 }
+/* The hairline above the row is drawn by `::before` rather than as the row's
+   top border: a border follows the row's rounded corners, so it would curve
+   down at both ends. */
 .profile-row {
+  position: relative;
   min-height: 52px;
   padding: 6px 8px;
-  border-top: 1px solid var(--line-soft);
   border-radius: var(--r-md);
+}
+.profile-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  border-top: 1px solid var(--line-soft);
 }
 .profile-row:hover {
   background: var(--hover);
 }
-.profile-row:hover,
-.profile-row:hover + .profile-row {
+.profile-row:hover::before,
+.profile-row:hover + .profile-row::before {
   border-top-color: transparent;
 }
 /* The book's `.mk`. */

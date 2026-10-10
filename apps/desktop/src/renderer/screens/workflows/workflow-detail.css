@@ -1,0 +1,193 @@
+/* PROTOTYPE. An open workflow's page. Its lead is the Bureau book's Intake
+   lead (`.lead h2` and `.gist`, desktop/intake.html), its tabs are the
+   book's `.tabs`, and its tables are the workflow list's table rows
+   (workflow-list.css). Each departure from the book is explained. */
+
+/* The page scrolls as one: the lead, the graph, then the tab's table. The
+   side padding is the book's Intake list's 20px plus the 4px the floating
+   pill's edge sits in from the header's. */
+.wfd {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  container: workflow-detail / inline-size;
+  padding: 0 24px 40px;
+}
+
+/* Not in the book. The room for the floating pills, at the top of the page
+   and opaque, as the list's sticky head is: the page scrolls out of sight
+   under it, so no text is cut in half between the pills. Its height is
+   `PILL_CLEARANCE` in workflow-list.tsx. Its negative margins reach the
+   page's padding, so no text shows beside it. */
+.wfd-cap {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 56px;
+  margin: 0 -24px;
+  background: var(--surface);
+}
+
+/* The book's Intake `.lead h2`, as the page's heading, and its `.gist`. */
+.wfd-lead > h1 {
+  margin: 8px 0 6px;
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.wfd-gist {
+  margin: 0 0 14px;
+  max-width: 700px;
+  font-size: var(--t-14);
+  line-height: 1.55;
+}
+/* Not in the book: chips in a row under a heading, as the Agent page's tool
+   families are listed. */
+.wfd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wfd-chips .ic {
+  flex: none;
+}
+
+/* Which run the graph draws: the book's `.section-h`, then the run's mark,
+   status and time on the same line. */
+.wfd-drawn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  margin-top: 24px;
+}
+.wfd-drawn > .mark {
+  flex: none;
+}
+.wfd-drawn > .wl-status {
+  min-width: 0;
+}
+.wfd-drawn-time {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.wfd-drawn > .btn {
+  flex: none;
+  margin-left: auto;
+}
+.wfd-graph {
+  margin: 8px 0 20px;
+}
+
+/* Not in the book. The tab bar and the open tab's column heads stick under
+   the pills' room, so the user always sees which tab and which column they
+   read. The hairline above the tabs ends the graph, as the book's `.hair`
+   ends a section. */
+.wfd-band {
+  position: sticky;
+  top: 56px;
+  z-index: 1;
+  margin: 0 -24px;
+  padding: 0 24px;
+  background: var(--surface);
+}
+/* The tabs, and on the Runs tab the tools that pick how its runs show, at
+   the row's right end. A page too narrow for both puts the tools on a line
+   of their own, still at the right. */
+.wfd-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 10px 0 8px;
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.wfd-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+/* ---------- The tables ---------- */
+
+/* Rows that are buttons fill the table, and read from the left. */
+button.wl-trow {
+  width: 100%;
+  text-align: left;
+}
+
+/* The Runs tab: the mark, the status, who or what started the run, how
+   long it took, and when it started. */
+.wfd-runs {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 2fr) minmax(0, 1fr) 64px 72px;
+  align-items: center;
+  gap: 14px;
+}
+/* The Triggers tab: the clock or the bolt, the trigger's id, what it does,
+   what it fires on, and its state. */
+.wfd-triggers {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) 104px minmax(0, 1.4fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 14px;
+}
+/* The Inputs tab: the input's name, its type, whether it is required, and
+   its default. */
+.wfd-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px minmax(0, 1.4fr);
+  align-items: center;
+  gap: 14px;
+}
+.wfd-runs.wl-trow,
+.wfd-triggers.wl-trow,
+.wfd-inputs.wl-trow {
+  height: 40px;
+}
+/* The column heads' hairline is the first row's top line. */
+.wfd-rows > .wl-trow:first-child::before {
+  border-top-color: transparent;
+}
+/* The book's `.topic`, in the second line's size, as `.wl-starts` is. */
+.wfd-quiet {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+}
+.wfd-icon {
+  color: var(--faint);
+}
+/* A run started by an actor has no clock or bolt; its text keeps the
+   icon's room, so every row's text starts at the same place. */
+.wfd-by > .wl-clip:only-child {
+  padding-left: 18px;
+}
+
+/* Not in the book. A narrow page drops who started each run and what each
+   trigger does, as the list drops what starts each workflow: the status
+   and what a trigger fires on need the room more. */
+@container workflow-detail (max-width: 560px) {
+  .wfd-runs {
+    grid-template-columns: 14px minmax(0, 1fr) 64px 72px;
+  }
+  .wfd-triggers {
+    grid-template-columns: 14px minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.2fr);
+  }
+  :is(.wfd-runs > .wfd-by, .wfd-triggers > .wfd-does) {
+    display: none;
+  }
+}
+
+/* The source is the one thing on the page a user may want to copy. */
+.wfd-source {
+  margin: 12px 0 0;
+  user-select: text;
+}
