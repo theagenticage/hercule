@@ -47,7 +47,6 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Schema } from "effect";
 import { pollUntil } from "./poll.ts";
-import { RUNNER_ATTACHMENTS_PATH } from "../../../packages/protocol/src/attachments";
 import type {
   ATTACHMENTS_CAPABILITY,
   AttachmentReference,
@@ -63,6 +62,7 @@ import type {
   RequestResolution,
   RunnerFacts,
   RunnerToController,
+  RUNNER_ATTACHMENTS_PATH,
   SessionBinding,
   SessionInput,
   SessionStart,
@@ -708,7 +708,10 @@ export async function enlistScriptedRunner(
     sessionId: string,
     bytes: Uint8Array<ArrayBuffer>,
   ): Promise<ToolResultAttachment> => {
-    const route = new URL(RUNNER_ATTACHMENTS_PATH, url);
+    // Plain Node cannot load the protocol package, so the path is written
+    // out; `satisfies` fails the typecheck when it changes.
+    const path = "/api/v1/runners/attachments" satisfies typeof RUNNER_ATTACHMENTS_PATH;
+    const route = new URL(path, url);
     route.searchParams.set("sessionId", sessionId);
     const stored = await fetch(route, {
       method: "POST",

@@ -678,8 +678,21 @@ async function recordHeldTopics({
             (element) => element.childElementCount === 0 && element.textContent.trim() === ${title},
           ),
         );
-        row?.click();
-        return row !== undefined;
+        if (row !== undefined) {
+          row.click();
+          return true;
+        }
+        // A project's section shows only its newest threads, and the list
+        // mounts only the rows in view, so each try opens a section's "more"
+        // row or scrolls one screen further down.
+        const more = document.querySelector(".side-row--more");
+        if (more !== null) {
+          more.click();
+          return false;
+        }
+        const list = document.querySelector(".side-scroll");
+        list.scrollTop += list.clientHeight;
+        return false;
       })()`,
       `the sidebar shows no row for ${thread.title}`,
     );
