@@ -1,6 +1,6 @@
 /**
  * The "since you last checked" marker of a view, such as the notification
- * center or Intake (spec 10 §8).
+ * center or Check-in (spec 10 §8).
  *
  * The user settings store holds one marker per view: the instant the user last
  * opened it. Opening the view advances the stored marker to now, but the view
