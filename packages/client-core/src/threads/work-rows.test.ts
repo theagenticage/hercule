@@ -123,6 +123,14 @@ describe("buildWorkRows", () => {
       [null, { type: "text" }, { type: "text", text: 7 }, "loose", { type: "text", text: "kept" }],
       "kept",
     ],
+    [
+      "nothing from text blocks that are empty",
+      [
+        { type: "text", text: "" },
+        { type: "text", text: "" },
+      ],
+      "",
+    ],
     ["nothing from any other value", 42, ""],
     ["nothing when the step returned nothing", undefined, ""],
   ] as const)("reads %s as a step's output", (_name, resultContent, output) => {
@@ -162,18 +170,22 @@ describe("buildWorkRows", () => {
     expect(row!.output).toBe("x".repeat(4095));
   });
 
-  it("cuts the output to 4096 characters when one text block is huge", () => {
-    const huge = "y".repeat(1_000_000);
+  it("reads no text block once the output is full", () => {
+    // Reading a block past the cut would mean the whole result is joined
+    // before it is cut, which builds a huge string for a huge result.
+    const blockPastTheCut = {
+      type: "text",
+      get text(): string {
+        throw new Error("The block after a full output was read.");
+      },
+    };
     const [row] = buildWorkRows([
       buildItem("command_execution", {
-        resultContent: [
-          { type: "text", text: "x".repeat(3000) },
-          { type: "text", text: huge },
-        ],
+        resultContent: [{ type: "text", text: "x".repeat(5000) }, blockPastTheCut],
       }),
     ]);
 
-    expect(row!.output).toHaveLength(4096);
+    expect(row!.output).toBe("x".repeat(4096));
   });
 
   it.each([

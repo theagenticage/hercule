@@ -149,24 +149,23 @@ const cutResultText = (text: string, length: number): string => {
  *
  * - a string is used as it is;
  * - a list of content blocks (Claude Code's tool result) gives the `text` of
- *   its `{ type: "text" }` blocks, joined by line breaks. Any other block,
- *   such as an image, is skipped. Each block is cut to the room left before
- *   it is joined, so a long result never builds a long string;
+ *   its `{ type: "text" }` blocks that are not empty, joined by line breaks.
+ *   Any other block, such as an image, is skipped. Each block is cut to the
+ *   room left before it is joined, and no block is read once the text is
+ *   full, so a long result never builds a long string;
  * - anything else, or no content, gives "".
  */
 const readResultText = (content: unknown): string => {
   if (typeof content === "string") return cutResultText(content, MAX_RESULT_TEXT_LENGTH);
   if (!Array.isArray(content)) return "";
   let text = "";
-  let blockCount = 0;
   for (const block of content as readonly unknown[]) {
+    if (text.length >= MAX_RESULT_TEXT_LENGTH) break;
     const object = readJsonObject(block);
-    if (object?.type !== "text" || typeof object.text !== "string") continue;
-    const separator = blockCount === 0 ? "" : "\n";
-    const room = MAX_RESULT_TEXT_LENGTH - text.length - separator.length;
-    if (room < 0) break;
-    text += separator + object.text.slice(0, room);
-    blockCount += 1;
+    if (object?.type !== "text" || typeof object.text !== "string" || object.text === "") continue;
+    const separator = text === "" ? "" : "\n";
+    text +=
+      separator + object.text.slice(0, MAX_RESULT_TEXT_LENGTH - text.length - separator.length);
   }
   return cutResultText(text, MAX_RESULT_TEXT_LENGTH);
 };
