@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { withTransaction } from "../../db";
+import { PromotionState } from "../../promotion";
 import { runnerRepository } from "../../runners";
 import { RunService } from "../../runs";
 import { SessionService } from "../../sessions";
@@ -52,13 +53,14 @@ export const LostRunnerSweepInterval = Context.Reference<Duration.Duration>(
 export const sweepSessionsOnLostRunners: Effect.Effect<
   never,
   SqlError,
-  SessionService | RunService | SqlClient.SqlClient
+  SessionService | RunService | SqlClient.SqlClient | PromotionState
 > = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
   const runs = yield* RunService;
   const runners = yield* runnerRepository;
   const interval = yield* LostRunnerSweepInterval;
+  const promotion = yield* PromotionState;
   const pass = withTransaction(
     sql,
     Effect.gen(function* () {
@@ -72,7 +74,7 @@ export const sweepSessionsOnLostRunners: Effect.Effect<
     }),
   );
   while (true) {
-    yield* absorbFailures("Ending sessions on lost runners failed", pass);
+    yield* absorbFailures("Ending sessions on lost runners failed", promotion.whenServing(pass));
     yield* Effect.sleep(interval);
   }
 });

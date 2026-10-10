@@ -11,6 +11,13 @@
  * A plugin's access is scoped by the `plugin_id` column alone: a plugin reaches
  * the connections whose `plugin_id` is its own, and cannot learn that any
  * others exist.
+ *
+ * Every write here passes the promotion gate (`PromotionState`) itself. A
+ * plugin calls this runtime from its own work, such as an ingest poll or a
+ * workflow action, and the gate does not always count that work already.
+ * While a promotion freezes the controller, the database refuses writes, so
+ * a write waits until the freeze ends. Once the controller is sealed, it
+ * never happens.
  */
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -33,6 +40,7 @@ import {
   type OAuthDeclaration,
 } from "@hercule/plugin-host";
 import { announce, nowIso, withTransaction } from "../db";
+import { PromotionState } from "../promotion";
 import { Secrets } from "../secrets";
 import {
   isStale,
@@ -75,6 +83,7 @@ const make = Effect.gen(function* () {
   const connections = yield* connectionRepository;
   const secrets = yield* Secrets;
   const findOAuthClient = yield* oauthClients;
+  const promotion = yield* PromotionState;
   const declared = yield* Ref.make<ReadonlyMap<string, RegisteredConnectionType>>(new Map());
 
   const toConnectionSummary = (row: StoredConnection): ConnectionSummary => ({
@@ -96,30 +105,32 @@ const make = Effect.gen(function* () {
     status: ConnectionStatus,
     detail: string | null,
   ): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      const at = yield* nowIso;
-      yield* Effect.orDie(
-        withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const changed = yield* connections.changeStatusFrom(
-              connectionId,
-              ["connected", "error", "needs-reauth"],
-              status,
-              detail,
-              at,
-            );
-            if (!changed) return;
-            yield* announce({
-              _tag: "record",
-              topic: "connection",
-              id: connectionId,
-              kind: "updated",
-            });
-          }),
-        ),
-      );
-    });
+    promotion.whenServing(
+      Effect.gen(function* () {
+        const at = yield* nowIso;
+        yield* Effect.orDie(
+          withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const changed = yield* connections.changeStatusFrom(
+                connectionId,
+                ["connected", "error", "needs-reauth"],
+                status,
+                detail,
+                at,
+              );
+              if (!changed) return;
+              yield* announce({
+                _tag: "record",
+                topic: "connection",
+                id: connectionId,
+                kind: "updated",
+              });
+            }),
+          ),
+        );
+      }),
+    );
 
   /**
    * Marks the connection `needs-reauth`, with `message` as the status detail,
@@ -161,18 +172,20 @@ const make = Effect.gen(function* () {
     write: Effect.Effect<void>,
   ): Effect.Effect<void, ConnectionUnavailable> =>
     Effect.gen(function* () {
-      const written = yield* Effect.orDie(
-        withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const current = yield* secrets.get(
-              { kind: "connection", id: connectionId },
-              OAUTH_TOKENS,
-            );
-            if (Option.isNone(current) || Redacted.value(current.value) !== held) return false;
-            yield* write;
-            return true;
-          }),
+      const written = yield* promotion.whenServing(
+        Effect.orDie(
+          withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const current = yield* secrets.get(
+                { kind: "connection", id: connectionId },
+                OAUTH_TOKENS,
+              );
+              if (Option.isNone(current) || Redacted.value(current.value) !== held) return false;
+              yield* write;
+              return true;
+            }),
+          ),
         ),
       );
       if (!written) {
@@ -305,6 +318,14 @@ const make = Effect.gen(function* () {
    * Only a type with an `oauth` declaration can refresh. A token from a device
    * flow has no expiry, so it never needs a refresh; if a provider ever sends
    * one with an expiry anyway, the connection needs reauth once it lapses.
+   *
+   * A refresh passes the promotion gate as one unit, before the provider is
+   * called: it waits while a promotion freezes the controller, and never
+   * happens once it is sealed. The provider's answer and the write that
+   * stores it cannot be split. Many providers rotate the refresh token and
+   * invalidate the old one, so a refresh whose new tokens are not in the
+   * copy would leave the new machine holding a refresh token that no longer
+   * works.
    */
   const readFreshAccessToken = (
     row: StoredConnection,
@@ -323,8 +344,10 @@ const make = Effect.gen(function* () {
           "this connection's access token has expired",
         );
       }
-      const fresh = yield* readOrCreateRefreshPermit(row.id).withPermits(1)(
-        refreshTokens(row, oauth),
+      // The gate is passed before the permit is taken, so no caller holds
+      // the permit while it waits for a freeze to end.
+      const fresh = yield* promotion.whenServing(
+        readOrCreateRefreshPermit(row.id).withPermits(1)(refreshTokens(row, oauth)),
       );
       return { accessToken: fresh.accessToken };
     });
@@ -440,5 +463,5 @@ export class ConnectionTypes extends Context.Service<
 export const ConnectionTypesLayer: Layer.Layer<
   ConnectionTypes,
   never,
-  SqlClient.SqlClient | Secrets | PluginConfigs
+  SqlClient.SqlClient | Secrets | PluginConfigs | PromotionState
 > = Layer.effect(ConnectionTypes)(make);

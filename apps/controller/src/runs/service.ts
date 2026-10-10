@@ -45,6 +45,7 @@ import {
 import type { PlatformEvents } from "../events";
 import type { Notifier } from "../notifications";
 import type { PluginHost } from "../plugins";
+import type { PromotionState } from "../promotion";
 import type { Settings } from "../settings";
 import { runHeldSubscriptions } from "../subscriptions";
 import type { TaskService } from "../tasks";
@@ -164,6 +165,7 @@ export const RunServiceLayer: Layer.Layer<
   | PlatformEvents
   | Notifier
   | ConnectionTypes
+  | PromotionState
 > = Layer.effect(RunService)(make);
 
 /**

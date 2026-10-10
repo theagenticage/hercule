@@ -227,6 +227,7 @@ const COMMANDS: Record<string, string> = {
 
   "controller.read": "controller read",
   "controller.update": "controller update",
+  "controller.createPromotionToken": "controller promotion-token create",
 };
 
 /**

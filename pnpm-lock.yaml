@@ -99,6 +99,9 @@ importers:
       '@hercule/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@hercule/service':
+        specifier: workspace:*
+        version: link:../../packages/service
       '@marcbachmann/cel-js':
         specifier: 8.0.0
         version: 8.0.0

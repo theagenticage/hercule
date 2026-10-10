@@ -75,16 +75,10 @@ const make = Effect.gen(function* () {
 
   const readControllerInfo = (): Effect.Effect<ControllerInfo, SettingError | SqlError> =>
     Effect.gen(function* () {
-      const record = yield* identity.read;
-      if (Option.isNone(record)) {
-        // The boot creates the identity before the controller listens, so a
-        // controller serving requests without one is a bug, not something a
-        // caller can fix.
-        return yield* Effect.die("the controller has no identity row");
-      }
+      const record = yield* identity.readOrDie;
       return {
-        id: record.value.id,
-        publicKey: Buffer.from(record.value.publicKey).toString("base64"),
+        id: record.id,
+        publicKey: Buffer.from(record.publicKey).toString("base64"),
         version: VERSION,
         defaultRunnerId: yield* settings.defaultRunnerId(),
         localRunnerId: localRunnerId.read() ?? null,

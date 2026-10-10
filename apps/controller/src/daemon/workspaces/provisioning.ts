@@ -42,6 +42,7 @@ import {
 } from "@hercule/contract";
 import { CurrentActor, currentStamp, requireGrant, SYSTEM_ACTOR } from "../../actor";
 import { withTransaction, mintUuid, uuidToString } from "../../db";
+import { PromotionState } from "../../promotion";
 import { RunnerConnections } from "../../runners";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures } from "../absorbing";
@@ -67,6 +68,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const workspaces = yield* WorkspaceService;
   const connections = yield* RunnerConnections;
+  const promotion = yield* PromotionState;
 
   /** One pass of the expiry sweep. */
   const sweep = Effect.gen(function* () {
@@ -237,7 +239,7 @@ const make = Effect.gen(function* () {
       const interval = yield* WorkspaceSweepInterval;
       while (true) {
         yield* Effect.sleep(interval);
-        yield* absorbFailures("Sweeping expired workspaces failed", sweep);
+        yield* absorbFailures("Sweeping expired workspaces failed", promotion.whenServing(sweep));
       }
     }),
   };
@@ -250,5 +252,5 @@ export class Provisioning extends Context.Service<Provisioning, Effect.Success<t
 export const ProvisioningLayer: Layer.Layer<
   Provisioning,
   never,
-  SqlClient.SqlClient | WorkspaceService | RunnerConnections
+  SqlClient.SqlClient | WorkspaceService | RunnerConnections | PromotionState
 > = Layer.effect(Provisioning)(make);

@@ -323,6 +323,19 @@ const make = Effect.gen(function* () {
           }),
       ),
 
+    /**
+     * Returns the name and connectivity of every runner in the fleet, sorted
+     * by name. A retired runner is left out: it has left the fleet and never
+     * connects again.
+     */
+    listFleet: (): Effect.Effect<
+      ReadonlyArray<{ readonly name: string; readonly connectivity: RunnerConnectivity }>,
+      SqlError
+    > =>
+      sql<{ readonly name: string; readonly connectivity: RunnerConnectivity }>`
+        SELECT name, connectivity FROM runners WHERE lifecycle <> 'retired' ORDER BY name
+      `,
+
     /** Returns every runner name, so a joining runner can get a free one. */
     names: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
       Effect.map(

@@ -214,6 +214,11 @@ describe("the config layer", () => {
     }
   });
 
+  it("accepts --force-unseal, the disaster-recovery flag after a promotion", async () => {
+    const result = await load(["--force-unseal"]);
+    expect(Result.isSuccess(result)).toBe(true);
+  });
+
   it("rejects an argument hercule serve does not have", async () => {
     const result = await Effect.runPromise(
       HerculeHome.pipe(Effect.provide(layer(["--home", home, "--version"], {})), Effect.result),

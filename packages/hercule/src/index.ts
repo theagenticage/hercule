@@ -2,18 +2,19 @@ import { parseGlobalOptions } from "@hercule/home";
 import { VERSION } from "@hercule/home/version";
 import { Result } from "effect";
 
-export type Role = "controller" | "runner" | "service" | "cli";
+export type Role = "controller" | "promote" | "runner" | "service" | "cli";
 
 /** What every role entrypoint exports. Daemon roles return a promise. */
 type RoleModule = { run: (argv: readonly string[]) => void | Promise<void> };
 
 /**
- * One binary, four roles. Each role is a separate entrypoint reached by a
+ * One binary, five roles. Each role is a separate entrypoint reached by a
  * dynamic import, so starting as a runner never evaluates the controller's
  * module graph.
  */
 const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
   controller: () => import("@hercule/controller"),
+  promote: () => import("@hercule/controller/promote"),
   runner: () => import("@hercule/runner"),
   service: () => import("@hercule/service"),
   cli: () => import("@hercule/cli"),
@@ -23,12 +24,15 @@ const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
  * Decides which role handles this invocation, and returns the role and the
  * arguments it receives.
  *
- * `hercule serve` is the controller; `hercule runner`, `hercule runner --local`,
- * `hercule runner join` and `hercule runner set-controller` are the runner;
- * `hercule service` installs and controls the OS service unit. Every other
- * verb, `hercule runner join-token create` included, is the CLI, which talks to
- * the controller over HTTP only. The role keeps the global options; only the
- * verb is consumed.
+ * `hercule serve` is the controller, and `hercule promote` is a role of its
+ * own; `hercule runner`, `hercule runner --local`, `hercule runner join` and
+ * `hercule runner set-controller` are the runner; `hercule service` installs
+ * and controls the OS service unit. Every other verb,
+ * `hercule runner join-token create` included, is the CLI, which talks to the
+ * controller over HTTP only. The role keeps the global options; only the verb
+ * is consumed. `promote` writes this machine's Home (the database and the
+ * Master Key), so it cannot live in the CLI, and it must not boot a
+ * controller, so it is not `serve` either.
  *
  * `--home <dir>` and `-c key=value` may come before the verb, so the verb is
  * wherever `parseGlobalOptions` found it. The role runs the same parser on the
@@ -43,6 +47,8 @@ function route(
   switch (options.rest[0]) {
     case "serve":
       return { role: "controller", args: withoutVerb };
+    case "promote":
+      return { role: "promote", args: withoutVerb };
     case "service":
       return { role: "service", args: withoutVerb };
     // git runs this command for each request, and the runner's own socket

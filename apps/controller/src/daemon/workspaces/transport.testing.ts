@@ -12,6 +12,7 @@ import {
   type RunnerToController,
 } from "@hercule/protocol";
 import type { Workspaces } from "../../../../runner/src/workspaces";
+import { buildRunnerSocketUrl } from "../../runners/testing";
 import { waitUntil } from "../../sessions/testing";
 import { FACTS, MODELS } from "../../workspaces/testing";
 
@@ -102,7 +103,7 @@ export const connectProofRunner = async (
   options: { readonly workspaces?: Workspaces; readonly finishSessions?: boolean } = {},
 ) => {
   const frames: Array<ControllerToRunner> = [];
-  const socket = new WebSocket(`${base.replace(/^http:/, "ws:")}/api/v1/runners/socket`, {
+  const socket = new WebSocket(buildRunnerSocketUrl(base), {
     headers: { authorization: `Bearer ${joined.credential}` },
   });
   const write = (frame: RunnerToController): void => socket.send(JSON.stringify(frame));

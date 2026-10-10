@@ -16,6 +16,7 @@ import { CurrentActor, type Actor } from "../actor";
 import { nowIso } from "../db";
 import { AuditLogLayer } from "../events";
 import { NotifierLayer } from "../notifications";
+import { ServingPromotionStateLayer } from "../promotion/testing";
 import { readEventsOfKind } from "../events/testing";
 import { TestDatabase } from "../db/testing";
 import { Settings, SettingsLayer } from "../settings";
@@ -31,6 +32,7 @@ const layer = RunnerServiceLayer.pipe(
   Layer.provideMerge(Layer.mergeAll(JoinTokensLayer, SettingsLayer)),
   Layer.provideMerge(RunnerConnectionsLayer),
   Layer.provideMerge(NotifierLayer),
+  Layer.provideMerge(ServingPromotionStateLayer),
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(TestDatabase),
 );
