@@ -569,9 +569,10 @@ export {
   type ThreadUserMessage,
 } from "./threads/turns";
 export {
+  collectSenderSessionIds,
   describeSender,
   readInputSender,
-  type SenderLink,
+  readSenderSession,
   type SenderReading,
 } from "./threads/sender";
 export {

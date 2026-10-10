@@ -27,6 +27,20 @@ describe("findSubagentBrief", () => {
     ).toEqual({ turnId: "t-1", text: "Read the docs" });
   });
 
+  it("leaves out a message steered into the first turn later, because only the opening message is the brief", () => {
+    const first = buildTurn("t-1", "Read the docs");
+    const steered = {
+      itemId: "u-steered",
+      text: "Skip the changelog",
+      attachments: [],
+      steered: true,
+    };
+
+    expect(
+      findSubagentBrief([{ ...first, userMessages: [...first.userMessages, steered] }]),
+    ).toEqual({ turnId: "t-1", text: "Read the docs" });
+  });
+
   it("returns undefined while no turn is read, or the first holds no user message", () => {
     expect(findSubagentBrief([])).toBeUndefined();
     expect(findSubagentBrief([buildTurn("t-1", "")])).toBeUndefined();

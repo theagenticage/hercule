@@ -4176,6 +4176,19 @@ describe("Thread: a queued message another agent sent", () => {
     expect(screen.getByText("Also check the logs").previousElementSibling).toBeNull();
   });
 
+  it("names the sender at the row's first paint, because the loader read the queue and its senders", async () => {
+    await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [AGENT_INPUT] } },
+    });
+
+    // `openApp` resolves once the loaders have, so nothing is awaited here: a
+    // row the loader did not read, or whose sender it did not read, would
+    // not be drawn yet, or be drawn without "From".
+    const row = screen.getByText("The 3DS fix is merged").parentElement;
+    expect(readPageText(row)).toBe("From Fix EU checkoutThe 3DS fix is mergedSteerCancel");
+  });
+
   it("starts the row with From another agent when the sender cannot be read", async () => {
     await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
       [`GET /api/v1/sessions/${SENDER.id}`]: {

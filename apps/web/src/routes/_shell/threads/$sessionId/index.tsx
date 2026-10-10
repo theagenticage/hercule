@@ -1,11 +1,11 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { buildSessionAgentState, buildTurns, resolveDisplayTimezone } from "@hercule/client-core";
+import { collectSenderSessionIds, resolveDisplayTimezone } from "@hercule/client-core";
 import {
   assistantsQuery,
+  inputsQuery,
   senderSessionQuery,
-  sessionQuery,
   settingsQuery,
   transcriptQuery,
 } from "../../../../app/queries";
@@ -17,32 +17,36 @@ import { AgentPage } from "../../../../screens/thread/agent-page";
  * the shell's top bar is hidden here.
  *
  * The loader fetches the transcript before the route renders, so the first
- * paint is never a spinner over an empty column. It then fetches each agent
- * that sent a message into the transcript, once per sender, and the
- * assistants, so a message names its sender at the first paint. Those reads
- * are prefetched rather than ensured: a sender that cannot be read shows as
- * "Another agent" and never fails the load. The thread's layout route
- * fetches everything else the page reads.
+ * paint is never a spinner over an empty column. It also reads the two
+ * things below; the thread's layout route fetches the rest of what the page
+ * reads.
+ *
+ * - The queued inputs are prefetched rather than ensured: if the controller
+ *   cannot list them, the queued list stays empty, but the thread still
+ *   opens, as it did before the list was read here.
+ * - Once the transcript and the queued inputs are in, it reads each agent
+ *   that sent one of those messages, once per sender, and the assistants, so
+ *   a message and a queued row name their sender at the first paint. Those
+ *   reads are prefetched too: a sender that cannot be read shows as "another
+ *   agent" and never fails the load.
  */
 export const Route = createFileRoute("/_shell/threads/$sessionId/")({
   staticData: { title: "Thread", ownsTopBar: true },
   loader: async ({ context, params }) => {
     const { client, queryClient } = context;
-    const [rows, session] = await Promise.all([
+    const queued = inputsQuery(client, params.sessionId);
+    const [rows] = await Promise.all([
       queryClient.ensureQueryData(transcriptQuery(client, params.sessionId)),
-      queryClient.ensureQueryData(sessionQuery(client, params.sessionId)),
+      queryClient.prefetchQuery(queued),
     ]);
-    const senderSessionIds = new Set(
-      buildTurns(rows, buildSessionAgentState(session)).flatMap((turn) =>
-        turn.userMessages.flatMap((message) => message.senderSessionId ?? []),
-      ),
+    const inputs = (queryClient.getQueryData(queued.queryKey)?.items ?? []).filter(
+      (input) => input.status === "queued",
     );
-    if (senderSessionIds.size === 0) return;
+    const senderSessionIds = collectSenderSessionIds(rows, inputs);
+    if (senderSessionIds.length === 0) return;
     await Promise.all([
       queryClient.prefetchQuery(assistantsQuery(client)),
-      ...Array.from(senderSessionIds, (id) =>
-        queryClient.prefetchQuery(senderSessionQuery(client, id)),
-      ),
+      ...senderSessionIds.map((id) => queryClient.prefetchQuery(senderSessionQuery(client, id))),
     ]);
   },
   component: ThreadPage,

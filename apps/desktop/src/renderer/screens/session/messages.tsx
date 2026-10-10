@@ -66,8 +66,9 @@ export function AgentFace({
  * and name above the bubble, and the bubble tinted in its hue. The message is
  * then a group named "Message from" and the agent's name, so a screen reader
  * never takes it for the user's. While the agent is still being read,
- * `sender` is null: the chip's row is held empty, so the bubble does not move
- * when the name arrives, and nothing names a sender that may be wrong.
+ * `sender` is `"loading"`: the chip's row is held empty, so the bubble does
+ * not move when the name arrives, and nothing names a sender that may be
+ * wrong.
  */
 export const UserMessage = memo(function UserMessage({
   text,
@@ -84,7 +85,7 @@ export const UserMessage = memo(function UserMessage({
   readonly timezone: string;
   readonly today: number;
   readonly steered?: boolean;
-  readonly sender?: SenderReading | null;
+  readonly sender?: SenderReading | "loading";
 }): JSX.Element {
   const time = formatBlockTime(at, timezone, today);
   const content = (
@@ -107,7 +108,7 @@ export const UserMessage = memo(function UserMessage({
       </div>
     );
   }
-  if (sender === null) {
+  if (sender === "loading") {
     return (
       <div className="msg--me">
         <div>
@@ -123,7 +124,7 @@ export const UserMessage = memo(function UserMessage({
       className="msg--me msg--agent"
       style={buildHueStyle(look.hue)}
       role="group"
-      aria-label={`Message from ${sender.name}`}
+      aria-label={`Message from ${sender.label}`}
     >
       <div>
         <div className="msg-sender">

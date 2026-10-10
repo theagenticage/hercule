@@ -19,9 +19,9 @@ const SENDER_FACE_SIZE = 18;
  * frozen object, so a memoized component that takes it is not drawn again.
  */
 export const buildSenderLook = (sender: SenderReading): Look =>
-  sender.faceKind === "assistant"
-    ? buildAssistantLook(sender.faceSeed)
-    : buildLook(sender.faceSeed);
+  sender.face.kind === "assistant"
+    ? buildAssistantLook(sender.face.seed)
+    : buildLook(sender.face.seed);
 
 /**
  * Renders `sender` as a chip: its face, idle and still, then its name. The
@@ -48,7 +48,7 @@ export function SenderChip({
   );
   const { link } = sender;
   switch (link.kind) {
-    case "thread":
+    case "session":
       return (
         <Link
           to="/threads/$sessionId"

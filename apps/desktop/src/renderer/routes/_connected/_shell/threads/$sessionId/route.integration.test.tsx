@@ -182,14 +182,29 @@ describe("a message another session's agent sent into the thread", () => {
     });
     const { context } = await app;
 
-    expect(context.queryClient.getQueryData([...queryKeys.session(RUNBOOK.id), "sender"])).toEqual(
-      RUNBOOK,
-    );
+    expect(context.queryClient.getQueryData(queryKeys.sender(RUNBOOK.id))).toEqual(RUNBOOK);
     const message = await screen.findByRole("group", { name: `Message from ${RUNBOOK.title}` });
     const chip = within(message).getByRole("link", { name: RUNBOOK.title });
     expect(chip.getAttribute("href")).toBe(`/threads/${RUNBOOK.id}`);
     expect(within(message).getByText(/Bump the Bun pin to 1\.3\.2/)).toBeTruthy();
     // One read for the sender, however many of its messages the thread holds.
     expect(calls.filter((call) => call.path === senderPath)).toHaveLength(1);
+  });
+
+  it("opens the thread after one read of a sender that got no answer, rather than retrying it first", async () => {
+    const { app, calls } = openApp(`/threads/${sessionId}`, {
+      ...buildThreadHandlers({ ...thread, transcript }),
+      [`GET ${senderPath}`]: () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    await app;
+
+    // Retries in the loader would hold the thread's first paint for seconds,
+    // for a name, and this test would time out. There are two reads: the
+    // loader's, and the one the message makes when it mounts, because a
+    // read that failed is tried again by the next component that shows it.
+    await screen.findByRole("group", { name: "Message from another agent" });
+    expect(calls.filter((call) => call.path === senderPath)).toHaveLength(2);
   });
 });

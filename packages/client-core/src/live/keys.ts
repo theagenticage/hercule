@@ -66,6 +66,15 @@ export const queryKeys = {
   profiles: (): LiveQueryKey => ["profiles"],
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
   /**
+   * The session of an agent that sent a message into a thread, read to name
+   * the sender. Not a live topic: the name comes from the session's title,
+   * Agent and conversation, which are set when the session starts and never
+   * change. The key is kept out of the `session` prefix on purpose, so the
+   * `session` pushes of a busy sender, which come as often as once a second,
+   * never read it again.
+   */
+  sender: (sessionId: string): LiveQueryKey => ["sender", sessionId],
+  /**
    * A conversation's current session: the newest session that answers it,
    * which an assistant's pose is drawn from. Without the id, the prefix of
    * every conversation's.

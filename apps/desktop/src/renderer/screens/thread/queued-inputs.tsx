@@ -179,7 +179,7 @@ function AgentQueuedInputRow({
   readonly children: ReactNode;
 }): JSX.Element {
   const sender = useSenderReading(senderSessionId);
-  if (sender === null) {
+  if (sender === "loading") {
     return (
       <div className="queued">
         <span className="queued-lead">
@@ -197,7 +197,7 @@ function AgentQueuedInputRow({
       className="queued queued--agent"
       style={buildHueStyle(look.hue)}
       role="group"
-      aria-label={`Queued message from ${sender.name}`}
+      aria-label={`Queued message from ${sender.label}`}
     >
       <span className="queued-lead">
         <SenderChip sender={sender} look={look} />

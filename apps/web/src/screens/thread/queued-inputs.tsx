@@ -10,7 +10,7 @@ import {
 import type { Input } from "@hercule/contract";
 import { Button, useBlobImageSource, type LightboxImage } from "@hercule/ui";
 import { inputsQuery, sessionQuery } from "../../app/queries";
-import { SenderName } from "../actor-link";
+import { ActorLink } from "../actor-link";
 import { useAttachmentImages } from "../use-attachment-images";
 import { useSenderReading } from "./use-sender-reading";
 
@@ -135,10 +135,10 @@ function QueuedSender({
   readonly senderSessionId: string;
 }): JSX.Element | null {
   const sender = useSenderReading(senderSessionId);
-  if (sender === undefined) return null;
+  if (sender === "loading") return null;
   return (
     <span className="max-w-[40%] shrink-0 truncate text-row text-muted">
-      From <SenderName sender={sender} plainClassName="text-muted" />
+      From <ActorLink actor={sender} plainClassName="text-muted" />
     </span>
   );
 }

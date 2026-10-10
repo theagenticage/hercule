@@ -10,7 +10,9 @@ import { useSenderReading } from "./use-sender-reading";
  * `UserMessage`, which draws it.
  *
  * It is `memo`, as `UserMessage` is: the transcript draws again with every
- * row the agent streams, and this message's props never change with them.
+ * row the agent stores, and this message's props stay the same across those
+ * rows. The one exception is a message sent with images, whose list of
+ * images is a new array each time the transcript is grouped again.
  */
 export const AgentSentMessage = memo(function AgentSentMessage({
   senderSessionId,

@@ -14,10 +14,10 @@
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import {
-  ApiError,
   isNotFound,
   queryKeys,
   readEveryPage,
+  readSenderSession,
   RUNNING_STATUSES,
   UNSEEN_COUNT_READ_LIMIT,
   type HerculeClient,
@@ -161,29 +161,26 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
- * Reads the session whose agent sent a message into a thread, so the message
- * can name its sender. Returns null when the sender cannot be read: the
- * session was deleted, or the user may not read it. The message still shows,
- * as from "Another agent", so neither answer is a failure; any other error
- * still fails the read, and the screen shows the same "Another agent".
+ * Reads the session whose agent sent a message into a thread, or queued one
+ * there, so the message can name its sender. Holds null when the sender
+ * cannot be read, as `readSenderSession` says; the message then shows as from
+ * "another agent". Any other error fails the read, and the screen shows the
+ * same "another agent".
  *
- * The answer is kept until a `session` push names the sender, such as a
- * rename: the key sits under the session's own key, so that push refetches
- * it with no subscription of its own. Until then nothing about the name can
- * have changed, so the read is never repeated on its own, and the messages
- * that mount after the loader prefetched it do not read it again. An error is
- * not retried either, because a session that returns 404 or 403 once will
- * keep returning it.
+ * The read is made once per sender and kept: the sender's name comes from
+ * fields that never change, and `queryKeys.sender` is outside the `session`
+ * prefix, so no push reads it again, and the messages that mount after the
+ * loader read it do not read it again either. The desktop app reads it the
+ * same way.
+ *
+ * It is never retried. The thread's loader waits for it, and retries of a
+ * controller that does not answer would hold the thread's first paint for
+ * several seconds, for a name that only decorates a message.
  */
 export const senderSessionQuery = (client: HerculeClient, id: string) =>
   queryOptions({
-    queryKey: [...queryKeys.session(id), "sender"],
-    queryFn: () =>
-      client.session.read({ params: { id } }).catch((error: unknown) => {
-        if (error instanceof ApiError && (error.code === "not_found" || error.code === "forbidden"))
-          return null;
-        throw error;
-      }),
+    queryKey: queryKeys.sender(id),
+    queryFn: () => readSenderSession(client, id),
     staleTime: Infinity,
     retry: false,
   });

@@ -17,7 +17,7 @@
  */
 import type { JSX, ReactNode, RefObject } from "react";
 import { showsTurnDivider, type ThreadTurn, type ThreadUserMessage } from "@hercule/client-core";
-import { SenderName, writeSenderName } from "../actor-link";
+import { ActorLink } from "../actor-link";
 import { MessageBubble } from "../bubble";
 import { useAttachmentImages } from "../use-attachment-images";
 import { TimeSeparator } from "../time-separator";
@@ -125,18 +125,18 @@ function AgentMessage({
   return (
     <div
       role="group"
-      aria-label={sender === undefined ? undefined : `Message from ${writeSenderName(sender)}`}
+      aria-label={sender === "loading" ? undefined : `Message from ${sender.label}`}
       className="flex flex-col items-end gap-1"
     >
       {children}
-      {sender === undefined && !steered ? null : (
+      {sender === "loading" && !steered ? null : (
         <p className="text-meta text-faint">
-          {sender === undefined ? null : (
+          {sender === "loading" ? null : (
             <>
-              Sent by <SenderName sender={sender} plainClassName="text-muted" />
+              Sent by <ActorLink actor={sender} plainClassName="text-muted" />
             </>
           )}
-          {sender !== undefined && steered ? " · " : null}
+          {sender !== "loading" && steered ? " · " : null}
           {steered ? "steered" : null}
         </p>
       )}

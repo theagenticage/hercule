@@ -11,16 +11,15 @@
  * So each message is placed by its `item.started` row, and its text is
  * gathered from its rows wherever they sit.
  */
-import type { Attachment, TranscriptRow } from "@hercule/contract";
+import type { TranscriptRow } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
 import type { AgentState } from "./agent-state";
 import { findOpenItem } from "./open-item";
 import {
   buildThreadItem,
-  readUserAttachments,
-  readUserSender,
-  isSteeredUserMessage,
+  buildUserMessage,
   type ThreadItem,
+  type ThreadUserMessage,
 } from "./turns";
 
 type ProviderEvent = TranscriptRow["event"];
@@ -37,17 +36,9 @@ export interface WorkItem extends ThreadItem {
  * A message sent into the thread: the opening one, or one steered into the
  * running turn. The session's owner sent it, or another session's agent did.
  */
-export interface UserBlock {
+export interface UserBlock extends ThreadUserMessage {
   readonly kind: "user";
   readonly key: string;
-  readonly itemId: string;
-  readonly text: string;
-  /** The images sent with the message, in the order they were attached. Empty when none were. */
-  readonly attachments: readonly Attachment[];
-  /** Whether the message was steered into the running turn rather than opening it. */
-  readonly steered: boolean;
-  /** The session whose agent sent the message. Absent when the owner sent it. */
-  readonly senderSessionId?: string;
   readonly at: string;
 }
 
@@ -339,17 +330,10 @@ export const buildThreadBlocks = (
         turn.lastStartedItemId = event.itemId;
         if (event.kind === "user_message") {
           closeStretch(turn, event.at);
-          const detail = readJsonObject(event.detail);
-          const text = typeof detail?.text === "string" ? detail.text : "";
-          const senderSessionId = readUserSender(detail);
           slots.push({
             kind: "user",
             key: `user:${event.itemId}`,
-            itemId: event.itemId,
-            text,
-            attachments: readUserAttachments(detail),
-            steered: isSteeredUserMessage(detail),
-            ...(senderSessionId === undefined ? {} : { senderSessionId }),
+            ...buildUserMessage(event),
             at: event.at,
           });
           turn.boundary = event.at;

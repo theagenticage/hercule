@@ -87,7 +87,7 @@ describe("a message another session's agent sent", () => {
       },
     });
 
-    const message = await screen.findByRole("group", { name: "Message from Another agent" });
+    const message = await screen.findByRole("group", { name: "Message from another agent" });
     expect(message.querySelector(".sender-chip")?.textContent).toBe("Another agent");
     expect(screen.queryByRole("link")).toBeNull();
   });
@@ -102,7 +102,7 @@ describe("a message another session's agent sent", () => {
       },
     });
 
-    await screen.findByRole("group", { name: "Message from Another agent" });
+    await screen.findByRole("group", { name: "Message from another agent" });
     expect(screen.queryByRole("link")).toBeNull();
   });
 });

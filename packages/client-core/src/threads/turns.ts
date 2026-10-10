@@ -42,15 +42,25 @@ export interface ThreadItem {
 const isAttachment = Schema.is(Attachment);
 
 /**
- * Returns the images a `user_message` item's detail lists in `attachments`:
- * references to uploaded images, never their bytes. Returns `[]` when the
- * message had no images. An entry that is not a well-formed attachment is
- * skipped, so a transcript written by an older or newer controller still
- * renders.
+ * The attachments of every message sent with no images. It is one shared
+ * array, so a memoized component that takes a message's attachments sees the
+ * same value each time the transcript is grouped again.
  */
-export const readUserAttachments = (detail: unknown): readonly Attachment[] => {
+const NO_ATTACHMENTS: readonly Attachment[] = Object.freeze([]);
+
+/**
+ * Returns the images a `user_message` item's detail lists in `attachments`:
+ * references to uploaded images, never their bytes. Returns `NO_ATTACHMENTS`
+ * when the message had no images. An entry that is not a well-formed
+ * attachment is skipped, so a transcript written by an older or newer
+ * controller still renders.
+ */
+const readUserAttachments = (detail: unknown): readonly Attachment[] => {
   const attachments = readJsonObject(detail)?.attachments;
-  return Array.isArray(attachments) ? (attachments as readonly unknown[]).filter(isAttachment) : [];
+  const valid = Array.isArray(attachments)
+    ? (attachments as readonly unknown[]).filter(isAttachment)
+    : [];
+  return valid.length === 0 ? NO_ATTACHMENTS : valid;
 };
 
 /**
@@ -68,8 +78,7 @@ export const readUserSender = (detail: unknown): string | undefined => {
  * running, from its detail's `steered`. Returns `false` for a message that
  * opened its turn.
  */
-export const isSteeredUserMessage = (detail: unknown): boolean =>
-  readJsonObject(detail)?.steered === true;
+const isSteeredUserMessage = (detail: unknown): boolean => readJsonObject(detail)?.steered === true;
 
 /** One message sent into a turn: by the session's owner, or by another session's agent. */
 export interface ThreadUserMessage {
@@ -86,9 +95,11 @@ export interface ThreadUserMessage {
 /**
  * Returns the message a `user_message` item's `item.started` holds. Each
  * message is kept on its own, because a message steered into a turn can come
- * from a different sender than the one that opened it.
+ * from a different sender than the one that opened it. The thread's turns
+ * and its blocks both build their messages here, so the two never read a
+ * message differently.
  */
-const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
+export const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
   const text = readJsonObject(event.detail)?.text;
   const senderSessionId = readUserSender(event.detail);
   return {

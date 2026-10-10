@@ -75,11 +75,11 @@ describe("the current sessions a session push makes stale", () => {
   });
 });
 
-describe("the running turn's key", () => {
-  /** Checks whether `prefix` matches `key` as TanStack Query matches a prefix: element by element. */
-  const isPrefixOf = (prefix: LiveQueryKey, key: LiveQueryKey): boolean =>
-    prefix.length <= key.length && prefix.every((part, index) => part === key[index]);
+/** Checks whether `prefix` matches `key` as TanStack Query matches a prefix: element by element. */
+const isPrefixOf = (prefix: LiveQueryKey, key: LiveQueryKey): boolean =>
+  prefix.length <= key.length && prefix.every((part, index) => part === key[index]);
 
+describe("the running turn's key", () => {
   it("is never invalidated by a push on any topic, with or without ids", () => {
     // The running turn is kept current by the session's `:stream` topic, so
     // an invalidation would only read it again for nothing.
@@ -97,5 +97,21 @@ describe("the running turn's key", () => {
   it("is apart from the session's transcript, so neither entry overwrites the other", () => {
     assert.isFalse(isPrefixOf(queryKeys.transcript("s1"), queryKeys.runningTurn("s1")));
     assert.isFalse(isPrefixOf(queryKeys.runningTurn("s1"), queryKeys.transcript("s1")));
+  });
+});
+
+describe("a sender's key", () => {
+  it("is never invalidated by a push on any topic, with or without ids", () => {
+    // A sender is named from fields of its session that never change, so a
+    // push about it, such as a busy sender's usage, must not read it again.
+    const sender = queryKeys.sender("s1");
+    for (const topic of MUTABLE_LIVE_TOPICS) {
+      for (const ids of [[], ["s1"]]) {
+        const reached = buildQueryKeys(topic, ids, { s1: "c1" }).filter((key) =>
+          isPrefixOf(key, sender),
+        );
+        assert.deepStrictEqual(reached, [], `a ${topic} push naming ${ids.join() || "no ids"}`);
+      }
+    }
   });
 });

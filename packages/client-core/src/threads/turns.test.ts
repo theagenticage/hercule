@@ -945,7 +945,7 @@ describe("buildTurns: the item an open request is about", () => {
     ]);
   });
 
-  it("gives a message that carries no images an empty list", () => {
+  it("gives a message that carries no images an empty list, the same one every time the rows are grouped", () => {
     const rows = [
       buildRow({
         _tag: "item.started",
@@ -959,7 +959,13 @@ describe("buildTurns: the item an open request is about", () => {
       }),
     ];
 
-    expect(buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userMessages[0]?.attachments).toEqual([]);
+    const attachments = buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userMessages[0]?.attachments;
+    expect(attachments).toEqual([]);
+    // A memoized message compares its props by identity, so a fresh empty
+    // list on each streamed row would draw it again for nothing.
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userMessages[0]?.attachments).toBe(
+      attachments,
+    );
   });
 });
 
