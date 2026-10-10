@@ -1,0 +1,35 @@
+/* The chip that names another session's agent (sender-chip.tsx). The rules
+   are the Bureau book's `.mention` (desktop/assistant.html), without its
+   `vertical-align`, which sets a mention inside a line of text: the chip
+   always stands on its own. */
+.sender-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  /* Not in the book, whose names are short. A long thread title ends in an
+     ellipsis rather than pushing what is beside the chip away. */
+  max-width: 240px;
+  color: var(--who-ink);
+  font-weight: var(--w-bold);
+  text-decoration: none;
+}
+.sender-chip-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Not in the book, whose mention is not a link. A chip that links to its
+   sender's thread or assistant is lit on hover as the book lights a row it
+   can open, with the arrow kept, as on every row. The padding holds the
+   light around the face and the name; the negative margin takes the same
+   space back, so the chip's face and name sit where they would without it. */
+a.sender-chip {
+  padding: 2px 6px 2px 4px;
+  margin: -2px -6px -2px -4px;
+  border-radius: var(--r-sm);
+}
+a.sender-chip:hover {
+  background: var(--hover);
+}

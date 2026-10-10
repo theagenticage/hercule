@@ -218,7 +218,8 @@ export const SessionBinding = Schema.Struct({
 export type SessionBinding = Schema.Schema.Type<typeof SessionBinding>;
 
 /**
- * One turn's input: its text, and the images attached to it.
+ * One turn's input: its text, the images attached to it, and the session that
+ * sent it when another agent did.
  * `modelSelection` is the session's current model, sent on every frame. A
  * harness accepts a model change only on the input that starts a turn, so an
  * adapter applies it there and ignores it the rest of the time.
@@ -242,6 +243,16 @@ export const TurnInput = Schema.Struct({
    * result, under this key, instead of only as session events.
    */
   step: Schema.optionalKey(WorkspaceStepKey),
+  /**
+   * The session whose agent sent this input, set only when another session's
+   * agent sent it as a message (`source` user, actor `session:<id>`, and not
+   * the receiving session itself). The controller reads it from the stored
+   * actor, never from the caller. The runner tells the harness who sent the
+   * message and copies the id to the `user_message` it reports. An older
+   * runner drops the key when it decodes the frame, so its transcript shows
+   * no sender.
+   */
+  senderSessionId: Schema.optionalKey(SessionId),
 });
 
 export type TurnInput = Schema.Schema.Type<typeof TurnInput>;
@@ -619,6 +630,11 @@ const TurnCompleted = defineEvent("turn.completed", {
  * them, each as `{ id, name, mimeType, sizeBytes }`. These are references
  * only; a client reads the bytes through `attachment.readContent`. The field
  * is absent when the input had no images.
+ *
+ * A second field is shared the same way: a `user_message` whose input another
+ * session's agent sent carries that session's id in `detail.senderSessionId`,
+ * copied from the input's `senderSessionId`. The field is absent on any other
+ * message, the owner's included.
  */
 const itemFields = {
   ...attribution,

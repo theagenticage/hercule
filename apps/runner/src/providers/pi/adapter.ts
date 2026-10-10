@@ -36,8 +36,9 @@ import type {
   ProviderRunnerContext,
   UserMaterial,
 } from "../index";
-import { appendAttachmentPaths, readAttachmentBase64 } from "../attachments";
+import { readAttachmentBase64 } from "../attachments";
 import { buildUserMessage } from "../events";
+import { buildHarnessPrompt } from "../prompt";
 import { buildFailedProbe } from "../probe";
 import { killProcessesHolding, runProcess, spawnPi, type Run } from "../process";
 import { truncateFact, truncateMessage } from "../text";
@@ -1441,7 +1442,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         yield* Effect.tapError(
           root.rpc.send({
             type: steered ? "steer" : "prompt",
-            message: appendAttachmentPaths(input.text, input.attachments),
+            message: buildHarnessPrompt(input),
             ...(images.length === 0 ? {} : { images }),
           }),
           () =>
@@ -1461,6 +1462,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           turnId,
           text: input.text,
           attachments: input.attachments,
+          senderSessionId: input.senderSessionId,
           steered,
           providerRefs: { nativeSessionId: held.binding.nativeSessionId },
         })) {

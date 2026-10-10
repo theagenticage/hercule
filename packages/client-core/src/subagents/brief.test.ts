@@ -9,11 +9,10 @@ import type { ThreadTurn } from "../threads/turns";
 import { describeBriefSource, findSubagentBrief, splitSubagentBrief } from "./brief";
 import { buildSubagent } from "./subagents.testing";
 
-/** Builds a finished turn with `user` as its user message. */
-const buildTurn = (turnId: string, user: string): ThreadTurn => ({
+/** Builds a finished turn opened by a user message with `text`. */
+const buildTurn = (turnId: string, text: string): ThreadTurn => ({
   turnId,
-  user,
-  userAttachments: [],
+  userMessages: [{ itemId: `u-${turnId}`, text, attachments: [], steered: false }],
   items: [],
   assistantText: "",
   startedAt: "2026-10-05T09:00:00.000Z",
@@ -25,6 +24,20 @@ describe("findSubagentBrief", () => {
   it("returns the user message of the first turn", () => {
     expect(
       findSubagentBrief([buildTurn("t-1", "Read the docs"), buildTurn("t-2", "And then?")]),
+    ).toEqual({ turnId: "t-1", text: "Read the docs" });
+  });
+
+  it("leaves out a message steered into the first turn later, because only the opening message is the brief", () => {
+    const first = buildTurn("t-1", "Read the docs");
+    const steered = {
+      itemId: "u-steered",
+      text: "Skip the changelog",
+      attachments: [],
+      steered: true,
+    };
+
+    expect(
+      findSubagentBrief([{ ...first, userMessages: [...first.userMessages, steered] }]),
     ).toEqual({ turnId: "t-1", text: "Read the docs" });
   });
 
@@ -41,6 +54,7 @@ describe("splitSubagentBrief", () => {
     itemId: text,
     text,
     attachments: [],
+    steered: false,
     at: "2026-10-05T09:00:00.000Z",
   });
   const pending: ThreadBlock = { kind: "pending", key: "pending", since: null };

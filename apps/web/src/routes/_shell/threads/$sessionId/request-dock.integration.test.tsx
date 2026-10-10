@@ -64,19 +64,29 @@ const PLAN_QUESTION: SessionRequest = {
 
 const BRIEF = "Plan the migration that adds the archived_at column, and how to roll it out safely.";
 
-/** Builds a transcript of one turn whose user message is `text`, numbered from 0. */
-const buildBriefTurn = (text: string): TranscriptRow[] =>
+/**
+ * Builds a transcript of one turn that opens with the user message `brief`,
+ * numbered from 0. Each of `steeredTexts` follows it as a message steered
+ * into the turn.
+ */
+const buildBriefTurn = (brief: string, ...steeredTexts: string[]): TranscriptRow[] =>
   [
     { _tag: "turn.started", turnId: "s1" },
-    { _tag: "item.started", turnId: "s1", itemId: "u1", kind: "user_message", detail: { text } },
-    {
-      _tag: "item.completed",
-      turnId: "s1",
-      itemId: "u1",
-      kind: "user_message",
-      status: "completed",
-      detail: { text },
-    },
+    ...[brief, ...steeredTexts].flatMap((text, index) => {
+      const itemId = `u${String(index + 1)}`;
+      const detail = index === 0 ? { text } : { text, steered: true };
+      return [
+        { _tag: "item.started", turnId: "s1", itemId, kind: "user_message", detail },
+        {
+          _tag: "item.completed",
+          turnId: "s1",
+          itemId,
+          kind: "user_message",
+          status: "completed",
+          detail,
+        },
+      ];
+    }),
   ].map((event, position) => {
     const at = "2026-09-08T10:00:00.000Z";
     return {
@@ -474,6 +484,25 @@ describe("A subagent's page, opened from its URL", () => {
 
     expect(screen.getByRole("link", { name: "Open parent" })).toBeDefined();
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("leaves out only the brief's own message, so a message steered into the first turn still shows", async () => {
+    const steered = "Also check the rollback path";
+    await openApp(
+      { session: buildSession({ status: "busy" }), subagents: [PLAN, DRY_RUN] },
+      `/threads/${SESSION_ID}/subagents/${PLAN.id}`,
+      {
+        [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: () => ({
+          body: { items: buildBriefTurn(BRIEF, steered) },
+        }),
+      },
+    );
+
+    await screen.findByRole("button", { name: BRIEF });
+    // The brief shows once, in its card, and the steered message keeps its bubble.
+    expect(screen.getAllByText(BRIEF)).toHaveLength(1);
+    expect(screen.getByText(steered)).toBeDefined();
+    expect(screen.getByText("steered")).toBeDefined();
   });
 
   it("pages through the subagent's own Requests with the arrows alone, leaving out the session's other Requests", async () => {

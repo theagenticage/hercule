@@ -17,6 +17,7 @@ import {
   isNotFound,
   queryKeys,
   readEveryPage,
+  readSenderSession,
   RUNNING_STATUSES,
   UNSEEN_COUNT_READ_LIMIT,
   type HerculeClient,
@@ -157,6 +158,37 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
     queryKey: queryKeys.session(id),
     queryFn: () => client.session.read({ params: { id } }),
     retry: false,
+  });
+
+/**
+ * Reads the session whose agent sent a message into a thread, or queued one
+ * there, so the message can name its sender. Holds null when the sender
+ * cannot be read, as `readSenderSession` says; the message then shows as from
+ * "another agent". Any other error fails the read, and the screen shows the
+ * same "another agent".
+ *
+ * The read is made once per sender and kept: the sender's name comes from
+ * fields that never change, and `queryKeys.sender` is outside the `session`
+ * prefix, so no push reads it again, and the messages that mount after the
+ * read do not read it again either. The desktop app reads it the same way.
+ *
+ * A read that fails is not tried again, neither at once nor when the next
+ * message from the same sender mounts: a read that fails for a network error
+ * or a 5xx would otherwise be made again by every message and queued row that
+ * shows the sender, each time one mounts. The thread's loader skips a sender
+ * whose read failed, for the same reason.
+ */
+export const senderSessionQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.sender(id),
+    queryFn: () => readSenderSession(client, id),
+    staleTime: Infinity,
+    retry: false,
+    // Without data, a mounting component reads the query again whatever its
+    // `staleTime`; this option alone stops that after an error.
+    retryOnMount: false,
+    // Without data the query is stale, so focus would read it again too.
+    refetchOnWindowFocus: false,
   });
 
 /**

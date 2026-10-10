@@ -29,8 +29,7 @@ const ITEM: ThreadItem = {
 /** Builds a turn that completed after five seconds with no tool items. */
 const buildTurn = (over: Partial<ThreadTurn> = {}): ThreadTurn => ({
   turnId: "t1",
-  user: "Fix the login bug",
-  userAttachments: [],
+  userMessages: [{ itemId: "u1", text: "Fix the login bug", attachments: [], steered: false }],
   items: [],
   assistantText: "Done.",
   startedAt: STARTED_AT,

@@ -122,12 +122,23 @@ export const USER_ACTOR = "user";
  */
 export const SYSTEM_ACTOR = "system";
 
+const SESSION_STAMP_PREFIX = "session:";
+
 /**
  * Returns the actor stamp of the session with this id, `session:<id>`. A write
  * the session caused without a request of its own, such as the reply taken
  * from its turn, is stamped with it.
  */
-export const buildSessionStamp = (sessionId: string): string => `session:${sessionId}`;
+export const buildSessionStamp = (sessionId: string): string =>
+  `${SESSION_STAMP_PREFIX}${sessionId}`;
+
+/**
+ * Parses an actor stamp into the id of the session it names. Returns the id
+ * for a `session:<id>` stamp, and `undefined` for any other stamp: `user`,
+ * `system`, or `run:<id>`. It is the inverse of `buildSessionStamp`.
+ */
+export const parseSessionStamp = (stamp: string): string | undefined =>
+  stamp.startsWith(SESSION_STAMP_PREFIX) ? stamp.slice(SESSION_STAMP_PREFIX.length) : undefined;
 
 /**
  * Returns the actor a run's step executes as. The run engine executes both

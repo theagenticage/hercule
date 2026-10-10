@@ -16,14 +16,17 @@ import {
 import {
   ApiError,
   collectRunningTurnRows,
+  collectSenderSessionIds,
   detectLocalRunner,
   mergeNewestMessagePage,
   mergeSentMessage,
   queryKeys,
   readEveryPage,
+  readSenderSession,
   type HerculeClient,
   type MessagePage,
   type MessagePages,
+  waitForSenderReads,
 } from "@hercule/client-core";
 import {
   DEFAULT_PAGE_LIMIT,
@@ -653,6 +656,37 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
+ * Reads the session whose agent sent a message into a thread, or queued one
+ * there, so the message can name its sender. Holds null when the sender
+ * cannot be read, as `readSenderSession` says; the message then shows as from
+ * "Another agent". Any other error fails the read, and the screen shows the
+ * same "Another agent".
+ *
+ * The read is made once per sender and kept: the sender's name comes from
+ * fields that never change, and `queryKeys.sender` is outside the `session`
+ * prefix, so no push reads it again. Being fresh forever, it is not read
+ * again on focus or reconnect either, once it holds data. The web app reads it the same way.
+ *
+ * A read that fails is not tried again, neither at once nor when the next
+ * message from the same sender mounts: a read that fails for a network error
+ * or a 5xx would otherwise be made again by every message and queued row that
+ * shows the sender, each time one mounts. The thread's loader skips a sender
+ * whose read failed, for the same reason.
+ */
+export const senderSessionQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.sender(id),
+    queryFn: () => readSenderSession(client, id),
+    staleTime: Infinity,
+    retry: false,
+    // Without data, a mounting component reads the query again whatever its
+    // `staleTime`; this option alone stops that after an error.
+    retryOnMount: false,
+    // Without data the query is stale, so focus would read it again too.
+    refetchOnWindowFocus: false,
+  });
+
+/**
  * Reads one agent's whole transcript, oldest first, page by page until the
  * last one, because the thread screen draws every row. Without `subagentId`
  * it reads the session's own agent; with it, that subagent's transcript.
@@ -796,9 +830,21 @@ export const ensureFirstRunData = async (
 /**
  * Reads everything the thread's own agent's page shows of the thread
  * `sessionId` into `queryClient`: its session, its subagents, its whole
- * transcript and its queued inputs.
- * Resolves once every read is cached, and fails with the first read that
- * fails, such as a `not_found` `ApiError` when no such session exists.
+ * transcript and its queued inputs, and the session of each agent that sent
+ * a message into the transcript or queued one, once per sender. Resolves once
+ * the thread's own four reads are cached, and fails with the first of them
+ * that fails, such as a `not_found` `ApiError` when no such session exists.
+ *
+ * The senders' reads start as soon as the transcript and the queued inputs
+ * have arrived, and the returned promise waits for them for at most
+ * `SENDER_READ_WAIT_MS`, so a sender that answers in time is named at the
+ * first paint, and a controller that never answers a sender's read cannot
+ * keep the thread from opening. A sender whose read is still running after
+ * that is named when it answers; until then its messages and queued rows
+ * hold the sender's place (see `useSenderReading`). A sender's read never
+ * fails the thread, and a sender whose read already failed is not read
+ * again. The assistants a sender may answer for are shell data, already
+ * cached.
  *
  * The thread's loader calls it, and so do the Office, whose drawer shows the
  * thread's page outside the thread's route, and a test that renders one
@@ -809,11 +855,25 @@ export const ensureThreadData = async (
   client: HerculeClient,
   sessionId: string,
 ): Promise<void> => {
+  const transcript = queryClient.ensureQueryData(transcriptQuery(client, sessionId));
+  const inputs = queryClient.ensureQueryData(queuedInputsQuery(client, sessionId));
+  const senders = Promise.all([transcript, inputs]).then(
+    ([rows, queued]) =>
+      waitForSenderReads(
+        collectSenderSessionIds(rows, queued)
+          .map((id) => senderSessionQuery(client, id))
+          .filter((sender) => queryClient.getQueryState(sender.queryKey)?.status !== "error")
+          .map((sender) => queryClient.prefetchQuery(sender)),
+      ),
+    // The thread's own reads fail through the promises awaited below.
+    () => {},
+  );
   await Promise.all([
     queryClient.ensureQueryData(sessionQuery(client, sessionId)),
     queryClient.ensureQueryData(subagentsQuery(client, sessionId)),
-    queryClient.ensureQueryData(transcriptQuery(client, sessionId)),
-    queryClient.ensureQueryData(queuedInputsQuery(client, sessionId)),
+    transcript,
+    inputs,
+    senders,
   ]);
 };
 

@@ -562,7 +562,22 @@ export {
   describeTurnEnding,
   showsTurnDivider,
 } from "./threads/turn-divider";
-export { buildTurns, mayBeRunningTurn, type ThreadItem, type ThreadTurn } from "./threads/turns";
+export {
+  buildTurns,
+  mayBeRunningTurn,
+  type ThreadItem,
+  type ThreadTurn,
+  type ThreadUserMessage,
+} from "./threads/turns";
+export {
+  collectSenderSessionIds,
+  describeSender,
+  readInputSender,
+  readSenderSession,
+  SENDER_READ_WAIT_MS,
+  type SenderReading,
+  waitForSenderReads,
+} from "./threads/sender";
 export {
   resolveBrowserTimezone,
   resolveDisplayTimezone,

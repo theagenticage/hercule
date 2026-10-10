@@ -803,6 +803,29 @@ describe("a Claude Code session", () => {
     });
   });
 
+  it("tells the agent which session sent a message, and reports the sender beside the original text", async () => {
+    const run = createDriving();
+    const sender = "0199e0e7-0000-7000-8000-0000000000e1";
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    await Effect.runPromise(
+      run.adapter.sendInput(SESSION, { text: "rebase on main", senderSessionId: sender }),
+    );
+
+    await waitUntil("sent the turn", () => run.sent.length === 1);
+    expect(run.sent[0]?.message.content).toBe(
+      `[Message from session ${sender}, another agent. To reply: hercule session input ${sender}]\n\nrebase on main`,
+    );
+    await waitUntil(
+      "published the user's own message",
+      () => filterItems(run.seen, "user_message").length === 2,
+    );
+    expect(filterItems(run.seen, "user_message")[1]?.detail).toEqual({
+      text: "rebase on main",
+      senderSessionId: sender,
+    });
+  });
+
   it("steers input on a busy session into the turn already running", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));

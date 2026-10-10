@@ -15,14 +15,16 @@ export interface SubagentBrief {
 
 /**
  * Returns the brief of a subagent from its `turns`, oldest first: the user
- * message of its first turn, which is how a harness hands a subagent its
- * brief. Returns undefined while that turn has not been read, or when it
- * holds no user message.
+ * message its first turn opens with, which is how a harness hands a subagent
+ * its brief. A message steered into that turn later is not part of the brief.
+ * Returns undefined while that turn has not been read, or when it opens with
+ * no user message text.
  */
 export const findSubagentBrief = (turns: readonly ThreadTurn[]): SubagentBrief | undefined => {
   const first = turns[0];
-  if (first === undefined || first.user === "") return undefined;
-  return { turnId: first.turnId, text: first.user };
+  const text = first?.userMessages[0]?.text;
+  if (first === undefined || text === undefined || text === "") return undefined;
+  return { turnId: first.turnId, text };
 };
 
 /** A subagent's transcript blocks with its brief taken out of them. */

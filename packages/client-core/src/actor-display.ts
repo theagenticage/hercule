@@ -9,11 +9,17 @@
  */
 import { toIdTail } from "./id-tail";
 
-/** What an actor's label links to: nothing, a session's thread, or a run's page. */
+/**
+ * What the label of whoever made a change links to: nothing, a session's
+ * thread, a run's page, or an assistant's page. An actor stamp never names an
+ * assistant; the `assistant` target is for the agent that sent a message,
+ * when it answers an assistant's conversation (see `describeSender`).
+ */
 export type ActorTarget =
   | { readonly kind: "none" }
   | { readonly kind: "session"; readonly sessionId: string }
-  | { readonly kind: "run"; readonly runId: string };
+  | { readonly kind: "run"; readonly runId: string }
+  | { readonly kind: "assistant"; readonly assistantId: string };
 
 export interface ActorReading {
   /** What to print. */

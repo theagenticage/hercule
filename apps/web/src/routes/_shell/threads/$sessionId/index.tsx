@@ -1,8 +1,18 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { resolveDisplayTimezone } from "@hercule/client-core";
-import { settingsQuery, transcriptQuery } from "../../../../app/queries";
+import {
+  collectSenderSessionIds,
+  resolveDisplayTimezone,
+  waitForSenderReads,
+} from "@hercule/client-core";
+import {
+  assistantsQuery,
+  inputsQuery,
+  senderSessionQuery,
+  settingsQuery,
+  transcriptQuery,
+} from "../../../../app/queries";
 import { AgentPage } from "../../../../screens/thread/agent-page";
 
 /**
@@ -11,13 +21,52 @@ import { AgentPage } from "../../../../screens/thread/agent-page";
  * the shell's top bar is hidden here.
  *
  * The loader fetches the transcript before the route renders, so the first
- * paint is never a spinner over an empty column. The thread's layout route
- * fetches everything else the page reads.
+ * paint is never a spinner over an empty column. It also reads the two
+ * things below; the thread's layout route fetches the rest of what the page
+ * reads.
+ *
+ * - The queued inputs are prefetched rather than ensured: if the controller
+ *   cannot list them, the queued list stays empty, but the thread still
+ *   opens, as it did before the list was read here. Their read shares the
+ *   senders' wait below, so a list that never answers cannot hold the
+ *   thread either.
+ * - Once the transcript and the queued inputs are in, it reads each agent
+ *   that sent one of those messages, once per sender, and the assistants, so
+ *   a message and a queued row name their sender at the first paint. It
+ *   waits for those reads for at most `SENDER_READ_WAIT_MS`: a sender's name
+ *   only decorates a message, so a controller that never answers one must
+ *   not keep the thread from opening. A sender still being read after that
+ *   is named when its read answers; until then its rows hold the sender's
+ *   place (see `useSenderReading`). Those reads are prefetched, so a sender
+ *   that cannot be read shows as "another agent" and never fails the load,
+ *   and a sender whose read already failed is not read again.
  */
 export const Route = createFileRoute("/_shell/threads/$sessionId/")({
   staticData: { title: "Thread", ownsTopBar: true },
-  loader: ({ context, params }) =>
-    context.queryClient.ensureQueryData(transcriptQuery(context.client, params.sessionId)),
+  loader: async ({ context, params }) => {
+    const { client, queryClient } = context;
+    const queued = inputsQuery(client, params.sessionId);
+    const queue = queryClient.prefetchQuery(queued);
+    const rows = await queryClient.ensureQueryData(transcriptQuery(client, params.sessionId));
+    // One wait covers the queued inputs and the senders they name, so a
+    // controller that never answers the queue does not hold the thread either.
+    await waitForSenderReads([
+      queue.then(() => {
+        const inputs = (queryClient.getQueryData(queued.queryKey)?.items ?? []).filter(
+          (input) => input.status === "queued",
+        );
+        const senderSessionIds = collectSenderSessionIds(rows, inputs);
+        if (senderSessionIds.length === 0) return;
+        return Promise.all([
+          queryClient.prefetchQuery(assistantsQuery(client)),
+          ...senderSessionIds
+            .map((id) => senderSessionQuery(client, id))
+            .filter((sender) => queryClient.getQueryState(sender.queryKey)?.status !== "error")
+            .map((sender) => queryClient.prefetchQuery(sender)),
+        ]);
+      }),
+    ]);
+  },
   component: ThreadPage,
 });
 

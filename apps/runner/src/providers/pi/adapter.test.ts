@@ -374,6 +374,28 @@ describe("sending an input to a pi session", () => {
     });
   }
 
+  it("tells the agent which session sent a message, and reports the sender beside the original text", async () => {
+    const run = await startTestSession();
+    const sender = "0199e0e7-0000-7000-8000-0000000000e1";
+
+    await Effect.runPromise(
+      run.adapter.sendInput(SESSION, { text: "rebase on main", senderSessionId: sender }),
+    );
+
+    expect(listSentCommands(run.sent, "prompt")).toEqual([
+      expect.objectContaining({
+        message: `[Message from session ${sender}, another agent. To reply: hercule session input ${sender}]\n\nrebase on main`,
+      }),
+    ]);
+    await waitUntil(
+      "reported the user's message",
+      () => filterByTag(run.seen, "item.completed").length === 1,
+    );
+    const reported = filterByTag(run.seen, "item.completed")[0];
+    expect(reported?.kind).toBe("user_message");
+    expect(reported?.detail).toEqual({ text: "rebase on main", senderSessionId: sender });
+  });
+
   it("reports the user's message as an item of the turn it opened", async () => {
     const run = await startTestSession();
 

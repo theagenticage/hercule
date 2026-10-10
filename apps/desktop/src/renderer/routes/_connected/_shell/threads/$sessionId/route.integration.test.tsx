@@ -1,11 +1,14 @@
 /**
  * Tests the thread route's loading: the reads it makes before the screen
- * renders, the thread it stores as the last open one, and what it shows when
- * the thread does not exist or cannot be read.
+ * renders, the thread it stores as the last open one, what it shows when
+ * the thread does not exist or cannot be read, and the sender it names on a
+ * message another session's agent sent, which it waits for only briefly.
  */
-import { describe, expect, it } from "vitest";
-import { act, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, screen, within } from "@testing-library/react";
+import type { TranscriptRow } from "@hercule/contract";
 import userEvent from "@testing-library/user-event";
+import { focusManager } from "@tanstack/react-query";
 import { queryKeys } from "@hercule/client-core";
 import {
   createLaunchHistory,
@@ -21,6 +24,7 @@ import {
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
+  stubElementSize,
   THREAD_FIXTURES,
 } from "../../../../../app/testing";
 
@@ -145,5 +149,136 @@ describe("the thread route", () => {
     await act(() => router.navigate({ to: "/" }));
     // The next launch starts where this one quit.
     expect(createLaunchHistory(CONTROLLER_URL).location.pathname).toBe("/");
+  });
+});
+
+describe("a message another session's agent sent into the thread", () => {
+  const thread = THREAD_FIXTURES.finished;
+  const sessionId = thread.session.id;
+  /** "Write the retry runbook", whose agent sent the thread's first message. */
+  const RUNBOOK = SIDEBAR_FIXTURE.threads[0]!;
+  const senderPath = `/api/v1/sessions/${RUNBOOK.id}`;
+
+  /**
+   * The finished thread's transcript, with its user message sent by the
+   * runbook's agent, and a second message from the same agent right after
+   * it. The rows are numbered again, so each keeps a position and an event
+   * id of its own.
+   */
+  const transcript: TranscriptRow[] = thread.transcript
+    .flatMap((row): TranscriptRow[] => {
+      const { event } = row;
+      if (event._tag !== "item.started" && event._tag !== "item.completed") return [row];
+      if (event.kind !== "user_message") return [row];
+      if (event._tag === "item.started") {
+        // The fixture's user message detail is an object that holds its text.
+        const detail = {
+          ...(event.detail as Record<string, unknown>),
+          senderSessionId: RUNBOOK.id,
+        };
+        return [{ ...row, event: { ...event, detail } }];
+      }
+      const itemId = `${event.itemId}-again`;
+      const detail = { text: "Then tag the release.", senderSessionId: RUNBOOK.id };
+      const { turnId, kind, eventId, sessionId, at } = event;
+      return [
+        row,
+        {
+          ...row,
+          event: { _tag: "item.started", turnId, itemId, kind, detail, eventId, sessionId, at },
+        },
+        { ...row, event: { ...event, itemId, detail } },
+      ];
+    })
+    .map((row, index) => ({
+      ...row,
+      position: index + 1,
+      event: { ...row.event, eventId: `event-${String(index + 1)}` },
+    }));
+
+  beforeEach(() => {
+    stubElementSize(800, 800);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reads the sender before the screen renders, and names it in a chip linked to its thread", async () => {
+    const { app, calls } = openApp(`/threads/${sessionId}`, {
+      ...buildThreadHandlers({ ...thread, transcript }),
+      // The sender answers after the thread's own reads, but well inside the
+      // loader's wait.
+      [`GET ${senderPath}`]: () =>
+        new Promise((resolve) => setTimeout(() => resolve({ body: RUNBOOK }), 50)),
+    });
+    const { context } = await app;
+
+    expect(context.queryClient.getQueryData(queryKeys.sender(RUNBOOK.id))).toEqual(RUNBOOK);
+    // Nothing is awaited here: the loader waited for the sender, so the
+    // first paint already names it.
+    const [first, second] = screen.getAllByRole("group", {
+      name: `Message from ${RUNBOOK.title}`,
+    });
+    const chip = within(first!).getByRole("link", { name: RUNBOOK.title });
+    expect(chip.getAttribute("href")).toBe(`/threads/${RUNBOOK.id}`);
+    expect(within(first!).getByText(/Bump the Bun pin to 1\.3\.2/)).toBeTruthy();
+    expect(within(second!).getByText("Then tag the release.")).toBeTruthy();
+    // One read for the sender, however many of its messages the thread holds.
+    expect(calls.filter((call) => call.path === senderPath)).toHaveLength(1);
+  });
+
+  it("opens the thread while the sender's read gets no answer, and names the sender once it answers", async () => {
+    let answer = (): void => {};
+    const { app } = openApp(`/threads/${sessionId}`, {
+      ...buildThreadHandlers({ ...thread, transcript }),
+      [`GET ${senderPath}`]: () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ body: RUNBOOK });
+        }),
+    });
+    // The loader waits for the sender for at most a second, then the app's
+    // loaders resolve and the transcript shows while the read is still
+    // unanswered.
+    await app;
+    expect(await screen.findByText("Then tag the release.")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: /^Message from/ })).toBeNull();
+
+    answer();
+    expect(
+      await screen.findAllByRole("group", { name: `Message from ${RUNBOOK.title}` }),
+    ).toHaveLength(2);
+  });
+
+  it("reads a sender whose read failed only once, however often its messages mount or the window is focused", async () => {
+    const { app, calls } = openApp(`/threads/${sessionId}`, {
+      ...buildThreadHandlers({ ...thread, transcript }),
+      [`GET ${senderPath}`]: () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    const { router } = await app;
+    expect(
+      await screen.findAllByRole("group", { name: "Message from another agent" }),
+    ).toHaveLength(2);
+
+    // Leaving the thread and opening it again runs its loader again and
+    // mounts its messages again.
+    for (let visit = 0; visit < 3; visit += 1) {
+      await act(() => router.navigate({ to: "/" }));
+      await act(() => router.navigate({ to: "/threads/$sessionId", params: { sessionId } }));
+      expect(
+        await screen.findAllByRole("group", { name: "Message from another agent" }),
+      ).toHaveLength(2);
+    }
+    // Focusing the window again does not read it either. A read focus started
+    // would be sent within the wait.
+    await act(async () => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    focusManager.setFocused(undefined);
+    expect(calls.filter((call) => call.path === senderPath)).toHaveLength(1);
   });
 });

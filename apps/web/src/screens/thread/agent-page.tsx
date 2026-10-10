@@ -75,8 +75,8 @@ export function AgentPage({
       ? buildSessionAgentState(session)
       : buildSubagentAgentState(subagent, session);
   const turns = buildTurns(rows, agent);
-  // A subagent's page shows its brief in the brief card, so the turn whose
-  // user message holds the brief leaves that message out.
+  // A subagent's page shows its brief in the brief card, so the turn that
+  // opens with the brief leaves that opening message out.
   const brief = subagent === undefined ? undefined : findSubagentBrief(turns);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
   const tailRef = useAgentLive(live, queryClient, sessionId, subagentId, rows, followIfAtBottom);
@@ -155,7 +155,7 @@ export function AgentPage({
                 // live last turn gets the live tail element.
                 tailRef={isLive ? tailRef : undefined}
                 stamp={stamps[index]}
-                hidesUserMessage={turn.turnId === brief?.turnId}
+                hidesOpeningMessage={turn.turnId === brief?.turnId}
               />
             );
           })}

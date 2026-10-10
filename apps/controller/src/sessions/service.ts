@@ -41,7 +41,6 @@ import {
   type SessionRespondToQuestion,
   type SessionStart,
   type SessionStop,
-  type TurnInput,
   type WorkspaceStepKey,
 } from "@hercule/protocol";
 import {
@@ -139,6 +138,7 @@ import {
   type SubagentEventFacts,
 } from "./subagents";
 import { hasOtherTurn, readAssistantTexts, readOpenTurnId } from "./transcript-log";
+import { buildStepKey, buildTurnInput } from "./turn-input";
 import { addUsageReport, clearProcessShare } from "./usage";
 
 const QueryInput = Schema.Struct({
@@ -486,47 +486,6 @@ const RUNNER_LOST =
  */
 const describeExited = (reason: string): string =>
   `that session's harness exited (${reason}) before this input was sent`;
-
-/**
- * Builds the step key of an agent step's prompt: the run and the step its
- * session was started by, and the prompt's `iteration`.
- *
- * Throws when the session was started by no step. Only an agent step creates
- * a step prompt, in the session it started, so that is a bug. Inside an
- * effect the throw is a defect.
- */
-const buildStepKey = (
-  session: Pick<StoredSession, "id" | "runId" | "stepId">,
-  iteration: number,
-): WorkspaceStepKey => {
-  if (session.runId === null || session.stepId === null) {
-    throw new Error(
-      `session ${session.id} holds the prompt of an agent step, but no step started it`,
-    );
-  }
-  return { runId: session.runId, stepId: session.stepId, iteration };
-};
-
-/**
- * Builds what a frame carries to the runner for one stored input: its text,
- * its images when it has any, the session's current model selection, and,
- * for an agent step's prompt,
- * the step's key, so the runner knows the turn the prompt starts is the
- * step's and reports its result. A `sessionInput` and a `sessionStart` carry
- * the same shape.
- *
- * Throws, as a defect, on a step prompt whose session was started by no step
- * (`buildStepKey`).
- */
-const buildTurnInput = (
-  session: Pick<StoredSession, "id" | "runId" | "stepId" | "modelSelection">,
-  row: StoredInput,
-): TurnInput => ({
-  text: row.text,
-  ...(row.attachments.length === 0 ? {} : { attachments: row.attachments }),
-  modelSelection: session.modelSelection,
-  ...(row.stepIteration === null ? {} : { step: buildStepKey(session, row.stepIteration) }),
-});
 
 /**
  * Returns the provider-native session id from a `session.started` event, if
@@ -2686,6 +2645,13 @@ const make = Effect.gen(function* () {
      * still waiting, and dispatch sends whatever text it holds when it claims
      * it. Once the start claims it, it is on the wire and refused like any
      * other sent input.
+     *
+     * The changed input becomes the caller's: its actor is the caller's and
+     * its source is `user`, even on an input a subscription created. It is
+     * sent as the caller's input, images included, and the agent that
+     * receives it is told the caller sent it. The images it already carries
+     * stay, and a new image must have been uploaded by the caller
+     * (`readClaimableAttachments`).
      */
     updateInput: (input: InputUpdate): Effect.Effect<Input, InputError> =>
       Effect.gen(function* () {
@@ -2699,7 +2665,8 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const row = yield* queuedInput(id, inputId);
-            yield* inputs.rewrite(inputId, text);
+            const actor = yield* currentStamp;
+            yield* inputs.rewrite(inputId, text, actor);
             if (attachments === undefined) {
               // The payload cannot see the stored images, so an empty text
               // that leaves the input with nothing is refused here.
@@ -2708,7 +2675,7 @@ const make = Effect.gen(function* () {
                   createValidationError([{ path: ["text"], message: EMPTY_PROMPT_MESSAGE }]),
                 );
               yield* announceSessionChangeById(id);
-              return buildInputRecord({ ...row, text });
+              return buildInputRecord({ ...row, source: "user", actor, text });
             }
             const references = yield* provideSql(
               readClaimableAttachments(attachments, row.attachments),
@@ -2724,7 +2691,13 @@ const make = Effect.gen(function* () {
             );
             yield* provideSql(claimAttachments(inputId, references));
             yield* announceSessionChange(session);
-            return buildInputRecord({ ...row, text, attachments: references });
+            return buildInputRecord({
+              ...row,
+              source: "user",
+              actor,
+              text,
+              attachments: references,
+            });
           }),
         );
       }),

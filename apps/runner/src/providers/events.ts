@@ -21,11 +21,16 @@ export const ensureId = (given: string): string =>
  * `item.started` and `item.completed`. Every adapter builds these itself rather
  * than from the harness's echo of the message, because only the adapter knows
  * whether the input steered a running turn. The echo does not identify which
- * input it belongs to.
+ * input it belongs to, and it holds the prompt the harness got, with the
+ * sender header and the image lines. So the `user_message` is always built
+ * from the input, never from the harness's echo.
  *
  * The images of the input go in `detail.attachments` as references: id, name,
  * type and size. Never their bytes, and never the runner's path, so the
  * stream stays small and the transcript reads the same on every client.
+ *
+ * When another session's agent sent the input, that session's id goes in
+ * `detail.senderSessionId`. The key is absent otherwise.
  */
 export const buildUserMessage = (input: {
   readonly sessionId: string;
@@ -36,6 +41,8 @@ export const buildUserMessage = (input: {
   readonly steered: boolean;
   /** The images of the input, in order. */
   readonly attachments?: ReadonlyArray<AttachmentReference> | undefined;
+  /** The session whose agent sent the input, or undefined when no other agent did. */
+  readonly senderSessionId?: string | undefined;
   /** The harness's own ids for the item, if the adapter has any. */
   readonly providerRefs?: Readonly<Record<string, string>>;
 }): readonly [ProviderEvent, ProviderEvent] => {
@@ -59,6 +66,7 @@ export const buildUserMessage = (input: {
               sizeBytes,
             })),
           }),
+      ...(input.senderSessionId === undefined ? {} : { senderSessionId: input.senderSessionId }),
     },
     ...(input.providerRefs === undefined ? {} : { providerRefs: input.providerRefs }),
   } as const;

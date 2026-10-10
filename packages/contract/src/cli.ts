@@ -2711,9 +2711,10 @@ export const CLI = {
   },
   "session.input": {
     command: "session input",
-    help: "Sends one turn's input to a session. On an idle session it starts a turn; on any other it is queued. A session whose process is gone, but whose transcript is still on its runner, is resumed in place. Returns the input's id and what happened to it; while the row is still queued, `hercule input update` and `hercule input cancel` change it and `hercule input steer` folds it into the turn already running.",
+    help: "Sends one turn's input to a session. On an idle session it starts a turn; on any other it is queued, and on a busy one `--steer true` puts it into the running turn instead. A session whose process is gone, but whose transcript is still on its runner, is resumed in place. Returns the input's id and what happened to it; while the row is still queued, `hercule input update` and `hercule input cancel` change it and `hercule input steer` folds it into the turn already running. A steer that cannot be delivered still stores the input, and the answer is `queued`; `hercule input list` shows why.",
     examples: [
       { args: ["1f3a9c2e"], stdin: "Carry on, and run the tests when you are done." },
+      { args: ["7c82ebeb", "--steer", "true"], stdin: "The 3DS fix is merged, rebase on main" },
       { args: ["1f3a9c2e", "--model", "claude-opus-4"], stdin: "Try that again with more care." },
       {
         args: ["1f3a9c2e", "--image", "before.png", "--image", "after.png"],
@@ -2740,6 +2741,10 @@ export const CLI = {
       options: {
         flag: "options",
         help: "The per-model choices as inline JSON, applied before the input is stored.",
+      },
+      steer: {
+        flag: "steer",
+        help: "With true, a busy session gets the input in the turn it is running now, as `hercule input steer` does. Without it the input waits for that turn to end. Use it when the agent should act on the message before it finishes what it is doing. A provider that cannot steer has its running turn interrupted, and the input is sent as the next turn, reported as `queued`. A session that is not busy takes the input as without the flag: an idle one starts a turn with it. If the steer cannot be delivered, because the runner refused it, is not connected, or did not answer in time, the input is still stored and waits for the turn to end, and the answer is `queued`. `hercule input list` shows the reason.",
       },
     },
     errors: {

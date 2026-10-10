@@ -8,6 +8,7 @@
  * treats them the same.
  */
 import { describe, expect, it, vi } from "vitest";
+import type { Input } from "@hercule/contract";
 import {
   readSession,
   listInputs,
@@ -15,8 +16,9 @@ import {
   waitForStartFrames,
   WAIT_DEADLINE_MS,
   reportTurnCompleted,
+  spawnThreadWithGrants,
 } from "../../../sessions/testing";
-import { post } from "../../../http/testing";
+import { post, send } from "../../../http/testing";
 import {
   emitManualEvent,
   endPromptTurn,
@@ -173,6 +175,39 @@ describe("the delivery of a queued input", () => {
       // sends it, the same as for a matched input.
       const frame = await waitForFrameCarrying(arranged, "typed while busy");
       expect(frame.sessionId).toBe(agent.session.id);
+    });
+  });
+
+  it("names the session that changed a matched input as its sender", async () => {
+    await withPipeline(async (arranged) => {
+      const agent = await spawnSubscriber(arranged, "subscribers");
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
+      await makeBusy(arranged, agent, 2);
+      await emitManualEvent(arranged, [REF], "the event's words");
+      await waitForMatchedInputRows(arranged.harness, subscriptionId, (found) => found.length >= 1);
+      const matched = (await listInputs(arranged, agent.session.id)).find((one) =>
+        one.text.includes("the event's words"),
+      )!;
+      expect(matched.source).toBe("subscription");
+
+      // Another session rewrites the matched input. Its text is now that
+      // session's words, so the input becomes that session's message.
+      const updater = await spawnThreadWithGrants(arranged, "updater", ["session.steer"]);
+      const updated = await send(
+        "PATCH",
+        arranged.harness.base,
+        `/api/v1/sessions/${agent.session.id}/inputs/${matched.id}`,
+        { body: { text: "the updater's words" }, token: updater.token },
+      );
+      expect(updated.status, await updated.clone().text()).toBe(200);
+      const changed = (await updated.json()) as Input;
+      expect(changed.source).toBe("user");
+      expect(changed.actor).toBe(`session:${updater.session.id}`);
+
+      reportTurnCompleted(arranged, agent.session.id, 3);
+      const frame = await waitForFrameCarrying(arranged, "the updater's words");
+      expect(frame.requestId).toBe(matched.id);
+      expect(frame.input.senderSessionId).toBe(updater.session.id);
     });
   });
 });

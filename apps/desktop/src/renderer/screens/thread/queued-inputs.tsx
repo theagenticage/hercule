@@ -1,37 +1,21 @@
 import type { JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { canSteerOrCancelQueuedInputs, queryKeys, readErrorMessage } from "@hercule/client-core";
+import {
+  canSteerOrCancelQueuedInputs,
+  queryKeys,
+  readErrorMessage,
+  readInputSender,
+  type SenderReading,
+} from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
 import { queuedInputsQuery, sessionQuery } from "../../app/queries";
+import { buildHueStyle } from "../../faces";
 import { ClockIcon } from "../../icons/clock";
-import { QueuedImages, QUEUED_IMAGE_SIZE } from "../attachments/queued-images";
+import { QueuedImages } from "../attachments/queued-images";
+import { buildSenderLook, SenderChip, SenderChipPlaceholder } from "../session/sender-chip";
+import { useSenderReading } from "./use-sender-reading";
 import "./queued-inputs.css";
-
-declare module "react" {
-  interface CSSProperties {
-    /** How far a queued input's note is indented, as `<n>px`, to line up with its text. */
-    "--queued-note-indent"?: string;
-  }
-}
-
-/** The gap between a queued input's clock, its images and its text, in pixels, as `.queued` sets it. */
-const QUEUED_ROW_GAP = 10;
-/** The gap between two image tiles in a queued input, in pixels, as `.queued-images` sets it. */
-const QUEUED_IMAGE_GAP = 4;
-
-/**
- * Returns how far a queued input's note is indented so it starts under the
- * input's text: past the 14px clock and, when the input has images, past
- * their tiles, each with the gap after it.
- */
-const computeNoteIndent = (imageCount: number): number => {
-  const clock = 14 + QUEUED_ROW_GAP;
-  if (imageCount === 0) return clock;
-  return (
-    clock + imageCount * QUEUED_IMAGE_SIZE + (imageCount - 1) * QUEUED_IMAGE_GAP + QUEUED_ROW_GAP
-  );
-};
 
 /**
  * Renders the thread's queued inputs above the dock and the composer, one
@@ -68,10 +52,13 @@ export function QueuedInputs({ sessionId }: { readonly sessionId: string }): JSX
 }
 
 /**
- * Renders one queued input: the clock, its images, its text on one line, how soon it
- * runs, and Steer and Cancel when `offersActions` is true. Below them, the
- * row shows why its last delivery failed, when one did, and why Steer or
+ * Renders one queued input: the clock, its images, its text on one line,
+ * how soon it runs, and Steer and Cancel when `offersActions` is true. Below
+ * them, the row shows why its last delivery failed, when one did, and why Steer or
  * Cancel failed, when one does.
+ *
+ * An input another session's agent queued draws that agent's chip in place
+ * of the clock, and the row takes the agent's hue (see `AgentQueuedInputRow`).
  *
  * Steer delivers the input into the running turn now, rather than after it;
  * Cancel drops the input. Either one, once it succeeds, reads the queue
@@ -106,47 +93,88 @@ function QueuedInputRow({
   const running = steer.isPending || cancel.isPending;
   const failure = steer.error ?? cancel.error;
 
-  return (
-    <div
-      className="queued"
-      style={{ "--queued-note-indent": `${String(computeNoteIndent(input.attachments.length))}px` }}
-    >
-      <ClockIcon size={14} />
-      {input.attachments.length === 0 ? null : <QueuedImages attachments={input.attachments} />}
-      <span className="queued-text" title={input.text}>
-        {input.text}
-      </span>
-      <span className="faint">{runsNext ? "queued · runs next" : "queued"}</span>
-      {offersActions ? (
-        <>
-          <button
-            type="button"
-            className="btn btn--quiet btn--sm"
-            aria-disabled={running || undefined}
-            onClick={() => {
-              if (!running) steer.mutate();
-            }}
-          >
-            Steer
-          </button>
-          <button
-            type="button"
-            className="btn btn--quiet btn--sm"
-            aria-disabled={running || undefined}
-            onClick={() => {
-              if (!running) cancel.mutate();
-            }}
-          >
-            Cancel
-          </button>
-        </>
-      ) : null}
-      {input.reason === null ? null : <span className="queued-note faint">{input.reason}</span>}
-      {failure === null ? null : (
-        <span className="queued-note queued-error" role="alert">
-          {readErrorMessage(failure)}
+  // The row's markup is written once, for the owner's input and for an
+  // agent's, whose sender is read first (see `AgentQueuedInputRow`).
+  const renderRow = (sender?: SenderReading | "loading"): JSX.Element => {
+    const agent = sender === undefined || sender === "loading" ? undefined : sender;
+    return (
+      <div
+        className={agent === undefined ? "queued" : "queued queued--agent"}
+        style={agent === undefined ? undefined : buildHueStyle(buildSenderLook(agent).hue)}
+        role={agent === undefined ? undefined : "group"}
+        aria-label={agent === undefined ? undefined : `Queued message from ${agent.label}`}
+      >
+        {sender === undefined ? (
+          <ClockIcon size={14} />
+        ) : agent === undefined ? (
+          <SenderChipPlaceholder />
+        ) : (
+          <SenderChip sender={agent} />
+        )}
+        {input.attachments.length === 0 ? null : <QueuedImages attachments={input.attachments} />}
+        <span className="queued-text" title={input.text}>
+          {input.text}
         </span>
-      )}
-    </div>
+        <span className="queued-status faint">{runsNext ? "queued · runs next" : "queued"}</span>
+        {offersActions ? (
+          <>
+            <button
+              type="button"
+              className="queued-steer btn btn--quiet btn--sm"
+              aria-disabled={running || undefined}
+              onClick={() => {
+                if (!running) steer.mutate();
+              }}
+            >
+              Steer
+            </button>
+            <button
+              type="button"
+              className="queued-cancel btn btn--quiet btn--sm"
+              aria-disabled={running || undefined}
+              onClick={() => {
+                if (!running) cancel.mutate();
+              }}
+            >
+              Cancel
+            </button>
+          </>
+        ) : null}
+        {input.reason === null ? null : <span className="queued-note faint">{input.reason}</span>}
+        {failure === null ? null : (
+          <span className="queued-note queued-error" role="alert">
+            {readErrorMessage(failure)}
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const senderSessionId = readInputSender(input);
+  return senderSessionId === undefined ? (
+    renderRow()
+  ) : (
+    <AgentQueuedInputRow senderSessionId={senderSessionId} renderRow={renderRow} />
   );
+}
+
+/**
+ * Reads the agent of session `senderSessionId`, which queued the input, and
+ * returns `renderRow`'s row for it: the agent's chip in place of the clock,
+ * on glass tinted in the agent's hue, as a group named "Queued message from"
+ * and the agent's name. It is a component of its own because only an
+ * agent's row reads a sender, and a hook cannot be called on a condition.
+ *
+ * While the agent is still being read, the chip's place is held empty, in
+ * place of the clock, and the row is not tinted, rather than naming a sender
+ * that may be wrong.
+ */
+function AgentQueuedInputRow({
+  senderSessionId,
+  renderRow,
+}: {
+  readonly senderSessionId: string;
+  readonly renderRow: (sender: SenderReading | "loading") => JSX.Element;
+}): JSX.Element {
+  return renderRow(useSenderReading(senderSessionId));
 }

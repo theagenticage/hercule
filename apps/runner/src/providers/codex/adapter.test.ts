@@ -543,6 +543,34 @@ describe("what an input does to a Codex session", () => {
     });
   }
 
+  it("tells the agent which session sent a message, and reports the sender beside the original text", async () => {
+    const run = await startTestSession();
+    const sender = "0199e0e7-0000-7000-8000-0000000000e1";
+
+    await Effect.runPromise(
+      run.adapter.sendInput(SESSION, { text: "rebase on main", senderSessionId: sender }),
+    );
+
+    expect(listSentParams(run.requests, "turn/start").at(-1)).toMatchObject({
+      input: [
+        {
+          type: "text",
+          text: `[Message from session ${sender}, another agent. To reply: hercule session input ${sender}]\n\nrebase on main`,
+        },
+      ],
+    });
+    await waitUntil(
+      "reported the user's message",
+      () =>
+        filterByTag(run.seen, "item.completed").filter((event) => event.kind === "user_message")
+          .length === 1,
+    );
+    const reported = filterByTag(run.seen, "item.completed").find(
+      (event) => event.kind === "user_message",
+    );
+    expect(reported?.detail).toEqual({ text: "rebase on main", senderSessionId: sender });
+  });
+
   it("starts a new turn instead when the turn it meant to steer is no longer active", async () => {
     const NEXT = "0199e0e7-0000-7000-8000-0000000000f9";
     let turns = 0;

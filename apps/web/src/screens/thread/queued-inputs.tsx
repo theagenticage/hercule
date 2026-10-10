@@ -5,15 +5,20 @@ import {
   queryKeys,
   type HerculeClient,
   readErrorMessage,
+  readInputSender,
 } from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
 import { Button, useBlobImageSource, type LightboxImage } from "@hercule/ui";
 import { inputsQuery, sessionQuery } from "../../app/queries";
+import { ActorLink } from "../actor-link";
 import { useAttachmentImages } from "../use-attachment-images";
+import { useSenderReading } from "./use-sender-reading";
 
 /**
  * The list of queued messages above the composer, each with Steer and Cancel,
- * and with small thumbnails of its images before its text.
+ * and with small thumbnails of its images before its text. A message another
+ * session's agent queued starts with "From" and its sender, set apart from the
+ * message by a "·", so it never looks like one the owner queued; the owner can steer or cancel it all the same.
  * The query returns the session's whole input history; this component shows
  * only the inputs still `queued`, because sent, delivered or cancelled ones
  * can no longer be acted on.
@@ -79,10 +84,12 @@ function QueuedRow({
   });
   const failure = steer.error ?? cancel.error;
   const { images, observe } = useAttachmentImages(row.attachments);
+  const senderSessionId = readInputSender(row);
 
   return (
     <div className="flex flex-col gap-1 rounded-control border border-line-soft bg-surface px-3 py-2">
       <div className="flex items-center gap-2">
+        {senderSessionId === undefined ? null : <QueuedSender senderSessionId={senderSessionId} />}
         {images.length === 0 ? null : (
           <span
             ref={observe}
@@ -113,6 +120,39 @@ function QueuedRow({
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * Shows "From", the sender of a message another session's agent queued, and
+ * a "·" that parts the sender from the message, so the name never reads as
+ * the message's first words. A long name is cut with an ellipsis and shows
+ * whole as a tooltip. Every row from one sender shares one cached read, so a
+ * long queue reads each sender once.
+ *
+ * While the sender is still being read, a faint "…" holds the name's place,
+ * rather than a name that may be wrong. "From" shows from the first paint,
+ * so the row never looks like one the owner queued, and the row keeps its
+ * height when the name arrives.
+ */
+function QueuedSender({ senderSessionId }: { readonly senderSessionId: string }): JSX.Element {
+  const sender = useSenderReading(senderSessionId);
+  return (
+    <>
+      <span className="flex min-w-0 max-w-[40%] shrink-0 gap-1 text-row text-muted">
+        {/* The space keeps "From" apart from the name in the text a screen
+            reader reads; on screen, the gap does that. */}
+        <span className="shrink-0">{"From "}</span>
+        {sender === "loading" ? (
+          <span className="text-faint">…</span>
+        ) : (
+          <ActorLink actor={sender} plainClassName="text-muted" truncates />
+        )}
+      </span>
+      <span aria-hidden="true" className="shrink-0 text-row text-faint">
+        {" · "}
+      </span>
+    </>
   );
 }
 

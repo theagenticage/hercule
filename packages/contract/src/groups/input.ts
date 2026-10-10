@@ -72,6 +72,10 @@ export const Input = Schema.Struct({
   id: Id,
   sessionId: Id,
   source: InputSource,
+  /**
+   * Who wrote the input's current text: the actor who sent it, or the one who
+   * last changed it with `input.update`. A changed input's source is `user`.
+   */
   actor: Schema.String,
   text: Schema.String,
   /** The images sent with the text, in the order the user attached them. */

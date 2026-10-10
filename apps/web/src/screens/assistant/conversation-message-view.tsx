@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type { ConversationMessage } from "@hercule/contract";
-import { OwnerBubble } from "../bubble";
+import { MessageBubble } from "../bubble";
 import { Markdown } from "../markdown";
 import { TimeSeparator } from "../time-separator";
 
@@ -42,7 +42,7 @@ export function ConversationMessageView({
         <div data-sender="owner" data-message-id={message.id} className="flex flex-col gap-2">
           {stamp === undefined ? null : <TimeSeparator stamp={stamp} />}
           <div className="flex justify-end">
-            <OwnerBubble text={message.text} />
+            <MessageBubble text={message.text} />
           </div>
         </div>
       );

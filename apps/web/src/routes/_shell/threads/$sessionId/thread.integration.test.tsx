@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { defaultScheduler, notifyManager } from "@tanstack/react-query";
+import { defaultScheduler, focusManager, notifyManager } from "@tanstack/react-query";
 import { buildApprovalCard, formatDuration, formatStamp, queryKeys } from "@hercule/client-core";
 import type {
   Assistant,
@@ -318,13 +318,15 @@ const buildTurnCompletion = (
 
 /**
  * Builds the user's message the way a transcript records one: started and
- * completed at the same time, with the text on both events.
+ * completed at the same time, with the text on both events. `detail` adds
+ * fields to both events' detail, such as `steered` or `senderSessionId`.
  */
 const buildUserMessage = (
   turnId: string,
   at: string,
   itemId: string,
   text: string,
+  detail: Readonly<Record<string, unknown>> = {},
 ): TurnEvent[] => [
   {
     _tag: "item.started",
@@ -334,7 +336,7 @@ const buildUserMessage = (
     turnId,
     itemId,
     kind: "user_message",
-    detail: { text },
+    detail: { text, ...detail },
   },
   {
     _tag: "item.completed",
@@ -345,7 +347,7 @@ const buildUserMessage = (
     itemId,
     kind: "user_message",
     status: "completed",
-    detail: { text },
+    detail: { text, ...detail },
   },
 ];
 
@@ -3985,5 +3987,353 @@ describe("Thread: images", () => {
     const thumbnails = await screen.findByLabelText("2 images");
     expect(within(thumbnails).getByAltText("before.png")).toBeDefined();
     expect(within(thumbnails).getByAltText("after.png")).toBeDefined();
+  });
+});
+
+/** The session whose agent sends messages into the thread under test. */
+const SENDER = buildSession({
+  id: "01a06d02-b100-7000-8000-000000000077",
+  title: "Fix EU checkout",
+});
+
+/**
+ * Builds one turn the owner opened at 10:00 with "Fix the login bug", into
+ * which `SENDER`'s agent then steered "The 3DS fix is merged".
+ */
+const buildTurnWithAgentMessage = (senderSessionId: string = SENDER.id): TranscriptRow[] =>
+  buildTranscript(
+    buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+    buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+    buildUserMessage("t1", "2026-09-08T10:00:02.000Z", "u2", "The 3DS fix is merged", {
+      steered: true,
+      senderSessionId,
+    }),
+    buildAssistantMessage("t1", "2026-09-08T10:00:03.000Z", "a1", "Rebasing on main."),
+    buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z"),
+  );
+
+/** Counts the reads of one session the app has made so far. */
+const countSessionReads = (calls: readonly Call[], id: string): number =>
+  calls.filter((call) => call.method === "GET" && call.path === `/api/v1/sessions/${id}`).length;
+
+describe("Thread: a message another agent sent", () => {
+  it("draws the owner's message and a steered agent message as two bubbles, the agent's naming its sender with a link to its thread", async () => {
+    await openApp(buildSession({ status: "idle" }), buildTurnWithAgentMessage(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },
+    });
+
+    const agentMessage = await screen.findByRole("group", {
+      name: "Message from Fix EU checkout",
+    });
+    expect(readPageText(agentMessage)).toBe(
+      "The 3DS fix is mergedSent by Fix EU checkout · steered",
+    );
+    const link = within(agentMessage).getByRole("link", { name: "Fix EU checkout" });
+    expect(link.getAttribute("href")).toBe(`/threads/${SENDER.id}`);
+
+    // The owner's message is its own bubble, outside the agent's message,
+    // with no sender line and no steered mark.
+    const ownerText = screen.getByText("Fix the login bug", { selector: "p" });
+    expect(agentMessage.contains(ownerText)).toBe(false);
+    expect(ownerText.closest('[role="group"]')).toBeNull();
+    expect(screen.getAllByText(/^Sent by/)).toHaveLength(1);
+    expect(screen.getAllByText(/steered$/)).toHaveLength(1);
+  });
+
+  it("marks the owner's own steered message as steered, with no sender line", async () => {
+    await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(
+        buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+        buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+        buildUserMessage("t1", "2026-09-08T10:00:02.000Z", "u2", "Also the logout", {
+          steered: true,
+        }),
+        buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z"),
+      ),
+    );
+
+    const steered = await screen.findByText("Also the logout", { selector: "p" });
+    expect(steered.closest('[role="group"]')).toBeNull();
+    expect(screen.getAllByText("steered")).toHaveLength(1);
+    expect(screen.queryByText(/^Sent by/)).toBeNull();
+  });
+
+  it("names a sender that cannot be read as another agent, with no link and no error", async () => {
+    await openApp(buildSession({ status: "idle" }), buildTurnWithAgentMessage(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: {
+        status: 404,
+        body: buildErrorBody("not_found", "No session has that id."),
+      },
+    });
+
+    const agentMessage = await screen.findByRole("group", {
+      name: "Message from another agent",
+    });
+    expect(readPageText(agentMessage)).toBe("The 3DS fix is mergedSent by another agent · steered");
+    expect(within(agentMessage).queryByRole("link")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(readPageText()).toContain("Rebasing on main.");
+  });
+
+  it("names a sender that answers an assistant's conversation by the assistant, linking to its page", async () => {
+    const sender = buildAssistantSession({ id: SENDER.id });
+    await openApp(buildSession({ status: "idle" }), buildTurnWithAgentMessage(), {
+      ...ASSISTANT_ROUTES,
+      [`GET /api/v1/sessions/${SENDER.id}`]: { body: sender },
+    });
+
+    const agentMessage = await screen.findByRole("group", { name: "Message from Ada" });
+    const link = within(agentMessage).getByRole("link", { name: "Ada" });
+    expect(link.getAttribute("href")).toBe(`/assistants/${ADA.id}`);
+  });
+
+  it("reads each sender once, however many messages it sent", async () => {
+    const { api } = await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(
+        buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+        buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "First note", {
+          senderSessionId: SENDER.id,
+        }),
+        buildUserMessage("t1", "2026-09-08T10:00:02.000Z", "u2", "Second note", {
+          steered: true,
+          senderSessionId: SENDER.id,
+        }),
+        buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z"),
+      ),
+      { [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER } },
+    );
+
+    expect(
+      await screen.findAllByRole("group", { name: "Message from Fix EU checkout" }),
+    ).toHaveLength(2);
+    expect(countSessionReads(api.calls, SENDER.id)).toBe(1);
+  });
+});
+
+describe("Thread: an agent message that arrives while the thread is open", () => {
+  it("draws the message at once and adds its sender when the sender's read answers, never holding up the transcript", async () => {
+    let answer = (): void => {};
+    const { live } = await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ body: SENDER });
+        }),
+    });
+    await waitFor(() => {
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
+    });
+
+    act(() => {
+      live.push(buildSessionStreamTopic(SESSION_ID), {
+        _tag: "delta",
+        items: buildUserMessage("t2", "2026-09-08T10:01:02.000Z", "u3", "The 3DS fix is merged", {
+          steered: true,
+          senderSessionId: SENDER.id,
+        }).map((event, index) =>
+          buildTranscriptRow(16 + index, { ...event, eventId: `e${16 + index}` }),
+        ),
+        cursor: "17",
+      });
+    });
+
+    // The message and the rest of the transcript show while the sender is
+    // read; only the sender line waits.
+    await screen.findByText("The 3DS fix is merged", { selector: "p" });
+    expect(readPageText()).toContain("Added a test too.");
+    expect(screen.queryByText(/^Sent by/)).toBeNull();
+    // Until its sender is known, the message is no group, since a group with
+    // no name tells a screen reader nothing.
+    expect(screen.queryByRole("group")).toBeNull();
+
+    answer();
+    const agentMessage = await screen.findByRole("group", { name: "Message from Fix EU checkout" });
+    expect(within(agentMessage).getByRole("link", { name: "Fix EU checkout" })).toBeDefined();
+  });
+});
+
+describe("Thread: a sender whose read is slow or fails", () => {
+  /** A message `SENDER`'s agent queued into the busy thread. */
+  const AGENT_INPUT = buildQueuedInput({ actor: `session:${SENDER.id}`, text: "Tag the release" });
+
+  it("opens the thread while the sender's read gets no answer, and names the sender once it answers", async () => {
+    let answer = (): void => {};
+    // `openApp` resolves once the loaders have, so this test times out if a
+    // loader waits for the sender without a limit. The loader gives up on it
+    // after a second.
+    await openApp(buildSession({ status: "busy" }), buildTurnWithAgentMessage(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ body: SENDER });
+        }),
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [AGENT_INPUT] } },
+    });
+
+    // The transcript shows. The queued row starts with "From" and a
+    // placeholder, so it never reads as the owner's, and the message has no
+    // sender line yet.
+    expect(await screen.findByText("Rebasing on main.")).toBeDefined();
+    const row = screen.getByText("Tag the release").parentElement;
+    expect(readPageText(row)).toBe("From … · Tag the releaseSteerCancel");
+    expect(screen.queryByText(/^Sent by/)).toBeNull();
+
+    answer();
+    await waitFor(() => {
+      expect(readPageText(row)).toBe("From Fix EU checkout · Tag the releaseSteerCancel");
+    });
+    const agentMessage = await screen.findByRole("group", { name: "Message from Fix EU checkout" });
+    expect(readPageText(agentMessage)).toBe(
+      "The 3DS fix is mergedSent by Fix EU checkout · steered",
+    );
+  });
+
+  it("opens the thread while the queued inputs' read gets no answer, and shows them once it answers", async () => {
+    let answer = (): void => {};
+    // `openApp` resolves once the loaders have, so this test times out if the
+    // loader waits for the queued inputs without a limit.
+    await openApp(buildSession({ status: "busy" }), buildTurnWithAgentMessage(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ body: { items: [AGENT_INPUT] } });
+        }),
+    });
+
+    expect(await screen.findByText("Rebasing on main.")).toBeDefined();
+    expect(screen.queryByText("Tag the release")).toBeNull();
+
+    answer();
+    const row = (await screen.findByText("Tag the release")).parentElement;
+    await waitFor(() => {
+      expect(readPageText(row)).toBe("From Fix EU checkout · Tag the releaseSteerCancel");
+    });
+  });
+
+  it("reads a sender whose read failed only once, however often its messages mount or the window is focused", async () => {
+    const { api, router } = await openApp(
+      buildSession({ status: "idle" }),
+      buildTurnWithAgentMessage(),
+      {
+        [`GET /api/v1/sessions/${SENDER.id}`]: {
+          status: 500,
+          body: buildErrorBody("internal", "The session could not be read."),
+        },
+      },
+    );
+    await screen.findByRole("group", { name: "Message from another agent" });
+
+    // Leaving the thread and opening it again runs its loader again and
+    // mounts its message again.
+    for (let visit = 0; visit < 3; visit += 1) {
+      await act(async () => {
+        await router.navigate({ to: "/" });
+      });
+      await act(async () => {
+        await router.navigate({ to: "/threads/$sessionId", params: { sessionId: SESSION_ID } });
+      });
+      await screen.findByRole("group", { name: "Message from another agent" });
+    }
+    // Focusing the window again does not read it either. A read focus started
+    // would be sent within the wait.
+    await act(async () => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    focusManager.setFocused(undefined);
+    expect(countSessionReads(api.calls, SENDER.id)).toBe(1);
+  });
+});
+
+describe("Thread: a queued message another agent sent", () => {
+  /** A message `SENDER`'s agent queued into the busy thread. */
+  const AGENT_INPUT = buildQueuedInput({
+    actor: `session:${SENDER.id}`,
+    text: "The 3DS fix is merged",
+  });
+
+  it("starts the agent's row with From and a link to the sender, and leaves the owner's row as it is", async () => {
+    await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: {
+        body: {
+          items: [buildQueuedInput({ id: "01a06d02-5000-7000-8000-000000000002" }), AGENT_INPUT],
+        },
+      },
+    });
+
+    const link = await screen.findByRole("link", { name: "Fix EU checkout" });
+    expect(link.getAttribute("href")).toBe(`/threads/${SENDER.id}`);
+    expect(readPageText(link.parentElement)).toBe("From Fix EU checkout");
+    // A name too long for the row is cut, so its whole text is the tooltip.
+    expect(link.getAttribute("title")).toBe("Fix EU checkout");
+    expect(readPageText()).toContain("From Fix EU checkout · The 3DS fix is merged");
+    // The owner's row has no sender.
+    expect(screen.getAllByText(/^From/)).toHaveLength(1);
+    expect(screen.getByText("Also check the logs").previousElementSibling).toBeNull();
+  });
+
+  it("names the sender at the row's first paint, because the loader waited for its read", async () => {
+    await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
+      // The sender answers after the thread's own reads, but well inside the
+      // loader's wait.
+      [`GET /api/v1/sessions/${SENDER.id}`]: () =>
+        new Promise((resolve) => setTimeout(() => resolve({ body: SENDER }), 50)),
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [AGENT_INPUT] } },
+    });
+
+    // `openApp` resolves once the loaders have, so nothing is awaited here: a
+    // row whose sender the loader did not wait for would show "From …".
+    const row = screen.getByText("The 3DS fix is merged").parentElement;
+    expect(readPageText(row)).toBe("From Fix EU checkout · The 3DS fix is mergedSteerCancel");
+  });
+
+  it("starts the row with From another agent when the sender cannot be read", async () => {
+    await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: {
+        status: 403,
+        body: buildErrorBody("forbidden", "The caller may not read that session."),
+      },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [AGENT_INPUT] } },
+    });
+
+    const row = (await screen.findByText("The 3DS fix is merged")).parentElement;
+    await waitFor(() => {
+      expect(readPageText(row)).toBe("From another agent · The 3DS fix is mergedSteerCancel");
+    });
+    expect(within(row!).queryByRole("link")).toBeNull();
+  });
+
+  it.each([
+    ["Steer", "POST", `/api/v1/sessions/${SESSION_ID}/inputs/${INPUT_ID}/steer`],
+    ["Cancel", "DELETE", `/api/v1/sessions/${SESSION_ID}/inputs/${INPUT_ID}`],
+  ] as const)("lets the owner %s the agent's queued row", async (label, method, path) => {
+    const user = userEvent.setup();
+    let acted = false;
+    const { api } = await openApp(buildSession({ status: "busy" }), buildTwoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () => ({
+        body: { items: acted ? [] : [AGENT_INPUT] },
+      }),
+      [`POST /api/v1/sessions/${SESSION_ID}/inputs/${INPUT_ID}/steer`]: () => {
+        acted = true;
+        return { body: { inputId: INPUT_ID, result: "steered" } };
+      },
+      [`DELETE /api/v1/sessions/${SESSION_ID}/inputs/${INPUT_ID}`]: () => {
+        acted = true;
+        return { body: { ...AGENT_INPUT, status: "cancelled" } };
+      },
+    });
+
+    await screen.findByRole("link", { name: "Fix EU checkout" });
+    await user.click(screen.getByRole("button", { name: label }));
+
+    await waitFor(() => {
+      expect(api.calls.some((call) => call.method === method && call.path === path)).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("The 3DS fix is merged")).toBeNull();
+    });
   });
 });

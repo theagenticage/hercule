@@ -1,41 +1,10 @@
 /**
- * What every adapter does the same way with the images of an input: the line
- * that tells the agent where each image is saved, and reading an image's
- * bytes for a harness that takes them inline.
+ * Reads an image's bytes the same way for every adapter whose harness takes
+ * images inline.
  */
 import { readFile } from "node:fs/promises";
 import * as Effect from "effect/Effect";
 import type { LocalAttachment } from "./index";
-
-/**
- * Returns the prompt text an adapter sends to its harness: the user's text,
- * then a blank line, then one line per image naming the file the runner saved
- * it in, for example `[Attached image "image.png" is saved at: /path]`.
- * Returns the text unchanged when the input has no images, and only the lines
- * when the text is empty.
- *
- * The name is written as a JSON string, so a name with a quote or a line
- * break stays inside its own line and cannot pass for another line of the
- * prompt.
- *
- * The harness sees each image itself; the line is there so the agent can use
- * the file too, for example to copy a screenshot into the repository. Only
- * the harness gets the lines: the stored input and the user's message in the
- * transcript keep the original text.
- */
-export const appendAttachmentPaths = (
-  text: string,
-  attachments: ReadonlyArray<LocalAttachment> | undefined,
-): string => {
-  if (attachments === undefined || attachments.length === 0) return text;
-  const lines = attachments
-    .map(
-      (attachment) =>
-        `[Attached image ${JSON.stringify(attachment.name)} is saved at: ${attachment.path}]`,
-    )
-    .join("\n");
-  return text === "" ? lines : `${text}\n\n${lines}`;
-};
 
 /**
  * Reads an image the runner cached and returns its bytes in standard base64.

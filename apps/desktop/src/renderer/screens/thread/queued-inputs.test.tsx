@@ -1,13 +1,18 @@
 /**
  * Tests the queued inputs against the stubbed controller: one row per input,
- * which one runs next, Steer and Cancel, and what a row shows when one of
- * them fails.
+ * which one runs next, Steer and Cancel, what a row shows when one of them
+ * fails, and the row of an input another session's agent queued.
  */
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Input } from "@hercule/contract";
-import { buildErrorBody, FIXTURE_THREAD_IDS, THREAD_FIXTURES } from "../../app/testing";
+import {
+  buildErrorBody,
+  FIXTURE_THREAD_IDS,
+  SIDEBAR_FIXTURE,
+  THREAD_FIXTURES,
+} from "../../app/testing";
 import { QueuedInputs } from "./queued-inputs";
 import { renderThreadPart } from "./testing";
 
@@ -147,5 +152,98 @@ describe("the queued inputs", () => {
 
     expect(readRows()).toEqual([OLDER.text, NEWER.text]);
     expect(screen.queryAllByRole("button")).toEqual([]);
+  });
+});
+
+describe("an input another session's agent queued", () => {
+  /** "Write the retry runbook", whose agent queued the input. */
+  const RUNBOOK = SIDEBAR_FIXTURE.threads[0]!;
+  const FROM_RUNBOOK: Input = {
+    ...OLDER,
+    actor: `session:${RUNBOOK.id}`,
+    reason: "The runner went offline.",
+  };
+
+  /** Renders the queue with the runbook's input first, and the runbook readable. */
+  const renderAgentQueue = (
+    handlers: Parameters<typeof renderThreadPart>[1]["handlers"] = {},
+    remaining: Input[] = [FROM_RUNBOOK, NEWER],
+  ) =>
+    renderQueue(
+      { [`GET /api/v1/sessions/${RUNBOOK.id}`]: { body: RUNBOOK }, ...handlers },
+      remaining,
+    );
+
+  it("names the agent in place of the clock, linked to its thread", async () => {
+    await renderAgentQueue();
+
+    const row = await screen.findByRole("group", {
+      name: `Queued message from ${RUNBOOK.title}`,
+    });
+    const chip = within(row).getByRole("link", { name: RUNBOOK.title });
+    expect(chip.getAttribute("href")).toBe(`/threads/${RUNBOOK.id}`);
+    expect(within(row).getByText(FROM_RUNBOOK.text)).toBeTruthy();
+    // The owner's row names no sender and is no group.
+    expect(screen.getAllByRole("group")).toEqual([row]);
+    expect(within(readRow(NEWER)).queryByRole("link")).toBeNull();
+  });
+
+  it("shows why the agent's input was not delivered, in the agent's row", async () => {
+    await renderAgentQueue();
+
+    const row = await screen.findByRole("group", {
+      name: `Queued message from ${RUNBOOK.title}`,
+    });
+    expect(within(row).getByText("The runner went offline.")).toBeTruthy();
+  });
+
+  it("offers Steer and Cancel on the agent's input, and steers it into the running turn", async () => {
+    const user = userEvent.setup();
+    const remaining = [FROM_RUNBOOK, NEWER];
+    const { calls } = await renderAgentQueue(
+      {
+        [`POST ${INPUTS}/${OLDER.id}/steer`]: () => {
+          remaining.shift();
+          return { body: { inputId: OLDER.id, result: "steered" } };
+        },
+      },
+      remaining,
+    );
+    const row = await screen.findByRole("group", {
+      name: `Queued message from ${RUNBOOK.title}`,
+    });
+
+    expect(within(row).getByRole("button", { name: "Cancel" })).toBeTruthy();
+    await user.click(within(row).getByRole("button", { name: "Steer" }));
+
+    await waitFor(() => {
+      expect(readRows()).toEqual([NEWER.text]);
+    });
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toContain(
+      `POST ${INPUTS}/${OLDER.id}/steer`,
+    );
+  });
+
+  it("cancels the agent's input", async () => {
+    const user = userEvent.setup();
+    const remaining = [FROM_RUNBOOK, NEWER];
+    await renderAgentQueue(
+      {
+        [`DELETE ${INPUTS}/${OLDER.id}`]: () => {
+          remaining.shift();
+          return { body: { ...FROM_RUNBOOK, status: "cancelled" } };
+        },
+      },
+      remaining,
+    );
+    const row = await screen.findByRole("group", {
+      name: `Queued message from ${RUNBOOK.title}`,
+    });
+
+    await user.click(within(row).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(readRows()).toEqual([NEWER.text]);
+    });
   });
 });

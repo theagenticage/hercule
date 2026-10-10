@@ -5,7 +5,7 @@ import { useBlobImageSource } from "./thumbnail";
 import "./attachments.css";
 
 /** The size of a queued input's image, in CSS pixels: square, a little taller than the row's text. */
-export const QUEUED_IMAGE_SIZE = 20;
+const QUEUED_IMAGE_SIZE = 20;
 
 /**
  * Renders the images of a queued input as small square tiles, in its row

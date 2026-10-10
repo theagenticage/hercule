@@ -1,6 +1,6 @@
 /**
  * Tests `buildTurns(rows, agent)`, which groups an agent's transcript rows
- * into turns.
+ * into turns, and `readUserSender`, which reads who sent a user message.
  *
  * The fixtures use the Claude adapter's real shapes (spec 06 §6.3, and
  * `apps/runner/src/providers/claude-code.ts` / `claude-code-normalize.ts`):
@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionRequest, TranscriptRow } from "@hercule/contract";
 import type { AgentState } from "./agent-state";
-import { buildTurns } from "./turns";
+import { buildTurns, readUserSender } from "./turns";
 
 const SESSION_ID = "session-1";
 
@@ -220,7 +220,7 @@ describe("buildTurns", () => {
 
     expect(turns[0]).toMatchObject({
       turnId: "t1",
-      user: "Fix the login bug",
+      userMessages: [{ text: "Fix the login bug", steered: false }],
       assistantText: "I'll look at the file.",
       startedAt: "2026-09-08T10:00:00.000Z",
       duration: 5000,
@@ -240,7 +240,7 @@ describe("buildTurns", () => {
 
     expect(turns[1]).toMatchObject({
       turnId: "t2",
-      user: "What about the tests?",
+      userMessages: [{ text: "What about the tests?", steered: false }],
       assistantText: "Added a test too.",
       startedAt: "2026-09-08T10:01:00.000Z",
       duration: 3000,
@@ -787,7 +787,7 @@ describe("buildTurns", () => {
     expect(turns[0]!.items[0]!.target).toBe("");
   });
 
-  it("keeps the opening prompt when a steered input adds a second user_message to the same turn", () => {
+  it("keeps the owner's message and an agent's message steered into the same turn apart", () => {
     const rows: TranscriptRow[] = [
       buildRow({
         _tag: "turn.started",
@@ -817,8 +817,8 @@ describe("buildTurns", () => {
         status: "completed",
         detail: { text: "Fix the login bug" },
       }),
-      // A steered input joins the running turn as a second user_message,
-      // rather than starting a new turn.
+      // Another session's agent steers a message into the running turn: it
+      // joins the turn as a second user_message rather than starting a new one.
       buildRow({
         _tag: "item.started",
         eventId: nextId(),
@@ -827,7 +827,7 @@ describe("buildTurns", () => {
         turnId: "t8",
         itemId: "u8b",
         kind: "user_message",
-        detail: { text: "Also check auth.ts", steered: true },
+        detail: { text: "Also check auth.ts", steered: true, senderSessionId: "s-sender" },
       }),
       buildRow({
         _tag: "item.completed",
@@ -838,7 +838,7 @@ describe("buildTurns", () => {
         itemId: "u8b",
         kind: "user_message",
         status: "completed",
-        detail: { text: "Also check auth.ts", steered: true },
+        detail: { text: "Also check auth.ts", steered: true, senderSessionId: "s-sender" },
       }),
       buildRow({
         _tag: "turn.completed",
@@ -852,8 +852,17 @@ describe("buildTurns", () => {
 
     const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
 
-    expect(turns[0]!.user).toContain("Fix the login bug");
-    expect(turns[0]!.user).toContain("Also check auth.ts");
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.userMessages).toEqual([
+      { itemId: "u8a", text: "Fix the login bug", attachments: [], steered: false },
+      {
+        itemId: "u8b",
+        text: "Also check auth.ts",
+        attachments: [],
+        steered: true,
+        senderSessionId: "s-sender",
+      },
+    ]);
   });
 });
 
@@ -935,7 +944,7 @@ describe("buildTurns: the item an open request is about", () => {
     ).toBe("completed");
   });
 
-  it("gathers the images of every message the user sent in a turn, in order", () => {
+  it("keeps the images of each message the user sent in a turn with that message", () => {
     const first = {
       id: "01920000-0000-7000-8000-000000000001",
       name: "before.png",
@@ -970,10 +979,14 @@ describe("buildTurns: the item an open request is about", () => {
 
     const [turn] = buildTurns(rows, AGENT_ASKING_NOTHING);
 
-    expect(turn?.userAttachments).toEqual([first, second]);
+    expect(turn?.userMessages.map((message) => message.attachments)).toEqual([
+      [first],
+      [],
+      [second],
+    ]);
   });
 
-  it("gives a turn whose messages carry no images an empty list", () => {
+  it("gives a message that carries no images an empty list, the same one every time the rows are grouped", () => {
     const rows = [
       buildRow({
         _tag: "item.started",
@@ -987,6 +1000,23 @@ describe("buildTurns: the item an open request is about", () => {
       }),
     ];
 
-    expect(buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userAttachments).toEqual([]);
+    const attachments = buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userMessages[0]?.attachments;
+    expect(attachments).toEqual([]);
+    // A memoized message compares its props by identity, so a fresh empty
+    // list on each streamed row would draw it again for nothing.
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userMessages[0]?.attachments).toBe(
+      attachments,
+    );
+  });
+});
+
+describe("readUserSender", () => {
+  it("returns the sending session's id, and undefined when the message has no sender", () => {
+    expect(readUserSender({ text: "Rebase on main", senderSessionId: "s-sender" })).toBe(
+      "s-sender",
+    );
+    expect(readUserSender({ text: "Fix the login bug" })).toBeUndefined();
+    expect(readUserSender({ text: "Fix the login bug", senderSessionId: "" })).toBeUndefined();
+    expect(readUserSender(undefined)).toBeUndefined();
   });
 });

@@ -11,15 +11,16 @@
  * So each message is placed by its `item.started` row, and its text is
  * gathered from its rows wherever they sit.
  */
-import type { Attachment, TranscriptRow } from "@hercule/contract";
+import type { TranscriptRow } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
 import type { AgentState } from "./agent-state";
 import { findOpenItem } from "./open-item";
 import {
   buildThreadItem,
+  buildUserMessage,
   describeToolCallTarget,
-  readUserAttachments,
   type ThreadItem,
+  type ThreadUserMessage,
 } from "./turns";
 
 type ProviderEvent = TranscriptRow["event"];
@@ -67,14 +68,13 @@ export interface WorkItem extends ThreadItem {
   readonly resultContent: unknown;
 }
 
-/** A message the user sent: the opening one, or one steered into the running turn. */
-export interface UserBlock {
+/**
+ * A message sent into the thread: the opening one, or one steered into the
+ * running turn. The session's owner sent it, or another session's agent did.
+ */
+export interface UserBlock extends ThreadUserMessage {
   readonly kind: "user";
   readonly key: string;
-  readonly itemId: string;
-  readonly text: string;
-  /** The images sent with the message, in the order they were attached. Empty when none were. */
-  readonly attachments: readonly Attachment[];
   readonly at: string;
 }
 
@@ -407,14 +407,10 @@ export const buildThreadBlocks = (
         turn.lastStartedItemId = event.itemId;
         if (event.kind === "user_message") {
           closeStretch(turn, event.at);
-          const detail = readJsonObject(event.detail);
-          const text = typeof detail?.text === "string" ? detail.text : "";
           slots.push({
             kind: "user",
             key: `user:${event.itemId}`,
-            itemId: event.itemId,
-            text,
-            attachments: readUserAttachments(detail),
+            ...buildUserMessage(event),
             at: event.at,
           });
           turn.boundary = event.at;
