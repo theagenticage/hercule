@@ -2,6 +2,7 @@
  * Tests how the images in a Claude tool result are replaced by references,
  * with a fake uploader that records what it was given.
  */
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -17,7 +18,7 @@ const OTHER = Buffer.concat([PNG_BYTES, Buffer.from([0])]).toString("base64");
 
 /** Returns the id the fake uploader gives the image whose bytes encode to `data`. */
 const buildStoredId = (data: string): string =>
-  data === PNG ? "0199e0e7-0000-7000-8000-0000000000c1" : "0199e0e7-0000-7000-8000-0000000000c2";
+  `0199e0e7-0000-7000-8000-${createHash("sha256").update(data).digest("hex").slice(0, 12)}`;
 
 /** Returns the reference the fake uploader gives the image whose bytes encode to `data`. */
 const buildStored = (data: string): ToolResultImage => ({
@@ -295,6 +296,50 @@ describe("replacing the images in a tool result", () => {
     );
 
     expect(readContent(replaced)).toEqual([buildStored(PNG)]);
+  });
+
+  it("finds a data URL whose media type has parameters", async () => {
+    const uploader = createRecordingUploader();
+    const replaced = await replace(
+      uploader,
+      buildToolResult([{ type: "text", text: `data:image/png;charset=utf-8;base64,${PNG}` }]),
+    );
+
+    expect(readContent(replaced)).toEqual([
+      {
+        type: "text",
+        text: `data:image/png;charset=utf-8;base64,[image ${buildStoredId(PNG)}]`,
+      },
+    ]);
+  });
+
+  it("scrubs every copy of an image whose base64 begins with another image's", async () => {
+    // Bytes in multiples of three encode with no padding, so the shorter
+    // image's base64 is exactly the start of the longer one's.
+    const shorter = PNG_BYTES.subarray(0, 66).toString("base64");
+    const longer = Buffer.concat([PNG_BYTES.subarray(0, 66), Buffer.from([1, 2, 3])]).toString(
+      "base64",
+    );
+    const replaced = await replace(
+      createRecordingUploader(),
+      buildToolResult(
+        [
+          buildImageBlock(shorter),
+          buildImageBlock(longer),
+          { type: "text", text: `copy ${longer}` },
+        ],
+        { [longer]: "screenshot" },
+      ),
+    );
+
+    expect(readContent(replaced)).toEqual([
+      buildStored(shorter),
+      buildStored(longer),
+      { type: "text", text: `copy [image ${buildStoredId(longer)}]` },
+    ]);
+    expect(replaced).toMatchObject({
+      tool_use_result: { [`[image ${buildStoredId(longer)}]`]: "screenshot" },
+    });
   });
 
   it("scrubs an image's base64 from an object key", async () => {

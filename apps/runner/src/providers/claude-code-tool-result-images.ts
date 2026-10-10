@@ -49,11 +49,13 @@ const IMAGE_TOO_LARGE = `The image is larger than ${String(MAX_ATTACHMENT_BYTES 
 const SESSION_STOPPED = "The session stopped before the image was kept.";
 
 /**
- * Matches each data URL that holds a base64 image, anywhere in text. The
- * first group is the image's base64, which ends at the first character
- * base64 does not use, so the text around the URL is kept.
+ * Matches each data URL that holds a base64 image, anywhere in text, with
+ * or without media type parameters such as `;charset=utf-8`. The first
+ * group is the image's base64, which ends at the first character base64
+ * does not use, so the text around the URL is kept.
  */
-const IMAGE_DATA_URL = /data:image\/[a-z0-9.+_-]+;base64,([A-Za-z0-9+/]+={0,2})/gi;
+const IMAGE_DATA_URL =
+  /data:image\/[a-z0-9.+_-]+(?:;[a-z0-9.+_-]+=[^;,\s]*)*;base64,([A-Za-z0-9+/]+={0,2})/gi;
 
 /**
  * The number of base64 characters that decode to the 18 bytes the image
@@ -173,7 +175,11 @@ const findImages = (value: unknown, found: Set<string>): void => {
 
 /**
  * Returns `text` with every exact copy of a found image's base64 replaced by
- * a short placeholder naming the image, such as `[image <id>]`. Text holds
+ * a short placeholder naming the image, such as `[image <id>]`.
+ * `references` must list longer data first: when one image's base64 is part
+ * of another's, scrubbing the shorter first would break up the copies of the
+ * longer. A placeholder holds characters base64 never uses, so no later
+ * match can run across one. Text holds
  * an image as a data URL, or as a copy no shape holds, for example the JSON
  * of an MCP tool's `structuredContent` repeated as text, which MCP
  * recommends. The agent has already read the text; the copy in the
@@ -293,7 +299,7 @@ export const replaceToolResultImages = (
       { concurrency: MAX_PARALLEL_UPLOADS },
     ),
     (entries) => {
-      const references = new Map(entries);
+      const references = new Map(entries.toSorted(([a], [b]) => b.length - a.length));
       const content = blocks.map((block) =>
         isToolResultBlock(block)
           ? { ...block, content: replaceImages(block.content, references) }
