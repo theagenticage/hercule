@@ -19,6 +19,25 @@ describe("workspace pushes", () => {
   });
 });
 
+describe("signal pushes", () => {
+  it("invalidates every list and the changed signals", () => {
+    assert.deepStrictEqual(buildQueryKeys("signal", ["first", "second"]), [
+      queryKeys.signals(),
+      queryKeys.signal("first"),
+      queryKeys.signal("second"),
+    ]);
+  });
+
+  it("invalidates every signal after reconnect", () => {
+    assert.deepStrictEqual(buildQueryKeys("signal", []), [queryKeys.signals(), queryKeys.signal()]);
+  });
+
+  it("reaches a filtered list through the list prefix", () => {
+    const toDo = queryKeys.signals({ view: "to-do" });
+    assert.isTrue(buildQueryKeys("signal", ["first"]).some((key) => isPrefixOf(key, toDo)));
+  });
+});
+
 /**
  * Returns only the keys of conversations' current sessions among the keys a
  * `session` push invalidates.

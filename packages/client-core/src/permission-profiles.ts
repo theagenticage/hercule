@@ -27,6 +27,10 @@ export const GRANT_FAMILY_TEXT: Readonly<
     hint: "What wakes a session when something happens.",
   },
   notification: { label: "Notifications", hint: "Notifications to you. Only you act on one." },
+  signal: {
+    label: "Signals",
+    hint: "What Intake asks of you, and its Ignore Rules. Only you answer one.",
+  },
   settings: { label: "Settings", hint: "Your time zone and mutes." },
   event: { label: "Events", hint: "The event log. Audit adds its security entries." },
   connection: {

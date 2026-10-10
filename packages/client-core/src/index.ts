@@ -229,6 +229,7 @@ export {
   type BoundActionRow,
   type NotificationMark,
 } from "./notifications";
+export { formatBlocksAsText, UNKNOWN_BLOCK_TEXT } from "./signal-blocks";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
