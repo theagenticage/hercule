@@ -366,14 +366,14 @@ describe("buildSignalAnswers", () => {
     const [handOff] = buildSignalAnswers(
       buildSignal("b", {
         actions: [
-          action("hand", {
-            operation: { op: "run.start", input: { workflowId, inputs: { signalId: "b" } } },
+          action(`hand-to-${workflowId}`, {
+            operation: { op: "run.start", input: { workflowId, inputs: { signal: "b" } } },
           }),
         ],
       }),
     );
     expect(handOff?.workflowId).toBe(workflowId);
-    expect(answers.map((answer) => answer.workflowId)).toEqual([null, null, null, null, null]);
+    expect(answers.every((answer) => answer.workflowId === null)).toBe(true);
   });
 
   it("finds the primary action as the suggested answer, and the first text box", () => {

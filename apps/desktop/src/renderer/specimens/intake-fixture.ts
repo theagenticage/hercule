@@ -23,7 +23,14 @@
  * - `closed`: no signal selected, so the list has the full width;
  * - `empty`: nothing on To do.
  */
-import type { Event, PluginDetail, PluginMark, Signal, SignalAction } from "@hercule/contract";
+import {
+  HAND_TO_ACTION_PREFIX,
+  type Event,
+  type PluginDetail,
+  type PluginMark,
+  type Signal,
+  type SignalAction,
+} from "@hercule/contract";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { SidebarRecords } from "./shell-page";
 
@@ -162,7 +169,7 @@ const WORKFLOW_IDS = {
 
 /** Starts a workflow on the signal: an answer that hands the work to an agent. */
 const buildHandOff = (workflow: keyof typeof WORKFLOW_IDS, line: string): SignalAction => ({
-  id: "hand-off",
+  id: `${HAND_TO_ACTION_PREFIX}${WORKFLOW_IDS[workflow]}`,
   label: `Start "${workflow}"`,
   operation: { op: "run.start", input: { workflowId: WORKFLOW_IDS[workflow], inputs: {} } },
   describeLine: buildDescribeLine(line),

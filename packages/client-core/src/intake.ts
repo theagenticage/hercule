@@ -319,12 +319,14 @@ const chooseAnswerStyle = (action: SignalAction): SignalAnswerStyle => {
 };
 
 /**
- * Returns the workflow an action starts: the `workflowId` of a `run.start`
- * binding, as the core binds Hand to an agent (spec 10 §9.4), or `null` for
- * an action that starts no workflow.
+ * Returns the workflow a Hand to an agent answer starts: the `workflowId` of
+ * the `run.start` the core binds (spec 10 §9.4), or `null` for any other
+ * answer, a raiser's own `run.start` included.
  */
 const readStartedWorkflowId = (action: SignalAction): string | null => {
-  if (action.operation?.op !== "run.start") return null;
+  if (!action.id.startsWith(HAND_TO_ACTION_PREFIX) || action.operation?.op !== "run.start") {
+    return null;
+  }
   const input: unknown = action.operation.input;
   if (typeof input !== "object" || input === null || !("workflowId" in input)) return null;
   return typeof input.workflowId === "string" ? input.workflowId : null;
