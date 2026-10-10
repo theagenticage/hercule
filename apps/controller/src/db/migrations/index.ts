@@ -68,6 +68,8 @@ import profileGrantsOnce from "./0057-profile-grants-once";
 import promotion from "./0058-promotion";
 import sessionToolResultAttachments from "./0059-session-tool-result-attachments";
 import retiredIntakeSettings from "./0060-retired-intake-settings";
+import signals from "./0061-signals";
+import signalGrants from "./0062-signal-grants";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -130,6 +132,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [58, "promotion", Effect.succeed(promotion)],
   [59, "session-tool-result-attachments", Effect.succeed(sessionToolResultAttachments)],
   [60, "retired-intake-settings", Effect.succeed(retiredIntakeSettings)],
+  [61, "signals", Effect.succeed(signals)],
+  [62, "signal-grants", Effect.succeed(signalGrants)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */
