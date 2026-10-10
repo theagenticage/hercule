@@ -102,6 +102,7 @@ const awaitResolvedRequest = async (
  *
  * - a shell is a command approval;
  * - writing or editing a file is a file change approval;
+ * - reading, searching or listing files is a file read approval;
  * - any other tool is a tool approval, by name.
  */
 describe("the request kind of a held call", () => {
@@ -111,6 +112,12 @@ describe("the request kind of a held call", () => {
     ["powershell", { command: COMMAND }, "command_approval"],
     ["write", { path: "src/new.ts" }, "file_change_approval"],
     ["edit", { path: "src/new.ts" }, "file_change_approval"],
+    // These run unasked in the known modes, but a mode this build does not
+    // know asks about everything, so they still need the right card.
+    ["read", { path: "src/main.ts" }, "file_read_approval"],
+    ["grep", { pattern: "TODO", path: "src" }, "file_read_approval"],
+    ["find", { pattern: "*.ts" }, "file_read_approval"],
+    ["ls", {}, "file_read_approval"],
     // An MCP tool, or one a later pi adds: shown by name, never guessed at.
     ["mcp__jira__create", { summary: "ship it" }, "tool_approval"],
   ];
@@ -120,6 +127,28 @@ describe("the request kind of a held call", () => {
       const run = await parkOnTool(toolName, args);
 
       expect((await awaitOpenedRequest(run)).request.kind).toBe(kind);
+    });
+  }
+});
+
+describe("the paths on a parked file call", () => {
+  it("shows the path a read is about", async () => {
+    const run = await parkOnTool("read", { path: "src/main.ts" });
+
+    expect((await awaitOpenedRequest(run)).request.detail).toEqual({ paths: ["src/main.ts"] });
+  });
+
+  // The protocol refuses an empty path, and a frame it refuses is lost, which
+  // would leave pi holding the call with no card for the user to answer.
+  for (const [toolName, args] of [
+    ["ls", {}],
+    ["find", { pattern: "*.ts", path: "" }],
+    ["write", { content: "b" }],
+  ] as const) {
+    it(`shows no paths when a held ${toolName} call has no path`, async () => {
+      const run = await parkOnTool(toolName, args);
+
+      expect((await awaitOpenedRequest(run)).request.detail).toEqual({ paths: [] });
     });
   }
 });

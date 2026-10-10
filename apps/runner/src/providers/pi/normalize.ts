@@ -403,20 +403,53 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   powershell: "command_execution",
   edit: "file_change",
   write: "file_change",
+  read: "file_read",
+  grep: "file_search",
+  find: "file_search",
+  ls: "file_search",
 };
 
 /**
- * Builds the one detail field a row shows for a tool item: the task a
- * subagent was given, the command, the file path, or else the tool name. The
- * full arguments are in `raw`.
+ * Returns a tool call's string argument cut to the fact bound, or `undefined`
+ * when the argument is missing, not a string, or empty.
+ */
+const readFactArg = (
+  args: Record<string, unknown> | undefined,
+  name: string,
+): string | undefined => {
+  const value = args?.[name];
+  return typeof value === "string" && value !== "" ? truncateFact(value) : undefined;
+};
+
+/**
+ * Builds the detail a row shows for a tool item. The full arguments are in
+ * `raw`.
+ *
+ * - A subagent shows the task it was given.
+ * - A file read shows the fixed field `path`, and a file search the fixed
+ *   fields `pattern` and `path`, each left out when the call did not give it.
+ *   `ls` has no pattern, and a search with no path covers the workspace. The
+ *   tool's name is kept beside them, so a row still has a label when both are
+ *   missing.
+ * - Any other tool shows its command, else its file path, else its name.
  */
 const buildToolDetail = (
+  kind: ItemKind,
   toolName: string,
   args: Record<string, unknown> | undefined,
 ): Schema.Json => {
   const description = args?.["description"];
-  if (toolName === SUBAGENT_TOOL && typeof description === "string") {
+  if (kind === "subagent" && typeof description === "string") {
     return { name: truncateFact(toolName), description: truncateMessage(description) };
+  }
+  if (kind === "file_read" || kind === "file_search") {
+    const pattern = kind === "file_search" ? readFactArg(args, "pattern") : undefined;
+    const path = readFactArg(args, "path");
+    return {
+      name: truncateFact(toolName),
+      ...(pattern === undefined ? {} : { pattern }),
+      ...(path === undefined ? {} : { path }),
+    };
   }
   const command = args?.["command"];
   if (typeof command === "string") return { command: truncateMessage(command) };
@@ -485,7 +518,7 @@ const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<Provider
     // id would put the second call's output on the first call's row.
     itemId: callId === "" ? crypto.randomUUID() : ensureId(callId),
     kind,
-    detail: buildToolDetail(toolName, event.args),
+    detail: buildToolDetail(kind, toolName, event.args),
     toolName,
     args: event.args,
     seen: "",

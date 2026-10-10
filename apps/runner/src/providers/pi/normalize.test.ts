@@ -14,7 +14,7 @@
  * the cases below. The tests do not check event ids or `at` timestamps.
  */
 import { describe, expect, it } from "vitest";
-import type { ProviderEvent, SubagentId } from "@hercule/protocol";
+import { MAX_FACT_LENGTH, type ProviderEvent, type SubagentId } from "@hercule/protocol";
 import { normalize, buildNormalizingState, buildSubagentState } from "./normalize";
 import { SUBAGENT_TOOL } from "./extension";
 
@@ -266,12 +266,76 @@ describe("normalizing a tool call on a pi turn", () => {
     ]);
     const other = normalizeFromStart([
       { type: "agent_start" },
-      buildToolStart("grep", { pattern: "todo" }),
+      buildToolStart("mcp__jira__create", { summary: "ship it" }),
     ]);
 
     expect(filterByTag(edited, "item.started")[0]?.kind).toBe("file_change");
     expect(filterByTag(written, "item.started")[0]?.kind).toBe("file_change");
     expect(filterByTag(other, "item.started")[0]?.kind).toBe("tool_call");
+  });
+});
+
+describe("normalizing a file read or a file search on a pi turn", () => {
+  /** Normalizes one call to `toolName` and returns the item it started. */
+  const startTool = (toolName: string, args: Record<string, unknown>) =>
+    filterByTag(
+      normalizeFromStart([{ type: "agent_start" }, buildToolStart(toolName, args)]),
+      "item.started",
+    )[0];
+
+  it("reports a read and a grep in one turn as a file read and a file search", () => {
+    const events = normalizeFromStart([
+      { type: "agent_start" },
+      { ...buildToolStart("read", { path: "src/main.ts", offset: 10 }), toolCallId: "call_read" },
+      {
+        ...buildToolStart("grep", { pattern: "TODO", path: "src", ignoreCase: true }),
+        toolCallId: "call_grep",
+      },
+    ]);
+
+    expect(
+      filterByTag(events, "item.started").map(({ kind, detail }) => ({ kind, detail })),
+    ).toEqual([
+      { kind: "file_read", detail: { name: "read", path: "src/main.ts" } },
+      { kind: "file_search", detail: { name: "grep", pattern: "TODO", path: "src" } },
+    ]);
+  });
+
+  it("reports find as a file search with its pattern and path", () => {
+    expect(startTool("find", { pattern: "*.ts", path: "src" })).toMatchObject({
+      kind: "file_search",
+      detail: { name: "find", pattern: "*.ts", path: "src" },
+    });
+  });
+
+  it("reports ls as a file search with only a path, because it has no pattern", () => {
+    expect(startTool("ls", { path: "src" })).toMatchObject({
+      kind: "file_search",
+      detail: { name: "ls", path: "src" },
+    });
+  });
+
+  // A field that would be empty is left out, so a surface never shows a blank
+  // path or pattern as if the tool had given one.
+  for (const [label, value] of [
+    ["missing", undefined],
+    ["not a string", 42],
+    ["empty", ""],
+  ] as const) {
+    it(`leaves out a ${label} path and pattern`, () => {
+      const args = value === undefined ? {} : { path: value, pattern: value };
+
+      expect(startTool("read", args)?.detail).toEqual({ name: "read" });
+      expect(startTool("grep", args)?.detail).toEqual({ name: "grep" });
+    });
+  }
+
+  it("cuts a long path to the fact bound", () => {
+    const detail = startTool("read", { path: `src/${"a".repeat(10_000)}.ts` })?.detail as {
+      readonly path: string;
+    };
+
+    expect(detail.path.length).toBeLessThanOrEqual(MAX_FACT_LENGTH);
   });
 });
 

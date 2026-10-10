@@ -95,7 +95,7 @@ const STOP_DEADLINE: Duration.Duration = Duration.seconds(2);
  */
 type ParkKind = Extract<
   OpenRequest["kind"],
-  "command_approval" | "file_change_approval" | "tool_approval"
+  "command_approval" | "file_change_approval" | "file_read_approval" | "tool_approval"
 >;
 
 export interface PiSeam {
@@ -258,12 +258,16 @@ const buildDialogAnswer = (decision: ApprovalDecision): Record<string, unknown> 
 
 /**
  * The request kind for a held call, by the item kind the normalizer gave the
- * call: a command, a file change, or (for anything else) a tool by name. Which
- * calls are held is decided in `policy.ts`; this only picks the kind.
+ * call: a command, a file change, a file read, or (for anything else) a tool
+ * by name. A search or a listing reads files too, so it asks the same question
+ * as a read. Which calls are held is decided in `policy.ts`; this only picks
+ * the kind.
  */
 const APPROVALS: Readonly<Partial<Record<ItemKind, ParkKind>>> = {
   command_execution: "command_approval",
   file_change: "file_change_approval",
+  file_read: "file_read_approval",
+  file_search: "file_read_approval",
 };
 
 /** Returns the named string argument of a tool call, or "" when it is missing or not a string. */
@@ -273,9 +277,19 @@ const readStringArg = (item: RunningTool, name: string): string => {
 };
 
 /**
+ * Returns the call's `path` argument as a list of one path, or an empty list
+ * when the call has none. An empty path is left out, because the protocol
+ * refuses one and a frame it refuses is lost.
+ */
+const readPathArgs = (item: RunningTool): ReadonlyArray<string> => {
+  const path = readStringArg(item, "path");
+  return path === "" ? [] : [truncateFact(path)];
+};
+
+/**
  * Builds the approval request the user answers. Its detail comes from the tool
  * call pi started, not from pi's dialog, because the dialog only says which
- * call it is about. Surfaces show the command, the path or the tool name.
+ * call it is about. Surfaces show the command, the paths or the tool name.
  */
 const buildOpenRequest = (requestId: string, item: RunningTool, kind: ParkKind): OpenRequest => {
   const common = { requestId, itemId: item.itemId, decisions: DECISIONS };
@@ -286,8 +300,8 @@ const buildOpenRequest = (requestId: string, item: RunningTool, kind: ParkKind):
       detail: { command: truncateMessage(readStringArg(item, "command")) },
     };
   }
-  if (kind === "file_change_approval") {
-    return { ...common, kind, detail: { paths: [truncateFact(readStringArg(item, "path"))] } };
+  if (kind === "file_change_approval" || kind === "file_read_approval") {
+    return { ...common, kind, detail: { paths: readPathArgs(item) } };
   }
   return { ...common, kind, detail: { toolName: truncateFact(item.toolName) } };
 };

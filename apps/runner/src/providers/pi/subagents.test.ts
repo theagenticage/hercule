@@ -338,7 +338,7 @@ describe("what a running subagent reports", () => {
       expect.arrayContaining([
         "item.started:user_message",
         "item.completed:user_message",
-        "item.started:tool_call",
+        "item.started:file_read",
         "turn.started",
         "session.usage.updated",
         "turn.completed",
