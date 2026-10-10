@@ -33,7 +33,7 @@ One envelope for every event, regardless of source.
 | `payload` | object | emitter | Per-kind payload conforming to the declared schema. This is what CEL filters and trigger input mappings read. |
 | `raw` | object or null | emitter | Vendor payload passthrough for debugging and future kinds. Never read by filters or mappings. |
 | `actor` | Actor or null | core | This spec's addition. Set on manual synthetic events and platform events caused by an API mutation (`user` or `session:<id>`); null for ingested and cron events. The envelope is the only place `actor` lives; platform-event payloads do not repeat it. |
-| `title` | string or null | emitter | *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#393](https://github.com/theagenticage/hercule/issues/393).)* One line saying what happened, built by the plugin from the payload ("Marta requested your review on #1293"). A core kind gets its title from the core ("Run *Nightly backup* failed"). Required on every event a plugin emits ([./05-plugins.md](./05-plugins.md) section 4.3). |
+| `title` | string or null | emitter | *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#393](https://github.com/theagenticage/hercule/issues/393).)* One line saying what happened, built by the plugin from the payload ("Marta requested your review on #1293"). A core kind gets its title from the core ("Run *Nightly backup* failed"). Required on every event a plugin emits ([./05-plugins.md](./05-plugins.md) section 4.3). An event sent with `event.emit` has none in v1, so search does not find it. |
 | `author` | string or null | emitter | *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#393](https://github.com/theagenticage/hercule/issues/393).)* Who caused the event on its own system (a GitHub login, a mail sender), or null when nobody did. |
 
 Field names are pinned here; earlier tickets called them provisional. The envelope is ADR 0009's list plus the ticket 30 handoff's `system` and `url`; `refs` and `actor` are this spec's additions, motivated by Task provenance ([./09-tasks.md](./09-tasks.md)) and actor stamping ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
@@ -155,7 +155,7 @@ GitHub and Gmail are event-source plugins. Cron, manual, and platform events are
   | `github/mentioned` | normal | yes | repo, author | `messages`: the comment that names you (`mentionsYou`) and up to 3 comments before it | Reply (`issue.comment` or `pr.comment`, with a field), primary | your comment (decided) |
   | `github/assigned` | normal | yes | repo, author | `messages`: the issue or PR description | Reply (with a field) | unassigned or closed (withdrawn) |
   | `github/changes-requested` | normal | yes | repo, reviewer | `messages`: the review, then its comments with `location` | Reply (with a field) | re-request (decided); merged or closed (withdrawn) |
-  | `github/checks-failed` | normal | no | repo, check | `checks` | Re-run failed checks (`checks.rerun`), primary | checks passing; merged or closed (withdrawn) |
+  | `github/checks-failed` | normal | no | repo, check | `checks` | Re-run failed checks (`checks.rerun`), primary | checks passing, merged or closed (all withdrawn: the user made no move) |
 
   - The core adds Done and the matching workflows to every kind ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)). Approve is never the suggested action: a one-click approval should not be the default.
   - The block types are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#95-blocks), how an end works in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#96-when-a-signal-leaves), and what each action does in [./05-plugins.md](./05-plugins.md) section 4.4.
@@ -193,7 +193,7 @@ The workflow-action roster is pinned in [./05-plugins.md](./05-plugins.md) secti
     - it carries `CATEGORY_PROMOTIONS`, `CATEGORY_SOCIAL` or `CATEGORY_FORUMS`.
 
     It answers `undecided` for everything else, Updates included, because security alerts and deadlines land there. Accepted gap: an alert sent by mail, such as Sentry's "assigned to you", usually carries `List-Unsubscribe`, so it never becomes a signal; triage still reads it and may raise an `fyi`. GitHub's own notification mails drop out the same way, which is right, because the GitHub plugin covers them.
-  - **Match fields:** sender, senderDomain.
+  - **Match fields:** sender, senderDomain. `senderDomain` is the sender's registrable domain, the same reading sender rules use: mail from `alerts@em.sentry.io` has `senderDomain` `sentry.io`, so one Ignore Rule on it also covers the subdomains.
   - **Blocks:** `messages`: the thread, oldest first, with `recipients` and `attachments`, quoted history stripped.
   - **Actions `build` binds**, besides the core's Done ("Takes it off your list. Gmail is not told") and the matching workflows:
 
@@ -206,7 +206,7 @@ The workflow-action roster is pinned in [./05-plugins.md](./05-plugins.md) secti
     Each sets `markRead: true`. What a reply sends, and the describe lines, are in [./05-plugins.md](./05-plugins.md) section 4.4. Archive tells Gmail; Done tells Gmail nothing and does not mark the mail read, because from a row the user may never have opened it. Where each one is shown is in [./17-desktop-app.md](./17-desktop-app.md).
   - **Outcomes at the click:** "Replied to Marta Visser", "Replied to Marta Visser and 1 other", "Archived in Gmail".
   - **Ends**, both decided: `gmail.message.sent` gives "Replied in Gmail", and `gmail.thread.archived` gives "Done in Gmail". A reply or an archive sent from Hercule has already resolved the signal at the click, so when the feed sees it later, it finds no open signal and nothing happens.
-  - **Priority and Names you:** not decided yet; the Gmail build ticket sets them.
+  - **Priority and Names you:** `normal`, and names you: the mail was sent to the user, so a Subscription that also received it never keeps it off Intake.
   - **Intake defaults:** `gmail/mail` is on, and `gmail.message.received` is available to triage, because triage still reads the mail the rule refuses. `gmail.message.sent` and `gmail.thread.archived` are not, because they exist only to end signals ([./05-plugins.md](./05-plugins.md#82-intake-settings)).
   - **Accepted gap:** Gmail is polled every 30 s. A mail that reaches the thread in that window, before Hercule has seen it, is marked read, and archived, along with the rest. It still arrives in Hercule as its own event, so nothing is lost.
 - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#399](https://github.com/theagenticage/hercule/issues/399).)* **Connecting Gmail** shows one line naming the model that reads the user's mail, because the Screener sends each undecided mail to it.
@@ -269,8 +269,8 @@ The payload set is pinned by [Plugin contribution interfaces](https://github.com
 
 ```ts
 {
-  screeningId: string
-  eventId: number        // the event being screened; the log's integer id (section 2)
+  eventId: number        // the event being screened; the log's integer id (section 2).
+                         // With `kind` it names the Screening: a Screening has no id of its own
   kind: string           // the signal kind, e.g. "gmail/mail"
   connectionId: string   // the Connection the screened event arrived through
   kindLabel: string      // "Gmail mail"

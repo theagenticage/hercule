@@ -429,7 +429,7 @@ Intake is specified elsewhere now:
 - What came of each event, Intake's events and their handlings: [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#910-intakes-events-and-handlings) section 9.10.
 - The screen, with Everything in it: the desktop app, [./17-desktop-app.md](./17-desktop-app.md#intake).
 
-The web app has no Settings > Intake section in v1 either. The desktop app's Settings > Intake and the CLI (`hercule plugin intake update`, `hercule ignore-rule`) set the same values.
+The web app has no Settings > Intake section in v1 either. The desktop app's Settings > Intake and the CLI (`hercule plugin update-intake`, `hercule ignore-rule`) set the same values.
 
 **The web's Intake follows the desktop's, later.** When the web app builds Intake, it draws it from the same app-neutral model the desktop app draws from, and adds no model of its own:
 

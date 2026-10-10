@@ -529,7 +529,7 @@ An `offer` Signal: an immediate action proposed with no task behind it ("merge t
 _Avoid_: quick fix, shortcut, suggestion
 
 **Topic**:
-A label that groups Intake: a Connection may carry a topic its events file into, and triage labels a proposal with a topic (the connection's when it has one, unless the content says otherwise). A new Connection starts with none. User-defined and ordered; a label, never a domain state.
+A label that groups Tasks: a Connection may carry a topic its events file into, and triage puts a topic on the Task a proposal would create (the connection's when it has one, unless the content says otherwise). A new Connection starts with none. User-defined; a label, never a domain state. Intake's tabs are its sources, not topics.
 _Avoid_: category, area, folder
 
 ### Office

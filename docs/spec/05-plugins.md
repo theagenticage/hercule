@@ -37,7 +37,7 @@ interface PluginManifest {
 *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#394](https://github.com/theagenticage/hercule/issues/394) and [#389](https://github.com/theagenticage/hercule/issues/389).)* **The mark.** Intake shows the mark of the plugin a signal or an event came from.
 
 - `mark.paths` holds path `d` strings only, drawn on a fixed 16×16 viewBox. There is no SVG document, no `<style>`, no other element and no colour, so a mark cannot carry script or tracking, and the apps draw it in the theme's colour.
-- The core checks the mark when it loads the plugin: each string must be path data only (path commands and numbers), and all strings together must stay under about 4 KB.
+- The core checks the mark when it loads the plugin: each string must be path data only (path commands and numbers), and all strings together must stay under 4 KB. A mark that fails the check is dropped, not the plugin: the plugin loads with no mark, the apps draw its initial, and Settings > Plugins says why.
 - The API returns the mark with the plugin, so every client draws it the same way. How the apps draw it, and what they draw for a plugin with no valid mark, is in [./17-desktop-app.md](./17-desktop-app.md).
 - A plugin has one mark, its own. A system reached through another plugin is shown as text ("Sentry, via Gmail"), never as a mark.
 
@@ -294,6 +294,7 @@ interface WorkflowActionContribution {
   // ...the fields above, plus:
   usableIn?: ("workflow.step" | "notification.answer" | "signal.answer")[]   // default ["workflow.step"]
   describe?(input: unknown): DescribeLinePart[]   // pure; required when an *.answer place is listed
+  outcome?(input: unknown): string                // pure; the line a Signal keeps once this answer succeeds
 }
 
 type DescribeLinePart = { kind: "text" | "marked"; text: string }
@@ -301,6 +302,7 @@ type DescribeLinePart = { kind: "text" | "marked"; text: string }
 
 - **`usableIn`** says where the action may be bound: as a workflow step, as a Bound Action on a Notification, or as an action on a Signal. It is the plugin's side of the `usableIn` column that core operations declare in the operation table ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#2-operation-catalogue)). What a Bound Action is, and the safety test every `*.answer` operation passes, are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#74-bound-actions).
 - **`describe`** returns the describe line for one frozen input. It must be pure: it reads only `input`, and never calls the service. Registration fails when an `*.answer` place is listed without it, and TypeScript refuses it too. The plugin that owns an action writes its describe line; the producer that binds it cannot change it, so [ADR 0022](../adr/0022-proposing-is-not-doing.md) holds. The core appends the source and the Connection: "Merges pull request **#113** in **acme/api** · GitHub · as **work**". The text a user types into a `field` is left out of the line.
+- **`outcome`** returns the one line a Signal stores when this action, taken as its answer, succeeds: "Replied to Marta Visser" ([./08-events-and-connections.md](./08-events-and-connections.md#52-gmail-plugin) section 5.2). It is pure for the same reason as `describe`. Without it, the core writes the outcome from the answer's label and subject ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)).
 - **`description`** ~~is raw material for a bound action's describe line~~ is shown in pickers only *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*.
 - **The Connection is bound beside the input**, never inside it: `BoundOperation { op, connectionId?, input }`, with `connectionId` required exactly when the action declares a Connection. For the actions a signal kind's `build` binds, the core fills in the signal's own Connection. Who binds what, and the check at raise and at the click, are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent).
 - **A typed reply** is a Bound Action with `field?: { name, placeholder }`, where `name` is one top-level text field of the input (`body` on `github/issue.comment`). It exists on Signals only ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)). The plugin declares nothing for it beyond a text field in its input.

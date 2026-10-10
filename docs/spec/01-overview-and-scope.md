@@ -152,11 +152,11 @@ Four items are neither in nor out; they sharpen with dogfooding and are tracked 
 
 ## How this spec is organised
 
-The spec is sixteen documents under `docs/spec/`, one per subsystem, listed with what each owns in [README.md](./README.md). Read them in number order for a first pass; each document is self-contained enough to build from, and states any constraint a neighbour handed to it. Open questions, verify-at-build-time notes, and post-v1 items from every document are collected in [16-open-items.md](./16-open-items.md).
+The spec is seventeen documents under `docs/spec/`, one per subsystem, listed with what each owns in [README.md](./README.md). Read them in number order for a first pass; each document is self-contained enough to build from, and states any constraint a neighbour handed to it. Open questions, verify-at-build-time notes, and post-v1 items from every document are collected in [16-open-items.md](./16-open-items.md).
 
 The vocabulary is [CONTEXT.md](../../CONTEXT.md). Every document uses its terms exactly and respects its "Avoid" lists. The visual language for all UI is [design-language.md](../design-language.md).
 
-Rationale lives in the ADRs, not in the spec documents. All twenty:
+Rationale lives in the ADRs, not in the spec documents. All of them:
 
 - [ADR 0001 - Runs freeze an execution plan instead of versioning workflows](../adr/0001-runs-freeze-an-execution-plan.md)
 - [ADR 0002 - Orchestration stays on the controller; runners host sessions and workspaces](../adr/0002-orchestration-stays-on-the-controller.md)
@@ -180,6 +180,23 @@ Rationale lives in the ADRs, not in the spec documents. All twenty:
 - [ADR 0020 - Assistant memory is reached only through the API](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)
 - [ADR 0021 - One operation vocabulary, coarse grants, explicit routes](../adr/0021-one-operation-vocabulary-coarse-grants-explicit-routes.md)
 - [ADR 0022 - Proposing is not doing](../adr/0022-proposing-is-not-doing.md)
+- [ADR 0023 - Chat messages are conversation input, not events](../adr/0023-chat-messages-are-conversation-input-not-events.md)
+- [ADR 0024 - Assistants are woken by the scheduler, not by workflows](../adr/0024-assistants-are-woken-by-the-scheduler-not-by-workflows.md)
+- [ADR 0025 - Enrichment re-matches one event, idempotently](../adr/0025-enrichment-re-matches-one-event-idempotently.md)
+- [ADR 0026 - Workflow actions may call the public API as the run](../adr/0026-workflow-actions-may-call-the-public-api-as-the-run.md)
+- [ADR 0027 - A decision resolves when its question is answered, wherever](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)
+- [ADR 0028 - Provider harnesses are runner-installed executables, floor-pinned and explicitly updated](../adr/0028-provider-harnesses-are-runner-installed-executables.md)
+- [ADR 0029 - Workflow definitions are stored as their YAML source](../adr/0029-workflow-definitions-are-stored-as-their-yaml-source.md)
+- [ADR 0030 - Sessions copy their configuration, and a Thread has no Agent](../adr/0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md)
+- [ADR 0031 - The backend is written on Effect](../adr/0031-the-backend-is-written-on-effect.md)
+- [ADR 0032 - Threads link the user's own material, live and wholesale](../adr/0032-threads-link-the-users-own-material.md)
+- [ADR 0033 - Source is organized by domain and tests are colocated](../adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md)
+- [ADR 0034 - A catalog contribution is identified by its qualified id](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)
+- [ADR 0035 - An action declares where it runs](../adr/0035-an-action-declares-where-it-runs.md)
+- [ADR 0036 - A workspace is kept by leases its holders release](../adr/0036-a-workspace-is-kept-by-leases-its-holders-release.md)
+- [ADR 0037 - The desktop app is its own Electron client of the public API](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md)
+- [ADR 0038 - A subagent is part of its session, not a Session](../adr/0038-a-subagent-is-part-of-its-session-not-a-session.md)
+- [ADR 0039 - Workspaces preserve runner-local Git state and human work](../adr/0039-workspaces-preserve-runner-local-git-state-and-human-work.md)
 - [ADR 0040 - Intake holds Signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md) *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)*
 
 Research findings (facts about third-party systems) live on `research/*` branches under `research/` and are cited from the subsystem documents that use them.
@@ -223,4 +240,4 @@ Tickets:
 - [Write the Intake changes and the build tickets](https://github.com/theagenticage/hercule/issues/395), with the map [#380](https://github.com/theagenticage/hercule/issues/380)
 - The wayfinder map, issue #1 (Destination, Notes, Decisions so far, Out of scope): https://github.com/theagenticage/hercule/issues/1
 
-ADRs: 0001 through 0021, listed above.
+ADRs: 0001 through 0040, listed above.

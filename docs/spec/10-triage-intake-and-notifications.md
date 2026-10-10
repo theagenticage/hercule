@@ -500,7 +500,7 @@ interface Signal {
 
 ### 9.2 How a plugin's signal is raised
 
-A plugin declares its signal kinds in the `signalKinds` facet of its event source ([./05-plugins.md](./05-plugins.md#43-event-source)). Each kind names the event kinds it considers, a CEL `rule` that returns `yes`, `no` or `undecided`, the `threadRef` it is about, whether it `namesYou`, a default priority, its match fields, its `ends`, `guidance` for the Screener, and `build(event)`, the one piece of plugin code. The core raises the signal in this order:
+A plugin declares its signal kinds in the `signalKinds` facet of its event source ([./05-plugins.md](./05-plugins.md#43-event-source)). Each kind names the event kinds it considers, a CEL `rule` that returns `yes`, `no` or `undecided`, the `threadRef` it is about, whether it `namesYou`, a default priority, its match fields, its `ends`, `guidance` for the Screener, and `build(event, ctx)`, the one piece of plugin code; `ctx` carries the Connection and its credentials, so `build` can read the thread. The core raises the signal in this order:
 
 1. **In the ingest transaction:**
    - every event from a Connection is checked against the `ends` of the open signals on its thread. The end check runs on every event, whatever its kind's switches (Section 9.6);
@@ -509,7 +509,7 @@ A plugin declares its signal kinds in the `signalKinds` facet of its event sourc
    1. **The known-work check.** The signal is not raised when a live Subscription received this event, because a run is already handling it. A kind that `namesYou` is always raised.
    2. **Ignore Rules** (Section 9.9). An event a rule catches is recorded and goes no further, so it never reaches the Screener and costs no model call.
    3. **Replacement.** A newer signal replaces the open signal of the same kind on the same thread (below).
-   4. **`build(event)`** makes the draft: title, asker, place, priority, blocks and actions. If `build` fails, the draft falls back to the event's envelope (Section 9.4, Build failure).
+   4. **`build(event, ctx)`** makes the draft: title, asker, place, priority, blocks and actions. If `build` fails, the draft falls back to the event's envelope (Section 9.4, Build failure).
 3. **`yes`:** the Signal is written from the draft.
 4. **`undecided`:** the core writes a Screening row (status `pending`, holding the draft) and emits the core event `signal.screening-requested` in the same transaction (Section 9.8).
 
@@ -535,7 +535,7 @@ Four kinds belong to the core and are not prefixed. Any actor may raise them thr
 | Kind | Meaning | Actions |
 |---|---|---|
 | `proposal` | work the raiser prepared and asks the user to accept; no Task exists until Accept | **Accept** (primary), binding `task.create` with the signal's `task`; **Dismiss**, which runs nothing. Both are the core's. |
-| `offer` | an immediate action with no Task behind it ("Merge dev bumps", binding `github/pr.merge` over three PRs) | the raiser's actions and a Dismiss; Hand to an agent |
+| `offer` | an immediate action with no Task behind it ("Merge dev bumps", binding `github/pr.merge` over three PRs) | the raiser's actions, and the core's Dismiss; Hand to an agent |
 | `unsure` | the raiser could not decide; the signal says what and why | the raiser's own choices; Hand to an agent |
 | `fyi` | worth knowing, nothing to do | the core's Done; Hand to an agent |
 
@@ -566,13 +566,13 @@ A signal's actions are Bound Actions, with the shape and the rules of Section 7.
 
 - `build` binds only its own plugin's actions. The core fills in the signal's own Connection as `connectionId`; the plugin cannot pick another.
 - A `signal.raise` caller binds any operation usable as `signal.answer` and names the `connectionId` when the action declares a Connection.
-- The core adds Done (below), Hand to an agent (below), Accept and Dismiss on a proposal (Section 9.3), and Ignore and Dismiss on its own Ignore Rule offer (Section 9.9).
+- The core adds Done (below), Hand to an agent (below), Accept and Dismiss on a proposal (Section 9.3), Dismiss on every offer, and Ignore on its own Ignore Rule offer (Section 9.9). A raiser binds only its own actions on an offer: Dismiss always comes from the core, so it is always there and always reads the same.
 - When the signal is raised and again at the click, a named Connection must exist, have the action's Connection type, and be enabled.
 
 **Taking an action.** `signal.act { signalId, actionId, text? }` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#signal)) runs the frozen operation as the user, as `notification.act` does (Section 7.4, Executed):
 
 - Only the user may act. A session or a run holding `signal.write` is refused.
-- Every answer resolves the signal at the click, as `decided` with the answer's `actionId`. The core writes the outcome from the answer's label and subject ("Approved #1293", "Handed to Review PR").
+- Every answer resolves the signal at the click, as `decided` with the answer's `actionId`. The core writes the outcome from the answer's label and subject ("Approved #1293", "Handed to Review PR"), unless the plugin action declares its own `outcome` line ([./05-plugins.md](./05-plugins.md#44-workflow-action)), as Gmail's Reply does: "Replied to Marta Visser".
 - A failed operation leaves the signal open with the error shown, and the user may retry or pick another answer.
 - `signal.act` refuses `actionId: "done"`: Done goes through `signal.markDone`.
 
@@ -598,7 +598,7 @@ A signal's actions are Bound Actions, with the shape and the rules of Section 7.
 - When `build` throws, or returns something the schema refuses (Section 9.5), the signal is still written, from the envelope: the event's title, its author, and its Connection. Its `buildError` holds `{ message, at }`.
 - It gets only Done and the Hand to an agent actions: without `build`, the core cannot fill a plugin action's input. Opening the item on the source is the event's `url`, not an action.
 - The signal shows a quiet line: "GitHub couldn't draw this signal. Showing the event as it came in." with the plugin's name in place of GitHub.
-- Check-in gets one `core.signal-build-failed` Notification per plugin and signal kind, open at most once. Later failures update its count ("failed 14 times since 09:12") instead of raising another, and the core withdraws it when a later `build` of that kind succeeds. `core.plugin-error` keeps its own meaning, a failed activation.
+- Check-in gets one `core.signal-build-failed` Notification per plugin and signal kind, open at most once. Later failures raise no other. The count beside it ("failed 14 times since 09:12") is worked out on read from the signals of that kind that carry `buildError` since the Notification was created, so the Notification itself never changes (Section 7.1), and the core withdraws it when a later `build` of that kind succeeds. `core.plugin-error` keeps its own meaning, a failed activation.
 - The controller log keeps the full error.
 
 ### 9.5 Blocks
@@ -732,7 +732,7 @@ interface Screening {
 }
 ```
 
-- The core writes it `pending`, holding the draft, and emits `signal.screening-requested` in the same transaction (Section 9.2). The event's payload is `{ screeningId, eventId, kind, connectionId, kindLabel, item, guidance, you }` ([./08-events-and-connections.md](./08-events-and-connections.md#55-platform-events-core)): `item` is the draft as plain text, `guidance` the kind's guidance read at that moment, and `you` the user's identity on the Connection. Copying `guidance` into each event, never into the workflow, lets a plugin update reach the user without touching their edits.
+- The core writes it `pending`, holding the draft, and emits `signal.screening-requested` in the same transaction (Section 9.2). The event's payload is owned by [./08-events-and-connections.md](./08-events-and-connections.md#55-platform-events-core) section 5.5: it carries the draft as plain text, the kind's guidance read at that moment, and the user's identity on the Connection. A Screening has no id of its own: the event and the kind name it, in the payload and in `signal.screen`.
 - **`yes`:** the draft becomes the Signal's blocks, and the reason goes to `origin.screened = { runId, reason }`.
 - **`no`:** the draft is dropped and only the reason is kept.
 - The row is pruned with its event, and is not a referrer.
@@ -868,7 +868,7 @@ Triage does not suggest rules.
 - every event whose kind is available to triage for its Connection (the switches and their three levels are in [./05-plugins.md](./05-plugins.md#82-intake-settings));
 - plus every event behind a signal: an `origin.eventId`, an `origin.eventIds` entry, a `resolution.eventId`, or an event an Ignore Rule caught.
 
-The set is worked out on read against today's settings, never stored. An event triage only attached to a Task, with no signal behind it, falls back to its kind's switch; the Task's provenance still points at it. Core events (`run.failed`, `cron.tick`) have no Connection and are out of these settings in v1. `event.query` takes `intake: true` (`hercule event query --intake`) to return only Intake's events ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#event)); a plain query still returns every event.
+The set is worked out on read against today's settings, never stored. An event triage only attached to a Task, with no signal behind it, falls back to its kind's switch; the Task's provenance still points at it. Core events (`run.failed`, `cron.tick`) have no Connection and are out of these settings in v1. `event.query` takes `intake: true` (`hercule event list --intake true`) to return only Intake's events ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#event)); a plain query still returns every event.
 
 **Handlings.** A **handling** is what came of an event in Intake, or what is still to come. It is worked out on read and never stored, so renaming a label is a view change. The word never reaches the user: the event pane captions the block "What came of it". Every handling that applies is shown, in this order:
 
