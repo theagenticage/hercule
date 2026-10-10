@@ -87,9 +87,12 @@ interface Running {
 
 /**
  * A running tool item, with the output already reported for it. It keeps pi's
- * tool name and the call's arguments, because the approval hook asks about a
- * call after the call has started: the adapter builds the approval request
- * from the waiting call's name and arguments.
+ * tool name, because the approval hook asks about a call after the call has
+ * started and the adapter reads the name and kind from this item. It keeps the
+ * arguments the call started with for `submit_result`, whose arguments are
+ * the turn's answer. An approval request never reads them: pi converts the
+ * arguments before the hook runs, so the request is built from the converted
+ * command and path in the hook's dialog.
  */
 export interface RunningTool extends Running {
   readonly toolName: string;
