@@ -15,17 +15,20 @@
  * 1. Through Playwright, to sign in on the sign-in screen, as a user does
  *    once. The app saves the token with the mock keychain, so the run never
  *    touches the real Keychain.
- * 2. Seven measured launches: with 40 threads, with 40 threads and one row
+ * 2. Eight measured launches: with 40 threads, with 40 threads and one row
  *    that shows minutes, with 40 threads and Settings › Profile open, the
  *    same with Settings › Assistants open (see `openSettingsSection`), with
  *    40 threads and the sidebar's Hercule face showing (see
  *    `showOrchestrationFace`), and, after spawning 460 more, with 500 threads,
- *    the last time with a thread of 500 transcript rows open (see step 3).
+ *    then with a thread of 500 transcript rows open (see step 3), and last
+ *    with Intake open on 200 signals (see step 5).
  *    Spec 17 §What Settings costs asks for Settings' memory and idle to be
  *    read with a section open; each section in `SETTINGS_SECTIONS` adds one
- *    launch. Spec 17 §What the Hercule face costs asks the same of the face.
+ *    launch. Spec 17 §What the Hercule face costs and §What Intake costs ask
+ *    the same of the face and of Intake.
  *    Before each of them the fixture restarts the controller with every idle
- *    thread's creation and last activity set hours back. Then the script starts the app
+ *    thread's creation and last activity, and every open signal's creation,
+ *    set hours back. Then the script starts the app
  *    through Playwright, signed in, to warm it up (see `warmUpApp`), and
  *    then as a plain process, signed in, for the measured launch. From each
  *    measured launch the script reads, in this order:
@@ -41,7 +44,7 @@
  *      `measureNudges`);
  *    - the launch times: how long from spawn until the window was shown,
  *      and until each step that leads up to it.
- * 3. For the last measured launch, the fixture first plays turns into one idle
+ * 3. For the long-transcript launch, the fixture first plays turns into one idle
  *    thread until its transcript holds 500 rows. The script opens that
  *    thread once, through Playwright, so the app opens it again at every
  *    later launch (see `openThreadOnce`). That launch's first screen is
@@ -50,7 +53,14 @@
  *    open.
  * 4. One more plain launch, which reopens the same thread, measures a turn
  *    that streams into it at full speed (see `measureStreaming`).
- * 5. The last plain launch opens another idle thread, into which the fixture
+ * 5. The fixture raises 200 signals, and the script opens Intake once, so
+ *    the last measured launch opens on Intake (see `openIntakeOnce`), with
+ *    the Hercule face showing. Its first screen is Intake's list, and its
+ *    memory and idle are read with Intake open. One more plain launch, which
+ *    opens Intake again, measures what a signal raised costs, alone and in
+ *    a burst, and what opening and closing the split costs (see
+ *    `perf-intake.ts`).
+ * 6. The last plain launch opens another idle thread, into which the fixture
  *    has played 20 subagents, 4 of them still running, and measures what
  *    spec 17 §What subagents cost asks for: memory with the side pane closed
  *    and open, idle with 4 running and with every subagent ended, how often
@@ -172,15 +182,25 @@ import {
   VISIBLE_SAMPLE_AT_MS,
   evaluateInPage,
   findProcessUse,
+  findRendererMainTasks,
   openThreadOnce,
+  readCpuMs,
   readProcessMemory,
-  runFile,
+  readTrace,
   sampleIdleUse,
+  TIMELINE_CATEGORY,
   waitForPageSocketUrl,
   warmUpApp,
   type ProcessMemory,
   type ProcessUse,
 } from "./perf-measures.ts";
+import {
+  INTAKE_SIGNALS,
+  measureIntakeWork,
+  openIntakeOnce,
+  raiseSignals,
+  reportIntakeWork,
+} from "./perf-intake.ts";
 import { measureSubagentLaunch, reportSubagentLaunch } from "./perf-subagents.ts";
 import { pollUntil } from "./poll.ts";
 import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../src/main/window-visibility.ts";
@@ -285,8 +305,9 @@ interface PlainLaunch {
  *   `LaunchTimes`), the measures that need a connection to main and to the
  *   page.
  *
- * With `opensThread`, the app is expected to open the last open thread, so
- * the first screen is that thread's transcript. With a `settingsSection`,
+ * With `reopens` set, the app is expected to open the last screen again, so
+ * the first screen is the last open thread's transcript, or Intake with its
+ * signals. With `reopens` null it opens on the new-thread screen. With a `settingsSection`,
  * the script opens that section of Settings once the first screen is up (see
  * `openSettingsSection`). With `showsOrchestrationFace`, the script switches
  * the sidebar to its Hercule face once the first screen is up (see
@@ -297,14 +318,13 @@ interface PlainLaunch {
  * Fails when the app does not open its page within 10 s, when the section of
  * Settings or the Hercule face has not rendered by the time memory is read, when the window is
  * not visible while it is sampled, when main showed the window without its
- * first screen, when the first screen is not the shell, or not the thread's
- * transcript when `opensThread` is set, or when the app does not quit
- * cleanly afterwards.
+ * first screen, when the first screen is not the shell, or not the screen
+ * `reopens` names, or when the app does not quit cleanly afterwards.
  */
 async function measurePlainLaunch(
   userDataDir: string,
   fixture: ThreadFixture,
-  opensThread: boolean,
+  reopens: ReopenedScreen | null,
   settingsSection: SettingsSection | null,
   showsOrchestrationFace: boolean,
 ): Promise<PlainLaunch> {
@@ -398,8 +418,11 @@ async function measurePlainLaunch(
     if (!firstScreen.showsShell) {
       throw new Error("the app did not open on the shell, so it was not signed in");
     }
-    if (opensThread && !firstScreen.showsTranscript) {
+    if (reopens === "thread" && !firstScreen.showsTranscript) {
       throw new Error("the app did not open the last open thread");
+    }
+    if (reopens === "intake" && !firstScreen.showsIntake) {
+      throw new Error("the app did not open Intake with its signals");
     }
     measured = {
       launch: {
@@ -537,18 +560,24 @@ async function openSettingsSection(
 
 /**
  * An expression that evaluates, in the page, to the text of every age label
- * inside the visible part of the thread list, top to bottom. A mounted row
- * outside that part, in the list's overscan, is left out, because the age
- * clock does not keep its label current.
+ * inside the visible part of the sidebar's list, top to bottom, followed by
+ * those inside the visible part of Intake's list when Intake is open. A
+ * mounted row outside that part, in a list's overscan, is left out, because
+ * the age clock does not keep its label current.
  */
 const READ_AGES_ON_SCREEN = `(() => {
-  const list = document.querySelector(".side-scroll").getBoundingClientRect();
-  return [...document.querySelectorAll(".side-scroll .side-age")]
-    .filter((label) => {
-      const box = label.getBoundingClientRect();
-      return box.bottom > list.top && box.top < list.bottom;
-    })
-    .map((label) => label.textContent);
+  const readVisibleAges = (scrollerSelector, labelSelector) => {
+    const scroller = document.querySelector(scrollerSelector);
+    if (scroller === null) return [];
+    const list = scroller.getBoundingClientRect();
+    return [...scroller.querySelectorAll(labelSelector)]
+      .filter((label) => {
+        const box = label.getBoundingClientRect();
+        return box.bottom > list.top && box.top < list.bottom;
+      })
+      .map((label) => label.textContent);
+  };
+  return [...readVisibleAges(".side-scroll", ".side-age"), ...readVisibleAges(".asks-scroll", ".ask-age")];
 })()`;
 
 /**
@@ -566,7 +595,21 @@ interface FirstScreen {
   readonly showsShell: boolean;
   /** Whether the page shows a thread's transcript. */
   readonly showsTranscript: boolean;
+  /** Whether the page shows Intake with at least one signal's row. */
+  readonly showsIntake: boolean;
 }
+
+/**
+ * The screen a measured launch stores as the last screen beforehand, so the
+ * app opens it again: the last open thread, or Intake.
+ */
+type ReopenedScreen = "thread" | "intake";
+
+/** What the first screen shows when the app opens each `ReopenedScreen` again, for the report. */
+const FIRST_SCREEN_NAMES: Readonly<Record<ReopenedScreen, string>> = {
+  thread: "the last thread's transcript",
+  intake: "Intake's signals",
+};
 
 /**
  * An expression that evaluates, in the page, to its `FirstScreen`, or to
@@ -583,6 +626,7 @@ const READ_FIRST_SCREEN = `(() => {
     firstScreen: performance.timeOrigin + firstScreen.startTime,
     showsShell: document.querySelector("main") !== null,
     showsTranscript: document.querySelector('section[aria-label="Transcript"]') !== null,
+    showsIntake: document.querySelector('section[aria-label="Signals"] .ask-row') !== null,
   };
 })()`;
 
@@ -617,20 +661,6 @@ function findYoungestAge(ages: readonly string[]): string {
   const minutes = (age: string) =>
     age === "now" ? 0 : Number.parseInt(age, 10) * AGE_UNIT_MINUTES[age.at(-1)!]!;
   return ages.toSorted((a, b) => minutes(a) - minutes(b))[0] ?? "none";
-}
-
-/**
- * Returns the CPU time the process `pid` has used so far, in milliseconds.
- * `ps` reports it to the hundredth of a second, as `[hours:]minutes:seconds`.
- */
-async function readCpuMs(pid: number): Promise<number> {
-  const { stdout } = await runFile("ps", ["-o", "time=", "-p", String(pid)]);
-  return (
-    stdout
-      .trim()
-      .split(":")
-      .reduce((seconds, part) => seconds * 60 + Number(part), 0) * 1_000
-  );
 }
 
 /**
@@ -713,25 +743,6 @@ interface StreamingCost {
   readonly paragraphWrites: number;
   /** How many frames the page drew meanwhile. */
   readonly frames: number;
-}
-
-/**
- * The trace category that holds `RunTask`, the event Chromium records for
- * each task a thread runs. It is the category DevTools' Performance panel
- * records.
- */
-const TIMELINE_CATEGORY = "disabled-by-default-devtools.timeline";
-
-/** One event of a Chromium trace, with only the fields the script reads. */
-interface TraceEvent {
-  readonly name: string;
-  /** The phase: `X` for an event with a duration, `M` for metadata such as a thread's name. */
-  readonly ph: string;
-  readonly pid: number;
-  readonly tid: number;
-  /** The duration, in microseconds, of an event whose phase is `X`. */
-  readonly dur?: number;
-  readonly args?: { readonly name?: string };
 }
 
 /**
@@ -846,53 +857,6 @@ const RECORD_PARAGRAPH_WRITES = `(() => {
   requestAnimationFrame(countFrame);
 })()`;
 
-/**
- * Waits for the trace that `Tracing.end` finished on `page`, and returns its
- * events. Fails when the trace lost events because its buffer filled up.
- */
-async function readTrace(page: Inspector): Promise<TraceEvent[]> {
-  const { stream, dataLossOccurred } = (await page.waitForEvent("Tracing.tracingComplete")) as {
-    stream: string;
-    dataLossOccurred: boolean;
-  };
-  if (dataLossOccurred) throw new Error("the trace's buffer filled up, so the trace lost events");
-  let text = "";
-  for (;;) {
-    const chunk = (await page.send("IO.read", { handle: stream })) as {
-      data: string;
-      eof: boolean;
-      base64Encoded?: boolean;
-    };
-    text +=
-      chunk.base64Encoded === true ? Buffer.from(chunk.data, "base64").toString() : chunk.data;
-    if (chunk.eof) break;
-  }
-  await page.send("IO.close", { handle: stream });
-  const trace = JSON.parse(text) as { traceEvents: TraceEvent[] } | TraceEvent[];
-  return Array.isArray(trace) ? trace : trace.traceEvents;
-}
-
-/**
- * Returns the tasks the renderer's main thread ran in `events`: the `RunTask`
- * events of the thread named `CrRendererMain`. The app has one renderer.
- * Fails when the trace holds no such task.
- */
-function findRendererMainTasks(events: readonly TraceEvent[]): TraceEvent[] {
-  const mainThreads = new Set(
-    events
-      .filter((event) => event.name === "thread_name" && event.args?.name === "CrRendererMain")
-      .map((event) => `${String(event.pid)}:${String(event.tid)}`),
-  );
-  const tasks = events.filter(
-    (event) =>
-      event.name === "RunTask" &&
-      event.ph === "X" &&
-      mainThreads.has(`${String(event.pid)}:${String(event.tid)}`),
-  );
-  if (tasks.length === 0) throw new Error("the trace holds no task of the renderer's main thread");
-  return tasks;
-}
-
 /** Prints what streaming one turn into the open thread cost, against its budget. */
 function reportStreaming(cost: StreamingCost, thread: LongThread): void {
   console.log(
@@ -935,8 +899,8 @@ interface MeasuredLaunch extends PlainLaunch {
   readonly threadCount: number;
   /** Whether one row on screen showed minutes, so the age clock should fire once while visible. */
   readonly twoMinuteRow: boolean;
-  /** The thread the app opened at launch, or `null` when it opened on the new-thread screen. */
-  readonly openThread: LongThread | null;
+  /** The screen the app opened again at launch, or `null` when it opened on the new-thread screen. */
+  readonly reopens: ReopenedScreen | null;
   /** The machine's load average over the minute before the app was spawned. */
   readonly loadAtSpawn: number;
 }
@@ -989,11 +953,11 @@ function reportLaunch(measured: MeasuredLaunch): void {
       `${launch.windowShownMs.toFixed(0)} ms`,
       launch.windowShownMs <= BUDGET.launchMs,
     ],
-    ...(measured.openThread === null
+    ...(measured.reopens === null
       ? []
       : [
           [
-            "Launch, spawn to the last thread's transcript",
+            `Launch, spawn to ${FIRST_SCREEN_NAMES[measured.reopens]}`,
             `painted within ${BUDGET.transcriptPaintMs} ms of spawn (warm, signed in)`,
             `${launch.firstScreenMs.toFixed(0)} ms`,
             launch.firstScreenMs <= BUDGET.transcriptPaintMs,
@@ -1081,7 +1045,7 @@ function reportLaunch(measured: MeasuredLaunch): void {
   console.log(`Load average over the minute before the launch: ${measured.loadAtSpawn.toFixed(2)}`);
   console.log();
   console.log(
-    `Launch steps, in ms from spawn (first screen: ${measured.openThread === null ? "the new-thread screen" : "the last thread's transcript"}):`,
+    `Launch steps, in ms from spawn (first screen: ${measured.reopens === null ? "the new-thread screen" : FIRST_SCREEN_NAMES[measured.reopens]}):`,
   );
   console.log(
     formatTable(
@@ -1153,29 +1117,34 @@ const { streaming, longThread, subagents } = await runWithThreadFixture(async (f
       twoMinuteRow: boolean,
       {
         openThread = null,
+        opensIntake = false,
         settingsSection = null,
         showsOrchestrationFace = false,
       }: {
         readonly openThread?: LongThread | null;
+        readonly opensIntake?: boolean;
         readonly settingsSection?: SettingsSection | null;
         readonly showsOrchestrationFace?: boolean;
       } = {},
     ) => {
       await fixture.prepareLaunch({ twoMinuteRow });
       if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
+      if (opensIntake) await openIntakeOnce(userDataDir);
       await warmUpApp(userDataDir);
+      const reopens: ReopenedScreen | null =
+        openThread !== null ? "thread" : opensIntake ? "intake" : null;
       // Each launch is reported as soon as it is measured, so a launch that
       // fails later in the run does not take the earlier readings with it.
       reportLaunch({
         name,
         threadCount,
         twoMinuteRow,
-        openThread,
+        reopens,
         loadAtSpawn: loadavg()[0]!,
         ...(await measurePlainLaunch(
           userDataDir,
           fixture,
-          openThread !== null,
+          reopens,
           settingsSection,
           showsOrchestrationFace,
         )),
@@ -1200,8 +1169,15 @@ const { streaming, longThread, subagents } = await runWithThreadFixture(async (f
       false,
       { openThread: thread },
     );
+    const streaming = await measureStreaming(userDataDir, fixture, thread);
+    await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
+    await measure(`500 threads, Intake open on ${String(INTAKE_SIGNALS)} signals`, 500, false, {
+      opensIntake: true,
+    });
+    // The app opens Intake again, as the launch above left it.
+    reportIntakeWork(await measureIntakeWork(userDataDir, fixture));
     return {
-      streaming: await measureStreaming(userDataDir, fixture, thread),
+      streaming,
       longThread: thread,
       subagents: await measureSubagentLaunch(userDataDir, fixture, thread.id),
     };

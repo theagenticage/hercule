@@ -1,8 +1,9 @@
 /**
  * The measurements the desktop perf script takes of a running app, shared by
- * `perf.ts` and the scenarios it runs (see `perf-subagents.ts`): the budgets
- * one launch can check, the moments a launch is read at, each process's
- * memory, CPU and wakeups, and the page's DevTools connection.
+ * `perf.ts` and the scenarios it runs (see `perf-subagents.ts` and
+ * `perf-intake.ts`): the budgets one launch can check, the moments a launch
+ * is read at, each process's memory, CPU and wakeups, the page's DevTools
+ * connection, and a Chromium trace of the renderer's tasks.
  *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
@@ -14,12 +15,14 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import type { ProcessMetric } from "electron";
+import type { Page } from "playwright";
 import {
   connectInspector,
   evaluateInMain,
   launchTestPackage,
   quitApp,
   readSettings,
+  type Inspector,
 } from "./packaged-app.ts";
 import { pollUntil } from "./poll.ts";
 
@@ -234,41 +237,56 @@ export async function warmUpApp(userDataDir: string): Promise<void> {
 }
 
 /**
- * Opens the thread `sessionId` in the signed-in app on `userDataDir`, waits
- * for its transcript, and quits. The app then opens that thread again at its
- * next launch, as it does for a user who quit with the thread open. Fails
- * when the thread's transcript does not show.
+ * Stores `path` as the last screen of the signed-in app on `userDataDir`,
+ * starts the app again, waits until `waitForScreen` returns, and quits. The
+ * app then opens that screen again at its next launch, as it does for a user
+ * who quit on it. Fails when `waitForScreen` fails, which it should do when
+ * the screen does not show.
  *
- * The thread is stored as the last screen, and the app started again, rather
- * than opened from the sidebar: a project's section shows only its newest
- * threads, and its list mounts only the rows in view, so the thread's row
- * may not be there to click.
+ * The screen is stored rather than opened by a click, because a click needs
+ * its target on screen: a project's section shows only its newest threads,
+ * and its list mounts only the rows in view, so a thread's row may not be
+ * there to click.
  */
-export async function openThreadOnce(userDataDir: string, sessionId: string): Promise<void> {
+export async function openScreenOnce(
+  userDataDir: string,
+  path: string,
+  waitForScreen: (page: Page) => Promise<void>,
+): Promise<void> {
   const { controllerUrl } = readSettings(userDataDir) as { readonly controllerUrl: string };
   const first = await launchTestPackage(userDataDir);
   try {
     const page = await first.firstWindow();
-    // The app stores the screen it settles on, so the thread is stored only
-    // once the first screen is up.
-    await page.getByRole("navigation", { name: "Threads", exact: true }).waitFor();
+    // The app stores the screen it settles on, so the path is stored only
+    // once the shell, and with it the first screen, is up. Only the shell
+    // has a <main>.
+    await page.locator("main").waitFor();
     await page.evaluate(
-      ([key, path]) => {
-        localStorage.setItem(key, path);
+      ([key, screen]) => {
+        localStorage.setItem(key, screen);
       },
-      [`last-screen:${controllerUrl}`, `/threads/${sessionId}`] as const,
+      [`last-screen:${controllerUrl}`, path] as const,
     );
   } finally {
     await quitApp(first);
   }
   const second = await launchTestPackage(userDataDir);
   try {
-    const page = await second.firstWindow();
-    await page.getByRole("region", { name: "Transcript" }).waitFor();
+    await waitForScreen(await second.firstWindow());
   } finally {
     await quitApp(second);
   }
 }
+
+/**
+ * Opens the thread `sessionId` once in the signed-in app on `userDataDir`,
+ * so the app opens it again at its next launch (see `openScreenOnce`). Fails
+ * when the thread's transcript does not show.
+ */
+export const openThreadOnce = (userDataDir: string, sessionId: string): Promise<void> =>
+  openScreenOnce(userDataDir, `/threads/${sessionId}`, (page) =>
+    page.getByRole("region", { name: "Transcript" }).waitFor(),
+  );
 
 /**
  * Waits until Chromium's DevTools endpoint `endpoint` lists the app's page,
@@ -319,3 +337,83 @@ export async function evaluateInPage(pageSocketUrl: string, expression: string):
 /** Finds the process of one type in a sample of CPU and wakeups, such as `Tab` for the renderer. */
 export const findProcessUse = (samples: readonly ProcessUse[], type: string) =>
   samples.find((sample) => sample.type === type);
+
+/**
+ * Returns the CPU time the process `pid` has used so far, in milliseconds.
+ * `ps` reports it to the hundredth of a second, as `[hours:]minutes:seconds`.
+ */
+export async function readCpuMs(pid: number): Promise<number> {
+  const { stdout } = await runFile("ps", ["-o", "time=", "-p", String(pid)]);
+  return (
+    stdout
+      .trim()
+      .split(":")
+      .reduce((seconds, part) => seconds * 60 + Number(part), 0) * 1_000
+  );
+}
+
+/**
+ * The trace category that holds `RunTask`, the event Chromium records for
+ * each task a thread runs. It is the category DevTools' Performance panel
+ * records.
+ */
+export const TIMELINE_CATEGORY = "disabled-by-default-devtools.timeline";
+
+/** One event of a Chromium trace, with only the fields the script reads. */
+export interface TraceEvent {
+  readonly name: string;
+  /** The phase: `X` for an event with a duration, `M` for metadata such as a thread's name. */
+  readonly ph: string;
+  readonly pid: number;
+  readonly tid: number;
+  /** The duration, in microseconds, of an event whose phase is `X`. */
+  readonly dur?: number;
+  readonly args?: { readonly name?: string };
+}
+
+/**
+ * Waits for the trace that `Tracing.end` finished on `page`, and returns its
+ * events. Fails when the trace lost events because its buffer filled up.
+ */
+export async function readTrace(page: Inspector): Promise<TraceEvent[]> {
+  const { stream, dataLossOccurred } = (await page.waitForEvent("Tracing.tracingComplete")) as {
+    stream: string;
+    dataLossOccurred: boolean;
+  };
+  if (dataLossOccurred) throw new Error("the trace's buffer filled up, so the trace lost events");
+  let text = "";
+  for (;;) {
+    const chunk = (await page.send("IO.read", { handle: stream })) as {
+      data: string;
+      eof: boolean;
+      base64Encoded?: boolean;
+    };
+    text +=
+      chunk.base64Encoded === true ? Buffer.from(chunk.data, "base64").toString() : chunk.data;
+    if (chunk.eof) break;
+  }
+  await page.send("IO.close", { handle: stream });
+  const trace = JSON.parse(text) as { traceEvents: TraceEvent[] } | TraceEvent[];
+  return Array.isArray(trace) ? trace : trace.traceEvents;
+}
+
+/**
+ * Returns the tasks the renderer's main thread ran in `events`: the `RunTask`
+ * events of the thread named `CrRendererMain`. The app has one renderer.
+ * Fails when the trace holds no such task.
+ */
+export function findRendererMainTasks(events: readonly TraceEvent[]): TraceEvent[] {
+  const mainThreads = new Set(
+    events
+      .filter((event) => event.name === "thread_name" && event.args?.name === "CrRendererMain")
+      .map((event) => `${String(event.pid)}:${String(event.tid)}`),
+  );
+  const tasks = events.filter(
+    (event) =>
+      event.name === "RunTask" &&
+      event.ph === "X" &&
+      mainThreads.has(`${String(event.pid)}:${String(event.tid)}`),
+  );
+  if (tasks.length === 0) throw new Error("the trace holds no task of the renderer's main thread");
+  return tasks;
+}
