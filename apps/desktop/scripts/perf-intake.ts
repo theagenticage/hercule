@@ -11,7 +11,8 @@
  * - what a burst of 30 signals raised at once costs: the renderer's longest
  *   task and the reads of To do;
  * - what opening and closing the split costs: the renderer's longest task
- *   and the frames the page drew, with the 250 rows the steps above leave in the list.
+ *   and the frames the page drew while the split's transition ran, with the
+ *   250 rows the steps above leave in the list.
  *
  * To do is sorted oldest first, so a raised signal lands below the rows on
  * screen. The per-push cost is then the read and the list's render, with no
@@ -64,9 +65,6 @@ const BURST_SIZE = 30;
  * so the launch's own work is over.
  */
 const LAUNCH_SETTLE_MS = 5_000;
-
-/** How long frames and tasks are recorded after the split opens or closes. */
-const SPLIT_RECORD_MS = 1_000;
 
 /** Intake's list of signals, which holds one `.ask-row` for each row it draws. */
 const SIGNALS_LIST = 'section[aria-label="Signals"]';
@@ -149,11 +147,13 @@ interface BurstCost {
   readonly toDoReads: number;
 }
 
-/** What opening or closing the split cost the renderer, in the second after the click. */
+/** What opening or closing the split cost the renderer while its transition ran. */
 interface SplitCost {
   /** The longest task the renderer's main thread ran, in milliseconds. */
   readonly longestTaskMs: number;
-  /** How many frames the page drew. */
+  /** How long the transition runs, `--dur-3`, in milliseconds. */
+  readonly transitionMs: number;
+  /** How many frames the page drew, from the click's frame to one past the transition. */
   readonly frames: number;
   /** The longest time between two frames, in milliseconds. */
   readonly longestFrameGapMs: number;
@@ -185,7 +185,8 @@ export interface IntakeWork {
  * - 30 signals raised at once: a Chromium trace from the first raise until
  *   the Hercule segment counts them all, plus 2 s;
  * - the split opened and then closed with the header's button: for each, a
- *   trace and the page's animation frames over the second after the click.
+ *   trace and the page's animation frames from the click until one frame
+ *   after the transition's `--dur-3` is over.
  *
  * The reads of To do are counted from the page's resource timing entries.
  * One connection to the page serves the whole scenario. The window stays
@@ -193,8 +194,8 @@ export interface IntakeWork {
  *
  * Fails when Intake does not show with its signals within 15 s, when the
  * segment does not count a raised signal within 10 s, when the split does
- * not open or close, when a trace lost events, or when the app does not quit
- * cleanly afterwards.
+ * not open or close, when the split has no transition to measure, when a
+ * trace lost events, or when the app does not quit cleanly afterwards.
  */
 export async function measureIntakeWork(
   userDataDir: string,
@@ -325,27 +326,47 @@ async function traceRendererTasks(page: Inspector, work: () => Promise<void>): P
 
 /**
  * Clicks the split's toggle on `page`, which opens the pane when `opens` is
- * set and closes it otherwise, and returns what that cost over the second
- * after the click: the renderer's tasks from a trace, and the frames the page
- * drew from an animation frame loop. Fails when the pane is not in the state
- * `opens` asks for afterwards.
+ * set and closes it otherwise, and returns what the transition cost: the
+ * renderer's tasks from a trace, and the gaps between the frames the page
+ * drew from the click until one frame after `--dur-3`, the transition's
+ * length, is over. Fails when `--dur-3` is 0, as under Reduce motion, because
+ * there is then no transition to measure, and when the pane is not in the
+ * state `opens` asks for afterwards.
+ *
+ * The click runs inside an animation frame callback, so the first frame
+ * recorded is the one that starts the transition, and the first gap holds
+ * that frame's work.
  */
 async function measureSplitToggle(page: Inspector, opens: boolean): Promise<SplitCost> {
   const evaluate = (expression: string) =>
     page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
+  const transitionMs = (await evaluate(`(() => {
+    const value = getComputedStyle(document.documentElement).getPropertyValue("--dur-3").trim();
+    return value.endsWith("ms") ? parseFloat(value) : parseFloat(value) * 1000;
+  })()`)) as number;
+  if (!(transitionMs > 0)) {
+    throw new Error(
+      `--dur-3 is ${String(transitionMs)} ms, so the split does not animate. Turn Reduce motion off and run the script again.`,
+    );
+  }
   const tasks = await traceRendererTasks(page, async () => {
     await evaluate(`(() => {
       const frames = [];
       globalThis.splitFrames = frames;
-      const until = performance.now() + ${String(SPLIT_RECORD_MS)};
+      let until;
       const record = (at) => {
         frames.push(at);
-        if (at < until) requestAnimationFrame(record);
+        if (until === undefined) {
+          until = at + ${String(transitionMs)};
+          document.querySelector(${JSON.stringify(PANE_TOGGLE)}).click();
+        }
+        // One frame past the transition's end, so the gap into the frame
+        // that draws its last state is measured too.
+        if (at <= until) requestAnimationFrame(record);
       };
       requestAnimationFrame(record);
-      document.querySelector(${JSON.stringify(PANE_TOGGLE)}).click();
     })()`);
-    await sleep(SPLIT_RECORD_MS + 100);
+    await sleep(transitionMs + 200);
   });
   const shown = await evaluate(`document.querySelector(".asks.has-pane") !== null`);
   if (shown !== opens) {
@@ -358,6 +379,7 @@ async function measureSplitToggle(page: Inspector, opens: boolean): Promise<Spli
   const sorted = gaps.toSorted((a, b) => a - b);
   return {
     longestTaskMs: Math.max(...tasks),
+    transitionMs,
     frames: frames.length,
     longestFrameGapMs: sorted.at(-1) ?? 0,
     frameIntervalMs: sorted[Math.floor(sorted.length / 2)] ?? 0,
@@ -377,7 +399,8 @@ const formatPerPush = (totalMs: number) =>
 
 /** Formats a split's cost as one table cell. */
 const formatSplit = (cost: SplitCost) =>
-  `longest task ${cost.longestTaskMs.toFixed(1)} ms; ${String(cost.frames)} frames, ` +
+  `longest task ${cost.longestTaskMs.toFixed(1)} ms; ${String(cost.frames)} frames over the ` +
+  `${cost.transitionMs.toFixed(0)} ms transition, ` +
   `longest gap ${cost.longestFrameGapMs.toFixed(1)} ms against ${cost.frameIntervalMs.toFixed(1)} ms usual`;
 
 /** Prints what the Intake scenario measured, against the limits spec 17 sets. */
