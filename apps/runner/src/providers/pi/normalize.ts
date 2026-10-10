@@ -395,7 +395,8 @@ const BLOCKS: Readonly<
 
 /**
  * The item kinds of pi's built-in tools and of the runner's `subagent` tool.
- * Any other tool is a `tool_call`.
+ * Any other tool is a `tool_call`. Only the table's own keys count, so a tool
+ * named like an object method, such as `constructor`, is still a `tool_call`.
  */
 const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   [SUBAGENT_TOOL]: "subagent",
@@ -443,7 +444,10 @@ const buildToolDetail = (
     return { name: truncateFact(toolName), description: truncateMessage(description) };
   }
   if (kind === "file_read" || kind === "file_search") {
-    const pattern = kind === "file_search" ? readFactArg(args, "pattern") : undefined;
+    // `ls` takes no pattern. pi accepts one anyway and ignores it, so showing
+    // it would claim a filter that never ran.
+    const pattern =
+      kind === "file_search" && toolName !== "ls" ? readFactArg(args, "pattern") : undefined;
     const path = readFactArg(args, "path");
     return {
       name: truncateFact(toolName),
@@ -469,7 +473,9 @@ const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
     type.slice(0, type.lastIndexOf("_")),
     type.slice(type.lastIndexOf("_") + 1),
   ];
-  const block = BLOCKS[channel];
+  // Only the table's own keys count: a block type such as `constructor_start`
+  // would otherwise find an object method and start an item with no kind.
+  const block = Object.hasOwn(BLOCKS, channel) ? BLOCKS[channel] : undefined;
   if (block === undefined) return [];
   const turnId = ensureTurnId(state);
   if (phase === "start") {
@@ -511,7 +517,7 @@ const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
 const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEvent> => {
   const toolName = typeof event.toolName === "string" ? event.toolName : "";
   const callId = typeof event.toolCallId === "string" ? event.toolCallId : "";
-  const kind = TOOL_KINDS[toolName] ?? "tool_call";
+  const kind = Object.hasOwn(TOOL_KINDS, toolName) ? TOOL_KINDS[toolName]! : "tool_call";
   const item: RunningTool = {
     // A call with no id from pi gets a new one. Giving two such calls the same
     // id would put the second call's output on the first call's row.

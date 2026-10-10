@@ -308,11 +308,12 @@ describe("normalizing a file read or a file search on a pi turn", () => {
     });
   });
 
-  it("reports ls as a file search with only a path, because it has no pattern", () => {
-    expect(startTool("ls", { path: "src" })).toMatchObject({
-      kind: "file_search",
-      detail: { name: "ls", path: "src" },
-    });
+  it("reports ls as a file search with only a path, even when it was given a pattern", () => {
+    // pi accepts a pattern on `ls` and ignores it, so the listing was not filtered.
+    const started = startTool("ls", { path: "src", pattern: "*.secret" });
+
+    expect(started?.kind).toBe("file_search");
+    expect(started?.detail).toEqual({ name: "ls", path: "src" });
   });
 
   // A field that would be empty is left out, so a surface never shows a blank
@@ -338,6 +339,30 @@ describe("normalizing a file read or a file search on a pi turn", () => {
       name: "read",
       path: `${path.slice(0, MAX_FACT_LENGTH - 1)}…`,
     });
+  });
+});
+
+describe("a name that is also an object method", () => {
+  it("reports a tool named constructor as a tool call", () => {
+    const events = normalizeFromStart([
+      { type: "agent_start" },
+      buildToolStart("constructor", {}),
+      { ...buildToolStart("__proto__", {}), toolCallId: "call_proto" },
+    ]);
+
+    expect(filterByTag(events, "item.started").map((event) => event.kind)).toEqual([
+      "tool_call",
+      "tool_call",
+    ]);
+  });
+
+  it("ignores a content block of type constructor", () => {
+    const events = normalizeFromStart([
+      { type: "agent_start" },
+      buildMessageUpdate({ type: "constructor_start", contentIndex: 0 }),
+    ]);
+
+    expect(filterByTag(events, "item.started")).toEqual([]);
   });
 });
 

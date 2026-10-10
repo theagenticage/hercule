@@ -613,8 +613,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       });
       return;
     }
-    const asked = ASKED[frame.method];
-    if (asked === undefined) {
+    // Only the table's own keys count: a method named like an object method,
+    // such as `constructor`, is not a Request this runner handles.
+    if (!Object.hasOwn(ASKED, frame.method)) {
       refuseRequest(host, frame, {
         code: METHOD_NOT_FOUND,
         message: `Hercule does not support ${frame.method}`,
