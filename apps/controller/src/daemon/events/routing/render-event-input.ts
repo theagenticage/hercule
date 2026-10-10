@@ -22,11 +22,14 @@ const readSubjectTitle = (payload: Readonly<Record<string, unknown>>): string | 
  * A field the event does not have is left out, not written as "undefined".
  * This text starts an agent's turn, and "undefined" would look like
  * information from the event.
+ *
+ * The JSON is compact. Indented JSON grows with the depth of every line, so a
+ * deeply nested payload of a few kilobytes would become megabytes of input.
  */
 export const renderEventInput = (event: Event): string => {
   const title = readSubjectTitle(event.payload);
   const line = [event.kind, title, event.url ?? undefined].filter(
     (part): part is string => part !== undefined,
   );
-  return `${line.join(" - ")}\n\n\`\`\`json\n${JSON.stringify(event.payload, null, 2)}\n\`\`\``;
+  return `${line.join(" - ")}\n\n\`\`\`json\n${JSON.stringify(event.payload)}\n\`\`\``;
 };

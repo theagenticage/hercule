@@ -47,6 +47,7 @@ const buildSession = (tail: string) => ({
   modelSelection: { model: "claude-opus-4", options: {} },
   parentSessionId: null,
   openRequests: [],
+  openPermissionRequests: [],
   createdAt: "2026-09-15T10:00:00.000Z",
   startedAt: null,
   exitedAt: null,

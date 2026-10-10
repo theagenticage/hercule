@@ -13,7 +13,12 @@ import {
   typeQuestionAnswer,
   type QuestionDraft,
 } from "@hercule/client-core";
-import type { ApprovalDecision, QuestionAnswers, SessionRequest } from "@hercule/contract";
+import type {
+  ApprovalDecision,
+  DescribeLine,
+  QuestionAnswers,
+  SessionRequest,
+} from "@hercule/contract";
 import { useRequestDraft } from "../../app/request-drafts";
 import { buildLook, Face, type Look } from "../../faces";
 import { CheckIcon } from "../../icons/check";
@@ -58,12 +63,13 @@ const DECISION_BUTTON_CLASSES: Readonly<Record<ApprovalDecision, string>> = {
  *   Deny is never turned into Allow.
  *
  * Only an approval takes a decision, so `RequestDock` never asks for one on
- * a `question` request.
+ * a `question` request. `PermissionRequestDock` reads the same keys for the
+ * answers that mirror these decisions.
  *
  * A key held with ⌘, ⌃ or ⇧ sends nothing, so those combinations keep any
  * meaning the app gives them.
  */
-const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision | null => {
+export const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision | null => {
   if (event.metaKey || event.ctrlKey || event.shiftKey) return null;
   if (event.key === "Enter") {
     if (event.altKey) return "allow_always";
@@ -72,6 +78,125 @@ const findDecisionForKey = (event: KeyboardEvent<HTMLElement>): ApprovalDecision
   if (event.key === "Escape" && !event.altKey) return "deny";
   return null;
 };
+
+/**
+ * One answer of a dock's ledger, which `AnswerLedger` and `ShrunkDockRow`
+ * draw. `Id` is what the answer sends when it is given.
+ */
+export interface DockAnswer<Id extends string> {
+  /** What the answer sends, which also tells the answers apart. */
+  readonly id: Id;
+  readonly label: string;
+  /** What the answer does, drawn beside its button. */
+  readonly describeLine: DescribeLine;
+  /** The approval decision whose key and button the answer takes. */
+  readonly decision: ApprovalDecision;
+  /** Whether the answer can be given now. One that cannot is drawn faded and sends nothing. */
+  readonly available: boolean;
+}
+
+/**
+ * Renders the ledger of a dock, as the Bureau book's `.ledger` draws it:
+ * one row per answer of `answers`, each with its button, what it does and
+ * its key. A click on a row calls `onAnswer` with the answer's id, unless
+ * the dock is `locked` or the answer is not available. The key itself is
+ * read by the dock, not here. `titleId` is the id of the dock's title, from
+ * which each row's description takes its id.
+ */
+export function AnswerLedger<Id extends string>({
+  titleId,
+  answers,
+  locked,
+  onAnswer,
+}: {
+  readonly titleId: string;
+  readonly answers: readonly DockAnswer<Id>[];
+  readonly locked: boolean;
+  readonly onAnswer: (id: Id) => void;
+}): JSX.Element {
+  return (
+    <div className="ledger">
+      {answers.map((answer) => {
+        const key = DECISION_KEYS[answer.decision];
+        const describeId = `${titleId}-${answer.id}`;
+        const disabled = locked || !answer.available;
+        return (
+          <button
+            key={answer.id}
+            type="button"
+            className="ans"
+            aria-label={answer.label}
+            aria-describedby={describeId}
+            aria-keyshortcuts={key?.shortcut}
+            aria-disabled={disabled || undefined}
+            onClick={() => {
+              if (!disabled) onAnswer(answer.id);
+            }}
+          >
+            <span
+              className={DECISION_BUTTON_CLASSES[answer.decision]}
+              data-unready={!answer.available || undefined}
+            >
+              {answer.label}
+            </span>
+            <span className="ans-desc" id={describeId}>
+              {formatDescribeLine(answer.describeLine)}
+            </span>
+            {key === null ? null : <kbd aria-hidden="true">{key.hint}</kbd>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Renders the dock while the composer is shrunk, as the Bureau book's
+ * `.dock-mini` draws it: the face of the agent that asks, in the waiting
+ * pose, `question` in one line, and the answers of `answers` that take the
+ * Allow once and Deny decisions. A click calls `onAnswer` as the ledger's
+ * rows do, without expanding the composer.
+ */
+export function ShrunkDockRow<Id extends string>({
+  look,
+  question,
+  answers,
+  locked,
+  onAnswer,
+}: {
+  readonly look: Look;
+  readonly question: string;
+  readonly answers: readonly DockAnswer<Id>[];
+  readonly locked: boolean;
+  readonly onAnswer: (id: Id) => void;
+}): JSX.Element {
+  return (
+    <div className="dock-mini">
+      <Face look={look} pose="waiting" size={24} />
+      <span className="dock-mini-q">{question}</span>
+      <span className="spacer" />
+      {answers
+        .filter((answer) => answer.decision === "allow" || answer.decision === "deny")
+        .map((answer) => {
+          const disabled = locked || !answer.available;
+          return (
+            <button
+              key={answer.id}
+              type="button"
+              className={DECISION_BUTTON_CLASSES[answer.decision]}
+              aria-disabled={disabled || undefined}
+              data-unready={!answer.available || undefined}
+              onClick={() => {
+                if (!disabled) onAnswer(answer.id);
+              }}
+            >
+              {answer.label}
+            </button>
+          );
+        })}
+    </div>
+  );
+}
 
 /**
  * Renders one Request the session `sessionId` is waiting on, docked on top
@@ -136,6 +261,11 @@ export function RequestDock({
   const { client } = controller;
   const titleId = useId();
   const card = buildApprovalCard(request);
+  const answers = card.rows.map((row): DockAnswer<ApprovalDecision> => ({
+    ...row,
+    decision: row.id,
+    available: true,
+  }));
   const faceLook =
     request.subagentId === undefined
       ? look
@@ -314,33 +444,13 @@ export function RequestDock({
             </div>
           </div>
         )}
-        {card.rows.length === 0 ? null : (
-          <div className="ledger">
-            {card.rows.map((row) => {
-              const key = DECISION_KEYS[row.id];
-              const describeId = `${titleId}-${row.id}`;
-              return (
-                <button
-                  key={row.id}
-                  type="button"
-                  className="ans"
-                  aria-label={row.label}
-                  aria-describedby={describeId}
-                  aria-keyshortcuts={key?.shortcut}
-                  aria-disabled={locked || undefined}
-                  onClick={() => {
-                    if (!locked) decide.mutate(row.id);
-                  }}
-                >
-                  <span className={DECISION_BUTTON_CLASSES[row.id]}>{row.label}</span>
-                  <span className="ans-desc" id={describeId}>
-                    {formatDescribeLine(row.describeLine)}
-                  </span>
-                  {key === null ? null : <kbd aria-hidden="true">{key.hint}</kbd>}
-                </button>
-              );
-            })}
-          </div>
+        {answers.length === 0 ? null : (
+          <AnswerLedger
+            titleId={titleId}
+            answers={answers}
+            locked={locked}
+            onAnswer={(decision) => decide.mutate(decision)}
+          />
         )}
         {error === null ? null : (
           <p className="dock-error" role="alert">
@@ -348,26 +458,13 @@ export function RequestDock({
           </p>
         )}
       </div>
-      <div className="dock-mini">
-        <Face look={faceLook} pose="waiting" size={24} />
-        <span className="dock-mini-q">{formatRequestQuestion(request)}</span>
-        <span className="spacer" />
-        {card.rows
-          .filter((row) => row.id === "allow" || row.id === "deny")
-          .map((row) => (
-            <button
-              key={row.id}
-              type="button"
-              className={DECISION_BUTTON_CLASSES[row.id]}
-              aria-disabled={locked || undefined}
-              onClick={() => {
-                if (!locked) decide.mutate(row.id);
-              }}
-            >
-              {row.label}
-            </button>
-          ))}
-      </div>
+      <ShrunkDockRow
+        look={faceLook}
+        question={formatRequestQuestion(request)}
+        answers={answers}
+        locked={locked}
+        onAnswer={(decision) => decide.mutate(decision)}
+      />
     </div>
   );
 }

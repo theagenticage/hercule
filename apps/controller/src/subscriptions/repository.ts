@@ -270,6 +270,29 @@ const make = Effect.gen(function* () {
             AND holder_id = ${uuidFromString(holder.id)}`,
       ),
 
+    /**
+     * Ends every live subscription these sessions hold whose target is one of
+     * these Permission Requests, recording why and who ended them. The
+     * session ids let the holder index find the rows.
+     */
+    endWaitingOnRequests: (
+      sessionIds: ReadonlyArray<string>,
+      requestIds: ReadonlyArray<string>,
+      ending: Omit<SubscriptionEnd, "id">,
+    ): Effect.Effect<void, SqlError> =>
+      sessionIds.length === 0 || requestIds.length === 0
+        ? Effect.void
+        : Effect.asVoid(
+            sql`
+              UPDATE subscriptions
+              SET ended_at = ${ending.at}, ended_reason = ${ending.reason},
+                  ended_actor = ${ending.actor}
+              WHERE ended_at IS NULL AND holder_kind = 'session'
+                AND holder_id IN ${sql.in(sessionIds.map(uuidFromString))}
+                AND json_extract(target, '$.kind') = 'request'
+                AND json_extract(target, '$.requestId') IN ${sql.in(requestIds)}`,
+          ),
+
     list: (
       request: SubscriptionPageRequest,
     ): Effect.Effect<Page<StoredSubscription>, CursorError | SqlError> =>

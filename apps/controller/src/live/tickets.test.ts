@@ -29,6 +29,7 @@ const AGENT: Actor = {
   sessionId: "0199e0e7-0002-7000-8000-000000000000",
   profileId: "0199e0e7-0003-7000-8000-000000000000",
   grants: ["session.read"],
+  profileGrants: ["session.read"],
   assistantId: null,
 };
 

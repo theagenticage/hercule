@@ -8,6 +8,11 @@
  * the controller actually gave its runner. That test cannot reach the timing
  * below, so here the resolver gets a SQL client that lets the test run code
  * after the query returns and before the result is cached.
+ *
+ * Also tests which Permission Request grants the resolver adds to the
+ * profile's grants. The rows are written directly, because over HTTP a
+ * session's profile only changes on a resume, and a request open at that
+ * point was already withdrawn by the exit.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
@@ -74,6 +79,31 @@ const narrow = Effect.flatMap(
     sql`UPDATE permission_profiles SET grants = '["task.read"]' WHERE id = unhex(${PROFILE})`,
 );
 
+/** A profile id the session is not on. */
+const OTHER_PROFILE = "0199e0e77b217000800000000000000b";
+
+/**
+ * Inserts a Permission Request of the session, asked under `profile`, in the
+ * given state. `outcome` is set only for a decided request.
+ */
+const insertRequest = (
+  id: string,
+  profile: string,
+  grant: string,
+  status: "open" | "decided",
+  outcome: "session" | "profile" | "deny" | null,
+) =>
+  Effect.flatMap(
+    SqlClient.SqlClient,
+    (sql) => sql`
+      INSERT INTO permission_requests (id, session_id, profile_id, grant, reason, status,
+                                       outcome, created_at, decided_at)
+      VALUES (unhex(${id}), unhex(${SESSION}), unhex(${profile}), ${grant}, 'a reason',
+              ${status}, ${outcome}, '2026-09-15T10:00:00.000Z',
+              ${status === "decided" ? "2026-09-15T10:01:00.000Z" : null})
+    `,
+  );
+
 const run = <A, E>(body: Effect.Effect<A, E, SessionTokens | SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(
     Effect.provide(
@@ -126,5 +156,56 @@ describe("the resolver cache", () => {
     );
 
     expect(readGrants(after)).toEqual(["task.read"]);
+  });
+});
+
+describe("the grants a session holds", () => {
+  it("adds only the grants of requests decided with session under the session's current profile", async () => {
+    const actor = await run(
+      Effect.gen(function* () {
+        yield* insertRequest(
+          "0199e0e77b217000800000000000002a",
+          PROFILE,
+          "task.delete",
+          "decided",
+          "session",
+        );
+        // Already on the profile: the result lists it once.
+        yield* insertRequest(
+          "0199e0e77b217000800000000000002b",
+          PROFILE,
+          "task.read",
+          "decided",
+          "session",
+        );
+        // Asked under a profile the session has since left.
+        yield* insertRequest(
+          "0199e0e77b217000800000000000002c",
+          OTHER_PROFILE,
+          "task.update",
+          "decided",
+          "session",
+        );
+        yield* insertRequest(
+          "0199e0e77b217000800000000000002d",
+          PROFILE,
+          "agent.read",
+          "decided",
+          "deny",
+        );
+        yield* insertRequest(
+          "0199e0e77b217000800000000000002e",
+          PROFILE,
+          "agent.write",
+          "open",
+          null,
+        );
+        const tokens = yield* SessionTokens;
+        return Option.getOrThrow(yield* tokens.resolve("hash-live"));
+      }),
+    );
+
+    expect(actor.profileGrants).toEqual(["task.read", "task.create"]);
+    expect(actor.grants).toEqual(["task.read", "task.create", "task.delete"]);
   });
 });

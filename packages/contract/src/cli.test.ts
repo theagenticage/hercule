@@ -99,6 +99,8 @@ const COMMANDS: Record<string, string> = {
   "notification.read": "notification read",
   "notification.create": "notification create",
   "notification.withdraw": "notification withdraw",
+  "permission.decide": "permission decide",
+  "permission.request": "permission request",
   "notification.act": "notification act",
 
   "project.query": "project list",

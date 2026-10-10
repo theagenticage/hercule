@@ -56,6 +56,8 @@ import {
   EventRouterLayer,
   PipelineLayer,
   Placement,
+  PermissionRequests,
+  PermissionRequestsLayer,
   PlacementLayer,
   ProfileRemoval,
   ProfileRemovalLayer,
@@ -176,6 +178,19 @@ const profileRoutes = HttpApiBuilder.group(api, "profile", (handlers) =>
         withApiErrors(profiles.update({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(removal.deleteProfile(params)));
+  }),
+);
+
+// Asking for a grant and deciding one read the asking session, another
+// domain's row, so both are a controller daemon use case.
+const permissionRoutes = HttpApiBuilder.group(api, "permission", (handlers) =>
+  Effect.gen(function* () {
+    const requests = yield* PermissionRequests;
+    return handlers
+      .handle("request", ({ payload }) => withApiErrors(requests.request(payload)))
+      .handle("decide", ({ params, payload }) =>
+        withApiErrors(requests.decide({ requestId: params.id, outcome: payload.outcome })),
+      );
   }),
 );
 
@@ -663,6 +678,16 @@ const RunDomainLayer = RunServiceLayer.pipe(
 );
 
 /**
+ * The Permission Request use case, with the profile service its `profile`
+ * outcome edits through. It serves the `permission` routes and is the
+ * notification answers' way to `permission.decide`. Both are provided this
+ * one layer, so it is built once.
+ */
+const PermissionRequestsDomainLayer = PermissionRequestsLayer.pipe(
+  Layer.provideMerge(ProfilesLayer),
+);
+
+/**
  * Every service an operation uses, together with the controller daemon. The
  * listener starts the controller daemon's drivers, so they are built here
  * rather than a second time elsewhere. It is one list because otherwise a
@@ -692,6 +717,7 @@ export const operationLayers = Layer.mergeAll(
   // The controller daemon's profile removal uses the profile service, so the
   // profile service is provided to it rather than merged next to it.
   ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
+  PermissionRequestsDomainLayer,
   AgentServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
@@ -722,13 +748,19 @@ export const operationLayers = Layer.mergeAll(
   // The inbound driver hands a workspace step's result to the run service.
   // The notification service runs the operation of a chosen answer through
   // its `BindableOperations` port, which the controller daemon implements,
-  // and the operation can be a task, run or live session operation. So the port gets the run layers,
-  // which include the task service, and sits in this group, which provides
-  // `Live`.
+  // and the operation can be a task, run, live session or Permission Request
+  // operation. So the port gets the run layers, which include the task
+  // service, and the Permission Request use case, and sits in this group,
+  // which provides `Live`.
   Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunDomainLayer)),
     NotificationServiceLayer.pipe(
-      Layer.provide(BindableOperationsLayer.pipe(Layer.provide(RunDomainLayer))),
+      Layer.provide(
+        BindableOperationsLayer.pipe(
+          Layer.provide(RunDomainLayer),
+          Layer.provide(PermissionRequestsDomainLayer),
+        ),
+      ),
     ),
     SetupLayer,
     // The events service reads the registered event kinds from the plugins
@@ -787,6 +819,7 @@ export const handlerLayers = Layer.mergeAll(
   userRoutes,
   settingsRoutes,
   profileRoutes,
+  permissionRoutes,
   secretRoutes,
   controllerRoutes,
   taskRoutes,

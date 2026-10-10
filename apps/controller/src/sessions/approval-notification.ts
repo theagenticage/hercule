@@ -21,7 +21,13 @@ import {
   type SessionRequest,
 } from "@hercule/contract";
 import type { ApprovalDecision, ApprovalRequest } from "@hercule/protocol";
-import type { CoreAction, CoreNotification } from "../notifications";
+import {
+  formatCodeBlock,
+  formatInlineCode,
+  shortenForTitle,
+  type CoreAction,
+  type CoreNotification,
+} from "../notifications";
 import type { RequestClosingEvent } from "./stream";
 
 /**
@@ -34,9 +40,6 @@ export const APPROVAL_ANSWER_IDS: Readonly<Record<ApprovalDecision, string>> = {
   deny: "deny",
   cancel: "cancel",
 };
-
-/** The longest command or path a title shows. The body holds the whole text. */
-const MAX_TITLE_TEXT_LENGTH = 80;
 
 /**
  * The most paths the body lists. The rest are counted in a last line.
@@ -76,47 +79,6 @@ export const buildRequestSubject = (sessionId: string, requestId: string): Notif
   sessionId,
   requestId,
 });
-
-/**
- * Shortens text to its first line and at most `MAX_TITLE_TEXT_LENGTH`
- * characters, ending it with an ellipsis when anything was left out, so a
- * title stays one short line.
- */
-const shortenForTitle = (text: string): string => {
-  const [first = ""] = text.split("\n");
-  const cut = first.length > MAX_TITLE_TEXT_LENGTH || first.length < text.length;
-  return cut ? `${first.slice(0, MAX_TITLE_TEXT_LENGTH - 1)}…` : first;
-};
-
-/**
- * Returns a run of backticks one longer than the longest run in `text`, and
- * at least `minimum` long. Used as a code fence, it cannot be closed early by
- * backticks inside the text.
- */
-const buildFence = (text: string, minimum: number): string => {
-  const longestRun = (text.match(/`+/g) ?? []).reduce((most, run) => Math.max(most, run.length), 0);
-  return "`".repeat(Math.max(minimum, longestRun + 1));
-};
-
-/** Wraps text in a markdown code block. */
-const formatCodeBlock = (text: string): string => {
-  const fence = buildFence(text, 3);
-  return `${fence}\n${text}\n${fence}`;
-};
-
-/**
- * Formats one line of text as markdown inline code, so it renders as itself.
- * Used for paths and for text an agent wrote, such as a subagent's
- * description: inline code cannot add a link, an image or emphasis, and it
- * still reads well where the body is shown as plain text, as in the CLI.
- *
- * The spaces inside the fence keep text that starts or ends with a backtick
- * apart from the fence; markdown drops them when it renders the text.
- */
-const formatInlineCode = (text: string): string => {
-  const fence = buildFence(text, 1);
-  return `${fence} ${text} ${fence}`;
-};
 
 /**
  * Formats paths as a markdown list, one path per line, each as inline code.
@@ -170,7 +132,8 @@ const buildRequestTitleAndDetail = (
  * subagent's name, `askerName`, or "Asked by a subagent" when it has none.
  * A session can wait on several Requests at once, and this line tells their
  * notifications apart. The name is the parent agent's or the
- * harness's text, so it is shown as inline code and cannot format the body.
+ * harness's text, and the session's title is the agent's or the user's, so
+ * both are shown as inline code and cannot format the body.
  *
  * The answers are the decisions the request accepts, in the request's order.
  * Each answer has the same label and the same sentence under it as the
@@ -194,7 +157,7 @@ export const buildApprovalNotification = (
     asker +
     (session.title === ""
       ? "A session is waiting for your answer."
-      : `The session "${session.title}" is waiting for your answer.`);
+      : `The session ${formatInlineCode(session.title)} is waiting for your answer.`);
   const actions = request.decisions.map((decision): CoreAction => ({
     id: APPROVAL_ANSWER_IDS[decision],
     label: APPROVAL_ANSWER_LABELS[decision],

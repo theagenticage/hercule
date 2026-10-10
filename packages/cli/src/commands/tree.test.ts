@@ -300,6 +300,8 @@ describe("the placeholders a usage line shows", () => {
   const NAMED: Record<string, string> = {
     "secret set": "<owner-kind> <owner-id> <name>",
     "subscription create": "<target>",
+    "permission request": "<grant>",
+    "permission decide": "<request-id>",
     "secret delete": "<owner-kind> <owner-id> <name>",
     "input list": "<session-id>",
     "input update": "<session-id> <input-id>",

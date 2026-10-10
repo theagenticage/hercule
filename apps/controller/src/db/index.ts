@@ -11,7 +11,7 @@ export {
   openDatabaseCopy,
   withTransaction,
 } from "./client";
-export { mintUuid, uuidFromString, uuidToString, UUID_PATTERN } from "./id";
+export { mintUuid, uuidFromString, uuidHexToString, uuidToString, UUID_PATTERN } from "./id";
 export {
   CursorError,
   decodeCursor,

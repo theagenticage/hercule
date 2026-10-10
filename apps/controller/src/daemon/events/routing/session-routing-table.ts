@@ -18,6 +18,7 @@ import { SessionService, sessionRepository } from "../../../sessions";
 import type { Notifier } from "../../../notifications";
 import {
   buildHolderEndedReason,
+  permissionRequestSubscriptions,
   subscriptionRepository,
   type StoredSubscription,
 } from "../../../subscriptions";
@@ -34,6 +35,7 @@ export const sessionRoutingTable: Effect.Effect<
   const sessions = yield* SessionService;
   const sessionRows = yield* sessionRepository;
   const subscriptions = yield* subscriptionRepository;
+  const requestSubscriptions = yield* permissionRequestSubscriptions;
   const recordEvaluationFailure = yield* buildSubscriptionFailureRecorder;
 
   /**
@@ -102,6 +104,11 @@ export const sessionRoutingTable: Effect.Effect<
               // subscription already has a row for this event, nothing is
               // written, and its health does not change either.
               if (Option.isSome(written)) yield* subscriptions.clearLostWakeUp(subscription.id);
+              // A Permission Request is decided once, so its subscription has
+              // nothing more to wait for after the decision.
+              if (subscription.target.kind === "request") {
+                yield* requestSubscriptions.endDelivered(subscription.id);
+              }
             }),
           recordEvaluationFailure: (message) => recordEvaluationFailure(subscription.id, message),
           clearEvaluationFailure: () => subscriptions.clearEvaluationFailure(subscription.id),
