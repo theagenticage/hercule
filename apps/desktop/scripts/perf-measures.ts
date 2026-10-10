@@ -14,7 +14,13 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import type { ProcessMetric } from "electron";
-import { connectInspector, evaluateInMain, launchTestPackage, quitApp } from "./packaged-app.ts";
+import {
+  connectInspector,
+  evaluateInMain,
+  launchTestPackage,
+  quitApp,
+  readSettings,
+} from "./packaged-app.ts";
 import { pollUntil } from "./poll.ts";
 
 /** The limits of spec 17's budget table that one launch of the app can check. */
@@ -228,22 +234,39 @@ export async function warmUpApp(userDataDir: string): Promise<void> {
 }
 
 /**
- * Starts the signed-in app on `userDataDir`, opens the thread titled `title`
- * from the sidebar, waits for its transcript, and quits. The app then opens
- * that thread again at its next launch, as it does for a user who quit with
- * the thread open. Fails when the sidebar does not show the thread.
+ * Opens the thread `sessionId` in the signed-in app on `userDataDir`, waits
+ * for its transcript, and quits. The app then opens that thread again at its
+ * next launch, as it does for a user who quit with the thread open. Fails
+ * when the thread's transcript does not show.
+ *
+ * The thread is stored as the last screen, and the app started again, rather
+ * than opened from the sidebar: a project's section shows only its newest
+ * threads, and its list mounts only the rows in view, so the thread's row
+ * may not be there to click.
  */
-export async function openThreadOnce(userDataDir: string, title: string): Promise<void> {
-  const app = await launchTestPackage(userDataDir);
+export async function openThreadOnce(userDataDir: string, sessionId: string): Promise<void> {
+  const { controllerUrl } = readSettings(userDataDir) as { readonly controllerUrl: string };
+  const first = await launchTestPackage(userDataDir);
   try {
-    const page = await app.firstWindow();
-    await page
-      .locator("a.side-row")
-      .filter({ has: page.getByText(title, { exact: true }) })
-      .click();
+    const page = await first.firstWindow();
+    // The app stores the screen it settles on, so the thread is stored only
+    // once the first screen is up.
+    await page.getByRole("navigation", { name: "Threads", exact: true }).waitFor();
+    await page.evaluate(
+      ([key, path]) => {
+        localStorage.setItem(key, path);
+      },
+      [`last-screen:${controllerUrl}`, `/threads/${sessionId}`] as const,
+    );
+  } finally {
+    await quitApp(first);
+  }
+  const second = await launchTestPackage(userDataDir);
+  try {
+    const page = await second.firstWindow();
     await page.getByRole("region", { name: "Transcript" }).waitFor();
   } finally {
-    await quitApp(app);
+    await quitApp(second);
   }
 }
 

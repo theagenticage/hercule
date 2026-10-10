@@ -319,7 +319,7 @@ export async function measureSubagentLaunch(
     },
   );
 
-  await openThreadOnce(userDataDir, open.title);
+  await openThreadOnce(userDataDir, open.id);
   await warmUpApp(userDataDir);
   const loadAtSpawn = loadavg()[0]!;
   const app = await launchPlainApp(userDataDir);

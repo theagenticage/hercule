@@ -249,7 +249,8 @@ export type FirstRunProgress = typeof FirstRunProgress.Type;
  * - `density`: how the sidebar draws its thread rows.
  * - `textSize`: the step of the text size, from 1 to 4; 2 is the tokens as
  *   they are.
- * - `openOn`: what a launch opens: the threads or the Office.
+ * - `openOn`: what a launch opens: the last screen the user had open, or the
+ *   Office.
  * - `reduceMotion`: whether every animation stops. macOS's own setting has
  *   the same effect.
  * - `marks`: whether rows show the marks of the systems their work came from.
@@ -263,7 +264,7 @@ export const Appearance = Schema.Struct({
   reduceTransparency: Schema.Boolean,
   density: Schema.Literals(["comfortable", "compact"]),
   textSize: Schema.Literals([1, 2, 3, 4]),
-  openOn: Schema.Literals(["threads", "office"]),
+  openOn: Schema.Literals(["lastScreen", "office"]),
   reduceMotion: Schema.Boolean,
   marks: Schema.Boolean,
 });

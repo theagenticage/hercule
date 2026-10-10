@@ -1,6 +1,7 @@
 import type { JSX } from "react";
-import { Link, createFileRoute, notFound } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import type { Subagent } from "@hercule/contract";
+import { throwScreenNotFound } from "../../../../../../app/last-screen";
 import { subagentsQuery, transcriptQuery } from "../../../../../../app/queries";
 import { SubagentPage } from "../../../../../../screens/subagents/subagent-page";
 import { NotFound } from "../../../../../../screens/not-found";
@@ -15,12 +16,14 @@ import { NotFound } from "../../../../../../screens/not-found";
  * subagent's transcript before the page renders. A subagent missing from
  * the cached list may have started since the list was read, such as one
  * whose Request docked before its record was read again, so the loader
- * reads the list again before it gives up.
+ * reads the list again before it gives up. When the app opened the page at
+ * launch, a subagent the session does not have goes to the new-thread
+ * screen instead (see `throwScreenNotFound`).
  */
 export const Route = createFileRoute("/_connected/_shell/threads/$sessionId/subagents/$subagentId")(
   {
     staticData: { title: "Subagent" },
-    loader: async ({ context: { controller, queryClient }, params }) => {
+    loader: async ({ context: { controller, queryClient }, params, location }) => {
       const query = subagentsQuery(controller.client, params.sessionId);
       const hasSubagent = (subagents: readonly Subagent[]): boolean =>
         subagents.some((subagent) => subagent.id === params.subagentId);
@@ -28,10 +31,7 @@ export const Route = createFileRoute("/_connected/_shell/threads/$sessionId/suba
         !hasSubagent(await queryClient.ensureQueryData(query)) &&
         !hasSubagent(await queryClient.fetchQuery({ ...query, staleTime: 0 }))
       ) {
-        // The router acts on a thrown `notFound`, which is a plain descriptor
-        // rather than an Error.
-        // eslint-disable-next-line @typescript-eslint/only-throw-error
-        throw notFound();
+        throwScreenNotFound(location);
       }
       await queryClient.ensureQueryData(
         transcriptQuery(controller.client, params.sessionId, params.subagentId),

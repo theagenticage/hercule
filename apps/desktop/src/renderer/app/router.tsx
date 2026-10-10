@@ -6,15 +6,17 @@
  * the same router.
  */
 import { QueryClientProvider } from "@tanstack/react-query";
-import { createRouter } from "@tanstack/react-router";
+import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { routeTree } from "../routeTree.gen";
 import { RenderFailure } from "../screens/render-failure";
 import type { RouterContext } from "./context";
-import { createLaunchHistory } from "./last-thread";
+import { openLaunchScreen, trackLastScreen } from "./last-screen";
 
 /**
- * Returns a new router. It starts at the last open thread of the saved
- * controller when one is stored, and at `/` otherwise (see `last-thread.ts`).
+ * Returns a new router. With a saved controller, it starts at the screen a
+ * launch opens, the last screen or the Office as Open on is set, and stores
+ * each screen the user opens after that (see `last-screen.ts`). With none,
+ * it starts at `/`.
  * It renders the query cache's provider around every route, so the app and a
  * test render the router alone. A route that fails shows `RenderFailure`.
  *
@@ -42,12 +44,17 @@ export const createAppRouter = (context: RouterContext) => {
   const router = createRouter({
     routeTree,
     context,
-    history: createLaunchHistory(context.controller?.url ?? null),
+    history: createMemoryHistory(),
     defaultErrorComponent: RenderFailure,
     Wrap: ({ children }) => (
       <QueryClientProvider client={context.queryClient}>{children}</QueryClientProvider>
     ),
   });
+
+  if (context.controller !== null) {
+    openLaunchScreen(router, context.controller.url, context.appearance.read().openOn);
+    trackLastScreen(router, context.controller.url);
+  }
 
   const holdsToken = (): boolean =>
     context.controller !== null && context.controller.client.getToken() !== null;

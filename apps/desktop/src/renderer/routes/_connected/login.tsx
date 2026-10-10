@@ -1,8 +1,9 @@
 import { useState, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
 import { ApiError, ConnectionError, isMutationRunning } from "@hercule/client-core";
-import { CONNECT_PATH, HOME_PATH } from "../../app/entry-guard";
+import { CONNECT_PATH } from "../../app/entry-guard";
+import { openLaunchScreen } from "../../app/last-screen";
 import { CenteredFooter, CenteredScreen } from "../../screens/centered-screen";
 
 export const Route = createFileRoute("/_connected/login")({
@@ -31,15 +32,18 @@ const describeSignInFailure = (error: Error, url: string): string => {
 };
 
 function SignIn(): JSX.Element {
-  const { controller, queryClient } = Route.useRouteContext();
+  const { controller, queryClient, appearance } = Route.useRouteContext();
   const navigate = useNavigate();
+  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
   const signIn = useMutation({
     mutationKey: SIGN_IN_KEY,
     mutationFn: () => controller.client.auth.login({ payload: { username, password } }),
-    onSuccess: () => navigate({ to: HOME_PATH }),
+    onSuccess: () => {
+      openLaunchScreen(router, controller.url, appearance.read().openOn);
+    },
   });
 
   return (

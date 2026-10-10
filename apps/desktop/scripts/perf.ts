@@ -1106,7 +1106,7 @@ const { launches, streaming, longThread, subagents } = await runWithThreadFixtur
         } = {},
       ) => {
         await fixture.prepareLaunch({ twoMinuteRow });
-        if (openThread !== null) await openThreadOnce(userDataDir, openThread.title);
+        if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
         await warmUpApp(userDataDir);
         measured.push({
           name,

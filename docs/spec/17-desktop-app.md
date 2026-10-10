@@ -2234,6 +2234,20 @@ Bundle: the first screen is 327.5 kB gzipped before (14 chunks) and 331.6 kB aft
 - **The second review's fixes,** measured against the renderer built from `1b6bf8ab`: a linked chip in a queued row keeps the 6px its hover light takes back, so the row's text starts where it did before the grid, and a sender's read that failed is not made again when the window is focused. The agent page's CSS grows by one rule and stays at 1.31 kB gzipped as Vite reports it; the first-screen chunk gains one query option and stays at 258.8 kB. Neither adds work while idle or per streamed token, and the focus change removes a read per focus for each failed sender.
 - **The numbers above were measured before #479 and #478 merged into this branch,** on a base without the work stretch rows or the tool result images. After the merge, `pnpm build:desktop`'s budget check reads the first screen at 334.1 kB gzipped across 20 chunks, 1.8 kB over main's 332.3 kB, in line with the 1.7 kB measured above.
 
+**Launch on the last screen, slice 36,** measured 2026-10-10 on the reference machine with `pnpm build:desktop`'s size checks and one run of `apps/desktop/scripts/perf.ts` on each side, on `main` at a9fc51cf (Before) and on the working tree of branch `t3/launch-on-last-screen` (After), for [#535](https://github.com/theagenticage/hercule/issues/535). The slice adds no process, no timer, no polling and no live topic. Each navigation writes one `localStorage` entry. Intake is not built yet, so reopening Intake is not measured.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Launch, spawn to window shown, new-thread screen | 500 ms | 346 to 379 ms over five launches | 371 to 399 ms over five launches |
+| Launch steps, page start to first screen, new-thread screen | none new | 128 to 140 ms | 132 to 140 ms |
+| Launch, spawn to the last thread's transcript painted, 501 rows | 800 ms | 417 ms | 414 ms |
+| The first screen's JavaScript, gzipped | none new | 334.1 kB | 334.2 kB; the first-screen chunk is 256.5 kB, up 0.1 kB |
+| Main's startup file, minified | 160 kB | 148.1 kB | 148.2 kB |
+
+- **Launch time is unchanged.** The renderer's part of a launch, from the page's start to its first screen, is the same within 4 ms on both sides. The windows were shown 12 ms later in the median After, but the difference lies before the page starts, in main's Node start and the GPU and renderer processes, which this change does not touch. It is the spread between runs on a machine shared with other worktrees.
+- **A launch with a saved controller reads the Appearance once more,** a synchronous message to main answered from memory, because Open on decides the first screen. `theme-init.js` reads it once already before the first paint. The second read is lost in the spread above, as the first one was ([Settings › Appearance, slice 12](#measured)).
+- **The perf script was repaired to take these numbers.** It could no longer run on `main`: the scripted runner imported a value from the protocol package, which plain Node cannot load, and the script opened threads by their sidebar rows, which the flat sidebar ([#473](https://github.com/theagenticage/hercule/issues/473)) hides behind a section's "more" row. The script now stores the long thread as the last screen instead, and the subagent scenario opens "more" rows and scrolls the sidebar until its thread's row shows. The Before ran the same repaired script, storing the thread under the old `last-thread` key that build reads.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
