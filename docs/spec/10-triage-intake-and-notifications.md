@@ -576,7 +576,7 @@ A signal's actions are Bound Actions, with the shape and the rules of Section 7.
 - A failed operation leaves the signal open with the error shown, and the user may retry or pick another answer.
 - `signal.act` refuses `actionId: "done"`: Done goes through `signal.markDone`.
 
-**A typed reply.** An action may carry `field?: { name, placeholder }`. `name` is one top-level text field of the operation's input (`body` on `github/issue.comment`), empty until the click. `signal.act`'s `text` fills it in; the core decodes the input again and runs it. The describe line leaves the text out, and the text box beside it shows the text in full. `field` exists on Signals only: `notification.create` refuses it.
+**A typed reply.** An action may carry `field?: { name, placeholder }`. `name` is one top-level text field of the operation's input (`body` on `github/issue.comment`), empty until the click. `signal.act`'s `text` fills it in; the core decodes the input again and runs it. The describe line leaves the text out, and the text box beside it shows the text in full. `field` exists on Signals only: `notification.create` refuses it. *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* Only a plugin action takes a `field` in v1: a core operation usable as `signal.answer` (`task.create`, `task.update`, `run.start`) has no input a reply belongs in, so `signal.raise` refuses `field` on one with `validation`.
 
 **The suggested action.** A signal has at most one `primary` action. `build` or the `signal.raise` caller may mark one of its own. The actions the core adds are never primary, with two exceptions: Accept on a proposal and Ignore on the core's Ignore Rule offer. When nobody marks one, nothing is suggested.
 
