@@ -220,6 +220,16 @@ const getList = () => screen.getByRole("region", { name: "Signals" });
 const getRow = (signal: Signal) =>
   getList().querySelector<HTMLElement>(`[data-signal-id="${signal.id}"]`)!;
 const findPane = () => screen.findByRole("region", { name: "The open signal" });
+
+/**
+ * Checks whether the pane shows. A closed pane stays drawn while a signal is
+ * selected, off screen and inert, so it slides out, and the query alone does
+ * not tell the two apart.
+ */
+const isPaneShown = (): boolean => {
+  const pane = screen.queryByRole("region", { name: "The open signal" });
+  return pane !== null && !pane.hasAttribute("inert");
+};
 const readSelected = (search: Record<string, unknown>) => search.signal;
 /** Checks whether a request answers a signal; the app's other requests include POSTs of its own. */
 const isAct = (call: Call) => call.method === "POST" && call.path.endsWith("/act");
@@ -295,7 +305,7 @@ describe("Intake's pane", () => {
 
   it("shows what the user did once an answer succeeds", async () => {
     const { handlers, store } = storeSignals(SIGNALS);
-    const { calls } = await openIntake(`/intake?signal=${REVIEW.id}`, {
+    const { calls, live } = await openIntake(`/intake?signal=${REVIEW.id}`, {
       ...handlers,
       [`POST /api/v1/signals/${REVIEW.id}/act`]: () => {
         const acted = resolve(REVIEW, "user", "Approved #1294");
@@ -308,7 +318,9 @@ describe("Intake's pane", () => {
     const outcome = await within(pane).findByRole("status");
     expect(outcome.textContent).toBe("What you did: Approved #1294, by you");
     expect(calls.find(isAct)?.body).toEqual({ actionId: "approve" });
-    // The list reads To do again, which no longer holds the signal.
+    // The answer's audit entry reaches the app as a push on the `signal`
+    // topic, and the list reads To do again, which no longer holds the signal.
+    live.pushInvalidation("signal", [REVIEW.id]);
     await waitFor(() => {
       expect(getList().querySelector(`[data-signal-id="${REVIEW.id}"]`)).toBeNull();
     });
@@ -408,7 +420,7 @@ describe("Intake's keys", () => {
     });
 
     await userEvent.keyboard("{Escape}");
-    expect(screen.queryByRole("region", { name: "The open signal" })).toBeNull();
+    expect(isPaneShown()).toBe(false);
     expect(readSelected(router.state.location.search)).toBe(REVIEW.id);
     expect(document.activeElement).toBe(getRow(REVIEW));
 
@@ -445,6 +457,8 @@ describe("Intake's split", () => {
       DOMRect.fromRect({ x: 272, y: 0, width: 432, height: 800 }),
     );
     const handle = screen.getByRole("separator", { name: "Resize the list" });
+    // The split is 1168px wide and the pane keeps at least 400px of it.
+    expect(handle.getAttribute("aria-valuemax")).toBe("768");
     fireEvent.keyDown(handle, { key: "ArrowRight" });
     expect(handle.getAttribute("aria-valuenow")).toBe("448");
     expect(localStorage.getItem("hercule.intake.list-width")).toBe("448");
@@ -455,17 +469,26 @@ describe("Intake's split", () => {
   it("keeps the pane closed while the window is too narrow for it, and says why", async () => {
     stubElementSize(700, 800);
     await openIntake(`/intake?signal=${REVIEW.id}`);
-    expect(screen.queryByRole("region", { name: "The open signal" })).toBeNull();
-    const toggle = screen.getByRole("button", { name: "Widen the window to show the pane" });
+    expect(isPaneShown()).toBe(false);
+    const toggle = screen.getByRole("button", { name: "Signal pane" });
     expect(toggle.getAttribute("aria-disabled")).toBe("true");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.title).toBe("Widen the window to show the pane");
   });
 
   it("hides and shows the pane with the bar's button", async () => {
     await openIntake(`/intake?signal=${REVIEW.id}`);
     await findPane();
-    await userEvent.click(screen.getByRole("button", { name: "Hide the signal" }));
-    expect(screen.queryByRole("region", { name: "The open signal" })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Show the signal" }));
-    expect(await findPane()).toBeTruthy();
+    const toggle = screen.getByRole("button", { name: "Signal pane" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.title).toBe("Hide the signal  Esc");
+    await userEvent.click(toggle);
+    expect(isPaneShown()).toBe(false);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.title).toBe("Show the signal");
+    await userEvent.click(toggle);
+    await waitFor(() => {
+      expect(isPaneShown()).toBe(true);
+    });
   });
 });

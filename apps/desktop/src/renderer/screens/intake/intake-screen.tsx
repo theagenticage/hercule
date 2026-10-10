@@ -34,6 +34,8 @@ declare module "react" {
   interface CSSProperties {
     /** The width the user last gave Intake's list, as `<n>px`, before it is fitted to the split. */
     "--intake-list-width"?: string;
+    /** The list's width beside the open pane: `--intake-list-width` fitted to the split by CSS. */
+    "--intake-list-fitted"?: string;
   }
 }
 
@@ -80,6 +82,13 @@ export function IntakeScreen({
   const splitRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLElement>(null);
   const paneRef = useRef<SignalPaneHandle>(null);
+  // Read by `openSignal` when it runs, so `openSignal` keeps one identity
+  // while `J` and `K` change the selection, and the list's rows, which are
+  // memoized, do not draw again.
+  const selectedIdRef = useRef(selectedId);
+  useLayoutEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
   // `null` until the split is measured, which counts as fitting, so the pane
   // never flashes closed on the first frame.
   const [available, setAvailable] = useState<number | null>(null);
@@ -109,7 +118,7 @@ export function IntakeScreen({
   /** Selects `signalId` and shows the pane, as a click on its row does. */
   const openSignal = (signalId: string): void => {
     setDismissed(false);
-    if (signalId !== selectedId) onSelect(signalId);
+    if (signalId !== selectedIdRef.current) onSelect(signalId);
   };
 
   /** Puts the focus on the selected row, when the list draws it. */
@@ -167,13 +176,14 @@ export function IntakeScreen({
         if (fits) setFocusPaneFor(signalId);
         return;
       }
+      // The closed pane stays drawn, off screen, so these keys check that it shows.
       case "r":
         event.preventDefault();
-        paneRef.current?.openReply();
+        if (paneShown) paneRef.current?.openReply();
         return;
       case "o":
         event.preventDefault();
-        paneRef.current?.openOnSource();
+        if (paneShown) paneRef.current?.openOnSource();
         return;
       case "Escape":
         event.preventDefault();
@@ -192,17 +202,30 @@ export function IntakeScreen({
     return { left: list.left, listWidth: list.width, available: splitRef.current!.offsetWidth };
   };
 
+  /**
+   * Gives the list `listWidth` at once, with no React render and no
+   * transition: only opening and closing the pane animate the list's width.
+   * The new width is laid out before the transition is allowed again, so the
+   * change never starts one.
+   */
+  const resizeList = (listWidth: number): void => {
+    const split = splitRef.current!;
+    split.dataset.resizing = "";
+    split.style.setProperty("--intake-list-width", `${String(listWidth)}px`);
+    void listRef.current!.offsetWidth;
+    delete split.dataset.resizing;
+  };
+
   const startDrag = (event: PointerEvent<HTMLDivElement>): void => {
     const handle = event.currentTarget;
-    const list = listRef.current!;
     handle.setPointerCapture(event.pointerId);
     const split = measureSplit();
     let latest: number | undefined;
-    // Each move writes the width straight into the list's style, with no
-    // React render; only the end of the drag stores it, which renders once.
+    // Each move resizes the list straight in the page; only the end of the
+    // drag stores the width, which renders once.
     const move = (moved: globalThis.PointerEvent): void => {
       latest = fitIntakeListWidth(Math.round(moved.clientX - split.left), split.available);
-      list.style.setProperty("--intake-list-width", `${String(latest)}px`);
+      resizeList(latest);
       handle.setAttribute("aria-valuenow", String(latest));
     };
     const end = (): void => {
@@ -222,16 +245,20 @@ export function IntakeScreen({
       event.key === "ArrowRight" ? KEYBOARD_STEP : event.key === "ArrowLeft" ? -KEYBOARD_STEP : 0;
     if (step === 0) return;
     event.preventDefault();
+    // The split's key handler must not also move the selection.
+    event.stopPropagation();
     const split = measureSplit();
-    storeWidth(fitIntakeListWidth(Math.round(split.listWidth) + step, split.available));
+    const next = fitIntakeListWidth(Math.round(split.listWidth) + step, split.available);
+    resizeList(next);
+    storeWidth(next);
   };
 
-  const toggleLabel = !fits
+  const canToggle = fits && (paneShown || signals.length > 0);
+  const toggleTitle = !fits
     ? "Widen the window to show the pane"
     : paneShown
-      ? "Hide the signal"
+      ? "Hide the signal  Esc"
       : "Show the signal";
-  const canToggle = fits && (paneShown || signals.length > 0);
 
   return (
     <>
@@ -257,11 +284,14 @@ export function IntakeScreen({
           ))}
         </nav>
         <span className="spacer" />
+        {/* One name, with the pressed state telling whether the pane shows.
+            The tooltip, which screen readers read as the description, says
+            what a press does, or why the pane cannot show. */}
         <button
           type="button"
           className="icon-btn asks-pane-btn"
-          aria-label={toggleLabel}
-          title={fits && paneShown ? `${toggleLabel}  Esc` : toggleLabel}
+          aria-label="Signal pane"
+          title={toggleTitle}
           aria-pressed={paneShown}
           aria-disabled={!canToggle || undefined}
           onClick={() => {
@@ -274,23 +304,23 @@ export function IntakeScreen({
         </button>
       </header>
       {/* The keys are handled here, where every key press in the list and
-          the pane arrives, rather than on each row and answer. */}
-      <div ref={splitRef} className={paneShown ? "asks has-pane" : "asks"} onKeyDown={handleKeys}>
-        <section
-          ref={listRef}
-          className="asks-list"
-          aria-label="Signals"
-          style={
-            paneShown
-              ? {
-                  "--intake-list-width": `${String(width)}px`,
-                  // The same fit as `fitIntakeListWidth`, done by CSS against
-                  // the split's width, which only layout knows.
-                  width: `max(${String(MIN_INTAKE_LIST_WIDTH)}px, min(var(--intake-list-width), 100% - ${String(MIN_INTAKE_PANE_WIDTH)}px))`,
-                }
-              : undefined
-          }
-        >
+          the pane arrives, rather than on each row and answer.
+
+          While a signal is selected the pane stays drawn, even closed, so
+          it slides out as the list widens over it. The split clips it, and
+          `inert` keeps the focus and screen readers out of it. */}
+      <div
+        ref={splitRef}
+        className={paneShown ? "asks has-pane" : "asks"}
+        style={{
+          "--intake-list-width": `${String(width)}px`,
+          // The same fit as `fitIntakeListWidth`, done by CSS against the
+          // split's width, which only layout knows.
+          "--intake-list-fitted": `max(${String(MIN_INTAKE_LIST_WIDTH)}px, min(var(--intake-list-width), 100% - ${String(MIN_INTAKE_PANE_WIDTH)}px))`,
+        }}
+        onKeyDown={handleKeys}
+      >
+        <section ref={listRef} className="asks-list" aria-label="Signals">
           <IntakeList
             sections={sections}
             plugins={plugins}
@@ -303,31 +333,32 @@ export function IntakeScreen({
           />
         </section>
         {paneShown && (
-          <>
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize the list"
-              aria-valuenow={width}
-              aria-valuemin={MIN_INTAKE_LIST_WIDTH}
-              tabIndex={0}
-              className="asks-handle"
-              onPointerDown={startDrag}
-              onKeyDown={resizeWithKeys}
-            />
-            <SignalPane
-              key={selectedId}
-              signalId={selectedId}
-              listed={listed}
-              plugins={plugins}
-              timezone={timezone}
-              focusSuggestedOnOpen={focusPaneFor === selectedId}
-              onFocusedSuggested={() => {
-                setFocusPaneFor(null);
-              }}
-              ref={paneRef}
-            />
-          </>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize the list"
+            aria-valuenow={available === null ? width : fitIntakeListWidth(width, available)}
+            aria-valuemin={MIN_INTAKE_LIST_WIDTH}
+            aria-valuemax={available === null ? undefined : available - MIN_INTAKE_PANE_WIDTH}
+            tabIndex={0}
+            className="asks-handle"
+            onPointerDown={startDrag}
+            onKeyDown={resizeWithKeys}
+          />
+        )}
+        {selectedId !== null && (
+          <SignalPane
+            key={selectedId}
+            signalId={selectedId}
+            listed={listed}
+            timezone={timezone}
+            shown={paneShown}
+            focusSuggestedOnOpen={focusPaneFor === selectedId}
+            onFocusedSuggested={() => {
+              setFocusPaneFor(null);
+            }}
+            ref={paneRef}
+          />
         )}
       </div>
     </>

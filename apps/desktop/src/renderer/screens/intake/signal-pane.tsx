@@ -4,7 +4,13 @@
  */
 import { useEffect, useId, useImperativeHandle, useRef, useState, type JSX, type Ref } from "react";
 import { flushSync } from "react-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import type { Signal } from "@hercule/contract";
 import {
@@ -19,12 +25,10 @@ import {
   findSuggestedAnswer,
   formatMessageTime,
   nameSignalSource,
-  queryKeys,
   readErrorMessage,
   parseSignalPluginId,
-  type PluginIdentity,
 } from "@hercule/client-core";
-import { eventQuery, signalQuery } from "../../app/queries";
+import { eventQuery, pluginsQuery, signalQuery } from "../../app/queries";
 import { CheckIcon } from "../../icons/check";
 import { ExternalIcon } from "../../icons/external";
 import { SignalAnswers, type AnswerFailure } from "./signal-answers";
@@ -33,8 +37,6 @@ import { SourceMark } from "./source-mark";
 
 /** What Intake's keys do in the pane, called by the screen's key handler. */
 export interface SignalPaneHandle {
-  /** Puts the focus on the suggested answer: its button, or a suggested reply's text box. */
-  readonly focusSuggested: () => void;
   /** Opens the first Reply box and puts the focus in it. Does nothing when the signal has none. */
   readonly openReply: () => void;
   /** Opens the signal on its source, in the default browser. Does nothing when its address is not known. */
@@ -46,6 +48,10 @@ export interface SignalPaneHandle {
  * its read, the pane shows `listed`, the signal as the To do list holds it,
  * so it opens at once; the read adds the describe lines of its answers.
  *
+ * `shown` is false while the pane is closed. The pane stays drawn then, so
+ * closing it can slide it out, and it is made inert: off screen, it takes no
+ * focus and screen readers skip it.
+ *
  * `focusSuggestedOnOpen` puts the focus on the suggested answer as soon as
  * the pane shows the signal, then calls `onFocusedSuggested`. `ref` gives
  * the screen's keys the pane's moves.
@@ -53,16 +59,16 @@ export interface SignalPaneHandle {
 export function SignalPane({
   signalId,
   listed,
-  plugins,
   timezone,
+  shown,
   focusSuggestedOnOpen,
   onFocusedSuggested,
   ref,
 }: {
   readonly signalId: string;
   readonly listed: Signal | undefined;
-  readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly timezone: string;
+  readonly shown: boolean;
   readonly focusSuggestedOnOpen: boolean;
   readonly onFocusedSuggested: () => void;
   readonly ref: Ref<SignalPaneHandle>;
@@ -70,12 +76,11 @@ export function SignalPane({
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const read = useQuery({ ...signalQuery(client, signalId), placeholderData: () => listed });
   return (
-    <section className="asks-detail" aria-label="The open signal">
+    <section className="asks-detail" aria-label="The open signal" inert={!shown}>
       {read.data !== undefined ? (
         <SignalDetail
           key={signalId}
           signal={read.data}
-          plugins={plugins}
           timezone={timezone}
           focusSuggestedOnOpen={focusSuggestedOnOpen}
           onFocusedSuggested={onFocusedSuggested}
@@ -103,14 +108,12 @@ export function SignalPane({
  */
 function SignalDetail({
   signal,
-  plugins,
   timezone,
   focusSuggestedOnOpen,
   onFocusedSuggested,
   ref,
 }: {
   readonly signal: Signal;
-  readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly timezone: string;
   readonly focusSuggestedOnOpen: boolean;
   readonly onFocusedSuggested: () => void;
@@ -141,20 +144,22 @@ function SignalDetail({
     },
     onSuccess: (acted) => {
       setActedHere(true);
+      // The lists need no read here: the answer writes an audit entry on the
+      // `signal` topic, and its live push reads every signal list again.
       queryClient.setQueryData(signalQuery(client, signal.id).queryKey, acted);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.signals() });
     },
     onError: (error, input) => {
       setFailure({ actionId: input.actionId, message: readErrorMessage(error) });
     },
   });
 
+  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const origin = signal.origin;
-  const event = useQuery({
-    ...eventQuery(client, origin.type === "event" ? origin.eventId : 0),
-    enabled: origin.type === "event",
-  });
-  const sourceUrl = origin.type === "event" ? (event.data?.url ?? null) : null;
+  // Only a signal raised from an event has an event to read, so the list of
+  // reads is empty for any other signal.
+  const eventReads = origin.type === "event" ? [eventQuery(client, origin.eventId)] : [];
+  const [event] = useQueries({ queries: eventReads });
+  const sourceUrl = event?.data?.url ?? null;
   const sourceName = nameSignalSource(signal, plugins);
 
   /** Puts the focus in the Reply box of `actionId`, opening it first. */
@@ -182,7 +187,6 @@ function SignalDetail({
 
   const reply = findReplyAnswer(answers);
   useImperativeHandle(ref, () => ({
-    focusSuggested,
     openReply: () => {
       if (reply !== undefined && signal.status === "open") focusReply(reply.action.id);
     },
