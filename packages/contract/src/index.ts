@@ -244,6 +244,8 @@ export {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENT_NAME_LENGTH,
   MAX_ATTACHMENTS_PER_INPUT,
+  StoredToolImage,
+  ToolResultImage,
 } from "./groups/attachment";
 export {
   INPUT_SORT_FIELDS,

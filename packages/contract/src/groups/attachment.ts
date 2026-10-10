@@ -17,11 +17,14 @@ import { Id } from "../ids";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
 
-/** Re-exported from the protocol, where the runner reads it, so both use the same list. */
-export { IMAGE_MIME_TYPES, ImageMimeType } from "@hercule/protocol";
-
-/** The largest image an upload accepts: 10 MiB. */
-export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+/** Re-exported from the protocol, where the runner reads them, so both use the same values. */
+export {
+  IMAGE_MIME_TYPES,
+  ImageMimeType,
+  MAX_ATTACHMENT_BYTES,
+  StoredToolImage,
+  ToolResultImage,
+} from "@hercule/protocol";
 
 /** The most images one input may carry. */
 export const MAX_ATTACHMENTS_PER_INPUT = 10;
