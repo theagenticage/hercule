@@ -70,6 +70,11 @@ export interface TriggerRow {
    * for it, so it has no schedule and nothing to pause.
    */
   readonly status: WorkflowStatus;
+  /**
+   * Whether the start trigger starts runs, which its switch shows: false
+   * while it is paused. `undefined` for a signal, which cannot be paused.
+   */
+  readonly isActive: boolean | undefined;
 }
 
 /** One input, as its row in the Inputs tab shows it. */
@@ -99,9 +104,9 @@ const countNoun = (count: number, noun: string): string | undefined =>
  *   on, with "paused", "error", or when it next fires;
  * - "On demand" instead when it has no start trigger, so only the user, an
  *   agent or another run starts it;
- * - what its steps run, "5 agents · 2 actions · 1 signal";
- * - "Off" when the workflow is disabled.
+ * - what its steps run, "5 agents · 2 actions · 1 signal".
  *
+ * Whether the workflow is enabled is its switch's to show, not a chip's.
  * Times are formatted in `timezone`, relative to `now`.
  */
 export const buildWorkflowChips = (
@@ -140,7 +145,6 @@ export const buildWorkflowChips = (
       ? startChips
       : [{ key: "on-demand", source: undefined, text: "On demand", tone: undefined }]),
     { key: "steps", source: undefined, text: counts.join(" · "), tone: undefined },
-    ...(enabled ? [] : [{ key: "off", source: undefined, text: "Off", tone: undefined }]),
   ];
 };
 
@@ -262,6 +266,7 @@ export const buildTriggerRows = (
         firesOnText:
           "schedule" in trigger.on ? describeSchedule(trigger.on) : describeTriggerOn(trigger.on),
         status,
+        isActive: trigger.kind === "start" ? trigger.status !== "paused" : undefined,
       };
     });
 };

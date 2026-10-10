@@ -116,6 +116,7 @@ import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
 import { Route as WorkflowsRoute } from "../routes/_connected/_shell/workflows/route";
 import { Route as WorkflowRoute } from "../routes/_connected/_shell/workflows/$workflowId";
+import { Route as RunRoute } from "../routes/_connected/_shell/runs/$runId";
 import { computeTimelineDay, computeTimelineReadRange } from "../screens/workflows/run-timeline";
 import {
   runQuery,
@@ -128,6 +129,7 @@ import {
   workflowRunningRunsQuery,
   workflowRunsBetweenQuery,
   workflowRunsQuery,
+  workflowTriggersQuery,
 } from "../screens/workflows/workflow-queries";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
@@ -410,8 +412,12 @@ const seedQueryCache = (
     );
     queryClient.setQueryData(agentsQuery(client).queryKey, workflows.agents);
     queryClient.setQueryData(workflowActionsQuery(client).queryKey, workflows.workflowActions);
-    for (const workflow of workflows.definitions) {
-      queryClient.setQueryData(workflowQuery(workflow.id).queryKey, workflow);
+    for (const { workflow } of workflows.storedWorkflows) {
+      queryClient.setQueryData(workflowQuery(client, workflow.id).queryKey, workflow);
+      queryClient.setQueryData(
+        workflowTriggersQuery(client, workflow.id).queryKey,
+        workflows.triggers.filter((trigger) => trigger.workflowId === workflow.id),
+      );
       // One page holds every run of the workflow.
       const summaries = workflows.runSummaries.get(workflow.id) ?? [];
       queryClient.setQueryData(workflowRunsQuery(client, workflow.id).queryKey, {
@@ -575,6 +581,12 @@ const buildRouter = (
     getParentRoute: () => workflowsRoute,
     loader: undefined,
   } as never);
+  const runRoute = RunRoute.update({
+    id: "/runs/$runId",
+    path: "/runs/$runId",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
   const routeTree = rootRoute.addChildren([
     connectedRoute.addChildren([
       shellRoute.addChildren([
@@ -599,6 +611,7 @@ const buildRouter = (
           permissionProfileSettingsRoute,
         ]),
         workflowsRoute.addChildren([workflowRoute]),
+        runRoute,
       ]),
     ]),
   ]);
@@ -658,9 +671,12 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
       "Settings > Permission profiles drew no list and no profile. Check the page's console for the error.",
     );
   }
-  if (screens.workflows !== undefined && document.querySelector(".wl-row, .wf-open") === null) {
+  if (
+    screens.workflows !== undefined &&
+    document.querySelector(".wl-row, .wf-open, .run-page") === null
+  ) {
     throw new Error(
-      "Workflows drew no workflow row and no workflow. Check the page's console for the error.",
+      "Workflows drew no workflow row, no workflow and no run. Check the page's console for the error.",
     );
   }
   if (screens.appearanceSettings !== undefined && document.querySelector(".themes") === null) {
@@ -838,13 +854,14 @@ export async function mountAppearanceSettingsSpecimen(
 
 /**
  * PROTOTYPE. Applies the URL's theme and draws the shell into `#root` from
- * `records`, with Workflows open at `path`: `/workflows` for the list, or
- * `/workflows/<id>` for one workflow beside it. The main pane shows the
- * app's real Workflows routes, which read what `workflows` holds. Returns
- * the client and the query cache the page reads, so the page can change a
- * record while it shows, once a workflow row or the open workflow is in the
- * document. Fails when the page has no `#root`, draws neither, or tries to
- * read a record the cache does not hold.
+ * `records`, with Workflows open at `path`: `/workflows` for the list,
+ * `/workflows/<id>` for one workflow beside it, or `/runs/<id>` for one run.
+ * The main pane shows the app's real Workflows and run routes, which read
+ * what `workflows` holds. Returns the client and the query cache the page
+ * reads, so the page can change a record while it shows, once a workflow
+ * row, the open workflow or the run is in the document. Fails when the page
+ * has no `#root`, draws none of them, or tries to read a record the cache
+ * does not hold.
  */
 export async function mountWorkflowsSpecimen(
   records: SidebarRecords,

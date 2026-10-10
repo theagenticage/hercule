@@ -38,8 +38,7 @@ function buildBoard(bars: ReadonlyArray<TimelineBar>): JSX.Element {
       bars={bars}
       trackCount={1}
       fires={[]}
-      drawnRunId={undefined}
-      onPickRun={() => undefined}
+      onOpenRun={() => undefined}
       emptyText="No runs"
     />
   );

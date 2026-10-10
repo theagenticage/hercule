@@ -208,6 +208,19 @@
   font-size: var(--t-12);
   font-weight: var(--w-regular);
 }
+/* A button inside a pill, such as a run's Re-run. The book's `.pill-btn`. */
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-weight: var(--w-medium);
+}
+.pill-btn:hover {
+  background: var(--hover);
+}
 /* A tab in a page's own bar, such as the tabs of an open workflow. The book's
    `.tabs` and `.tab`; the background fades as the pill's tab's does. The
    `small` after its label is a count. */

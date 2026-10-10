@@ -21,13 +21,15 @@ import { applySheetTheme, markSheetReady } from "./sheet-page";
 import { SPECIMEN_INSTANCES } from "./sidebar-fixture";
 import { buildShipReleaseFrames, SHIP_RELEASE_ID, WORKFLOWS_RECORDS } from "./workflows-fixture";
 
-const { definitions, triggers, runs, runSessions, agents, workflowActions } = WORKFLOWS_RECORDS;
+const { storedWorkflows, triggers, runs, runSessions, agents, workflowActions } = WORKFLOWS_RECORDS;
 
 /** Returns the definition of the workflow named `name`. */
 const findDefinition = (name: string) =>
-  definitions.find((workflow) => workflow.definition.name === name)!.definition;
+  storedWorkflows.find(({ definition }) => definition.name === name)!.definition;
 
-const shipRelease = definitions.find((workflow) => workflow.id === SHIP_RELEASE_ID)!.definition;
+const shipRelease = storedWorkflows.find(
+  ({ workflow }) => workflow.id === SHIP_RELEASE_ID,
+)!.definition;
 const shipReleaseRuns = runs.filter((run) => run.workflowId === SHIP_RELEASE_ID);
 
 /**
@@ -51,7 +53,15 @@ function Graph({
       drawing={drawing}
       details={buildNodeDetails(
         drawing,
-        { definition, run, sessions, triggers, agents, instances: SPECIMEN_INSTANCES },
+        {
+          definition,
+          run,
+          sessions,
+          triggers,
+          agents,
+          actions: workflowActions,
+          instances: SPECIMEN_INSTANCES,
+        },
         "UTC",
         new Date(),
       )}
@@ -123,7 +133,7 @@ root.render(
     <Motion ending={motion} />
   ) : (
     <div style={{ display: "grid", gap: 1 }}>
-      <Cell caption="No run picked" name="Ship release" run={undefined} />
+      <Cell caption="The workflow, with no run" name="Ship release" run={undefined} />
       <Cell caption="Newest run: security asks you" name="Ship release" run={shipReleaseRuns[0]} />
       <Cell
         caption="Waiting for the pull request to merge"
@@ -135,8 +145,8 @@ root.render(
         name="Ship release"
         run={shipReleaseRuns[2]}
       />
-      <Cell caption="No run picked" name="Fix bug" run={undefined} />
-      <Cell caption="No run picked" name="Investigate" run={undefined} />
+      <Cell caption="The workflow, with no run" name="Fix bug" run={undefined} />
+      <Cell caption="The workflow, with no run" name="Investigate" run={undefined} />
     </div>
   ),
 );

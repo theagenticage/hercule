@@ -129,13 +129,9 @@ describe("buildWorkflowChips", () => {
     ]);
   });
 
-  it("says a workflow with no start trigger starts on demand, and ends with Off when it is disabled", () => {
+  it("says a workflow with no start trigger starts on demand, enabled or not", () => {
     const chips = buildWorkflowChips(RELEASE, false, [MERGED], "UTC", NOW);
-    expect(chips.map((chip) => chip.text)).toEqual([
-      "On demand",
-      "2 agents · 1 action · 1 signal",
-      "Off",
-    ]);
+    expect(chips.map((chip) => chip.text)).toEqual(["On demand", "2 agents · 1 action · 1 signal"]);
   });
 
   it("leaves out when a disabled workflow's trigger would next fire", () => {
@@ -294,6 +290,18 @@ describe("buildTriggerRows", () => {
       tone: "muted",
     });
     expect(buildTriggerRows(RELEASE, false, [FRIDAY], "UTC", NOW)[0]?.status.text).toBe("Off");
+  });
+
+  it("gives a start trigger's switch its state, and a signal no switch", () => {
+    const rows = buildTriggerRows(
+      RELEASE,
+      false,
+      [{ ...FRIDAY, status: "paused" }, MERGED],
+      "UTC",
+      NOW,
+    );
+    expect(rows.map((row) => row.isActive)).toEqual([false, undefined]);
+    expect(buildTriggerRows(RELEASE, false, [FRIDAY], "UTC", NOW)[0]?.isActive).toBe(true);
   });
 
   it("adds the scheduled times a trigger missed after when it next fires", () => {

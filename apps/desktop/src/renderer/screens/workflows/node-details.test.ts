@@ -193,6 +193,7 @@ const describeNode = (
     sessions,
     triggers: TRIGGERS,
     agents: AGENTS,
+    actions: [],
     instances: INSTANCES,
   };
   return buildNodeDetails(drawing, records, "UTC", NOW).get(id)!;
@@ -215,7 +216,7 @@ describe("buildNodeDetails", () => {
       Tokens: "41.7k",
       "Tool calls": "31",
       Cost: "$0.42",
-      Started: "09:06",
+      Started: "Today 09:06",
       "Running for": "4m 0s",
     });
   });
@@ -279,7 +280,7 @@ describe("buildNodeDetails", () => {
     const openPr = describeNode("open_pr", run);
     expect(openPr.status).toEqual({ mark: "failed", text: "Failed", tone: "fail" });
     expect(openPr.facts).toEqual([
-      { label: "Started", value: "09:00", isCode: false, tone: undefined },
+      { label: "Started", value: "Today 09:00", isCode: false, tone: undefined },
       { label: "Took", value: "2m 30s", isCode: false, tone: undefined },
       { label: "Input", value: '{"title":"Ship 1.4"}', isCode: true, tone: undefined },
       {
@@ -319,18 +320,32 @@ describe("buildNodeDetails", () => {
     });
   });
 
-  it("shows only what the definition says when the graph draws no run", () => {
+  it("shows what a step's definition sets when the graph draws no run", () => {
     const fix = describeNode("fix", undefined);
     expect(fix.status).toBeUndefined();
-    // The step names its model, and no catalog names it, so the slug shows.
+    expect(fix.detail).toBe("Agent step");
+    // `a-coder` is no Agent, so its id shows; no catalog names the step's
+    // model, so its slug shows.
     expect(fix.facts).toEqual([
+      { label: "Agent", value: "a-coder", isCode: false, tone: undefined },
       { label: "Model", value: "claude-opus-5-5", isCode: false, tone: undefined },
+      { label: "Session", value: "A new one each time it runs", isCode: false, tone: undefined },
     ]);
     expect(fix.iterations).toEqual([]);
     expect(fix.sessionId).toBeUndefined();
   });
 
-  it("names the Agent's model when neither the step nor a session names one", () => {
-    expect(listFacts(describeNode("review", undefined)).Model).toBe("Claude Opus 5");
+  it("says which values a step takes from its Agent", () => {
+    expect(listFacts(describeNode("review", undefined))).toEqual({
+      Agent: "Reviewer",
+      Model: "Claude Opus 5, from the Agent",
+      Access: "Approval required, from the Agent",
+    });
+  });
+
+  it("names an action step's action, by its id when no action has it", () => {
+    const openPr = describeNode("open_pr", undefined);
+    expect(openPr.detail).toBe("Action step");
+    expect(listFacts(openPr)).toEqual({ Action: "github/pr.create" });
   });
 });

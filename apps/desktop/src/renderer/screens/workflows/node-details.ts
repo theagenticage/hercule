@@ -1,14 +1,21 @@
 /**
- * PROTOTYPE. Decides what the card of a node on the workflow graph shows:
- * where the drawn run is at the node, the facts about it, and the session
- * whose transcript the card opens. The Workflows ticket moves it into
- * `@hercule/client-core`, beside `graph-model.ts`.
+ * PROTOTYPE. Decides what the card of a node on a graph shows.
+ *
+ * - On a workflow's page the graph draws no run, and a card shows what the
+ *   node does: one fact per field its definition sets, as label and value.
+ *   Those rows are where a later change edits the definition in place.
+ * - On a run's page a card shows where the run is at the node, what it
+ *   used, and the session whose transcript it opens.
+ *
+ * The Workflows ticket moves it into `@hercule/client-core`, beside
+ * `graph-model.ts`.
  */
 import {
   countUsedTokens,
   describeTriggerOn,
   findModelName,
   findOldestOpenRequest,
+  formatAccessMode,
   formatElapsed,
   formatRequestQuestion,
   formatTokenCount,
@@ -23,6 +30,7 @@ import type {
   StepRecord,
   Trigger,
   Usage,
+  WorkflowAction,
   WorkflowDefinition,
 } from "@hercule/contract";
 import type { MarkState } from "../../marks/mark-state";
@@ -33,7 +41,7 @@ import {
   type WorkflowGraphDrawing,
 } from "./graph-model";
 import { readToolCalls } from "./proposed-contract";
-import { formatListTime } from "./workflow-rows";
+import { formatDayAndClock, formatListTime } from "./workflow-rows";
 
 /** One fact on a node's card: a label, and its value on one line. */
 export interface NodeFact {
@@ -72,7 +80,11 @@ export interface NodeStatus {
 export interface NodeDetails {
   readonly id: string;
   readonly kind: GraphNode["kind"];
-  /** The card's subtitle: the Agent, the action, or what the trigger fires on. */
+  /**
+   * The card's subtitle. With no run, what kind of node it is, "Agent step",
+   * because the facts below name the Agent. With a run, the Agent, the
+   * action, or what the trigger fires on, as the node on the graph says.
+   */
   readonly detail: string;
   /** `undefined` when the graph draws no run. */
   readonly status: NodeStatus | undefined;
@@ -118,6 +130,14 @@ const RECORD_STATES: Readonly<
   skipped: { mark: "idle", text: "Skipped" },
 };
 
+/** What each kind of node is called, the subtitle of its card when the graph draws no run. */
+const KIND_WORDS: Readonly<Record<GraphNode["kind"], string>> = {
+  agent: "Agent step",
+  action: "Action step",
+  start: "Start trigger",
+  signal: "Signal trigger",
+};
+
 /** The row of a running iteration whose session waits on the user. */
 const WAITING_RECORD = { mark: "waiting", text: "Waiting on you" } as const;
 
@@ -128,6 +148,44 @@ const buildFact = (label: string, value: string): NodeFact => ({
   isCode: false,
   tone: undefined,
 });
+
+/** Builds a fact in the mono face, for an expression or data. */
+const buildCodeFact = (label: string, value: string): NodeFact => ({
+  label,
+  value,
+  isCode: true,
+  tone: undefined,
+});
+
+/** One step of a workflow definition. */
+type Step = WorkflowDefinition["steps"][number];
+
+/**
+ * Returns the facts every step can set about where it sits in the graph:
+ * the condition it runs on, whether it waits for every edge into it, and
+ * whether the run ends when it completes.
+ */
+const listStepGraphFacts = (step: Step): ReadonlyArray<NodeFact> => [
+  ...(step.condition === undefined ? [] : [buildCodeFact("Runs if", step.condition)]),
+  ...(step.join === "all" ? [buildFact("Waits for", "Every step before it")] : []),
+  ...(step.terminal === true ? [buildFact("Ends the run", "When it completes")] : []),
+];
+
+/**
+ * Returns the names of the fields an output schema declares, "verdict,
+ * notes", or `undefined` for a schema that declares none by name.
+ */
+const listOutputFields = (schema: unknown): string | undefined => {
+  if (typeof schema !== "object" || schema === null || !("properties" in schema)) return undefined;
+  const { properties } = schema;
+  if (typeof properties !== "object" || properties === null) return undefined;
+  const names = Object.keys(properties);
+  return names.length === 0 ? undefined : names.join(", ");
+};
+
+/** Returns a param's value as one line: a string as written, anything else as JSON. */
+const formatParam = (value: unknown): string =>
+  typeof value === "string" ? value : JSON.stringify(value);
 
 /**
  * Returns a step's output or input as one line: a string as it is, anything
@@ -188,7 +246,7 @@ const listRecordFacts = (
   return [
     ...(startedAt === undefined
       ? []
-      : [buildFact("Started", formatListTime(new Date(startedAt), timezone, now, "past"))]),
+      : [buildFact("Started", formatDayAndClock(new Date(startedAt), timezone, now))]),
     ...(elapsed === undefined
       ? []
       : [buildFact(finishedAt === undefined ? "Running for" : "Took", formatElapsed(elapsed))]),
@@ -214,8 +272,9 @@ const describeNodeStatus = (node: GraphNode): NodeStatus | undefined => {
   };
 };
 
-/** The records the cards of a workflow's graph are built from. */
+/** The records the cards of a graph are built from. */
 export interface NodeRecords {
+  /** The definition the graph draws: the workflow's own, or the plan a run froze. */
   readonly definition: WorkflowDefinition;
   /** The run the graph draws, or `undefined` for none. */
   readonly run: Run | undefined;
@@ -223,8 +282,10 @@ export interface NodeRecords {
   readonly sessions: ReadonlyArray<Session>;
   /** The workflow's triggers, which say when each start trigger fires next and fired last. */
   readonly triggers: ReadonlyArray<Trigger>;
-  /** The Agents, whose model an agent step runs on when neither the step nor a session names one. */
+  /** The Agents, which name an agent step's Agent, and its model and access mode when the step sets none. */
   readonly agents: ReadonlyArray<Agent>;
+  /** The workflow actions, which name an action step's action. */
+  readonly actions: ReadonlyArray<WorkflowAction>;
   /** The provider instances, whose catalogs name each model. */
   readonly instances: ReadonlyArray<ProviderInstance>;
 }
@@ -233,13 +294,15 @@ export interface NodeRecords {
  * Builds the card of every node in `drawing` from `records`, by node id.
  * Times are formatted in `timezone`, relative to `now`.
  *
- * A step's facts describe its latest iteration, and its tokens and tool calls
- * add up every session its iterations drove. Its model is the one its latest
- * session runs on; with no session, the one the step or its Agent names.
+ * With no run, a step's facts are the fields its definition sets, and a
+ * value the step takes from its Agent says so. With a run, a step's facts
+ * describe its latest iteration, and its tokens and tool calls add up every
+ * session its iterations drove; its model is the one its latest session runs
+ * on, and with no session, the one the step or its Agent names.
  */
 export const buildNodeDetails = (
   drawing: WorkflowGraphDrawing,
-  { definition, run, sessions, triggers, agents, instances }: NodeRecords,
+  { definition, run, sessions, triggers, agents, actions, instances }: NodeRecords,
   timezone: string,
   now: Date,
 ): ReadonlyMap<string, NodeDetails> => {
@@ -264,6 +327,50 @@ export const buildNodeDetails = (
     return model === undefined ? undefined : findModelName(findInstance(agent?.instanceId), model);
   };
 
+  /**
+   * Returns what `step` does, one fact per field its definition sets, in
+   * the order a person reads a step: who runs it, on what, and where it
+   * sits in the graph. An agent step's prompt is not a fact: the card shows
+   * it in a section of its own.
+   */
+  const listStepFacts = (step: Step): ReadonlyArray<NodeFact> => {
+    if (step.kind === "action") {
+      const action = actions.find((each) => each.id === step.action);
+      return [
+        buildFact("Action", action?.displayName ?? step.action),
+        ...Object.entries(step.params ?? {}).map(([name, value]) =>
+          buildCodeFact(name, formatParam(value)),
+        ),
+        ...listStepGraphFacts(step),
+      ];
+    }
+    const agent = agents.find((each) => each.id === step.agent);
+    const model = nameStepModel(step, undefined);
+    const accessMode = step.accessMode ?? agent?.accessMode;
+    const outputFields = listOutputFields(step.outputSchema);
+    // A value the step leaves to its Agent says so, because changing it on
+    // the Agent changes it here too.
+    const fromAgent = (value: string, isOwn: boolean): string =>
+      isOwn ? value : `${value}, from the Agent`;
+    return [
+      buildFact("Agent", agent?.name ?? step.agent),
+      ...(model === undefined
+        ? []
+        : [buildFact("Model", fromAgent(model, step.model !== undefined))]),
+      ...(accessMode === undefined
+        ? []
+        : [
+            buildFact(
+              "Access",
+              fromAgent(formatAccessMode(accessMode), step.accessMode !== undefined),
+            ),
+          ]),
+      ...(step.freshSession === true ? [buildFact("Session", "A new one each time it runs")] : []),
+      ...(outputFields === undefined ? [] : [buildCodeFact("Returns", outputFields)]),
+      ...listStepGraphFacts(step),
+    ];
+  };
+
   const describeNode = (node: GraphNode): NodeDetails => {
     const records = run?.steps.filter((record) => record.stepId === node.id) ?? [];
     const latest = records.at(-1);
@@ -279,7 +386,8 @@ export const buildNodeDetails = (
     const trigger = declaredTriggers.get(node.id);
 
     const facts: Array<NodeFact> = [];
-    if (step?.kind === "agent") {
+    if (run === undefined && step !== undefined) facts.push(...listStepFacts(step));
+    if (run !== undefined && step?.kind === "agent") {
       const model = nameStepModel(step, latestSession);
       if (model !== undefined) facts.push(buildFact("Model", model));
       if (stepSessions.length > 0) {
@@ -302,7 +410,8 @@ export const buildNodeDetails = (
       if (!("schedule" in trigger.on) && trigger.on.filter !== undefined) {
         facts.push({ label: "Filter", value: trigger.on.filter, isCode: true, tone: undefined });
       }
-      if (record?.nextFireAt !== undefined) {
+      if (record?.status === "paused") facts.push(buildFact("Status", "Paused"));
+      if (record?.nextFireAt !== undefined && record.status !== "paused") {
         facts.push(
           buildFact("Next", formatListTime(new Date(record.nextFireAt), timezone, now, "future")),
         );
@@ -350,7 +459,7 @@ export const buildNodeDetails = (
     return {
       id: node.id,
       kind: node.kind,
-      detail: node.detail,
+      detail: run === undefined ? KIND_WORDS[node.kind] : node.detail,
       status: describeNodeStatus(node),
       question: request === null ? undefined : formatRequestQuestion(request),
       facts,

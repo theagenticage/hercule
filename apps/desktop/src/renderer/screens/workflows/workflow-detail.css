@@ -29,11 +29,42 @@
 }
 
 /* The book's Intake `.lead h2`, as the page's heading, and its `.gist`. */
-.wfd-lead > h1 {
+.wfd-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin: 8px 0 6px;
+}
+.wfd-name > h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
   font-size: var(--t-18);
   font-weight: var(--w-bold);
   letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The workflow's switch, at the heading's end, as the book puts the
+   Heartbeat's switch at the end of its section's heading
+   (settings-assistants.html, `.set-sec h2 .toggle`). Its label is a
+   setting row's in the second line's size (`.set-label`). */
+.wfd-switch {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* Not in the book, which draws no failed save: why a switch's save failed,
+   under its row. Drawn as Settings draws one, `.set-err`. */
+.wfd-err {
+  margin: 0 0 10px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
 }
 .wfd-gist {
   margin: 0 0 14px;
@@ -55,31 +86,6 @@
   flex: none;
 }
 
-/* Which run the graph draws: the book's `.section-h`, then the run's mark,
-   status and time on the same line. */
-.wfd-drawn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 30px;
-  margin-top: 24px;
-}
-.wfd-drawn > .mark {
-  flex: none;
-}
-.wfd-drawn > .wl-status {
-  min-width: 0;
-}
-.wfd-drawn-time {
-  flex: none;
-  color: var(--faint);
-  font-size: var(--t-12);
-  font-variant-numeric: tabular-nums;
-}
-.wfd-drawn > .btn {
-  flex: none;
-  margin-left: auto;
-}
 .wfd-graph {
   margin: 8px 0 20px;
 }
@@ -131,10 +137,10 @@ button.wl-trow {
   gap: 14px;
 }
 /* The Triggers tab: the clock or the bolt, the trigger's id, what it does,
-   what it fires on, and its state. */
+   what it fires on, its state, and a start trigger's switch. */
 .wfd-triggers {
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) 104px minmax(0, 1.4fr) minmax(0, 1.2fr);
+  grid-template-columns: 14px minmax(0, 1fr) 104px minmax(0, 1.4fr) minmax(0, 1.2fr) 36px;
   align-items: center;
   gap: 14px;
 }
@@ -179,7 +185,7 @@ button.wl-trow {
     grid-template-columns: 14px minmax(0, 1fr) 64px 72px;
   }
   .wfd-triggers {
-    grid-template-columns: 14px minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.2fr);
+    grid-template-columns: 14px minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.2fr) 36px;
   }
   :is(.wfd-runs > .wfd-by, .wfd-triggers > .wfd-does) {
     display: none;

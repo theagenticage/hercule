@@ -7,7 +7,7 @@ import { buildShipReleaseFrames, SHIP_RELEASE_ID, WORKFLOWS_RECORDS } from "./wo
 
 describe("the Workflows specimen's fixture", () => {
   it("holds definitions the controller would accept", () => {
-    for (const { definition } of WORKFLOWS_RECORDS.definitions) {
+    for (const { definition } of WORKFLOWS_RECORDS.storedWorkflows) {
       const decoded = decodeWorkflowDefinition(definition);
       expect(decoded, definition.name).toMatchObject({ _tag: "Success" });
     }

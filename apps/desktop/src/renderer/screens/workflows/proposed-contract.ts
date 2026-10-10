@@ -3,18 +3,13 @@
  * the prototype can draw them before the contract has them. The Workflows
  * ticket moves each one into `@hercule/contract`, and this file goes away.
  *
- * Everything else the page reads already exists: `trigger.query` gives each
- * trigger with its next fire time, `run.query` a workflow's runs, `run.read`
- * one run with its plan and step records, and `session.query` with `runId`
- * the sessions a run's agent steps started, with their open Requests.
+ * Everything else the pages read already exists: `workflow.read` gives a
+ * workflow's source, which the client parses, `trigger.query` each trigger
+ * with its next fire time, `run.query` a workflow's runs, `run.read` one run
+ * with its plan and step records, and `session.query` with `runId` the
+ * sessions a run's agent steps started, with their open Requests.
  */
-import type {
-  RunStatus,
-  Session,
-  Workflow,
-  WorkflowDefinition,
-  WorkflowSummary,
-} from "@hercule/contract";
+import type { RunStatus, Session, WorkflowSummary } from "@hercule/contract";
 
 /**
  * One of a workflow's latest runs, as its row in the workflow list shows it.
@@ -61,16 +56,6 @@ export interface WorkflowListEntry extends WorkflowSummary {
 
 /** The most runs `WorkflowListEntry.recentRuns` holds. */
 export const RECENT_RUN_LIMIT = 20;
-
-/**
- * A workflow with its source parsed. Proposed as a new field on what
- * `workflow.read` returns, so a client draws the graph without parsing YAML.
- * A stored workflow always parses: the controller refuses to save one that
- * does not.
- */
-export interface WorkflowWithDefinition extends Workflow {
-  readonly definition: WorkflowDefinition;
-}
 
 /**
  * A session, with how many tool calls it made. Proposed as a new field on

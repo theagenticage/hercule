@@ -378,8 +378,8 @@ export const assistantsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Checks whether a failed read of a thread's records, or of an assistant's
- * current session, is worth trying again. Returns `true` for the first three
+ * Checks whether a failed read of a thread's records, of an assistant's
+ * current session, or of a workflow or a run, is worth trying again. Returns `true` for the first three
  * failures that got no answer from the controller, such as a dropped
  * connection, and `false` for an `ApiError`.
  *
@@ -388,7 +388,7 @@ export const assistantsQuery = (client: HerculeClient) =>
  * forbidden stays forbidden. The not-found screen and the render failure then
  * show at once, rather than after several seconds of retries.
  */
-const isWorthRetrying = (failureCount: number, error: Error): boolean =>
+export const isWorthRetrying = (failureCount: number, error: Error): boolean =>
   !(error instanceof ApiError) && failureCount < 3;
 
 /**

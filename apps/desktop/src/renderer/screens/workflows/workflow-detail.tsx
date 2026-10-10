@@ -1,18 +1,16 @@
 /**
  * PROTOTYPE. The parts of an open workflow's page, top to bottom:
  *
- * - its lead: the name, the description, and chips that say what starts it
- *   and what its steps run;
- * - the heading of the run its graph draws;
+ * - its lead: the name with the switch that turns the workflow on or off,
+ *   the description, and chips that say what starts it and what its steps
+ *   run;
  * - its tabs, and the table each one shows: the runs, the triggers, the
  *   inputs, or the source.
  *
- * Every part takes values and callbacks and reads nothing. The page is read
- * only: starting a run, turning the workflow off and pausing a trigger come
- * with the Workflows ticket's follow-up, and changing the workflow with the
- * one on creating and editing workflows.
+ * Every part takes values and callbacks and reads nothing. Changing the
+ * workflow itself comes with the ticket on creating and editing workflows.
  */
-import type { JSX, RefObject } from "react";
+import { Fragment, type JSX, type RefObject } from "react";
 import { BoltIcon } from "../../icons/bolt";
 import { ClockIcon } from "../../icons/clock";
 import { Mark } from "../../marks/mark";
@@ -38,7 +36,7 @@ export const WORKFLOW_TABS = [
 export type WorkflowTab = (typeof WORKFLOW_TABS)[number]["tab"];
 
 /** Renders the clock for a schedule or the bolt for events, or nothing for `undefined`. */
-function SourceIcon({
+export function SourceIcon({
   source,
 }: {
   readonly source: TriggerSource | undefined;
@@ -47,19 +45,52 @@ function SourceIcon({
   return source === "schedule" ? <ClockIcon size={12} /> : <BoltIcon size={12} />;
 }
 
-/** Renders the workflow's name, its description, and its chips. */
+/**
+ * Explains the workflow's switch: turning a workflow off stops its triggers,
+ * and nothing else (spec 07 §1).
+ */
+const ENABLED_HINT = "When off, its triggers start no runs. You can still run it yourself.";
+
+/**
+ * Renders the workflow's name with its switch, its description, and its
+ * chips. Pressing the switch calls `onToggleEnabled`. `error`, when given,
+ * says why the switch's last save failed, under the name.
+ */
 export function WorkflowLead({
   name,
   description,
   chips,
+  enabled,
+  onToggleEnabled,
+  error,
 }: {
   readonly name: string;
   readonly description: string | undefined;
   readonly chips: ReadonlyArray<WorkflowChip>;
+  readonly enabled: boolean;
+  readonly onToggleEnabled: () => void;
+  readonly error: string | null;
 }): JSX.Element {
   return (
     <header className="wfd-lead">
-      <h1>{name}</h1>
+      <div className="wfd-name">
+        <h1>{name}</h1>
+        <label className="wfd-switch" title={ENABLED_HINT}>
+          Enabled
+          <button
+            type="button"
+            className="toggle"
+            role="switch"
+            aria-checked={enabled}
+            onClick={onToggleEnabled}
+          />
+        </label>
+      </div>
+      {error === null ? null : (
+        <p className="wfd-err" role="alert">
+          {error}
+        </p>
+      )}
       {description === undefined ? null : <p className="wfd-gist">{description}</p>}
       <ul className="wfd-chips" aria-label="About this workflow">
         {chips.map((chip) => (
@@ -70,44 +101,6 @@ export function WorkflowLead({
         ))}
       </ul>
     </header>
-  );
-}
-
-/**
- * Renders the heading over the graph: which run it draws, with the run's
- * mark, status and time, or "No runs yet" for a workflow that has none. A
- * run older than the latest offers a way back to the latest.
- */
-export function DrawnRunHeading({
-  run,
-  isLatest,
-  onShowLatest,
-}: {
-  readonly run: RunRow | undefined;
-  readonly isLatest: boolean;
-  readonly onShowLatest: () => void;
-}): JSX.Element {
-  if (run === undefined) {
-    return (
-      <div className="wfd-drawn">
-        <h2 className="section-h">No runs yet</h2>
-      </div>
-    );
-  }
-  return (
-    <div className="wfd-drawn">
-      <h2 className="section-h">{isLatest ? "Latest run" : "Run"}</h2>
-      <Mark state={run.mark} />
-      <span className={`wl-status wl-status--${run.status.tone}`}>{run.status.text}</span>
-      <span className="wfd-drawn-time">
-        {[run.timeText, run.durationText].filter(Boolean).join(" · ")}
-      </span>
-      {isLatest ? null : (
-        <button type="button" className="btn btn--quiet btn--sm" onClick={onShowLatest}>
-          Show the latest
-        </button>
-      )}
-    </div>
   );
 }
 
@@ -158,20 +151,17 @@ export function RunTableHeads(): JSX.Element {
 }
 
 /**
- * Renders the Runs tab's rows, newest first. The row of `drawnRunId` is
- * selected, and picking a row draws its run on the graph. `endRef` is put
- * after the last row, so the tab can read the next page when it scrolls into
- * view.
+ * Renders the Runs tab's rows, newest first. Picking a row opens its run's
+ * page. `endRef` is put after the last row, so the tab can read the next
+ * page when it scrolls into view.
  */
 export function RunTable({
   rows,
-  drawnRunId,
-  onPickRun,
+  onOpenRun,
   endRef,
 }: {
   readonly rows: ReadonlyArray<RunRow>;
-  readonly drawnRunId: string | undefined;
-  readonly onPickRun: (runId: string) => void;
+  readonly onOpenRun: (runId: string) => void;
   readonly endRef: RefObject<HTMLDivElement | null>;
 }): JSX.Element {
   if (rows.length === 0) return <p className="wl-empty">No runs yet</p>;
@@ -181,10 +171,9 @@ export function RunTable({
         <button
           key={row.id}
           type="button"
-          className={row.id === drawnRunId ? "wfd-runs wl-trow is-on" : "wfd-runs wl-trow"}
-          aria-pressed={row.id === drawnRunId}
+          className="wfd-runs wl-trow"
           aria-label={describeRunRow(row)}
-          onClick={() => onPickRun(row.id)}
+          onClick={() => onOpenRun(row.id)}
         >
           <span className="wl-mark">
             <Mark state={row.mark} />
@@ -212,27 +201,61 @@ export function TriggerTableHeads(): JSX.Element {
       <span className="wfd-does">Does</span>
       <span>Fires on</span>
       <span>State</span>
+      <span />
     </div>
   );
 }
 
-/** Renders the Triggers tab's rows, in the order the workflow declares its triggers. */
-export function TriggerTable({ rows }: { readonly rows: ReadonlyArray<TriggerRow> }): JSX.Element {
+/**
+ * Renders the Triggers tab's rows, in the order the workflow declares its
+ * triggers. A start trigger's row ends in its switch, and pressing it calls
+ * `onToggleTrigger` with the trigger's id. A signal trigger cannot be
+ * paused, so its row has none. `error`, when given, says why the last save
+ * of a trigger's switch failed, under that trigger's row.
+ */
+export function TriggerTable({
+  rows,
+  onToggleTrigger,
+  error,
+}: {
+  readonly rows: ReadonlyArray<TriggerRow>;
+  readonly onToggleTrigger: (triggerId: string) => void;
+  readonly error: { readonly triggerId: string; readonly text: string } | null;
+}): JSX.Element {
   if (rows.length === 0) {
     return <p className="wl-empty">No triggers. Only you, an agent or another run start it.</p>;
   }
   return (
     <div className="wfd-rows">
       {rows.map((row) => (
-        <div key={row.id} className="wfd-triggers wl-trow">
-          <span className="wl-mark wfd-icon">
-            <SourceIcon source={row.source} />
-          </span>
-          <span className="wl-name">{row.id}</span>
-          <span className="wfd-quiet wfd-does">{row.roleText}</span>
-          <span className="wfd-quiet">{row.firesOnText}</span>
-          <span className={`wl-status wl-status--${row.status.tone}`}>{row.status.text}</span>
-        </div>
+        <Fragment key={row.id}>
+          <div className="wfd-triggers wl-trow">
+            <span className="wl-mark wfd-icon">
+              <SourceIcon source={row.source} />
+            </span>
+            <span className="wl-name">{row.id}</span>
+            <span className="wfd-quiet wfd-does">{row.roleText}</span>
+            <span className="wfd-quiet">{row.firesOnText}</span>
+            <span className={`wl-status wl-status--${row.status.tone}`}>{row.status.text}</span>
+            {row.isActive === undefined ? (
+              <span />
+            ) : (
+              <button
+                type="button"
+                className="toggle"
+                role="switch"
+                aria-checked={row.isActive}
+                aria-label={`${row.id} starts runs`}
+                onClick={() => onToggleTrigger(row.id)}
+              />
+            )}
+          </div>
+          {error?.triggerId === row.id ? (
+            <p className="wfd-err" role="alert">
+              {error.text}
+            </p>
+          ) : null}
+        </Fragment>
       ))}
     </div>
   );

@@ -146,9 +146,8 @@ export function TimelineAxisRow({ axis }: { readonly axis: TimelineAxis }): JSX.
 
 /**
  * Renders the board of one day: its hour lines, the now line, a bar for each
- * run, and a tick for each fire still to come. The bar of `drawnRunId` is
- * selected, and picking a bar draws its run on the graph. A day with no runs
- * says `emptyText`.
+ * run, and a tick for each fire still to come. Picking a bar opens its run's
+ * page. A day with no runs says `emptyText`.
  */
 export function TimelineBoard({
   label,
@@ -156,8 +155,7 @@ export function TimelineBoard({
   bars,
   trackCount,
   fires,
-  drawnRunId,
-  onPickRun,
+  onOpenRun,
   emptyText,
 }: {
   readonly label: string;
@@ -165,8 +163,7 @@ export function TimelineBoard({
   readonly bars: ReadonlyArray<TimelineBar>;
   readonly trackCount: number;
   readonly fires: ReadonlyArray<TimelineFire>;
-  readonly drawnRunId: string | undefined;
-  readonly onPickRun: (runId: string) => void;
+  readonly onOpenRun: (runId: string) => void;
   readonly emptyText: string;
 }): JSX.Element {
   const lateRunIds = useLateRunIds(bars);
@@ -204,8 +201,7 @@ export function TimelineBoard({
           bar={bar}
           order={order}
           isLate={lateRunIds.has(bar.run.id)}
-          isDrawn={bar.run.id === drawnRunId}
-          onPick={() => onPickRun(bar.run.id)}
+          onOpen={() => onOpenRun(bar.run.id)}
         />
       ))}
     </div>
@@ -242,14 +238,12 @@ function RunBar({
   bar,
   order,
   isLate,
-  isDrawn,
-  onPick,
+  onOpen,
 }: {
   readonly bar: TimelineBar;
   readonly order: number;
   readonly isLate: boolean;
-  readonly isDrawn: boolean;
-  readonly onPick: () => void;
+  readonly onOpen: () => void;
 }): JSX.Element {
   const label = describeRunRow(bar.run);
   const className = [
@@ -258,7 +252,6 @@ function RunBar({
     bar.startsBefore ? "is-cut-start" : "",
     bar.endsAfter ? "is-cut-end" : "",
     isLate ? "is-late" : "",
-    isDrawn ? "is-on" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -266,10 +259,9 @@ function RunBar({
     <button
       type="button"
       className={className}
-      aria-pressed={isDrawn}
       aria-label={label}
       title={label}
-      onClick={onPick}
+      onClick={onOpen}
       style={{
         "--rt-at": formatPlace(bar.from),
         "--rt-span": formatPlace(bar.to - bar.from),

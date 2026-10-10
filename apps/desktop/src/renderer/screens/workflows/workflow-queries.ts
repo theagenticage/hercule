@@ -2,15 +2,21 @@
  * PROTOTYPE. The reads the Workflows page makes, as query options. The
  * Workflows ticket moves them into app/queries.ts beside the others.
  *
- * Three reads need a contract addition (see proposed-contract.ts). Their
+ * Two reads need a contract addition (see proposed-contract.ts). Their
  * query function fails with a message that names the addition, so the
  * prototype only draws from a specimen's seeded cache. They take no client
  * until the contract has the addition.
+ *
+ * A workflow is read as it is stored, with its YAML source. The page that
+ * draws it parses the source itself (`parseWorkflowSourceWithRanges`), which
+ * keeps the YAML parser out of this module: the shell imports this module
+ * for Waiting on you, so everything it imports loads with the first screen.
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { queryKeys, readEveryPage, type HerculeClient } from "@hercule/client-core";
-import type { Run, Session, WorkflowAction } from "@hercule/contract";
-import type { WorkflowListEntry, WorkflowWithDefinition } from "./proposed-contract";
+import type { Run, Session, Workflow, WorkflowAction } from "@hercule/contract";
+import { isWorthRetrying } from "../../app/queries";
+import type { WorkflowListEntry } from "./proposed-contract";
 
 /** The live connection keeps these reads current, so the cache never refetches on its own. */
 const LIVE_KEPT_READ_OPTIONS = {
@@ -32,12 +38,16 @@ export const workflowListQuery = () =>
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
-/** Reads one workflow with its parsed definition, for its page and its graph. */
-export const workflowQuery = (workflowId: string) =>
+/**
+ * Reads one workflow with its source, for its page and for the page of each
+ * of its runs. A run outlives its workflow, so on a run's page the read can
+ * fail with `not_found`; it is not retried then.
+ */
+export const workflowQuery = (client: HerculeClient, workflowId: string) =>
   queryOptions({
     queryKey: queryKeys.workflow(workflowId),
-    queryFn: (): Promise<WorkflowWithDefinition> =>
-      Promise.reject(buildMissingFieldError("Workflow.definition")),
+    queryFn: (): Promise<Workflow> => client.workflow.read({ params: { id: workflowId } }),
+    retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
@@ -58,6 +68,18 @@ export const triggersQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.triggers(),
     queryFn: () => readEveryPage((page) => client.trigger.query({ query: page })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads one workflow's triggers, for its page. A `workflow` push that names
+ * the workflow refetches them, so a trigger the user pauses shows paused.
+ */
+export const workflowTriggersQuery = (client: HerculeClient, workflowId: string) =>
+  queryOptions({
+    queryKey: queryKeys.triggers(workflowId),
+    queryFn: () =>
+      readEveryPage((page) => client.trigger.query({ query: { workflowId, ...page } })),
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
@@ -86,15 +108,19 @@ export const workflowRunsQuery = (client: HerculeClient, workflowId: string) =>
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
-/** Reads one run with its plan and step records, for the run drawn on the graph. */
+/** Reads one run with its plan and step records, for its page. */
 export const runQuery = (client: HerculeClient, runId: string) =>
   queryOptions({
     queryKey: queryKeys.run(runId),
     queryFn: (): Promise<Run> => client.run.read({ params: { id: runId } }),
+    retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
-/** Reads the sessions a run's agent steps started, whose open Requests mark a step as waiting. */
+/**
+ * Reads the sessions a run's agent steps started, for its page: their open
+ * Requests mark a step as waiting, and their usage fills each step's card.
+ */
 export const runSessionsQuery = (client: HerculeClient, runId: string) =>
   queryOptions({
     queryKey: queryKeys.sessions({ runId }),

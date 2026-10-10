@@ -1,0 +1,295 @@
+/* PROTOTYPE. A run's page. Its frame, its lead and its band are the open
+   workflow's (workflows-frame.css, workflow-detail.css), and its time axis
+   is drawn as the Runs tab's timeline is (run-timeline.css). Each departure
+   from the book is explained. */
+
+/* ---------- The header ---------- */
+
+/* The book's `.pill-crumb`, as a link back to the place it names. The
+   workflow's name gives way first when the header runs out of room, as a
+   thread's tabs do (thread-header.css). */
+.top > .run-crumbs {
+  min-width: 0;
+}
+.run-crumbs > .pill-crumb {
+  min-width: 0;
+}
+.run-crumbs > .pill-crumb:nth-child(2) {
+  flex-shrink: 1000;
+  max-width: 260px;
+}
+.run-crumbs > .pill-crumb > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-crumbs > .pill-crumb > a {
+  transition: color var(--dur-1);
+}
+.run-crumbs > .pill-crumb > a:hover {
+  color: var(--ink);
+}
+/* Why a workflow has no page to go back to, as a tab's age is drawn. */
+.run-crumbs > .pill-crumb small {
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.run-crumbs > .ptab {
+  flex: none;
+}
+
+/* ---------- The lead ---------- */
+
+/* The title says how the run stands, after its mark, and how long it has
+   run follows it, in the second line's colour. */
+.run-lead .wfd-name {
+  justify-content: flex-start;
+}
+.run-lead .wfd-name > h1 {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.run-took {
+  color: var(--muted);
+  font-size: var(--t-14);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Not in the book. What the run asks the user, or why it failed, on the
+   tint of its colour, as the book's waiting strip is drawn (`.wb-waiting`),
+   at the gist's width. */
+.run-gist {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 700px;
+  margin: 2px 0 14px;
+  padding: 8px 8px 8px 12px;
+  border-radius: var(--r-md);
+}
+.run-gist > p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--t-14);
+  line-height: 1.45;
+}
+.run-gist > .btn {
+  flex: none;
+}
+.run-gist--you {
+  background: var(--you-tint);
+  color: var(--you-ink);
+}
+.run-gist--fail {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+
+/* The inputs the run started with, as a node card lists its facts
+   (`.wfn-facts`), with values in the source's monospace. The names' column
+   is as wide as the longest. */
+.run-inputs {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  max-width: 700px;
+  margin: 14px 0 0;
+  font-size: var(--t-12);
+}
+.run-inputs > div {
+  display: contents;
+}
+.run-inputs dt {
+  color: var(--muted);
+}
+.run-inputs dd {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Not in the book as a shared rule: the note Permission profiles draws
+   (settings-profiles.html, `.note`), in the hairline's colour rather than
+   the waiting colour, because nothing waits on the user. */
+.run-note {
+  max-width: 700px;
+  margin: 16px 0 0;
+  padding-left: 11px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+
+/* ---------- The steps ---------- */
+
+.run-lead + .wfd-band,
+.run-note + .wfd-band {
+  margin-top: 20px;
+}
+.run-steps-h small {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.run-page .wfd-graph {
+  margin-top: 16px;
+}
+
+/* The timeline's columns: the mark, the step, the track, and how long the
+   step took, as the Runs tab's rows are laid out (`.wfd-runs`). */
+.rs-grid {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 180px) minmax(0, 1fr) 64px;
+  align-items: center;
+  gap: 14px;
+}
+.rs-grid > .wl-num {
+  text-align: right;
+}
+.rs-track {
+  position: relative;
+  align-self: stretch;
+}
+/* The axis's labels are in the monospace font, so the probe's width is the
+   width of every label's characters. */
+.rs-axis .rs-track {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.rs-ch {
+  position: absolute;
+  visibility: hidden;
+  font-style: normal;
+}
+.rs-tick {
+  position: absolute;
+  top: 0;
+  left: var(--rt-at);
+  line-height: 32px;
+  transform: translateX(-50%);
+}
+/* The day timeline's now pill, at the axis's end, where now is. Its stem
+   meets the rows' now line. */
+.rs-axis .rs-now-pill {
+  right: 0;
+  left: auto;
+  font-family: var(--font-ui);
+  font-variation-settings: normal;
+  transform: translateX(50%);
+}
+
+.rs-row.wl-trow {
+  min-height: 40px;
+  align-items: stretch;
+}
+.rs-row > .wl-mark,
+.rs-row > .rs-step,
+.rs-row > .wl-num {
+  align-self: center;
+}
+.rs-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 0;
+}
+.rs-step-id {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.rs-step-id > small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+/* A step the run has not reached, in the second line's colour, as the
+   graph draws it fainter. */
+.rs-step-id.is-quiet {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.rs-err {
+  overflow: hidden;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A step's bar: the day timeline's bar (`.rt-bar`), from when the step
+   started to when it ended, or to now while it runs, with its mark at the
+   end on a disc of the page's colour. */
+.rs-bar {
+  position: absolute;
+  top: 50%;
+  left: min(var(--rt-at), calc(100% - 7px));
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: max(var(--rt-span), 7px);
+  height: 16px;
+  margin-top: -8px;
+}
+.rs-bar--you > .rt-fill {
+  background: var(--you);
+}
+.rs-bar--fail > .rt-fill {
+  background: var(--fail);
+}
+.rs-bar > .mark {
+  position: relative;
+  margin-right: -7px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+button.rs-row:hover .rs-bar > .mark {
+  background: linear-gradient(var(--hover), var(--hover)), var(--surface);
+}
+/* What a step with no bar shows on its track, such as "skipped". It ends
+   at its place by the same share of its width as its place is of the
+   track, so it stays inside the track. */
+.rs-note {
+  position: absolute;
+  top: 50%;
+  left: var(--rt-at);
+  padding: 0 6px;
+  background: var(--surface);
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  transform: translate(calc(-1 * var(--rt-at)), -50%);
+}
+
+/* The bars arrive as the day timeline's do (run-timeline.css): each sweeps
+   from where its step started, and then its mark pops in. A mark that
+   changes later pops in again, because it is keyed by its state. */
+@media (prefers-reduced-motion: no-preference) {
+  .rs-bar > .mark {
+    animation: mark-in var(--dur-2) var(--ease-spring) backwards;
+    animation-delay: calc(min(var(--rt-order), 8) * 30ms + var(--dur-2));
+  }
+}
+
+/* The re-run dialog's choice between the current workflow and the run's own
+   plan, above the explanation of the chosen one. The gap is the one the
+   dialog keeps under each paragraph. */
+.run-rerun-seg {
+  margin-bottom: 10px;
+}

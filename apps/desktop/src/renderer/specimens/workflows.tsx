@@ -6,7 +6,10 @@
  * `?view=`:
  * - `table`, the default: no workflow is open, and the list fills the pane;
  * - `split`: Ship release is open beside the list, as a column;
- * - `full`: Ship release fills the pane, and the list is hidden.
+ * - `full`: Ship release fills the pane, and the list is hidden;
+ * - `run`: the page of the run `?run=` names, by the number at the end of
+ *   its id, such as `1140`; with none, Ship release's newest run, d1142.
+ *   `?steps=timeline` shows its steps on a time axis.
  *
  * The page removes every animation, so the sheet is held still, unless the
  * URL has `?motion=1` or `?play=`.
@@ -34,6 +37,7 @@ import { mountWorkflowsSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
 import { SPECIMEN_RECORDS } from "./sidebar-fixture";
 import {
+  buildId,
   buildShipReleaseFrames,
   SHIP_RELEASE_ID,
   summarizeRun,
@@ -54,6 +58,10 @@ function chooseAddress(view: string | null): string {
       return `/workflows/${SHIP_RELEASE_ID}`;
     case "full":
       return `/workflows/${SHIP_RELEASE_ID}?full=true`;
+    case "run": {
+      const runId = buildId("d", Number(params.get("run") ?? 1142));
+      return params.get("steps") === "timeline" ? `/runs/${runId}?view=timeline` : `/runs/${runId}`;
+    }
     default:
       throw new Error(`The Workflows specimen draws no view "${view}".`);
   }

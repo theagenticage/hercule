@@ -451,3 +451,15 @@ export const formatListTime = (
   if (days > 0 && days < 7) return direction === "past" ? at.weekday : `${at.weekday} ${at.clock}`;
   return formatDayStamp(instant, timezone, now) ?? "";
 };
+
+/**
+ * Formats an instant as the day relative to `now` and the clock time, in
+ * `timezone`: "Today 10:31", "Yesterday 14:00" or "3 Oct 14:00". A page
+ * about one run names its moments this way, because unlike a list column it
+ * has the room for the clock time, and the time matters.
+ */
+export const formatDayAndClock = (instant: Date, timezone: string, now: Date): string => {
+  const { clock } = readCalendarParts(instant, timezone);
+  const day = formatDayStamp(instant, timezone, now);
+  return day === undefined ? clock : `${day} ${clock}`;
+};

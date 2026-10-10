@@ -143,8 +143,8 @@
   width: max(var(--rt-span), 7px);
   height: 16px;
 }
-/* The hover and the selection: the book's `--hover` and `--selected`, as a
-   list row has them, on a pill around the line and its mark. */
+/* The hover: the book's `--hover`, as a list row has it, on a pill around
+   the line and its mark. */
 .rt-bar::before {
   content: "";
   position: absolute;
@@ -153,9 +153,6 @@
 }
 .rt-bar:hover::before {
   background: var(--hover);
-}
-.rt-bar.is-on::before {
-  background: var(--selected);
 }
 /* A 4px line: in the book's hairline colour for a run that went as it
    should, and in the colour of its mark for one that waits on the user or
@@ -181,9 +178,9 @@
   border-bottom-right-radius: 0;
 }
 /* The mark sits on the line's end, on a disc of the colour behind it, so
-   the hour lines and the now line pass behind it. Under the hover or the
-   selection, the disc is the pill's colour laid over the page's. A bar cut
-   at the day's end keeps its mark inside the board. */
+   the hour lines and the now line pass behind it. Under the hover, the disc
+   is the pill's colour laid over the page's. A bar cut at the day's end
+   keeps its mark inside the board. */
 .rt-bar > .mark {
   position: relative;
   margin-right: -7px;
@@ -192,9 +189,6 @@
 }
 .rt-bar:hover > .mark {
   background: linear-gradient(var(--hover), var(--hover)), var(--surface);
-}
-.rt-bar.is-on > .mark {
-  background: linear-gradient(var(--selected), var(--selected)), var(--surface);
 }
 .rt-bar.is-cut-end > .mark {
   margin-right: 0;

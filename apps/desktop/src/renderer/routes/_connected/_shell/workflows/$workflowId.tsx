@@ -1,8 +1,7 @@
-import { useRef, useState, type JSX } from "react";
+import { useState, type JSX } from "react";
 import { useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { resolveDisplayTimezone } from "@hercule/client-core";
-import { isId, type Trigger, type WorkflowDefinition } from "@hercule/contract";
+import { parseWorkflowSourceWithRanges, resolveDisplayTimezone } from "@hercule/client-core";
 import { agentsQuery, providersQuery, settingsQuery } from "../../../../app/queries";
 import { buildGraphDrawing } from "../../../../screens/workflows/graph-model";
 import { buildNodeDetails } from "../../../../screens/workflows/node-details";
@@ -18,7 +17,6 @@ import {
   type RunsView,
 } from "../../../../screens/workflows/run-timeline-board";
 import {
-  DrawnRunHeading,
   InputTable,
   InputTableHeads,
   RunTableHeads,
@@ -31,28 +29,24 @@ import {
 } from "../../../../screens/workflows/workflow-detail";
 import {
   buildInputRows,
-  buildRunRow,
   buildTriggerRows,
   buildWorkflowChips,
 } from "../../../../screens/workflows/workflow-detail-rows";
 import { WorkflowGraph } from "../../../../screens/workflows/workflow-graph";
 import {
-  runQuery,
-  runSessionsQuery,
-  triggersQuery,
   workflowActionsQuery,
   workflowQuery,
   workflowRunningRunsQuery,
   workflowRunsBetweenQuery,
   workflowRunsQuery,
+  workflowTriggersQuery,
 } from "../../../../screens/workflows/workflow-queries";
 import { RunsPanel, RunsTimeline } from "./-runs";
+import { useTriggerSwitches, useWorkflowSwitch } from "./-switches";
 
 /**
  * The search params of an open workflow:
  *
- * - `run`: the run drawn on the graph; with none, the graph shows the
- *   workflow's latest run;
  * - `full`: the workflow fills the main pane, and the list is hidden;
  * - `runsView`: the Runs tab shows its runs on a timeline; with none, in a
  *   list;
@@ -63,19 +57,17 @@ import { RunsPanel, RunsTimeline } from "./-runs";
  * navigation drops it.
  */
 export interface WorkflowSearch {
-  readonly run?: string | undefined;
   readonly full?: boolean | undefined;
   readonly runsView?: "timeline" | undefined;
   readonly daysBack?: number | undefined;
 }
 
 /**
- * Returns an open workflow's search params from the URL's. A `run` that is
- * not an id, and a `daysBack` that is not a whole number above 0, are
- * dropped, so the screen never acts on a malformed link.
+ * Returns an open workflow's search params from the URL's. A `daysBack`
+ * that is not a whole number above 0 is dropped, so the screen never acts
+ * on a malformed link.
  */
 const validateWorkflowSearch = (search: Record<string, unknown>): WorkflowSearch => ({
-  ...(isId(search.run) ? { run: search.run } : {}),
   ...(search.full === true ? { full: true } : {}),
   ...(search.runsView === "timeline" ? { runsView: "timeline" } : {}),
   ...(typeof search.daysBack === "number" &&
@@ -86,22 +78,20 @@ const validateWorkflowSearch = (search: Record<string, unknown>): WorkflowSearch
 });
 
 /**
- * PROTOTYPE. One workflow, beside the list or filling the pane: its lead,
- * the graph with one of its runs drawn on it, and its tabs.
+ * PROTOTYPE. One workflow, beside the list or filling the pane: its lead
+ * with its switch, the graph of its steps, and its tabs. The graph shows
+ * what the workflow does, not how a run went: a run's row, or its bar on
+ * the timeline, opens the run's own page.
  *
- * The loader reads everything the page draws before it renders, in two
- * steps: the workflow, the first page of its runs, and the timeline's day
- * when the Runs tab shows one, then the run the graph draws, which is the
- * latest unless the URL picks one. Picking a run or a day changes the URL,
- * so the loader reads what it draws before the page shows it.
+ * The loader reads everything the page draws before it renders: the
+ * workflow, its triggers, the first page of its runs, and the timeline's
+ * day when the Runs tab shows one. Picking a day changes the URL, so the
+ * loader reads it before the page shows it.
  */
 export const Route = createFileRoute("/_connected/_shell/workflows/$workflowId")({
+  codeSplitGroupings: [["loader", "component"]],
   validateSearch: validateWorkflowSearch,
-  loaderDeps: ({ search }) => ({
-    run: search.run,
-    runsView: search.runsView,
-    daysBack: search.daysBack,
-  }),
+  loaderDeps: ({ search }) => ({ runsView: search.runsView, daysBack: search.daysBack }),
   loader: async ({ context: { controller, queryClient }, params, deps }) => {
     const client = controller.client;
     const { workflowId } = params;
@@ -116,19 +106,15 @@ export const Route = createFileRoute("/_connected/_shell/workflows/$workflowId")
         queryClient.ensureQueryData(workflowRunningRunsQuery(client, workflowId)),
       ]);
     };
-    const [, runs] = await Promise.all([
-      queryClient.ensureQueryData(workflowQuery(workflowId)),
+    await Promise.all([
+      queryClient.ensureQueryData(workflowQuery(client, workflowId)),
+      queryClient.ensureQueryData(workflowTriggersQuery(client, workflowId)),
       queryClient.ensureInfiniteQueryData(workflowRunsQuery(client, workflowId)),
       queryClient.ensureQueryData(agentsQuery(client)),
       queryClient.ensureQueryData(providersQuery(client)),
       queryClient.ensureQueryData(workflowActionsQuery(client)),
+      queryClient.ensureQueryData(settingsQuery(client)),
       readTimeline(),
-    ]);
-    const drawnRunId = deps.run ?? runs.pages[0]?.items[0]?.id;
-    if (drawnRunId === undefined) return;
-    await Promise.all([
-      queryClient.ensureQueryData(runQuery(client, drawnRunId)),
-      queryClient.ensureQueryData(runSessionsQuery(client, drawnRunId)),
     ]);
   },
   component: WorkflowRoute,
@@ -140,53 +126,55 @@ function WorkflowRoute(): JSX.Element {
   return <WorkflowPage key={workflowId} workflowId={workflowId} />;
 }
 
-/** The room the sticky pill cap takes at the top of the page, `.wfd-cap` in workflow-detail.css. */
-const CAP_HEIGHT = 56;
-
 function WorkflowPage({ workflowId }: { readonly workflowId: string }): JSX.Element {
   const { controller } = Route.useRouteContext();
   const client = controller.client;
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
-  const workflow = useSuspenseQuery(workflowQuery(workflowId)).data;
-  const allTriggers = useSuspenseQuery(triggersQuery(client)).data;
+  const workflow = useSuspenseQuery(workflowQuery(client, workflowId)).data;
+  const storedTriggers = useSuspenseQuery(workflowTriggersQuery(client, workflowId)).data;
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   const runs = useSuspenseInfiniteQuery(workflowRunsQuery(client, workflowId)).data;
+  const agents = useSuspenseQuery(agentsQuery(client)).data;
+  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const actions = useSuspenseQuery(workflowActionsQuery(client)).data;
+  const enabled = useWorkflowSwitch(client, workflow);
+  const triggerSwitches = useTriggerSwitches(client, workflowId, storedTriggers);
 
   // Times are relative to when the page opened, as the list's are.
   const [openedAt] = useState(() => new Date());
   const [tab, setTab] = useState<WorkflowTab>("runs");
-  const drawnRef = useRef<HTMLDivElement>(null);
 
-  const { definition } = workflow;
+  // The YAML parser loads with this page, not with the first screen.
+  const { definition } = parseWorkflowSourceWithRanges(workflow.source);
+  if (definition === undefined) {
+    throw new Error(`The stored source of the workflow ${workflowId} does not parse.`);
+  }
+  const { triggers } = triggerSwitches;
   const timezone = resolveDisplayTimezone(settings.user.timezone);
-  const triggers = allTriggers.filter((trigger) => trigger.workflowId === workflowId);
-  const triggerRows = buildTriggerRows(definition, workflow.enabled, triggers, timezone, openedAt);
+  const triggerRows = buildTriggerRows(definition, enabled.value, triggers, timezone, openedAt);
   const inputRows = buildInputRows(definition);
-  const latestRunId = runs.pages[0]?.items[0]?.id;
-  const drawnRunId = search.run ?? latestRunId;
+  const hasRuns = runs.pages[0]?.items[0] !== undefined;
   const runsView: RunsView = search.runsView ?? "list";
   const daysBack = search.daysBack ?? 0;
   const day = computeTimelineDay(openedAt, daysBack, timezone);
   const axis = buildTimelineAxis(day, timezone, openedAt);
+  const drawing = buildGraphDrawing(definition, undefined, [], agents, actions);
+  const records = {
+    definition,
+    run: undefined,
+    sessions: [],
+    triggers,
+    agents,
+    actions,
+    instances,
+  };
 
   const openSession = (sessionId: string): void => {
     void navigate({ to: "/threads/$sessionId", params: { sessionId } });
   };
-
-  // Picking the latest run follows the latest, so a run that starts later
-  // takes its place on the graph. The graph scrolls into view, because a
-  // run picked far down the table would otherwise change nothing in sight.
-  const pickRun = (runId: string): void => {
-    void navigate({
-      to: ".",
-      search: (prev) => ({ ...prev, run: runId === latestRunId ? undefined : runId }),
-    });
-    const reducesMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    drawnRef.current?.scrollIntoView({
-      block: "nearest",
-      behavior: reducesMotion ? "instant" : "smooth",
-    });
+  const openRun = (runId: string): void => {
+    void navigate({ to: "/runs/$runId", params: { runId } });
   };
 
   // The view and the day are how the tab shows its runs, not places to go
@@ -213,7 +201,7 @@ function WorkflowPage({ workflowId }: { readonly workflowId: string }): JSX.Elem
   // A workflow with no runs has nothing to show either way, so the tab
   // offers no choice.
   const runsTools =
-    tab !== "runs" || latestRunId === undefined ? null : (
+    tab !== "runs" || !hasRuns ? null : (
       <div className="wfd-tools">
         {runsView === "timeline" ? (
           <TimelineDayStepper
@@ -230,7 +218,7 @@ function WorkflowPage({ workflowId }: { readonly workflowId: string }): JSX.Elem
 
   const heads =
     tab === "runs" ? (
-      latestRunId === undefined ? null : runsView === "timeline" ? (
+      !hasRuns ? null : runsView === "timeline" ? (
         <TimelineAxisRow axis={axis} />
       ) : (
         <RunTableHeads />
@@ -252,31 +240,18 @@ function WorkflowPage({ workflowId }: { readonly workflowId: string }): JSX.Elem
         <WorkflowLead
           name={definition.name}
           description={definition.description}
-          chips={buildWorkflowChips(definition, workflow.enabled, triggers, timezone, openedAt)}
+          chips={buildWorkflowChips(definition, enabled.value, triggers, timezone, openedAt)}
+          enabled={enabled.value}
+          onToggleEnabled={() => enabled.save(!enabled.value)}
+          error={enabled.error}
         />
-        <div ref={drawnRef} className="wfd-run" style={{ scrollMarginTop: CAP_HEIGHT }}>
-          {drawnRunId === undefined ? (
-            <WorkflowWithoutRun
-              definition={definition}
-              triggers={triggers}
-              onOpenSession={openSession}
-              timezone={timezone}
-              now={openedAt}
-            />
-          ) : (
-            <DrawnRun
-              definition={definition}
-              runId={drawnRunId}
-              isLatest={drawnRunId === latestRunId}
-              onShowLatest={() =>
-                void navigate({ to: ".", search: (prev) => ({ ...prev, run: undefined }) })
-              }
-              triggers={triggers}
-              onOpenSession={openSession}
-              timezone={timezone}
-              now={openedAt}
-            />
-          )}
+        <div className="wfd-graph">
+          <WorkflowGraph
+            drawing={drawing}
+            details={buildNodeDetails(drawing, records, timezone, openedAt)}
+            label={`${definition.name}, its steps`}
+            onOpenSession={openSession}
+          />
         </div>
         <div className="wfd-band">
           <div className="wfd-bar">
@@ -289,19 +264,18 @@ function WorkflowPage({ workflowId }: { readonly workflowId: string }): JSX.Elem
           </div>
           {heads}
         </div>
-        {tab === "runs" && runsView === "timeline" && latestRunId !== undefined ? (
+        {tab === "runs" && runsView === "timeline" && hasRuns ? (
           <RunsTimeline
             // Each day's board is drawn afresh, so its bars arrive again.
             key={day.start.toISOString()}
             client={client}
             workflowId={workflowId}
             definition={definition}
-            enabled={workflow.enabled}
+            enabled={enabled.value}
             triggers={triggers}
             day={day}
             axis={axis}
-            drawnRunId={drawnRunId}
-            onPickRun={pickRun}
+            onOpenRun={openRun}
             timezone={timezone}
             now={openedAt}
           />
@@ -310,13 +284,16 @@ function WorkflowPage({ workflowId }: { readonly workflowId: string }): JSX.Elem
             client={client}
             workflowId={workflowId}
             definition={definition}
-            drawnRunId={drawnRunId}
-            onPickRun={pickRun}
+            onOpenRun={openRun}
             timezone={timezone}
             now={openedAt}
           />
         ) : tab === "triggers" ? (
-          <TriggerTable rows={triggerRows} />
+          <TriggerTable
+            rows={triggerRows}
+            onToggleTrigger={triggerSwitches.toggle}
+            error={triggerSwitches.error}
+          />
         ) : tab === "inputs" ? (
           <InputTable rows={inputRows} />
         ) : (
@@ -324,92 +301,5 @@ function WorkflowPage({ workflowId }: { readonly workflowId: string }): JSX.Elem
         )}
       </div>
     </section>
-  );
-}
-
-/**
- * Draws the graph of a workflow that has never run, with its heading. A
- * node's card shows what the definition and the workflow's `triggers` say.
- */
-function WorkflowWithoutRun({
-  definition,
-  triggers,
-  onOpenSession,
-  timezone,
-  now,
-}: {
-  readonly definition: WorkflowDefinition;
-  readonly triggers: ReadonlyArray<Trigger>;
-  readonly onOpenSession: (sessionId: string) => void;
-  readonly timezone: string;
-  readonly now: Date;
-}): JSX.Element {
-  const { controller } = Route.useRouteContext();
-  const agents = useSuspenseQuery(agentsQuery(controller.client)).data;
-  const instances = useSuspenseQuery(providersQuery(controller.client)).data;
-  const actions = useSuspenseQuery(workflowActionsQuery(controller.client)).data;
-  const drawing = buildGraphDrawing(definition, undefined, [], agents, actions);
-  const records = { definition, run: undefined, sessions: [], triggers, agents, instances };
-  return (
-    <>
-      <DrawnRunHeading run={undefined} isLatest onShowLatest={() => undefined} />
-      <div className="wfd-graph">
-        <WorkflowGraph
-          drawing={drawing}
-          details={buildNodeDetails(drawing, records, timezone, now)}
-          label={`${definition.name}, its steps`}
-          onOpenSession={onOpenSession}
-        />
-      </div>
-    </>
-  );
-}
-
-/**
- * Draws the graph with the run `runId` on it, under a heading that names the
- * run. The run's sessions say which step waits on the user, and fill each
- * agent step's card with what its sessions used.
- */
-function DrawnRun({
-  definition,
-  runId,
-  isLatest,
-  onShowLatest,
-  triggers,
-  onOpenSession,
-  timezone,
-  now,
-}: {
-  readonly definition: WorkflowDefinition;
-  readonly runId: string;
-  readonly isLatest: boolean;
-  readonly onShowLatest: () => void;
-  readonly triggers: ReadonlyArray<Trigger>;
-  readonly onOpenSession: (sessionId: string) => void;
-  readonly timezone: string;
-  readonly now: Date;
-}): JSX.Element {
-  const { controller } = Route.useRouteContext();
-  const client = controller.client;
-  const run = useSuspenseQuery(runQuery(client, runId)).data;
-  const sessions = useSuspenseQuery(runSessionsQuery(client, runId)).data;
-  const agents = useSuspenseQuery(agentsQuery(client)).data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
-  const actions = useSuspenseQuery(workflowActionsQuery(client)).data;
-  const row = buildRunRow(run, definition, sessions, timezone, now);
-  const drawing = buildGraphDrawing(definition, run, sessions, agents, actions);
-  const records = { definition, run, sessions, triggers, agents, instances };
-  return (
-    <>
-      <DrawnRunHeading run={row} isLatest={isLatest} onShowLatest={onShowLatest} />
-      <div className="wfd-graph">
-        <WorkflowGraph
-          drawing={drawing}
-          details={buildNodeDetails(drawing, records, timezone, now)}
-          label={`${definition.name}, ${isLatest ? "its latest run" : "a run"}: ${row.status.text}`}
-          onOpenSession={onOpenSession}
-        />
-      </div>
-    </>
   );
 }

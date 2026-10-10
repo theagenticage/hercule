@@ -229,6 +229,16 @@ export const useDurationText = (
   useClockValue(since, counting, findNextDurationChange, (now) => describe(now.getTime()));
 
 /**
+ * Returns the age clock's current time, in milliseconds since the epoch, and
+ * draws the calling component again at each moment a duration counted from
+ * `since` shows a new number, as `useDurationText` does, while `counting` is
+ * true. A run's page draws its live durations and step bars at that time, so
+ * they all move together.
+ */
+export const useDurationClock = (since: string, counting: boolean): number =>
+  useClockValue(since, counting, findNextDurationChange, (now) => now.getTime());
+
+/**
  * Returns the moment after `now` at which the minutes left before
  * `expiresAt` next change. Once the code has expired, the count never
  * changes again, so the moment is as far off as a timer can wait.

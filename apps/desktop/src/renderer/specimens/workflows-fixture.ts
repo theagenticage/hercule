@@ -24,14 +24,11 @@ import {
   type StepRecord,
   type Trigger,
   type TriggerHealth,
+  type Workflow,
   type WorkflowAction,
   type WorkflowDefinition,
 } from "@hercule/contract";
-import type {
-  RecentRun,
-  WorkflowListEntry,
-  WorkflowWithDefinition,
-} from "../screens/workflows/proposed-contract";
+import type { RecentRun, WorkflowListEntry } from "../screens/workflows/proposed-contract";
 import {
   RECENT_RUN_LIMIT,
   type SessionWithToolCalls,
@@ -43,7 +40,7 @@ const minutesAgo = (minutes: number): string =>
   new Date(SPECIMEN_NOW - minutes * 60_000).toISOString();
 
 /** Returns a UUIDv7-shaped id: the shared prefix, then `kind` and `n` as twelve hex digits. */
-const buildId = (kind: "a" | "c" | "d" | "e", n: number): string =>
+export const buildId = (kind: "a" | "c" | "d" | "e", n: number): string =>
   `01a0ec64-6e80-7000-8000-${kind}${n.toString(16).padStart(11, "0")}`;
 
 const CREATED_AT = "2026-06-02T08:00:00.000Z";
@@ -986,6 +983,19 @@ const SHIP_RELEASE: WorkflowDefinition = {
   ],
 };
 
+/**
+ * Ship release as it was before its test step ran the end-to-end tests. The
+ * oldest runs followed it, so their pages note that the workflow changed.
+ */
+const SHIP_RELEASE_BEFORE_E2E: WorkflowDefinition = {
+  ...SHIP_RELEASE,
+  steps: SHIP_RELEASE.steps.map((step) =>
+    step.id === "test" && step.kind === "agent"
+      ? { ...step, prompt: "Run the full test suite." }
+      : step,
+  ),
+};
+
 // Ship release's edge indexes, in the order of its definition's `edges`.
 const [
   CHANGELOG_PR,
@@ -1029,10 +1039,15 @@ const buildChainDefinition = (spec: SpecimenWorkflow): WorkflowDefinition => ({
   edges: spec.steps.slice(1).map((step, index) => ({ from: spec.steps[index]!.id, to: step.id })),
 });
 
+/** A workflow as `workflow.read` returns it, with the definition its source holds. */
+export interface StoredWorkflow {
+  readonly workflow: Workflow;
+  readonly definition: WorkflowDefinition;
+}
+
 /** What the fixture builds for one workflow. */
-interface BuiltWorkflow {
+interface BuiltWorkflow extends StoredWorkflow {
   readonly entry: WorkflowListEntry;
-  readonly workflow: WorkflowWithDefinition;
   readonly triggers: ReadonlyArray<Trigger>;
   /** Newest first. */
   readonly runs: ReadonlyArray<Run>;
@@ -1357,8 +1372,8 @@ const assembleWorkflow = (
       source: renderWorkflowSource(definition),
       createdAt: CREATED_AT,
       updatedAt,
-      definition,
     },
+    definition,
     triggers: buildTriggers(workflowId, definition, runs, triggerExtras),
     runs,
     sessions,
@@ -1661,7 +1676,7 @@ const buildShipRelease = (): BuiltWorkflow => {
     const common = {
       id: runId,
       workflowId,
-      plan,
+      plan: index >= 16 ? SHIP_RELEASE_BEFORE_E2E : plan,
       inputs: { version: `2.${12 - Math.floor(index / 4)}.${index % 4}` },
       // These runs start at any hour, so an issue label starts them, not the Friday schedule.
       origin: { kind: "trigger", triggerId: "release_issue", eventId: 46000 - index } as const,
@@ -1982,8 +1997,8 @@ const BUILT: ReadonlyArray<BuiltWorkflow> = [
 export interface WorkflowsRecords {
   /** The workflow list, by name, as `workflow.query` would return it with `recentRuns`. */
   readonly workflows: ReadonlyArray<WorkflowListEntry>;
-  /** Each workflow with its definition, as `workflow.read` would return it. */
-  readonly definitions: ReadonlyArray<WorkflowWithDefinition>;
+  /** Each workflow as `workflow.read` would return it, with its definition. */
+  readonly storedWorkflows: ReadonlyArray<StoredWorkflow>;
   /** Every trigger of every workflow. */
   readonly triggers: ReadonlyArray<Trigger>;
   /** Every run of every workflow, newest first within each workflow. */
@@ -1998,7 +2013,7 @@ export interface WorkflowsRecords {
 
 export const WORKFLOWS_RECORDS: WorkflowsRecords = {
   workflows: BUILT.map(({ entry }) => entry),
-  definitions: BUILT.map(({ workflow }) => workflow),
+  storedWorkflows: BUILT.map(({ workflow, definition }) => ({ workflow, definition })),
   triggers: BUILT.flatMap(({ triggers }) => triggers),
   runs: BUILT.flatMap(({ runs }) => runs),
   runSummaries: new Map(

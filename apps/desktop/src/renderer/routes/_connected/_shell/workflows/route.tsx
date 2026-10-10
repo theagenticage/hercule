@@ -36,6 +36,7 @@ import { WorkflowsFrame, type WorkflowsView } from "../../../../screens/workflow
  * specimen the page fails to load (see workflow-queries.ts).
  */
 export const Route = createFileRoute("/_connected/_shell/workflows")({
+  codeSplitGroupings: [["loader", "component"]],
   staticData: { title: "Workflows" },
   loader: async ({ context: { controller, queryClient } }) => {
     await Promise.all([

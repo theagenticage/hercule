@@ -231,17 +231,23 @@ const WINDOW_MARGIN = 8;
 
 /**
  * Places the open card of details `card` under the node `anchor`, at its
- * left edge, or over it when the window has no room below. The card is kept
- * inside the window. Placing it above sets its `bottom`, so a card that
- * grows while it is open grows away from its node. A closed card has no
- * size, so it must be open.
+ * left edge, or over it when the card does not fit below and the window has
+ * more room above. The card is kept inside the window: it is no taller than
+ * the room on its side, and scrolls when its details are longer. Placing it
+ * above sets its `bottom`, so a card that grows while it is open grows away
+ * from its node. A closed card has no size, so it must be open.
  */
 const placeNodeCard = (card: HTMLElement, anchor: HTMLElement): void => {
   const box = anchor.getBoundingClientRect();
-  const fitsBelow = box.bottom + CARD_GAP + card.offsetHeight <= window.innerHeight - WINDOW_MARGIN;
+  const roomBelow = window.innerHeight - WINDOW_MARGIN - box.bottom - CARD_GAP;
+  const roomAbove = box.top - CARD_GAP - WINDOW_MARGIN;
+  // The card's own height, not the height an earlier placement capped it at.
+  card.style.maxHeight = "";
+  const isBelow = card.offsetHeight <= roomBelow || roomBelow >= roomAbove;
+  card.style.maxHeight = `${String(isBelow ? roomBelow : roomAbove)}px`;
   card.style.left = `${String(clamp(box.left, WINDOW_MARGIN, window.innerWidth - WINDOW_MARGIN - card.offsetWidth))}px`;
-  card.style.top = fitsBelow ? `${String(box.bottom + CARD_GAP)}px` : "auto";
-  card.style.bottom = fitsBelow ? "auto" : `${String(window.innerHeight - box.top + CARD_GAP)}px`;
+  card.style.top = isBelow ? `${String(box.bottom + CARD_GAP)}px` : "auto";
+  card.style.bottom = isBelow ? "auto" : `${String(window.innerHeight - box.top + CARD_GAP)}px`;
 };
 
 /**

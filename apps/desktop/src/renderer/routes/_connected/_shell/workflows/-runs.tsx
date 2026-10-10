@@ -20,22 +20,21 @@ import {
 
 /**
  * Renders the Runs tab's list, newest first. It reads the next page of runs
- * when the end of the table scrolls into view.
+ * when the end of the table scrolls into view. Picking a run calls
+ * `onOpenRun`.
  */
 export function RunsPanel({
   client,
   workflowId,
   definition,
-  drawnRunId,
-  onPickRun,
+  onOpenRun,
   timezone,
   now,
 }: {
   readonly client: HerculeClient;
   readonly workflowId: string;
   readonly definition: WorkflowDefinition;
-  readonly drawnRunId: string | undefined;
-  readonly onPickRun: (runId: string) => void;
+  readonly onOpenRun: (runId: string) => void;
   readonly timezone: string;
   readonly now: Date;
 }): JSX.Element {
@@ -47,13 +46,13 @@ export function RunsPanel({
   const rows = runs.data.pages
     .flatMap((page) => page.items)
     .map((run) => buildRunRow(run, definition, waitingSessions, timezone, now));
-  return <RunTable rows={rows} drawnRunId={drawnRunId} onPickRun={onPickRun} endRef={endRef} />;
+  return <RunTable rows={rows} onOpenRun={onOpenRun} endRef={endRef} />;
 }
 
 /**
  * Renders the Runs tab's timeline of `day`: the runs that ran on it, and the
  * fires still to come when it is today. `axis` is the day's axis, which the
- * page draws in its sticky band.
+ * page draws in its sticky band. Picking a run's bar calls `onOpenRun`.
  *
  * It reads the runs created from the day before up to the day's end, and
  * every run still running, because a run that waits on the user can run on
@@ -67,8 +66,7 @@ export function RunsTimeline({
   triggers,
   day,
   axis,
-  drawnRunId,
-  onPickRun,
+  onOpenRun,
   timezone,
   now,
 }: {
@@ -79,8 +77,7 @@ export function RunsTimeline({
   readonly triggers: ReadonlyArray<Trigger>;
   readonly day: TimelineDay;
   readonly axis: TimelineAxis;
-  readonly drawnRunId: string | undefined;
-  readonly onPickRun: (runId: string) => void;
+  readonly onOpenRun: (runId: string) => void;
   readonly timezone: string;
   readonly now: Date;
 }): JSX.Element {
@@ -103,8 +100,7 @@ export function RunsTimeline({
       bars={bars}
       trackCount={trackCount}
       fires={fires}
-      drawnRunId={drawnRunId}
-      onPickRun={onPickRun}
+      onOpenRun={onOpenRun}
       emptyText={isToday ? "No runs today" : "No runs this day"}
     />
   );
