@@ -128,6 +128,13 @@ Outside the store:
 - **The sweep.** The attachments domain holds one finite sweep, and the controller daemon runs it every hour, as it runs the other loops of the controller's life ([ADR 0033](../adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md)). The sweep deletes the rows of uploads that no input references and that are older than 24 hours, in its own transaction, and deletes each file after that transaction commits. An Attachment dropped from a queued input by `input.update` becomes sweepable the same way. The same sweep deletes files in `attachments/` that have no row and are older than 24 hours, which covers temp files from interrupted uploads and a crash between the database and the disk.
 - **Deletion.** No operation deletes a session today, so a referenced Attachment is in practice kept forever. A future session-deletion ticket must also delete the files nothing references anymore.
 
+*(Amended 2026-10-10, [#478](https://github.com/theagenticage/hercule/issues/478).)* **A tool result is an Attachment's second owner.** When an agent's tool returns an image, the runner uploads the bytes and the transcript keeps a reference ([./06-providers.md](./06-providers.md) section 6.3). The image is an ordinary Attachment: the same file under `attachments/`, the same row in `attachments`, stamped with the session's actor (`session:<id>`) and given a name from its type (`image.png`), since a tool's image has no file name. `session_tool_images` (attachment id, session id) records the session whose transcript references it.
+
+- **Write order.** The same as an upload: the file first, then the `attachments` row and the `session_tool_images` row in one transaction. An image is referenced from the moment its row exists, so it never counts against the 200 MiB of unsent uploads.
+- **Retention.** A tool result's image lives as long as the session's transcript and is deleted with it. "Referenced" means referenced by an input or by `session_tool_images`, so the 24-hour sweep never deletes a tool result's image, and `attachment.delete` cannot remove one.
+- **Size cap.** 10 MiB per image (`MAX_ATTACHMENT_BYTES`), as for uploads. A bigger image is not stored, and the transcript's reference says why.
+- **Backups and promotion** carry these files with the rest of `attachments/`, as already required above.
+
 Other artifacts are out of v1 scope; when they arrive they MUST live inside the Data Root too, so they move with the bundle (ticket 10). Promotion duration growing with file volume is the accepted cost; streaming or resumable transfer is the known escape hatch.
 
 ## Relocatable Data Root, no controller-owned absolute paths

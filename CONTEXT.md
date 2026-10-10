@@ -122,8 +122,8 @@ What the composer hands the system when the user sends: the message draft plus e
 _Avoid_: send, payload, message (bare)
 
 **Attachment**:
-An image the user attaches to a prompt: stored on the controller, referenced by id. Its bytes are a file in the Data Root and its metadata a row; an input, a fork and the stream carry only its id and metadata, never its bytes. An upload no input references is swept after 24 hours; one an input references lives as long as the session. PNG, JPEG, GIF or WebP, at most 10 MiB, at most 10 per input.
-_Avoid_: file, upload (the act, not the thing), blob, image chip (there is no chip; images sit on the composer's shelf); attachment for a checkout registered with `workspace.attach` (that is an adopted checkout)
+An image the controller stores and a transcript references by id. It has one of two owners: an input, when the user attaches the image to a prompt, or a tool result, when an agent's tool returned the image (a `Read` of a screenshot). Its bytes are a file in the Data Root and its metadata a row; an input, a fork, a frame and the stream carry only its id and metadata, never its bytes. An upload no input references is swept after 24 hours; one an input references, and every tool result's image, lives as long as the session. PNG, JPEG, GIF or WebP, at most 10 MiB, at most 10 per input.
+_Avoid_: file, upload (the act, not the thing), blob, tool image or screenshot as a separate concept (it is an Attachment owned by a tool result), image chip (there is no chip; images sit on the composer's shelf); attachment for a checkout registered with `workspace.attach` (that is an adopted checkout)
 
 ### Actors
 
