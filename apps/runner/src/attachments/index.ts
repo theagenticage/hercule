@@ -223,8 +223,10 @@ export const makeAttachmentUploader = (options: {
 }): AttachmentUploader => {
   /**
    * Uploads one image and returns the stored image. Throws an error whose
-   * message the user can read. The controller reads the image's type from
-   * its first bytes, so the request names no type.
+   * message the user can read, except when `signal` is aborted: `upload`
+   * explains an abort, because it can come at any step, the body included.
+   * The controller reads the image's type from its first bytes, so the
+   * request names no type.
    */
   const send = async (
     sessionId: string,
@@ -239,20 +241,12 @@ export const makeAttachmentUploader = (options: {
         method: "POST",
         headers: { authorization: `Bearer ${options.credential}` },
         body: bytes,
-        signal: AbortSignal.any([
-          signal,
-          AbortSignal.timeout(Duration.toMillis(ATTACHMENT_UPLOAD_TIMEOUT)),
-        ]),
+        signal,
       });
     } catch (error) {
-      throw new Error(
-        signal.aborted
-          ? "the session stopped before it was stored"
-          : error instanceof DOMException && error.name === "TimeoutError"
-            ? `the controller did not store it within ${Duration.format(ATTACHMENT_UPLOAD_TIMEOUT)}`
-            : `the controller could not be reached: ${describeError(error)}`,
-        { cause: error },
-      );
+      throw new Error(`the controller could not be reached: ${describeError(error)}`, {
+        cause: error,
+      });
     }
     if (response.status !== 201) {
       throw new Error(
@@ -268,9 +262,19 @@ export const makeAttachmentUploader = (options: {
   };
 
   return {
-    upload: (sessionId, bytes, signal) =>
-      Effect.match(
-        Effect.tryPromise({ try: () => send(sessionId, bytes, signal), catch: describeError }),
+    upload: (sessionId, bytes, signal) => {
+      const timeout = AbortSignal.timeout(Duration.toMillis(ATTACHMENT_UPLOAD_TIMEOUT));
+      return Effect.match(
+        Effect.tryPromise({
+          try: () => send(sessionId, bytes, AbortSignal.any([signal, timeout])),
+          // An abort is checked first: it fails whichever step was running.
+          catch: (error) =>
+            signal.aborted
+              ? "the session stopped before it was stored"
+              : timeout.aborted
+                ? `the controller did not store it within ${Duration.format(ATTACHMENT_UPLOAD_TIMEOUT)}`
+                : describeError(error),
+        }),
         {
           onSuccess: (attachment): ToolResultImage => ({ type: "image", attachment }),
           onFailure: (why): ToolResultImage => ({
@@ -278,6 +282,7 @@ export const makeAttachmentUploader = (options: {
             unavailable: truncateFact(`The image could not be kept: ${why}`),
           }),
         },
-      ),
+      );
+    },
   };
 };

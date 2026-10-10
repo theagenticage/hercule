@@ -182,6 +182,68 @@ describe("replacing the images in a tool result", () => {
     expect(uploader.uploads).toEqual([PNG]);
   });
 
+  it("uploads an image only the tool's structured output holds", async () => {
+    const uploader = createRecordingUploader();
+    const text = { type: "text", text: "took a screenshot" };
+    const replaced = await replace(
+      uploader,
+      buildToolResult([text], {
+        structuredContent: { screenshot: { type: "image", data: OTHER, mimeType: "image/png" } },
+      }),
+    );
+
+    expect(replaced).toMatchObject({
+      tool_use_result: { structuredContent: { screenshot: buildStored(OTHER) } },
+    });
+    expect(readContent(replaced)).toEqual([text]);
+    expect(uploader.uploads).toEqual([OTHER]);
+  });
+
+  it("uploads each of two different images in the content and the structured output", async () => {
+    const uploader = createRecordingUploader();
+    const replaced = await replace(
+      uploader,
+      buildToolResult([buildImageBlock(PNG)], {
+        type: "image",
+        file: { base64: OTHER, type: "image/png" },
+      }),
+    );
+
+    expect(readContent(replaced)).toEqual([buildStored(PNG)]);
+    expect(replaced).toMatchObject({ tool_use_result: { file: { base64: buildStored(OTHER) } } });
+    expect(uploader.uploads.toSorted()).toEqual([PNG, OTHER].toSorted());
+  });
+
+  it("replaces an MCP resource that embeds an image, and leaves one that embeds a PDF", async () => {
+    const uploader = createRecordingUploader();
+    const pdf = {
+      type: "resource",
+      resource: { uri: "file:///a.pdf", mimeType: "application/pdf", blob: "JVBERi0=" },
+    };
+    const replaced = await replace(
+      uploader,
+      buildToolResult([
+        { type: "resource", resource: { uri: "file:///a.png", mimeType: "image/png", blob: PNG } },
+        pdf,
+      ]),
+    );
+
+    expect(readContent(replaced)).toEqual([buildStored(PNG), pdf]);
+    expect(uploader.uploads).toEqual([PNG]);
+  });
+
+  it("leaves what is not an image: a PDF the tool read, and an MCP audio block", async () => {
+    const uploader = createRecordingUploader();
+    const sdk = buildToolResult([{ type: "audio", data: "UklGRg==", mimeType: "audio/wav" }], {
+      type: "pdf",
+      file: { base64: "JVBERi0=", type: "application/pdf" },
+    });
+    const replaced = await replace(uploader, sdk);
+
+    expect(replaced).toBe(sdk);
+    expect(uploader.uploads).toEqual([]);
+  });
+
   it("replaces image blocks in a structured output that is an array of blocks", async () => {
     const uploader = createRecordingUploader();
     const replaced = await replace(
@@ -222,7 +284,10 @@ describe("replacing the images in a tool result", () => {
     };
     const replaced = await replace(
       { upload: () => Effect.succeed(unavailable) },
-      buildToolResult([buildImageBlock(PNG)], { type: "image", file: { base64: PNG } }),
+      buildToolResult([buildImageBlock(PNG)], {
+        type: "image",
+        file: { base64: PNG, type: "image/png" },
+      }),
     );
 
     expect(readContent(replaced)).toEqual([unavailable]);

@@ -2,7 +2,7 @@
  * Takes the images out of the tool results in a Claude SDK message, before
  * the normalizer sees it, so no event carries an image's bytes.
  *
- * A Claude `Read` of a PNG returns the image twice: as an image block with
+ * For example, a Claude `Read` of a PNG returns the image twice: as an image block with
  * base64 data in the `tool_result`'s content, and again in the message's
  * `tool_use_result`, the tool's structured output. The normalizer passes the
  * first on in `item.completed.detail.content` and the whole message in `raw`.
@@ -15,10 +15,12 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { MAX_ATTACHMENT_BYTES, type ToolResultImage } from "@hercule/protocol";
 import type { AttachmentUploader } from "../attachments";
 
-/** An image block with inline base64 data, as the Messages API writes it in a tool result. */
-interface Base64ImageBlock {
-  readonly type: "image";
-  readonly source: { readonly type: "base64"; readonly media_type: string; readonly data: string };
+/** An image found in a tool result, and how to put its reference in its place. */
+interface FoundImage {
+  /** The image's base64 data. */
+  readonly data: string;
+  /** Returns the object the image was found in, with `reference` in the image's place. */
+  readonly replace: (reference: ToolResultImage) => unknown;
 }
 
 /**
@@ -28,56 +30,106 @@ interface Base64ImageBlock {
  */
 const MAX_PARALLEL_UPLOADS = 4;
 
-/** The keys under which a tool's structured output holds an image's base64 data. */
-const IMAGE_DATA_KEYS: ReadonlySet<string> = new Set(["base64", "image_data"]);
-
 /** The reason an image too large for the controller is not kept. */
 const IMAGE_TOO_LARGE = `The image is larger than ${String(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB, so it was not kept.`;
 
 /** The reason an image whose upload had not started when the session stopped is not kept. */
 const SESSION_STOPPED = "The session stopped before the image was kept.";
 
-/** Checks whether a content block is an image with inline base64 data. */
-const isBase64ImageBlock = (block: unknown): block is Base64ImageBlock => {
-  if (typeof block !== "object" || block === null) return false;
-  const { type, source } = block as { readonly type?: unknown; readonly source?: unknown };
-  if (type !== "image" || typeof source !== "object" || source === null) return false;
-  const { type: sourceType, data, media_type } = source as Record<string, unknown>;
-  return sourceType === "base64" && typeof data === "string" && typeof media_type === "string";
-};
+/** Returns `value` as a record when it is a plain object, or undefined. */
+const asRecord = (value: unknown): Readonly<Record<string, unknown>> | undefined =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+
+/** Checks whether a declared media type is an image's. */
+const isImageMimeType = (mimeType: unknown): boolean =>
+  typeof mimeType === "string" && mimeType.startsWith("image/");
 
 /**
- * Returns the base64 data of an image block in a tool's structured output,
- * or undefined for any other value. An image block has one of two shapes:
+ * Returns the image `value` holds itself, or undefined when it holds none.
+ * Five shapes hold an image's bytes in a tool result:
  *
- * - the Messages API's, with the data in `source.data`, as Claude's
- *   subagents and most MCP tools repeat their result's content;
- * - MCP's own, with the data in `data`, as an MCP tool's
- *   `structuredContent` holds it.
+ * - `{ type: "image", source: { type: "base64", data, media_type } }`, the
+ *   Messages API's image block, in a `tool_result`'s content and in what a
+ *   subagent or an MCP tool repeats of it;
+ * - `{ type: "image", data, mimeType }`, MCP's image block, as an MCP tool's
+ *   `structuredContent` may hold it;
+ * - `{ type: "resource", resource: { blob, mimeType } }`, MCP's embedded
+ *   resource;
+ * - `{ base64, type }`, the `file` of Claude's `Read` of an image;
+ * - `{ image_data, media_type }`, a cell output's image in Claude's `Read`
+ *   of a notebook.
+ *
+ * These are every shape of MCP's content types (text, image, audio,
+ * resource link, resource) and of Claude's own tools that can carry an
+ * image's bytes. A block is replaced whole; in the last two shapes only the
+ * field with the data is. A shape counts only when its declared media type
+ * is an image's, so a PDF, an audio clip or another blob is left as it is. An
+ * image the controller does not store, such as a BMP, is still uploaded: it
+ * is refused and becomes `unavailable`, so its bytes are dropped all the same.
  */
-const readImageBlockData = (value: object): string | undefined => {
-  if (isBase64ImageBlock(value)) return value.source.data;
-  const { type, data } = value as { readonly type?: unknown; readonly data?: unknown };
-  return type === "image" && typeof data === "string" ? data : undefined;
+const recognizeImage = (value: Readonly<Record<string, unknown>>): FoundImage | undefined => {
+  const recognizeBlock = (data: unknown, mimeType: unknown): FoundImage | undefined =>
+    typeof data === "string" && isImageMimeType(mimeType)
+      ? { data, replace: (reference) => reference }
+      : undefined;
+  const recognizeField = (key: string, mimeType: unknown): FoundImage | undefined => {
+    const data = value[key];
+    return typeof data === "string" && isImageMimeType(mimeType)
+      ? { data, replace: (reference) => ({ ...value, [key]: reference }) }
+      : undefined;
+  };
+  if (value.type === "image") {
+    const source = asRecord(value.source);
+    return source?.type === "base64"
+      ? recognizeBlock(source.data, source.media_type)
+      : recognizeBlock(value.data, value.mimeType);
+  }
+  if (value.type === "resource") {
+    const resource = asRecord(value.resource);
+    return resource === undefined ? undefined : recognizeBlock(resource.blob, resource.mimeType);
+  }
+  if ("base64" in value) return recognizeField("base64", value.type);
+  if ("image_data" in value) return recognizeField("image_data", value.media_type);
+  return undefined;
 };
 
-/** Returns the content array of a `tool_result` block, or undefined for any other block. */
-const readToolResultContent = (block: unknown): ReadonlyArray<unknown> | undefined => {
-  if (typeof block !== "object" || block === null) return undefined;
-  const { type, content } = block as { readonly type?: unknown; readonly content?: unknown };
-  return type === "tool_result" && Array.isArray(content) ? content : undefined;
+/** Adds every image inside `value`, at any depth, to `found`, in the order they appear. */
+const findImages = (value: unknown, found: Array<FoundImage>): void => {
+  if (Array.isArray(value)) {
+    for (const item of value) findImages(item, found);
+    return;
+  }
+  const record = asRecord(value);
+  if (record === undefined) return;
+  const image = recognizeImage(record);
+  if (image !== undefined) found.push(image);
+  else for (const field of Object.values(record)) findImages(field, found);
 };
 
 /**
- * Returns the image blocks inside the tool results of a user message, in the
- * order they appear. Returns an empty list for every other message.
+ * Returns a copy of `value` in which each image `findImages` found holds its
+ * reference from `references`, keyed by the image's data, instead.
  */
-const findToolResultImages = (sdk: SDKMessage): ReadonlyArray<Base64ImageBlock> => {
-  if (sdk.type !== "user" || !Array.isArray(sdk.message.content)) return [];
-  return sdk.message.content.flatMap(
-    (block) => readToolResultContent(block)?.filter(isBase64ImageBlock) ?? [],
+const replaceImages = (
+  value: unknown,
+  references: ReadonlyMap<string, ToolResultImage>,
+): unknown => {
+  if (Array.isArray(value)) return value.map((item) => replaceImages(item, references));
+  const record = asRecord(value);
+  if (record === undefined) return value;
+  const image = recognizeImage(record);
+  const reference = image === undefined ? undefined : references.get(image.data);
+  if (image !== undefined && reference !== undefined) return image.replace(reference);
+  return Object.fromEntries(
+    Object.entries(record).map(([key, field]) => [key, replaceImages(field, references)]),
   );
 };
+
+/** Checks whether a content block of a user message is a `tool_result`. */
+const isToolResultBlock = (block: unknown): block is { readonly content?: unknown } =>
+  asRecord(block)?.type === "tool_result";
 
 /**
  * Returns the number of bytes base64 `data` decodes to, without decoding it,
@@ -89,7 +141,7 @@ const computeDecodedSize = (data: string): number => {
 };
 
 /**
- * Uploads one image and returns its reference. The image is decoded only
+ * Uploads the image whose base64 is `data` and returns its reference. The image is decoded only
  * when its upload starts. These images are not uploaded:
  *
  * - an image larger than `MAX_ATTACHMENT_BYTES`, which the controller would
@@ -99,58 +151,30 @@ const computeDecodedSize = (data: string): number => {
 const uploadImage = (
   uploader: AttachmentUploader,
   sessionId: string,
-  image: Base64ImageBlock,
+  data: string,
   signal: AbortSignal,
 ): Effect.Effect<ToolResultImage> =>
   Effect.suspend(() => {
     if (signal.aborted) return Effect.succeed({ type: "image", unavailable: SESSION_STOPPED });
-    if (computeDecodedSize(image.source.data) > MAX_ATTACHMENT_BYTES) {
+    if (computeDecodedSize(data) > MAX_ATTACHMENT_BYTES) {
       return Effect.succeed({ type: "image", unavailable: IMAGE_TOO_LARGE });
     }
-    return uploader.upload(sessionId, Buffer.from(image.source.data, "base64"), signal);
+    return uploader.upload(sessionId, Buffer.from(data, "base64"), signal);
   });
 
 /**
- * Returns a copy of `value`, a tool's structured output, in which each copy
- * of an uploaded image holds that image's reference instead. An image is
- * found in two shapes:
- *
- * - a `base64` field holding the image's data, as Claude's `Read` of an image
- *   writes it;
- * - an `image_data` field holding the image's data, as Claude's `Read` of a
- *   notebook writes a cell output's image;
- * - an image block with the image's data, in either shape
- *   `readImageBlockData` reads.
- *
- * Other base64, such as a PDF's, is left as it is.
- */
-const replaceUploadedImages = (
-  value: unknown,
-  references: ReadonlyMap<string, ToolResultImage>,
-): unknown => {
-  if (Array.isArray(value)) return value.map((item) => replaceUploadedImages(item, references));
-  if (typeof value !== "object" || value === null) return value;
-  const data = readImageBlockData(value);
-  const blockReference = data === undefined ? undefined : references.get(data);
-  if (blockReference !== undefined) return blockReference;
-  return Object.fromEntries(
-    Object.entries(value).map(([key, field]) => {
-      const reference =
-        IMAGE_DATA_KEYS.has(key) && typeof field === "string" ? references.get(field) : undefined;
-      return [key, reference ?? replaceUploadedImages(field, references)];
-    }),
-  );
-};
-
-/**
  * Returns the message with each image in its tool results replaced by a
- * `ToolResultImage`, in the tool result's content and in `tool_use_result`
- * alike. Each distinct image is uploaded once, and up to
- * `MAX_PARALLEL_UPLOADS` uploads of one message run in parallel. A message with no such image is returned as the
- * same object, with no work done, because every SDK message passes through
- * here. Aborting `signal`, when the session stops, ends the uploads in
- * progress and starts no more. Never fails: an image that cannot be kept
- * becomes `unavailable`, and its bytes are dropped all the same.
+ * `ToolResultImage`. Images are found by shape (see `recognizeImage`) in
+ * two places: the content of each `tool_result` block, and
+ * `tool_use_result`, the tool's structured output. The user's own images in
+ * a prompt are not in either, so they are never taken for a tool's.
+ *
+ * Each distinct image is uploaded once, and up to `MAX_PARALLEL_UPLOADS`
+ * uploads of one message run in parallel. A message with no such image is
+ * returned as the same object, with no work done, because every SDK message
+ * passes through here. Aborting `signal`, when the session stops, ends the
+ * uploads in progress and starts no more. Never fails: an image that cannot
+ * be kept becomes `unavailable`, and its bytes are dropped all the same.
  */
 export const replaceToolResultImages = (
   uploader: AttachmentUploader,
@@ -158,31 +182,30 @@ export const replaceToolResultImages = (
   sdk: SDKMessage,
   signal: AbortSignal,
 ): Effect.Effect<SDKMessage> => {
-  const images = findToolResultImages(sdk);
-  if (images.length === 0 || sdk.type !== "user") return Effect.succeed(sdk);
-  const distinct = new Map(images.map((image) => [image.source.data, image]));
+  if (sdk.type !== "user" || !Array.isArray(sdk.message.content)) return Effect.succeed(sdk);
+  const blocks: ReadonlyArray<unknown> = sdk.message.content;
+  const found: Array<FoundImage> = [];
+  for (const block of blocks) if (isToolResultBlock(block)) findImages(block.content, found);
+  findImages(sdk.tool_use_result, found);
+  if (found.length === 0) return Effect.succeed(sdk);
+  const distinct = new Set(found.map((image) => image.data));
   return Effect.map(
     Effect.forEach(
       distinct,
-      ([data, image]) =>
+      (data) =>
         Effect.map(
-          uploadImage(uploader, sessionId, image, signal),
+          uploadImage(uploader, sessionId, data, signal),
           (reference) => [data, reference] as const,
         ),
       { concurrency: MAX_PARALLEL_UPLOADS },
     ),
     (entries) => {
       const references = new Map(entries);
-      const content = (sdk.message.content as ReadonlyArray<unknown>).map((block) => {
-        const blocks = readToolResultContent(block);
-        if (blocks === undefined) return block;
-        return {
-          ...(block as object),
-          content: blocks.map((inner) =>
-            isBase64ImageBlock(inner) ? references.get(inner.source.data) : inner,
-          ),
-        };
-      });
+      const content = blocks.map((block) =>
+        isToolResultBlock(block)
+          ? { ...block, content: replaceImages(block.content, references) }
+          : block,
+      );
       // The SDK's types have no reference block, so the copy is cast back to
       // an SDK message. The normalizer passes a tool result's content array
       // through untouched, and the event's `detail` is plain JSON.
@@ -191,7 +214,7 @@ export const replaceToolResultImages = (
         message: { ...sdk.message, content },
         ...(sdk.tool_use_result === undefined
           ? {}
-          : { tool_use_result: replaceUploadedImages(sdk.tool_use_result, references) }),
+          : { tool_use_result: replaceImages(sdk.tool_use_result, references) }),
       } as SDKMessage;
     },
   );

@@ -305,6 +305,29 @@ describe("the attachment uploader", () => {
     });
   });
 
+  it("reports a stop while the controller's answer is still arriving as the session stopping", async () => {
+    const stopping = new AbortController();
+    // The headers arrive, and the body never ends until the stop.
+    const stub = startUploadStub(
+      () =>
+        new Response(
+          new ReadableStream({
+            start: (controller) => {
+              controller.enqueue(new TextEncoder().encode("{"));
+              // Late enough that the runner has the headers and reads the body.
+              setTimeout(() => stopping.abort(), 50);
+            },
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+    );
+
+    expect(await uploadPng(stub.url, stopping.signal)).toEqual({
+      type: "image",
+      unavailable: "The image could not be kept: the session stopped before it was stored",
+    });
+  });
+
   it("returns the image as unavailable when the controller cannot be reached", async () => {
     const stub = startUploadStub(() => Response.json(STORED, { status: 201 }));
     stub.stop();
