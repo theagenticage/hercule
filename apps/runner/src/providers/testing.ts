@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { expect } from "vitest";
 import * as Effect from "effect/Effect";
 import type { ProviderEvent } from "@hercule/protocol";
-import type { ToolImageUploader } from "../attachments";
+import type { AttachmentUploader } from "../attachments";
 import type { LocalAttachment, UserMaterial } from "./index";
 
 const homes: Array<string> = [];
@@ -126,7 +126,7 @@ export const NO_USER_MATERIAL_PATHS: UserMaterial = {
  * A tool image uploader for a test with no controller: it uploads nothing
  * and returns every image as unavailable.
  */
-export const NO_CONTROLLER_TOOL_IMAGES: ToolImageUploader = {
+export const NO_CONTROLLER_UPLOADER: AttachmentUploader = {
   upload: () =>
     Effect.succeed({ type: "image", unavailable: "This test has no controller to keep images." }),
 };

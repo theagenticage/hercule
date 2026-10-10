@@ -17,7 +17,7 @@ import type {
   SubagentId,
   TurnInput,
 } from "@hercule/protocol";
-import type { ToolImageUploader } from "../attachments";
+import type { AttachmentUploader } from "../attachments";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
 import { CODEX, codex } from "./codex";
 import { PI, pi } from "./pi";
@@ -86,7 +86,7 @@ export interface ProviderRunnerContext {
    * There is one per runner process; a probe, an install and a login are
    * given it too but never use it.
    */
-  readonly toolImages: ToolImageUploader;
+  readonly attachmentUploader: AttachmentUploader;
 }
 
 /**

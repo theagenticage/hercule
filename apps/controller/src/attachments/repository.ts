@@ -45,7 +45,7 @@ const COLUMNS = "a.id, a.name, a.mime_type, a.size_bytes, a.sha256, a.actor, a.c
  */
 const buildReferencedClause = (alias: string): string =>
   `(EXISTS (SELECT 1 FROM session_input_attachments r WHERE r.attachment_id = ${alias}.id) ` +
-  `OR EXISTS (SELECT 1 FROM session_tool_images t WHERE t.attachment_id = ${alias}.id))`;
+  `OR EXISTS (SELECT 1 FROM session_tool_result_attachments t WHERE t.attachment_id = ${alias}.id))`;
 
 const toAttachment = (row: AttachmentRow): StoredAttachment => ({
   id: uuidToString(row.id),
@@ -77,14 +77,14 @@ const make = Effect.gen(function* () {
      * session's transcript. Run it inside a transaction, so both rows are
      * written or neither is.
      */
-    insertToolImage: (
+    insertToolResultAttachment: (
       attachment: StoredAttachment,
       sessionId: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         yield* insert(attachment);
         yield* sql`
-          INSERT INTO session_tool_images (attachment_id, session_id)
+          INSERT INTO session_tool_result_attachments (attachment_id, session_id)
           VALUES (${uuidFromString(attachment.id)}, ${uuidFromString(sessionId)})
         `;
       }),

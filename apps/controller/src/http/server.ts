@@ -29,7 +29,7 @@
  * - The attachment fetch at `GET /api/v1/runners/attachments/:id` also stops
  *   before step 5, for the same reason: a runner fetches an input's image
  *   with its credential.
- * - The tool image upload at `POST /api/v1/runners/tool-images` also stops
+ * - The tool image upload at `POST /api/v1/runners/attachments` also stops
  *   before step 5, for the same reason: a runner uploads an image an agent's
  *   tool returned with its credential.
  * - The OAuth callback at `GET /oauth/callback` also stops before the
@@ -70,7 +70,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   OPERATIONS,
 } from "@hercule/contract";
-import { MAX_FRAME_BYTES, TOOL_IMAGE_UPLOAD_PATH } from "@hercule/protocol";
+import { MAX_FRAME_BYTES, RUNNER_ATTACHMENTS_PATH } from "@hercule/protocol";
 import { withCors } from "./cors";
 import { buildErrorResponse, withEnvelope } from "./envelope";
 import { setupGate } from "./gate";
@@ -150,7 +150,7 @@ export const bodyLimits = {
  */
 const UPLOAD_ROUTES: ReadonlySet<string> = new Set([
   `${OPERATIONS["attachment.create"].method} ${OPERATIONS["attachment.create"].path}`,
-  `POST ${TOOL_IMAGE_UPLOAD_PATH}`,
+  `POST ${RUNNER_ATTACHMENTS_PATH}`,
 ]);
 
 /**

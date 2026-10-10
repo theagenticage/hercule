@@ -12,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import { TOOL_IMAGE_UPLOAD_PATH, type AttachmentReference } from "@hercule/protocol";
-import { makeAttachmentCache, makeToolImageUploader } from "./index";
+import { RUNNER_ATTACHMENTS_PATH, type AttachmentReference } from "@hercule/protocol";
+import { makeAttachmentCache, makeAttachmentUploader } from "./index";
 
 const CREDENTIAL = "runner-credential-for-a-test";
 
@@ -235,7 +235,10 @@ const STORED = { id: "0199e0e7-0000-7000-8000-0000000000c1", mimeType: "image/pn
 
 const uploadPng = (url: string) =>
   Effect.runPromise(
-    makeToolImageUploader({ controllerUrl: url, credential: CREDENTIAL }).upload(TOOL_SESSION, PNG),
+    makeAttachmentUploader({ controllerUrl: url, credential: CREDENTIAL }).upload(
+      TOOL_SESSION,
+      PNG,
+    ),
   );
 
 describe("the tool image uploader", () => {
@@ -245,7 +248,7 @@ describe("the tool image uploader", () => {
     expect(await uploadPng(stub.url)).toEqual({ type: "image", attachment: STORED });
     expect(stub.uploads).toEqual([
       {
-        path: TOOL_IMAGE_UPLOAD_PATH,
+        path: RUNNER_ATTACHMENTS_PATH,
         sessionId: TOOL_SESSION,
         authorization: `Bearer ${CREDENTIAL}`,
         body: PNG,

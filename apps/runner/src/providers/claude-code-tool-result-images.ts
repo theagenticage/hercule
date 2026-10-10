@@ -13,7 +13,7 @@
 import * as Effect from "effect/Effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { MAX_ATTACHMENT_BYTES, type ToolResultImage } from "@hercule/protocol";
-import type { ToolImageUploader } from "../attachments";
+import type { AttachmentUploader } from "../attachments";
 
 /** An image block with inline base64 data, as the Messages API writes it in a tool result. */
 interface Base64ImageBlock {
@@ -44,7 +44,7 @@ const readToolResultContent = (block: unknown): ReadonlyArray<unknown> | undefin
  * Returns the image blocks inside the tool results of a user message, in the
  * order they appear. Returns an empty list for every other message.
  */
-const findToolImages = (sdk: SDKMessage): ReadonlyArray<Base64ImageBlock> => {
+const findToolResultImages = (sdk: SDKMessage): ReadonlyArray<Base64ImageBlock> => {
   if (sdk.type !== "user" || !Array.isArray(sdk.message.content)) return [];
   return sdk.message.content.flatMap(
     (block) => readToolResultContent(block)?.filter(isBase64ImageBlock) ?? [],
@@ -64,8 +64,8 @@ const computeDecodedSize = (data: string): number => {
  * Uploads one image and returns its reference. An image larger than
  * `MAX_ATTACHMENT_BYTES` is not uploaded: the controller would refuse it.
  */
-const keepImage = (
-  uploader: ToolImageUploader,
+const uploadImage = (
+  uploader: AttachmentUploader,
   sessionId: string,
   image: Base64ImageBlock,
 ): Effect.Effect<ToolResultImage> => {
@@ -104,12 +104,12 @@ const replaceBase64Fields = (
  * here. Never fails: an image that cannot be kept becomes `unavailable`, and
  * its bytes are dropped all the same.
  */
-export const replaceToolImages = (
-  uploader: ToolImageUploader,
+export const replaceToolResultImages = (
+  uploader: AttachmentUploader,
   sessionId: string,
   sdk: SDKMessage,
 ): Effect.Effect<SDKMessage> => {
-  const images = findToolImages(sdk);
+  const images = findToolResultImages(sdk);
   if (images.length === 0 || sdk.type !== "user") return Effect.succeed(sdk);
   const distinct = new Map(images.map((image) => [image.source.data, image]));
   return Effect.map(
@@ -117,7 +117,7 @@ export const replaceToolImages = (
       distinct,
       ([data, image]) =>
         Effect.map(
-          keepImage(uploader, sessionId, image),
+          uploadImage(uploader, sessionId, image),
           (reference) => [data, reference] as const,
         ),
       { concurrency: "unbounded" },

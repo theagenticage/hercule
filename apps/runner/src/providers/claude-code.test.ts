@@ -51,7 +51,7 @@ const CONTEXT: ProviderRunnerContext = {
   env: { PATH: "/usr/local/bin:/usr/bin" },
   secrets: {},
   herculeTool: HERCULE_TOOL,
-  toolImages: testing.NO_CONTROLLER_TOOL_IMAGES,
+  attachmentUploader: testing.NO_CONTROLLER_UPLOADER,
 };
 
 afterAll(testing.cleanupHomes);
@@ -3014,7 +3014,7 @@ describe("an image a tool returns", () => {
     await Effect.runPromise(
       run.adapter.startSession(SESSION, SPEC, {
         ...WORKING,
-        toolImages: {
+        attachmentUploader: {
           upload: (sessionId, bytes) =>
             Effect.sync(() => {
               uploaded.push({ sessionId, bytes });

@@ -14,11 +14,11 @@ import * as Effect from "effect/Effect";
 import type { Attachment, Input, RunnerDetail, Session } from "@hercule/contract";
 import {
   MAX_ATTACHMENT_BYTES,
-  TOOL_IMAGE_UPLOAD_PATH,
+  RUNNER_ATTACHMENTS_PATH,
   type ImageInputCapability,
   type SessionInput,
   type SessionStart,
-  type StoredToolImage,
+  type ToolResultAttachment,
 } from "@hercule/protocol";
 import { get, post, send } from "../http/testing";
 import {
@@ -72,25 +72,25 @@ const fetchAsRunner = (arranged: Arranged, id: string, credential?: string): Pro
   });
 
 /** Uploads a tool's image the way a runner does, with `credential` as its bearer, or none for `null`. */
-const uploadToolImage = (
+const uploadToolResultAttachment = (
   arranged: Arranged,
   sessionId: string,
   bytes: Uint8Array = PNG,
   credential: string | null = arranged.credential,
 ): Promise<Response> =>
-  fetch(`${arranged.harness.base}${TOOL_IMAGE_UPLOAD_PATH}?sessionId=${sessionId}`, {
+  fetch(`${arranged.harness.base}${RUNNER_ATTACHMENTS_PATH}?sessionId=${sessionId}`, {
     method: "POST",
     headers: credential === null ? {} : { authorization: `Bearer ${credential}` },
     body: bytes,
   });
 
-const uploadToolImageOrFail = async (
+const uploadToolResultAttachmentOrFail = async (
   arranged: Arranged,
   sessionId: string,
-): Promise<StoredToolImage> => {
-  const response = await uploadToolImage(arranged, sessionId);
+): Promise<ToolResultAttachment> => {
+  const response = await uploadToolResultAttachment(arranged, sessionId);
   expect(response.status, await response.clone().text()).toBe(201);
-  return (await response.json()) as StoredToolImage;
+  return (await response.json()) as ToolResultAttachment;
 };
 
 /** Spawns a session with the image as its prompt, answers its start, and waits until it is busy. */
@@ -878,7 +878,7 @@ describe("a runner uploading a tool's image", () => {
     async () => {
       await withAgentFleet(async (arranged) => {
         const session = await spawnSessionOrFail(arranged, { prompt: "look" });
-        const stored = await uploadToolImageOrFail(arranged, session.id);
+        const stored = await uploadToolResultAttachmentOrFail(arranged, session.id);
         expect(stored).toEqual({ id: stored.id, mimeType: "image/png", sizeBytes: PNG.byteLength });
 
         // The image is not theirs and no input carries it: the reader sees it
@@ -902,11 +902,15 @@ describe("a runner uploading a tool's image", () => {
     async () => {
       await withAgentFleet(async (arranged) => {
         const session = await spawnSessionOrFail(arranged, { prompt: "look" });
-        const large = await uploadToolImage(arranged, session.id, buildPng(3 * MEBIBYTE));
+        const large = await uploadToolResultAttachment(
+          arranged,
+          session.id,
+          buildPng(3 * MEBIBYTE),
+        );
         expect(large.status, await large.clone().text()).toBe(201);
         expect(await large.json()).toMatchObject({ sizeBytes: 3 * MEBIBYTE });
 
-        const tooLarge = await uploadToolImage(
+        const tooLarge = await uploadToolResultAttachment(
           arranged,
           session.id,
           buildPng(MAX_ATTACHMENT_BYTES + 1),
@@ -925,7 +929,7 @@ describe("a runner uploading a tool's image", () => {
         const directory = join(arranged.harness.home, "data", "attachments");
         const filesBefore = listFiles(directory);
 
-        const response = await uploadToolImage(
+        const response = await uploadToolResultAttachment(
           arranged,
           session.id,
           new TextEncoder().encode("hello"),
@@ -946,21 +950,26 @@ describe("a runner uploading a tool's image", () => {
     async () => {
       await withAgentFleet(async (arranged) => {
         const session = await spawnSessionOrFail(arranged, { prompt: "look" });
-        expect((await uploadToolImage(arranged, session.id, PNG, null)).status).toBe(401);
+        expect((await uploadToolResultAttachment(arranged, session.id, PNG, null)).status).toBe(
+          401,
+        );
         expect(
-          (await uploadToolImage(arranged, session.id, PNG, "a-made-up-credential")).status,
+          (await uploadToolResultAttachment(arranged, session.id, PNG, "a-made-up-credential"))
+            .status,
         ).toBe(401);
         // A user's token is not a runner's credential.
-        expect((await uploadToolImage(arranged, session.id, PNG, arranged.token)).status).toBe(401);
+        expect(
+          (await uploadToolResultAttachment(arranged, session.id, PNG, arranged.token)).status,
+        ).toBe(401);
 
-        expect((await uploadToolImage(arranged, "not-an-id")).status).toBe(404);
-        expect((await uploadToolImage(arranged, NO_SUCH_ATTACHMENT)).status).toBe(404);
+        expect((await uploadToolResultAttachment(arranged, "not-an-id")).status).toBe(404);
+        expect((await uploadToolResultAttachment(arranged, NO_SUCH_ATTACHMENT)).status).toBe(404);
         const joined = await send("POST", arranged.harness.base, "/api/v1/runners/join", {
           body: {},
           token: await arranged.harness.joinToken(),
         });
         const { credential } = (await joined.json()) as { credential: string };
-        const otherRunner = await uploadToolImage(arranged, session.id, PNG, credential);
+        const otherRunner = await uploadToolResultAttachment(arranged, session.id, PNG, credential);
         expect(otherRunner.status).toBe(404);
         expect(await otherRunner.json()).toMatchObject({ error: { code: "not_found" } });
       });
@@ -976,7 +985,7 @@ describe("a runner uploading a tool's image", () => {
           "session.steer",
           "session.read",
         ]);
-        const stored = await uploadToolImageOrFail(arranged, agent.session.id);
+        const stored = await uploadToolResultAttachmentOrFail(arranged, agent.session.id);
         // The tool's image has the session as its actor, as the session's own
         // uploads do. Were it counted, this size would fill the quota.
         await Effect.runPromise(
@@ -1034,7 +1043,7 @@ describe("the sweep", () => {
       await withAgentFleet(
         async (arranged) => {
           const session = await spawnSessionOrFail(arranged, { prompt: "look" });
-          const toolImage = await uploadToolImageOrFail(arranged, session.id);
+          const toolResultAttachment = await uploadToolResultAttachmentOrFail(arranged, session.id);
           const unclaimed = await uploadOrFail(arranged, "old.png");
           const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
           await Effect.runPromise(
@@ -1046,10 +1055,10 @@ describe("the sweep", () => {
           await waitUntil("swept the unclaimed image", () =>
             existsSync(join(directory, unclaimed.id)) ? undefined : true,
           );
-          expect(existsSync(join(directory, toolImage.id))).toBe(true);
+          expect(existsSync(join(directory, toolResultAttachment.id))).toBe(true);
           const read = await get(
             arranged.harness.base,
-            `/api/v1/attachments/${toolImage.id}/content`,
+            `/api/v1/attachments/${toolResultAttachment.id}/content`,
             arranged.token,
           );
           expect(read.status).toBe(200);

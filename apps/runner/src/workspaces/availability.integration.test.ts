@@ -25,7 +25,7 @@ import {
   runGitOrThrow,
 } from "./testing";
 import { makeAttachmentCache } from "../attachments";
-import { NO_CONTROLLER_TOOL_IMAGES } from "../providers/testing";
+import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 
 afterAll(cleanTemporaries);
 
@@ -38,7 +38,7 @@ const refuseSessionPlacement = async (
     providersDir: join(storageDir, "providers"),
     scratchDir: join(storageDir, "scratch"),
     attachmentsDir: join(storageDir, "attachments"),
-    toolImages: NO_CONTROLLER_TOOL_IMAGES,
+    attachmentUploader: NO_CONTROLLER_UPLOADER,
     attachments: makeAttachmentCache({
       controllerUrl: "https://controller.example:4938",
       credential: "test",

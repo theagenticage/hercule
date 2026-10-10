@@ -22,7 +22,7 @@ export {
   IMAGE_MIME_TYPES,
   ImageMimeType,
   MAX_ATTACHMENT_BYTES,
-  StoredToolImage,
+  ToolResultAttachment,
   ToolResultImage,
 } from "@hercule/protocol";
 

@@ -244,7 +244,7 @@ export {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENT_NAME_LENGTH,
   MAX_ATTACHMENTS_PER_INPUT,
-  StoredToolImage,
+  ToolResultAttachment,
   ToolResultImage,
 } from "./groups/attachment";
 export {

@@ -17,7 +17,7 @@ import {
   createLines,
   createScratchHome,
   filterByTag,
-  NO_CONTROLLER_TOOL_IMAGES,
+  NO_CONTROLLER_UPLOADER,
   waitUntil,
 } from "../testing";
 import { makeCodexAdapter, type CodexSeam } from "./adapter";
@@ -38,7 +38,7 @@ export const createCodexHome = (): string => createScratchHome("codex");
 export const buildContext = (home: string, cwd: string | null = null): ProviderRunnerContext => ({
   cwd,
   attachmentsDir: null,
-  toolImages: NO_CONTROLLER_TOOL_IMAGES,
+  attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,
   binary: "/usr/local/bin/codex",
   env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },

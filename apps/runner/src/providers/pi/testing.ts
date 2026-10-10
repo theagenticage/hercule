@@ -25,7 +25,7 @@ import {
   createLines,
   createScratchHome,
   filterByTag,
-  NO_CONTROLLER_TOOL_IMAGES,
+  NO_CONTROLLER_UPLOADER,
   waitUntil,
 } from "../testing";
 import { makePiAdapter, type PiSeam } from "./adapter";
@@ -53,7 +53,7 @@ export const buildContext = (
 ): ProviderRunnerContext => ({
   cwd,
   attachmentsDir: null,
-  toolImages: NO_CONTROLLER_TOOL_IMAGES,
+  attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,
   binary: "/usr/local/bin/pi",
   env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },

@@ -190,17 +190,17 @@
    same tiles as the bubble's. An image the controller could not keep is a
    quiet line under them, in the faint ink and not in the failure colour:
    the tool still ran, and the reason is information, not an alarm. */
-.tool-images {
+.tool-result-images {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.tool-image-tiles {
+.tool-result-image-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fill, 210px);
   gap: 8px;
 }
-.tool-image-unavailable {
+.tool-result-image-unavailable {
   margin: 0;
   color: var(--faint);
   font-size: var(--t-11);

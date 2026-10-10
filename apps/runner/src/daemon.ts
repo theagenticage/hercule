@@ -16,7 +16,7 @@ import {
   serveCredentialSocket,
   buildSocketPath,
 } from "./credentials";
-import { makeAttachmentCache, makeToolImageUploader } from "./attachments";
+import { makeAttachmentCache, makeAttachmentUploader } from "./attachments";
 import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { providerLogins } from "./providers";
@@ -155,7 +155,7 @@ export const runDaemon = (
         controllerUrl: pin.controllerUrl,
         credential: pin.credential,
       });
-      const toolImages = makeToolImageUploader({
+      const attachmentUploader = makeAttachmentUploader({
         controllerUrl: pin.controllerUrl,
         credential: pin.credential,
       });
@@ -210,7 +210,7 @@ export const runDaemon = (
             scratchDir,
             attachmentsDir,
             attachments,
-            toolImages,
+            attachmentUploader,
             workspaces,
             workspaceSteps,
             socketPath,

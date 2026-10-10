@@ -15,7 +15,7 @@ const ImageLightbox = lazy(() =>
  * no file name, so it is named by its place among the step's stored images:
  * "Image 1", "Image 2", and so on.
  */
-const nameToolImage = (index: number): string => `Image ${String(index + 1)}`;
+const nameToolResultImage = (index: number): string => `Image ${String(index + 1)}`;
 
 /**
  * Renders the images a tool returned, under its step, and the lightbox while
@@ -45,7 +45,7 @@ export function ToolResultImages({
       <ToolResultImageList
         images={stored.map((image, index) => ({
           key: image.id,
-          name: nameToolImage(index),
+          name: nameToolResultImage(index),
           thumbnail: thumbnails[index],
         }))}
         unavailable={unavailable}
@@ -54,7 +54,7 @@ export function ToolResultImages({
       {open === null ? null : (
         <Suspense fallback={null}>
           <ImageLightbox
-            names={stored.map((_, index) => nameToolImage(index))}
+            names={stored.map((_, index) => nameToolResultImage(index))}
             index={open}
             source={content}
             onIndexChange={setOpen}
@@ -89,9 +89,9 @@ export function ToolResultImageList({
   readonly onOpen: (index: number) => void;
 }): JSX.Element {
   return (
-    <div className="tool-images">
+    <div className="tool-result-images">
       {images.length === 0 ? null : (
-        <div className="tool-image-tiles">
+        <div className="tool-result-image-tiles">
           {images.map((image, index) => (
             <ImageTile
               key={image.key}
@@ -105,7 +105,7 @@ export function ToolResultImageList({
         </div>
       )}
       {unavailable.map((reason, index) => (
-        <p key={index} className="tool-image-unavailable">
+        <p key={index} className="tool-result-image-unavailable">
           {reason}
         </p>
       ))}

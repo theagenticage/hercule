@@ -79,16 +79,17 @@ export const SESSION_INPUT_DEADLINE: Duration.Duration = Duration.seconds(10);
 export const ATTACHMENT_DOWNLOAD_TIMEOUT: Duration.Duration = Duration.minutes(2);
 
 /**
- * A tool's image once the controller has stored it: what a client needs to
- * show it. The bytes are read through `attachment.readContent` with this id.
+ * The Attachment the controller stored for an image in a tool's result: what
+ * a client needs to show it. The bytes are read through
+ * `attachment.readContent` with this id.
  */
-export const StoredToolImage = Schema.Struct({
+export const ToolResultAttachment = Schema.Struct({
   id: StorageId,
   mimeType: ImageMimeType,
   sizeBytes: Schema.Int.check(Schema.isGreaterThan(0)),
 });
 
-export type StoredToolImage = Schema.Schema.Type<typeof StoredToolImage>;
+export type ToolResultAttachment = Schema.Schema.Type<typeof ToolResultAttachment>;
 
 /**
  * One image in a tool's result, as `item.completed.detail.content` holds it
@@ -100,24 +101,27 @@ export type StoredToolImage = Schema.Schema.Type<typeof StoredToolImage>;
  *   larger than `MAX_ATTACHMENT_BYTES`, or the upload failed.
  */
 export const ToolResultImage = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("image"), attachment: StoredToolImage }),
+  Schema.Struct({ type: Schema.Literal("image"), attachment: ToolResultAttachment }),
   Schema.Struct({ type: Schema.Literal("image"), unavailable: Fact }),
 ]);
 
 export type ToolResultImage = Schema.Schema.Type<typeof ToolResultImage>;
 
 /**
- * The HTTP route a runner uploads a tool's image to, with the session's id in
- * the `sessionId` query parameter and the raw bytes as the body. The route
- * is part of the runner protocol, not the operation table: the caller
- * presents a runner's credential. It answers `201` with a `StoredToolImage`.
+ * The HTTP resource a runner moves Attachments through with its credential.
+ * It is part of the runner protocol, not the operation table:
+ *
+ * - `GET <path>/<id>` fetches an input's image;
+ * - `POST <path>?sessionId=<id>`, with the raw bytes as the body, stores an
+ *   image from a tool's result and answers `201` with a
+ *   `ToolResultAttachment`.
  */
-export const TOOL_IMAGE_UPLOAD_PATH = "/api/v1/runners/tool-images";
+export const RUNNER_ATTACHMENTS_PATH = "/api/v1/runners/attachments";
 
 /**
- * The longest a runner waits for one tool image's upload. The session's
- * events wait behind it, so a controller that does not answer must not hold
- * them for long. An upload that runs out of time leaves the image
+ * The longest a runner waits for the upload of one image from a tool's
+ * result. The session's events wait behind it, so a controller that does
+ * not answer must not hold them for long. An upload that runs out of time leaves the image
  * `unavailable`.
  */
-export const TOOL_IMAGE_UPLOAD_TIMEOUT: Duration.Duration = Duration.seconds(30);
+export const ATTACHMENT_UPLOAD_TIMEOUT: Duration.Duration = Duration.seconds(30);

@@ -20,7 +20,7 @@ describe("session tool images migration", () => {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         return yield* Effect.result(
-          sql`INSERT INTO session_tool_images (attachment_id, session_id) VALUES ('missing', 's')`,
+          sql`INSERT INTO session_tool_result_attachments (attachment_id, session_id) VALUES ('missing', 's')`,
         );
       }),
     );
@@ -34,7 +34,7 @@ describe("session tool images migration", () => {
         yield* sql`INSERT INTO attachments (id, name, mime_type, size_bytes, sha256, created_at, actor)
                    VALUES ('a', 'image.png', 'image/png', 10, 'hash', 'now', 'session:s')`;
         return yield* Effect.result(
-          sql`INSERT INTO session_tool_images (attachment_id, session_id) VALUES ('a', 'missing')`,
+          sql`INSERT INTO session_tool_result_attachments (attachment_id, session_id) VALUES ('a', 'missing')`,
         );
       }),
     );

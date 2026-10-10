@@ -34,9 +34,9 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   ATTACHMENT_DOWNLOAD_TIMEOUT,
-  StoredToolImage,
-  TOOL_IMAGE_UPLOAD_PATH,
-  TOOL_IMAGE_UPLOAD_TIMEOUT,
+  ToolResultAttachment,
+  RUNNER_ATTACHMENTS_PATH,
+  ATTACHMENT_UPLOAD_TIMEOUT,
   type AttachmentReference,
   type ToolResultImage,
 } from "@hercule/protocol";
@@ -190,18 +190,18 @@ export const makeAttachmentCache = (options: {
   };
 };
 
-export interface ToolImageUploader {
+export interface AttachmentUploader {
   /**
    * Uploads one image an agent's tool returned to the controller, which
    * stores it for the session, and returns the reference to keep in the
    * image's place. Never fails: an upload that fails, is refused, or does not
-   * finish within `TOOL_IMAGE_UPLOAD_TIMEOUT` returns the image as
+   * finish within `ATTACHMENT_UPLOAD_TIMEOUT` returns the image as
    * `unavailable`, with the reason for the user.
    */
   readonly upload: (sessionId: string, bytes: Uint8Array) => Effect.Effect<ToolResultImage>;
 }
 
-const decodeStoredToolImage = Schema.decodeUnknownSync(StoredToolImage);
+const decodeToolResultAttachment = Schema.decodeUnknownSync(ToolResultAttachment);
 
 /**
  * Returns the `message` of the error envelope in a refused upload's body, or
@@ -218,17 +218,17 @@ const readErrorMessage = async (response: Response): Promise<string | undefined>
  * Creates the uploader of tool images. The request carries the runner's
  * credential, the same one the socket uses, and the image's bytes as its body.
  */
-export const makeToolImageUploader = (options: {
+export const makeAttachmentUploader = (options: {
   readonly controllerUrl: string;
   readonly credential: string;
-}): ToolImageUploader => {
+}): AttachmentUploader => {
   /**
    * Uploads one image and returns the stored image. Throws an error whose
    * message the user can read. The controller reads the image's type from
    * its first bytes, so the request names no type.
    */
-  const send = async (sessionId: string, bytes: Uint8Array): Promise<StoredToolImage> => {
-    const url = new URL(TOOL_IMAGE_UPLOAD_PATH, options.controllerUrl);
+  const send = async (sessionId: string, bytes: Uint8Array): Promise<ToolResultAttachment> => {
+    const url = new URL(RUNNER_ATTACHMENTS_PATH, options.controllerUrl);
     url.searchParams.set("sessionId", sessionId);
     let response: Response;
     try {
@@ -236,12 +236,12 @@ export const makeToolImageUploader = (options: {
         method: "POST",
         headers: { authorization: `Bearer ${options.credential}` },
         body: bytes,
-        signal: AbortSignal.timeout(Duration.toMillis(TOOL_IMAGE_UPLOAD_TIMEOUT)),
+        signal: AbortSignal.timeout(Duration.toMillis(ATTACHMENT_UPLOAD_TIMEOUT)),
       });
     } catch (error) {
       throw new Error(
         error instanceof DOMException && error.name === "TimeoutError"
-          ? `the controller did not store it within ${Duration.format(TOOL_IMAGE_UPLOAD_TIMEOUT)}`
+          ? `the controller did not store it within ${Duration.format(ATTACHMENT_UPLOAD_TIMEOUT)}`
           : `the controller could not be reached: ${describeError(error)}`,
         { cause: error },
       );
@@ -253,7 +253,7 @@ export const makeToolImageUploader = (options: {
       );
     }
     try {
-      return decodeStoredToolImage(await response.json());
+      return decodeToolResultAttachment(await response.json());
     } catch (error) {
       throw new Error("the controller's answer was not a stored image", { cause: error });
     }

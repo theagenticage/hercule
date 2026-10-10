@@ -11,7 +11,7 @@
  * - An input. A user, or an agent, uploads the image with
  *   `attachment.create`, then sends it with an input.
  * - A tool's result. The runner uploads the image an agent's tool returned
- *   (`storeToolImage`), and the event keeps only a reference to it.
+ *   (`storeToolResultAttachment`), and the event keeps only a reference to it.
  *
  * Both kinds are stored the same way. An attachment's bytes are one
  * immutable file at `<dataDir>/attachments/<id>` and its metadata is a row
@@ -61,7 +61,7 @@ import {
   type NotFound,
   type Validation,
 } from "@hercule/contract";
-import type { StoredToolImage } from "@hercule/protocol";
+import type { ToolResultAttachment } from "@hercule/protocol";
 import { buildSessionStamp, currentStamp, requireGrant } from "../actor";
 import { HerculeHome } from "../config";
 import { mintUuid, nowIso, UUID_PATTERN, uuidToString, withTransaction } from "../db";
@@ -351,11 +351,14 @@ const make = Effect.gen(function* () {
      * - `Validation` when the bytes are more than `MAX_ATTACHMENT_BYTES`, or
      *   are not a PNG, JPEG, GIF or WebP image.
      */
-    storeToolImage: (
+    storeToolResultAttachment: (
       sessionId: string,
       runnerId: string,
       bytes: Uint8Array,
-    ): Effect.Effect<StoredToolImage, NotFound | Validation | AttachmentFileError | SqlError> =>
+    ): Effect.Effect<
+      ToolResultAttachment,
+      NotFound | Validation | AttachmentFileError | SqlError
+    > =>
       Effect.gen(function* () {
         const placed = UUID_PATTERN.test(sessionId)
           ? yield* attachments.isSessionPlacedOn(sessionId, runnerId)
@@ -371,7 +374,7 @@ const make = Effect.gen(function* () {
             tooLargeMessage: "the image is larger than 10 MB, the most the controller keeps",
             notAnImageMessage: "the image is not a PNG, JPEG, GIF or WebP image",
           },
-          (row) => withTransaction(sql, attachments.insertToolImage(row, sessionId)),
+          (row) => withTransaction(sql, attachments.insertToolResultAttachment(row, sessionId)),
         );
         return { id: stored.id, mimeType: stored.mimeType, sizeBytes: stored.sizeBytes };
       }),

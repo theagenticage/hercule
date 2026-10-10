@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { MAX_ATTACHMENT_BYTES, type ToolResultImage } from "@hercule/protocol";
-import type { ToolImageUploader } from "../attachments";
-import { IMAGE_TOO_LARGE, replaceToolImages } from "./claude-code-tool-images";
+import type { AttachmentUploader } from "../attachments";
+import { IMAGE_TOO_LARGE, replaceToolResultImages } from "./claude-code-tool-result-images";
 import { PNG_BYTES } from "./testing";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
@@ -29,7 +29,7 @@ const buildStored = (data: string): ToolResultImage => ({
 });
 
 /** Creates an uploader that stores every image and records each upload's base64. */
-const createRecordingUploader = (): ToolImageUploader & { readonly uploads: Array<string> } => {
+const createRecordingUploader = (): AttachmentUploader & { readonly uploads: Array<string> } => {
   const uploads: Array<string> = [];
   return {
     uploads,
@@ -61,8 +61,8 @@ const buildToolResult = (content: ReadonlyArray<unknown>, toolUseResult?: unknow
     session_id: "native",
   }) as SDKMessage;
 
-const replace = (uploader: ToolImageUploader, sdk: SDKMessage) =>
-  Effect.runPromise(replaceToolImages(uploader, SESSION, sdk));
+const replace = (uploader: AttachmentUploader, sdk: SDKMessage) =>
+  Effect.runPromise(replaceToolResultImages(uploader, SESSION, sdk));
 
 /** Returns the content of the first tool result in a replaced message. */
 const readContent = (sdk: SDKMessage): unknown =>

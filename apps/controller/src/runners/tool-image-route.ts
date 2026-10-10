@@ -1,6 +1,6 @@
 /**
  * The HTTP route a runner uploads an image an agent's tool returned to:
- * `POST TOOL_IMAGE_UPLOAD_PATH?sessionId=<id>`, with the raw bytes as the
+ * `POST RUNNER_ATTACHMENTS_PATH?sessionId=<id>`, with the raw bytes as the
  * body.
  *
  * The runner uploads the bytes here before it reports the tool's result, and
@@ -24,7 +24,7 @@ import {
   NotFound,
   Validation,
 } from "@hercule/contract";
-import { TOOL_IMAGE_UPLOAD_PATH } from "@hercule/protocol";
+import { RUNNER_ATTACHMENTS_PATH } from "@hercule/protocol";
 import { AttachmentService } from "../attachments";
 import { readBearerToken } from "../http/bearer";
 import { buildErrorResponse } from "../http/envelope";
@@ -35,40 +35,43 @@ const NO_CREDENTIAL = "uploading a tool's image needs a runner's credential";
 const UNKNOWN_CREDENTIAL = "unknown credential";
 
 /**
- * Stores the image and returns `201` with its `StoredToolImage`. Returns
+ * Stores the image and returns `201` with its `ToolResultAttachment`. Returns
  * `401` without a known runner credential, `404` for a session not placed on
  * the runner, and a validation error when the bytes are too large or are not
  * an image. The body is read only after the credential is checked.
  */
-export const RunnerToolImageRouteLayer = HttpRouter.add("POST", TOOL_IMAGE_UPLOAD_PATH, (request) =>
-  Effect.gen(function* () {
-    const connections = yield* RunnerConnections;
-    const attachments = yield* AttachmentService;
-    const credential = readBearerToken(request);
-    if (credential === undefined)
-      return buildErrorResponse(createUnauthenticatedError(NO_CREDENTIAL));
-    return yield* Effect.gen(function* () {
-      const runnerId = yield* connections.admits(credential);
-      if (Option.isNone(runnerId))
-        return buildErrorResponse(createUnauthenticatedError(UNKNOWN_CREDENTIAL));
-      const { sessionId } = yield* HttpServerRequest.ParsedSearchParams;
-      const stored = yield* attachments.storeToolImage(
-        typeof sessionId === "string" ? sessionId : "",
-        runnerId.value,
-        new Uint8Array(yield* request.arrayBuffer),
+export const RunnerToolImageRouteLayer = HttpRouter.add(
+  "POST",
+  RUNNER_ATTACHMENTS_PATH,
+  (request) =>
+    Effect.gen(function* () {
+      const connections = yield* RunnerConnections;
+      const attachments = yield* AttachmentService;
+      const credential = readBearerToken(request);
+      if (credential === undefined)
+        return buildErrorResponse(createUnauthenticatedError(NO_CREDENTIAL));
+      return yield* Effect.gen(function* () {
+        const runnerId = yield* connections.admits(credential);
+        if (Option.isNone(runnerId))
+          return buildErrorResponse(createUnauthenticatedError(UNKNOWN_CREDENTIAL));
+        const { sessionId } = yield* HttpServerRequest.ParsedSearchParams;
+        const stored = yield* attachments.storeToolResultAttachment(
+          typeof sessionId === "string" ? sessionId : "",
+          runnerId.value,
+          new Uint8Array(yield* request.arrayBuffer),
+        );
+        return HttpServerResponse.jsonUnsafe(stored, { status: 201 });
+      }).pipe(
+        Effect.catch((error) =>
+          error instanceof NotFound || error instanceof Validation
+            ? Effect.succeed(buildErrorResponse(error))
+            : Effect.as(
+                Effect.logError("A runner's tool image upload failed", error),
+                buildErrorResponse(createInternalError("something went wrong")),
+              ),
+        ),
       );
-      return HttpServerResponse.jsonUnsafe(stored, { status: 201 });
-    }).pipe(
-      Effect.catch((error) =>
-        error instanceof NotFound || error instanceof Validation
-          ? Effect.succeed(buildErrorResponse(error))
-          : Effect.as(
-              Effect.logError("A runner's tool image upload failed", error),
-              buildErrorResponse(createInternalError("something went wrong")),
-            ),
-      ),
-    );
-    // The derived routes get their span from the router middleware, which this
-    // route sits outside of.
-  }).pipe(Effect.withSpan("runner.toolImage")),
+      // The derived routes get their span from the router middleware, which this
+      // route sits outside of.
+    }).pipe(Effect.withSpan("runner.toolResultAttachment")),
 );

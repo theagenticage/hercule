@@ -1,7 +1,7 @@
 /**
  * Adds the second owner of an Attachment: the images an agent's tool returned.
  *
- * - `session_tool_images` records which session's transcript references
+ * - `session_tool_result_attachments` records which session's transcript references
  *   which image. The image itself is an ordinary row in `attachments`, with
  *   its bytes in the same `<dataDir>/attachments/<id>` file.
  * - A row here counts as a reference, like a row in
@@ -16,7 +16,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   yield* sql`
-    CREATE TABLE session_tool_images (
+    CREATE TABLE session_tool_result_attachments (
       attachment_id BLOB PRIMARY KEY NOT NULL REFERENCES attachments (id),
       session_id BLOB NOT NULL REFERENCES sessions (id)
     )

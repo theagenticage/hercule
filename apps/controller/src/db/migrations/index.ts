@@ -65,7 +65,7 @@ import workspaceDisposalAndRetention from "./0054-workspace-disposal-and-retenti
 import attachments from "./0055-attachments";
 import exitIsNotActivity from "./0056-exit-is-not-activity";
 import profileGrantsOnce from "./0057-profile-grants-once";
-import sessionToolImages from "./0058-session-tool-images";
+import sessionToolResultAttachments from "./0058-session-tool-result-attachments";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -125,7 +125,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [55, "attachments", Effect.succeed(attachments)],
   [56, "exit-is-not-activity", Effect.succeed(exitIsNotActivity)],
   [57, "profile-grants-once", Effect.succeed(profileGrantsOnce)],
-  [58, "session-tool-images", Effect.succeed(sessionToolImages)],
+  [58, "session-tool-result-attachments", Effect.succeed(sessionToolResultAttachments)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */
