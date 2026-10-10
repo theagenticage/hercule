@@ -3,6 +3,9 @@
  * the host and the `Plugins` service, so both are tested here together rather
  * than in two files that would each see half of every outcome.
  */
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Cause, Deferred, Duration, Effect, Fiber, Option, Redacted, Schema } from "effect";
 import { TestClock } from "effect/testing";
@@ -23,6 +26,8 @@ import { Secret, Secrets } from "../secrets";
 import { connectionStateRepository } from "../connections";
 import { DEACTIVATE_TIMEOUT_SECONDS } from "./host";
 import { IngestLoops, PluginHost, Plugins } from "./index";
+import { PromotionState } from "../promotion";
+import { awaitHeldWork } from "../promotion/testing";
 import { pluginRepository } from "./repository";
 import {
   asUser,
@@ -35,7 +40,14 @@ import {
 } from "./testing";
 
 type Services =
-  Plugins | PluginHost | IngestLoops | NotificationService | Secret | Secrets | SqlClient.SqlClient;
+  | Plugins
+  | PluginHost
+  | IngestLoops
+  | NotificationService
+  | Secret
+  | Secrets
+  | SqlClient.SqlClient
+  | PromotionState;
 
 /** Runs an effect on a fresh plugin stack, as the user, like a request through the API. */
 const run = <A, E>(body: Effect.Effect<A, E, Services>) =>
@@ -522,6 +534,38 @@ describe("the key-value store a plugin is given", () => {
     );
 
     expect(Option.getOrNull(value)).toBe("2026-09-06");
+  });
+
+  it("holds a write while a promotion freezes the controller, and makes it once the freeze ends", async () => {
+    const alpha = buildStatefulFixture("alpha");
+    const directory = mkdtempSync(join(tmpdir(), "hercule-plugin-freeze-"));
+    try {
+      const read = await run(
+        Effect.gen(function* () {
+          const host = yield* PluginHost;
+          yield* host.boot([alpha.plugin]);
+          const promotion = yield* PromotionState;
+          const tokenId = "0199f0b7-0003-7000-8000-000000000000";
+          yield* promotion.freeze(tokenId, new Date(Date.now() + 60_000));
+          // From the copy on, the database refuses writes, so a write that
+          // skipped the gate would fail instead of waiting.
+          yield* promotion.copyDatabaseAndStopWrites(tokenId, join(directory, "copy.db"));
+
+          const write = yield* Effect.forkChild(readKeyValueStore(alpha).set("cursor", "frozen"));
+          yield* awaitHeldWork(promotion, 1);
+          const whileFrozen = yield* readKeyValueStore(alpha).get("cursor");
+
+          yield* promotion.thaw(tokenId);
+          yield* Fiber.join(write);
+          return { whileFrozen, afterThaw: yield* readKeyValueStore(alpha).get("cursor") };
+        }),
+      );
+
+      expect(Option.isNone(read.whileFrozen)).toBe(true);
+      expect(Option.getOrNull(read.afterThaw)).toBe("frozen");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 

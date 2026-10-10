@@ -9,7 +9,7 @@
  * the controller's state to do it.
  */
 export { locateCompiledBinary } from "./binary";
-export { buildControllerOrigin, isWildcardHost } from "./origin";
+export { buildControllerOrigin, isLoopbackHost, isWildcardHost } from "./origin";
 export {
   InvalidOptionError,
   parseGlobalOptions,

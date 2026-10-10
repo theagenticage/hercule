@@ -23,18 +23,12 @@ import * as Option from "effect/Option";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
-import {
-  createInternalError,
-  createNotFoundError,
-  createUnauthenticatedError,
-  NotFound,
-  Validation,
-} from "@hercule/contract";
+import { createNotFoundError, createUnauthenticatedError } from "@hercule/contract";
 import { RUNNER_ATTACHMENTS_PATH } from "@hercule/protocol";
 import { AttachmentService } from "../attachments";
 import { buildAttachmentResponse } from "../http/attachment-response";
 import { readBearerToken } from "../http/bearer";
-import { buildErrorResponse } from "../http/envelope";
+import { buildErrorResponse, respondToFailures } from "../http/envelope";
 import { RunnerConnections } from "./connections";
 
 const UNKNOWN_CREDENTIAL = "unknown credential";
@@ -49,7 +43,8 @@ const NO_SESSION_ID =
  * for the messages. Returns:
  *
  * - `401` without a credential, or with one no runner holds;
- * - the error envelope when `respond` fails with `NotFound` or `Validation`;
+ * - the error envelope when `respond` fails with an error of the contract,
+ *   such as `NotFound` or `Validation`;
  * - `500` for any other failure, which is logged.
  */
 const respondToRunner = <E, R>(
@@ -67,16 +62,7 @@ const respondToRunner = <E, R>(
     if (Option.isNone(runnerId))
       return buildErrorResponse(createUnauthenticatedError(UNKNOWN_CREDENTIAL));
     return yield* respond(runnerId.value);
-  }).pipe(
-    Effect.catch((error) =>
-      error instanceof NotFound || error instanceof Validation
-        ? Effect.succeed(buildErrorResponse(error))
-        : Effect.as(
-            Effect.logError(`A runner failed ${action}`, error),
-            buildErrorResponse(createInternalError("something went wrong")),
-          ),
-    ),
-  );
+  }).pipe(respondToFailures(`A runner failed ${action}`));
 
 /**
  * Both routes. The derived routes get their span from the router middleware,

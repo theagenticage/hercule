@@ -306,11 +306,16 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     workspaceId: null,
   },
   { _tag: "workspaceStepSettle", steps: [STEP_KEY] },
+  {
+    _tag: "forwardingPointer",
+    newAddress: "https://controller-b.example:4937",
+    signature: "dGVzdC1zaWduYXR1cmU=",
+  },
 ];
 
 describe("the protocol version", () => {
-  it("is 6, the version that reports file reads and file searches", () => {
-    expect(PROTOCOL_VERSION).toBe(6);
+  it("is 7, the version that reports file reads and file searches", () => {
+    expect(PROTOCOL_VERSION).toBe(7);
   });
 });
 

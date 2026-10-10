@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Context, Effect, Layer, Result } from "effect";
 import {
   BootstrapConfig,
   locateConfigFile,
@@ -29,12 +29,45 @@ export {
 export * from "./errors";
 export * from "./home";
 
-/** The usage line of `hercule serve`, which takes no arguments of its own. */
-const USAGE = "usage: hercule serve [--home <dir>] [-c key=value]";
+/** The usage line of `hercule serve`. `--force-unseal` is disaster recovery after a promotion. */
+const USAGE = "usage: hercule serve [--home <dir>] [-c key=value] [--force-unseal]";
+
+/** The flags `hercule serve` takes besides the global options. */
+export class ServeFlags extends Context.Service<
+  ServeFlags,
+  {
+    /** Clears the seal a promotion left, so this machine serves again (spec 03 section 8.3). */
+    readonly forceUnseal: boolean;
+  }
+>()("hercule/controller/config/ServeFlags") {}
+
+/**
+ * Parses the arguments the global options left over into the serve flags.
+ * Fails on any other argument: booting anyway would silently ignore it.
+ */
+const parseServeFlags = (
+  rest: ReadonlyArray<string>,
+): Result.Result<ServeFlags["Service"], InvalidOptionError> => {
+  let forceUnseal = false;
+  for (const arg of rest) {
+    if (arg === "--force-unseal") {
+      forceUnseal = true;
+      continue;
+    }
+    return Result.fail(
+      new InvalidOptionError({
+        option: arg,
+        message: `hercule serve takes no arguments; ${USAGE}`,
+      }),
+    );
+  }
+  return Result.succeed({ forceUnseal });
+};
 
 /**
  * Resolves the Hercule Home and the bootstrap config, creates the home layout,
- * and returns a layer that provides both. Fails with a `ConfigError`.
+ * and returns a layer that provides both, with the serve flags. Fails with a
+ * `ConfigError`.
  *
  * This is step 1 of first run (spec 15 section 7) and the first thing every
  * controller boot does. `argv` and `env` are passed in rather than read from
@@ -46,19 +79,11 @@ const USAGE = "usage: hercule serve [--home <dir>] [-c key=value]";
 export const layer = (
   argv: ReadonlyArray<string>,
   env: Readonly<Record<string, string | undefined>>,
-): Layer.Layer<HerculeHome | BootstrapConfig, ConfigError> =>
+): Layer.Layer<HerculeHome | BootstrapConfig | ServeFlags, ConfigError> =>
   Layer.unwrap(
     Effect.gen(function* () {
       const options = yield* Effect.fromResult(parseGlobalOptions(argv));
-      // Anything the global options did not consume is an argument `hercule
-      // serve` does not have. Booting anyway would silently ignore it.
-      const unknown = options.rest[0];
-      if (unknown !== undefined) {
-        return yield* new InvalidOptionError({
-          option: unknown,
-          message: `hercule serve takes no arguments; ${USAGE}`,
-        });
-      }
+      const flags = yield* Effect.fromResult(parseServeFlags(options.rest));
 
       const home = yield* Effect.fromResult(resolveHomePathToActOn(options.home, env));
       const configFile = locateConfigFile(home);
@@ -76,6 +101,7 @@ export const layer = (
       return Layer.mergeAll(
         Layer.succeed(HerculeHome, HerculeHome.of(paths)),
         Layer.succeed(BootstrapConfig, config),
+        Layer.succeed(ServeFlags, flags),
       );
     }),
   );

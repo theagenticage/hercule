@@ -15,12 +15,14 @@ import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Logger, PubSub, Schema, Stream } from "effect";
+import { locateRunnerFile } from "@hercule/home";
 import {
   AGENT_STEPS_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   PROTOCOL_VERSION,
   RunnerToController,
+  encodeForwardingPointerBytes,
   encodeChallengeBytes,
   type ControllerHello,
   type ExitReason,
@@ -50,6 +52,8 @@ import {
   type ConnectOptions,
   type ControllerPin,
 } from "./socket";
+import { acceptControllerMove } from "./repoint";
+import { writeRunnerFile } from "./runner-file";
 import { makeCredentialRelay } from "./credentials";
 import type { ProviderAdapter } from "./providers";
 import { makeLogins, type Logins } from "./providers/login";
@@ -162,6 +166,7 @@ interface Stub {
   readonly url: string;
   readonly identityId: string;
   readonly publicKey: string;
+  readonly sign: (payload: Uint8Array<ArrayBuffer>) => Promise<string>;
   /** Every frame the runner sent, in order. */
   readonly received: ReadonlyArray<RunnerMessage>;
   /** Resolves once a runner has connected. */
@@ -240,6 +245,7 @@ const stubController = async (
     url: `http://127.0.0.1:${String(server.port)}`,
     identityId: controller.id,
     publicKey: controller.publicKey,
+    sign: controller.sign,
     received,
     connected: async () => {
       expect(await waitFor(() => open), "the runner never connected").toBe(true);
@@ -351,6 +357,7 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
         binDir: BIN_DIR,
         herculeTool: HERCULE_TOOL,
         proofDeadline: PATIENT,
+        followForwardingPointer: () => Effect.succeed("ignored" as const),
         ...overrides,
       }),
     ).pipe(Effect.provide(collectLogLines)),
@@ -588,6 +595,106 @@ describe("which controller a runner accepts", () => {
     // However the connection ended, it was not because the controller was
     // the wrong one.
     expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
+  });
+});
+
+describe("when the controller sends a forwarding pointer", () => {
+  const NEW_ADDRESS = "https://controller.example:8443";
+  const homes: Array<string> = [];
+
+  afterEach(() => {
+    for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
+  });
+
+  const createEnrolledHome = (stub: Stub): string => {
+    const home = mkdtempSync(joinPath(tmpdir(), "hercule-repoint-"));
+    homes.push(home);
+    mkdirSync(joinPath(home, "runner"), { recursive: true, mode: 0o700 });
+    writeRunnerFile(locateRunnerFile(home), {
+      runnerId: RUNNER_ID,
+      credential: "the-credential-the-join-handed-back",
+      controllerUrl: stub.url,
+      controllerIdentityId: stub.identityId,
+      controllerPublicKey: stub.publicKey,
+      storageDirectory: "deadbeefdeadbeef",
+    });
+    return home;
+  };
+
+  it.each([
+    {
+      when: "on a live connection",
+      greet: true,
+      wait: (stub: Stub) => waitUntilProven(stub),
+    },
+    {
+      when: "in place of a hello",
+      greet: false,
+      wait: async (stub: Stub) => {
+        await stub.connected();
+        await waitUntil(() => stub.received.some((frame) => frame._tag === "runnerHello"));
+      },
+    },
+  ])(
+    "rewrites controllerUrl after a signed pointer $when and ends the connection",
+    async ({ greet, wait }) => {
+      const stub = await stubController(undefined, { greet });
+      const home = createEnrolledHome(stub);
+      const pending = runConnection(buildPin(stub), {
+        followForwardingPointer: (pointer) =>
+          acceptControllerMove({
+            home,
+            publicKey: stub.publicKey,
+            newAddress: pointer.newAddress,
+            signature: pointer.signature,
+          }),
+      });
+      await wait(stub);
+      stub.say({
+        _tag: "forwardingPointer",
+        newAddress: NEW_ADDRESS,
+        signature: await stub.sign(encodeForwardingPointerBytes(NEW_ADDRESS)),
+      });
+      await pending;
+      expect(await stub.ended()).toBe(true);
+      expect(JSON.parse(readFileSync(locateRunnerFile(home), "utf8"))).toMatchObject({
+        controllerUrl: NEW_ADDRESS,
+        controllerIdentityId: stub.identityId,
+        controllerPublicKey: stub.publicKey,
+      });
+    },
+  );
+
+  it("leaves controllerUrl when the signature does not verify", async () => {
+    const stub = await stubController();
+    const other = await createIdentity();
+    const home = createEnrolledHome(stub);
+    let settled: Awaited<ReturnType<typeof runConnection>> | undefined;
+    const pending = runConnection(buildPin(stub), {
+      followForwardingPointer: (pointer) =>
+        acceptControllerMove({
+          home,
+          publicKey: stub.publicKey,
+          newAddress: pointer.newAddress,
+          signature: pointer.signature,
+        }),
+    }).then((outcome) => {
+      settled = outcome;
+    });
+    await waitUntilProven(stub);
+    stub.say({
+      _tag: "forwardingPointer",
+      newAddress: NEW_ADDRESS,
+      signature: await other.sign(encodeForwardingPointerBytes(NEW_ADDRESS)),
+    });
+    stub.say({ _tag: "ping" });
+    await waitUntil(() => stub.received.some((frame) => frame._tag === "pong"));
+    expect(JSON.parse(readFileSync(locateRunnerFile(home), "utf8"))).toMatchObject({
+      controllerUrl: stub.url,
+    });
+    expect(settled).toBeUndefined();
+    stub.hangUp();
+    await pending;
   });
 });
 

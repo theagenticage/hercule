@@ -145,13 +145,20 @@ const describeWait = (millis: number): string => {
 const NOT_FOUND = "no attachment with that id";
 
 const NO_SESSION_ON_RUNNER = "no session with that id is placed on this runner";
+/** Returns the directory that holds the attachment files of the Data Root at `dataDir`. */
+export const buildAttachmentsDirectory = (dataDir: string): string => join(dataDir, "attachments");
+
+/** Returns the path of the file that holds the bytes of attachment `id`. */
+export const buildAttachmentPath = (dataDir: string, id: string): string =>
+  join(buildAttachmentsDirectory(dataDir), id);
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const attachments = yield* attachmentRepository;
-  const directory = join((yield* HerculeHome).dataDir, "attachments");
+  const { dataDir } = yield* HerculeHome;
+  const directory = buildAttachmentsDirectory(dataDir);
 
-  const buildPath = (id: string): string => join(directory, id);
+  const buildPath = (id: string): string => buildAttachmentPath(dataDir, id);
 
   const removeFile = (path: string): Effect.Effect<void, AttachmentFileError> =>
     Effect.tryPromise({
@@ -203,13 +210,11 @@ const make = Effect.gen(function* () {
         try: async () => {
           const old: Array<string> = [];
           for (const name of names.filter((one) => !kept.has(one))) {
-            const found = await stat(join(directory, name)).catch(
-              (error: NodeJS.ErrnoException) => {
-                // Removed since the listing, by an upload's rename or its cleanup.
-                if (error.code === "ENOENT") return undefined;
-                throw error;
-              },
-            );
+            const found = await stat(buildPath(name)).catch((error: NodeJS.ErrnoException) => {
+              // Removed since the listing, by an upload's rename or its cleanup.
+              if (error.code === "ENOENT") return undefined;
+              throw error;
+            });
             if (found !== undefined && found.mtimeMs < cutoffMillis) old.push(name);
           }
           return old;

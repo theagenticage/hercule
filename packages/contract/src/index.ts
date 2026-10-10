@@ -44,6 +44,8 @@ export { CLI, NOUNS, type CliExample, type CliRow, type FieldRow, type NounRow }
 export {
   CapExceeded,
   Conflict,
+  ControllerSealed,
+  PromotionInProgress,
   ERROR_CODES,
   ERROR_STATUS,
   Forbidden,
@@ -55,6 +57,8 @@ export {
   Validation,
   createCapExceededError,
   createConflictError,
+  createControllerSealedError,
+  createPromotionInProgressError,
   createDecodeValidationError,
   createForbiddenError,
   createInternalError,
@@ -277,7 +281,7 @@ export {
   MAX_CONNECTION_LABEL_LENGTH,
   MAX_FEED_INTERVAL_SECONDS,
 } from "./groups/connection";
-export { ControllerInfo, ControllerUpdateInput } from "./groups/controller";
+export { ControllerInfo, ControllerUpdateInput, MintedPromotionToken } from "./groups/controller";
 export {
   IDENTITY_PORT,
   IDENTITY_PORT_COUNT,

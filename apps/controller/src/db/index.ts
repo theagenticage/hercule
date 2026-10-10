@@ -8,6 +8,7 @@ export {
   createDatabaseError,
   MEMORY,
   openDatabase,
+  openDatabaseCopy,
   withTransaction,
 } from "./client";
 export { mintUuid, uuidFromString, uuidToString, UUID_PATTERN } from "./id";
@@ -38,9 +39,16 @@ export {
 export { nowIso } from "./time";
 export {
   backupBeforeMigration,
+  copyDatabaseTo,
   databaseVersion,
   migrate,
   runMigrations,
   SchemaVersionError,
 } from "./migrate";
 export { binaryVersion } from "./migrations/index";
+export {
+  copyDatabaseAndStopWrites,
+  resumeWrites,
+  stopWrites,
+  withFinalTransaction,
+} from "./writes";

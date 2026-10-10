@@ -31,6 +31,13 @@ export interface HomePaths {
   readonly credentialsFile: string;
   readonly dataDir: string;
   readonly databaseFile: string;
+  /**
+   * Where a promotion transfer in progress is written, on either machine. It
+   * sits in the Data Root, so it is on the same disk as the database: a copy
+   * of the whole database can be too large for the system's temporary
+   * directory, which on many Linux systems is held in memory.
+   */
+  readonly promotionTransferDir: string;
   readonly runnerDir: string;
   readonly logsDir: string;
   readonly backupsDir: string;
@@ -153,6 +160,7 @@ export function buildHomePaths(home: string, dataDir: string): HomePaths {
     credentialsFile: locateCredentialsFile(home),
     dataDir: resolvedDataDir,
     databaseFile: join(resolvedDataDir, DATABASE_FILE_NAME),
+    promotionTransferDir: join(resolvedDataDir, "promotion-transfer"),
     runnerDir: locateRunnerDir(home),
     logsDir: locateLogsDir(home),
     backupsDir: join(home, "backups"),

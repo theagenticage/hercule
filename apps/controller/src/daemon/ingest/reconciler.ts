@@ -28,6 +28,7 @@ import {
   PluginHost,
   type RegisteredEventSource,
 } from "../../plugins";
+import { PromotionState } from "../../promotion";
 import { absorbFailures } from "../absorbing";
 
 /**
@@ -55,12 +56,13 @@ interface ConnectionToIngest {
 export const runIngestReconciler: Effect.Effect<
   never,
   never,
-  PluginHost | IngestLoops | SqlClient.SqlClient
+  PluginHost | IngestLoops | SqlClient.SqlClient | PromotionState
 > = Effect.gen(function* () {
   const host = yield* PluginHost;
   const ingest = yield* IngestLoops;
   const connections = yield* connectionRepository;
   const interval = yield* IngestReconcileInterval;
+  const promotion = yield* PromotionState;
 
   /**
    * Returns each Connection that should be ingesting, keyed by its id, with
@@ -105,7 +107,11 @@ export const runIngestReconciler: Effect.Effect<
     // Under the plugin host's gate, so a plugin cannot be stopped between
     // the read of its active sources and the open of a handle through one.
     // Closing waits for the plugin's `close`, but no poll runs under the gate.
-    yield* absorbFailures("Reconciling ingest handles failed", host.serialized(reconcileHandles));
+    // A frozen controller is waited out before the gate is taken, not under it.
+    yield* absorbFailures(
+      "Reconciling ingest handles failed",
+      promotion.whenServing(host.serialized(reconcileHandles)),
+    );
     yield* Effect.sleep(interval);
   }
 });

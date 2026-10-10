@@ -18,6 +18,7 @@ import { HOST_API, PluginError, type Plugin } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "./actor";
 import { boot, bootWith, hashToken, buildSetupUrl, type BootOutcome } from "./bootstrap";
 import { Plugins } from "./plugins";
+import { PromotionState } from "./promotion";
 
 /** Listing plugins needs an actor, and a boot has none, so the test provides the user. */
 const USER: Actor = {
@@ -162,6 +163,68 @@ describe("the first run", () => {
 });
 
 describe("bootWith", () => {
+  it("boots sealed after a seal, and serving again with --force-unseal", async () => {
+    const bootAndReadPhase = (argv: ReadonlyArray<string>) =>
+      Effect.runPromise(
+        bootWith({ argv: ["--home", home, ...argv], env: {}, masterKeyBackend: "file" }, () =>
+          Effect.flatMap(PromotionState, (promotion) => promotion.phase),
+        ),
+      );
+    const tokenId = "0199f0b7-0002-7000-8000-000000000000";
+    await Effect.runPromise(
+      bootWith({ argv: ["--home", home], env: {}, masterKeyBackend: "file" }, () =>
+        Effect.gen(function* () {
+          const promotion = yield* PromotionState;
+          yield* promotion.freeze(tokenId, new Date(Date.now() + 60_000));
+          yield* promotion.seal(tokenId, "http://b.example:9");
+        }),
+      ),
+    );
+
+    const sealed = await bootAndReadPhase([]);
+    expect(sealed._tag === "Sealed" && sealed.seal.newAddress).toBe("http://b.example:9");
+    expect((await bootAndReadPhase(["--force-unseal"]))._tag).toBe("Serving");
+    expect((await bootAndReadPhase([]))._tag).toBe("Serving");
+  });
+
+  it("starts no plugin on a sealed controller, and starts them again once unsealed", async () => {
+    let activations = 0;
+    const counted = buildBootPlugin("counted");
+    const plugin: Plugin = {
+      ...counted,
+      activate: (context) =>
+        Effect.andThen(
+          Effect.sync(() => (activations += 1)),
+          counted.activate(context),
+        ),
+    };
+    const bootWithPlugin = (
+      argv: ReadonlyArray<string>,
+      use: Effect.Effect<void, unknown, PromotionState> = Effect.void,
+    ) =>
+      Effect.runPromise(
+        bootWith(
+          { argv: ["--home", home, ...argv], env: {}, masterKeyBackend: "file", plugins: [plugin] },
+          () => use,
+        ),
+      );
+    const tokenId = "0199f0b7-0003-7000-8000-000000000000";
+    await bootWithPlugin(
+      [],
+      Effect.gen(function* () {
+        const promotion = yield* PromotionState;
+        yield* promotion.freeze(tokenId, new Date(Date.now() + 60_000));
+        yield* promotion.seal(tokenId, "http://b.example:9");
+      }),
+    );
+    activations = 0;
+
+    await bootWithPlugin([]);
+    expect(activations).toBe(0);
+    await bootWithPlugin(["--force-unseal"]);
+    expect(activations).toBe(1);
+  });
+
   it("keeps the database open for whatever runs after the boot, and closes it after", async () => {
     const rows = await Effect.runPromise(
       bootWith({ argv: ["--home", home], env: {}, masterKeyBackend: "file" }, (outcome) =>

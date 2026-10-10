@@ -5,11 +5,11 @@ import { MEMORY, openDatabase } from "../client";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
-/** Runs every migration up to 58 on an empty database, then `body`, and returns what `body` returns. */
+/** Runs every migration up to 59 on an empty database, then `body`, and returns what `body` returns. */
 const runOnMigratedDatabase = <A, E>(body: Effect.Effect<A, E, SqlClient.SqlClient>) =>
   Effect.runPromise(
     Effect.gen(function* () {
-      yield* runMigrations(migrations.filter(([id]) => id <= 58));
+      yield* runMigrations(migrations.filter(([id]) => id <= 59));
       return yield* body;
     }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
   );

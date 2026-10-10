@@ -138,6 +138,7 @@ import { AfterCommit, afterCommit, nowIso, UUID_PATTERN, withTransaction } from 
 import { isBuiltInControllerActionId, PluginHost, runsInWorkspace } from "../plugins";
 import { PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
+import { PromotionState } from "../promotion";
 import { runnerRepository } from "../runners";
 import { isGitActionId } from "../workflows";
 import { runHeldSubscriptions } from "../subscriptions";
@@ -355,6 +356,19 @@ export const makeRunEngine = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const host = yield* PluginHost;
   const runHeld = yield* runHeldSubscriptions;
+  const promotion = yield* PromotionState;
+  /**
+   * Runs `effect` in a transaction of its own once the controller is
+   * serving. Every write a run's execution makes on its own goes through
+   * this. A promotion's freeze then holds a run between two transactions,
+   * never inside one, so the copy waits only for the transaction that is
+   * open, and never for a step that waits or calls a plugin. A sealed
+   * controller writes nothing more for any run: the new machine carries
+   * the runs on from the copy.
+   */
+  const transactWhenServing = <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E | SqlError, R> => promotion.whenServing(withTransaction(sql, effect));
   // The listener that publishes a committed change on the live topics. A
   // run's execution is carried out apart from the request that started it,
   // so the listener is provided to the execution here.
@@ -481,8 +495,7 @@ export const makeRunEngine = Effect.gen(function* () {
     error: StepError,
     failureReason: ExecutionFailureReason,
   ): Effect.Effect<void, SqlError> =>
-    withTransaction(
-      sql,
+    transactWhenServing(
       Effect.flatMap(nowIso, (at) => writeStepFailure(runId, attempt, error, failureReason, at)),
     );
 
@@ -697,8 +710,7 @@ export const makeRunEngine = Effect.gen(function* () {
     record: StepRecordKey,
   ): Effect.Effect<StartedRecord, SqlError> =>
     Effect.catchTag(
-      withTransaction(
-        sql,
+      transactWhenServing(
         Effect.gen(function* () {
           const at = yield* nowIso;
           const run = Option.getOrThrow(yield* runs.read(runId));
@@ -789,6 +801,7 @@ export const makeRunEngine = Effect.gen(function* () {
 
   const { prepareInput, executeStep } = yield* makeStepExecution({
     start,
+    transactWhenServing,
     failRun,
     routeAfterStep,
   });
@@ -808,8 +821,7 @@ export const makeRunEngine = Effect.gen(function* () {
    */
   const deliverSignal = (runId: string, record: StepRecordKey): Effect.Effect<void, SqlError> =>
     Effect.catchTag(
-      withTransaction(
-        sql,
+      transactWhenServing(
         Effect.gen(function* () {
           const at = yield* nowIso;
           yield* runs.completeSignalStep(runId, record, at);
@@ -952,10 +964,7 @@ export const makeRunEngine = Effect.gen(function* () {
           const run = found.value;
           if (!isUnfinished(run.status)) return;
           if (run.status === "pending") {
-            yield* withTransaction(
-              sql,
-              Effect.flatMap(nowIso, (at) => runs.start(runId, at)),
-            );
+            yield* transactWhenServing(Effect.flatMap(nowIso, (at) => runs.start(runId, at)));
           }
           const next = listNextStepRecords(run.steps).filter(
             (record) => !busySteps.has(record.stepId) && !stepsWaitingForRunner.has(record.stepId),
@@ -1068,8 +1077,7 @@ export const makeRunEngine = Effect.gen(function* () {
    * `controller-error` and no failed step: the error was not at any one step.
    */
   const failRunUnexpectedly = (runId: string): Effect.Effect<void, SqlError> =>
-    withTransaction(
-      sql,
+    transactWhenServing(
       Effect.flatMap(nowIso, (at) =>
         writeRunEnding(runId, { status: "failed", failureReason: "controller-error" }, at),
       ),
@@ -1283,6 +1291,12 @@ export const makeRunEngine = Effect.gen(function* () {
      *
      * So the same result applies once however often it arrives.
      *
+     * While a promotion freezes the controller, this waits, and once the
+     * controller is sealed it never returns. The caller tells the runner the
+     * step is settled only after this returns, so the runner keeps the
+     * result, and answers it again to the new machine, which still has the
+     * record running.
+     *
      * - An action step's output is decoded against the action's output
      *   schema, and one that does not match fails the step with
      *   `unexpected`. A failed action step fails the run with `step-failed`.
@@ -1303,8 +1317,7 @@ export const makeRunEngine = Effect.gen(function* () {
               `Ignored the result of step ${stepId} from runner ${runnerId}: ${runId} is not a run id`,
             );
           }
-          yield* withTransaction(
-            sql,
+          yield* transactWhenServing(
             Effect.gen(function* () {
               const found = yield* runs.read(runId);
               if (

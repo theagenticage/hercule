@@ -9,7 +9,7 @@ import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { locateCompiledBinary, locateRunnerDir, locateRunnerFile } from "@hercule/home";
-import { IDENTITY_PORT } from "@hercule/protocol";
+import { IDENTITY_PORT, type ForwardingPointer } from "@hercule/protocol";
 import {
   buildGitCredentialEnv,
   makeCredentialRelay,
@@ -25,6 +25,7 @@ import { HERCULE_SKILL } from "./sessions/skill";
 import { prepareTooling, type Tooling } from "./sessions/tooling";
 import { reconnect, streamReconnectSignals } from "./reconnect";
 import { CONTROLLER_URL_SCHEMES, NotEnrolled, readRunnerFile } from "./runner-file";
+import { acceptControllerMove } from "./repoint";
 import { connect, type RunnerRetired } from "./socket";
 import { readMachineHeadroom } from "./watermark";
 import { makeWorkspaceSteps } from "./workspace-steps";
@@ -128,11 +129,25 @@ export const runDaemon = (
     Effect.gen(function* () {
       const pin = yield* readRunnerFile(home);
       yield* validateControllerUrl(home, pin.controllerUrl);
+      // Refreshed on a verified re-point so B's web app can read /identity
+      // without restarting this daemon.
+      let controllerUrl = pin.controllerUrl;
+      const applyControllerMove = (message: ForwardingPointer) =>
+        Effect.gen(function* () {
+          const move = yield* acceptControllerMove({
+            home,
+            publicKey: pin.controllerPublicKey,
+            newAddress: message.newAddress,
+            signature: message.signature,
+          });
+          if (move === "accepted") controllerUrl = message.newAddress;
+          return move;
+        });
       // Start the listener before the first probe, so the facts report the
       // port a browser will actually find this runner on.
       const identityPort = yield* serveIdentity({
         runnerId: pin.runnerId,
-        controllerUrl: pin.controllerUrl,
+        readControllerUrl: () => controllerUrl,
         port: IDENTITY_PORT,
       });
       const probe = probeFacts(thisMachine, identityPort);
@@ -151,14 +166,6 @@ export const runDaemon = (
       // The images attached to each session's input, one directory per
       // session, removed when the session exits.
       const attachmentsDir = joinPath(storageDir, "attachments");
-      const attachments = makeAttachmentCache({
-        controllerUrl: pin.controllerUrl,
-        credential: pin.credential,
-      });
-      const attachmentUploader = makeAttachmentUploader({
-        controllerUrl: pin.controllerUrl,
-        credential: pin.credential,
-      });
       const socketPath = buildSocketPath(storageDir);
       // The runner's own git gets its credentials the same way a session's git
       // does: through this socket, with nothing written to disk.
@@ -200,8 +207,13 @@ export const runDaemon = (
         joinPath(locateRunnerDir(home), pin.storageDirectory),
       );
       return yield* reconnect({
-        attempt: Effect.flatMap(probe, (facts) =>
-          connect({
+        // Re-read runner.json on every attempt so a re-point that rewrote
+        // controllerUrl is used on the next dial, including A's local runner.
+        attempt: Effect.gen(function* () {
+          const pin = yield* readRunnerFile(home);
+          yield* validateControllerUrl(home, pin.controllerUrl);
+          const facts = yield* probe;
+          return yield* connect({
             pin,
             facts,
             probe,
@@ -209,8 +221,14 @@ export const runDaemon = (
             providersDir,
             scratchDir,
             attachmentsDir,
-            attachments,
-            attachmentUploader,
+            attachments: makeAttachmentCache({
+              controllerUrl: pin.controllerUrl,
+              credential: pin.credential,
+            }),
+            attachmentUploader: makeAttachmentUploader({
+              controllerUrl: pin.controllerUrl,
+              credential: pin.credential,
+            }),
             workspaces,
             workspaceSteps,
             socketPath,
@@ -219,8 +237,9 @@ export const runDaemon = (
             sessions,
             binDir,
             herculeTool,
-          }),
-        ),
+            followForwardingPointer: applyControllerMove,
+          });
+        }),
         signals: streamReconnectSignals({ now: () => Date.now(), addresses: listNetworkAddresses }),
       });
     }),

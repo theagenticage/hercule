@@ -33,6 +33,7 @@ import {
   type Notification,
   type OpenRequest,
   type OperationId,
+  type MintedPromotionToken,
   type Resolution,
   type Run,
   type RunStarted,
@@ -47,6 +48,7 @@ import {
   type WorkflowIssues,
   type WorkflowSaveResult,
 } from "@hercule/contract";
+import { isLoopbackHost } from "@hercule/home";
 import type { Outcome } from "./execute";
 import type { Command } from "./tree";
 
@@ -849,11 +851,35 @@ const renderWorkflowSource = ({ source }: Workflow): ReadonlyArray<string> => [
 ];
 
 /**
+ * Returns the paste-ready `hercule promote` command for the new machine, then
+ * the token's expiry. The command is one line so it can be copied as-is.
+ *
+ * `--from` is the URL the CLI reached the controller at. A loopback URL
+ * reaches nothing from another machine, so in its place the command holds a
+ * placeholder, and a last line asks the user to fill it in.
+ */
+const renderPromotionToken = (
+  result: MintedPromotionToken,
+  controllerUrl: string,
+): ReadonlyArray<string> => {
+  const reachable = !isLoopbackHost(new URL(controllerUrl).hostname);
+  return [
+    `hercule promote --from ${reachable ? controllerUrl : "<this-controller-url>"} --token ${result.token}`,
+    `expires ${result.expiresAt}`,
+    ...(reachable
+      ? []
+      : ["replace <this-controller-url> with the URL the new machine reaches this controller at"]),
+  ];
+};
+
+/**
  * The commands whose single result is not printed as generic key-value lines,
  * by command id. The derived client decoded the result with the operation's
  * schema, so each renderer may read it as that schema's type.
  */
-const VALUE_RENDERERS: Partial<Record<OperationId, (value: unknown) => ReadonlyArray<string>>> = {
+const VALUE_RENDERERS: Partial<
+  Record<OperationId, (value: unknown, controllerUrl: string) => ReadonlyArray<string>>
+> = {
   // These two queries return a short, complete array instead of a page, so
   // the array is printed as a table, like the items of a page.
   "workflowAction.query": (value) =>
@@ -879,19 +905,25 @@ const VALUE_RENDERERS: Partial<Record<OperationId, (value: unknown) => ReadonlyA
   "session.respondToQuestion": (value) => renderSession(value as Session),
   "session.stop": (value) => renderSession(value as Session),
   "session.continue": (value) => renderSession(value as Session),
+  "controller.createPromotionToken": (value, controllerUrl) =>
+    renderPromotionToken(value as MintedPromotionToken, controllerUrl),
 };
 
 /**
  * Returns the lines for a successful command without `--json`, before
  * `renderHuman` removes the characters a terminal would act on.
  */
-const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
+const renderLines = (
+  outcome: Outcome,
+  command: Command,
+  controllerUrl: string,
+): ReadonlyArray<string> => {
   const renderItems = ITEMS_RENDERERS[command.id] ?? renderTable;
   if (outcome.kind === "items") return renderItems(outcome.items);
 
   const value = outcome.value;
   const renderValue = VALUE_RENDERERS[command.id];
-  if (renderValue !== undefined) return renderValue(value);
+  if (renderValue !== undefined) return renderValue(value, controllerUrl);
   if (isPage(value)) {
     const lines = [...renderItems(value.items)];
     if (value.nextCursor !== undefined) {
@@ -907,6 +939,7 @@ const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> 
 
 /**
  * Returns the lines the CLI prints for a successful command without `--json`.
+ * `controllerUrl` is the URL the CLI reached the controller at.
  *
  * Every line has the characters a terminal would act on removed, except the
  * source that `workflow read` prints, which must come back byte for byte.
@@ -914,7 +947,11 @@ const renderLines = (outcome: Outcome, command: Command): ReadonlyArray<string> 
  * line up; this pass covers the text printed any other way, such as a
  * notification's body.
  */
-export const renderHuman = (outcome: Outcome, command: Command): ReadonlyArray<string> => {
-  const lines = renderLines(outcome, command);
+export const renderHuman = (
+  outcome: Outcome,
+  command: Command,
+  controllerUrl: string,
+): ReadonlyArray<string> => {
+  const lines = renderLines(outcome, command, controllerUrl);
   return command.id === "workflow.read" ? lines : lines.map(removeTerminalControls);
 };

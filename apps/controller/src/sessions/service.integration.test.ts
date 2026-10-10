@@ -29,6 +29,7 @@ import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } fr
 import { hashToken } from "../credentials";
 import { IngestExecutorLayer } from "../daemon/ingest";
 import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
+import { ServingPromotionStateLayer } from "../promotion/testing";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
@@ -62,6 +63,7 @@ const buildHostLayer = (secrets: Layer.Layer<Secrets, unknown, SqlClient.SqlClie
     Layer.provideMerge(secrets),
     Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(AuditLogLayer),
+    Layer.provideMerge(ServingPromotionStateLayer),
   );
 
 /**

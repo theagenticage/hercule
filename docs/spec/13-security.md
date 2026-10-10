@@ -89,7 +89,7 @@ Promotion ([./03-controller-and-runners.md](./03-controller-and-runners.md), [AD
 
 Write-only machine-bound storage is forbidden for exactly this reason.
 
-**Verify at build time:** the key-derivation function from the promotion token (a KDF over a high-entropy token; the token must be long enough that the derived key is not brute-forceable if the bundle leaks).
+*(Amended 2026-10-09, [#103](https://github.com/theagenticage/hercule/issues/103).)* The promotion token is 32 random bytes, encoded base64url. The transfer key is HKDF-SHA256 of that token, with a 32-byte random salt (carried in the bundle header) and info `hercule-promotion-v1`. Each secret is AES-256-GCM; the associated data is `<kind>|<id>|<name>`. The token is long enough that a leaked bundle is not brute-forceable.
 
 ### 2.4 Plugin secrets API
 
@@ -142,7 +142,7 @@ The bearer token's lifetime is **30 days rolling** (resolved 2026-09-01, [#44](h
 ### 4.3 API keys
 
 - Long-lived, opaque, revocable. Always the user's identity, never an agent's.
-- Minted in the web app (Settings) or via `hercule login` (password in, token out; `--password-stdin` scripted, echo-off TTY prompt as the one exception to the never-prompts rule, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §6.1). The CLI stores it in `~/.hercule/credentials.json`, mode 0600 ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
+- Minted in the web app (Settings) or via `hercule login` (password in, token out; `--password-stdin` scripted, echo-off TTY prompt as one of two exceptions to the never-prompts rule, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §6.1; the other is `hercule promote` without `--yes`, [#103](https://github.com/theagenticage/hercule/issues/103)). The CLI stores it in `~/.hercule/credentials.json`, mode 0600 ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
   - **`hercule login` is two calls** (pinned 2026-09-04, [#57](https://github.com/theagenticage/hercule/issues/57)): `auth.login` with the username and password returns a 30-day bearer (§4.2), and `apiKey.create { name }` under that bearer mints the long-lived key. The key is what lands in the credential file; the bearer is discarded and never written to disk. There is no login mode that hands out a long-lived key directly - minting a key is an authenticated operation like any other, and this keeps it that way. The key's name defaults to the machine's hostname, so a laptop's key is distinguishable in Settings from one minted in the web app; `--name` overrides it.
 - Revocable individually; a revoked key fails on its next use.
 - Used by the ops CLI and scripts. The ops CLI and the runner-shipped `hercule` CLI are the same binary; the difference is the credential ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).

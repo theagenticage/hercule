@@ -61,6 +61,42 @@ Either way, Hercule keeps everything in the Hercule Home, which is `~/.hercule` 
 
 If your desktop app was installed before the app was signed with a certificate, the first update asks you to sign in once more, because the Keychain sees a different app ([docs/signing-certificate.md](docs/signing-certificate.md)). Later updates keep the sign-in.
 
+## Moving the controller to another machine
+
+Promotion pulls the controller's data onto a new machine under the same identity. Runners follow automatically.
+
+On the old machine (A), create a token:
+
+```sh
+hercule controller promotion-token create
+```
+
+It prints the command to run on the new machine (B), with the token filled in. `--from` is the URL the CLI reached A at; when that is a loopback address such as `127.0.0.1`, which B cannot reach, the command holds a placeholder for you to replace with A's URL as B reaches it. The token works once, for 15 minutes, and creating another invalidates it. On B, with an empty Hercule Home, run it:
+
+```sh
+hercule promote --from <A-url> --token <token> --address <B-url>
+```
+
+`--address` is B's URL as runners reach it. It is required when B binds loopback or a wildcard. `--yes` skips the confirm prompt. `--no-service` skips installing the Service Unit and runs the controller in the foreground.
+
+Promote while no agent is working: while A copies its data it refuses changes, and a session event a runner reports between the copy and its reconnect to B is lost.
+
+After the pull, A seals and tells every connected runner to reconnect to B. A runner that missed the announcement and dials A gets a signed forwarding pointer. If promote fails after the pull, it says what happened to both machines. Usually A serves again and B's Home is emptied, so you create a new token and run promote again.
+
+Clients do not follow on their own. A sealed A answers them with B's address, and you point each one at B:
+
+- **CLI**: `hercule login <B-url> --username <name>`. Your password and API keys moved with the data, so they work on B.
+- **Desktop app**: sign out (Settings > Profile, or the app menu), choose **Change** next to "Connected to" on the sign-in screen, enter B's URL, and sign in.
+- **Web app**: open B's URL.
+
+To serve on A again after a promotion (disaster recovery only):
+
+```sh
+hercule serve --force-unseal
+```
+
+If A is gone and a runner never heard the announcement, re-point it by hand: `hercule runner set-controller <B-url>`.
+
 ## Documentation
 
 | Where | What |

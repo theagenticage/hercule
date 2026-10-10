@@ -14,15 +14,12 @@ import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import {
   createDecodeValidationError,
-  createInternalError,
   createUnauthenticatedError,
   createValidationError,
-  Unauthenticated,
-  Validation,
 } from "@hercule/contract";
 import { JoinRequest } from "@hercule/protocol";
 import { readBearerToken } from "../http/bearer";
-import { buildErrorResponse } from "../http/envelope";
+import { buildErrorResponse, respondToFailures } from "../http/envelope";
 import { RunnerJoin } from "./join";
 
 const JOIN_PATH = "/api/v1/runners/join";
@@ -43,14 +40,17 @@ const NO_BODY = "the join request needs a JSON body";
 const CLOSED = { onExcessProperty: "error" } as const;
 
 /**
- * Decodes the join request body. It is decoded here, not by a derived route,
- * because this route is not derived: the caller holds a join token and no
- * credential.
+ * The join request's body, decoded. Fails with `Validation` when the body is
+ * not JSON or does not match `JoinRequest`. It is decoded here, not by a
+ * derived route, because this route is not derived: the caller holds a join
+ * token and no credential.
  */
-const requestIn = Effect.mapError(HttpServerRequest.schemaBodyJson(JoinRequest, CLOSED), (error) =>
-  error._tag === "SchemaError"
-    ? createDecodeValidationError(error)
-    : createValidationError([{ path: [], message: NO_BODY }]),
+const joinRequestBody = Effect.mapError(
+  HttpServerRequest.schemaBodyJson(JoinRequest, CLOSED),
+  (error) =>
+    error._tag === "SchemaError"
+      ? createDecodeValidationError(error)
+      : createValidationError([{ path: [], message: NO_BODY }]),
 );
 
 /** Returns `201`, because the response is a runner that did not exist before the request. */
@@ -59,18 +59,11 @@ export const RunnerJoinRouteLayer = HttpRouter.add("POST", JOIN_PATH, (request) 
     const enlist = yield* RunnerJoin;
     const token = readBearerToken(request);
     if (token === undefined) return buildErrorResponse(createUnauthenticatedError(NO_TOKEN));
-    return yield* Effect.flatMap(requestIn, (body) =>
+    return yield* Effect.flatMap(joinRequestBody, (body) =>
       enlist.join(token, body.reserved ?? false),
     ).pipe(
       Effect.map((answer) => HttpServerResponse.jsonUnsafe(answer, { status: 201 })),
-      Effect.catch((error) =>
-        error instanceof Unauthenticated || error instanceof Validation
-          ? Effect.succeed(buildErrorResponse(error))
-          : Effect.as(
-              Effect.logError("A runner presenting a join token could not join", error),
-              buildErrorResponse(createInternalError("something went wrong")),
-            ),
-      ),
+      respondToFailures("A runner presenting a join token could not join"),
     );
     // The derived routes get their span from the router middleware, which this
     // route sits outside of.

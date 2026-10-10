@@ -224,10 +224,37 @@ const waitForEvent = async (
   while (!seen.some((event) => event._tag === tag)) {
     if (Date.now() > deadline) {
       throw new Error(
-        `no ${tag} within ${Duration.format(TURN_DEADLINE)}: saw ${seen.map((event) => event._tag).join(", ")}`,
+        `no ${tag} within ${Duration.format(TURN_DEADLINE)}: saw ${describeEvents(seen)}`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+};
+
+/**
+ * Lists the tags of the events seen so far, with the text of each warning, so
+ * a test that misses its deadline shows what Codex reported on the way.
+ */
+const describeEvents = (seen: ReadonlyArray<ProviderEvent>): string =>
+  seen
+    .map((event) =>
+      event._tag === "runtime.warning" ? `runtime.warning (${event.message})` : event._tag,
+    )
+    .join(", ");
+
+/**
+ * Waits until `predicate` holds, checking every 20 ms. Fails after 20 seconds
+ * with `name` and the events seen so far.
+ */
+const waitForFixture = async (
+  seen: ReadonlyArray<ProviderEvent>,
+  name: string,
+  predicate: () => boolean,
+): Promise<void> => {
+  const deadline = Date.now() + 20_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`${name} deadline: ${describeEvents(seen)}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
 };
 
@@ -344,16 +371,8 @@ describe.skipIf(binary === undefined)(
         const subscriber = Effect.runFork(
           Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
         );
-        const waitUntil = async (predicate: () => boolean) => {
-          const deadline = Date.now() + 20_000;
-          while (!predicate()) {
-            if (Date.now() >= deadline)
-              throw new Error(
-                `Codex fixture deadline: ${seen.map((event) => event._tag).join(", ")}`,
-              );
-            await new Promise((resolve) => setTimeout(resolve, 20));
-          }
-        };
+        const waitUntil = (predicate: () => boolean) =>
+          waitForFixture(seen, "Codex fixture", predicate);
         const childCompletions = () =>
           seen.filter(
             (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
@@ -528,7 +547,9 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
       );
       const delayed = createLines();
       let heldMetadata: { line: string; id: string; parentId: string } | undefined;
-      let descendantRequestArrived = false;
+      // Codex can send the descendant's approval request before or after the
+      // answer to the read of its metadata, so both are recorded on their own.
+      const approvalThreadIds = new Set<string>();
       const adapter = makeCodexAdapter({
         appServer:
           target !== "discovering-subtree"
@@ -559,9 +580,9 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
                       }
                       if (
                         frame.method === "item/commandExecution/requestApproval" &&
-                        frame.params?.threadId === heldMetadata?.id
+                        frame.params?.threadId !== undefined
                       )
-                        descendantRequestArrived = true;
+                        approvalThreadIds.add(frame.params.threadId);
                       delayed.push(line);
                     }
                   } finally {
@@ -586,16 +607,8 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
         Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
       );
       const sessionId = "0199e0e7-0000-7000-8000-00000000ff10";
-      const waitUntil = async (predicate: () => boolean) => {
-        const deadline = Date.now() + 20_000;
-        while (!predicate()) {
-          if (Date.now() >= deadline)
-            throw new Error(
-              `Codex Stop fixture deadline: ${seen.map((event) => event._tag).join(", ")}`,
-            );
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-      };
+      const waitUntil = (predicate: () => boolean) =>
+        waitForFixture(seen, "Codex Stop fixture", predicate);
       try {
         await Effect.runPromise(
           adapter.startSession(
@@ -619,7 +632,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
           () =>
             (target === "discovering-subtree"
               ? heldMetadata !== undefined &&
-                descendantRequestArrived &&
+                approvalThreadIds.has(heldMetadata.id) &&
                 seen.filter((event) => event._tag === "request.opened").length === 2
               : seen.filter((event) => event._tag === "request.opened").length === 3) &&
             model.waitingChildren.size === 1,
@@ -786,16 +799,8 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
           Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
         );
       let subscriber = subscribe();
-      const waitUntil = async (predicate: () => boolean) => {
-        const deadline = Date.now() + 20_000;
-        while (!predicate()) {
-          if (Date.now() >= deadline)
-            throw new Error(
-              `Codex resume fixture deadline: ${seen.map((event) => event._tag).join(", ")}`,
-            );
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-      };
+      const waitUntil = (predicate: () => boolean) =>
+        waitForFixture(seen, "Codex resume fixture", predicate);
       const childCompletions = () =>
         seen.filter(
           (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>

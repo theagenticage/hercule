@@ -1,8 +1,9 @@
 /**
  * Runners: the daemons that host sessions on the controller's behalf.
  *
- * This domain owns the runner rows and the live connections to runners, and
- * calls no other domain. When a runner reports something another domain acts
+ * This domain owns the runner rows and the live connections to runners. The
+ * socket reads sealed state so a runner that dials a promoted controller is
+ * told the new address. When a runner reports something another domain acts
  * on, the report is published on `RunnerConnections`, and the layer above this
  * domain decides what to do about it.
  */

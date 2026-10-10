@@ -184,6 +184,8 @@ const GENERIC: Record<ErrorCode, string> = {
   not_found: "no such record, or none this credential may see",
   conflict: "it collides with something that already exists",
   invalid_state: "the record is in a state that does not allow this",
+  controller_sealed: "the controller has moved to another machine and no longer serves",
+  promotion_in_progress: "a promotion is moving the controller, so nothing can be changed now",
   cap_exceeded: "a size or count cap was exceeded",
   internal: "the controller failed",
 };
@@ -404,7 +406,13 @@ export const buildNounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<stri
   }
 
   if (noted?.flow !== undefined) lines.push("", "flow:", ...wrapParagraph(noted.flow, "  "));
-  lines.push("", `run \`hercule ${noun} <verb> --help\` for one command's arguments and examples.`);
+  lines.push(
+    "",
+    ...wrapParagraph(
+      `run \`hercule ${noun} <verb> --help\` for one command's arguments and examples.`,
+      "",
+    ),
+  );
   return lines;
 };
 

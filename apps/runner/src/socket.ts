@@ -43,6 +43,7 @@ import {
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
+  type ForwardingPointer,
   MAX_FACT_LENGTH,
   type InstallRequest,
   type LoginStart,
@@ -57,6 +58,7 @@ import {
 import type { AttachmentCache, AttachmentUploader } from "./attachments";
 import type { CredentialRelay } from "./credentials";
 import { refreshFacts } from "./probe";
+import type { ControllerMove } from "./repoint";
 import { describeCause } from "./report";
 import {
   findAdapter,
@@ -161,6 +163,12 @@ export interface ConnectOptions {
   readonly binDir: string;
   /** How sessions call Hercule as a tool, resolved once at runner start (spec 06 section 9.3). */
   readonly herculeTool: ProviderRunnerContext["herculeTool"];
+  /**
+   * Follows a forwarding pointer from a controller that moved. Returns
+   * `accepted` when the runner rewrote its controller URL, and this
+   * connection closes so the next attempt dials the new address.
+   */
+  readonly followForwardingPointer: (pointer: ForwardingPointer) => Effect.Effect<ControllerMove>;
   /** Defaults to `PROOF_DEADLINE`. Tests set a shorter one. */
   readonly proofDeadline?: Duration.Duration;
 }
@@ -602,6 +610,16 @@ export const connect = (
         const frame = yield* Effect.option(decodeFrame(parsed.value));
         if (Option.isNone(frame)) return yield* disown(UNREADABLE);
         const message = frame.value;
+        if (message._tag === "forwardingPointer") {
+          // Before the identity proof, because a sealed controller sends the
+          // pointer in place of a hello. The pointer's own signature is
+          // checked against the pinned key instead.
+          const move = yield* options.followForwardingPointer(message);
+          if (move === "accepted") {
+            yield* write(new Socket.CloseEvent(1000, "controller moved"));
+          }
+          return;
+        }
         if (message._tag === "controllerHello") {
           // Ignore a second hello: it could only undo the proof the first one gave.
           if (greeted) return;

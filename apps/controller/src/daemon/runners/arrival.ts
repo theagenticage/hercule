@@ -25,6 +25,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { withTransaction } from "../../db";
 import { SessionService } from "../../sessions";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { PromotionState } from "../../promotion";
 import { RunnerConnections } from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
 import { WorkspaceService } from "../../workspaces";
@@ -34,6 +35,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
   const connections = yield* RunnerConnections;
+  const promotion = yield* PromotionState;
   const workspaces = yield* WorkspaceService;
   const runs = yield* RunService;
   const workspaceSteps = yield* WorkspaceSteps;
@@ -88,7 +90,7 @@ const make = Effect.gen(function* () {
     driving: Stream.runForEach(connections.arrivals, (runnerId) =>
       forkAndAbsorbFailures(
         `Sending runner ${runnerId} the work owed to it failed`,
-        sendOwedWork(runnerId),
+        promotion.whenServing(sendOwedWork(runnerId)),
       ),
     ),
   };
@@ -107,4 +109,5 @@ export const ArrivalLayer: Layer.Layer<
   | WorkspaceService
   | RunService
   | WorkspaceSteps
+  | PromotionState
 > = Layer.effect(Arrival)(make);

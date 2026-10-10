@@ -20,6 +20,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import { createNotFoundError, type CapabilitySnapshot, type NotFound } from "@hercule/contract";
 import { announce, nowIso, withTransaction } from "../db";
 import { PluginHost } from "../plugins";
+import { PromotionState } from "../promotion";
 import { RunnerConnections, runnerRepository } from "../runners";
 import { readInstanceSecrets, Secrets, type SecretDecryptError } from "../secrets";
 import { providerRepository, type StoredInstance } from "./repository";
@@ -65,12 +66,20 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const secrets = yield* Secrets;
   const host = yield* PluginHost;
+  const promotion = yield* PromotionState;
 
   /**
    * Probes one instance on one runner, stores the snapshot, and returns it.
    * Returns `none` if the runner does not answer before the deadline. A late
    * report is dropped rather than stored, because nothing is waiting for that
    * request any more.
+   *
+   * Only the store passes the promotion gate, not the wait for the runner, so
+   * a freeze never waits up to a probe's deadline for its answer. While a
+   * promotion freezes the controller, the store waits until the freeze ends.
+   * Once the controller is sealed, the snapshot is dropped and `none` is
+   * returned: the runner reconnects to the new machine, which probes it again
+   * when it arrives.
    */
   const probeOne = (
     runnerId: string,
@@ -98,7 +107,7 @@ const make = Effect.gen(function* () {
       );
       if (Option.isNone(answer) || answer.value._tag !== "probeReport") return Option.none();
       const result = answer.value.result;
-      return yield* withTransaction(
+      const store = withTransaction(
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
@@ -119,6 +128,7 @@ const make = Effect.gen(function* () {
           });
         }),
       );
+      return yield* promotion.whenServingOr(store, () => Effect.succeed(Option.none()));
     });
 
   /**
@@ -369,5 +379,5 @@ export class ProviderProbes extends Context.Service<ProviderProbes, Effect.Succe
 export const ProviderProbesLayer: Layer.Layer<
   ProviderProbes,
   never,
-  SqlClient.SqlClient | RunnerConnections | Secrets | PluginHost
+  SqlClient.SqlClient | RunnerConnections | Secrets | PluginHost | PromotionState
 > = Layer.effect(ProviderProbes)(make);

@@ -7,7 +7,14 @@
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import { Internal, InvalidState, Unauthenticated, Validation } from "../errors";
+import {
+  ControllerSealed,
+  Internal,
+  InvalidState,
+  PromotionInProgress,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { NewPassword, Timezone, Username } from "../strings";
 import { SetupToken } from "../security";
 
@@ -32,6 +39,13 @@ export const setup = HttpApiGroup.make("setup").add(
   HttpApiEndpoint.post("complete", "/setup/complete", {
     payload: SetupPayload,
     success: SetupResult,
-    error: [Unauthenticated, Validation, InvalidState, Internal],
+    error: [
+      Unauthenticated,
+      Validation,
+      InvalidState,
+      Internal,
+      ControllerSealed,
+      PromotionInProgress,
+    ],
   }).middleware(SetupToken),
 );

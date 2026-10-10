@@ -8,7 +8,13 @@ import type { FileSystem } from "effect/FileSystem";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import { MEMORY, openDatabase, withTransaction } from "./client";
-import { backupBeforeMigration, databaseVersion, migrate, runMigrations } from "./migrate";
+import {
+  backupBeforeMigration,
+  copyDatabaseTo,
+  databaseVersion,
+  migrate,
+  runMigrations,
+} from "./migrate";
 import { binaryVersion, migrations } from "./migrations/index";
 import { TestDatabase } from "./testing";
 
@@ -196,6 +202,21 @@ describe("the pre-migration copy", () => {
     // The copy is a real database, not an empty file.
     const restored = await run(written, tableNames);
     for (const table of TABLES) expect(restored).toContain(table);
+  });
+
+  it("writes a VACUUM INTO snapshot to a path outside backups/", async () => {
+    const dest = join(home, "promotion-copy.db");
+    await run(
+      databaseFile,
+      Effect.gen(function* () {
+        yield* runMigrations();
+        yield* copyDatabaseTo(dest);
+      }),
+    );
+    expect(existsSync(dest)).toBe(true);
+    const restored = await run(dest, tableNames);
+    for (const table of TABLES) expect(restored).toContain(table);
+    expect(existsSync(backupsDir)).toBe(false);
   });
 });
 

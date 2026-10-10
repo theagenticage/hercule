@@ -21,6 +21,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { withTransaction } from "../../db";
+import { PromotionState } from "../../promotion";
 import { ProviderProbes } from "../../providers";
 import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
@@ -35,6 +36,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* SessionService;
   const workspaces = yield* WorkspaceService;
   const runs = yield* RunService;
+  const promotion = yield* PromotionState;
   const workspaceSteps = yield* WorkspaceSteps;
   const probes = yield* ProviderProbes;
   const { dispatch } = yield* Dispatch;
@@ -50,23 +52,29 @@ const make = Effect.gen(function* () {
           // workspace. All the writes are one transaction, so a failed
           // workspace and the work it strands are updated together or not at
           // all.
-          const settled = yield* withTransaction(
-            sql,
-            Effect.gen(function* () {
-              const settled = yield* workspaces.reported(traffic.runnerId, traffic.report);
-              // A workspace that failed to provision ends the sessions waiting
-              // on it, with the runner's error message as the reason, and
-              // fails the runs working in it.
-              if (settled?.moved === "failed") {
-                const { message } = traffic.report;
-                yield* sessions.endForWorkspace(settled.workspaceId, message ?? null);
-                yield* runs.failRunsInWorkspace(
-                  settled.workspaceId,
-                  message ?? "The runner could not provision the workspace, and gave no reason.",
-                );
-              }
-              return settled;
-            }),
+          // Held while a promotion freezes the controller, like a run's
+          // writes, and never applied once it is sealed. A report applied
+          // after the copy would be missing on the new machine, which sends
+          // the runner what it still waits on when the runner connects.
+          const settled = yield* promotion.whenServing(
+            withTransaction(
+              sql,
+              Effect.gen(function* () {
+                const settled = yield* workspaces.reported(traffic.runnerId, traffic.report);
+                // A workspace that failed to provision ends the sessions waiting
+                // on it, with the runner's error message as the reason, and
+                // fails the runs working in it.
+                if (settled?.moved === "failed") {
+                  const { message } = traffic.report;
+                  yield* sessions.endForWorkspace(settled.workspaceId, message ?? null);
+                  yield* runs.failRunsInWorkspace(
+                    settled.workspaceId,
+                    message ?? "The runner could not provision the workspace, and gave no reason.",
+                  );
+                }
+                return settled;
+              }),
+            ),
           );
           // A workspace that became ready lets its waiting sessions start. The
           // dispatch sends frames to the runner, so it runs after the commit,
@@ -128,10 +136,29 @@ const make = Effect.gen(function* () {
     }
   };
 
+  /**
+   * Applies one frame of a runner's session traffic.
+   *
+   * Each write waits while a promotion freezes the controller, and is never
+   * made once it is sealed, like a workspace report. The new machine's copy
+   * of the data must be the last state this controller acted on. A session
+   * that exited after the copy would otherwise free its slot here, and this
+   * controller would start the next queued session or send the next queued
+   * input, which the new machine then hands out again from its copy. The
+   * frames held back by a seal are lost, which spec 03 section 8.2 accepts
+   * for session events reported between the copy and the runner's reconnect
+   * to the new machine. While a freeze lasts, the queue waits behind the
+   * held frame, so the frames are still applied in order once it ends.
+   *
+   * The work each write leads to is forked after the gate, not inside it,
+   * so it passes the gate on its own once the write is done.
+   */
   const ingestSessionTraffic = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       if (traffic.frame._tag === "sessionsReport") {
-        const ended = yield* sessions.bound(traffic.runnerId, traffic.frame.sessions);
+        const ended = yield* promotion.whenServing(
+          sessions.bound(traffic.runnerId, traffic.frame.sessions),
+        );
         // Mark the runner only after the write is committed. The mark lives in
         // a `Map`, which does not roll back, so a report that failed to write
         // must not make the runner dispatchable.
@@ -149,7 +176,9 @@ const make = Effect.gen(function* () {
         return;
       }
       if (traffic.frame._tag === "sessionInputResult") {
-        return yield* sessions.applyInputResult(traffic.runnerId, traffic.frame);
+        return yield* promotion.whenServing(
+          sessions.applyInputResult(traffic.runnerId, traffic.frame),
+        );
       }
       const { seq, event } = traffic.frame;
       // The fold reads and publishes but writes nothing, so it runs outside
@@ -157,9 +186,8 @@ const make = Effect.gen(function* () {
       // whether or not the write succeeds.
       const report = yield* sessions.foldReport(traffic.runnerId, seq, event);
       if (report === undefined) return;
-      const applied = yield* withTransaction(
-        sql,
-        sessions.applyReport(traffic.runnerId, event, report),
+      const applied = yield* promotion.whenServing(
+        withTransaction(sql, sessions.applyReport(traffic.runnerId, event, report)),
       );
       // The claimed input is sent after the commit, because the send waits on
       // the runner. A session that exited has freed a slot on its runner.
@@ -210,6 +238,7 @@ export const InboundLayer: Layer.Layer<
   | RunService
   | WorkspaceSteps
   | ProviderProbes
+  | PromotionState
   | Dispatch
   | Live
 > = Layer.effect(Inbound)(make);
