@@ -20,6 +20,8 @@ import type { MarkState } from "../marks";
  * `worktree` and `chevron-right` `chev-r`.
  */
 export type IconName =
+  | "alarm"
+  | "arrow"
   | "bound"
   | "branch"
   | "chat"
@@ -31,6 +33,7 @@ export type IconName =
   | "connections"
   | "cpu"
   | "crew"
+  | "diff"
   | "editor"
   | "external"
   | "eye"
@@ -100,6 +103,8 @@ const MARK_STATES: ReadonlyArray<MarkState> = [
 // Every icon, with each size other than 16 that the v1 desktop pages draw it
 // at. The sheet draws every icon at 16, and again at each of these sizes.
 const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
+  ["alarm", [12]],
+  ["arrow", [12]],
   ["bound", []],
   ["branch", [13, 14]],
   ["chat", [13]],
@@ -111,6 +116,7 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["connections", []],
   ["cpu", []],
   ["crew", []],
+  ["diff", [14]],
   ["editor", []],
   ["external", [12, 14]],
   ["eye", [14]],

@@ -57,7 +57,8 @@ function pressMoreRow(label: string): void {
 function pressFaceSegment(face: SidebarFace): void {
   const label = face === "threads" ? "Threads" : "Hercule";
   const segment = [...document.querySelectorAll<HTMLElement>('.seg--side [role="tab"]')].find(
-    (tab) => tab.textContent === label,
+    // The Hercule segment ends in its To do count, so only its first text is the label.
+    (tab) => tab.firstChild?.textContent === label,
   );
   if (segment === undefined) throw new Error(`The face switch has no "${label}" segment.`);
   flushSync(() => {

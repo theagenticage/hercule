@@ -76,6 +76,12 @@ describe("a launch", () => {
     expect(router.state.location.pathname).toBe(threadPath);
   });
 
+  it("opens Intake stored as the last screen", async () => {
+    storeScreen("/intake");
+    const { router } = await launch();
+    expect(router.state.location.pathname).toBe("/intake");
+  });
+
   it("opens a subagent's page stored as the last screen", async () => {
     const path = `/threads/${FIXTURE_SUBAGENT.sessionId}/subagents/${FIXTURE_SUBAGENT.id}`;
     storeScreen(path);
@@ -107,7 +113,7 @@ describe("a launch", () => {
   );
 
   it.each([
-    ["a screen this build does not have", "/intake"],
+    ["a screen this build does not have", "/inbox"],
     ["Settings", "/settings/appearance"],
     ["sign-in", "/login"],
     ["a path past a screen's own", "/office/old"],

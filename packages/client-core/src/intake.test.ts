@@ -1,6 +1,9 @@
 import type { Signal, SignalAction } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_INTAKE_LIST_WIDTH,
+  MIN_INTAKE_LIST_WIDTH,
+  MIN_INTAKE_PANE_WIDTH,
   buildIntakeTabs,
   buildSignalAnswers,
   countToDo,
@@ -14,12 +17,16 @@ import {
   describeSignalRow,
   findReplyAnswer,
   findSuggestedAnswer,
+  fitIntakeListWidth,
+  fitsIntakePane,
   groupSignalsIntoSections,
   isBackFromSnooze,
   listUrgentSignals,
   moveSignalSelection,
   nameSignalKind,
   nameSignalSource,
+  parseIntakeListWidth,
+  readInitials,
   readSignalPluginId,
 } from "./intake";
 
@@ -424,5 +431,35 @@ describe("moveSignalSelection", () => {
     expect(moveSignalSelection(sections, null, 1)).toBe("now");
     expect(moveSignalSelection(sections, "gone", -1)).toBe("b");
     expect(moveSignalSelection([], null, 1)).toBeNull();
+  });
+});
+
+describe("readInitials", () => {
+  it("takes the first letters of the first and the last word", () => {
+    expect(readInitials("Marta de Vries")).toBe("MV");
+  });
+
+  it("takes one letter of a one-word name", () => {
+    expect(readInitials(" sanne ")).toBe("S");
+  });
+});
+
+describe("the split's widths", () => {
+  it("parses a stored width, and falls back to the default for anything else", () => {
+    expect(parseIntakeListWidth("500")).toBe(500);
+    expect(parseIntakeListWidth(null)).toBe(DEFAULT_INTAKE_LIST_WIDTH);
+    expect(parseIntakeListWidth("wide")).toBe(DEFAULT_INTAKE_LIST_WIDTH);
+    expect(parseIntakeListWidth("200")).toBe(DEFAULT_INTAKE_LIST_WIDTH);
+  });
+
+  it("keeps both columns at their minimums", () => {
+    expect(fitIntakeListWidth(200, 1200)).toBe(MIN_INTAKE_LIST_WIDTH);
+    expect(fitIntakeListWidth(1000, 1200)).toBe(1200 - MIN_INTAKE_PANE_WIDTH);
+    expect(fitIntakeListWidth(500, 1200)).toBe(500);
+  });
+
+  it("hides the pane when the two minimums do not fit", () => {
+    expect(fitsIntakePane(MIN_INTAKE_LIST_WIDTH + MIN_INTAKE_PANE_WIDTH)).toBe(true);
+    expect(fitsIntakePane(MIN_INTAKE_LIST_WIDTH + MIN_INTAKE_PANE_WIDTH - 1)).toBe(false);
   });
 });

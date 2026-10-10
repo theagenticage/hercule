@@ -1,8 +1,9 @@
 /* The controls every screen shares: the buttons, the answer ledger, the
    pills, the segmented controls, the navigation rows, the counts, the text
-   field, the quiet text and dots, the priority bars and the section
-   headings. The rules and class names are the Bureau book's, as its
-   system.css spells them. Each departure from the book says why. */
+   field, the quiet text and dots, the priority bars, the bar over the main
+   pane, the tabs and the section headings. The rules and class names are
+   the Bureau book's, as its system.css spells them. Each departure from the
+   book says why. */
 
 /* ---------- Buttons ---------- */
 /* One doctrine for every button:
@@ -624,6 +625,68 @@ input.field[type="password"]:not(:placeholder-shown) {
    nothing to override. */
 .bars[data-p="4"] i {
   background: var(--fail);
+}
+
+/* ---------- The bar ---------- */
+/* The header over the main pane. */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 16px 0 24px;
+  flex: none;
+}
+.title {
+  margin: 0;
+  font-size: var(--t-16);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  /* Not in the book. A record's name is the title and can be 128
+     characters, so a name too long for the header ends in an ellipsis rather
+     than pushing the header's actions out of the window. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Not in the book, which is a page, not a window. The bar lies in the
+   window's drag strip, so each control in it is marked as no part of the
+   strip, or a click on it would start dragging the window. */
+.bar :is(a, button, [role="tab"]) {
+  -webkit-app-region: no-drag;
+}
+
+/* ---------- Tabs ---------- */
+/* Topic tabs in a bar, such as Intake's sources: text on a tint while
+   selected, with a count beside. */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.tab:hover {
+  background: var(--hover);
+}
+.tab.is-on {
+  color: var(--ink);
+  background: var(--selected);
+}
+.tab small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- Section headings ---------- */

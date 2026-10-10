@@ -1,30 +1,10 @@
 /* Settings, ported from the Bureau book's system.css and its settings pages
    (desktop/settings-*.html). Its class names are the book's, so each rule
    maps 1:1 to the book's rule of the same name. The list's group headings
-   are the sidebar's `.side-h`, in shell/sidebar.css, as in the book. */
+   are the sidebar's `.side-h`, in shell/sidebar.css, as in the book. The
+   header itself, `.bar` and `.title`, is in styles/controls.css, because
+   Intake draws it too. */
 
-/* The header over the main pane. */
-.bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 52px;
-  padding: 0 16px 0 24px;
-  flex: none;
-}
-.title {
-  margin: 0;
-  font-size: var(--t-16);
-  font-weight: var(--w-bold);
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  /* Not in the book. A record's name is the title and can be 128
-     characters, so a name too long for the header ends in an ellipsis rather
-     than pushing the header's actions out of the window. */
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .crumb {
   flex: none;
   color: var(--faint);

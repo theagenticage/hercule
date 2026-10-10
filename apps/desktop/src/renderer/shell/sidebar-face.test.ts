@@ -11,6 +11,10 @@ describe("decideScreenFace", () => {
     expect(decideScreenFace(pathname)).toBe("threads");
   });
 
+  it("shows the orchestration face on Intake", () => {
+    expect(decideScreenFace("/intake")).toBe("orchestration");
+  });
+
   it.each([
     ["the Office", "/office"],
     ["Settings", "/settings"],

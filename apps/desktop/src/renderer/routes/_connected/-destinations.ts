@@ -1,6 +1,6 @@
 /**
- * What the shell exchanges with main about destinations, the threads and
- * assistants main can ask the page to open: the waiting Requests the shell
+ * What the shell exchanges with main about destinations, the threads,
+ * assistants and signals main can ask the page to open: the waiting Requests the shell
  * sends for the dock badge and the notifications, and the hook that opens
  * the destination main names.
  */
@@ -47,7 +47,8 @@ export const buildWaitingRequest = (waiting: Waiting): WaitingRequest => {
  *   screen otherwise;
  * - an assistant opens its Conversation, where its Request is answered: in
  *   the Office's drawer while the Office is open, because an assistant
- *   always has a colleague there, and on its own screen otherwise.
+ *   always has a colleague there, and on its own screen otherwise;
+ * - a signal opens Intake with the signal selected.
  *
  * The thread and its runner are read from the cache when the thread is
  * opened, so the function keeps its identity while the threads change.
@@ -86,6 +87,9 @@ export function useOpenDestination(): (destination: Destination) => void {
           else void navigate({ to: "/assistants/$assistantId", params: { assistantId } });
           return;
         }
+        case "signal":
+          void navigate({ to: "/intake", search: { signal: destination.signalId } });
+          return;
       }
     },
     [controller, navigate, officeOpen, queryClient],

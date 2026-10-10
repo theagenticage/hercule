@@ -1,0 +1,330 @@
+/**
+ * Intake: the signals on To do in a list, and the selected one in a pane
+ * beside it (spec 17 §Intake).
+ */
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type JSX,
+  type KeyboardEvent,
+  type PointerEvent,
+} from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
+import {
+  buildIntakeTabs,
+  fitIntakeListWidth,
+  fitsIntakePane,
+  groupSignalsIntoSections,
+  MIN_INTAKE_LIST_WIDTH,
+  MIN_INTAKE_PANE_WIDTH,
+  moveSignalSelection,
+  resolveBrowserTimezone,
+} from "@hercule/client-core";
+import { pluginsQuery, signalsToDoQuery } from "../../app/queries";
+import { SidebarIcon } from "../../icons/sidebar";
+import { IntakeList } from "./intake-list";
+import { SignalPane, type SignalPaneHandle } from "./signal-pane";
+import { SourceMark } from "./source-mark";
+import { useIntakeListWidth } from "./use-intake-list-width";
+import "./intake.css";
+
+declare module "react" {
+  interface CSSProperties {
+    /** The width the user last gave Intake's list, as `<n>px`, before it is fitted to the split. */
+    "--intake-list-width"?: string;
+  }
+}
+
+/** How far one arrow key press moves the split's handle, in pixels. */
+const KEYBOARD_STEP = 16;
+
+/** Checks whether a key press lands in a text field, where Intake's keys never act. */
+const isTextField = (target: EventTarget): boolean =>
+  target instanceof HTMLInputElement ||
+  target instanceof HTMLTextAreaElement ||
+  target instanceof HTMLSelectElement ||
+  (target instanceof HTMLElement && target.isContentEditable);
+
+/**
+ * Renders Intake: the bar with its source tabs and the pane's toggle, then
+ * the split of the list and the pane.
+ *
+ * `selectedId` is the selected signal, from the URL, and `onSelect` changes
+ * it, or clears it with `null`. The pane shows the selected signal unless
+ * the user closed it with Esc, which keeps the row selected, or the split is
+ * too narrow for it.
+ *
+ * The keys of spec 17 §Keys act while the focus is in the list or the pane
+ * and never in a text field: `J`/`K` and `↓`/`↑` move the selection, `↩`
+ * on a row opens the pane on the suggested answer, `R` opens the Reply box,
+ * `O` opens the signal on its source, and Esc steps back.
+ */
+export function IntakeScreen({
+  selectedId,
+  onSelect,
+}: {
+  readonly selectedId: string | null;
+  readonly onSelect: (signalId: string | null) => void;
+}): JSX.Element {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const { data: signals } = useSuspenseQuery(signalsToDoQuery(client));
+  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
+  const [timezone] = useState(() => resolveBrowserTimezone());
+  const [pluginId, setPluginId] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  const [focusPaneFor, setFocusPaneFor] = useState<string | null>(null);
+  const [focusSelectedRow, setFocusSelectedRow] = useState(false);
+  const [width, storeWidth] = useIntakeListWidth();
+  const splitRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLElement>(null);
+  const paneRef = useRef<SignalPaneHandle>(null);
+  // `null` until the split is measured, which counts as fitting, so the pane
+  // never flashes closed on the first frame.
+  const [available, setAvailable] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const split = splitRef.current!;
+    const measure = (): void => {
+      setAvailable(split.offsetWidth);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(split);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  const tabs = buildIntakeTabs(signals, plugins, pluginId);
+  const sections = groupSignalsIntoSections(signals, pluginId);
+  const fits = available === null || fitsIntakePane(available);
+  const paneShown = selectedId !== null && !dismissed && fits;
+  const listed = signals.find((signal) => signal.id === selectedId);
+
+  /** Selects `signalId` and shows the pane, as a click on its row does. */
+  const openSignal = (signalId: string): void => {
+    setDismissed(false);
+    if (signalId !== selectedId) onSelect(signalId);
+  };
+
+  /** Puts the focus on the selected row, when the list draws it. */
+  const focusSelected = (): void => {
+    if (selectedId === null) return;
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-signal-id="${CSS.escape(selectedId)}"]`)
+      ?.focus();
+  };
+
+  const moveSelection = (step: 1 | -1): void => {
+    const next = moveSignalSelection(sections, selectedId, step);
+    if (next === null || next === selectedId) return;
+    // The pane draws the new signal from scratch, which drops the focus
+    // inside it, so the focus goes to the list and stays on the keys' side.
+    if (!(listRef.current?.contains(document.activeElement) ?? false)) setFocusSelectedRow(true);
+    onSelect(next);
+  };
+
+  const stepBack = (): void => {
+    if (paneShown) {
+      const focusInPane = !(listRef.current?.contains(document.activeElement) ?? true);
+      setDismissed(true);
+      if (focusInPane) focusSelected();
+      return;
+    }
+    if (selectedId !== null) {
+      setDismissed(false);
+      onSelect(null);
+    }
+  };
+
+  const handleKeys = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (isTextField(event.target)) return;
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+    const target = event.target as HTMLElement;
+    switch (event.key) {
+      case "j":
+      case "ArrowDown":
+        event.preventDefault();
+        moveSelection(1);
+        return;
+      case "k":
+      case "ArrowUp":
+        event.preventDefault();
+        moveSelection(-1);
+        return;
+      case "Enter": {
+        // `↩` on a row opens the pane on the suggested answer, and never
+        // answers: the second `↩` presses the focused answer, natively.
+        const signalId = target.dataset.signalId;
+        if (signalId === undefined) return;
+        event.preventDefault();
+        openSignal(signalId);
+        if (fits) setFocusPaneFor(signalId);
+        return;
+      }
+      case "r":
+        event.preventDefault();
+        paneRef.current?.openReply();
+        return;
+      case "o":
+        event.preventDefault();
+        paneRef.current?.openOnSource();
+        return;
+      case "Escape":
+        event.preventDefault();
+        stepBack();
+        return;
+    }
+  };
+
+  /** Measures the list's left edge and the split's width, once per drag or key press. */
+  const measureSplit = (): {
+    readonly left: number;
+    readonly listWidth: number;
+    readonly available: number;
+  } => {
+    const list = listRef.current!.getBoundingClientRect();
+    return { left: list.left, listWidth: list.width, available: splitRef.current!.offsetWidth };
+  };
+
+  const startDrag = (event: PointerEvent<HTMLDivElement>): void => {
+    const handle = event.currentTarget;
+    const list = listRef.current!;
+    handle.setPointerCapture(event.pointerId);
+    const split = measureSplit();
+    let latest: number | undefined;
+    // Each move writes the width straight into the list's style, with no
+    // React render; only the end of the drag stores it, which renders once.
+    const move = (moved: globalThis.PointerEvent): void => {
+      latest = fitIntakeListWidth(Math.round(moved.clientX - split.left), split.available);
+      list.style.setProperty("--intake-list-width", `${String(latest)}px`);
+      handle.setAttribute("aria-valuenow", String(latest));
+    };
+    const end = (): void => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", end);
+      if (latest !== undefined) storeWidth(latest);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+  };
+
+  const resizeWithKeys = (event: KeyboardEvent<HTMLDivElement>): void => {
+    // The handle is the list's right edge, so the right arrow widens the list.
+    const step =
+      event.key === "ArrowRight" ? KEYBOARD_STEP : event.key === "ArrowLeft" ? -KEYBOARD_STEP : 0;
+    if (step === 0) return;
+    event.preventDefault();
+    const split = measureSplit();
+    storeWidth(fitIntakeListWidth(Math.round(split.listWidth) + step, split.available));
+  };
+
+  const toggleLabel = !fits
+    ? "Widen the window to show the pane"
+    : paneShown
+      ? "Hide the signal"
+      : "Show the signal";
+  const canToggle = fits && (paneShown || signals.length > 0);
+
+  return (
+    <>
+      <header className="bar">
+        <h1 className="title">Intake</h1>
+        <nav className="tabs" aria-label="Sources">
+          {tabs.map((tab) => (
+            <button
+              key={tab.pluginId ?? "all"}
+              type="button"
+              className={tab.pluginId === pluginId ? "tab is-on" : "tab"}
+              aria-pressed={tab.pluginId === pluginId}
+              onClick={() => {
+                setPluginId(tab.pluginId);
+              }}
+            >
+              {tab.pluginId !== null && <SourceMark pluginId={tab.pluginId} size={14} />}
+              {tab.label}
+              {tab.count > 0 && <small>{tab.count}</small>}
+            </button>
+          ))}
+        </nav>
+        <span className="spacer" />
+        <button
+          type="button"
+          className="icon-btn asks-pane-btn"
+          aria-label={toggleLabel}
+          title={fits && paneShown ? `${toggleLabel}  Esc` : toggleLabel}
+          aria-pressed={paneShown}
+          aria-disabled={!canToggle || undefined}
+          onClick={() => {
+            if (!canToggle) return;
+            if (paneShown) setDismissed(true);
+            else openSignal(selectedId ?? moveSignalSelection(sections, null, 1) ?? signals[0]!.id);
+          }}
+        >
+          <SidebarIcon size={16} />
+        </button>
+      </header>
+      {/* The keys are handled here, where every key press in the list and
+          the pane arrives, rather than on each row and answer. */}
+      <div ref={splitRef} className={paneShown ? "asks has-pane" : "asks"} onKeyDown={handleKeys}>
+        <section
+          ref={listRef}
+          className="asks-list"
+          aria-label="Signals"
+          style={
+            paneShown
+              ? {
+                  "--intake-list-width": `${String(width)}px`,
+                  // The same fit as `fitIntakeListWidth`, done by CSS against
+                  // the split's width, which only layout knows.
+                  width: `max(${String(MIN_INTAKE_LIST_WIDTH)}px, min(var(--intake-list-width), 100% - ${String(MIN_INTAKE_PANE_WIDTH)}px))`,
+                }
+              : undefined
+          }
+        >
+          <IntakeList
+            sections={sections}
+            plugins={plugins}
+            selectedId={selectedId}
+            focusSelectedRow={focusSelectedRow}
+            onSelect={openSignal}
+            onFocusedSelectedRow={() => {
+              setFocusSelectedRow(false);
+            }}
+          />
+        </section>
+        {paneShown && (
+          <>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize the list"
+              aria-valuenow={width}
+              aria-valuemin={MIN_INTAKE_LIST_WIDTH}
+              tabIndex={0}
+              className="asks-handle"
+              onPointerDown={startDrag}
+              onKeyDown={resizeWithKeys}
+            />
+            <SignalPane
+              key={selectedId}
+              signalId={selectedId}
+              listed={listed}
+              plugins={plugins}
+              timezone={timezone}
+              focusSuggestedOnOpen={focusPaneFor === selectedId}
+              onFocusedSuggested={() => {
+                setFocusPaneFor(null);
+              }}
+              ref={paneRef}
+            />
+          </>
+        )}
+      </div>
+    </>
+  );
+}

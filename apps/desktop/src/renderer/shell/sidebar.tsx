@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
+import { countToDo } from "@hercule/client-core";
 import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useAssistantRows } from "../app/assistant-rows";
 import { useDraftThread } from "../app/draft-thread";
@@ -9,6 +10,7 @@ import {
   providersQuery,
   resourcesQuery,
   runnersQuery,
+  signalsToDoQuery,
   threadsQuery,
   userQuery,
   workspacesQuery,
@@ -27,6 +29,7 @@ import { buildSidebar, listGoMenuItems, type SectionKey } from "./sidebar-items"
 import { SidebarFoot } from "./sidebar-foot";
 import { SidebarList } from "./sidebar-list";
 import { SystemSection } from "./system-section";
+import { WorkSection } from "./work-section";
 import "./sidebar.css";
 import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
 
@@ -82,6 +85,10 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const { username } = useSuspenseQuery(userQuery(client)).data;
+  const toDoCount = useSuspenseQuery({
+    ...signalsToDoQuery(client),
+    select: (signals) => countToDo(signals, null),
+  }).data;
   const assistantRows = useAssistantRows();
   const waiting = useWaiting();
   const unsentKeys = useUnsentKeys(controller.pendingSubmissions);
@@ -157,7 +164,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
           <SidebarIcon />
         </button>
       </div>
-      <FaceSwitch face={face} onChange={setFace} listId={listId} />
+      <FaceSwitch face={face} onChange={setFace} listId={listId} toDoCount={toDoCount} />
       {/* The space between a row's text and its key cap keeps the row's name
           "New thread ⌘N", not "New thread⌘N". A row is a flex box, which
           draws no space between its items, so the layout is the book's. The
@@ -190,7 +197,10 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
         onExpand={expandSection}
       >
         {face === "orchestration" ? (
-          <SystemSection />
+          <>
+            <WorkSection />
+            <SystemSection />
+          </>
         ) : (
           items.length === 0 && <p className="side-meta side-empty">No threads yet</p>
         )}

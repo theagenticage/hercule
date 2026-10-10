@@ -152,6 +152,11 @@ export const queryKeys = {
    */
   workflowActions: (): LiveQueryKey => ["workflow-actions"],
   eventKinds: (): LiveQueryKey => ["event-kinds"],
+  /**
+   * One event, as `event.read` returns it. Not a live topic: the event log is
+   * append-only, so a stored event is read once and kept.
+   */
+  event: (id: number): LiveQueryKey => ["event", id],
   /** Not a live topic yet. A change to an Agent made elsewhere shows up on the next fetch. */
   agents: (): LiveQueryKey => ["agents"],
   assistants: (): LiveQueryKey => ["assistants"],

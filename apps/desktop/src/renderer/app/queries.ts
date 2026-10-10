@@ -378,6 +378,30 @@ export const assistantsQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads Intake's To do list: every open signal that is not snoozed, read
+ * whole, because every client counts it. The Hercule segment's count and
+ * Intake's list both come from it, and a push on the `signal` topic reads it
+ * again.
+ */
+export const signalsToDoQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.signals({ view: "to-do" }),
+    queryFn: () => client.signal.query({ query: { view: "to-do" } }),
+    ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads every plugin, for the names Intake gives each signal's source. A push
+ * on the `plugin` topic reads it again.
+ */
+export const pluginsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.plugins(),
+    queryFn: () => client.plugin.query(),
+    ...SHELL_READ_OPTIONS,
+  });
+
+/**
  * Checks whether a failed read of a thread's records, or of an assistant's
  * current session, is worth trying again. Returns `true` for the first three
  * failures that got no answer from the controller, such as a dropped
@@ -674,6 +698,32 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
+ * Reads one signal for Intake's pane. Unlike the To do list, `signal.read`
+ * carries the describe line of each action of an open signal. A push on the
+ * `signal` topic that names the signal reads it again. Fails with a
+ * `not_found` `ApiError` when no such signal exists.
+ */
+export const signalQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.signal(id),
+    queryFn: () => client.signal.read({ params: { id } }),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads one event, for the address Intake's pane opens a signal at on its
+ * source. The event log is append-only, so the read is made once and kept.
+ */
+export const eventQuery = (client: HerculeClient, id: number) =>
+  queryOptions({
+    queryKey: queryKeys.event(id),
+    queryFn: () => client.event.read({ params: { id } }),
+    retry: isWorthRetrying,
+    staleTime: Infinity,
+  });
+
+/**
  * Reads the session whose agent sent a message into a thread, or queued one
  * there, so the message can name its sender. Holds null when the sender
  * cannot be read, as `readSenderSession` says; the message then shows as from
@@ -776,7 +826,9 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
 /**
  * Reads everything the shell shows into `queryClient`: the sidebar's records,
  * the assistants and the current session of each one's main conversation,
- * the Connections and the signed-in user. Resolves once every read is cached,
+ * the Connections, the signed-in user, Intake's To do list, whose count the
+ * Hercule segment shows, and the plugins that name each signal's source.
+ * Resolves once every read is cached,
  * and fails with the first read that fails.
  *
  * The current sessions can only be read once the assistants are, because
@@ -806,6 +858,8 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(providersQuery(client)),
     queryClient.ensureQueryData(connectionsQuery(client)),
     queryClient.ensureQueryData(userQuery(client)),
+    queryClient.ensureQueryData(signalsToDoQuery(client)),
+    queryClient.ensureQueryData(pluginsQuery(client)),
     queryClient
       .ensureQueryData(assistantsQuery(client))
       .then((assistants) =>

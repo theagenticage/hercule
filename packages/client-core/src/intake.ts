@@ -417,3 +417,51 @@ export const moveSignalSelection = (
   if (index < 0) return step === 1 ? ids[0]! : ids.at(-1)!;
   return ids[Math.min(ids.length - 1, Math.max(0, index + step))]!;
 };
+
+/**
+ * Returns the initials a message's author shows in place of an avatar: the
+ * first letter of the first and the last word of `name`, in capitals, such
+ * as "MV" for "Marta de Vries", or one letter for a one-word name.
+ */
+export const readInitials = (name: string): string => {
+  const words = name.split(/\s+/).filter((word) => word !== "");
+  const first = words[0]?.charAt(0) ?? "";
+  const last = words.length > 1 ? words.at(-1)!.charAt(0) : "";
+  return (first + last).toUpperCase();
+};
+
+/** The list's width when the user has never dragged the split's handle: the drawing's. */
+export const DEFAULT_INTAKE_LIST_WIDTH = 432;
+
+/** The narrowest the list may be. */
+export const MIN_INTAKE_LIST_WIDTH = 360;
+
+/** The narrowest the pane may be. Below both minimums together, the pane hides. */
+export const MIN_INTAKE_PANE_WIDTH = 400;
+
+/**
+ * Parses the stored width of Intake's list. Returns
+ * `DEFAULT_INTAKE_LIST_WIDTH` for nothing stored and for anything that is not
+ * a width the user could have dragged to.
+ */
+export const parseIntakeListWidth = (raw: string | null): number => {
+  const width = Number(raw);
+  return raw === null || !Number.isFinite(width) || width < MIN_INTAKE_LIST_WIDTH
+    ? DEFAULT_INTAKE_LIST_WIDTH
+    : Math.round(width);
+};
+
+/**
+ * Checks whether the list and the pane both fit in `available`, the width
+ * they share, each at its minimum. When they do not, the pane hides.
+ */
+export const fitsIntakePane = (available: number): boolean =>
+  available >= MIN_INTAKE_LIST_WIDTH + MIN_INTAKE_PANE_WIDTH;
+
+/**
+ * Returns the list's width to draw beside the pane: `width`, made no
+ * narrower than `MIN_INTAKE_LIST_WIDTH` and narrow enough to leave the pane
+ * `MIN_INTAKE_PANE_WIDTH` of `available`, the width the two share.
+ */
+export const fitIntakeListWidth = (width: number, available: number): number =>
+  Math.max(MIN_INTAKE_LIST_WIDTH, Math.min(width, available - MIN_INTAKE_PANE_WIDTH));

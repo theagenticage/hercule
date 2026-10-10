@@ -20,6 +20,8 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { buildLook, Face, UserAvatar } from "../faces";
 import {
+  AlarmIcon,
+  ArrowIcon,
   BoundIcon,
   BranchIcon,
   ChatIcon,
@@ -31,6 +33,7 @@ import {
   ConnectionsIcon,
   CpuIcon,
   CrewIcon,
+  DiffIcon,
   EditorIcon,
   ExternalIcon,
   EyeIcon,
@@ -77,6 +80,8 @@ import { applySheetTheme, markSheetReady } from "./sheet-page";
 // The screens import each icon by its own name, so a screen ships only the
 // icons it uses. The sheet draws every icon, so it may look them up by name.
 const ICONS: { readonly [Name in IconName]: (props: IconProps) => JSX.Element } = {
+  alarm: AlarmIcon,
+  arrow: ArrowIcon,
   bound: BoundIcon,
   branch: BranchIcon,
   chat: ChatIcon,
@@ -88,6 +93,7 @@ const ICONS: { readonly [Name in IconName]: (props: IconProps) => JSX.Element } 
   connections: ConnectionsIcon,
   cpu: CpuIcon,
   crew: CrewIcon,
+  diff: DiffIcon,
   editor: EditorIcon,
   external: ExternalIcon,
   eye: EyeIcon,
