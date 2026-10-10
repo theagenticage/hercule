@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import type { ActorReading } from "@hercule/client-core";
+import type { ActorReading, SenderReading } from "@hercule/client-core";
 import { cn } from "@hercule/ui";
 
 /**
@@ -48,3 +48,54 @@ export function ActorLink({
       return <span className={plainClassName}>{actor.label}</span>;
   }
 }
+
+/**
+ * Renders the name of the agent that sent a message into a thread: a link to
+ * the sender's thread, or to its assistant's page when the sender answers an
+ * assistant's conversation. A sender that could not be read is plain text in
+ * `plainClassName`, written by `writeSenderName`.
+ */
+export function SenderName({
+  sender,
+  plainClassName,
+}: {
+  readonly sender: SenderReading;
+  readonly plainClassName: string;
+}): JSX.Element {
+  switch (sender.link.kind) {
+    case "thread":
+      return (
+        <Link
+          to="/threads/$sessionId"
+          params={{ sessionId: sender.link.sessionId }}
+          className={INLINE_LINK}
+        >
+          {sender.name}
+        </Link>
+      );
+    case "assistant":
+      return (
+        <Link
+          to="/assistants/$assistantId"
+          params={{ assistantId: sender.link.assistantId }}
+          className={INLINE_LINK}
+        >
+          {sender.name}
+        </Link>
+      );
+    case "none":
+      return <span className={plainClassName}>{writeSenderName(sender)}</span>;
+  }
+}
+
+/**
+ * Returns the sender's name as it reads inside a sentence, such as "Sent by
+ * Fix EU checkout" or "From another agent". A sender with a name of its own
+ * keeps it as it is. The label of a sender that could not be read, "Another
+ * agent", is written to stand alone, so inside a sentence it starts in lower
+ * case.
+ */
+export const writeSenderName = (sender: SenderReading): string =>
+  sender.link.kind === "none"
+    ? sender.name.charAt(0).toLowerCase() + sender.name.slice(1)
+    : sender.name;

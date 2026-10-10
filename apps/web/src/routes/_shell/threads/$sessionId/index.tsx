@@ -1,8 +1,14 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { resolveDisplayTimezone } from "@hercule/client-core";
-import { settingsQuery, transcriptQuery } from "../../../../app/queries";
+import { buildSessionAgentState, buildTurns, resolveDisplayTimezone } from "@hercule/client-core";
+import {
+  assistantsQuery,
+  senderSessionQuery,
+  sessionQuery,
+  settingsQuery,
+  transcriptQuery,
+} from "../../../../app/queries";
 import { AgentPage } from "../../../../screens/thread/agent-page";
 
 /**
@@ -11,13 +17,34 @@ import { AgentPage } from "../../../../screens/thread/agent-page";
  * the shell's top bar is hidden here.
  *
  * The loader fetches the transcript before the route renders, so the first
- * paint is never a spinner over an empty column. The thread's layout route
+ * paint is never a spinner over an empty column. It then fetches each agent
+ * that sent a message into the transcript, once per sender, and the
+ * assistants, so a message names its sender at the first paint. Those reads
+ * are prefetched rather than ensured: a sender that cannot be read shows as
+ * "Another agent" and never fails the load. The thread's layout route
  * fetches everything else the page reads.
  */
 export const Route = createFileRoute("/_shell/threads/$sessionId/")({
   staticData: { title: "Thread", ownsTopBar: true },
-  loader: ({ context, params }) =>
-    context.queryClient.ensureQueryData(transcriptQuery(context.client, params.sessionId)),
+  loader: async ({ context, params }) => {
+    const { client, queryClient } = context;
+    const [rows, session] = await Promise.all([
+      queryClient.ensureQueryData(transcriptQuery(client, params.sessionId)),
+      queryClient.ensureQueryData(sessionQuery(client, params.sessionId)),
+    ]);
+    const senderSessionIds = new Set(
+      buildTurns(rows, buildSessionAgentState(session)).flatMap((turn) =>
+        turn.userMessages.flatMap((message) => message.senderSessionId ?? []),
+      ),
+    );
+    if (senderSessionIds.size === 0) return;
+    await Promise.all([
+      queryClient.prefetchQuery(assistantsQuery(client)),
+      ...Array.from(senderSessionIds, (id) =>
+        queryClient.prefetchQuery(senderSessionQuery(client, id)),
+      ),
+    ]);
+  },
   component: ThreadPage,
 });
 

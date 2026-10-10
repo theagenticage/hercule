@@ -3,9 +3,10 @@ import { cn, ImageLightbox, useBlobImageSource, type LightboxImage } from "@herc
 import { Markdown } from "./markdown";
 
 /**
- * Renders what the user wrote, in a bubble: a thread turn's message, or the
- * owner's message in an assistant's conversation. The caller places the
- * bubble on the right.
+ * Renders one message sent into a thread, in a bubble: a message the owner
+ * or another session's agent sent into a turn, or the owner's message in an
+ * assistant's conversation. The caller places the bubble on the right, and
+ * draws who sent it, when that is not the owner, around it.
  *
  * The bubble is a passive container, so it sits on `--surface` with a
  * `--line` hairline, as design-language.md asks; the lit `--raised` layer is
@@ -15,7 +16,7 @@ import { Markdown } from "./markdown";
  * The images attached to the message sit above the text, two to a row, and
  * a click on one opens it large. A message may be images alone, with no text.
  */
-export function OwnerBubble({
+export function MessageBubble({
   text,
   images = [],
   imagesRef,

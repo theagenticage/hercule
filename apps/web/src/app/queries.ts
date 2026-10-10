@@ -14,6 +14,7 @@
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import {
+  ApiError,
   isNotFound,
   queryKeys,
   readEveryPage,
@@ -156,6 +157,34 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
   queryOptions({
     queryKey: queryKeys.session(id),
     queryFn: () => client.session.read({ params: { id } }),
+    retry: false,
+  });
+
+/**
+ * Reads the session whose agent sent a message into a thread, so the message
+ * can name its sender. Returns null when the sender cannot be read: the
+ * session was deleted, or the user may not read it. The message still shows,
+ * as from "Another agent", so neither answer is a failure; any other error
+ * still fails the read, and the screen shows the same "Another agent".
+ *
+ * The answer is kept until a `session` push names the sender, such as a
+ * rename: the key sits under the session's own key, so that push refetches
+ * it with no subscription of its own. Until then nothing about the name can
+ * have changed, so the read is never repeated on its own, and the messages
+ * that mount after the loader prefetched it do not read it again. An error is
+ * not retried either, because a session that returns 404 or 403 once will
+ * keep returning it.
+ */
+export const senderSessionQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: [...queryKeys.session(id), "sender"],
+    queryFn: () =>
+      client.session.read({ params: { id } }).catch((error: unknown) => {
+        if (error instanceof ApiError && (error.code === "not_found" || error.code === "forbidden"))
+          return null;
+        throw error;
+      }),
+    staleTime: Infinity,
     retry: false,
   });
 
