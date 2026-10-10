@@ -3,12 +3,12 @@
  * rows. This is not an operation and not on `RunnerService`: it checks no
  * grant, and every audit entry is stamped `system`.
  *
- * The only state kept here is which connection each runner is reachable
- * through. A runner can connect again before its old connection has finished
- * closing. Without the map, the old connection's final `unreachable` would
- * overwrite the new connection's `online`. The map is lost when the process
- * stops, which `strandedByTheLastRun` corrects before the server starts
- * listening.
+ * The state kept here is which connection each runner is reachable through,
+ * and the departures not yet written. A runner can connect again before its
+ * old connection has finished closing. Without the map, the old connection's
+ * final `unreachable` would overwrite the new connection's `online`. Both maps
+ * are lost when the process stops, which `strandedByTheLastRun` corrects
+ * before the server starts listening.
  *
  * Every database write here passes the promotion gate (spec 03 section 8.2).
  * A frozen controller must not write, because the copy the new machine
@@ -17,9 +17,10 @@
  *
  * - The hello's write is admitted by the socket, together with the hello's
  *   answer, so that a seal is ordered after it.
- * - The write that moves a runner off `online` when its connection ends
- *   waits for the thaw, because it is still true afterwards. It is dropped
- *   once sealed.
+ * - The write that moves a runner off `online` when its connection ends is
+ *   held in memory while frozen, because it is still true after the thaw.
+ *   The controller daemon calls `recordHeldDepartures` each time the
+ *   controller serves again. Once sealed, it is never written.
  * - The writes a frame causes while the connection is open (a pong, a facts
  *   report, a watermark report) are skipped. They are handled one at a time
  *   with every other frame, so a write that waited would hold up the pongs,
@@ -40,13 +41,7 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import {
-  ControllerSealed,
-  PromotionInProgress,
-  type RunnerConnectivity,
-  type RunnerFacts,
-  type RunnerWatermark,
-} from "@hercule/contract";
+import type { RunnerConnectivity, RunnerFacts, RunnerWatermark } from "@hercule/contract";
 import {
   GOING_AWAY_CLOSE_CODE,
   RETIRED_CLOSE_CODE,
@@ -246,11 +241,15 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
   const promotion = yield* PromotionState;
-  // A departure that waits for a freeze to end waits on a fiber of its own,
-  // which lives as long as this layer, not as long as the connection.
-  const scope = yield* Effect.scope;
 
   const reachable = new Map<string, Reachable>();
+  // The departures whose write a promotion freeze is holding, by runner id.
+  // Each keeps the connection that ended, so an entry that a later connection
+  // replaced is never mistaken for the one that was written.
+  const heldDepartures = new Map<
+    string,
+    { readonly connection: Connection; readonly departure: Departure }
+  >();
   // Unbounded, so a runner's hello never waits for a slow subscriber. It
   // replays recent arrivals, because the subscriber starts on a forked fiber
   // while the server is already starting to listen. Without the replay, a
@@ -395,6 +394,36 @@ const make = Effect.gen(function* () {
       });
     });
 
+  /**
+   * Writes every held departure: sets each runner `offline` or `unreachable`,
+   * as its connection reported, in one transaction. Skipped while a promotion
+   * freezes the controller, and once it is sealed, leaving the departures
+   * held. Fails when the write fails, and the departures then stay held.
+   *
+   * The entries are read inside the transaction, because a hello removes its
+   * runner's entry inside its own transaction, and transactions run one at a
+   * time. A runner that connected again is therefore never moved off the
+   * `online` its new hello wrote. After the commit, an entry is removed only
+   * if it still holds the connection that was written: a connection that
+   * ended in the meantime has its own departure, not yet written.
+   */
+  const recordHeldDepartures: Effect.Effect<void, SqlError> = promotion.runIfServing(
+    Effect.gen(function* () {
+      const written = yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const held = [...heldDepartures];
+          const at = yield* nowIso;
+          for (const [id, { departure }] of held) yield* changeConnectivity(id, departure, at);
+          return held;
+        }),
+      );
+      for (const [id, { connection }] of written) {
+        if (heldDepartures.get(id)?.connection === connection) heldDepartures.delete(id);
+      }
+    }),
+  );
+
   return {
     /** Returns the id of the runner this credential belongs to. Only the hash is stored, and the lookup needs only that. */
     admits: (credential: string): Effect.Effect<Option.Option<string>, SqlError> =>
@@ -434,6 +463,11 @@ const make = Effect.gen(function* () {
             // not the connectivity changed, so the row can change without an
             // audit entry. Announce it either way.
             yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
+            // A departure a freeze held for an earlier connection is no longer
+            // true. It is dropped inside the transaction, so that it is ordered
+            // with `recordHeldDepartures`, and after the writes, so that a
+            // write that fails leaves it held.
+            heldDepartures.delete(id);
           }),
         );
         const previous = reachable.get(id);
@@ -826,20 +860,16 @@ const make = Effect.gen(function* () {
      * everyone waiting on it, and sets the runner `offline` or `unreachable`.
      * The connection passes the departure, because only it knows whether a
      * `goodbye` arrived. A connection that was already replaced changes
-     * nothing.
+     * nothing. Fails when the write fails.
      *
      * The map is updated at once, so nothing is sent to a closed connection.
-     * The row is written when the promotion gate allows:
+     * The departure is then held, and written by `recordHeldDepartures`:
      *
      * - while serving, at once;
-     * - while frozen, after the thaw, on a fiber of its own, so the socket's
-     *   finalizer, which cannot be interrupted, never waits for the freeze;
+     * - while frozen, when the controller daemon calls `recordHeldDepartures`
+     *   after the thaw. The socket's finalizer, which cannot be interrupted,
+     *   never waits for the freeze;
      * - once sealed, never: the runner follows the forwarding pointer.
-     *
-     * The write checks the map again inside its transaction, because the
-     * runner can connect again before it runs, most of all after a freeze.
-     * The new connection's hello has then marked the runner online, and that
-     * must not be overwritten.
      */
     ended: (
       id: string,
@@ -854,36 +884,13 @@ const make = Effect.gen(function* () {
         // online now, so everyone waiting on it is released now rather than
         // at their own deadline.
         abandon(held);
-        const recordDeparture = withTransaction(
-          sql,
-          Effect.gen(function* () {
-            if (reachable.has(id)) return;
-            yield* changeConnectivity(id, departure, yield* nowIso);
-          }),
-        );
-        return Effect.catch(promotion.admit(recordDeparture), (error) => {
-          if (error instanceof ControllerSealed) return Effect.void;
-          if (!(error instanceof PromotionInProgress)) return Effect.fail(error);
-          // Interruptible, so that the layer's scope can end the wait when
-          // the controller stops while frozen. The row is then corrected at
-          // the next boot, like the rows of every connection a stop cut off.
-          return Effect.asVoid(
-            Effect.forkIn(
-              Effect.interruptible(
-                promotion
-                  .whenServingOr(recordDeparture, () => Effect.void)
-                  .pipe(
-                    Effect.tapCause((cause) =>
-                      Effect.logError("A runner's row could not be moved off online", cause),
-                    ),
-                    Effect.ignore,
-                  ),
-              ),
-              scope,
-            ),
-          );
-        });
+        // Held before the phase is checked, so a thaw that lands in between
+        // finds it.
+        heldDepartures.set(id, { connection, departure });
+        return recordHeldDepartures;
       }),
+
+    recordHeldDepartures,
 
     /**
      * Raises one `core.runner-unreachable` notification for each runner that

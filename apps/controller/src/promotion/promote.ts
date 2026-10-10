@@ -506,15 +506,15 @@ export const promote = (options: PromoteOptions): Effect.Effect<void, PromoteErr
        * Pulls the transfer into this Home, receives it, then asks the old
        * controller to switch to this machine.
        *
-       * The transfer is saved whole in the Home's promotion transfer
-       * directory before it is unpacked, so it sits on the same disk as the
-       * database it becomes. The reservation created that directory and
-       * removes it when it ends.
+       * The transfer is saved whole in the reservation's own directory
+       * inside the Home before it is unpacked, so it sits on the same disk
+       * as the database it becomes. The reservation created that directory
+       * and removes it when it ends.
        */
       const pullReceiveAndSwitch = Effect.gen(function* () {
         // From here on the token is spent.
         out("Pulling the data...");
-        const file = join(paths.promotionTransferDir, "transfer");
+        const file = join(home.transferDirectory, "transfer");
         yield* downloadTransfer(file);
         const received = yield* receiveTransfer(home, tokenBytes, preview.controllerId, file).pipe(
           Effect.mapError((error) => refuse(error.message)),

@@ -78,6 +78,7 @@ export {
   PromotionFleet,
   PromotionFleetLayer,
   PromotionFleetRouteLayer,
+  recordDeparturesAfterThaws,
   Retirement,
   RetirementLayer,
   sweepUnreachableRunners,

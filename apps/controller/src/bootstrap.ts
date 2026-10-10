@@ -384,26 +384,36 @@ export const bootWith = <A, E>(
       // Right after the migrations, which create the seal's table, and before
       // anything that a sealed controller must not do.
       const flags = yield* config.ServeFlags;
-      yield* Effect.flatMap(PromotionState, (promotion) => promotion.restore(flags));
-      // There is no way to ask whether the harness received an input that was
-      // in flight before this boot. So the input is never sent again, which
-      // could deliver it twice: an agent step's prompt is marked sent, any
-      // other input is cancelled, and the subscription records which
-      // wake-up was lost. This runs after the migrations and before
-      // anything is placed on a runner.
-      yield* endStrandedInputsAndReportLostWakeUps;
-      yield* seed;
+      const promotion = yield* PromotionState;
+      yield* promotion.restore(flags);
 
       const identity = yield* ControllerIdentity;
       const record = yield* identity.ensure;
 
-      // After the migrations and the identity, because a plugin that activates
-      // may read its own state and secrets. Before the runner, because a
-      // session's provider is looked up in the catalog.
-      yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? registry));
-      // After the catalog, because a provider instance is created only for a
-      // provider this build registered.
-      yield* ensureProviderInstances;
+      // A sealed controller has moved: its data and its work now live on the
+      // new machine, and it only answers with the new address. So it skips
+      // every step that starts or prepares work. A plugin activated here
+      // would wait forever on the promotion gate, or act on data that moved.
+      // The identity, the setup URL and the local runner still start, because
+      // the local runner has to connect to receive the new address.
+      if ((yield* promotion.phase)._tag !== "Sealed") {
+        // There is no way to ask whether the harness received an input that
+        // was in flight before this boot. So the input is never sent again,
+        // which could deliver it twice: an agent step's prompt is marked
+        // sent, any other input is cancelled, and the subscription records
+        // which wake-up was lost. This runs after the migrations and before
+        // anything is placed on a runner.
+        yield* endStrandedInputsAndReportLostWakeUps;
+        yield* seed;
+
+        // After the migrations and the identity, because a plugin that
+        // activates may read its own state and secrets. Before the runner,
+        // because a session's provider is looked up in the catalog.
+        yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? registry));
+        // After the catalog, because a provider instance is created only for
+        // a provider this build registered.
+        yield* ensureProviderInstances;
+      }
 
       const url = yield* ensureSetupUrl(paths, bootstrap);
 

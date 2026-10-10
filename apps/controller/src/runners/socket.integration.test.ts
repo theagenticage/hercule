@@ -3150,6 +3150,68 @@ describe("a runner connection during a promotion", () => {
     });
   });
 
+  it("records a runner that says goodbye while frozen as offline only once the transfer is cancelled", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential);
+      await waitForRunner(
+        harness.base,
+        token,
+        joined.runnerId,
+        (one) => one.connectivity === "online",
+      );
+      const promotionToken = await freezeController(harness.base, token);
+
+      wire.send({ _tag: "goodbye" });
+      wire.close();
+      await delay(QUIET_MS);
+      expect((await readRunner(harness.base, token, joined.runnerId)).connectivity).toBe("online");
+      expect(await readStateTransitions(harness)).toEqual(["online"]);
+
+      await thaw(harness.base, promotionToken);
+      await waitForRunner(
+        harness.base,
+        token,
+        joined.runnerId,
+        (one) => one.connectivity === "offline",
+      );
+      // The held departure keeps its kind: a runner that said goodbye was not
+      // lost, so it never reads as unreachable.
+      expect(await readStateTransitions(harness)).toEqual(["online", "offline"]);
+    });
+  });
+
+  it("keeps a runner online that disconnects and connects again while frozen", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+      const first = await greet(harness.base, joined.credential);
+      await waitForRunner(
+        harness.base,
+        token,
+        joined.runnerId,
+        (one) => one.connectivity === "online",
+      );
+      const promotionToken = await freezeController(harness.base, token);
+
+      first.wire.close();
+      const second = await dial(harness.base, joined.credential);
+      second.send(buildHello());
+      await delay(QUIET_MS);
+
+      await thaw(harness.base, promotionToken);
+      await waitForFrame<ControllerHello>(second, "controllerHello");
+      await delay(QUIET_MS);
+      // The held hello and the held departure both run after the thaw, in
+      // either order. Either way the runner ends online: the departure is
+      // written before the hello, or the hello drops it.
+      expect((await readRunner(harness.base, token, joined.runnerId)).connectivity).toBe("online");
+      expect((await readStateTransitions(harness)).at(-1)).toBe("online");
+      second.close();
+    });
+  });
+
   it("writes nothing for a runner that disconnects from a sealed controller", async () => {
     await withServer(async (harness) => {
       const token = await completeSetupWithNoProviderInstance(harness);

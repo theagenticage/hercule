@@ -90,6 +90,7 @@ import {
   PromotionFleetRouteLayer,
   Provisioning,
   checkSchedulerInterval,
+  recordDeparturesAfterThaws,
   runAttachmentSweepLoop,
   runIngestReconciler,
   runScheduler,
@@ -391,6 +392,9 @@ export const serve = (bundle: WebBundle | undefined) =>
     // over ends on its own, so a new machine that went quiet cannot leave
     // this controller frozen.
     yield* Effect.forkScoped(thawExpiredFreezes);
+    // A runner that disconnects while frozen is moved off online once the
+    // controller serves again, because the write was held during the freeze.
+    yield* Effect.forkScoped(recordDeparturesAfterThaws);
     // Runs a restart cut off continue from their rows. Each run executes on
     // a fiber of the Run Executor, so this returns once they are all started.
     // A sealed controller resumes nothing: the controller its data moved to

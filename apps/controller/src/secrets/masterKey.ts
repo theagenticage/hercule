@@ -249,18 +249,23 @@ export const createKeychainStore = (
     // back; only a keychain that still has no item is a real failure.
     write: (bytes) =>
       Effect.gen(function* () {
-        const result = yield* runSecurity(
-          [
-            "security",
-            "add-generic-password",
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-a",
-            account,
-            "-w",
-            Buffer.from(bytes).toString("base64"),
-          ],
-          "Cannot run `security` to store the master key in the login keychain.",
+        // An interrupt waits for `security` to exit. Otherwise the command
+        // keeps running after the interrupt, and can store the key after a
+        // cleanup has already removed it, leaving a key nobody knows about.
+        const result = yield* Effect.uninterruptible(
+          runSecurity(
+            [
+              "security",
+              "add-generic-password",
+              "-s",
+              KEYCHAIN_SERVICE,
+              "-a",
+              account,
+              "-w",
+              Buffer.from(bytes).toString("base64"),
+            ],
+            "Cannot run `security` to store the master key in the login keychain.",
+          ),
         );
         if (result.exitCode === 0) return bytes;
         const stored = yield* read;

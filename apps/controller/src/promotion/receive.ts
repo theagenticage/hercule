@@ -18,6 +18,7 @@ import {
   createWriteStream,
   linkSync,
   mkdirSync,
+  mkdtempSync,
   renameSync,
   rmdirSync,
   rmSync,
@@ -61,6 +62,11 @@ export interface ReservedHome {
   readonly paths: HomePaths;
   readonly keyStore: ReturnType<typeof openKeyStore>;
   /**
+   * The directory this promotion keeps its own files in until it ends: the
+   * placeholder database, the saved transfer and the unpacked database.
+   */
+  readonly transferDirectory: string;
+  /**
    * The scope that holds the controller locks. It closes after everything
    * else the reservation registered, so every file is removed while the Home
    * is still locked.
@@ -97,20 +103,22 @@ const createDirectoryExclusively = (path: string): Effect.Effect<void, Promotion
 /**
  * Reserves the Hercule Home at `paths` for a promotion transfer, and fails
  * with `PromotionReceiveError` when the Home is not empty: when it holds a
- * database, an attachments directory, a promotion transfer directory, or a
- * Master Key in the store that `backend` names. `run` is the `security` CLI
- * the Keychain store uses; tests pass a fake.
+ * database, an attachments directory, or a Master Key in the store that
+ * `backend` names. `run` is the `security` CLI the Keychain store uses; tests
+ * pass a fake.
  *
  * The reservation lasts until the scope closes. When the scope closes with a
  * failure, everything the reservation and `receiveTransfer` created is
  * removed. When it closes with a success, the received data stays. Either
- * way, the promotion transfer directory is removed and the controller lock is
- * released last, so a controller can start in this Home only afterwards.
+ * way, this promotion's own directory inside the promotion transfer
+ * directory is removed, and the controller lock is released last, so a
+ * controller can start in this Home only afterwards.
  *
  * The lock is taken before anything is checked. The database name is claimed
  * by hard-linking a locked placeholder database to it: a link fails when the
  * name exists, so the check and the claim are one step, and from the moment
- * the name exists, a controller that opens it finds it locked.
+ * the name exists, a controller that opens it finds it locked. The claim is
+ * the only check that another promotion or a controller holds the Home.
  */
 export const reserveHome = (
   paths: HomePaths,
@@ -142,26 +150,34 @@ export const reserveHome = (
         }),
     );
 
+    // The promotion transfer directory may already hold another transfer's
+    // files, which are not this promotion's to check or remove. So it is
+    // removed only when this promotion created it and it is empty again.
     yield* Effect.acquireRelease(
       Effect.try({
-        try: () => mkdirSync(paths.promotionTransferDir, { mode: 0o700 }),
-        // Every promotion removes this directory when it ends, unless its
-        // process was killed. So it exists only while another promotion runs,
-        // or after one was killed and left part of a Home behind.
-        catch: (cause) =>
-          (cause as NodeJS.ErrnoException).code === "EEXIST"
-            ? new PromotionReceiveError({
-                message:
-                  `${paths.promotionTransferDir} already exists: another \`hercule promote\` is ` +
-                  `receiving data into this Home, or one was killed before it finished. ` +
-                  `If none is running, remove ${paths.dataDir} and try again.`,
-              })
-            : describeCreateFailure(paths.promotionTransferDir, cause),
+        try: () => mkdirSync(paths.promotionTransferDir, { recursive: true, mode: 0o700 }),
+        catch: (cause) => describeCreateFailure(paths.promotionTransferDir, cause),
       }),
-      () => Effect.sync(() => rmSync(paths.promotionTransferDir, { recursive: true, force: true })),
+      (created) =>
+        Effect.sync(() => {
+          if (created === undefined) return;
+          try {
+            rmdirSync(paths.promotionTransferDir);
+          } catch {
+            // Not empty: another transfer's files are in it.
+          }
+        }),
+    );
+    // A directory of its own, like the one the old controller copies its data into.
+    const transferDirectory = yield* Effect.acquireRelease(
+      Effect.try({
+        try: () => mkdtempSync(join(paths.promotionTransferDir, "incoming-")),
+        catch: (cause) => describeCreateFailure(paths.promotionTransferDir, cause),
+      }),
+      (directory) => Effect.sync(() => rmSync(directory, { recursive: true, force: true })),
     );
 
-    const placeholder = join(paths.promotionTransferDir, "reservation.db");
+    const placeholder = join(transferDirectory, "reservation.db");
     yield* Layer.buildWithScope(openDatabase(placeholder), locks).pipe(
       Effect.mapError((error) => new PromotionReceiveError({ message: error.message })),
     );
@@ -193,7 +209,7 @@ export const reserveHome = (
         message: `${keyStore.describe} already holds a master key; promotion needs an empty Hercule Home`,
       });
     }
-    return { paths, keyStore, locks };
+    return { paths, keyStore, transferDirectory, locks };
   });
 
 /**
@@ -239,7 +255,7 @@ export const receiveTransfer = (
   transferFile: string,
 ): Effect.Effect<ReceivedTransfer, PromotionReceiveError | TransferBundleError, Scope.Scope> =>
   Effect.gen(function* () {
-    const { paths, keyStore, locks } = home;
+    const { paths, keyStore, transferDirectory, locks } = home;
     const layout = yield* readTransferLayout(transferFile);
     const { header } = layout;
     // The preview and the transfer are two requests, and something between
@@ -270,7 +286,7 @@ export const receiveTransfer = (
 
     // The database is unpacked beside the placeholder, and takes the
     // database's name only once it is ready and locked.
-    const database = join(paths.promotionTransferDir, "received.db");
+    const database = join(transferDirectory, "received.db");
     yield* copyRange(transferFile, layout.database, database);
     for (const attachment of layout.attachments) {
       yield* copyRange(transferFile, attachment, buildAttachmentPath(paths.dataDir, attachment.id));
@@ -315,8 +331,8 @@ export const receiveTransfer = (
     yield* Layer.buildWithScope(openDatabase(database), locks).pipe(
       Effect.mapError((error) => new PromotionReceiveError({ message: error.message })),
     );
-    // Its write-ahead log keeps its old name and is removed with the promotion
-    // transfer directory, so the rename loses nothing only while that log is
+    // Its write-ahead log keeps its old name and is removed with this
+    // promotion's directory, so the rename loses nothing only while that log is
     // empty. Opening the database writes nothing to it today; this check
     // fails loudly if that ever changes. `statSync` opens no file, so the
     // lock stays.

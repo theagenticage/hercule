@@ -180,10 +180,12 @@ Every other command resolves the Home as above.
                     incomplete, deleted on completion (section 7)
   data/             Data Root: the controller's SQLite database (with -wal/-shm),
                     packed secrets at export, attachments/ (image files,
-                    ./04), promotion-transfer/ (a promotion transfer in
-                    progress: on A its copy of the database, on B the locked
+                    ./04), promotion-transfer/ (one directory per promotion
+                    transfer in progress: on A, outgoing-* with its copy of
+                    the database; on B, incoming-* with the locked
                     placeholder that reserves the Home, the saved transfer and
-                    the unpacked database; removed when it ends; ./03 §8.2)
+                    the unpacked database; each removed when its transfer
+                    ends; ./03 §8.2)
   tls/              tailscale-managed HTTPS cert material, when enabled (./13 §3.3)
   runner/           runner-owned material state
   logs/             rotated process logs

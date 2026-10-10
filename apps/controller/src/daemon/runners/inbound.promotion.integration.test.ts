@@ -10,15 +10,29 @@
  * session still queued, and it starts that session itself once the runner
  * connects to it. So the frozen controller must not record the exit, and must
  * not start the queued session: it would start twice.
+ *
+ * The cost is a known loss: an event the runner reports between the copy and
+ * its reconnect to the new machine is on neither machine. A test asserts it.
  */
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SessionStart } from "@hercule/protocol";
 import type { Session } from "@hercule/contract";
-import { uuidFromString } from "../../db";
+import { buildHomePaths, type HomePaths } from "@hercule/home";
+import { openDatabase, uuidFromString } from "../../db";
 import { send } from "../../http/testing";
-import { freezeController, requestTransfer, sealController } from "../../promotion/testing";
+import {
+  freezeController,
+  pullTransfer,
+  receiveTransferIntoHome,
+  requestTransfer,
+  sealController,
+} from "../../promotion/testing";
 import {
   WAIT_DEADLINE_MS,
   at,
@@ -58,27 +72,64 @@ const queueBehindOneSession = async (
   return { running, queued };
 };
 
-/** Reports that the session's process exited, as the session's first event. */
-const reportExited = (arranged: Arranged, sessionId: string): void =>
+/**
+ * Reports that the session's process exited, as the session's first event,
+ * and returns the event's id.
+ */
+const reportExited = (arranged: Arranged, sessionId: string): string => {
+  const eventId = crypto.randomUUID();
   reportEvent(arranged.wire, 1, {
-    eventId: crypto.randomUUID(),
+    eventId,
     sessionId,
     at,
     _tag: "session.exited",
     reason: "process_exit",
   });
+  return eventId;
+};
+
+/** Returns a session's status as the database holds it. */
+const readStatus = (sql: SqlClient.SqlClient, sessionId: string) =>
+  Effect.map(
+    sql<{ status: string }>`SELECT status FROM sessions WHERE id = ${uuidFromString(sessionId)}`,
+    (rows) => rows[0]!.status,
+  );
+
+/** Checks whether the session's stream holds the event with id `eventId`. */
+const isEventOnStream = (sql: SqlClient.SqlClient, sessionId: string, eventId: string) =>
+  Effect.map(
+    sql`
+      SELECT 1 FROM session_stream
+      WHERE session_id = ${uuidFromString(sessionId)}
+        AND json_extract(event, '$.eventId') = ${eventId}
+    `,
+    (rows) => rows.length > 0,
+  );
 
 /** Returns a session's status as the database holds it, for a controller that answers no request. */
-const readStatusFromDatabase = async (arranged: Arranged, sessionId: string): Promise<string> => {
-  const rows = await Effect.runPromise(
+const readStatusFromDatabase = (arranged: Arranged, sessionId: string): Promise<string> =>
+  Effect.runPromise(Effect.orDie(readStatus(arranged.harness.sql, sessionId)));
+
+/**
+ * Returns the session's status and whether its stream holds the event, read
+ * from the database of the Home at `paths`.
+ */
+const readSessionFromHome = (
+  paths: HomePaths,
+  sessionId: string,
+  eventId: string,
+): Promise<{ status: string; hasEvent: boolean }> =>
+  Effect.runPromise(
     Effect.orDie(
-      arranged.harness.sql<{ status: string }>`
-        SELECT status FROM sessions WHERE id = ${uuidFromString(sessionId)}
-      `,
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        return {
+          status: yield* readStatus(sql, sessionId),
+          hasEvent: yield* isEventOnStream(sql, sessionId, eventId),
+        };
+      }).pipe(Effect.provide(openDatabase(paths.databaseFile))),
     ),
   );
-  return rows[0]!.status;
-};
 
 /** Returns the start frames the runner received for the session. */
 const listStartFrames = (arranged: Arranged, sessionId: string): ReadonlyArray<SessionStart> =>
@@ -119,5 +170,43 @@ describe("session traffic during a promotion", () => {
       expect(await readStatusFromDatabase(arranged, queued.id)).toBe("queued");
       expect(listStartFrames(arranged, queued.id)).toEqual([]);
     });
+  });
+
+  it("loses a session event the runner reports between the copy and the switch: it is on neither machine", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "hercule-promote-loss-"));
+    try {
+      await withAgentFleet(async (arranged) => {
+        const session = await spawnSessionOrFail(arranged, { prompt: "run" });
+        await waitForStartFrames(arranged, session.id, 1);
+        const transferFile = join(scratch, "transfer");
+        const { promotionToken, controllerId } = await pullTransfer(
+          arranged.harness.base,
+          arranged.token,
+          transferFile,
+        );
+
+        const eventId = reportExited(arranged, session.id);
+        await delay(200);
+        await sealController(arranged.harness.base, promotionToken);
+        // The freeze holds the event instead of dropping it. The wait gives a
+        // seal that wrote the held event after all the time to do so.
+        await delay(200);
+        const onA = await Effect.runPromise(
+          Effect.orDie(isEventOnStream(arranged.harness.sql, session.id, eventId)),
+        );
+        expect(onA).toBe(false);
+        expect(await readStatusFromDatabase(arranged, session.id)).not.toBe("exited");
+
+        const homeB = join(scratch, "b");
+        mkdirSync(homeB);
+        const pathsB = buildHomePaths(homeB, join(homeB, "data"));
+        await receiveTransferIntoHome(pathsB, promotionToken, controllerId, transferFile);
+        const onB = await readSessionFromHome(pathsB, session.id, eventId);
+        expect(onB.hasEvent).toBe(false);
+        expect(onB.status).not.toBe("exited");
+      });
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });

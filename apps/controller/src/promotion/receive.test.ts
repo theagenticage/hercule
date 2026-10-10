@@ -1,5 +1,6 @@
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -85,11 +86,12 @@ const openAsController = (path: string) => Effect.scoped(Layer.build(openDatabas
 
 /**
  * A `security` CLI that keeps items in memory, for the command shape the
- * macOS store sends. `afterAdd` runs once an item is stored, before the
- * command returns.
+ * macOS store sends. `beforeAdd` runs when an add starts, before the item is
+ * stored, the way the real command takes a while before the Keychain holds
+ * the item.
  */
 const createFakeSecurityRunner =
-  (items: Map<string, string>, afterAdd: () => Promise<void> = () => Promise.resolve()) =>
+  (items: Map<string, string>, beforeAdd: () => Promise<void> = () => Promise.resolve()) =>
   async (argv: ReadonlyArray<string>): ReturnType<SecurityRunner> => {
     const ok = { exitCode: 0, stdout: "", stderr: "" };
     const missing = { exitCode: 44, stdout: "", stderr: "" };
@@ -100,8 +102,8 @@ const createFakeSecurityRunner =
         return value === undefined ? missing : { ...ok, stdout: `${value}\n` };
       }
       case "add-generic-password":
+        await beforeAdd();
         items.set(account, argv[argv.indexOf("-w") + 1] ?? "");
-        await afterAdd();
         return ok;
       case "delete-generic-password":
         return items.delete(account) ? ok : missing;
@@ -120,12 +122,30 @@ describe("reserveHome", () => {
     expect(readFileSync(paths.databaseFile, "utf8")).toBe("keep-me");
   });
 
-  it("refuses a Home that a killed promotion left behind, and says what to remove", async () => {
+  it("refuses a controller's Home while it sends a transfer, and leaves the transfer's copy", async () => {
     const paths = buildHomeB();
-    mkdirSync(paths.promotionTransferDir, { recursive: true });
+    const outgoing = join(paths.promotionTransferDir, "outgoing-abc");
+    mkdirSync(outgoing, { recursive: true });
+    writeFileSync(join(outgoing, "database.db"), "copy");
+    writeFileSync(paths.databaseFile, "keep-me");
     const exit = await Effect.runPromiseExit(Effect.scoped(reserveHome(paths, "file")));
-    expect(JSON.stringify(exit)).toContain(`If none is running, remove ${paths.dataDir}`);
-    expect(existsSync(paths.promotionTransferDir)).toBe(true);
+    expect(JSON.stringify(exit)).toContain(`${paths.databaseFile} already exists`);
+    expect(JSON.stringify(exit)).not.toContain("remove");
+    expect(readFileSync(paths.databaseFile, "utf8")).toBe("keep-me");
+    expect(readdirSync(paths.promotionTransferDir)).toEqual(["outgoing-abc"]);
+    expect(readFileSync(join(outgoing, "database.db"), "utf8")).toBe("copy");
+  });
+
+  it("refuses a Home that a killed promotion left behind, and leaves what it left", async () => {
+    const paths = buildHomeB();
+    const incoming = join(paths.promotionTransferDir, "incoming-abc");
+    mkdirSync(incoming, { recursive: true });
+    writeFileSync(join(incoming, "reservation.db"), "");
+    linkSync(join(incoming, "reservation.db"), paths.databaseFile);
+    const exit = await Effect.runPromiseExit(Effect.scoped(reserveHome(paths, "file")));
+    expect(JSON.stringify(exit)).toContain(`${paths.databaseFile} already exists`);
+    expect(readdirSync(paths.promotionTransferDir)).toEqual(["incoming-abc"]);
+    expect(existsSync(paths.databaseFile)).toBe(true);
   });
 
   it("refuses a Home whose store already holds a master key, and leaves the key", async () => {
@@ -192,24 +212,29 @@ describe("receiveTransfer", () => {
     const paths = buildHomeB();
     const transferFile = await writeTransfer(1);
     const items = new Map<string, string>();
-    let keyStored!: () => void;
-    const stored = new Promise<void>((resolve) => (keyStored = resolve));
-    // The key is in the Keychain, but the command that stored it never returns.
-    const stallAfterAdd = createFakeSecurityRunner(items, () => {
-      keyStored();
-      return new Promise<void>(() => undefined);
+    let addStarted!: () => void;
+    const started = new Promise<void>((resolve) => (addStarted = resolve));
+    let finishAdd!: () => void;
+    const finished = new Promise<void>((resolve) => (finishAdd = resolve));
+    // The interrupt arrives while `security` is still storing the key, and
+    // the key lands in the Keychain only after that.
+    const slowAdd = createFakeSecurityRunner(items, () => {
+      addStarted();
+      return finished;
     });
 
     const fiber = Effect.runFork(
       Effect.scoped(
-        Effect.flatMap(reserveHome(paths, "keychain", stallAfterAdd), (home) =>
+        Effect.flatMap(reserveHome(paths, "keychain", slowAdd), (home) =>
           receiveTransfer(home, buildTokenBytes(), CONTROLLER_ID, transferFile),
         ),
       ),
     );
-    await stored;
-    expect(items.size).toBe(1);
-    await Effect.runPromise(Fiber.interrupt(fiber));
+    await started;
+    const interrupted = Effect.runPromise(Fiber.interrupt(fiber));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    finishAdd();
+    await interrupted;
     expect(items.size).toBe(0);
     expect(existsSync(paths.home)).toBe(false);
 
