@@ -1,11 +1,14 @@
 /**
- * Reads an image's type from its first bytes.
+ * Reads an image's type from its first bytes. Two roles use it:
  *
- * The type is never taken from the uploader: neither a declared media type
- * nor the file name decides it, so an attachment is always one of the four
- * image types the harnesses accept, whatever the client claims.
+ * - the controller decides an attachment's type with it. The type is never
+ *   taken from the uploader: neither a declared media type nor the file name
+ *   decides it, so an attachment is always one of the four image types the
+ *   harnesses accept, whatever the client claims;
+ * - the runner tells with it whether a blob a tool returned with no media
+ *   type is an image.
  */
-import type { ImageMimeType } from "@hercule/protocol";
+import type { ImageMimeType } from "./attachments";
 
 /** The bytes each image type starts with, and the offset they start at. */
 const SIGNATURES: ReadonlyArray<{

@@ -17,6 +17,7 @@ import type {
   SubagentId,
   TurnInput,
 } from "@hercule/protocol";
+import type { AttachmentUploader } from "../attachments";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
 import { CODEX, codex } from "./codex";
 import { PI, pi } from "./pi";
@@ -79,6 +80,13 @@ export interface ProviderRunnerContext {
    * operations that run no session: a probe, an install or a login.
    */
   readonly attachmentsDir: string | null;
+  /**
+   * Uploads the images an agent's tools return to the controller, so a
+   * session's events carry a reference to each image instead of its bytes.
+   * There is one per runner process; a probe, an install and a login are
+   * given it too but never use it.
+   */
+  readonly attachmentUploader: AttachmentUploader;
 }
 
 /**

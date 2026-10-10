@@ -62,6 +62,8 @@ const MAX_LINE_LENGTH = 200;
 const TOOL_CALL_KINDS: ReadonlySet<ItemKind> = new Set([
   "command_execution",
   "file_change",
+  "file_read",
+  "file_search",
   "tool_call",
   "web_search",
   "subagent",
@@ -74,6 +76,8 @@ const ACTIVITY_VERBS: Readonly<Record<ItemKind, string>> = {
   reasoning: "Thinking",
   command_execution: "Running",
   file_change: "Editing",
+  file_read: "Reading",
+  file_search: "Searching",
   tool_call: "Using",
   web_search: "Searching",
   subagent: "Delegating",
@@ -106,10 +110,12 @@ const readDetail = (detail: unknown): Readonly<Record<string, unknown>> =>
 
 /**
  * Returns the part of an item's `detail` worth naming in `activity`: the
- * command, the path, the search, the tool's name or its description. Each
- * adapter shapes `detail` its own way, so each field is optional. The Claude
- * adapter keeps the tool's arguments under `detail.input`, so a field there
- * comes before the same field at the top level.
+ * command, the path, the search pattern, the search, the tool's name or its
+ * description. Each adapter shapes `detail` its own way, so each field is
+ * optional. The Claude adapter keeps the tool's arguments under
+ * `detail.input`, so a field there comes before the same field at the top
+ * level. A file search names its `pattern` before its `path`, because what it
+ * looks for says more than where.
  *
  * A `subagent` item is named only by the task it hands over, its
  * `description`. Its `name` is the delegating tool, such as Claude's `Agent`
@@ -125,6 +131,7 @@ const findDetailTarget = (kind: ItemKind, detail: unknown): string | undefined =
           input.command,
           fields.command,
           input.file_path,
+          fields.pattern,
           fields.path,
           input.query,
           input.description,

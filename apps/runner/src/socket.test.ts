@@ -62,6 +62,7 @@ import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
 import * as workspaceFixtures from "./workspaces/testing";
 import { makeTestWorkspaces } from "./workspaces/testing";
 import { makeAttachmentCache } from "./attachments";
+import { NO_CONTROLLER_UPLOADER } from "./providers/testing";
 
 /** This machine's facts. These tests are not about the probe. */
 const FACTS: RunnerFacts = {
@@ -342,6 +343,7 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
         providersDir: PROVIDERS_DIR,
         scratchDir: SCRATCH_DIR,
         attachmentsDir: "/nonexistent/hercule-runner-attachments",
+        attachmentUploader: NO_CONTROLLER_UPLOADER,
         attachments: makeAttachmentCache({
           controllerUrl: "https://controller.example:4938",
           credential: "test",

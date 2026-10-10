@@ -53,6 +53,7 @@ import {
 } from "./workspace-steps";
 
 export * from "./attachments";
+export * from "./image-signatures";
 export * from "./identity-port";
 export * from "./output-schema";
 export * from "./remote";
@@ -76,20 +77,23 @@ export {
  * hello, with a message telling the user to upgrade it.
  *
  * - Version 2 put a session's first input on `SessionStart`.
- * - Version 4 prevents older peers from displaying incomplete usage as exact.
- * - Version 5 added the `output_too_large` failure of a workspace step. An
- *   older controller could not decode it and would close the socket on it,
- *   again after every reconnect, so the two refuse each other at hello.
  * - Version 3 added subagents: the `subagentId` on session events and on
  *   `SessionInterrupt`. A capability with a fallback would not be safe here.
  *   A controller that ignored `subagentId` would book a subagent's turns to
  *   the session's own agent, and a runner that ignored it would stop the
  *   whole session where the user asked to stop one subagent (spec 03
  *   section 2.2).
+ * - Version 4 prevents older peers from displaying incomplete usage as exact.
+ * - Version 5 added the `output_too_large` failure of a workspace step. An
+ *   older controller could not decode it and would close the socket on it,
+ *   again after every reconnect, so the two refuse each other at hello.
  * - Version 6 added controller promotion: the `ForwardingPointer` frame that
  *   tells a runner where its controller moved (spec 03 section 8.3).
+ * - Version 7 added the `file_read` and `file_search` item kinds. An older
+ *   controller could not decode an item of either kind, for the same reason
+ *   as version 5.
  */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /**
  * The close code and reason the controller uses to end the connection of a

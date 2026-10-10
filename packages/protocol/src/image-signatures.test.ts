@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectImageMimeType } from "./sniff";
+import { detectImageMimeType } from "./image-signatures";
 
 const bytesOf = (...values: ReadonlyArray<number>) => new Uint8Array(values);
 const ascii = (text: string) => [...text].map((character) => character.charCodeAt(0));

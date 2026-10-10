@@ -9,7 +9,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import type { SessionStart } from "@hercule/protocol";
-import type { AttachmentCache } from "../attachments";
+import type { AttachmentCache, AttachmentUploader } from "../attachments";
 import { buildGitCredentialEnv } from "../credentials";
 import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
@@ -25,6 +25,8 @@ export interface Machine {
   readonly attachmentsDir: string;
   /** Fetches the images of an input from the controller into a session's directory. */
   readonly attachments: AttachmentCache;
+  /** Uploads the images a session's tools return to the controller. */
+  readonly attachmentUploader: AttachmentUploader;
   /** `<home>/runner/bin`, holding the `hercule` symlink, prepended to a session's `PATH`. */
   readonly binDir: string;
   /** The skill and the Claude plugin directory, prepared once at runner start (spec 06 section 9.3). */
@@ -231,6 +233,7 @@ export const resolveSessionContext = (
         secrets: frame.secrets,
         herculeTool: machine.herculeTool,
         attachmentsDir,
+        attachmentUploader: machine.attachmentUploader,
         ...(userMaterial === undefined ? {} : { userMaterial }),
       },
     };

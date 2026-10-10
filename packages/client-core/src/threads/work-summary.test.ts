@@ -11,14 +11,18 @@ import { describePending, describeWorkStretch, summarizeWork } from "./work-summ
 
 let itemSeq = 0;
 
-/** Builds a completed item of `kind`, touching `paths` when it is a file change. */
+/** Builds a completed item of `kind` that names `paths`, as a file change or a file read does. */
 const buildItem = (kind: WorkItem["kind"], paths: readonly string[] = []): WorkItem => ({
   itemId: `i${itemSeq++}`,
   kind,
   paths,
   verb: "verb",
   target: "",
+  targetIsCode: false,
   result: "completed",
+  startedAt: "2026-09-30T09:00:00.000Z",
+  toolName: "",
+  resultContent: undefined,
 });
 
 /** Builds `count` items of `kind`. */
@@ -31,6 +35,10 @@ describe("summarizeWork", () => {
     ["command_execution", 2, "ran 2 commands"],
     ["file_change", 1, "edited 1 file"],
     ["file_change", 3, "edited 3 files"],
+    ["file_read", 1, "read 1 file"],
+    ["file_read", 6, "read 6 files"],
+    ["file_search", 1, "searched once"],
+    ["file_search", 3, "searched 3 times"],
     ["web_search", 1, "searched the web"],
     ["web_search", 2, "searched the web 2 times"],
     ["tool_call", 1, "used 1 tool"],
@@ -76,6 +84,17 @@ describe("summarizeWork", () => {
     ];
 
     expect(summarizeWork(items)).toEqual(["edited 4 files"]);
+  });
+
+  it("counts the files read apart from the files changed, each distinct", () => {
+    const items = [
+      buildItem("file_read", ["src/a.ts"]),
+      buildItem("file_read", ["src/a.ts"]),
+      buildItem("file_change", ["src/a.ts"]),
+      buildItem("file_read", ["src/b.ts"]),
+    ];
+
+    expect(summarizeWork(items)).toEqual(["read 2 files", "edited 1 file"]);
   });
 });
 

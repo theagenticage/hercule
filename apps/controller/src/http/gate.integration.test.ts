@@ -4,6 +4,7 @@
  * answering while a promotion freezes the controller.
  */
 import { describe, expect, it } from "vitest";
+import { RUNNER_ATTACHMENTS_PATH } from "@hercule/protocol";
 import { freezeController } from "../promotion/testing";
 import { completeSetup, post, readErrorBody, send, withServer } from "./testing";
 
@@ -34,6 +35,19 @@ describe("promotion gate", () => {
       );
       expect(write.status).toBe(409);
       expect((await readErrorBody(write)).code).toBe("promotion_in_progress");
+    });
+  });
+
+  // An upload writes a file and a row that B would never receive, so a frozen
+  // controller refuses it before it even checks the credential.
+  it("refuses a runner's image upload while frozen", async () => {
+    await withServer(async (harness) => {
+      const user = await completeSetup(harness.base);
+      await freezeController(harness.base, user);
+
+      const upload = await send("POST", harness.base, `${RUNNER_ATTACHMENTS_PATH}?sessionId=s`);
+      expect(upload.status).toBe(409);
+      expect((await readErrorBody(upload)).code).toBe("promotion_in_progress");
     });
   });
 });

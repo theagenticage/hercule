@@ -275,7 +275,7 @@ describe("the composer", () => {
     await sent.getByRole("button", { name: "Preview screen.png" }).waitFor();
     await expect
       .poll(() =>
-        sent.locator(".bubble-image img").evaluate((image: HTMLImageElement) => image.naturalWidth),
+        sent.locator(".image-tile img").evaluate((image: HTMLImageElement) => image.naturalWidth),
       )
       .toBeGreaterThan(0);
   });

@@ -47,6 +47,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Schema } from "effect";
 import { pollUntil } from "./poll.ts";
+import { RUNNER_ATTACHMENTS_PATH } from "../../../packages/protocol/src/attachments";
 import type {
   ATTACHMENTS_CAPABILITY,
   AttachmentReference,
@@ -65,6 +66,8 @@ import type {
   SessionBinding,
   SessionInput,
   SessionStart,
+  ToolResultAttachment,
+  ToolResultImage,
   TurnState,
   Usage,
   WORKSPACE_LIFECYCLE_CAPABILITY,
@@ -187,6 +190,11 @@ export type ScriptedQuestions = Extract<
  *   and `Edit`. The call runs for `forMs` (0 by default) and succeeds. With
  *   `ask`, it first opens a Request for approval and waits for the user to
  *   allow it; see `playScript`.
+ * - `tool_images` reports a call of the tool `tool` that returns `text` and
+ *   `images`, the way the Claude Code adapter does: each image given as its
+ *   bytes is stored through the controller's runner attachment route, and
+ *   the result holds its reference; an image given as `unavailable` is the
+ *   reason it could not be kept.
  * - `question` asks the user `questions` the way Claude Code's
  *   `AskUserQuestion` tool does: a `tool_call` item, and a `question` Request
  *   about it. The agent waits for the answers, and the item then completes.
@@ -225,6 +233,14 @@ export type ScriptStep =
       readonly path: string;
       readonly forMs?: number;
       readonly ask?: boolean;
+    }
+  | {
+      readonly kind: "tool_images";
+      readonly tool: string;
+      readonly text: string;
+      readonly images: ReadonlyArray<
+        { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly unavailable: string }
+      >;
     }
   | { readonly kind: "question"; readonly questions: ScriptedQuestions }
   | { readonly kind: "usage"; readonly usage: Usage }
@@ -684,6 +700,71 @@ export async function enlistScriptedRunner(
   };
 
   /**
+   * Stores `bytes` as an image of the session through the controller's
+   * runner attachment route, as a real runner stores a tool's image, and
+   * returns its reference. Fails if the controller refuses it.
+   */
+  const storeImage = async (
+    sessionId: string,
+    bytes: Uint8Array<ArrayBuffer>,
+  ): Promise<ToolResultAttachment> => {
+    const route = new URL(RUNNER_ATTACHMENTS_PATH, url);
+    route.searchParams.set("sessionId", sessionId);
+    const stored = await fetch(route, {
+      method: "POST",
+      headers: { authorization: `Bearer ${credential}` },
+      body: bytes,
+    });
+    if (!stored.ok) {
+      throw new Error(
+        `the controller refused the image (${stored.status}): ${await stored.text()}`,
+      );
+    }
+    return (await stored.json()) as ToolResultAttachment;
+  };
+
+  /**
+   * Reports a call of `step.tool` that returns `step.text` and `step.images`,
+   * storing each image given as its bytes first. Fails if an image cannot be
+   * stored.
+   */
+  const runToolWithImages = async (
+    session: HostedSession,
+    agent: Agent,
+    turnId: string,
+    step: Extract<ScriptStep, { readonly kind: "tool_images" }>,
+  ): Promise<void> => {
+    const itemId = `toolu_${randomBytes(12).toString("hex")}`;
+    const kind = "tool_call";
+    const stamp = () => stampAgentEvent(session.sessionId, agent);
+    reportEvent(session, {
+      _tag: "item.started",
+      ...stamp(),
+      turnId,
+      itemId,
+      kind,
+      detail: { name: step.tool, input: {} },
+    });
+    const images: ToolResultImage[] = [];
+    for (const image of step.images) {
+      images.push(
+        "bytes" in image
+          ? { type: "image", attachment: await storeImage(session.sessionId, image.bytes) }
+          : { type: "image", unavailable: image.unavailable },
+      );
+    }
+    reportEvent(session, {
+      _tag: "item.completed",
+      ...stamp(),
+      turnId,
+      itemId,
+      kind,
+      status: "completed",
+      detail: { content: [{ type: "text", text: step.text }, ...images] },
+    });
+  };
+
+  /**
    * Opens the Request for the agent and waits until it is resolved. Returns
    * the decision or the answers it was resolved with. Fails when the agent's
    * script is stopped first, as an interrupt does before it withdraws the
@@ -869,6 +950,8 @@ export async function enlistScriptedRunner(
       case "command":
       case "file_change":
         return runToolCall(session, agent, turnId, buildToolCall(step), step, signal);
+      case "tool_images":
+        return runToolWithImages(session, agent, turnId, step);
       case "question":
         return askQuestions(session, agent, turnId, step.questions, signal);
       case "usage":
@@ -1096,7 +1179,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 6 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 7 satisfies typeof PROTOCOL_VERSION,
             capabilities: [
               "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,

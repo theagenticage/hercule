@@ -128,7 +128,11 @@ const runItem = (
   ];
 };
 
-/** Returns the steps of a tool call Claude Code reports: its name and its input, as the adapter passes them on. */
+/**
+ * Returns the steps of a tool call Claude Code reports: its name and its
+ * input, as the adapter passes them on. A file read also carries its fixed
+ * field `path`, as the adapter sets it from the input's `file_path`.
+ */
 const runTool = (
   seconds: readonly [number, number],
   itemId: string,
@@ -137,6 +141,7 @@ const runTool = (
   input: Record<string, string>,
 ): TranscriptStep[] =>
   runItem(seconds, itemId, kind, {
+    ...(kind === "file_read" ? { path: input.file_path } : {}),
     name,
     input,
     ...(kind === "tool_call" ? { kind: "native" } : {}),
@@ -178,16 +183,16 @@ const FIX_STEPS: ReadonlyArray<TranscriptStep> = [
       "Checkout fails for EU cards that need 3\u2011D Secure since deploy #1289. Find the cause " +
       "and fix it. Add a test that reproduces it first.",
   }),
-  ...runTool([5, 6], "it-read-1", "tool_call", "Read", { file_path: "src/checkout/payment.ts" }),
-  ...runTool([12, 13], "it-read-2", "tool_call", "Read", { file_path: "src/checkout/stripe.ts" }),
-  ...runTool([20, 21], "it-read-3", "tool_call", "Read", {
+  ...runTool([5, 6], "it-read-1", "file_read", "Read", { file_path: "src/checkout/payment.ts" }),
+  ...runTool([12, 13], "it-read-2", "file_read", "Read", { file_path: "src/checkout/stripe.ts" }),
+  ...runTool([20, 21], "it-read-3", "file_read", "Read", {
     file_path: "src/checkout/3ds-modal.tsx",
   }),
-  ...runTool([31, 32], "it-read-4", "tool_call", "Read", {
+  ...runTool([31, 32], "it-read-4", "file_read", "Read", {
     file_path: "src/checkout/checkout.tsx",
   }),
-  ...runTool([45, 46], "it-read-5", "tool_call", "Read", { file_path: "package.json" }),
-  ...runTool([58, 59], "it-read-6", "tool_call", "Read", { file_path: "CHANGELOG.md" }),
+  ...runTool([45, 46], "it-read-5", "file_read", "Read", { file_path: "package.json" }),
+  ...runTool([58, 59], "it-read-6", "file_read", "Read", { file_path: "CHANGELOG.md" }),
   ...runTool([70, 74], "it-log", "command_execution", "Bash", {
     command: "git log --oneline -5 -- src/checkout",
   }),
@@ -262,6 +267,67 @@ const FIX_STEPS_WITH_WARNINGS: ReadonlyArray<TranscriptStep> = FIX_STEPS.flatMap
   return [step];
 });
 
+/** What the first read returned: the start of src/checkout/payment.ts, with one line wider than the box. */
+const PAYMENT_SOURCE = [
+  'import type { PaymentIntentResult, Stripe, StripeElements } from "@stripe/stripe-js";',
+  'import { reportCheckoutError } from "./errors";',
+  "",
+  "/** Handles the result of `confirmPayment`, and shows the card error when the payment did not succeed. */",
+  "export async function handlePaymentResult(result: PaymentIntentResult): Promise<CheckoutOutcome> {",
+  "  if (result.error) {",
+  "    reportCheckoutError(result.error);",
+  '    return { kind: "declined", message: result.error.message ?? "Card declined" };',
+  "  }",
+  '  if (result.paymentIntent.status === "succeeded") {',
+  '    return { kind: "paid", paymentIntentId: result.paymentIntent.id };',
+  "  }",
+  '  return { kind: "declined", message: "Card declined" };',
+  "}",
+].join("\n");
+
+/**
+ * Returns `step` with its completion's detail set to `detail`, and its status
+ * to `status`, when it completes the item `itemId`; any other step as it is.
+ */
+const setCompletion = (
+  step: TranscriptStep,
+  itemId: string,
+  status: "completed" | "failed",
+  detail: ItemDetail,
+): TranscriptStep => {
+  const [seconds, event] = step;
+  return event._tag === "item.completed" && event.itemId === itemId
+    ? [seconds, { ...event, status, detail }]
+    : step;
+};
+
+/**
+ * The Fix thread whose first stretch shows what an open stretch draws, which
+ * the book never draws: a web search before the reads, what the first read
+ * returned, and a command that failed with its error. The divider's summary
+ * differs from the book's, so `pnpm compare:bureau` does not compare it.
+ */
+const FIX_STEPS_WITH_RESULTS: ReadonlyArray<TranscriptStep> = [
+  ...FIX_STEPS.slice(0, 3),
+  ...runItem([2, 4], "it-search", "web_search", {
+    name: "WebSearch",
+    input: { query: "Stripe confirmPayment requires_action 3-D Secure SDK v14" },
+  }),
+  ...FIX_STEPS.slice(3).map((step) =>
+    setCompletion(
+      setCompletion(step, "it-read-1", "completed", {
+        content: [{ type: "text", text: PAYMENT_SOURCE }],
+      }),
+      "it-log",
+      "failed",
+      {
+        content:
+          "fatal: bad revision 'src/checkout'\nhint: use '--' to separate paths from revisions",
+      },
+    ),
+  ),
+];
+
 /** The message the user queued behind the turn, four minutes ago. */
 const QUEUED_INPUT: Input = {
   id: "in-apple-pay",
@@ -289,6 +355,12 @@ export const FIX_THREAD: ThreadScreenRecords = {
 export const FIX_THREAD_WITH_WARNINGS: ThreadScreenRecords = {
   ...FIX_THREAD,
   transcript: buildTranscript(FIX_STEPS_WITH_WARNINGS),
+};
+
+/** The Fix thread with results in its first stretch, for the thread specimen's `?state=steps`. */
+export const FIX_THREAD_WITH_RESULTS: ThreadScreenRecords = {
+  ...FIX_THREAD,
+  transcript: buildTranscript(FIX_STEPS_WITH_RESULTS),
 };
 
 /** Every list the shell reads: the sidebar specimen's, with Fix and Read in `FIX_WORKSPACE`. */

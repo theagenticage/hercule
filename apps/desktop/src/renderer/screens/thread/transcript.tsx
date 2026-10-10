@@ -60,6 +60,12 @@ import {
 /** The space between two blocks: the book's `.tx { gap: 22px }`. Each block but the first includes it. */
 const BLOCK_GAP = 22;
 
+/**
+ * The open keys a collapsed work stretch is passed: one set that never
+ * changes, so opening a row in another stretch does not draw it again.
+ */
+const NO_OPEN_KEYS: ReadonlySet<string> = new Set();
+
 /** Roughly how tall `lead` is before it is measured, in CSS pixels. */
 const LEAD_HEIGHT_ESTIMATE = 110;
 
@@ -175,13 +181,14 @@ export function Transcript({
 }): JSX.Element {
   const [timezone] = useState(() => resolveBrowserTimezone());
   const today = useStartOfToday();
-  // The keys of the work stretches the reader expanded. They are kept here
-  // rather than in each divider, so a stretch stays expanded when it scrolls
-  // out of the mounted range and back.
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  // The keys of the work stretches, and of the rows inside them, that the
+  // reader opened. They are kept here rather than in each divider, so a
+  // stretch and its rows stay open when they scroll out of the mounted range
+  // and back.
+  const [openKeys, setOpenKeys] = useState<ReadonlySet<string>>(() => new Set());
 
-  const toggleExpanded = useCallback((key: string) => {
-    setExpanded((keys) => {
+  const toggleOpen = useCallback((key: string) => {
+    setOpenKeys((keys) => {
       const next = new Set(keys);
       if (!next.delete(key)) next.add(key);
       return next;
@@ -287,8 +294,10 @@ export function Transcript({
             <WorkDivider
               block={block}
               onScreen={onScreen}
-              expanded={expanded.has(block.key)}
-              onToggle={toggleExpanded}
+              openKeys={openKeys.has(block.key) ? openKeys : NO_OPEN_KEYS}
+              onToggle={toggleOpen}
+              timezone={timezone}
+              today={today}
             />
             {renderSpawnLines?.(block.items, onScreen)}
           </>

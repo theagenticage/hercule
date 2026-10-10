@@ -472,18 +472,18 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 5 cannot announce a promoted controller.
-  it("refuses a runner on protocol version 5 and says to upgrade it", async () => {
+  // Version 6 cannot decode the file read and file search item kinds.
+  it("refuses a runner on protocol version 6 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dialRunnerSocket(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 5 }));
+      wire.send(buildHello({ protocolVersion: 6 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(6);
+      expect(PROTOCOL_VERSION).toBe(7);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 6 and the runner does not; " +
-          "upgrade the runner to a build that uses version 6",
+        "this controller uses runner protocol version 7 and the runner does not; " +
+          "upgrade the runner to a build that uses version 7",
       );
       expect(wire.frames).toEqual([]);
     });

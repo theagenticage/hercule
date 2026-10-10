@@ -302,6 +302,13 @@ export const ItemKind = Schema.Literals([
   "reasoning",
   "command_execution",
   "file_change",
+  /** A tool read one file. `detail.path` holds the path (spec 06 section 6.3). */
+  "file_read",
+  /**
+   * A tool searched or listed files. `detail.pattern` and `detail.path` hold
+   * what it searched for and where, and either may be absent.
+   */
+  "file_search",
   "tool_call",
   "web_search",
   "subagent",

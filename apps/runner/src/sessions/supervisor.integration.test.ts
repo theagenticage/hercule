@@ -44,6 +44,7 @@ import {
 } from "../workspaces/testing";
 import { makeSupervising } from "./supervisor";
 import { makeAttachmentCache, type AttachmentCache } from "../attachments";
+import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 
 const roots: Array<string> = [];
 /** Scopes that attach each test's workspace steps to its list of sent frames. */
@@ -267,6 +268,7 @@ const buildConnection = (fake: Fake, cache?: AttachmentCache) => {
     providersDir: join(under, "providers"),
     scratchDir: join(under, "scratch"),
     attachmentsDir: join(under, "attachments"),
+    attachmentUploader: NO_CONTROLLER_UPLOADER,
     attachments:
       cache ??
       makeAttachmentCache({

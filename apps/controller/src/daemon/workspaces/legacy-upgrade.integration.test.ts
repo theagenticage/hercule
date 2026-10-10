@@ -17,6 +17,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ALL_GRANTS, type Session, type Workspace } from "@hercule/contract";
 import type { SessionStart, WorkspaceProvision } from "@hercule/protocol";
 import { makeAttachmentCache } from "../../../../runner/src/attachments";
+import { NO_CONTROLLER_UPLOADER } from "../../../../runner/src/providers/testing";
 import { resolveSessionContext } from "../../../../runner/src/sessions/context";
 import {
   makeTestWorkspaces,
@@ -360,6 +361,7 @@ describe("pre-change controller and provider-state upgrade", () => {
               providersDir: join(fixture.storageDir, "providers"),
               scratchDir: join(fixture.storageDir, "scratch"),
               attachmentsDir: join(fixture.storageDir, "attachments"),
+              attachmentUploader: NO_CONTROLLER_UPLOADER,
               attachments: makeAttachmentCache({
                 controllerUrl: "https://controller.example:4938",
                 credential: "test",

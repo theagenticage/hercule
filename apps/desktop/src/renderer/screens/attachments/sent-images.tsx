@@ -1,7 +1,8 @@
 import { lazy, Suspense, useState, type JSX } from "react";
 import type { Attachment } from "@hercule/contract";
 import { useAttachmentContent, useAttachmentThumbnails } from "./attachment-contents";
-import { BUBBLE_IMAGE_HEIGHT, BUBBLE_IMAGE_WIDTH, BubbleImageGrid } from "./bubble-image";
+import { BubbleImageGrid } from "./bubble-image";
+import { IMAGE_TILE_HEIGHT, IMAGE_TILE_WIDTH } from "./image-tile";
 
 // The lightbox is a chunk of its own, loaded the first time an image is
 // previewed (spec 17 §Performance, rule 6).
@@ -21,7 +22,7 @@ export function SentImages({
 }: {
   readonly attachments: readonly Attachment[];
 }): JSX.Element {
-  const thumbnails = useAttachmentThumbnails(attachments, BUBBLE_IMAGE_WIDTH, BUBBLE_IMAGE_HEIGHT);
+  const thumbnails = useAttachmentThumbnails(attachments, IMAGE_TILE_WIDTH, IMAGE_TILE_HEIGHT);
   const [open, setOpen] = useState<number | null>(null);
   const content = useAttachmentContent(open === null ? undefined : attachments[open]);
 

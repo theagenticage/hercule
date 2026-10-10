@@ -16,7 +16,7 @@ import {
   serveCredentialSocket,
   buildSocketPath,
 } from "./credentials";
-import { makeAttachmentCache } from "./attachments";
+import { makeAttachmentCache, makeAttachmentUploader } from "./attachments";
 import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { providerLogins } from "./providers";
@@ -222,6 +222,10 @@ export const runDaemon = (
             scratchDir,
             attachmentsDir,
             attachments: makeAttachmentCache({
+              controllerUrl: pin.controllerUrl,
+              credential: pin.credential,
+            }),
+            attachmentUploader: makeAttachmentUploader({
               controllerUrl: pin.controllerUrl,
               credential: pin.credential,
             }),

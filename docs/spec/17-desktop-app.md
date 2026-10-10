@@ -574,9 +574,28 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
 **The thread** *(added 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275))* follows spec 14's thread surface and the book's session pages, with these differences:
 
 - **A turn's work is shown per work stretch,** as the book draws it. A work stretch is the steps between two messages of one turn. Each stretch gets its own divider, and each agent message stands on its own with its face, its meta line and its body. Talk and work keep the order they happened in. Spec 14 and the web app draw one divider per turn, and join the agent's messages under it.
-  - The divider reads "Worked for 2m 14s ›" and a summary of the stretch. The summary counts its steps by kind, in the order each kind first appears: "ran 2 commands", "edited 3 files", "searched the web", "used 6 tools", "ran 1 subagent", "made a plan", "compacted the context", "hit 1 error", "did 1 other step". Reasoning is not counted, and a stretch of reasoning alone draws nothing.
-  - The book's "read 6 files" is not drawn: no transcript item says that a tool read a file, so such a read counts as a tool.
-  - Clicking the divider expands the stretch in place, one line per step, with spec 14's verb, target and result. Expansion is not stored.
+  - The divider reads "Worked for 2m 14s ›" and a summary of the stretch. The summary counts its steps by kind, in the order each kind first appears: "ran 2 commands", "edited 3 files", "searched the web", "used 6 tools", "ran 1 subagent", "made a plan", "compacted the context", "hit 1 error", "did 1 other step". Reasoning is not counted, and a stretch of reasoning alone draws nothing. *(Amended 2026-10-10, [#479](https://github.com/theagenticage/hercule/issues/479).)* The list also has "read 3 files" and "searched 2 times".
+  - ~~The book's "read 6 files" is not drawn: no transcript item says that a tool read a file, so such a read counts as a tool.~~
+    *(Amended 2026-10-10, [#479](https://github.com/theagenticage/hercule/issues/479).)* **The summary counts reads and searches,** from the `file_read` and `file_search` item kinds the adapters emit ([./06-providers.md](./06-providers.md) section 6.3, [#477](https://github.com/theagenticage/hercule/issues/477)). "read 3 files" counts distinct paths, as "edited 3 files" does. "searched 2 times" counts searches, and reads "searched once" for one.
+  - Clicking the divider expands the stretch in place, ~~one line per step, with spec 14's verb, target and result~~ *(Amended 2026-10-10, [#479](https://github.com/theagenticage/hercule/issues/479).)* one row per step, as below. Expansion is not stored. This departs from spec 14: its rows are a verb, a target and a result, and the web app keeps them.
+    - **A row is an icon, a label and a chevron.** The icon shows the step's kind. The label is the verb in the UI face, then the target, for example "Read /tmp/411-shots/app.png", on one line and cut with an ellipsis. A target that is code (a command, a path, a search pattern, also when a tool call names one) is in mono. A target that is words (a web search's query, a subagent's or a tool's description, an error's message) is in the UI face, because mono is kept for code ([Design system](#design-system), item 2). The time the step started shows on hover only, through CSS, with no timer. The chevron at the end shows only when the row has something to open. When hidden, it keeps its space, so the columns line up.
+    - **Each kind has a verb and an icon.** `buildWorkRows` in `@hercule/client-core` decides them:
+      - `file_read`: "Read", eye
+      - `file_search`: "Searched", search
+      - `command_execution`: "Ran", terminal
+      - `file_change`: "Edited", file
+      - `web_search`: "Searched the web", globe
+      - `tool_call`: the tool's name, puzzle
+      - `subagent`: "Subagent", crew
+      - `plan`: "Planned", list
+      - `reasoning`: "Thought", sparkle
+      - `context_compaction`: "Compacted the context", more
+      - `error`: "Error", close
+      - an unknown kind: "Step", more
+    - **Two or more steps of one kind in a row fold into one row:** "Read 3 files", "Searched 2 times", "Ran 3 commands", "Edited 2 files", "Searched the web 2 times", "Used WebFetch 3 times", with the tool's name. A tool call folds only with calls of the same tool. A subagent call, reasoning, a plan, a compaction, an error and an unknown step never fold. The folded row opens to its steps.
+    - **Opening a step shows the text it returned:** `item.completed`'s `detail.content`. A string result is used as it is; the adapter has already cut it to 4096 characters. A list of content blocks (Claude Code's tool result) is read for its text blocks, joined by line breaks, and the client cuts that text to 4096 characters, cutting each block to the room left so a long result never builds a long string. A cut never leaves half a character at the end. ~~Any other block, such as an image, is not drawn.~~ Any other block is not drawn. *(Amended 2026-10-10, [#478](https://github.com/theagenticage/hercule/issues/478).)* An image the tool returned is drawn under the text, as the bubble's 210px tiles at 4:3, as many as fit in a row; a click opens it in the lightbox, named "Image 1", "Image 2" and so on among the step's stored images. The runner stores each image and leaves a reference in the content ([./06-providers.md](./06-providers.md)), so a tile reads its thumbnail through `attachment.readContent` the first time it draws, and an image that could not be kept is a quiet line with the reason, in the faint ink. A step that returned images and no text has something to open, and draws no empty text box. Codex sends no result content today, so a Codex step has nothing to open and shows no chevron. The text sits in a scroll box with a maximum height, in the book's mono face, each line kept whole and scrolling sideways. Only an open step puts its text in the page.
+    - **A failed step shows a quiet failure mark,** in `--muted`, not tomato (`--fail`), as the warning line's dot does. A declined, running or awaiting-approval step shows that word in `--faint`.
+    - **The transcript keeps which rows are open,** as it keeps which stretches are expanded, so a row stays open when it scrolls out of the mounted range and back. A row keeps its key when a second step folds onto it, so an open row stays open and then shows its steps. It is not stored.
   - The stretch that is running reads "Working for 12s ›" and counts up. It shows no divider until its first step that is not reasoning, so no divider shows before the first step, or while the agent only reasons. It does not shimmer, as spec 14's does, because only the working face animates ([Rules](#rules), rule 2). While a Request is open, the stretch stops at the Request's opening and reads "Worked for".
   - *(Amended 2026-10-09, [#504](https://github.com/theagenticage/hercule/issues/504), replacing the 2026-10-08 amendment of [#481](https://github.com/theagenticage/hercule/issues/481).)* **The thread never draws an agent row with no text.** A face and a meta line with nothing beside them read as a response that has started, and a response can take minutes to begin. The face is drawn only beside text, because the first thing the agent does after the user's message may be tool calls, not a message. While the agent has drawn nothing, a status line stands where the next block will be, in the divider's drawing (muted, 12px, indented to the message column, with its rule):
     - **"Working for 12s"** from the start of the wait, counting up: right after the user's message, while the agent only reasons, and after a message when the next step is not yet a tool call. The start is the stretch's own start, so when the first step arrives the line becomes the stretch's divider and the count goes on.
@@ -1852,6 +1871,32 @@ The earlier sizes come from that commit's CI build; the final sizes come from th
 
 **The CPU row misses its budget before this change as well as after it.** On `main`, without assistants, the renderer read 18.7 to 24.6% at rest, against the 17.9% it read for v1 (6.2 to 16.3%). This change adds three assistants and reads within that same range, so it does not cause the miss. The machine's load average was 2.5 to 8 during both runs, with other work running, and the miss needs its own look on a quiet machine. That is a follow-up, not part of #505.
 
+**Work stretch rows,** for [#479](https://github.com/theagenticage/hercule/issues/479). The rows add no process, no read, no live topic and no timer. Everything comes from the transcript the thread already holds.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Processes | none added | none added |
+| Reads and live topics | none added | none added: a step's result text is already in the cache |
+| Memory | unchanged | a step's result content is held by reference to the transcript row it came from, never copied; its text is in the page only while that step is open; which rows are open is a set of keys in the transcript's state, never saved |
+| Work while idle | none | none: the time on hover is CSS, with no timer |
+| Work per streamed token | unchanged | unchanged: a token streams in the tail and rebuilds nothing. The transcript's blocks are rebuilt when its rows change, as before, and the `item.completed` handler in that pass only stores a reference to the result content. A stretch's rows, and its steps' result text, are read only while the stretch is open |
+
+Bundle: the first screen is 327.5 kB gzipped before (14 chunks) and 331.6 kB after (20 chunks), 4.1 kB more: the row code, its styles, and the step icons the app did not draw before, which split into chunks of their own. Measured with `pnpm build:desktop`'s budget check on the change's base and on the change.
+
+**Images in tool results,** measured 2026-10-10 with `pnpm build:desktop`'s budget check on the renderer's `vite build`, on #479's branch at 0bd4d53d (Before) and on this change (After), for [#478](https://github.com/theagenticage/hercule/issues/478). The images add no process, no live topic and no timer.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Processes | none added | none added |
+| Reads | only for an image in view | a tile reads its image once, when an open step first draws it, and keeps the small WebP thumbnail, as a bubble's image does; the lightbox reads the full image only while it is open |
+| Memory | unchanged until a step with images is opened | a closed step holds only the image's reference, which is in the transcript row already |
+| Work while idle | none | none |
+| Work per streamed token | unchanged | unchanged: images are read from a step's result content only while its stretch is open, with its text |
+| The first screen's JavaScript, gzipped | grows only by the step's image code | 332.3 kB, up 0.7 kB from 331.6 kB, across 20 chunks both times: the agent page's chunk is 16.1 kB, up from 15.5 kB, and the transcript's chunk up 20 bytes. The tiles, the thumbnails and the lazy lightbox were already in the bundle for images in prompts |
+
+- **The numbers above predate a rebase onto #479's branch at a75c13a9,** which changed client-core's row reading only; the share was not measured again.
+- **The memory of a step with many large images was not measured.** It follows the thumbnail rule of images in prompts, whose readings are in [Measured](#measured).
+
 **The sender of a message,** measured 2026-10-10 with `pnpm --filter @hercule/desktop build`, the renderer's `check-bundle-budget` and `gzip -9` on the built files, on the working tree of branch `feat/511-agent-message-sender-clients`, for [#511](https://github.com/theagenticage/hercule/issues/511). Before and After were built from the same tree, which already held client-core's side of #511; only the renderer's change lies between them. The change adds no process, no timer, no polling and no live topic: each sender is one cached read, made by the thread's loader or when the sender first appears.
 
 | Measure | Budget | Measured |
@@ -1868,6 +1913,7 @@ The earlier sizes come from that commit's CI build; the final sizes come from th
 - **The loader waits for senders at most one second,** measured the same way against the renderer built from `a8f51a4c`: the thread's loader waits for its senders' reads up to `SENDER_READ_WAIT_MS`, one second, and never longer, and a read that failed is not made again when a message mounts or the thread opens again. The first-screen chunk is 103 bytes larger, at 258.8 kB gzipped; the transcript's chunk and the agent page's chunk change by 2 to 4 bytes. The wait is one timer per thread open, cleared as soon as the reads settle, so it adds no work while idle; it removes work too: a sender whose read fails was read again each time one of its messages mounted, and is now read once.
 - **The queued row keeps the book's items as its direct children,** measured the same way against the renderer built from `550bff43`: two wrapper spans fewer per queued row, and a grid track per item in their place. The agent page's CSS is 81 bytes larger, at 1,321 bytes, and its chunk 13 bytes smaller, at 13.8 kB; the first screen is unchanged. Every box of the owner's and the agent's rows, with and without images, buttons and notes, measures the same as before, except the text beside a linked chip, which stood 6px further right until the fix below, and the change adds no work while idle or per streamed token.
 - **The second review's fixes,** measured against the renderer built from `1b6bf8ab`: a linked chip in a queued row keeps the 6px its hover light takes back, so the row's text starts where it did before the grid, and a sender's read that failed is not made again when the window is focused. The agent page's CSS grows by one rule and stays at 1.31 kB gzipped as Vite reports it; the first-screen chunk gains one query option and stays at 258.8 kB. Neither adds work while idle or per streamed token, and the focus change removes a read per focus for each failed sender.
+- **The numbers above were measured before #479 and #478 merged into this branch,** on a base without the work stretch rows or the tool result images. After the merge, `pnpm build:desktop`'s budget check reads the first screen at 334.1 kB gzipped across 20 chunks, 1.8 kB over main's 332.3 kB, in line with the 1.7 kB measured above.
 
 ## Slices
 

@@ -102,8 +102,17 @@ const buildItemCompleted = (
   kind: ItemKind,
   seconds: number,
   status: "completed" | "failed" | "declined" = "completed",
+  detail?: unknown,
 ): TranscriptRow =>
-  buildRow({ _tag: "item.completed", ...buildEnvelope(seconds), turnId, itemId, kind, status });
+  buildRow({
+    _tag: "item.completed",
+    ...buildEnvelope(seconds),
+    turnId,
+    itemId,
+    kind,
+    status,
+    ...(detail === undefined ? {} : { detail: detail as never }),
+  });
 
 const buildText = (turnId: string, itemId: string, seconds: number, delta: string): TranscriptRow =>
   buildRow({
@@ -965,5 +974,148 @@ describe("buildThreadBlocks", () => {
       [],
       [],
     ]);
+  });
+
+  it("keeps when each tool item started, and the name of the tool only for a tool call", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Look"),
+      buildItemStarted("t1", "fetch", "tool_call", 2, {
+        name: "WebFetch",
+        input: { url: "https://example.com" },
+      }),
+      buildItemStarted("t1", "read", "file_read", 3, {
+        path: "/tmp/shot.png",
+        name: "Read",
+        input: { file_path: "/tmp/shot.png" },
+      }),
+      buildItemStarted("t1", "plan", "plan", 4),
+    ];
+
+    const work = findBlock(
+      buildThreadBlocks(rows, buildSessionAgentState(BUSY)),
+      "work",
+      "work:fetch",
+    );
+
+    expect(work.items.map((item) => [item.startedAt, item.toolName])).toEqual([
+      [buildInstant(2), "WebFetch"],
+      [buildInstant(3), ""],
+      [buildInstant(4), ""],
+    ]);
+  });
+
+  it("reads a file read's and a file search's target and paths from their fixed fields only", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Look"),
+      buildItemStarted("t1", "read", "file_read", 1, {
+        path: "src/a.ts",
+        name: "Read",
+        input: { file_path: "src/other.ts" },
+      }),
+      buildItemStarted("t1", "grep", "file_search", 2, {
+        pattern: "TODO",
+        path: "src",
+        name: "Grep",
+      }),
+      buildItemStarted("t1", "glob", "file_search", 3, { pattern: "**/*.ts", name: "Glob" }),
+      buildItemStarted("t1", "ls", "file_search", 4, { path: "src", name: "LS" }),
+    ];
+
+    const work = findBlock(
+      buildThreadBlocks(rows, buildSessionAgentState(BUSY)),
+      "work",
+      "work:read",
+    );
+
+    expect(work.items.map((item) => [item.target, item.targetIsCode, item.paths])).toEqual([
+      ["src/a.ts", true, ["src/a.ts"]],
+      ["TODO in src", true, []],
+      ["**/*.ts", true, []],
+      ["src", true, []],
+    ]);
+  });
+
+  it("gives a tool call the target its input names, never its tool's name, and marks a command or path as code", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Look"),
+      buildItemStarted("t1", "fetch", "tool_call", 1, {
+        name: "WebFetch",
+        input: { description: "Fetch the release notes\nand more" },
+      }),
+      buildItemStarted("t1", "todo", "tool_call", 2, { name: "TodoWrite", input: { todos: [] } }),
+      buildItemStarted("t1", "exec", "tool_call", 3, {
+        name: "mcp__tools__exec",
+        input: { command: "git status" },
+      }),
+      buildItemStarted("t1", "open", "tool_call", 4, {
+        name: "mcp__files__open",
+        input: { file_path: "src/a.ts" },
+      }),
+    ];
+
+    const work = findBlock(
+      buildThreadBlocks(rows, buildSessionAgentState(BUSY)),
+      "work",
+      "work:fetch",
+    );
+
+    expect(work.items.map((item) => [item.target, item.targetIsCode])).toEqual([
+      ["Fetch the release notes", false],
+      ["", false],
+      ["git status", true],
+      ["src/a.ts", true],
+    ]);
+  });
+
+  it("keeps each tool item's result content as its completion sent it", () => {
+    const blocks = [{ type: "text", text: "first" }, null, { type: "image" }];
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Look"),
+      buildItemStarted("t1", "text", "command_execution", 1),
+      buildItemCompleted("t1", "text", "command_execution", 2, "completed", {
+        content: "a.ts\nb.ts",
+      }),
+      buildItemStarted("t1", "blocks", "tool_call", 2),
+      buildItemCompleted("t1", "blocks", "tool_call", 3, "completed", { content: blocks }),
+      buildItemStarted("t1", "bare", "tool_call", 3),
+      buildItemCompleted("t1", "bare", "tool_call", 4),
+      buildItemStarted("t1", "running", "tool_call", 4),
+    ];
+
+    const work = findBlock(
+      buildThreadBlocks(rows, buildSessionAgentState(BUSY)),
+      "work",
+      "work:text",
+    );
+
+    expect(work.items.map((item) => item.resultContent)).toEqual([
+      "a.ts\nb.ts",
+      blocks,
+      undefined,
+      undefined,
+    ]);
+    expect(work.items[1]!.resultContent).toBe(blocks);
+  });
+
+  it("keeps the result of an item that completes after its turn ended", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Look"),
+      buildItemStarted("t1", "run", "command_execution", 1),
+      buildTurnCompleted("t1", 2, "interrupted"),
+      buildItemCompleted("t1", "run", "command_execution", 3, "failed", { content: "killed" }),
+    ];
+
+    const work = findBlock(
+      buildThreadBlocks(rows, buildSessionAgentState(IDLE)),
+      "work",
+      "work:run",
+    );
+
+    expect(work.items[0]).toMatchObject({ result: "failed", resultContent: "killed" });
   });
 });

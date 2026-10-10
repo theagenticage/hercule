@@ -1,4 +1,4 @@
-/** Attachments: the images a user attaches to an input. */
+/** Attachments: the images the controller stores for a transcript, an input's or a tool's. */
 export {
   AttachmentService,
   AttachmentServiceLayer,

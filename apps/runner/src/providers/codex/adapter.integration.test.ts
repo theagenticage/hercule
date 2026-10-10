@@ -47,7 +47,7 @@ import { codex, makeCodexAdapter } from "./adapter";
 import { runProcess, spawnAppServer } from "../process";
 import { startMockModel } from "./mock-model.testing";
 import type { ProviderRunnerContext } from "../index";
-import { createLines, NO_USER_MATERIAL_PATHS } from "../testing";
+import { createLines, NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "../testing";
 import { buildScriptedSeam, listSentParams, SESSION, SPEC } from "./testing";
 
 const binary = process.env["HERCULE_CODEX_TEST_BINARY"] ?? Bun.which("codex") ?? undefined;
@@ -85,6 +85,7 @@ const createHomeWithLogin = (): string => {
 const buildContext = (home: string): ProviderRunnerContext => ({
   cwd: createScratchDir("cwd"),
   attachmentsDir: null,
+  attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,
   binary: binary!,
   env: { PATH: process.env["PATH"] ?? "" },
@@ -546,7 +547,9 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
       );
       const delayed = createLines();
       let heldMetadata: { line: string; id: string; parentId: string } | undefined;
-      let descendantRequestArrived = false;
+      // Codex can send the descendant's approval request before or after the
+      // answer to the read of its metadata, so both are recorded on their own.
+      const approvalThreadIds = new Set<string>();
       const adapter = makeCodexAdapter({
         appServer:
           target !== "discovering-subtree"
@@ -577,9 +580,9 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
                       }
                       if (
                         frame.method === "item/commandExecution/requestApproval" &&
-                        frame.params?.threadId === heldMetadata?.id
+                        frame.params?.threadId !== undefined
                       )
-                        descendantRequestArrived = true;
+                        approvalThreadIds.add(frame.params.threadId);
                       delayed.push(line);
                     }
                   } finally {
@@ -629,7 +632,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
           () =>
             (target === "discovering-subtree"
               ? heldMetadata !== undefined &&
-                descendantRequestArrived &&
+                approvalThreadIds.has(heldMetadata.id) &&
                 seen.filter((event) => event._tag === "request.opened").length === 2
               : seen.filter((event) => event._tag === "request.opened").length === 3) &&
             model.waitingChildren.size === 1,

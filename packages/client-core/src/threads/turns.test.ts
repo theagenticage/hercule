@@ -348,6 +348,47 @@ describe("buildTurns", () => {
     expect(turns[0]!.items[0]!.target).toBe("3-D Secure challenge timeout");
   });
 
+  it("summarizes a file search's target as the pattern it looked for, not its path or tool", () => {
+    const turns = buildTurns(
+      [
+        buildRow({
+          _tag: "item.started",
+          eventId: nextId(),
+          sessionId: SESSION_ID,
+          at: "2026-09-08T10:00:00.000Z",
+          turnId: "t-grep",
+          itemId: "t-grep",
+          kind: "file_search",
+          detail: { pattern: "handlePaymentResult", path: "src", name: "Grep" },
+        }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(turns[0]!.items[0]!.target).toBe("handlePaymentResult");
+  });
+
+  it("shows the raw JSON when the field it would summarize by is not a string", () => {
+    const detail = { name: "McpTool", input: { command: 123 } };
+    const turns = buildTurns(
+      [
+        buildRow({
+          _tag: "item.started",
+          eventId: nextId(),
+          sessionId: SESSION_ID,
+          at: "2026-09-08T10:00:00.000Z",
+          turnId: "t-mcp",
+          itemId: "t-mcp",
+          kind: "tool_call",
+          detail,
+        }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(turns[0]!.items[0]!.target).toBe(JSON.stringify(detail));
+  });
+
   it("falls back from file_path to description, then name, then raw JSON", () => {
     const fileChange = buildTurns(
       [

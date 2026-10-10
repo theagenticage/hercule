@@ -7,6 +7,7 @@
  */
 import type { Project, Resource, Session, Workspace } from "@hercule/contract";
 import { pickProjectTone, type ProjectTone } from "./tone";
+import { formatCount } from "./work-summary";
 import { listProjectRepos, listProjectWorkspaces, formatRepoName } from "./workspaces";
 
 export interface ProjectPickerRow {
@@ -18,9 +19,6 @@ export interface ProjectPickerRow {
   /** `⌘1`, or `null` after the ninth row, because there are no more number keys. */
   readonly shortcut: string | null;
 }
-
-const formatCount = (n: number, word: string): string =>
-  `${String(n)} ${n === 1 ? word : `${word}s`}`;
 
 export const buildProjectPickerRows = ({
   projects,
