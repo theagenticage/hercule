@@ -222,16 +222,12 @@ describe("the subagents of a thread", () => {
     await surface.getByRole("link", { name: SUBAGENT.description, exact: true }).waitFor();
     expect(await pill.getAttribute("aria-pressed")).toBe("true");
 
-    const toggle = page.getByRole("button", { name: "Hide the side pane", exact: true });
+    const toggle = page.getByRole("button", { name: "Side pane", exact: true });
     expect(await toggle.getAttribute("aria-pressed")).toBe("true");
     await toggle.click();
 
     await pane.waitFor({ state: "detached" });
     expect(await pill.getAttribute("aria-pressed")).toBe("false");
-    expect(
-      await page
-        .getByRole("button", { name: "Show the side pane", exact: true })
-        .getAttribute("aria-pressed"),
-    ).toBe("false");
+    expect(await toggle.getAttribute("aria-pressed")).toBe("false");
   });
 });
