@@ -62,13 +62,12 @@ import {
   type NotFound,
   type Validation,
 } from "@hercule/contract";
-import type { ToolResultAttachment } from "@hercule/protocol";
+import { detectImageMimeType, type ToolResultAttachment } from "@hercule/protocol";
 import { buildSessionStamp, currentStamp, requireGrant } from "../actor";
 import { HerculeHome } from "../config";
 import { mintUuid, nowIso, UUID_PATTERN, uuidToString, withTransaction } from "../db";
 import { excludeDigest, readUnclaimedCutoff, UNCLAIMED_LIFETIME } from "./claims";
 import { attachmentRepository, type StoredAttachment, type UnclaimedUpload } from "./repository";
-import { detectImageMimeType } from "./sniff";
 
 /** A disk operation on an attachment file failed. `action` is the verb the message uses. */
 class AttachmentFileError extends Schema.TaggedError<AttachmentFileError>()("AttachmentFileError", {

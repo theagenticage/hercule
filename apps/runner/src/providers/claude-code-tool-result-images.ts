@@ -2,26 +2,27 @@
  * Takes the images out of the tool results in a Claude SDK message, before
  * the normalizer sees it, so no event carries an image's bytes.
  *
- * For example, a Claude `Read` of a PNG returns the image twice: as an image block with
- * base64 data in the `tool_result`'s content, and again in the message's
- * `tool_use_result`, the tool's structured output. The normalizer passes the
- * first on in `item.completed.detail.content` and the whole message in `raw`.
- * One image can be megabytes, and the runner socket carries every session's
- * events, so each image is uploaded to the controller and only a reference to
- * it stays in the message (spec 06, image blocks in tool results).
+ * For example, a Claude `Read` of a PNG returns the image twice: as an image
+ * block with base64 data in the `tool_result`'s content, and again in the
+ * message's `tool_use_result`, the tool's structured output. The normalizer
+ * passes the first on in `item.completed.detail.content` and the whole
+ * message in `raw`. One image can be megabytes, and the runner socket
+ * carries every session's events, so each image is uploaded to the
+ * controller and only a reference to it stays in the message (spec 06,
+ * images in tool results).
+ *
+ * An image is found by its shape (see `readImageData` and
+ * `readImageFieldData`). Once found, every copy of its bytes is taken out of
+ * the message, whatever shape holds the copy, because the copies are found
+ * by the bytes themselves. An image a tool's structured output holds in a
+ * shape of the tool's own invention, and nowhere else, is not found: no
+ * list of shapes can cover arbitrary JSON. The runner's supervisor still
+ * shrinks any event too large for one frame.
  */
 import * as Effect from "effect/Effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { MAX_ATTACHMENT_BYTES, type ToolResultImage } from "@hercule/protocol";
+import { detectImageMimeType, MAX_ATTACHMENT_BYTES, type ToolResultImage } from "@hercule/protocol";
 import type { AttachmentUploader } from "../attachments";
-
-/** An image found in a tool result, and how to put its reference in its place. */
-interface FoundImage {
-  /** The image's base64 data. */
-  readonly data: string;
-  /** Returns the object the image was found in, with `reference` in the image's place. */
-  readonly replace: (reference: ToolResultImage) => unknown;
-}
 
 /**
  * The most images of one message that upload at once. Each upload holds its
@@ -36,6 +37,15 @@ const IMAGE_TOO_LARGE = `The image is larger than ${String(MAX_ATTACHMENT_BYTES 
 /** The reason an image whose upload had not started when the session stopped is not kept. */
 const SESSION_STOPPED = "The session stopped before the image was kept.";
 
+/** Matches the start of a data URL that holds a base64 image. */
+const IMAGE_DATA_URL_PREFIX = /^data:image\/[a-z0-9.+_-]+;base64,/i;
+
+/**
+ * The number of base64 characters that decode to the 18 bytes the image
+ * signatures need: WebP's is the longest, 12 bytes from the start.
+ */
+const SIGNATURE_BASE64_LENGTH = 24;
+
 /** Returns `value` as a record when it is a plain object, or undefined. */
 const asRecord = (value: unknown): Readonly<Record<string, unknown>> | undefined =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -46,9 +56,27 @@ const asRecord = (value: unknown): Readonly<Record<string, unknown>> | undefined
 const isImageMimeType = (mimeType: unknown): boolean =>
   typeof mimeType === "string" && mimeType.startsWith("image/");
 
+/** Returns `data` when it is a string whose declared media type is an image's, or undefined. */
+const readDeclaredImageData = (data: unknown, mimeType: unknown): string | undefined =>
+  typeof data === "string" && isImageMimeType(mimeType) ? data : undefined;
+
 /**
- * Returns the image `value` holds itself, or undefined when it holds none.
- * Five shapes hold an image's bytes in a tool result:
+ * Returns the blob of an MCP resource when it is an image, or undefined. A
+ * resource may leave out its media type, and then the blob's first bytes
+ * decide, so a PDF or another file is never taken for an image.
+ */
+const readResourceImageData = (resource: Readonly<Record<string, unknown>>): string | undefined => {
+  const { blob, mimeType } = resource;
+  if (typeof blob !== "string") return undefined;
+  if (mimeType !== undefined) return readDeclaredImageData(blob, mimeType);
+  const start = Buffer.from(blob.slice(0, SIGNATURE_BASE64_LENGTH), "base64");
+  return detectImageMimeType(start) === undefined ? undefined : blob;
+};
+
+/**
+ * Returns the base64 data of the image `value` is, or undefined when it is
+ * not one. `value` is replaced whole by the image's reference. Three shapes
+ * are an image:
  *
  * - `{ type: "image", source: { type: "base64", data, media_type } }`, the
  *   Messages API's image block, in a `tool_result`'s content and in what a
@@ -56,74 +84,121 @@ const isImageMimeType = (mimeType: unknown): boolean =>
  * - `{ type: "image", data, mimeType }`, MCP's image block, as an MCP tool's
  *   `structuredContent` may hold it;
  * - `{ type: "resource", resource: { blob, mimeType } }`, MCP's embedded
- *   resource;
- * - `{ base64, type }`, the `file` of Claude's `Read` of an image;
- * - `{ image_data, media_type }`, a cell output's image in Claude's `Read`
- *   of a notebook.
+ *   resource.
  *
- * These are every shape of MCP's content types (text, image, audio,
- * resource link, resource) and of Claude's own tools that can carry an
- * image's bytes. A block is replaced whole; in the last two shapes only the
- * field with the data is. A shape counts only when its declared media type
- * is an image's, so a PDF, an audio clip or another blob is left as it is. An
- * image the controller does not store, such as a BMP, is still uploaded: it
- * is refused and becomes `unavailable`, so its bytes are dropped all the same.
+ * A shape counts only when it is an image's, by its declared media type, so
+ * a PDF, an audio clip or another blob is left as it is. An image the
+ * controller does not store, such as a BMP, is still uploaded: it is
+ * refused and becomes `unavailable`, so its bytes are dropped all the same.
  */
-const recognizeImage = (value: Readonly<Record<string, unknown>>): FoundImage | undefined => {
-  const recognizeBlock = (data: unknown, mimeType: unknown): FoundImage | undefined =>
-    typeof data === "string" && isImageMimeType(mimeType)
-      ? { data, replace: (reference) => reference }
-      : undefined;
-  const recognizeField = (key: string, mimeType: unknown): FoundImage | undefined => {
-    const data = value[key];
-    return typeof data === "string" && isImageMimeType(mimeType)
-      ? { data, replace: (reference) => ({ ...value, [key]: reference }) }
-      : undefined;
-  };
-  if (value.type === "image") {
-    const source = asRecord(value.source);
+const readImageData = (value: unknown): string | undefined => {
+  const record = asRecord(value);
+  if (record?.type === "image") {
+    const source = asRecord(record.source);
     return source?.type === "base64"
-      ? recognizeBlock(source.data, source.media_type)
-      : recognizeBlock(value.data, value.mimeType);
+      ? readDeclaredImageData(source.data, source.media_type)
+      : readDeclaredImageData(record.data, record.mimeType);
   }
-  if (value.type === "resource") {
-    const resource = asRecord(value.resource);
-    return resource === undefined ? undefined : recognizeBlock(resource.blob, resource.mimeType);
+  if (record?.type === "resource") {
+    const resource = asRecord(record.resource);
+    return resource === undefined ? undefined : readResourceImageData(resource);
   }
-  if ("base64" in value) return recognizeField("base64", value.type);
-  if ("image_data" in value) return recognizeField("image_data", value.media_type);
   return undefined;
 };
 
-/** Adds every image inside `value`, at any depth, to `found`, in the order they appear. */
-const findImages = (value: unknown, found: Array<FoundImage>): void => {
+/**
+ * Returns the base64 data of the image that `record`'s field `key` holds,
+ * or undefined when it holds none. Only that field is replaced by the
+ * image's reference, and the record's other fields are searched as usual.
+ * Two shapes hold an image in a field:
+ *
+ * - `{ base64, type }`, the `file` of Claude's `Read` of an image;
+ * - `{ image_data, media_type }`, a cell output's image in Claude's `Read`
+ *   of a notebook.
+ */
+const readImageFieldData = (
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): string | undefined => {
+  if (key === "base64") return readDeclaredImageData(record.base64, record.type);
+  if (key === "image_data") return readDeclaredImageData(record.image_data, record.media_type);
+  return undefined;
+};
+
+/**
+ * Returns the base64 data of the image `text` is a data URL of, or
+ * undefined. Claude's `Bash` keeps the image a command printed this way, in
+ * its `stdout`. The text stays text: `scrubImageData` replaces the data in it.
+ */
+const readDataUrlImageData = (text: string): string | undefined => {
+  const prefix = IMAGE_DATA_URL_PREFIX.exec(text);
+  return prefix === null ? undefined : text.slice(prefix[0].length);
+};
+
+/** Adds the base64 data of every image inside `value`, at any depth, to `found`. */
+const findImages = (value: unknown, found: Set<string>): void => {
+  const data = typeof value === "string" ? readDataUrlImageData(value) : readImageData(value);
+  if (data !== undefined) {
+    found.add(data);
+    return;
+  }
   if (Array.isArray(value)) {
     for (const item of value) findImages(item, found);
     return;
   }
   const record = asRecord(value);
   if (record === undefined) return;
-  const image = recognizeImage(record);
-  if (image !== undefined) found.push(image);
-  else for (const field of Object.values(record)) findImages(field, found);
+  for (const [key, field] of Object.entries(record)) {
+    const fieldData = readImageFieldData(record, key);
+    if (fieldData === undefined) findImages(field, found);
+    else found.add(fieldData);
+  }
+};
+
+/**
+ * Returns `text` with every copy of an uploaded image's base64 replaced by
+ * a short placeholder naming the image, such as `[image <id>]`. Text holds
+ * an image as a data URL, or as a copy no shape holds, for example the JSON
+ * of an MCP tool's `structuredContent` repeated as text, which MCP
+ * recommends. The agent has
+ * already read the text; the copy in the transcript is for people.
+ */
+const scrubImageData = (text: string, references: ReadonlyMap<string, ToolResultImage>): string => {
+  let scrubbed = text;
+  for (const [data, reference] of references) {
+    if (!scrubbed.includes(data)) continue;
+    const placeholder =
+      "attachment" in reference ? `[image ${reference.attachment.id}]` : "[image not kept]";
+    scrubbed = scrubbed.replaceAll(data, placeholder);
+  }
+  return scrubbed;
 };
 
 /**
  * Returns a copy of `value` in which each image `findImages` found holds its
- * reference from `references`, keyed by the image's data, instead.
+ * reference from `references`, keyed by the image's data, instead, and every
+ * other copy of an image's bytes, in any text, is scrubbed.
  */
 const replaceImages = (
   value: unknown,
   references: ReadonlyMap<string, ToolResultImage>,
 ): unknown => {
+  const data = readImageData(value);
+  if (data !== undefined) return references.get(data) ?? value;
+  if (typeof value === "string") return scrubImageData(value, references);
   if (Array.isArray(value)) return value.map((item) => replaceImages(item, references));
   const record = asRecord(value);
   if (record === undefined) return value;
-  const image = recognizeImage(record);
-  const reference = image === undefined ? undefined : references.get(image.data);
-  if (image !== undefined && reference !== undefined) return image.replace(reference);
   return Object.fromEntries(
-    Object.entries(record).map(([key, field]) => [key, replaceImages(field, references)]),
+    Object.entries(record).map(([key, field]) => {
+      const fieldData = readImageFieldData(record, key);
+      return [
+        key,
+        fieldData === undefined
+          ? replaceImages(field, references)
+          : (references.get(fieldData) ?? field),
+      ];
+    }),
   );
 };
 
@@ -164,8 +239,8 @@ const uploadImage = (
 
 /**
  * Returns the message with each image in its tool results replaced by a
- * `ToolResultImage`. Images are found by shape (see `recognizeImage`) in
- * two places: the content of each `tool_result` block, and
+ * `ToolResultImage`. Images are found by shape (see `readImageData` and
+ * `readImageFieldData`) in two places: the content of each `tool_result` block, and
  * `tool_use_result`, the tool's structured output. The user's own images in
  * a prompt are not in either, so they are never taken for a tool's.
  *
@@ -184,14 +259,13 @@ export const replaceToolResultImages = (
 ): Effect.Effect<SDKMessage> => {
   if (sdk.type !== "user" || !Array.isArray(sdk.message.content)) return Effect.succeed(sdk);
   const blocks: ReadonlyArray<unknown> = sdk.message.content;
-  const found: Array<FoundImage> = [];
+  const found = new Set<string>();
   for (const block of blocks) if (isToolResultBlock(block)) findImages(block.content, found);
   findImages(sdk.tool_use_result, found);
-  if (found.length === 0) return Effect.succeed(sdk);
-  const distinct = new Set(found.map((image) => image.data));
+  if (found.size === 0) return Effect.succeed(sdk);
   return Effect.map(
     Effect.forEach(
-      distinct,
+      found,
       (data) =>
         Effect.map(
           uploadImage(uploader, sessionId, data, signal),

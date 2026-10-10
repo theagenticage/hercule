@@ -15,14 +15,15 @@ const PNG = PNG_BYTES.toString("base64");
 /** A second, different image: the same PNG with one extra byte at the end. */
 const OTHER = Buffer.concat([PNG_BYTES, Buffer.from([0])]).toString("base64");
 
+/** Returns the id the fake uploader gives the image whose bytes encode to `data`. */
+const buildStoredId = (data: string): string =>
+  data === PNG ? "0199e0e7-0000-7000-8000-0000000000c1" : "0199e0e7-0000-7000-8000-0000000000c2";
+
 /** Returns the reference the fake uploader gives the image whose bytes encode to `data`. */
 const buildStored = (data: string): ToolResultImage => ({
   type: "image",
   attachment: {
-    id:
-      data === PNG
-        ? "0199e0e7-0000-7000-8000-0000000000c1"
-        : "0199e0e7-0000-7000-8000-0000000000c2",
+    id: buildStoredId(data),
     mimeType: "image/png",
     sizeBytes: Buffer.from(data, "base64").length,
   },
@@ -242,6 +243,98 @@ describe("replacing the images in a tool result", () => {
 
     expect(replaced).toBe(sdk);
     expect(uploader.uploads).toEqual([]);
+  });
+
+  it("scrubs the data URL a Bash command printed, and keeps stdout as text", async () => {
+    const uploader = createRecordingUploader();
+    const replaced = await replace(
+      uploader,
+      buildToolResult([buildImageBlock(PNG)], {
+        stdout: `data:image/png;base64,${OTHER}`,
+        stderr: "",
+        isImage: true,
+      }),
+    );
+
+    expect(replaced).toMatchObject({
+      tool_use_result: {
+        stdout: `data:image/png;base64,[image ${buildStoredId(OTHER)}]`,
+        isImage: true,
+      },
+    });
+    expect(readContent(replaced)).toEqual([buildStored(PNG)]);
+    expect(uploader.uploads.toSorted()).toEqual([PNG, OTHER].toSorted());
+  });
+
+  it("scrubs a copy of an image no shape holds, such as structured content repeated as text", async () => {
+    const uploader = createRecordingUploader();
+    const screenshot = { type: "image", data: PNG, mimeType: "image/png" };
+    const replaced = await replace(
+      uploader,
+      buildToolResult([{ type: "text", text: JSON.stringify({ screenshot }) }], {
+        structuredContent: { screenshot },
+      }),
+    );
+
+    expect(readContent(replaced)).toEqual([
+      {
+        type: "text",
+        text: JSON.stringify({
+          screenshot: { ...screenshot, data: `[image ${buildStoredId(PNG)}]` },
+        }),
+      },
+    ]);
+    expect(JSON.stringify(replaced)).not.toContain(PNG);
+  });
+
+  it("names an image that was not kept in the placeholder that scrubs it", async () => {
+    const unavailable: ToolResultImage = {
+      type: "image",
+      unavailable: "The image could not be kept.",
+    };
+    const replaced = await replace(
+      { upload: () => Effect.succeed(unavailable) },
+      buildToolResult([buildImageBlock(PNG), { type: "text", text: `copy: ${PNG}` }]),
+    );
+
+    expect(readContent(replaced)).toEqual([
+      unavailable,
+      { type: "text", text: "copy: [image not kept]" },
+    ]);
+  });
+
+  it("tells an image from a PDF by its first bytes when a resource declares no media type", async () => {
+    const uploader = createRecordingUploader();
+    const pdf = { type: "resource", resource: { uri: "file:///a.pdf", blob: "JVBERi0xLjcK" } };
+    const replaced = await replace(
+      uploader,
+      buildToolResult([{ type: "resource", resource: { uri: "file:///a.png", blob: PNG } }, pdf]),
+    );
+
+    expect(readContent(replaced)).toEqual([buildStored(PNG), pdf]);
+    expect(uploader.uploads).toEqual([PNG]);
+  });
+
+  it("keeps searching a record after an image in one of its fields", async () => {
+    const uploader = createRecordingUploader();
+    const replaced = await replace(
+      uploader,
+      buildToolResult([buildImageBlock(PNG)], {
+        type: "image",
+        file: {
+          base64: PNG,
+          type: "image/png",
+          thumbnail: { image_data: OTHER, media_type: "image/png" },
+        },
+      }),
+    );
+
+    expect(replaced).toMatchObject({
+      tool_use_result: {
+        file: { base64: buildStored(PNG), thumbnail: { image_data: buildStored(OTHER) } },
+      },
+    });
+    expect(JSON.stringify(replaced)).not.toContain(OTHER);
   });
 
   it("replaces image blocks in a structured output that is an array of blocks", async () => {
