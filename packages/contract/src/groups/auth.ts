@@ -15,7 +15,13 @@
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import { Internal, Unauthenticated, Validation } from "../errors";
+import {
+  ControllerSealed,
+  Internal,
+  PromotionInProgress,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Timestamp } from "../ids";
 import { PresentedPassword, Username } from "../strings";
 import { Authenticated } from "../security";
@@ -40,7 +46,7 @@ export const auth = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("login", "/auth/login", {
     payload: LoginPayload,
     success: LoginResult,
-    error: [Unauthenticated, Validation, Internal],
+    error: [Unauthenticated, Validation, Internal, ControllerSealed, PromotionInProgress],
   }),
   HttpApiEndpoint.post("logout", "/auth/logout", {
     success: Schema.Struct({}),

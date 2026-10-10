@@ -38,7 +38,7 @@ import {
   type RunnerLifecycle,
 } from "@hercule/contract";
 import type { Plugin } from "@hercule/plugin-host";
-import { buildHomePaths } from "@hercule/home";
+import { buildHomePaths, BootstrapConfig } from "@hercule/home";
 import { HerculeHome } from "../config";
 import { ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
@@ -72,7 +72,13 @@ import { NotifierLayer } from "../notifications";
 import { readEventsOfKind, type LoggedEvent } from "../events/testing";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
-import { masterKeyLayer, Secrets, secretsLayer } from "../secrets";
+import {
+  masterKeyLayer,
+  Secrets,
+  secretsLayer,
+  type MasterKeyBackend,
+  type SecurityRunner,
+} from "../secrets";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
 import { createPluginFixture } from "../plugins/testing";
@@ -100,6 +106,7 @@ import {
   runnerRepository,
   type RunnerPings,
 } from "../runners";
+import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../promotion";
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
@@ -118,7 +125,11 @@ export const USERNAME = "rogier";
  * routes must share one instance: a request must read the status the boot's
  * activation wrote.
  */
-const buildServices = (home: string) =>
+const buildServices = (
+  home: string,
+  masterKeyBackend: MasterKeyBackend = "file",
+  securityRunner?: SecurityRunner,
+) =>
   // The routes' layer includes the controller daemon, which uses the session
   // and workspace services and the plugin host. So this block's output is
   // provided to it rather than merged next to it, just as the real boot
@@ -165,6 +176,7 @@ const buildServices = (home: string) =>
       ),
     ),
     Layer.provideMerge(NotifierLayer),
+    Layer.provideMerge(PromotionStateLayer),
     Layer.provideMerge(
       Layer.mergeAll(
         UsersLayer,
@@ -176,11 +188,31 @@ const buildServices = (home: string) =>
         controllerIdentityLayer,
         JoinTokensLayer,
         SessionTokensLayer,
+        PromotionTokensLayer,
       ),
     ),
-    Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
+    Layer.provideMerge(
+      secretsLayer.pipe(
+        Layer.provideMerge(
+          securityRunner === undefined
+            ? masterKeyLayer(masterKeyBackend)
+            : masterKeyLayer(masterKeyBackend, securityRunner),
+        ),
+      ),
+    ),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
+    Layer.provideMerge(
+      Layer.succeed(
+        BootstrapConfig,
+        BootstrapConfig.of({
+          dataDir: join(home, "data"),
+          bindHost: "127.0.0.1",
+          bindPort: 0,
+          logLevel: "debug",
+        }),
+      ),
+    ),
   );
 
 /**
@@ -295,6 +327,11 @@ export interface ServerHarness {
    */
   readonly secrets: Secrets["Service"];
   /**
+   * The controller's promotion gate. A test reads its state to know that work
+   * waits at the gate while the controller is frozen or sealed.
+   */
+  readonly promotion: PromotionState["Service"];
+  /**
    * Checks whether a fiber is still executing the run. A cancelled run's
    * fiber lives on until its steps have stopped, so a test that checks what a
    * step does after the cancel waits for this to turn false first.
@@ -354,6 +391,14 @@ export interface ServerOptions {
    * so a test can name a runner that joins after the server is up.
    */
   readonly readLocalRunnerId?: () => string | undefined;
+  /**
+   * Where this controller keeps its Master Key. Defaults to the file store,
+   * so a test never touches the developer's keychain. A promotion test that
+   * covers macOS-to-Linux puts `"keychain"` here and a fake `security` runner.
+   */
+  readonly masterKeyBackend?: MasterKeyBackend;
+  /** The `security` CLI the keychain store runs. Required with `"keychain"`. */
+  readonly securityRunner?: SecurityRunner;
 }
 
 /**
@@ -452,6 +497,7 @@ export const withServer = (
             ),
           );
         const secrets = yield* Secrets;
+        const promotion = yield* PromotionState;
         const tokens = yield* JoinTokens;
         const joinToken: JoinTokenArranger = () =>
           Effect.runPromise(
@@ -472,13 +518,14 @@ export const withServer = (
             reboot,
             runWithLiveSessions,
             secrets,
+            promotion,
             isRunExecuting: (runId) => FiberMap.hasUnsafe(runFibers, runId),
           }),
         );
       }),
     ).pipe(
       Effect.provide(
-        buildServices(home).pipe(
+        buildServices(home, options.masterKeyBackend, options.securityRunner).pipe(
           // The same listener `hercule serve` builds, including the body size
           // limit. The limit is enforced by the transport, so without it the
           // tests would run a different server from the one that ships.

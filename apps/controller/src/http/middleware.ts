@@ -37,6 +37,7 @@ import {
 import { CurrentActor, checkGrant, NO_CREDENTIAL, type Actor } from "../actor";
 import { Credentials, hashToken } from "../credentials";
 import { SessionTokens } from "../permissions";
+import { PromotionState } from "../promotion";
 import { Setup } from "../setup";
 
 /** Builds the operation id of a request by joining the group and endpoint identifiers. */
@@ -62,6 +63,12 @@ const parseOperationId = (id: string): Effect.Effect<OperationId> =>
  * forward, and an API key's `last_used_at` is updated. The repository decides
  * whether a use is worth a write; on a busy connection most are not.
  *
+ * The use is recorded only while the controller is serving. A request that
+ * only reads still runs while a promotion freezes the controller, and the
+ * database then refuses every write. Skipping the record loses nothing that
+ * matters: the copy the new machine receives holds the older values, and
+ * this controller then agrees with it.
+ *
  * Session tokens are tried first, because they are cached. Agents call the
  * API on every tool use, so they cost one cached lookup instead of two
  * database misses first. A user pays one cache miss, which a person does not
@@ -70,6 +77,7 @@ const parseOperationId = (id: string): Effect.Effect<OperationId> =>
 const resolveActor = (
   credentials: Credentials["Service"],
   sessions: SessionTokens["Service"],
+  promotion: PromotionState["Service"],
   token: string,
 ): Effect.Effect<Option.Option<Actor>> =>
   Effect.gen(function* () {
@@ -80,7 +88,7 @@ const resolveActor = (
 
     const login = yield* credentials.findLoginToken(tokenHash);
     if (Option.isSome(login)) {
-      yield* credentials.renewLoginToken(login.value);
+      yield* promotion.runIfServing(credentials.renewLoginToken(login.value));
       return Option.some<Actor>({
         _tag: "user",
         userId: login.value.userId,
@@ -90,7 +98,7 @@ const resolveActor = (
 
     const apiKey = yield* credentials.findApiKey(tokenHash);
     if (Option.isSome(apiKey)) {
-      yield* credentials.touchApiKey(apiKey.value);
+      yield* promotion.runIfServing(credentials.touchApiKey(apiKey.value));
       return Option.some<Actor>({
         _tag: "user",
         userId: apiKey.value.userId,
@@ -102,30 +110,35 @@ const resolveActor = (
   }).pipe(Effect.orDie);
 
 /** Accepts a credential of any kind, then runs the operation's static grant check. */
-export const AuthenticatedLayer: Layer.Layer<Authenticated, never, Credentials | SessionTokens> =
-  Layer.effect(Authenticated)(
-    Effect.gen(function* () {
-      const credentials = yield* Credentials;
-      const sessions = yield* SessionTokens;
-      return {
-        bearer: (httpEffect, options) =>
-          Effect.gen(function* () {
-            const token = Redacted.value(options.credential);
-            if (token === "") return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
+export const AuthenticatedLayer: Layer.Layer<
+  Authenticated,
+  never,
+  Credentials | SessionTokens | PromotionState
+> = Layer.effect(Authenticated)(
+  Effect.gen(function* () {
+    const credentials = yield* Credentials;
+    const sessions = yield* SessionTokens;
+    const promotion = yield* PromotionState;
+    return {
+      bearer: (httpEffect, options) =>
+        Effect.gen(function* () {
+          const operation = yield* parseOperationId(buildOperationId(options));
 
-            const actor = yield* resolveActor(credentials, sessions, token);
-            if (Option.isNone(actor))
-              return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
+          const token = Redacted.value(options.credential);
+          if (token === "") return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
 
-            const operation = yield* parseOperationId(buildOperationId(options));
-            const refused = checkGrant(operation, actor.value);
-            if (refused !== undefined) return yield* Effect.fail(refused);
+          const actor = yield* resolveActor(credentials, sessions, promotion, token);
+          if (Option.isNone(actor))
+            return yield* Effect.fail(createUnauthenticatedError(NO_CREDENTIAL));
 
-            return yield* Effect.provideService(httpEffect, CurrentActor, actor.value);
-          }),
-      };
-    }),
-  );
+          const refused = checkGrant(operation, actor.value);
+          if (refused !== undefined) return yield* Effect.fail(refused);
+
+          return yield* Effect.provideService(httpEffect, CurrentActor, actor.value);
+        }),
+    };
+  }),
+);
 
 /** Accepts only the one-time setup token, compared with the hash written at boot. */
 export const SetupTokenLayer: Layer.Layer<SetupToken, never, Setup> = Layer.effect(SetupToken)(

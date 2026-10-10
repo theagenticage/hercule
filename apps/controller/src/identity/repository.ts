@@ -74,10 +74,11 @@ export class ControllerIdentity extends Context.Service<
     readonly ensure: Effect.Effect<ControllerIdentityRecord, SqlError | SecretNameError>;
 
     /**
-     * Returns the identity without creating one. Returns `None` only before
-     * the first boot has run.
+     * Returns the identity without creating one. Dies when the row is missing:
+     * the boot runs `ensure` before the controller listens, so a controller
+     * serving without an identity is a bug, not something a caller can fix.
      */
-    readonly read: Effect.Effect<Option.Option<ControllerIdentityRecord>, SqlError>;
+    readonly readOrDie: Effect.Effect<ControllerIdentityRecord, SqlError>;
 
     /**
      * Signs bytes with the identity's private key, which is how the controller
@@ -141,7 +142,11 @@ export const controllerIdentityLayer: Layer.Layer<
     );
 
     return ControllerIdentity.of({
-      read,
+      readOrDie: Effect.flatMap(read, (record) =>
+        Option.isSome(record)
+          ? Effect.succeed(record.value)
+          : Effect.die("the controller has no identity row"),
+      ),
 
       sign: (payload) =>
         Effect.gen(function* () {

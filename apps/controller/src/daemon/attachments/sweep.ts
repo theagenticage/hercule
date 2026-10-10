@@ -8,6 +8,7 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { AttachmentService } from "../../attachments";
+import { PromotionState } from "../../promotion";
 import { absorbFailures } from "../absorbing";
 
 /**
@@ -27,13 +28,19 @@ export const AttachmentSweepInterval = Context.Reference<Duration.Duration>(
  * Runs the attachment sweep at once, then every `AttachmentSweepInterval`.
  * Never returns. A pass that fails is logged, and the next one runs.
  */
-export const runAttachmentSweepLoop: Effect.Effect<never, never, AttachmentService> = Effect.gen(
-  function* () {
-    const attachments = yield* AttachmentService;
-    const interval = yield* AttachmentSweepInterval;
-    while (true) {
-      yield* absorbFailures("Sweeping unclaimed attachments failed", attachments.sweep);
-      yield* Effect.sleep(interval);
-    }
-  },
-);
+export const runAttachmentSweepLoop: Effect.Effect<
+  never,
+  never,
+  AttachmentService | PromotionState
+> = Effect.gen(function* () {
+  const attachments = yield* AttachmentService;
+  const interval = yield* AttachmentSweepInterval;
+  const promotion = yield* PromotionState;
+  while (true) {
+    yield* absorbFailures(
+      "Sweeping unclaimed attachments failed",
+      promotion.whenServing(attachments.sweep),
+    );
+    yield* Effect.sleep(interval);
+  }
+});

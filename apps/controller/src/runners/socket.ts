@@ -48,6 +48,7 @@ import { readBearerToken } from "../http/bearer";
 import { buildErrorResponse } from "../http/envelope";
 import { ControllerIdentity } from "../identity";
 import { WORKSPACE_ACTION_IDS } from "../plugins";
+import { buildForwardingPointer, PromotionState } from "../promotion";
 import { mintConnection, RunnerConnections, type Connection, type Departure } from "./connections";
 
 const RUNNER_SOCKET_PATH = "/api/v1/runners/socket";
@@ -142,6 +143,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
   Effect.gen(function* () {
     const connections = yield* RunnerConnections;
     const identity = yield* ControllerIdentity;
+    const promotion = yield* PromotionState;
     const pings = yield* RunnerPingSchedule;
     const write = yield* socket.writer;
 
@@ -156,55 +158,74 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
     const closeWithProtocolError = (reason: string) =>
       write(new Socket.CloseEvent(PROTOCOL_ERROR, reason));
 
+    /**
+     * Answers the runner's hello, as one unit of work the promotion gate
+     * admits. Only the hello is counted, never the connection's lifetime,
+     * so a freeze does not wait for a socket that stays open for days.
+     *
+     * - While serving, it signs the nonce, puts the connection in the map,
+     *   marks the runner online and answers with the controller's hello. A
+     *   seal waits until this has finished, so the seal's announcement then
+     *   reaches the connection.
+     * - While frozen, it waits for the freeze to end. The other frames wait
+     *   behind it, but before the hello they are ignored anyway.
+     * - Once sealed, it answers with the new address instead.
+     *
+     * Deciding the answer from the phase and then registering the connection
+     * as two separate steps left a gap: a runner whose hello was being signed
+     * when the controller sealed missed the announcement, then got a normal
+     * hello and stayed connected to a controller that no longer serves.
+     */
     const greet = (hello: RunnerHello) =>
-      Effect.gen(function* () {
-        const controller = yield* identity.read;
-        if (Option.isNone(controller)) {
-          // The boot creates the identity before the server starts, so a
-          // missing identity is a bug, not a state to handle.
-          return yield* Effect.die("the controller has no identity row");
-        }
-        const signature = yield* identity.sign(encodeChallengeBytes(runnerId, hello.nonce));
-        const answer: ControllerHello = {
-          _tag: "controllerHello",
-          protocolVersion: PROTOCOL_VERSION,
-          capabilities: CAPABILITIES,
-          identityId: controller.value.id,
-          publicKey: Buffer.from(controller.value.publicKey).toString("base64"),
-          nonce: hello.nonce,
-          signature: Buffer.from(signature).toString("base64"),
-        };
-        // Before the hello is answered, so a runner that receives the answer
-        // already reads as online in the fleet.
-        yield* connections.greeted(
-          runnerId,
-          mine,
-          {
-            close: (code, reason) => {
-              Deferred.doneUnsafe(asked, Exit.succeed(new Socket.CloseEvent(code, reason)));
+      promotion.whenServingOr(
+        Effect.gen(function* () {
+          const controller = yield* identity.readOrDie;
+          const signature = yield* identity.sign(encodeChallengeBytes(runnerId, hello.nonce));
+          const answer: ControllerHello = {
+            _tag: "controllerHello",
+            protocolVersion: PROTOCOL_VERSION,
+            capabilities: CAPABILITIES,
+            identityId: controller.id,
+            publicKey: Buffer.from(controller.publicKey).toString("base64"),
+            nonce: hello.nonce,
+            signature: Buffer.from(signature).toString("base64"),
+          };
+          // Before the hello is answered, so a runner that receives the answer
+          // already reads as online in the fleet.
+          yield* connections.greeted(
+            runnerId,
+            mine,
+            {
+              close: (code, reason) => {
+                Deferred.doneUnsafe(asked, Exit.succeed(new Socket.CloseEvent(code, reason)));
+              },
+              // A failed write means the connection is closing. The operation
+              // waiting for the answer then fails when its deadline passes.
+              askForFacts: Effect.ignore(write(FACTS_REQUEST)),
+              ask: (request) => Effect.ignore(write(encodeFrameText(request))),
             },
-            // A failed write means the connection is closing. The operation
-            // waiting for the answer then fails when its deadline passes.
-            askForFacts: Effect.ignore(write(FACTS_REQUEST)),
-            ask: (request) => Effect.ignore(write(encodeFrameText(request))),
-          },
-          {
-            binaryVersion: hello.binaryVersion,
-            protocolVersion: hello.protocolVersion,
-            negotiatedCapabilities: negotiateCapabilities(hello.capabilities),
-            facts: hello.facts,
-          },
-        );
-        yield* write(encodeFrameText(answer));
-        // Set after the answer is written, so the ping loop never sends a
-        // ping ahead of it. Frames are handled one at a time, so no other
-        // frame reads this in between.
-        greeted = true;
-        // After the answer, because the runner drops every frame that arrives
-        // before the controller's hello. A probe sweep announced earlier could
-        // have its first probe dropped.
-        yield* connections.arrived(runnerId);
-      });
+            {
+              binaryVersion: hello.binaryVersion,
+              protocolVersion: hello.protocolVersion,
+              negotiatedCapabilities: negotiateCapabilities(hello.capabilities),
+              facts: hello.facts,
+            },
+          );
+          yield* write(encodeFrameText(answer));
+          // Set after the answer is written, so the ping loop never sends a
+          // ping ahead of it. Frames are handled one at a time, so no other
+          // frame reads this in between.
+          greeted = true;
+          // After the answer, because the runner drops every frame that arrives
+          // before the controller's hello. A probe sweep announced earlier could
+          // have its first probe dropped.
+          yield* connections.arrived(runnerId);
+        }),
+        // A sealed controller does not prove itself as a live peer: it tells
+        // the runner where the live controller is, and the runner verifies
+        // that pointer against the identity it already trusts.
+        (seal) => write(encodeFrameText(buildForwardingPointer(seal))),
+      );
 
     const handleFrame = (raw: string) =>
       Effect.gen(function* () {

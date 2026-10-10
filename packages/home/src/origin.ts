@@ -30,6 +30,27 @@ export function isWildcardHost(host: string): boolean {
 }
 
 /**
+ * Checks whether a host is loopback: `localhost`, `::1`, or any address in
+ * `127.0.0.0/8`, in any spelling `URL` accepts. Returns false for a value
+ * that is not a host at all.
+ */
+export function isLoopbackHost(host: string): boolean {
+  try {
+    const hostname = new URL(`http://${bracketIpv6(host)}`).hostname;
+    if (hostname === "localhost" || hostname === "::1" || hostname === "[::1]") return true;
+    const parts = hostname.split(".");
+    if (parts.length !== 4 || parts[0] !== "127") return false;
+    return parts.every((part) => {
+      if (!/^\d{1,3}$/.test(part)) return false;
+      const octet = Number(part);
+      return octet >= 0 && octet <= 255;
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Returns the origin a process on this machine uses to reach the controller,
  * such as `http://127.0.0.1:4937`. A wildcard bind host becomes loopback,
  * because nothing can open `http://0.0.0.0:4937`.

@@ -15,11 +15,11 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import { createInternalError, createUnauthenticatedError, NotFound } from "@hercule/contract";
+import { createUnauthenticatedError } from "@hercule/contract";
 import { AttachmentService } from "../attachments";
 import { buildAttachmentResponse } from "../http/attachment-response";
 import { readBearerToken } from "../http/bearer";
-import { buildErrorResponse } from "../http/envelope";
+import { buildErrorResponse, respondToFailures } from "../http/envelope";
 import { RunnerConnections } from "./connections";
 
 const ATTACHMENT_PATH = "/api/v1/runners/attachments/:id";
@@ -48,16 +48,7 @@ export const RunnerAttachmentRouteLayer = HttpRouter.add("GET", ATTACHMENT_PATH,
       return yield* buildAttachmentResponse(
         yield* attachments.readForRunner(id ?? "", runnerId.value),
       );
-    }).pipe(
-      Effect.catch((error) =>
-        error instanceof NotFound
-          ? Effect.succeed(buildErrorResponse(error))
-          : Effect.as(
-              Effect.logError("A runner's attachment fetch failed", error),
-              buildErrorResponse(createInternalError("something went wrong")),
-            ),
-      ),
-    );
+    }).pipe(respondToFailures("A runner's attachment fetch failed"));
     // The derived routes get their span from the router middleware, which this
     // route sits outside of.
   }).pipe(Effect.withSpan("runner.attachment")),

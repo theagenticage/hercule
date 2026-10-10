@@ -54,6 +54,7 @@ import {
   type StoredConnection,
 } from "../connections";
 import { Notifier } from "../notifications";
+import { PromotionState } from "../promotion";
 import { summarizeCause, toPluginError } from "./errors";
 import type { RegisteredEventSource } from "./event-sources";
 import { ingestContexts } from "./ingest-context";
@@ -137,6 +138,7 @@ const make = Effect.gen(function* () {
   const notifier = yield* Notifier;
   const contexts = yield* ingestContexts;
   const executor = yield* IngestExecutor;
+  const promotion = yield* PromotionState;
   // The Connections whose supervisor is running, and what each was opened
   // with. A supervisor removes its entry as it ends, before it finishes, so a
   // Connection without an entry has no supervisor left that could still
@@ -350,28 +352,41 @@ const make = Effect.gen(function* () {
 
       const openRetrySeconds = Math.min(...intervals.map(([, seconds]) => seconds));
 
-      /** Opens the handle, retrying with backoff until it opens or the credentials are rejected. */
-      const openWithRetry: Effect.Effect<IngestHandle, AuthError> = Effect.gen(function* () {
-        while (true) {
-          const credentialsVersion = yield* connectionTypes.readCredentialsVersion(connection.id);
-          const attempt = yield* Effect.exit(
-            Effect.flatMap(decodeConfig, (config) =>
-              Effect.suspend(() =>
-                source.open(
-                  { id: connection.id, config },
-                  contexts.buildIngestContext(source, { id: connection.id, config }),
-                ),
+      /**
+       * Opens the handle once. Returns the handle, or the seconds to wait
+       * before the next attempt.
+       */
+      const tryOpen: Effect.Effect<IngestHandle | number, AuthError> = Effect.gen(function* () {
+        const credentialsVersion = yield* connectionTypes.readCredentialsVersion(connection.id);
+        const attempt = yield* Effect.exit(
+          Effect.flatMap(decodeConfig, (config) =>
+            Effect.suspend(() =>
+              source.open(
+                { id: connection.id, config },
+                contexts.buildIngestContext(source, { id: connection.id, config }),
               ),
             ),
-          );
-          if (Exit.isSuccess(attempt)) return attempt.value;
-          const delay = yield* handleFailure(
-            OPEN_FAILURES_KEY,
-            openRetrySeconds,
-            credentialsVersion,
-            attempt.cause,
-          );
-          yield* Effect.sleep(Duration.seconds(delay));
+          ),
+        );
+        if (Exit.isSuccess(attempt)) return attempt.value;
+        return yield* handleFailure(
+          OPEN_FAILURES_KEY,
+          openRetrySeconds,
+          credentialsVersion,
+          attempt.cause,
+        );
+      });
+
+      /**
+       * Opens the handle, retrying with backoff until it opens or the
+       * credentials are rejected. An attempt waits while a promotion freezes
+       * the controller, because opening may write the source's state.
+       */
+      const openWithRetry: Effect.Effect<IngestHandle, AuthError> = Effect.gen(function* () {
+        while (true) {
+          const opened = yield* promotion.whenServing(tryOpen);
+          if (typeof opened !== "number") return opened;
+          yield* Effect.sleep(Duration.seconds(opened));
         }
       });
 
@@ -399,7 +414,39 @@ const make = Effect.gen(function* () {
           ),
         );
 
-      /** Polls one feed right away and then forever. Fails only with an `AuthError`. */
+      /**
+       * Polls one feed once, and records how the poll went. Returns the
+       * seconds to wait before the next poll.
+       */
+      const pollFeed = (
+        handle: IngestHandle,
+        lock: Semaphore.Semaphore,
+        name: string,
+        intervalSeconds: number,
+      ): Effect.Effect<number, AuthError> =>
+        Effect.gen(function* () {
+          const credentialsVersion = yield* connectionTypes.readCredentialsVersion(connection.id);
+          const polled = yield* Effect.exit(pollWithTimeout(handle, lock, name));
+          if (Exit.isFailure(polled)) {
+            return yield* handleFailure(name, intervalSeconds, credentialsVersion, polled.cause);
+          }
+          yield* recordFeedSuccess(name);
+          // `nextAfterSeconds` comes from the plugin and may be NaN or Infinity, so a value that is not finite is ignored.
+          const asked = polled.value.nextAfterSeconds;
+          // A plugin may ask for a longer wait than the interval, but not
+          // for one longer than any feed may be configured to wait.
+          const requested =
+            typeof asked === "number" && Number.isFinite(asked)
+              ? Math.min(asked, MAX_FEED_INTERVAL_SECONDS)
+              : 0;
+          return Math.max(intervalSeconds, requested);
+        });
+
+      /**
+       * Polls one feed right away and then forever. Fails only with an
+       * `AuthError`. A poll waits while a promotion freezes the controller,
+       * because the events it emits are written to the event log.
+       */
       const runFeed = (
         handle: IngestHandle,
         lock: Semaphore.Semaphore,
@@ -408,23 +455,9 @@ const make = Effect.gen(function* () {
       ): Effect.Effect<never, AuthError> =>
         Effect.gen(function* () {
           while (true) {
-            const credentialsVersion = yield* connectionTypes.readCredentialsVersion(connection.id);
-            const polled = yield* Effect.exit(pollWithTimeout(handle, lock, name));
-            let delay: number;
-            if (Exit.isSuccess(polled)) {
-              yield* recordFeedSuccess(name);
-              // `nextAfterSeconds` comes from the plugin and may be NaN or Infinity, so a value that is not finite is ignored.
-              const asked = polled.value.nextAfterSeconds;
-              // A plugin may ask for a longer wait than the interval, but not
-              // for one longer than any feed may be configured to wait.
-              const requested =
-                typeof asked === "number" && Number.isFinite(asked)
-                  ? Math.min(asked, MAX_FEED_INTERVAL_SECONDS)
-                  : 0;
-              delay = Math.max(intervalSeconds, requested);
-            } else {
-              delay = yield* handleFailure(name, intervalSeconds, credentialsVersion, polled.cause);
-            }
+            const delay = yield* promotion.whenServing(
+              pollFeed(handle, lock, name, intervalSeconds),
+            );
             yield* Effect.sleep(Duration.seconds(delay));
           }
         });
@@ -551,5 +584,5 @@ export class IngestLoops extends Context.Service<IngestLoops, Effect.Success<typ
 export const IngestLoopsLayer: Layer.Layer<
   IngestLoops,
   never,
-  SqlClient.SqlClient | ConnectionTypes | Notifier | IngestExecutor
+  SqlClient.SqlClient | ConnectionTypes | Notifier | IngestExecutor | PromotionState
 > = Layer.effect(IngestLoops)(make);
