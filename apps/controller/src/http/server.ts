@@ -29,9 +29,9 @@
  * - The attachment fetch at `GET /api/v1/runners/attachments/:id` also stops
  *   before step 5, for the same reason: a runner fetches an input's image
  *   with its credential.
- * - The tool image upload at `POST /api/v1/runners/attachments` also stops
- *   before step 5, for the same reason: a runner uploads an image an agent's
- *   tool returned with its credential.
+ * - The attachment upload at `POST /api/v1/runners/attachments` also stops
+ *   before step 5, for the same reason: a runner uploads an image from a
+ *   tool's result with its credential.
  * - The OAuth callback at `GET /oauth/callback` also stops before the
  *   credential middleware: the browser arrives there from the provider with
  *   only a `state`, and gets a redirect rather than a JSON response.
@@ -91,11 +91,10 @@ import {
 import { LiveSocketLayer } from "../live";
 import { ProviderProbes } from "../providers";
 import {
-  RunnerAttachmentRouteLayer,
+  RunnerAttachmentRoutesLayer,
   RunnerJoinRouteLayer,
   RunnerConnections,
   RunnerSocketRouteLayer,
-  RunnerToolImageRouteLayer,
 } from "../runners";
 import { resumeUnfinishedRuns } from "../runs";
 import { handlerLayers } from "./routes";
@@ -123,7 +122,7 @@ export const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
 /**
  * The largest body of an image upload, which is the largest image the
  * controller stores: a user's upload (`attachment.create`) or a runner's
- * upload of a tool's image. Bun enforces it on every request as
+ * upload of a tool result's attachment. Bun enforces it on every request as
  * `maxRequestBodySize`, so it also bounds an upload sent without a
  * `Content-Length`.
  */
@@ -146,7 +145,7 @@ export const bodyLimits = {
 /**
  * The two routes whose body may exceed `MAX_REQUEST_BODY_BYTES`, as
  * `<method> <path>`: a user's image upload (`attachment.create`) and a
- * runner's upload of a tool's image.
+ * runner's upload of a tool result's attachment.
  */
 const UPLOAD_ROUTES: ReadonlySet<string> = new Set([
   `${OPERATIONS["attachment.create"].method} ${OPERATIONS["attachment.create"].path}`,
@@ -302,8 +301,7 @@ const buildApplication = (bundle: WebBundle | undefined) =>
         liveLayer,
         RunnerJoinRouteLayer,
         RunnerSocketRouteLayer,
-        RunnerAttachmentRouteLayer,
-        RunnerToolImageRouteLayer,
+        RunnerAttachmentRoutesLayer,
         OAuthCallbackRouteLayer,
       ),
     ),

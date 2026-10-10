@@ -17,6 +17,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ALL_GRANTS, type Session, type Workspace } from "@hercule/contract";
 import type { SessionStart, WorkspaceProvision } from "@hercule/protocol";
 import { makeAttachmentCache } from "../../../../runner/src/attachments";
+import { NO_CONTROLLER_UPLOADER } from "../../../../runner/src/providers/testing";
 import { resolveSessionContext } from "../../../../runner/src/sessions/context";
 import {
   makeTestWorkspaces,
@@ -38,7 +39,6 @@ import { migrations } from "../../db/migrations";
 import { get, post, PASSWORD, USERNAME } from "../../http/testing";
 import { waitUntil } from "../../sessions/testing";
 import { connectProofRunner, startControllerProcess } from "./transport.testing";
-import { NO_CONTROLLER_UPLOADER } from "../../../../runner/src/providers/testing";
 
 afterAll(cleanTemporaries);
 const createFixtureId = (): string => uuidToString(mintUuid());

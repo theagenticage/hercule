@@ -14,7 +14,7 @@ const runOnMigratedDatabase = <A, E>(body: Effect.Effect<A, E, SqlClient.SqlClie
     }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
   );
 
-describe("session tool images migration", () => {
+describe("session tool result attachments migration", () => {
   it("refuses a link to an image that does not exist", async () => {
     const outcome = await runOnMigratedDatabase(
       Effect.gen(function* () {

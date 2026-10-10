@@ -1,6 +1,6 @@
 /**
  * Reads and writes attachment rows and the references to them: the ones
- * inputs hold, and the ones session transcripts hold for a tool's images.
+ * inputs hold, and the ones session transcripts hold for tool results.
  * Nothing here decides policy: who may read an attachment, whether an input
  * may carry it, and when its file is removed are the service's decisions.
  */
@@ -39,7 +39,7 @@ const COLUMNS = "a.id, a.name, a.mime_type, a.size_bytes, a.sha256, a.actor, a.c
 /**
  * Builds the SQL condition that is true when something references the
  * attachment `alias` names: an input carries it, or a session's transcript
- * holds it as a tool's image. Every check of "referenced" uses this one
+ * holds it as a tool result's attachment. Every check of "referenced" uses this one
  * condition, so a new kind of reference cannot be counted in one query and
  * missed in another.
  */
@@ -73,8 +73,8 @@ const make = Effect.gen(function* () {
     insert,
 
     /**
-     * Inserts a new attachment row and records it as a tool's image in the
-     * session's transcript. Run it inside a transaction, so both rows are
+     * Inserts a new attachment row and records it as a tool result's
+     * attachment in the session's transcript. Run it inside a transaction, so both rows are
      * written or neither is.
      */
     insertToolResultAttachment: (
@@ -88,6 +88,24 @@ const make = Effect.gen(function* () {
           VALUES (${uuidFromString(attachment.id)}, ${uuidFromString(sessionId)})
         `;
       }),
+
+    /**
+     * Returns the tool result's attachment in the session's transcript whose
+     * bytes have that SHA-256 digest, and `None` when there is none.
+     */
+    findToolResultAttachment: (
+      sessionId: string,
+      sha256: string,
+    ): Effect.Effect<Option.Option<StoredAttachment>, SqlError> =>
+      Effect.map(
+        sql<AttachmentRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM session_tool_result_attachments t
+          JOIN attachments a ON a.id = t.attachment_id
+          WHERE t.session_id = ${uuidFromString(sessionId)} AND a.sha256 = ${sha256}
+          LIMIT 1
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toAttachment),
+      ),
 
     /** Checks whether the session exists and is placed on the runner. */
     isSessionPlacedOn: (sessionId: string, runnerId: string): Effect.Effect<boolean, SqlError> =>

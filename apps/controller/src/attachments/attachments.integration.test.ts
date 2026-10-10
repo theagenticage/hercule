@@ -2,8 +2,8 @@
  * Tests images in prompts over the real listener: the upload and the read,
  * the route a runner fetches an image from, the check that a turn's images
  * can go to its runner and model, the edit of a queued input's images, the
- * route a runner uploads a tool's image to, and the sweep of images nobody
- * claimed.
+ * route a runner uploads a tool result's attachment to, and the sweep of
+ * images nobody claimed.
  */
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
@@ -71,7 +71,7 @@ const fetchAsRunner = (arranged: Arranged, id: string, credential?: string): Pro
     headers: credential === undefined ? {} : { authorization: `Bearer ${credential}` },
   });
 
-/** Uploads a tool's image the way a runner does, with `credential` as its bearer, or none for `null`. */
+/** Uploads an image from a tool's result the way a runner does, with `credential` as its bearer, or none for `null`. */
 const uploadToolResultAttachment = (
   arranged: Arranged,
   sessionId: string,
@@ -872,7 +872,7 @@ describe("a runner fetching an image", () => {
   );
 });
 
-describe("a runner uploading a tool's image", () => {
+describe("a runner uploading a tool result's attachment", () => {
   it(
     "stores the image in a session on the runner, and anyone who may read transcripts reads it",
     async () => {
@@ -962,6 +962,12 @@ describe("a runner uploading a tool's image", () => {
           (await uploadToolResultAttachment(arranged, session.id, PNG, arranged.token)).status,
         ).toBe(401);
 
+        const noSessionId = await fetch(`${arranged.harness.base}${RUNNER_ATTACHMENTS_PATH}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${arranged.credential}` },
+          body: PNG,
+        });
+        expect(noSessionId.status).toBe(404);
         expect((await uploadToolResultAttachment(arranged, "not-an-id")).status).toBe(404);
         expect((await uploadToolResultAttachment(arranged, NO_SUCH_ATTACHMENT)).status).toBe(404);
         const joined = await send("POST", arranged.harness.base, "/api/v1/runners/join", {
@@ -978,6 +984,32 @@ describe("a runner uploading a tool's image", () => {
   );
 
   it(
+    "stores the same bytes once per session, and again in another session",
+    async () => {
+      await withAgentFleet(async (arranged) => {
+        const directory = join(arranged.harness.home, "data", "attachments");
+        const filesBefore = listFiles(directory);
+        const session = await spawnSessionOrFail(arranged, { prompt: "look" });
+        const first = await uploadToolResultAttachmentOrFail(arranged, session.id);
+        const second = await uploadToolResultAttachmentOrFail(arranged, session.id);
+        expect(second).toEqual(first);
+        expect(listFiles(directory)).toEqual([...filesBefore, first.id].sort());
+
+        const other = await spawnSessionOrFail(arranged, { prompt: "look" });
+        const elsewhere = await uploadToolResultAttachmentOrFail(arranged, other.id);
+        expect(elsewhere.id).not.toBe(first.id);
+        const rows = await Effect.runPromise(
+          arranged.harness.sql<{ readonly count: number }>`
+            SELECT COUNT(*) AS count FROM session_tool_result_attachments
+          `,
+        );
+        expect(rows[0]?.count).toBe(2);
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
     "counts nothing against the session's quota, and cannot be deleted as an unsent upload",
     async () => {
       await withAgentFleet(async (arranged) => {
@@ -986,7 +1018,7 @@ describe("a runner uploading a tool's image", () => {
           "session.read",
         ]);
         const stored = await uploadToolResultAttachmentOrFail(arranged, agent.session.id);
-        // The tool's image has the session as its actor, as the session's own
+        // The tool result's attachment has the session as its actor, as the session's own
         // uploads do. Were it counted, this size would fill the quota.
         await Effect.runPromise(
           arranged.harness.sql`UPDATE attachments SET size_bytes = ${MAX_UNCLAIMED_BYTES}`,
@@ -1038,7 +1070,7 @@ describe("the sweep", () => {
   );
 
   it(
-    "keeps a tool's image, row and file, long after a day",
+    "keeps a tool result's attachment, row and file, long after a day",
     async () => {
       await withAgentFleet(
         async (arranged) => {

@@ -361,7 +361,7 @@ describe("the body size limit", () => {
    * The limit runs before the route checks the runner's credential, so a
    * `401` rather than a `411` or `413` shows the request passed the limit.
    */
-  it("holds a runner's tool image upload to the upload limit too, at its exact path only", async () => {
+  it("holds a runner's upload of a tool result's attachment to the upload limit too, at its exact path only", async () => {
     await withServer(async ({ base }) => {
       const chunked = await fetch(`${base}${RUNNER_ATTACHMENTS_PATH}?sessionId=x`, {
         method: "POST",
