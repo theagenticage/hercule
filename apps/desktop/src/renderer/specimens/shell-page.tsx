@@ -269,13 +269,14 @@ export interface IntakeRecords {
   readonly view?: "later" | "done" | "everything";
   /**
    * What the Everything view reads: the events its one page holds, newest
-   * first, under the search text and the handling filter it opens with, and
-   * the event whose pane is open. Used only when `view` is "everything".
+   * first, under the search text, the handling filter and the source tab it
+   * opens with, and the event whose pane is open. Used only when `view` is "everything".
    */
   readonly everything?: {
     readonly events: ReadonlyArray<EventWithFacts>;
     readonly text?: string;
     readonly handling?: EventHandling;
+    readonly source?: string;
     readonly selectedEventId?: number;
   };
   /**
@@ -502,12 +503,10 @@ const seedQueryCache = (
     queryClient.setQueryData(workflowsQuery(client).queryKey, []);
   }
   if (intake?.everything !== undefined) {
-    const { events, text, handling } = intake.everything;
+    const { events, text, handling, source } = intake.everything;
     queryClient.setQueryData(
-      eventsEverythingQuery(client, {
-        ...(text === undefined ? {} : { text }),
-        ...(handling === undefined ? {} : { handling }),
-      }).queryKey,
+      // `since` is not part of the listing's key, so any value finds it.
+      eventsEverythingQuery(client, { text, handling, source }, "").queryKey,
       { pages: [{ items: events }], pageParams: [undefined] },
     );
   }
@@ -979,6 +978,7 @@ export async function mountIntakeSpecimen(
   }
   if (everything?.text !== undefined) search.set("text", everything.text);
   if (everything?.handling !== undefined) search.set("handling", everything.handling);
+  if (everything?.source !== undefined) search.set("source", everything.source);
   const path = search.size === 0 ? "/intake" : `/intake?${search.toString()}`;
   await mountShellSpecimen(records, path, { intake });
 }

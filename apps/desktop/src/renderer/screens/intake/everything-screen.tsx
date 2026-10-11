@@ -12,15 +12,16 @@ import {
   type JSX,
   type KeyboardEvent,
 } from "react";
-import { useInfiniteQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { MAX_SEARCH_TEXT_LENGTH, type EventHandling } from "@hercule/contract";
 import {
+  computeEventHorizonStart,
   describeEventHorizon,
+  describeEventListEnd,
   EVENT_HANDLING_OPTIONS,
   groupEventsByDay,
   moveEventSelection,
-  queryKeys,
   readErrorMessage,
   resolveDisplayTimezone,
   type IntakeView,
@@ -29,22 +30,54 @@ import { eventsEverythingQuery, settingsQuery } from "../../app/queries";
 import { SearchIcon } from "../../icons/search";
 import { EventPane, type EventPaneHandle } from "./event-pane";
 import { EverythingList } from "./everything-list";
-import { IntakeBar, IntakeSplit, IntakeViewSwitcher, isTextField } from "./intake-split";
+import { IntakeBar, IntakeSplit, IntakeViewSwitcher } from "./intake-frame";
+import { isTextField } from "./is-text-field";
 import { useIntakeSplit } from "./use-intake-split";
 import { useIntakeTabs } from "./use-intake-tabs";
 
 /** How long typing in the search field pauses before the list is read again, in milliseconds. */
 const SEARCH_WAIT_MS = 200;
 
+/** Returns the value of the filter menu's option for `handling`; "All events" is the empty string. */
+const toSelectValue = (handling: EventHandling | null): string => handling ?? "";
+
+/** Draws the error of a failed read as a line of the list, with a Retry that asks again. */
+function ReadFailure({
+  error,
+  onRetry,
+}: {
+  readonly error: Error | null;
+  readonly onRetry: () => void;
+}): JSX.Element {
+  return (
+    <p className="asks-note asks-note--failed" role="alert">
+      <span>{readErrorMessage(error)}</span>
+      <button type="button" className="btn btn--sm btn--quiet" onClick={onRetry}>
+        Retry
+      </button>
+    </p>
+  );
+}
+
 /**
  * Renders Everything: the bar with its source tabs and the pane's toggle,
  * then the split of the list and the pane. Above the list, the view switcher,
  * the search field, the filter menu and the horizon the list reaches back to.
  *
- * `text`, `handling` and `selectedId` come from the URL. The screen keeps
- * what the user types in the search field and calls `onSearchChange` once
- * typing has paused, so the list is not read again for each key. A new search
- * or filter starts a new list, and the route drops the selection with it.
+ * `pluginId` (the source tab), `text`, `handling` and `selectedId` come from
+ * the URL. The screen keeps what the user types in the search field and calls
+ * `onSearchChange` once typing has paused, so the list is not read again for
+ * each key. Only typing starts that wait: a `text` that arrives from outside,
+ * such as a link, replaces what the field holds and ends any wait. A new
+ * search, filter or tab starts a new list, and the route drops the selection
+ * with it.
+ *
+ * `openedAt` is the moment the route loaded the list. The screen takes it as
+ * "now" for the day headings and the row times, and counts the retention
+ * horizon from it, so neither moves while the list stays.
+ *
+ * A page that fails to load ends the list with its error and a Retry. The list
+ * does not ask for that page again until Retry is pressed.
  *
  * The keys of spec 17 §Keys act while the focus is in the list or the pane
  * and never in a text field:
@@ -59,6 +92,7 @@ export function EverythingScreen({
   text,
   handling,
   selectedId,
+  openedAt,
   onSelect,
   onSearchChange,
   onHandlingChange,
@@ -72,6 +106,8 @@ export function EverythingScreen({
   /** The filter the list shows, `null` for every event. */
   readonly handling: EventHandling | null;
   readonly selectedId: number | null;
+  /** When the route loaded the list, in milliseconds since the epoch. */
+  readonly openedAt: number;
   readonly onSelect: (eventId: number | null) => void;
   readonly onSearchChange: (text: string) => void;
   readonly onHandlingChange: (handling: EventHandling | null) => void;
@@ -79,10 +115,11 @@ export function EverythingScreen({
   readonly onPluginChange: (pluginId: string | null) => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const queryClient = useQueryClient();
   const { tabs, plugins } = useIntakeTabs(pluginId);
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const timezone = resolveDisplayTimezone(settings.user.timezone);
+  const retentionDays = settings.controller?.["retention.events"];
+  const now = useMemo(() => new Date(openedAt), [openedAt]);
   const [focusSelectedRow, setFocusSelectedRow] = useState(false);
   const split = useIntakeSplit(selectedId === null ? null : String(selectedId), "data-event-id");
   const { listRef, fits, paneShown, paneDrawn, setDismissed } = split;
@@ -95,29 +132,39 @@ export function EverythingScreen({
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
+  // The field holds what the user typed. `sentText` is the last `text` this
+  // screen either sent to the route or saw there: a `text` that differs from it
+  // came from outside, and replaces the field.
   const [draft, setDraft] = useState(text);
+  const [waiting, setWaiting] = useState(false);
+  const [sentText, setSentText] = useState(text);
+  if (text !== sentText) {
+    setSentText(text);
+    setDraft(text);
+    setWaiting(false);
+  }
   useEffect(() => {
-    const trimmed = draft.trim();
-    if (trimmed === text) return;
+    if (!waiting) return;
     const timer = setTimeout(() => {
+      const trimmed = draft.trim();
+      setWaiting(false);
+      if (trimmed === text) return;
+      setSentText(trimmed);
       onSearchChange(trimmed);
     }, SEARCH_WAIT_MS);
     return () => {
       clearTimeout(timer);
     };
-  }, [draft, text, onSearchChange]);
+  }, [waiting, draft, text, onSearchChange]);
 
   const paged = useInfiniteQuery(
-    eventsEverythingQuery(client, {
-      ...(pluginId === null ? {} : { source: pluginId }),
-      ...(text === "" ? {} : { text }),
-      ...(handling === null ? {} : { handling }),
-    }),
+    eventsEverythingQuery(
+      client,
+      { text, source: pluginId ?? undefined, handling: handling ?? undefined },
+      computeEventHorizonStart(now, retentionDays),
+    ),
   );
   const events = useMemo(() => paged.data?.pages.flatMap((page) => page.items) ?? [], [paged.data]);
-  // The sections name their days against the moment the listing was read.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- `dataUpdatedAt` is the reason to take the time again.
-  const now = useMemo(() => new Date(), [paged.dataUpdatedAt]);
   const sections = useMemo(() => groupEventsByDay(events, now, timezone), [events, now, timezone]);
   const selectedEvent = events.find((event) => event.id === selectedId);
 
@@ -152,10 +199,13 @@ export function EverythingScreen({
 
   const hasNextPage = paged.hasNextPage;
   const isFetchingNextPage = paged.isFetchingNextPage;
+  const nextPageFailed = paged.isFetchNextPageError;
   const fetchNextPage = paged.fetchNextPage;
+  // A failed page is not asked for again by scrolling: the list is still near
+  // its end, so that would loop. The Retry at the end of the list asks again.
   const readNextPage = useCallback((): void => {
-    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+    if (hasNextPage && !isFetchingNextPage && !nextPageFailed) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, nextPageFailed, fetchNextPage]);
 
   const handleKeys = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (isTextField(event.target)) return;
@@ -208,12 +258,7 @@ export function EverythingScreen({
             else openEvent(selectedId ?? events[0]!.id);
           },
         }}
-        onTabChange={(next) => {
-          // The tab starts another listing. Every listing held is marked stale
-          // so the one the tab shows is read again, as when Intake opens.
-          void queryClient.invalidateQueries({ queryKey: queryKeys.events(), refetchType: "none" });
-          onPluginChange(next);
-        }}
+        onTabChange={onPluginChange}
       />
       <IntakeSplit
         split={split}
@@ -234,31 +279,34 @@ export function EverythingScreen({
                     value={draft}
                     onChange={(event) => {
                       setDraft(event.target.value);
+                      setWaiting(true);
                     }}
                   />
                 </label>
                 <label className="field field--select asks-stamp">
                   <select
                     aria-label="What came of it"
-                    value={handling ?? ""}
+                    value={toSelectValue(handling)}
                     onChange={(event) => {
-                      const chosen = EVENT_HANDLING_OPTIONS.find(
-                        (option) => (option.handling ?? "") === event.target.value,
+                      onHandlingChange(
+                        EVENT_HANDLING_OPTIONS.find(
+                          (option) => toSelectValue(option.handling) === event.target.value,
+                        )?.handling ?? null,
                       );
-                      onHandlingChange(chosen?.handling ?? null);
                     }}
                   >
                     {EVENT_HANDLING_OPTIONS.map((option) => (
-                      <option key={option.handling ?? "all"} value={option.handling ?? ""}>
+                      <option
+                        key={toSelectValue(option.handling)}
+                        value={toSelectValue(option.handling)}
+                      >
                         {option.caption}
                       </option>
                     ))}
                   </select>
                 </label>
               </div>
-              <p className="asks-horizon">
-                {describeEventHorizon(settings.controller?.["retention.events"])}
-              </p>
+              <p className="asks-horizon">{describeEventHorizon(retentionDays)}</p>
             </div>
             <EverythingList
               sections={sections}
@@ -268,17 +316,19 @@ export function EverythingScreen({
               timezone={timezone}
               focusSelectedRow={focusSelectedRow}
               empty={
-                paged.isPending ? null : paged.isError ? (
-                  <p className="asks-empty" role="alert">
-                    {readErrorMessage(paged.error)}
-                  </p>
+                paged.isPending ? null : paged.data === undefined ? (
+                  <ReadFailure error={paged.error} onRetry={() => void paged.refetch()} />
                 ) : (
-                  <p className="asks-empty">{filtered ? "No events match." : "No events yet."}</p>
+                  <p className="asks-note">{filtered ? "No events match." : "No events yet."}</p>
                 )
               }
               foot={
-                events.length > 0 &&
-                !paged.hasNextPage && <p className="asks-end">No older events.</p>
+                nextPageFailed ? (
+                  <ReadFailure error={paged.error} onRetry={() => void fetchNextPage()} />
+                ) : (
+                  events.length > 0 &&
+                  !hasNextPage && <p className="asks-note">{describeEventListEnd(retentionDays)}</p>
+                )
               }
               onSelect={openEvent}
               onNearEnd={readNextPage}

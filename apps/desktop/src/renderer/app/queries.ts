@@ -10,6 +10,7 @@ import {
   keepPreviousData,
   queryOptions,
   type EnsureInfiniteQueryDataOptions,
+  type InfiniteData,
   type EnsureQueryDataOptions,
   type QueryClient,
   type QueryKey,
@@ -19,6 +20,7 @@ import {
   collectRunningTurnRows,
   collectSenderSessionIds,
   detectLocalRunner,
+  type EventListFilter,
   mergeNewestMessagePage,
   mergeSentMessage,
   queryKeys,
@@ -934,49 +936,84 @@ export const signalQuery = (client: HerculeClient, id: string) =>
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
-/** What the Everything view narrows its events by. Each field is absent when that filter is off. */
+/**
+ * What the Everything view narrows its events by. A field is `undefined` or
+ * empty when that filter is off, so a caller passes the URL's values as they
+ * are.
+ */
 export interface EverythingFilter {
-  readonly text?: string;
-  readonly source?: string;
-  readonly handling?: EventHandling;
+  readonly text?: EventListFilter["text"] | undefined;
+  readonly source?: EventListFilter["source"] | undefined;
+  readonly handling?: EventHandling | undefined;
 }
 
 /**
  * Reads Intake's Everything view page by page, newest first: the events
- * Intake covers, with the facts their handlings are drawn from, narrowed by
- * `filter`. Not a live topic: the log is append-only, so Intake reads it
- * again each time it opens, see `readInfiniteOnOpen`.
+ * Intake covers, received since `since`, with the facts their handlings are
+ * drawn from, narrowed by `filter`. Not a live topic: the log is append-only,
+ * so Intake reads it again each time it opens, see `readInfiniteOnOpen`.
+ *
+ * `since` is the start of the retention horizon. It is not part of the key,
+ * because it moves with the clock and a listing is read again from its first
+ * page on every opening anyway.
  */
-export const eventsEverythingQuery = (client: HerculeClient, filter: EverythingFilter = {}) => {
-  const listing = {
+export const eventsEverythingQuery = (
+  client: HerculeClient,
+  filter: EverythingFilter,
+  since: string,
+) => {
+  const listing: EventListFilter = {
     intake: true,
-    ...(filter.text === undefined ? {} : { text: filter.text }),
-    ...(filter.source === undefined ? {} : { source: filter.source }),
+    ...(filter.text === undefined || filter.text === "" ? {} : { text: filter.text }),
+    ...(filter.source === undefined || filter.source === "" ? {} : { source: filter.source }),
     ...(filter.handling === undefined ? {} : { handling: [filter.handling] }),
   };
   return infiniteQueryOptions({
     queryKey: queryKeys.events(listing),
     queryFn: ({ pageParam }) =>
       client.event.query({
-        query: pageParam === undefined ? listing : { ...listing, cursor: pageParam },
+        query: { ...listing, since, ...(pageParam === undefined ? {} : { cursor: pageParam }) },
       }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => page.nextCursor,
+    retry: isWorthRetrying,
     ...READ_ON_OPEN_OPTIONS,
   });
 };
 
 /**
  * Reads the first page of the infinite `options` once for this opening of a
- * screen, as `readOnOpen` does for a plain read. When the listing is held,
- * every held page is read again in the background.
+ * screen, as `readOnOpen` does for a plain read, and resolves when it is
+ * done.
+ *
+ * A listing already held starts again from its first page: later pages are
+ * dropped, so the opening reads one page and not every page the last visit
+ * scrolled through. The first page shows at once and is read again behind.
+ *
+ * Never fails. A listing that cannot be read is drawn by the screen as an
+ * error of its own, with a way to try again, rather than failing the route,
+ * which would replace the whole screen. The read is made once here; the screen
+ * tries it again when it mounts.
  */
-export const readInfiniteOnOpen = <Page, PageParam>(
+export const readInfiniteOnOpen = async <Page, PageParam>(
   queryClient: QueryClient,
   options: EnsureInfiniteQueryDataOptions<Page, Error, Page, QueryKey, PageParam>,
-) => {
+): Promise<void> => {
+  queryClient.setQueryData(options.queryKey, (held: InfiniteData<Page, PageParam> | undefined) =>
+    held === undefined || held.pages.length < 2
+      ? held
+      : { pages: held.pages.slice(0, 1), pageParams: held.pageParams.slice(0, 1) },
+  );
   void queryClient.invalidateQueries({ queryKey: options.queryKey, refetchType: "none" });
-  return queryClient.ensureInfiniteQueryData({ ...options, revalidateIfStale: true });
+  try {
+    await queryClient.ensureInfiniteQueryData({
+      ...options,
+      revalidateIfStale: true,
+      retry: false,
+    });
+  } catch {
+    // The screen reads the failure from the query.
+  }
 };
 
 /**

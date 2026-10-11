@@ -74,6 +74,8 @@
   min-height: 0;
   overflow-y: auto;
   padding: 0 10px 16px;
+  /* Rows fade in under the header instead of being cut by its edge. */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
 }
 /* The handle between the list and the pane: an 8px strip centred on the
    pane's edge that takes no room of its own, with a 2px accent line on
@@ -413,17 +415,28 @@
   outline-offset: 2px;
 }
 .asks-horizon {
-  margin: 8px 0 0;
-  padding: 0 2px;
+  margin: 6px 0 0;
+  padding: 0 10px;
   color: var(--faint);
   font-size: var(--t-11);
+  line-height: 16px;
 }
-/* The last line of Everything's list, when no older event is left. */
-.asks-end {
+/* A line of Everything's list that is not an event: no events, no match, the
+   end of the list, and a failed read. They share one look. */
+.asks-note {
   margin: 0;
   padding: 16px 10px 24px;
   color: var(--faint);
   font-size: var(--t-12);
+}
+.asks-note--failed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* The count of handlings a row does not list, which keeps its width as it changes. */
+.ev-more {
+  font-variant-numeric: tabular-nums;
 }
 /* An event's first handling, ahead of what it led to. */
 .ev-stamp {
@@ -692,10 +705,14 @@
   color: var(--ink);
   font-weight: var(--w-medium);
 }
-/* The line of a plugin's signal is a link to that kind's switches on Settings >
-   Intake. It keeps the look of the plain line; hovering it underlines the text,
-   as the app's other text links do (`.link`). */
-.ad-kind a.src:hover {
+/* An event's kind is a link to that kind's switches on Settings > Intake. It
+   keeps the look of plain muted text; hovering it underlines the text, as the
+   app's other text links do (`.link`). */
+.ad-kind-type {
+  color: var(--muted);
+  text-decoration: none;
+}
+.ad-kind-type:hover {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -1117,7 +1134,7 @@
   text-decoration: none;
 }
 .b-work--link:hover {
-  background: var(--hover);
+  background: color-mix(in oklab, var(--ink) 4%, var(--raised));
 }
 /* The event's Connection and references, as the drawing's field list. */
 .b-fields {
