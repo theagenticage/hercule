@@ -272,6 +272,9 @@ const make = Effect.gen(function* () {
    *
    * - the raise is gone, because an end on its thread dropped it while
    *   `build` ran;
+   * - the Connection is gone, because the user deleted it while `build`
+   *   ran. The raise is dropped with a log line, so no signal or build
+   *   failure points at a Connection that no longer exists;
    * - the event's signal of this kind already exists;
    * - an open signal on the thread was raised from a later event. That
    *   signal is newer, so it stays, and the raise is dropped.
@@ -288,6 +291,11 @@ const make = Effect.gen(function* () {
         if (!(yield* signals.deleteRaise(raise.eventId, raise.kind))) {
           return yield* Effect.logInfo(
             `The raise of a ${raise.kind} signal from the event ${raise.eventId} was dropped while its signal was built, so the signal was not written`,
+          );
+        }
+        if (Option.isNone(yield* connections.one(raise.connectionId))) {
+          return yield* Effect.logWarning(
+            `The raise of a ${raise.kind} signal from the event ${raise.eventId} was dropped, because its Connection was deleted while its signal was built`,
           );
         }
         if (yield* signals.hasSignalForEvent(raise.eventId, raise.kind)) return;

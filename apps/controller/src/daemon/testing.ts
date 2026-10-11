@@ -25,6 +25,7 @@ import type {
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
 import { github } from "@hercule/plugin-github";
+import { withTransaction } from "../db";
 import { appendIngestedEvent } from "../events";
 import { get, post, type ServerHarness } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
@@ -141,50 +142,71 @@ export const withPipeline = (
 export const runEffect = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(Effect.orDie(effect));
 
+/** One event a plugin's event source ingests, for `ingestEvents`. */
+export interface IngestedTestEvent {
+  readonly pluginId: string;
+  readonly connectionId: string;
+  readonly kind: string;
+  readonly title: string;
+  readonly payload: unknown;
+  readonly refs?: ReadonlyArray<string>;
+  readonly author?: string;
+}
+
 /**
- * Appends one event to the log as the event source of the plugin `pluginId`
- * ingests it through the Connection `connectionId`, and returns its id.
+ * Appends events to the log, in one transaction, as the event source of each
+ * event's plugin `pluginId` ingests it through the Connection
+ * `connectionId`. Returns their ids, in order.
  *
  * A test uses it in place of `event.emit` when the route under test takes
  * only a plugin's own events: an event emitted over HTTP is a manual event,
  * whose source is not the plugin. The payload is not checked against the
- * kind, so the test must give one that fits.
+ * kind, so the test must give one that fits. One transaction means the
+ * router reads all the events in the same pass, so whatever they route to
+ * is written together.
  */
+export const ingestEvents = (
+  harness: ServerHarness,
+  events: ReadonlyArray<IngestedTestEvent>,
+): Promise<ReadonlyArray<number>> =>
+  runEffect(
+    withTransaction(
+      harness.sql,
+      Effect.forEach(events, (event) =>
+        Effect.gen(function* () {
+          const dedupKey = crypto.randomUUID();
+          const now = new Date().toISOString();
+          yield* appendIngestedEvent(harness.sql, {
+            source: event.pluginId,
+            connectionId: event.connectionId,
+            system: event.pluginId,
+            kind: event.kind,
+            occurredAt: now,
+            receivedAt: now,
+            dedupKey,
+            refs: event.refs ?? [],
+            url: null,
+            title: event.title,
+            author: event.author ?? null,
+            payload: event.payload,
+            raw: null,
+          });
+          const [row] = yield* harness.sql<{ readonly id: number }>`
+            SELECT id FROM events WHERE dedup_key = ${dedupKey}
+          `;
+          return row!.id;
+        }),
+      ),
+    ),
+  );
+
+/** Appends one event to the log like `ingestEvents`, and returns its id. */
 export const ingestEvent = async (
   harness: ServerHarness,
-  event: {
-    readonly pluginId: string;
-    readonly connectionId: string;
-    readonly kind: string;
-    readonly title: string;
-    readonly payload: unknown;
-    readonly refs?: ReadonlyArray<string>;
-    readonly author?: string;
-  },
+  event: IngestedTestEvent,
 ): Promise<number> => {
-  const dedupKey = crypto.randomUUID();
-  const now = new Date().toISOString();
-  await runEffect(
-    appendIngestedEvent(harness.sql, {
-      source: event.pluginId,
-      connectionId: event.connectionId,
-      system: event.pluginId,
-      kind: event.kind,
-      occurredAt: now,
-      receivedAt: now,
-      dedupKey,
-      refs: event.refs ?? [],
-      url: null,
-      title: event.title,
-      author: event.author ?? null,
-      payload: event.payload,
-      raw: null,
-    }),
-  );
-  const [row] = await runEffect(
-    harness.sql<{ readonly id: number }>`SELECT id FROM events WHERE dedup_key = ${dedupKey}`,
-  );
-  return row!.id;
+  const [id] = await ingestEvents(harness, [event]);
+  return id!;
 };
 
 /** Spawns a Thread on a profile that may create and read subscriptions. */

@@ -64,14 +64,14 @@ const make = Effect.gen(function* () {
   /**
    * Runs `step` every interval, forever. A step that fails is logged and the
    * next one runs, because one bad step must not stop the loop that every
-   * later event depends on.
+   * later event depends on. `step` passes the promotion gate itself.
    */
   const repeatEveryInterval = <E>(failureMessage: string, step: Effect.Effect<void, E>) =>
     Effect.gen(function* () {
       const interval = yield* EventRoutingInterval;
       while (true) {
         yield* Effect.sleep(interval);
-        yield* absorbFailures(failureMessage, promotion.whenServing(step));
+        yield* absorbFailures(failureMessage, step);
       }
     });
 
@@ -79,7 +79,12 @@ const make = Effect.gen(function* () {
     /** Runs the tick loop and the signal raise loop side by side, forever. */
     driving: Effect.all(
       [
-        repeatEveryInterval("Running a tick of the event pipeline failed", tick),
+        repeatEveryInterval(
+          "Running a tick of the event pipeline failed",
+          promotion.whenServing(tick),
+        ),
+        // The signal raise delivery passes the gate once per raise, so a
+        // freeze never waits for a whole pass of builds.
         repeatEveryInterval(`Delivering ${raises.name} failed`, raises.deliverWaiting()),
       ],
       { concurrency: "unbounded", discard: true },

@@ -31,7 +31,8 @@ import {
   type Plugin,
   type SignalDraft,
 } from "@hercule/plugin-host";
-import { get, post } from "../../../http/testing";
+import { del, get, post } from "../../../http/testing";
+import { freezeController, requestTransfer } from "../../../promotion/testing";
 import { IDLE_FEEDS, IDLE_INGEST_OPEN } from "../../../plugins/testing";
 import { WAIT_DEADLINE_MS, waitUntil } from "../../../sessions/testing";
 import {
@@ -45,7 +46,13 @@ import {
   withSetUpController,
   type SetUpController,
 } from "../../../workflows/testing";
-import { ingestEvent, runEffect, waitOutSeveralTicks, waitUntilRouted } from "../../testing";
+import {
+  ingestEvent,
+  ingestEvents,
+  runEffect,
+  waitOutSeveralTicks,
+  waitUntilRouted,
+} from "../../testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
 
@@ -553,6 +560,93 @@ describe("raising a plugin's signals from its events", () => {
 
       expect(await listPendingRaises(controller)).toEqual([]);
       expect(await listOpenSignals(controller, ASKED_KIND)).toEqual([]);
+    });
+  });
+
+  it("does not write a signal or a build failure when the Connection is deleted while build runs", async () => {
+    let releaseBuild!: () => void;
+    const buildReleased = new Promise<void>((resolve) => (releaseBuild = resolve));
+    let markBuildStarted!: () => void;
+    const buildStarted = new Promise<void>((resolve) => (markBuildStarted = resolve));
+    const mode: DeskMode = {
+      build: "fail",
+      beforeBuild: () => {
+        markBuildStarted();
+        return buildReleased;
+      },
+    };
+    await withDeskController(mode, async (controller, connectionId) => {
+      await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-14",
+        by: "marta",
+        toYou: true,
+      });
+      await buildStarted;
+      const deleted = await del(
+        controller.base,
+        `/api/v1/connections/${connectionId}`,
+        controller.token,
+      );
+      expect(deleted.status, await deleted.clone().text()).toBe(200);
+      releaseBuild();
+      await waitUntil("dropped the raise", async () =>
+        (await listPendingRaises(controller)).length === 0 ? true : undefined,
+      );
+
+      expect(await listOpenSignals(controller, ASKED_KIND)).toEqual([]);
+      expect(await queryBuildFailedNotifications(controller)).toEqual([]);
+    });
+  });
+
+  it("lets a promotion's freeze stop between two raises, rather than wait for every build", async () => {
+    let releaseBuild!: () => void;
+    const buildReleased = new Promise<void>((resolve) => (releaseBuild = resolve));
+    let markBuildStarted!: () => void;
+    const buildStarted = new Promise<void>((resolve) => (markBuildStarted = resolve));
+    let builds = 0;
+    const mode: DeskMode = {
+      build: "draft",
+      beforeBuild: () => {
+        builds += 1;
+        if (builds > 1) return Promise.resolve();
+        markBuildStarted();
+        return buildReleased;
+      },
+    };
+    await withDeskController(mode, async (controller, connectionId) => {
+      // Both events are written in one transaction, so the router writes
+      // their raises together, and the pass that holds the first build has
+      // the second raise waiting behind it.
+      await ingestEvents(
+        controller.harness,
+        ["t-15", "t-16"].map((thread) => ({
+          pluginId: "desk",
+          connectionId,
+          kind: "desk.asked",
+          title: DESK_TITLE,
+          payload: { thread, by: "marta", toYou: true },
+        })),
+      );
+      await buildStarted;
+      expect(await listPendingRaises(controller)).toHaveLength(2);
+
+      // The freeze waits for the raise whose build is held, and no longer.
+      const frozen = freezeController(controller.base, controller.token);
+      await waitUntil("began the freeze", async () =>
+        (await runEffect(controller.harness.promotion.phase))._tag === "Frozen" ? true : undefined,
+      );
+      releaseBuild();
+      const promotionToken = await frozen;
+      await waitOutSeveralTicks();
+      expect(builds).toBe(1);
+      expect(await listOpenSignals(controller, ASKED_KIND)).toHaveLength(1);
+
+      const cancelled = await requestTransfer(controller.base, promotionToken, "DELETE");
+      expect(cancelled.status).toBe(204);
+      await waitUntil("raised the second signal", async () =>
+        (await listOpenSignals(controller, ASKED_KIND)).length === 2 ? true : undefined,
+      );
+      expect(builds).toBe(2);
     });
   });
 });
