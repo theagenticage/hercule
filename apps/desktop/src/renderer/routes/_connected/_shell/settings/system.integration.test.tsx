@@ -108,10 +108,13 @@ describe("Settings > System, text generation", () => {
   /**
    * Opens System on a controller that holds the Claude Code instance, the
    * stored `setting` (none when undefined) and the text generation `status`.
-   * A save is answered with the settings it stores.
+   * A save is answered with the settings it stores. `status` is either fixed,
+   * or worked out from the setting stored when the controller is read, as the
+   * real controller does.
    */
   const openSystem = async (
-    status: ControllerInfo["textGeneration"],
+    status:
+      ControllerInfo["textGeneration"] | ((stored: unknown) => ControllerInfo["textGeneration"]),
     setting?: unknown,
   ): Promise<readonly Call[]> => {
     // The stubbed controller keeps what a save stores, so the read after a save finds it.
@@ -126,22 +129,36 @@ describe("Settings > System, text generation", () => {
         stored = { controller: (call.body as SettingsPatch).controller ?? {}, user: {} };
         return { body: stored };
       },
-      "GET /api/v1/controller": {
+      "GET /api/v1/controller": () => ({
         body: {
           id: "01a06d02-7800-7000-8000-000000000001",
           publicKey: "cHVibGljLWtleQ==",
           version: "0.4.2",
           defaultRunnerId: null,
           localRunnerId: null,
-          textGeneration: status,
+          textGeneration:
+            typeof status === "function"
+              ? status((stored.controller as Record<string, unknown>)["textGeneration.model"])
+              : status,
         },
-      },
+      }),
     });
     await renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {
       path: "/settings/system",
     });
     await screen.findByRole("heading", { level: 1, name: "System" });
     return calls;
+  };
+
+  /**
+   * Returns the status a controller reports for `stored`, as it works it out on
+   * every read: nothing when text generation is off, the chosen model, or
+   * Sonnet for Automatic.
+   */
+  const followSetting = (stored: unknown): ControllerInfo["textGeneration"] => {
+    if (stored === "off") return NO_TEXT_GENERATION;
+    if (typeof stored === "object") return { model: stored as typeof OPUS, lastFailure: null };
+    return { model: SONNET, lastFailure: null };
   };
 
   const readSelect = (): HTMLSelectElement =>
@@ -167,7 +184,34 @@ describe("Settings > System, text generation", () => {
     ]);
   });
 
-  it("says that no model is available when Automatic resolves to none", async () => {
+  it("names the model Automatic resolves to after switching from Off, as the controller reports it", async () => {
+    const calls = await openSystem(followSetting, "off");
+    expect(readSelect().selectedOptions[0]?.textContent).toBe("Off");
+
+    await userEvent.selectOptions(readSelect(), "automatic");
+
+    await waitFor(() => {
+      expect(readSelect().selectedOptions[0]?.textContent).toBe(
+        "Automatic - currently Claude Code · Claude Sonnet 5",
+      );
+    });
+    expect(listPatches(calls)).toEqual([{ controller: { "textGeneration.model": "automatic" } }]);
+  });
+
+  it("names the model Automatic resolves to after switching from a chosen model", async () => {
+    await openSystem(followSetting, OPUS);
+    expect(readSelect().selectedOptions[0]?.textContent).toBe("Claude Code · Claude Opus 5");
+
+    await userEvent.selectOptions(readSelect(), "automatic");
+
+    await waitFor(() => {
+      expect(readSelect().selectedOptions[0]?.textContent).toBe(
+        "Automatic - currently Claude Code · Claude Sonnet 5",
+      );
+    });
+  });
+
+  it("shows no model for Automatic when no model is available", async () => {
     await openSystem(NO_TEXT_GENERATION);
 
     expect(readSelect().selectedOptions[0]?.textContent).toBe("Automatic - no model available");
@@ -209,6 +253,21 @@ describe("Settings > System, text generation", () => {
 
     expect(document.querySelector(".set-note")?.textContent).toBe(
       "Last failure 5 minutes ago - timed out: Claude Code did not answer within 60 seconds.",
+    );
+  });
+
+  it("reads a failure with the reason unavailable as a plain failure, not as a missing model", async () => {
+    await openSystem({
+      model: SONNET,
+      lastFailure: {
+        reason: "unavailable",
+        message: "The harness exited with code 1.",
+        at: new Date(Date.now() - 2 * 60_000).toISOString(),
+      },
+    });
+
+    expect(document.querySelector(".set-note")?.textContent).toBe(
+      "Last failure 2 minutes ago - failed: The harness exited with code 1.",
     );
   });
 

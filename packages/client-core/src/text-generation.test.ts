@@ -9,6 +9,7 @@ import {
   buildTextGenerationField,
   describeTextGenerationFailure,
   describeTextGenerationModel,
+  describeTextGenerationRecap,
 } from "./text-generation";
 
 const model = (slug: string, name: string, extra: { isLegacy?: boolean } = {}) => ({
@@ -138,7 +139,7 @@ describe("describeTextGenerationFailure", () => {
       "Last failure 5 minutes ago - timed out: The call went wrong.",
     );
     expect(describeTextGenerationFailure("automatic", failed("unavailable"), NOW)).toBe(
-      "Last failure 5 minutes ago - no model available: The call went wrong.",
+      "Last failure 5 minutes ago - failed: The call went wrong.",
     );
     expect(
       describeTextGenerationFailure(
@@ -175,6 +176,21 @@ describe("buildTextGenerationField, with models several runners list", () => {
       "Codex · GPT-6 Luna",
       "Off",
     ]);
+  });
+});
+
+describe("describeTextGenerationRecap", () => {
+  it("names the model text generation runs on", () => {
+    const status: TextGenerationStatus = {
+      model: { instanceId: CODEX.id, model: "gpt-6-luna" },
+      lastFailure: null,
+    };
+
+    expect(describeTextGenerationRecap([CODEX], status)).toBe("Codex · GPT-6 Luna");
+  });
+
+  it("reads no model available when the status holds none", () => {
+    expect(describeTextGenerationRecap([CODEX], NOTHING)).toBe("no model available");
   });
 });
 

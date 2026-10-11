@@ -439,6 +439,7 @@ export {
   buildTextGenerationField,
   describeTextGenerationFailure,
   describeTextGenerationModel,
+  describeTextGenerationRecap,
   type TextGenerationChoice,
   type TextGenerationField,
 } from "./text-generation";
