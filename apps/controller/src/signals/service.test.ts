@@ -1,8 +1,9 @@
 /**
  * Tests the signal service against a migrated in-memory database, with the
- * fake `BoundOperations` port: who may raise, act on and withdraw a signal,
- * the actions the core lays out beside the raiser's, how the list filters,
- * and what each write records in the audit log.
+ * fake `BoundOperations` port: who may raise, act on, withdraw, mark done,
+ * snooze and lower a signal, the actions the core lays out beside the
+ * raiser's, how each view filters and pages, and what each write records in
+ * the audit log.
  *
  * What an operation really does when the user takes an action, a plugin
  * action with a typed reply, and the real describe lines are tested over
@@ -10,7 +11,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Layer } from "effect";
-import type { SqlClient } from "effect/unstable/sql";
+import { TestClock } from "effect/testing";
+import { SqlClient } from "effect/unstable/sql";
 import {
   decodeAnswerOperation,
   isQualifiedId,
@@ -24,11 +26,11 @@ import {
 import { CurrentActor, type Actor } from "../actor";
 import { BoundOperations } from "../bound-actions";
 import { FakeBoundOperationsLayer } from "../bound-actions/testing";
-import { TestDatabase } from "../db/testing";
+import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { workflowRepository } from "../workflows";
-import { SignalService, SignalServiceLayer } from "./index";
+import { signalRepository, SignalService, SignalServiceLayer } from "./index";
 
 type Deps = SignalService | SqlClient.SqlClient;
 
@@ -395,9 +397,9 @@ describe("signal.query and signal.read", () => {
         const fyi = yield* as(TRIAGE)(signals.raise({ ...OFFER, kind: "fyi" }));
         return {
           ids: [offer.signalId, fyi.signalId],
-          all: yield* as(USER)(signals.query({})),
-          offers: yield* as(USER)(signals.query({ kind: "offer" })),
-          bySource: yield* as(USER)(signals.query({ source: "github" })),
+          all: (yield* as(USER)(signals.query({}))).items,
+          offers: (yield* as(USER)(signals.query({ kind: "offer" }))).items,
+          bySource: (yield* as(USER)(signals.query({ source: "github" }))).items,
           forSession: yield* as(TRIAGE)(signals.read(fyi.signalId)),
         };
       }),
@@ -609,5 +611,364 @@ describe("signal.withdraw", () => {
       },
     });
     expect(acted.resolution).toMatchObject({ kind: "decided", actionId: "approve" });
+  });
+});
+
+/**
+ * Runs `effect` as `run` does, on a `TestClock` that starts at the epoch, so
+ * a test can snooze a signal until a known time and then move past it.
+ */
+const runOnTestClock = <A, E>(effect: Effect.Effect<A, E, Deps>): Promise<A> =>
+  run(effect.pipe(Effect.provide(TestClock.layer())));
+
+const HOUR = 60 * 60 * 1000;
+const IN_ONE_HOUR = "1970-01-01T01:00:00.000Z";
+const IN_TWO_HOURS = "1970-01-01T02:00:00.000Z";
+const IN_THREE_HOURS = "1970-01-01T03:00:00.000Z";
+const FYI: SignalRaiseInput = { ...OFFER, kind: "fyi", title: "Release 4.2 shipped" };
+
+/** Raises `input` as the triage session and returns the new signal's id. */
+const raiseId = (input: SignalRaiseInput) =>
+  Effect.flatMap(service, (signals) =>
+    Effect.map(as(TRIAGE)(signals.raise(input)), (raised) => raised.signalId),
+  );
+
+/** Returns the ids of one view of the signals, as the user reads it. */
+const listIds = (view: "to-do" | "later" | "done") =>
+  Effect.flatMap(service, (signals) =>
+    Effect.map(as(USER)(signals.query({ view })), (page) => page.items.map((item) => item.id)),
+  );
+
+describe("signal.markDone", () => {
+  it("resolves each signal as Done once, skips a resolved one, removes its snooze, and records one entry", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const first = yield* raiseId(FYI);
+        const second = yield* raiseId(FYI);
+        const resolved = yield* raiseId(FYI);
+        yield* as(TRIAGE)(signals.withdraw({ id: resolved, reason: "Not needed." }));
+        yield* as(USER)(signals.snooze({ signalIds: [second], until: "2999-01-01T00:00:00.000Z" }));
+        const marked = yield* as(USER)(
+          signals.markDone({ signalIds: [first, second, first, resolved] }),
+        );
+        return {
+          ids: { first, second, resolved },
+          marked,
+          read: yield* as(USER)(signals.read(second)),
+          later: yield* listIds("later"),
+          done: yield* listIds("done"),
+          entries: yield* readEventsOfKind("signal.markedDone"),
+        };
+      }),
+    );
+
+    const { first, second, resolved } = result.ids;
+    expect(result.marked).toEqual({
+      done: [first, second],
+      skipped: [{ signalId: resolved, reason: "resolved" }],
+    });
+    expect(result.read).not.toHaveProperty("snooze");
+    expect(result.read.resolution).toMatchObject({
+      kind: "decided",
+      actionId: "done",
+      outcome: "Done, nothing sent",
+      actor: "user",
+    });
+    expect(result.later).toEqual([]);
+    expect(result.done).toEqual(expect.arrayContaining([first, second, resolved]));
+    expect(result.entries.map((entry) => entry.payload)).toEqual([{ signalIds: [first, second] }]);
+  });
+
+  it("changes nothing and records nothing when every signal is already resolved", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const id = yield* raiseId(FYI);
+        yield* as(USER)(signals.markDone({ signalIds: [id] }));
+        return {
+          again: yield* as(USER)(signals.markDone({ signalIds: [id] })),
+          entries: yield* readEventsOfKind("signal.markedDone"),
+        };
+      }),
+    );
+
+    expect(result.again.done).toEqual([]);
+    expect(result.entries).toHaveLength(1);
+  });
+
+  it("fails the whole call for an unknown id or a kind with no Done, and changes nothing", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const fyi = yield* raiseId(FYI);
+        const offer = yield* raiseId(OFFER);
+        return {
+          unknown: yield* Effect.flip(as(USER)(signals.markDone({ signalIds: [fyi, UNKNOWN_ID] }))),
+          noDone: yield* Effect.flip(as(USER)(signals.markDone({ signalIds: [fyi, offer] }))),
+          toDo: yield* listIds("to-do"),
+          ids: [fyi, offer],
+        };
+      }),
+    );
+
+    expect(result.unknown).toMatchObject({ error: { code: "not_found" } });
+    expect(result.noDone).toMatchObject({
+      error: { code: "validation", details: { issues: [{ path: ["signalIds", "1"] }] } },
+    });
+    expect(result.toDo).toEqual(result.ids);
+  });
+
+  it("refuses a session, even one that holds signal.write", async () => {
+    const error = await fail(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const id = yield* raiseId(FYI);
+        return yield* as(TRIAGE)(signals.markDone({ signalIds: [id] }));
+      }),
+    );
+
+    expect(error).toMatchObject({ error: { code: "forbidden" } });
+  });
+
+  it("refuses Done while an action on one of the signals runs", async () => {
+    const held = buildHeldOperations();
+    const { refused, acted } = await held.run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const { signalId } = yield* as(TRIAGE)(signals.raise({ ...FYI, actions: [PLUGIN_ACTION] }));
+        const first = yield* Effect.forkChild(
+          as(USER)(signals.act({ id: signalId, actionId: "approve" })),
+        );
+        yield* held.started;
+        const refused = yield* Effect.flip(as(USER)(signals.markDone({ signalIds: [signalId] })));
+        yield* held.release;
+        return { refused, acted: yield* Fiber.join(first) };
+      }),
+    );
+
+    expect(refused).toMatchObject({ error: { code: "invalid_state" } });
+    expect(acted.resolution).toMatchObject({ kind: "decided", actionId: "approve" });
+  });
+
+  it("announces the log once and each signal it changed", async () => {
+    const { listener, announced } = buildAnnouncementRecorder();
+    const { ids, raisesAnnounced } = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const ids = [yield* raiseId(FYI), yield* raiseId(FYI)];
+        const raisesAnnounced = announced.length;
+        yield* as(USER)(signals.markDone({ signalIds: ids }));
+        return { ids, raisesAnnounced };
+      }).pipe(Effect.provide(listener)),
+    );
+
+    expect(announced.slice(raisesAnnounced)).toEqual([
+      { _tag: "event" },
+      ...ids.map((id) => ({ _tag: "record", topic: "signal", id, kind: "updated" })),
+    ]);
+  });
+});
+
+describe("signal.snooze and signal.unsnooze", () => {
+  it("moves a signal to Later, replaces its time on a second snooze, and brings it back first when the time passes", async () => {
+    const result = await runOnTestClock(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const older = yield* raiseId(FYI);
+        const snoozed = yield* raiseId(FYI);
+        const first = yield* as(TRIAGE)(
+          signals.snooze({ signalIds: [snoozed], until: IN_ONE_HOUR }),
+        );
+        yield* as(USER)(signals.snooze({ signalIds: [snoozed], until: IN_TWO_HOURS }));
+        const whileSnoozed = {
+          toDo: yield* listIds("to-do"),
+          later: (yield* as(USER)(signals.query({ view: "later" }))).items,
+        };
+        yield* TestClock.adjust(2 * HOUR);
+        return {
+          ids: { older, snoozed },
+          first,
+          whileSnoozed,
+          afterwards: { toDo: yield* listIds("to-do"), later: yield* listIds("later") },
+          entries: yield* readEventsOfKind("signal.snoozed"),
+        };
+      }),
+    );
+
+    const { older, snoozed } = result.ids;
+    expect(result.first).toEqual({ snoozed: [snoozed], skipped: [] });
+    expect(result.whileSnoozed.toDo).toEqual([older]);
+    expect(result.whileSnoozed.later.map((signal) => [signal.id, signal.snooze?.until])).toEqual([
+      [snoozed, IN_TWO_HOURS],
+    ]);
+    expect(result.afterwards).toEqual({ toDo: [snoozed, older], later: [] });
+    expect(result.entries.map((entry) => [entry.actor, entry.payload])).toEqual([
+      [`session:${TRIAGE_SESSION_ID}`, { signalIds: [snoozed], until: IN_ONE_HOUR }],
+      ["user", { signalIds: [snoozed], until: IN_TWO_HOURS }],
+    ]);
+  });
+
+  it("refuses a time that is not in the future, and snoozes nothing", async () => {
+    const result = await runOnTestClock(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const id = yield* raiseId(FYI);
+        yield* TestClock.adjust(HOUR);
+        return {
+          error: yield* Effect.flip(
+            as(USER)(signals.snooze({ signalIds: [id], until: IN_ONE_HOUR })),
+          ),
+          later: yield* listIds("later"),
+        };
+      }),
+    );
+
+    expect(result.error).toMatchObject({
+      error: { code: "validation", details: { issues: [{ path: ["until"] }] } },
+    });
+    expect(result.later).toEqual([]);
+  });
+
+  it("puts a snoozed signal back on To do, and writes nothing for a signal that is not snoozed", async () => {
+    const result = await runOnTestClock(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const snoozed = yield* raiseId(FYI);
+        const plain = yield* raiseId(FYI);
+        yield* as(USER)(signals.snooze({ signalIds: [snoozed], until: IN_ONE_HOUR }));
+        const unsnoozed = yield* as(USER)(signals.unsnooze({ signalIds: [snoozed, plain] }));
+        const again = yield* as(USER)(signals.unsnooze({ signalIds: [snoozed] }));
+        return {
+          ids: { snoozed, plain },
+          unsnoozed,
+          again,
+          toDo: yield* listIds("to-do"),
+          entries: yield* readEventsOfKind("signal.unsnoozed"),
+        };
+      }),
+    );
+
+    expect(result.unsnoozed).toEqual({ unsnoozed: [result.ids.snoozed], skipped: [] });
+    expect(result.again).toEqual({ unsnoozed: [], skipped: [] });
+    expect(result.toDo).toEqual([result.ids.snoozed, result.ids.plain]);
+    expect(result.entries.map((entry) => entry.payload)).toEqual([
+      { signalIds: [result.ids.snoozed] },
+    ]);
+  });
+
+  it("removes the snooze of a withdrawn signal, and skips it on a later snooze", async () => {
+    const result = await runOnTestClock(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const id = yield* raiseId(FYI);
+        yield* as(USER)(signals.snooze({ signalIds: [id], until: IN_ONE_HOUR }));
+        const withdrawn = yield* as(TRIAGE)(signals.withdraw({ id, reason: "Not needed." }));
+        return {
+          id,
+          withdrawn,
+          later: yield* listIds("later"),
+          snoozedAgain: yield* as(USER)(signals.snooze({ signalIds: [id], until: IN_ONE_HOUR })),
+        };
+      }),
+    );
+
+    expect(result.withdrawn).not.toHaveProperty("snooze");
+    expect(result.later).toEqual([]);
+    expect(result.snoozedAgain).toEqual({
+      snoozed: [],
+      skipped: [{ signalId: result.id, reason: "resolved" }],
+    });
+  });
+
+  it("pages Later soonest first and Done newest first, and refuses one view's cursor in the other", async () => {
+    const result = await runOnTestClock(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const ids = [yield* raiseId(FYI), yield* raiseId(FYI), yield* raiseId(FYI)];
+        yield* as(USER)(signals.snooze({ signalIds: [ids[2]!], until: IN_ONE_HOUR }));
+        yield* as(USER)(signals.snooze({ signalIds: [ids[0]!], until: IN_TWO_HOURS }));
+        yield* as(USER)(signals.snooze({ signalIds: [ids[1]!], until: IN_THREE_HOURS }));
+        const later1 = yield* as(USER)(signals.query({ view: "later", limit: 2 }));
+        const later2 = yield* as(USER)(
+          signals.query({ view: "later", limit: 2, cursor: later1.nextCursor! }),
+        );
+        for (const id of ids) {
+          yield* TestClock.adjust(1000);
+          yield* as(USER)(signals.markDone({ signalIds: [id] }));
+        }
+        const done1 = yield* as(USER)(signals.query({ view: "done", limit: 2 }));
+        const done2 = yield* as(USER)(
+          signals.query({ view: "done", limit: 2, cursor: done1.nextCursor! }),
+        );
+        const mixed = yield* Effect.flip(
+          as(USER)(signals.query({ view: "done", limit: 2, cursor: later1.nextCursor! })),
+        );
+        return { ids, later1, later2, done1, done2, mixed };
+      }),
+    );
+
+    const [a, b, c] = result.ids;
+    const readIds = (page: { readonly items: ReadonlyArray<Signal> }) =>
+      page.items.map((item) => item.id);
+    expect(readIds(result.later1)).toEqual([c, a]);
+    expect(readIds(result.later2)).toEqual([b]);
+    expect(result.later2).not.toHaveProperty("nextCursor");
+    expect(readIds(result.done1)).toEqual([c, b]);
+    expect(readIds(result.done2)).toEqual([a]);
+    expect(result.mixed).toMatchObject({ error: { code: "validation" } });
+  });
+});
+
+describe("signal.lowerPriority", () => {
+  it("moves an urgent signal to high, marks it lowered, leaves the rest, and records one entry", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const sql = yield* SqlClient.SqlClient;
+        const urgent = yield* raiseId(FYI);
+        const normal = yield* raiseId(OFFER);
+        const resolved = yield* raiseId(OFFER);
+        yield* as(TRIAGE)(signals.withdraw({ id: resolved, reason: "Not needed." }));
+        // Only a plugin's kind may be urgent, so the test sets the priority directly.
+        yield* sql`UPDATE signals SET priority = 'urgent' WHERE kind = 'fyi'`;
+        const lowered = yield* as(USER)(
+          signals.lowerPriority({ signalIds: [urgent, normal, resolved] }),
+        );
+        const repository = yield* signalRepository;
+        return {
+          ids: { urgent, normal, resolved },
+          lowered,
+          read: yield* as(USER)(signals.read(urgent)),
+          isLowered: [
+            yield* repository.isPriorityLowered(urgent),
+            yield* repository.isPriorityLowered(normal),
+          ],
+          entries: yield* readEventsOfKind("signal.priorityLowered"),
+        };
+      }),
+    );
+
+    expect(result.lowered).toEqual({
+      lowered: [result.ids.urgent],
+      skipped: [{ signalId: result.ids.resolved, reason: "resolved" }],
+    });
+    expect(result.read.priority).toBe("high");
+    expect(result.isLowered).toEqual([true, false]);
+    expect(result.entries.map((entry) => entry.payload)).toEqual([
+      { signalIds: [result.ids.urgent] },
+    ]);
+  });
+
+  it("refuses a session, even one that holds signal.write", async () => {
+    const error = await fail(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const id = yield* raiseId(FYI);
+        return yield* as(TRIAGE)(signals.lowerPriority({ signalIds: [id] }));
+      }),
+    );
+
+    expect(error).toMatchObject({ error: { code: "forbidden" } });
   });
 });

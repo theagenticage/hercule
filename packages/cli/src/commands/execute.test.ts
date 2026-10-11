@@ -116,7 +116,7 @@ describe("a positional whose row resolves tails", () => {
     });
   });
 
-  it("resolves a signal tail through signal list, which returns the whole list rather than a page", async () => {
+  it("resolves a signal tail through signal list, whose To do view is one page", async () => {
     const signal = {
       id: buildId("ccccccc3"),
       kind: "fyi",
@@ -129,7 +129,9 @@ describe("a positional whose row resolves tails", () => {
       status: "open",
       createdAt: "2026-10-10T09:00:00.000Z",
     };
-    const { fetch, client } = stubClient(() => (fetch.calls.length === 1 ? [signal] : signal));
+    const { fetch, client } = stubClient(() =>
+      fetch.calls.length === 1 ? { items: [signal] } : signal,
+    );
     const command = lookUpCommand("signal", "read");
     const args = await parseArguments(command, ["0ccccccc3"], refuseStdinRead);
 
@@ -300,6 +302,34 @@ describe("a flag for a structured field", () => {
 });
 
 describe("a field whose row does not resolve tails", () => {
+  it("sends every word of a repeated positional as one list", async () => {
+    const first = "0199e0e7-7b21-7000-8000-000000000001";
+    const second = "0199e0e7-7b21-7000-8000-000000000002";
+    const { fetch, client } = stubClient(() => ({ done: [first, second], skipped: [] }));
+    const command = lookUpCommand("signal", "done");
+    const args = await parseArguments(command, [first, second], refuseStdinRead);
+
+    await execute(client, command, args);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/signals/mark-done",
+      body: { signalIds: [first, second] },
+    });
+  });
+
+  it("rejects a tail among the words of a repeated positional, and calls nothing", async () => {
+    const { fetch, client } = stubClient(() => ({}));
+    const command = lookUpCommand("signal", "snooze");
+    const args = await parseArguments(
+      command,
+      ["0199e0e7-7b21-7000-8000-000000000001", "00000002", "--until", "2026-10-12T07:00:00.000Z"],
+      refuseStdinRead,
+    );
+
+    await expect(execute(client, command, args)).rejects.toThrow(/full id/);
+    expect(fetch.calls).toEqual([]);
+  });
+
   it("rejects a tail for a Hercule id, asks for the full id, and calls nothing", async () => {
     const { fetch, client } = stubClient(() => ({}));
     // A queued input's id: a Hercule id with no list operation, so a tail

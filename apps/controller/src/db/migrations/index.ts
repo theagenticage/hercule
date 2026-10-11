@@ -73,6 +73,7 @@ import assistantMemory from "./0062-assistant-memory";
 import transcriptSearch from "./0063-transcript-search";
 import signals from "./0064-signals";
 import signalGrants from "./0065-signal-grants";
+import signalSnoozes from "./0066-signal-snoozes";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -140,6 +141,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [63, "transcript-search", Effect.succeed(transcriptSearch)],
   [64, "signals", Effect.succeed(signals)],
   [65, "signal-grants", Effect.succeed(signalGrants)],
+  [66, "signal-snoozes", Effect.succeed(signalSnoozes)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

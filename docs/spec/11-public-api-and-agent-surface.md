@@ -417,7 +417,7 @@ Record and router: [./10-triage-intake-and-notifications.md](./10-triage-intake-
 
 | Operation | Input | Grant | Route |
 |---|---|---|---|
-| `signal.query` | `{ view?: "to-do" \| "later" \| "done", kind?, source? }`; `view` defaults to `to-do` | `signal.read` | `GET /signals` |
+| `signal.query` | `{ view?: "to-do" \| "later" \| "done", kind?, source?, limit?, cursor? }` -> `{ items, nextCursor? }`; `view` defaults to `to-do`, which takes no `limit` or `cursor` and returns every item in one page. *(Amended 2026-10-11, [#525](https://github.com/theagenticage/hercule/issues/525).)* | `signal.read` | `GET /signals` |
 | `signal.read` | `{ signalId }` | `signal.read` | `GET /signals/{id}` |
 | `signal.raise` | `{ kind, title, reason, eventIds, priority?, blocks?, actions?, task? }` -> `{ signalId }`; core kinds only | `signal.write` | `POST /signals/raise` |
 | `signal.screen` | `{ eventId, kind, decision: "yes" \| "no", reason }` -> `{ signalId? }`, the signal raised on `yes`; also a built-in workflow action ([#399](https://github.com/theagenticage/hercule/issues/399)) | `signal.write` | `POST /signals/screen` |

@@ -107,6 +107,10 @@ const COMMANDS: Record<string, string> = {
   "signal.raise": "signal raise",
   "signal.act": "signal act",
   "signal.withdraw": "signal withdraw",
+  "signal.markDone": "signal done",
+  "signal.snooze": "signal snooze",
+  "signal.unsnooze": "signal unsnooze",
+  "signal.lowerPriority": "signal lower-priority",
 
   "project.query": "project list",
   "project.read": "project read",
@@ -621,6 +625,8 @@ const USER_ONLY = [
   "controller.update",
   "conversation.send",
   "signal.act",
+  "signal.markDone",
+  "signal.lowerPriority",
 ];
 
 /**

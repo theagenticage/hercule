@@ -720,12 +720,17 @@ export const CLI = {
 
   "signal.query": {
     command: "signal list",
-    help: "Lists the signals on your To do list: what asks for your move now. Use it to find the id that `hercule signal read`, `hercule signal act` and `hercule signal withdraw` take.",
-    examples: [{ args: [] }, { args: ["--kind", "unsure"] }],
+    help: "Lists the signals on your To do list: what asks for your move now. --view later lists the snoozed signals, soonest back first, and --view done the resolved ones, newest first; those two are read a page at a time. Use it to find the id that `hercule signal read`, `hercule signal act` and `hercule signal withdraw` take.",
+    examples: [
+      { args: [] },
+      { args: ["--kind", "unsure"] },
+      { args: ["--view", "later"] },
+      { args: ["--view", "done", "--limit", "20"] },
+    ],
     fields: {
       view: {
         flag: "view",
-        help: "to-do, the signals that ask for your move now. It is the default.",
+        help: "to-do, the signals that ask for your move now, which is the default and is never paged; later, the snoozed ones; or done, the resolved ones.",
       },
       kind: { flag: "kind", help: "Only signals of this kind, such as fyi or github/pr-review." },
       source: {
@@ -843,6 +848,67 @@ export const CLI = {
       },
       reason: { flag: "reason", help: "One line the user reads under the withdrawn signal." },
     },
+  },
+  "signal.markDone": {
+    command: "signal done",
+    help: "Marks signals done, as you, without telling their source. Each one leaves To do with the outcome Done, nothing sent. A signal already resolved is skipped and listed in skipped. Only a kind that offers Done can be marked done; a proposal, an offer or an unsure item is answered with `hercule signal act` instead.",
+    examples: [
+      { args: ["0199e0e7-7b21-7000-8000-000000000001"] },
+      {
+        args: ["0199e0e7-7b21-7000-8000-000000000001", "0199e0e7-7b21-7000-8000-000000000002"],
+      },
+    ],
+    fields: {
+      signalIds: {
+        positional: true,
+        placeholder: "signal-id",
+        help: "A signal's full id; a tail is not accepted. Give several to mark them done in one call.",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "signal.snooze": {
+    command: "signal snooze",
+    help: "Takes signals off To do until a time, without answering them. Each one waits in Later and comes back to To do when the time passes. Snoozing a snoozed signal replaces its time. A signal already resolved is skipped and listed in skipped.",
+    examples: [
+      { args: ["0199e0e7-7b21-7000-8000-000000000001", "--until", "2026-10-12T07:00:00.000Z"] },
+    ],
+    fields: {
+      signalIds: {
+        positional: true,
+        placeholder: "signal-id",
+        help: "A signal's full id; a tail is not accepted. Give several to snooze them in one call.",
+      },
+      until: {
+        flag: "until",
+        help: "When the signals come back, as a UTC time with milliseconds, such as 2026-10-12T07:00:00.000Z. It must be in the future.",
+      },
+    },
+  },
+  "signal.unsnooze": {
+    command: "signal unsnooze",
+    help: "Puts snoozed signals back on To do now. A signal that is not snoozed is left as it is, and one already resolved is skipped and listed in skipped.",
+    examples: [{ args: ["0199e0e7-7b21-7000-8000-000000000001"] }],
+    fields: {
+      signalIds: {
+        positional: true,
+        placeholder: "signal-id",
+        help: "A signal's full id; a tail is not accepted. Give several to unsnooze them in one call.",
+      },
+    },
+  },
+  "signal.lowerPriority": {
+    command: "signal lower-priority",
+    help: "Moves urgent signals out of Now, as you: each one goes from urgent to high. A signal that is not urgent is left as it is, and one already resolved is skipped and listed in skipped.",
+    examples: [{ args: ["0199e0e7-7b21-7000-8000-000000000001"] }],
+    fields: {
+      signalIds: {
+        positional: true,
+        placeholder: "signal-id",
+        help: "A signal's full id; a tail is not accepted. Give several to lower them in one call.",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
 
   "project.query": {

@@ -183,6 +183,24 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/signals/:id/withdraw",
   },
+  // The four moves that send nothing to the source take a list of ids, so
+  // their paths are the collection's plus the verb.
+  "signal.markDone": {
+    requires: "signal.write",
+    method: "POST",
+    path: "/api/v1/signals/mark-done",
+  },
+  "signal.snooze": { requires: "signal.write", method: "POST", path: "/api/v1/signals/snooze" },
+  "signal.unsnooze": {
+    requires: "signal.write",
+    method: "POST",
+    path: "/api/v1/signals/unsnooze",
+  },
+  "signal.lowerPriority": {
+    requires: "signal.write",
+    method: "POST",
+    path: "/api/v1/signals/lower-priority",
+  },
 
   "project.query": { requires: "project.read", method: "GET", path: "/api/v1/projects" },
   "project.read": { requires: "project.read", method: "GET", path: "/api/v1/projects/:id" },

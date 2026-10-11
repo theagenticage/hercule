@@ -280,7 +280,11 @@ const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
       )
       .handle("withdraw", ({ params, payload }) =>
         withApiErrors(signals.withdraw({ id: params.id, ...payload })),
-      );
+      )
+      .handle("markDone", ({ payload }) => withApiErrors(signals.markDone(payload)))
+      .handle("snooze", ({ payload }) => withApiErrors(signals.snooze(payload)))
+      .handle("unsnooze", ({ payload }) => withApiErrors(signals.unsnooze(payload)))
+      .handle("lowerPriority", ({ payload }) => withApiErrors(signals.lowerPriority(payload)));
   }),
 );
 

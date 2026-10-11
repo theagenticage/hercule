@@ -218,8 +218,16 @@ const resolveTails = async (
   const resolved = { ...values };
   for (const field of fields) {
     const given = resolved[field.name];
+    // A list of ids takes full ids only, so each one is checked as written.
+    if (Array.isArray(given) && field.resolves === undefined) {
+      for (const text of given) {
+        if (typeof text === "string") validateWrittenId(command, field, text);
+      }
+      continue;
+    }
     // Three kinds of field are skipped: a field the caller never wrote, a numeric
-    // field and a repeated field. No tail stands for any of them.
+    // field and a repeated field whose row names a list operation. No tail
+    // stands for any of them.
     if (typeof given !== "string") continue;
     resolved[field.name] =
       field.resolves === undefined
@@ -335,7 +343,10 @@ export const execute = async (
     // a usage error and nothing has been sent. A numeric path parameter is the
     // value itself, never a tail of a longer id: the event log numbers its
     // rows, and `42` is row 42.
-    const value = coerceFieldValue(field, args.positionals[index]!, command.spelling);
+    // A list positional is the last one and takes every word left.
+    const value = field.repeated
+      ? args.positionals.slice(index).map((text) => coerceFieldValue(field, text, command.spelling))
+      : coerceFieldValue(field, args.positionals[index]!, command.spelling);
     // A positional is a route parameter or a payload field, and is sent in
     // the part of the request its field declares.
     if (field.carriedIn === "payload") writtenPayload[field.name] = value;

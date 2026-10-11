@@ -1404,7 +1404,7 @@ describe("hercule signal", () => {
 
   it("lists each signal on one line, with its priority and without its blocks or actions", () => {
     const lines = renderHuman(
-      { kind: "value", value: [signal] },
+      { kind: "value", value: { items: [signal] } },
       lookUpCommand("signal", "list"),
       CONTROLLER_URL,
     );
@@ -1421,8 +1421,55 @@ describe("hercule signal", () => {
 
   it("prints no results for an empty To do list", () => {
     expect(
-      renderHuman({ kind: "value", value: [] }, lookUpCommand("signal", "list"), CONTROLLER_URL),
+      renderHuman(
+        { kind: "value", value: { items: [] } },
+        lookUpCommand("signal", "list"),
+        CONTROLLER_URL,
+      ),
     ).toEqual(["no results"]);
+  });
+
+  it("prints when a snoozed signal comes back, and the cursor of the next page", () => {
+    const until = "2999-01-01T07:00:00.000Z";
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [{ ...signal, snooze: { until, snoozedAt: "2026-10-10T09:00:00.000Z" } }],
+          nextCursor: "abc",
+        },
+      },
+      lookUpCommand("signal", "list"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines[0]).toMatch(/ +age +back$/);
+    expect(lines[1]).toMatch(new RegExp(` +${until}$`));
+    expect(lines.slice(-2)).toEqual(["", "more results: --cursor abc, or --all"]);
+  });
+
+  it("prints a line per signal moved and per signal skipped", () => {
+    const other = "0199e0e7-7b21-7000-8000-0000000000ff";
+    expect(
+      renderHuman(
+        {
+          kind: "value",
+          value: { done: [SIGNAL], skipped: [{ signalId: other, reason: "resolved" }] },
+        },
+        lookUpCommand("signal", "done"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual([
+      `signal ${SIGNAL.slice(-8)} done`,
+      `signal ${other.slice(-8)} skipped: already resolved`,
+    ]);
+    expect(
+      renderHuman(
+        { kind: "value", value: { unsnoozed: [], skipped: [] } },
+        lookUpCommand("signal", "unsnooze"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual(["no signal unsnoozed"]);
   });
 
   it("prints a signal's fields, where it came from, its blocks as text, and its actions with what each does", () => {
