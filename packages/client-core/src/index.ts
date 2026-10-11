@@ -174,6 +174,16 @@ export {
 export { toIdTail } from "./id-tail";
 export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
 export { isWebLink } from "./web-link";
+export {
+  parseMarkdown,
+  type ColumnAlignment,
+  type MarkdownBlock,
+  type MarkdownDocument,
+  type MarkdownFootnote,
+  type MarkdownInline,
+  type MarkdownListItem,
+  type MarkdownTableCell,
+} from "./markdown";
 export { listWaiting, type Waiting, type WaitingAssistant, type WaitingThread } from "./waiting";
 export { buildIdOptions } from "./id-options";
 export { readJsonObject, readStringList } from "./json-shape";
