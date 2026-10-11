@@ -336,8 +336,10 @@ const isSameItemState = (left: FollowedItemState, right: FollowedItemState): boo
  * A hint from the notifications feed is used up when its item is read, when
  * GitHub answers that the item is gone, or when the item is not followed
  * after all because its repository is watched. It stays for the next poll
- * when the item was not reached, or its read failed with a `PluginError`
- * such as GitHub answering 500.
+ * when the item was not reached. An item whose read fails, for any reason,
+ * gets a hint at the `since` it was read from: the failed read emitted
+ * nothing (`emitInTimeOrder`), so the next poll reads it again, followed or
+ * not.
  *
  * One item failing with a `PluginError` is logged as a warning and does not
  * stop the others: an item outside the watch list is not something the user
@@ -450,6 +452,12 @@ export const pollFollowedItems = (
           const next = yield* emitInTimeOrder(poll, (held) =>
             readFollowedItem(held, item.number, state),
           ).pipe(
+            // A failed read emits nothing, so the next poll must read the
+            // item again from the same `since`. A hint makes sure of that
+            // even for an item followed for another reason, such as an own
+            // pull request that is closed before the next poll and so drops
+            // out of the search.
+            Effect.tapError(() => recordFollowedHints(store, [{ ref, since: state.since }])),
             Effect.catchIf(
               (error): error is PluginError => error instanceof PluginError,
               (error) =>
@@ -462,7 +470,6 @@ export const pollFollowedItems = (
             ),
           );
           lastRead = ref;
-          // A read that failed keeps its hint, so the next poll tries again.
           if (next === undefined) continue;
           usedHints.add(ref);
           const unchanged =

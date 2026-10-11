@@ -333,6 +333,45 @@ describe("pollFollowedItems", () => {
     expect(harness.events.map((event) => event.kind)).toEqual(["github.pr.review-requested"]);
   });
 
+  it("reads an own pull request whose read failed again, even once it is closed", async () => {
+    const harness = buildIngestHarness();
+    let own = true;
+    let failing = false;
+    const route = (request: HttpClientRequest.HttpClientRequest): StubResponse => {
+      const { path } = readStubRequestTarget(request);
+      if (path === "/search/issues") {
+        const items = own
+          ? [
+              {
+                number: 1,
+                title: "Pull 1",
+                repository_url: `https://api.github.com/repos/${REPO}`,
+                updated_at: "2026-10-11T08:30:00Z",
+              },
+            ]
+          : [];
+        return { status: 200, body: { total_count: items.length, items } };
+      }
+      if (failing && path.endsWith("/events")) {
+        return { status: 500, body: { message: "Server Error" } };
+      }
+      return answerUserRequests(answerItem((number) => buildPull(number)))(request);
+    };
+    await pollOnce(harness, route);
+
+    // The review request at 09:00 is read, then the history read fails.
+    failing = true;
+    await pollOnce(harness, route);
+    expect(harness.events).toEqual([]);
+
+    // The pull request is closed, so the search no longer finds it.
+    own = false;
+    failing = false;
+    await pollOnce(harness, route);
+
+    expect(harness.events.map((event) => event.kind)).toEqual(["github.pr.review-requested"]);
+  });
+
   it("goes back to a notification's hint from before an own pull request's last read", async () => {
     const harness = buildIngestHarness();
     const answer = answerItem((number) => buildPull(number));
