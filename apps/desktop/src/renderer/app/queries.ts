@@ -18,6 +18,7 @@ import {
   collectRunningTurnRows,
   collectSenderSessionIds,
   detectLocalRunner,
+  LIVE_SESSION_STATUSES,
   mergeNewestMessagePage,
   mergeSentMessage,
   queryKeys,
@@ -165,6 +166,24 @@ export const threadsQuery = (client: HerculeClient) =>
       readEveryPage((page) => client.session.query({ query: { thread: true, ...page } })),
     ...SHELL_READ_OPTIONS,
   });
+
+/**
+ * Reads every live session an Agent spawned: the sessions of runs'
+ * agent steps, the assistants' and any other that is not a thread. "From
+ * runs" in Waiting on you, and the workflow list's Needs you, keep those of
+ * a run that wait on the user (`listWaitingRunSessions`). The controller has
+ * no filter for that, so the client keeps them. The read follows the cursor
+ * to the last page, and its key sits under the `sessions` prefix, so a push
+ * on the `session` topic invalidates it.
+ */
+export const liveAgentSessionsQuery = (client: HerculeClient) => {
+  const filter = { thread: false, status: LIVE_SESSION_STATUSES } as const;
+  return queryOptions({
+    queryKey: queryKeys.sessions(filter),
+    queryFn: () => readEveryPage((page) => client.session.query({ query: { ...filter, ...page } })),
+    ...SHELL_READ_OPTIONS,
+  });
+};
 
 /** Reads every project, for the sidebar's project headers. */
 export const projectsQuery = (client: HerculeClient) =>
@@ -865,8 +884,9 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
 
 /**
  * Reads everything the shell shows into `queryClient`: the sidebar's records,
- * the assistants and the current session of each one's main conversation,
- * the Connections, the signed-in user, Intake's To do list, whose count the
+ * the live sessions an Agent spawned, for "From runs" in Waiting on you, the
+ * assistants and the current session of each one's main conversation, the
+ * Connections, the signed-in user, Intake's To do list, whose count the
  * Hercule segment shows, and the plugins that name each signal's source.
  * Resolves once every read is cached,
  * and fails with the first read that fails.
@@ -891,6 +911,7 @@ export const ensureShellData = async (
 ): Promise<void> => {
   await Promise.all([
     queryClient.ensureQueryData(threadsQuery(client)),
+    queryClient.ensureQueryData(liveAgentSessionsQuery(client)),
     queryClient.ensureQueryData(projectsQuery(client)),
     queryClient.ensureQueryData(workspacesQuery(client)),
     queryClient.ensureQueryData(resourcesQuery(client)),

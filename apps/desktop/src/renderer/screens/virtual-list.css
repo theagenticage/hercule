@@ -1,0 +1,23 @@
+/* The scrolling element of a virtualized list. The list places its items
+   itself, so the browser must not also move the scroll position when items
+   mount above the visible part. */
+.virtual-list {
+  overflow: auto;
+  overflow-anchor: none;
+}
+
+/* The head above the items, in the same scroll. It sticks to the top while
+   the items scroll under it. */
+.virtual-list-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* The list mounts only the items near the visible part: they stack in flow,
+   each drawing its own height and the space above it, and an empty spacer
+   stands in for each run of items that is not mounted. `flow-root` keeps the
+   first item's top margin inside the list. */
+.virtual-list-items {
+  display: flow-root;
+}

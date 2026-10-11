@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { listWaiting, type AssistantRow, type DraftPlace } from "@hercule/client-core";
+import {
+  listWaiting,
+  listWaitingRunSessions,
+  type AssistantRow,
+  type DraftPlace,
+} from "@hercule/client-core";
 import {
   buildProject,
   buildSession,
@@ -54,13 +59,22 @@ const waitingAssistant = (id: string, minutes: number): AssistantRow => ({
 });
 
 /**
- * Returns the sidebar for `threads` and `assistantRows`, in the fixture's
+ * Returns the session of a run's step waiting on a command approval, titled
+ * "Deploy · <id>", last active at 09:`minutes`.
+ */
+const waitingRunSession = (id: string, minutes: number): Session =>
+  waiting(id, minutes, { title: `Deploy · ${id}`, runId: "run-1", stepId: id });
+
+/**
+ * Returns the sidebar for `threads`, `assistantRows` and the runs'
+ * sessions `runSessions`, in the fixture's
  * projects, workspaces and resources. With a `draft`, its row's model is
  * "draft model" and its third line "draft meta".
  */
 const buildFixtureSidebar = ({
   threads,
   assistantRows = [],
+  runSessions = [],
   runners = [MOSS],
   projects = [WEBSHOP_PROJECT, OPS_PROJECT],
   workspaces = [PRIMARY, THREAD_3F1],
@@ -71,6 +85,7 @@ const buildFixtureSidebar = ({
 }: {
   readonly threads: readonly Session[];
   readonly assistantRows?: readonly AssistantRow[];
+  readonly runSessions?: readonly Session[];
   readonly runners?: readonly Runner[];
   readonly projects?: readonly Project[];
   readonly workspaces?: readonly Workspace[];
@@ -82,6 +97,7 @@ const buildFixtureSidebar = ({
   buildSidebar({
     threads,
     waiting: listWaiting(threads, assistantRows),
+    waitingRunSessions: listWaitingRunSessions(runSessions),
     projects,
     workspaces,
     resources: [WEBSHOP, INFRA, RUNBOOKS],
@@ -413,6 +429,78 @@ describe("buildSidebar", () => {
     expect(listKeys(items)).toEqual(["header:waiting", "waiting:assistant:ada"]);
   });
 
+  it(`draws the runs' waiting sessions under "From runs", below the threads, 7px below them`, () => {
+    const items = buildItems({
+      threads: [waiting("s-a", 1)],
+      runSessions: [waitingRunSession("approve", 2)],
+    }).filter((item) => item.section === "waiting");
+
+    expect(listKeys(items)).toEqual([
+      "header:waiting",
+      "waiting:thread:s-a",
+      "label:waiting-runs",
+      "waiting-run:approve",
+    ]);
+    expect(findItem(items, "header:waiting")).toMatchObject({ count: 2 });
+    expect(findItem(items, "label:waiting-runs")).toMatchObject({ leading: 7 });
+    expect(findItem(items, "waiting-run:approve")).toMatchObject({
+      kind: "waiting-run-row",
+      sessionId: "approve",
+      title: "Deploy · approve",
+      question: "Run git push?",
+      leading: 1,
+    });
+  });
+
+  it("draws Waiting on you for a run's waiting session when no thread waits, 7px between the header and From runs", () => {
+    const items = buildItems({
+      threads: [],
+      workspaces: [],
+      runSessions: [waitingRunSession("approve", 2)],
+    });
+
+    expect(listKeys(items)).toEqual([
+      "header:waiting",
+      "label:waiting-runs",
+      "waiting-run:approve",
+    ]);
+    expect(findItem(items, "header:waiting")).toMatchObject({ count: 1 });
+    // The book's 6px margin and the section's 1px gap, whatever sits above.
+    expect(findItem(items, "label:waiting-runs")).toMatchObject({ leading: 7 });
+  });
+
+  it("caps the runs' sessions at 3 apart from the threads, and counts the hidden ones on the more row and in the header", () => {
+    const threads = [1, 2, 3, 4].map((minutes) => waiting(`s-${String(minutes)}`, minutes));
+    const runSessions = [11, 12, 13, 14, 15].map((minutes) =>
+      waitingRunSession(`step-${String(minutes)}`, minutes),
+    );
+    const items = buildItems({ threads, runSessions }).filter((item) => item.section === "waiting");
+
+    expect(listKeys(items)).toEqual([
+      "header:waiting",
+      "waiting:thread:s-4",
+      "waiting:thread:s-3",
+      "waiting:thread:s-2",
+      "label:waiting-runs",
+      "waiting-run:step-15",
+      "waiting-run:step-14",
+      "waiting-run:step-13",
+      "more:waiting",
+    ]);
+    expect(findItem(items, "header:waiting")).toMatchObject({ count: 9 });
+    expect(findItem(items, "more:waiting")).toMatchObject({ label: "3 more waiting on you" });
+  });
+
+  it("shows every run's waiting session once Waiting on you is expanded", () => {
+    const runSessions = [1, 2, 3, 4, 5].map((minutes) =>
+      waitingRunSession(`step-${String(minutes)}`, minutes),
+    );
+    const items = buildItems({ threads: [], runSessions, expanded: new Set(["waiting"]) });
+
+    expect(items.filter((item) => item.kind === "waiting-run-row")).toHaveLength(5);
+    expect(listKeys(items)).not.toContain("more:waiting");
+  });
+
   it("shows every waiting thread once Waiting on you is expanded", () => {
     const threads = [1, 2, 3, 4, 5].map((minutes) => waiting(`s-${String(minutes)}`, minutes));
     const items = buildItems({ threads, expanded: new Set(["waiting"]) }).filter(
@@ -537,6 +625,17 @@ describe("listGoMenuItems", () => {
     );
   });
 
+  it("lists no run's waiting session", () => {
+    const items = buildItems({
+      threads: [waiting("s-new", 5)],
+      runSessions: [waitingRunSession("approve", 6)],
+    });
+    expect(items.some((item) => item.kind === "waiting-run-row")).toBe(true);
+    expect(listGoMenuItems(items)).toEqual([
+      { destination: { kind: "thread", sessionId: "s-new" }, title: "s-new" },
+    ]);
+  });
+
   it("lists no draft", () => {
     const items = buildItems({
       threads: [],
@@ -555,6 +654,16 @@ describe("pickFocusFallback", () => {
     const after = buildItems({ threads: FIVE_WAITING, expanded: new Set(["waiting"]) });
 
     expect(pickFocusFallback("more:waiting", before, after)).toBe("waiting:thread:s-2");
+  });
+
+  it("picks the first run's session a pressed more row brought into view", () => {
+    const runSessions = [1, 2, 3, 4].map((minutes) =>
+      waitingRunSession(`step-${String(minutes)}`, minutes),
+    );
+    const before = buildItems({ threads: [], runSessions });
+    const after = buildItems({ threads: [], runSessions, expanded: new Set(["waiting"]) });
+
+    expect(pickFocusFallback("more:waiting", before, after)).toBe("waiting-run:step-1");
   });
 
   it("picks the section's more row when a row leaves a capped section", () => {
