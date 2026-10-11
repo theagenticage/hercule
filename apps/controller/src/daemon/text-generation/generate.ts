@@ -22,9 +22,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { TextGenerationFailureReason } from "@hercule/contract";
 import {
   lintOutputSchema,
+  MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER,
   MAX_TEXT_GENERATION_TEXT_LENGTH,
+  OutputSchema,
   TEXT_GENERATION_DEADLINE_MS,
-  type OutputSchema,
   type Usage,
 } from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../../actor";
@@ -33,7 +34,7 @@ import { AuditLog } from "../../events";
 import { deriveCatalogJsonSchema, PluginHost } from "../../plugins";
 import type { StoredInstance } from "../../providers";
 import { PromotionState } from "../../promotion";
-import { LocalRunnerId, RunnerConnections, type Answer } from "../../runners";
+import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
 import { readInstanceSecrets, Secrets } from "../../secrets";
 import {
   LastTextGenerationFailure,
@@ -48,21 +49,16 @@ import {
 } from "./service";
 
 /**
- * How many text generations one runner makes at once. It only guards against
- * a stampede, such as a burst of fifty events each asking for a summary, so
- * normal use never reaches it. It is separate from `maxConcurrentSessions`,
- * because a text generation is not a Session and takes no session slot.
- */
-const MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER = 10;
-
-/**
  * How long a call holds its slot, at most, after the request is sent. The
- * runner stops its harness at `TEXT_GENERATION_DEADLINE_MS` and then answers,
- * so the slot normally frees just after that. The extra time covers the
- * answer travelling back. It also bounds the hold for a runner that breaks
- * its promise to answer, so such a runner cannot keep slots for good.
+ * runner stops its harness at `TEXT_GENERATION_DEADLINE_MS`, waits for the
+ * harness process to exit, and only then answers. The slowest harness to stop
+ * is Claude Code: its SDK sends SIGTERM and escalates to SIGKILL after about
+ * 7 seconds, so the answer can arrive about 67 seconds after the request. The
+ * extra 10 seconds cover that and the answer travelling back. The limit also
+ * bounds the hold for a runner that breaks its promise to answer, so such a
+ * runner cannot keep slots for good.
  */
-const SLOT_HOLD_MS = TEXT_GENERATION_DEADLINE_MS + 5_000;
+const SLOT_HOLD_MS = TEXT_GENERATION_DEADLINE_MS + 10_000;
 
 /**
  * How long a caller waits, in all: for a free slot on the runner, and then
@@ -81,6 +77,11 @@ const TIMED_OUT =
 const INVALID_OUTPUT = "the model's answer did not match the output schema";
 
 const CONNECTION_ENDED = "the runner's connection ended before it answered";
+
+const NO_REASON = "the text generation failed, and no reason was given";
+
+const NOT_SENT =
+  "the call was not sent, because the runner is not connected or cannot make text generations";
 
 const UNEXPECTED_FAILURE =
   "the text generation stopped on an unexpected error; the controller log has the details";
@@ -101,15 +102,20 @@ interface Attempt<A> {
 }
 
 /**
- * Builds the attempt of a call that failed. The message must not be empty:
- * the last failure and the error both require one. The protocol already
- * refuses an empty message from a runner.
+ * Builds the attempt of a call that failed. The message is trimmed, and a
+ * blank one becomes a fixed text, because Settings shows the message as the
+ * reason and the status refuses an empty one. The protocol already refuses a
+ * blank message from a runner, so the fixed text is a safeguard for the
+ * controller's own messages.
  */
 const buildFailedAttempt = (
   reason: TextGenerationFailureReason,
   message: string,
   runnerId: string | null = null,
-): Attempt<never> => ({ runnerId, outcome: { _tag: "failed", reason, message } });
+): Attempt<never> => ({
+  runnerId,
+  outcome: { _tag: "failed", reason, message: message.trim() || NO_REASON },
+});
 
 /** Removes the `core:` or `plugin:` prefix, which the record keeps as the caller. */
 const readCallerId = (caller: TextGenerationCaller): string =>
@@ -186,15 +192,17 @@ const make = Effect.gen(function* () {
           ? buildFailedAttempt("unavailable", error.message, runnerId)
           : yield* Effect.die(error);
       }
-      const answered = yield* Deferred.make<Option.Option<Answer>>();
+      // Completed with the holder's whole exit, not only its answer, so a
+      // defect in the holder reaches the caller at once, as its own defect.
+      const answered = yield* Deferred.make<SendOutcome<Answer>>();
       const callerWaiting = yield* Ref.make(true);
       yield* FiberSet.run(
         slotHolders,
-        getOrCreateRunnerSlots(runnerId).withPermits(1)(
-          Effect.flatMap(Ref.get(callerWaiting), (waiting) =>
-            waiting
-              ? Effect.flatMap(
-                  connections.asked(
+        getOrCreateRunnerSlots(runnerId)
+          .withPermits(1)(
+            Effect.flatMap(Ref.get(callerWaiting), (waiting) =>
+              waiting
+                ? connections.sendRequest(
                     runnerId,
                     {
                       _tag: "textGenerationRequest",
@@ -211,22 +219,30 @@ const make = Effect.gen(function* () {
                       },
                     },
                     Duration.millis(SLOT_HOLD_MS),
-                  ),
-                  (answer) => Deferred.succeed(answered, answer),
-                )
-              : Effect.void,
+                  )
+                : // Nobody reads this: the caller has given up.
+                  Effect.succeed<SendOutcome<Answer>>({ _tag: "notSent" }),
+            ),
+          )
+          .pipe(
+            Effect.onExit((exit) => Deferred.done(answered, exit)),
+            // The exit now belongs to the caller. Ending the fiber with it as
+            // well would only fail the fiber set nobody joins.
+            Effect.ignoreCause,
           ),
-        ),
       );
-      const answer = yield* Effect.timeoutOption(
+      const sent = yield* Effect.timeoutOption(
         Deferred.await(answered),
         yield* TextGenerationDeadline,
       ).pipe(Effect.ensuring(Ref.set(callerWaiting, false)));
-      if (Option.isNone(answer)) return buildFailedAttempt("timeout", TIMED_OUT, runnerId);
-      if (Option.isNone(answer.value) || answer.value.value._tag !== "textGenerationReport") {
+      if (Option.isNone(sent)) return buildFailedAttempt("timeout", TIMED_OUT, runnerId);
+      if (sent.value._tag === "notSent")
+        return buildFailedAttempt("unavailable", NOT_SENT, runnerId);
+      const answer = sent.value.answer;
+      if (Option.isNone(answer) || answer.value._tag !== "textGenerationReport") {
         return buildFailedAttempt("unavailable", CONNECTION_ENDED, runnerId);
       }
-      const reported = answer.value.value.outcome;
+      const reported = answer.value.outcome;
       switch (reported.outcome) {
         case "failed":
           return buildFailedAttempt("unavailable", reported.message, runnerId);
@@ -265,7 +281,7 @@ const make = Effect.gen(function* () {
       ? Effect.succeed(
           buildFailedAttempt(
             "unavailable",
-            `no connected runner that can make text generations is logged in to the provider instance ${target.instance.name} with the model ${target.model}; log in on a machine, or update its runner`,
+            `no connected runner that can make text generations is logged in to the provider instance ${target.instance.name} with the model ${target.model}; log in on a machine, update its runner if it is too old, or choose a model the instance offers`,
           ),
         )
       : callRunner(runnerId, target.instance, target.model, call, outputSchema);
@@ -290,7 +306,7 @@ const make = Effect.gen(function* () {
       const { outcome } = attempt;
       const at = yield* nowIso;
       if (outcome._tag === "failed") {
-        yield* lastFailure.record(target.setting, {
+        yield* lastFailure.record(target.failureKey, {
           reason: outcome.reason,
           message: outcome.message,
           at,
@@ -348,8 +364,16 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        // Lint accepted it, so it is a closed JSON object schema.
-        const outputSchema = derived as OutputSchema;
+        // Lint checks the keywords only. The frame also bounds the schema's
+        // size and depth, and a request that cannot be encoded must fail here
+        // as the caller's bug, not later while it is sent.
+        const outputSchema = yield* Effect.mapError(
+          Schema.decodeUnknownEffect(OutputSchema)(derived),
+          (error) =>
+            new Error(
+              `the output schema of a text generation does not fit a request frame: ${error.message}`,
+            ),
+        ).pipe(Effect.orDie);
 
         // A database error here is not recorded: the audit entry is written
         // to the same database.

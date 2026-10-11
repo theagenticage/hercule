@@ -446,6 +446,41 @@ const make = Effect.gen(function* () {
     }),
   );
 
+  /**
+   * Sends a request to the runner and waits for its answer, up to `deadline`.
+   * Returns `notSent`, sending nothing, when the runner has no connection or
+   * has not negotiated the capability the request needs. Otherwise returns
+   * `sent`, with the answer, or with `none` when the connection ended or no
+   * answer came in time. With `Duration.infinity` the wait ends only on the
+   * answer or on the end of the connection, which ends every wait on it.
+   */
+  const sendRequest = (
+    id: string,
+    request: Request,
+    deadline: Duration.Duration,
+  ): Effect.Effect<SendOutcome<Answer>> =>
+    Effect.map(
+      sendAndAwaitReport(
+        id,
+        request.requestId,
+        (held) => held.ask(request),
+        deadline,
+        readRequiredCapability(request),
+      ),
+      (outcome): SendOutcome<Answer> =>
+        outcome._tag === "notSent"
+          ? outcome
+          : {
+              _tag: "sent",
+              // The facts report uses its own key, never a request id, so only
+              // an answer can arrive under this key.
+              answer: Option.filter(
+                outcome.answer,
+                (reported): reported is Answer => reported._tag !== "factsReported",
+              ),
+            },
+    );
+
   return {
     /** Returns the id of the runner this credential belongs to. Only the hash is stored, and the lookup needs only that. */
     admits: (credential: string): Effect.Effect<Option.Option<string>, SqlError> =>
@@ -556,25 +591,20 @@ const make = Effect.gen(function* () {
      * `deadline`. Returns `none` when the runner has no connection, the
      * connection ended, or no answer came in time. With
      * `Duration.infinity` the wait ends only on the answer or on the end of
-     * the connection, which ends every wait on it.
+     * the connection, which ends every wait on it. A caller that must tell a
+     * request that was never sent from one that went unanswered uses
+     * `sendRequest`.
      */
     asked: (
       id: string,
       request: Request,
       deadline: Duration.Duration,
     ): Effect.Effect<Option.Option<Answer>> =>
-      Effect.map(
-        askAndAwaitReport(
-          id,
-          request.requestId,
-          (held) => held.ask(request),
-          deadline,
-          readRequiredCapability(request),
-        ),
-        // The facts report uses its own key, never a request id, so only an
-        // answer can arrive under this key.
-        Option.filter((reported): reported is Answer => reported._tag !== "factsReported"),
+      Effect.map(sendRequest(id, request, deadline), (outcome) =>
+        outcome._tag === "sent" ? outcome.answer : Option.none(),
       ),
+
+    sendRequest,
 
     /**
      * Sends a frame that carries an input and waits for the runner's answer

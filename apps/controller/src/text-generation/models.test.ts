@@ -199,6 +199,31 @@ describe("automatic", () => {
     );
   });
 
+  it("has another failure key once it resolves to another model", async () => {
+    const keys = await run(({ instances, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const runner = yield* addRunner();
+        yield* snapshot(instances["codex"]!, runner, probed("ok", "codex-mini"));
+        yield* snapshot(instances["pi"]!, runner, probed("ok", "pi-small"));
+        const withCodex = yield* resolve.pipe(Effect.orDie);
+        yield* snapshot(instances["codex"]!, runner, probed("unauthenticated", "codex-mini"));
+        const withPi = yield* resolve.pipe(Effect.orDie);
+        yield* snapshot(instances["pi"]!, runner, probed("unauthenticated", "pi-small"));
+        const withNothing = yield* resolve.pipe(Effect.orDie);
+        const again = yield* resolve.pipe(Effect.orDie);
+        return {
+          codex: withCodex.failureKey,
+          pi: withPi.failureKey,
+          nothing: withNothing.failureKey,
+          nothingAgain: again.failureKey,
+        };
+      }),
+    );
+
+    expect(new Set([keys.codex, keys.pi, keys.nothing]).size).toBe(3);
+    expect(keys.nothingAgain).toBe(keys.nothing);
+  });
+
   it("is unresolved, with a message to act on, when nothing matches", async () => {
     const target = await run(({ instances, addRunner, snapshot }) =>
       Effect.gen(function* () {
@@ -239,7 +264,10 @@ describe("off", () => {
       }),
     );
 
-    expect(target).toEqual({ _tag: "off", setting: JSON.stringify("off") });
+    expect(target).toEqual({
+      _tag: "off",
+      failureKey: JSON.stringify({ setting: "off", ran: null }),
+    });
   });
 });
 

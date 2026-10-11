@@ -12,6 +12,7 @@ import { Settings, SettingsLayer } from "../settings";
 import {
   LastTextGenerationFailure,
   LastTextGenerationFailureLayer,
+  TextGenerationModels,
   TextGenerationModelsLayer,
 } from "../text-generation";
 import { Controller, ControllerLayer } from "./service";
@@ -38,7 +39,12 @@ const withIdentity = <A, E>(
   body: Effect.Effect<
     A,
     E,
-    Controller | ControllerIdentity | Settings | LastTextGenerationFailure | SqlClient.SqlClient
+    | Controller
+    | ControllerIdentity
+    | Settings
+    | LastTextGenerationFailure
+    | TextGenerationModels
+    | SqlClient.SqlClient
   >,
   actor: Actor | null = USER,
   localRunner: { readonly read: () => string | undefined } = { read: () => undefined },
@@ -144,7 +150,8 @@ describe("controller.read text generation", () => {
         });
         yield* settings.set("textGeneration.model", { instanceId: instance.id, model: "mini" });
         const before = yield* controller.read();
-        yield* failures.record(JSON.stringify({ instanceId: instance.id, model: "mini" }), {
+        const target = yield* (yield* TextGenerationModels).resolve();
+        yield* failures.record(target.failureKey, {
           reason: "timeout",
           message: "the text generation did not finish in time",
           at: "2026-10-11T10:00:00.000Z",
