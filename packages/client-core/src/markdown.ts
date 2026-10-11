@@ -153,13 +153,18 @@ const FOOTNOTE_REFERENCE = /^\[\^([^\]\n]{1,999})\]/;
 const FOOTNOTE_INDENT = /^(?: {4}| {0,3}\t)/;
 
 /**
- * Matches a line that starts a block other than a paragraph: up to 3 spaces,
- * then a heading, a quote, a list marker, a code fence, a thematic break, a
- * table row, HTML, or a footnote or link definition. Each alternative looks at
- * a bounded prefix, except the thematic break, which reads the line once.
+ * Matches a line that starts a block other than a paragraph, or that may: up
+ * to 3 spaces, then a heading, a quote, a list marker, a code fence, a
+ * thematic break, a heading underline, a table row, HTML, or a footnote or
+ * link definition. Each alternative looks at a bounded prefix, except the
+ * thematic break and the underline, which read the line once.
+ *
+ * A line that starts with `|` or `<` may still be paragraph text. It matches
+ * all the same, because a footnote that ends a line too early only shows that
+ * line after the footnote, while one that ends too late can hide it.
  */
 const STARTS_ANOTHER_BLOCK =
-  /^ {0,3}(?:#|>|[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|```|~~~|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$|\||<|\[[^\]\n]{1,999}\]:)/;
+  /^ {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|```|~~~|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$|(?:=+|-+)[ \t]*$|\||<|\[[^\]\n]{1,999}\]:)/;
 
 /** Returns whether `line` holds nothing but spaces and tabs. */
 const isBlankLine = (line: string): boolean => line.trim() === "";
@@ -181,9 +186,15 @@ const findLineEnd = (source: string, from: number): number => {
  * The definition is its first line, `[^label]: text`, and then, line by line:
  * - A line indented by 4 spaces or a tab belongs to it. The indentation is
  *   removed. Blank lines belong to it when an indented line follows them.
- * - A line without indentation continues the paragraph it follows, when no
- *   blank line comes between and the line does not start another block.
+ * - A line without indentation continues the first paragraph, when no blank
+ *   line and no other block has come before it and the line does not start
+ *   another block.
  * - Any other line ends it.
+ *
+ * GitHub also continues a later paragraph this way. This reader does not,
+ * because it cannot tell a later paragraph from the inside of a code block or
+ * of HTML, and continuing those would hide the line in a footnote the message
+ * may never reference. The line shows after the footnote instead.
  *
  * It reads one line at a time and never looks back, so it takes time linear in
  * the lines it covers plus the one line that ends the definition.
@@ -200,7 +211,7 @@ const readFootnoteDefinition = (
   let end = firstEnd;
   // The blank lines seen since then. They belong to the definition only if an indented line follows.
   let pendingBlankLines = 0;
-  // Whether the previous line is paragraph text, so that a line without indentation may continue it.
+  // Whether every line so far is text of the first paragraph, so that a line without indentation may continue it.
   let paragraphOpen = !isBlankLine(firstLine) && !STARTS_ANOTHER_BLOCK.test(firstLine);
   let position = firstEnd + 1;
   while (position <= source.length && end < source.length) {
@@ -215,7 +226,7 @@ const readFootnoteDefinition = (
       for (; pendingBlankLines > 0; pendingBlankLines--) lines.push("");
       lines.push(content);
       end = lineEnd;
-      paragraphOpen = !STARTS_ANOTHER_BLOCK.test(content);
+      paragraphOpen &&= !STARTS_ANOTHER_BLOCK.test(content);
     } else if (paragraphOpen && !STARTS_ANOTHER_BLOCK.test(line)) {
       lines.push(line);
       end = lineEnd;
@@ -289,7 +300,12 @@ const footnoteExtension: MarkedExtension = {
     {
       name: "footnoteDefinition",
       level: "block",
-      start: findFootnoteDefinitionStart,
+      // marked uses the result only to cut a top-level paragraph, but asks
+      // for it before every line of a list item too. Skipping those scans
+      // saves work and changes no result.
+      start(source) {
+        return this.lexer.state.top ? findFootnoteDefinitionStart(source) : undefined;
+      },
       tokenizer(source) {
         const definition = readFootnoteDefinition(source);
         if (definition === undefined) return undefined;

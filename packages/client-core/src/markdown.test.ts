@@ -550,6 +550,22 @@ describe("parseMarkdown footnotes", () => {
     });
   });
 
+  it("keeps a heading-like word without a space in the footnote", () => {
+    expect(parseMarkdown("[^a]\n\n[^a]: note\n#hashtag")).toEqual({
+      blocks: [paragraph(reference(1))],
+      footnotes: [{ number: 1, children: [paragraph(text("note\n#hashtag"), backReference(1))] }],
+    });
+  });
+
+  it.each([
+    ["a code fence", "[^unused]: ```\n    example\nIMPORTANT"],
+    ["HTML", "[^unused]: note\n    <div>\nIMPORTANT"],
+    ["indented code after a blank line", "[^unused]: note\n\n        code\nIMPORTANT"],
+    ["a heading underline", "[^unused]: note\n    ===\nIMPORTANT"],
+  ])("shows a line without indentation after %s in a footnote", (_, source) => {
+    expect(parseMarkdown(source)).toEqual(blocks(paragraph(text("IMPORTANT"))));
+  });
+
   it("ends the footnote at a blank line followed by a line without indentation", () => {
     expect(parseMarkdown("[^a]\n\n[^a]: first\n\nafter")).toEqual({
       blocks: [paragraph(reference(1)), paragraph(text("after"))],
