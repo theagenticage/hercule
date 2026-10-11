@@ -36,7 +36,9 @@
  *    lighter shadow;
  * 7. opens the dialog as a modal `<dialog>` in the top layer, as the app
  *    does, instead of inside the book's fixed `.scrim`. The two draw the
- *    corners of the Change button a level apart.
+ *    corners of the Change button a level apart;
+ * 8. adds an Intake row after Threads in the settings list: the book
+ *    predates Settings > Intake, and the app's list has the row.
  *
  * An edit that finds nothing to edit fails, because the book has changed and
  * the comparison would no longer compare what it claims to.
@@ -47,7 +49,7 @@ import {
   type ProfileAgent,
 } from "@hercule/client-core";
 import { buildAssistantLook, buildLook } from "../faces/look";
-import { findElement, findElements } from "./book-page";
+import { findElement, findElements, insertIntakeSettingsRow } from "./book-page";
 import { drawBookFace, markSheetReady, readCrew, stillBookPage } from "./sheet-page";
 import {
   PERMISSION_PROFILES_SETTINGS_RECORDS,
@@ -84,6 +86,9 @@ function buildFace(agent: ProfileAgent, size: number): Element {
 }
 
 stillBookPage();
+
+// 8. The Intake row.
+insertIntakeSettingsRow(document);
 
 const popStyle = document.createElement("style");
 popStyle.textContent = `
