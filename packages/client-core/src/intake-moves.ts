@@ -340,6 +340,17 @@ export interface SnoozeChoice {
 }
 
 /**
+ * Counts the days from `today` to the Monday the snooze menu's fourth
+ * choice comes back on: the first Monday after tomorrow. Returns 7 on a
+ * Monday, 8 on a Sunday, and 2 to 6 on the other days.
+ */
+const countDaysToMonday = (today: CalendarDate): number => {
+  // Monday is weekday 1, so this counts the days to the coming Monday, 0 on a Monday.
+  const days = (8 - computeWeekday(today)) % 7;
+  return days <= 1 ? days + 7 : days;
+};
+
+/**
  * Builds the snooze menu's five choices from `now`, in `timezone`, the
  * user's timezone setting:
  *
@@ -348,7 +359,9 @@ export interface SnoozeChoice {
  *    From 17:00 This evening is disabled, so key 2 never moves to another
  *    choice.
  * 3. Tomorrow at 09:00.
- * 4. Monday at 09:00: the next Monday, a week ahead on a Monday.
+ * 4. Monday at 09:00: the next Monday after tomorrow. On a Monday that is
+ *    a week ahead, and on a Sunday eight days ahead, so it is never the
+ *    same time as Tomorrow.
  * 5. Pick a time…, which has no time of its own.
  *
  * Days are counted on the calendar in `timezone`, never as 24 hours, so a
@@ -388,13 +401,7 @@ export const buildSnoozeChoices = (now: Date, timezone: string): ReadonlyArray<S
       ? { key: 2, label: "This evening", timeLabel: "18:00", until: null, disabled: true }
       : buildFixedChoice(2, evening ? "This evening" : "This afternoon", today, evening ? 18 : 14),
     buildFixedChoice(3, "Tomorrow", today && addCalendarDays(today, 1), 9),
-    // Monday is weekday 1; on a Monday itself the choice is a week ahead.
-    buildFixedChoice(
-      4,
-      "Monday",
-      today && addCalendarDays(today, (8 - computeWeekday(today)) % 7 || 7),
-      9,
-    ),
+    buildFixedChoice(4, "Monday", today && addCalendarDays(today, countDaysToMonday(today)), 9),
     { key: 5, label: "Pick a time…", timeLabel: null, until: null, disabled: false },
   ];
 };

@@ -388,9 +388,18 @@ describe("buildSnoozeChoices", () => {
 
   it("puts Monday a week ahead on a Monday", () => {
     // Monday 12 October, 10:00 in Amsterdam.
-    expect(readChoices("2026-10-12T08:00:00.000Z", AMSTERDAM)[3]?.[3]).toBe(
-      "2026-10-19T07:00:00.000Z",
-    );
+    expect(readChoices("2026-10-12T08:00:00.000Z", AMSTERDAM).slice(2, 4)).toEqual([
+      [3, "Tomorrow", "Tue 09:00", "2026-10-13T07:00:00.000Z", false],
+      [4, "Monday", "Mon 09:00", "2026-10-19T07:00:00.000Z", false],
+    ]);
+  });
+
+  it("puts Monday eight days ahead on a Sunday, so it is never the same time as Tomorrow", () => {
+    // Sunday 11 October, 10:00 in Amsterdam.
+    expect(readChoices("2026-10-11T08:00:00.000Z", AMSTERDAM).slice(2, 4)).toEqual([
+      [3, "Tomorrow", "Mon 09:00", "2026-10-12T07:00:00.000Z", false],
+      [4, "Monday", "19 Oct 09:00", "2026-10-19T07:00:00.000Z", false],
+    ]);
   });
 
   it("keeps 09:00 on the next day across the night the clocks go forward", () => {

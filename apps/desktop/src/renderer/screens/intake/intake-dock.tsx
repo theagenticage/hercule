@@ -112,9 +112,11 @@ function MoveToastLine({
 }
 
 /**
- * Renders the bulk bar: "3 selected", and after it what the button with
- * hover or focus would do, then the buttons and the clear button. The bar
- * anchors the snooze menu while the menu is open from it.
+ * Renders the bulk bar: "3 selected", then the buttons and the clear
+ * button. While a button has hover or focus, what it would do, such as
+ * "Done 2 · keeps 1 proposal", takes the place of "3 selected": the bar
+ * is as wide as the list, and the two together do not fit beside the
+ * buttons. The bar anchors the snooze menu while the menu is open from it.
  */
 function BulkBarLine({ bulk }: { readonly bulk: BulkBar }): JSX.Element {
   return (
@@ -125,8 +127,11 @@ function BulkBarLine({ bulk }: { readonly bulk: BulkBar }): JSX.Element {
       style={bulk.snoozeMenuOpen ? { anchorName: SNOOZE_ANCHOR } : undefined}
     >
       <span className="asks-toast-text" aria-live="polite">
-        <b>{bulk.checkedCount}</b> selected
-        {bulk.preview !== null && <span className="asks-bulk-preview">{` · ${bulk.preview}`}</span>}
+        {bulk.preview ?? (
+          <>
+            <b>{bulk.checkedCount}</b> selected
+          </>
+        )}
       </span>
       {bulk.moves.map((move) => {
         const opensMenu = move === "snooze";

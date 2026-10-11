@@ -424,6 +424,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Not in the drawing, whose toast is always one line. The mark is one line
+   of text tall and sits at the top, so on a toast whose text wraps it
+   stays beside the first line. On one line it is drawn as the drawing's
+   centred mark. */
+.asks-toast:not(.asks-bulk) {
+  align-items: flex-start;
+}
+.asks-toast > .mark {
+  height: 1lh;
+  line-height: inherit;
+}
 /* A move that failed, in the toast's place: the same ink toast, with its
    mark in the failure colour. Its text wraps instead of being cut short,
    because the reason it failed and what to do next are at the end. */
@@ -465,11 +476,11 @@
 .asks-bulk .asks-toast-text b {
   font-variant-numeric: tabular-nums;
 }
-/* What the button with hover or focus would do, after the count. Not in the
-   drawing. Dimmed as the keys are, because --muted is drawn for the light
-   surface and reads too faintly on the ink bar. */
-.asks-bulk-preview {
-  opacity: 0.7;
+/* Not in the drawing, which shows no preview. What the button with hover
+   or focus would do takes the count's place, and wraps rather than being
+   cut short, because the rows it keeps are named at its end. */
+.asks-bulk .asks-toast-text {
+  white-space: normal;
 }
 .asks-bulk button {
   display: inline-flex;
@@ -542,15 +553,17 @@
   text-align: left;
   font-size: var(--t-13);
 }
-.asks-snooze [role="menuitem"]:hover,
-.asks-snooze [role="menuitem"]:focus-visible,
-.asks-snooze[data-opened-by-key] [role="menuitem"]:focus {
+/* The drawing highlights a choice on `:hover` and `:focus-visible`. The
+   menu marks one active choice instead, under the pointer or moved to by
+   the arrow keys, so two choices are never highlighted at once. */
+.asks-snooze [role="menuitem"].is-active {
   background: var(--hover);
+}
+.asks-snooze [role="menuitem"]:focus-visible {
   outline: none;
 }
 .asks-snooze [role="menuitem"][aria-disabled="true"] {
   color: var(--faint);
-  background: none;
   cursor: default;
 }
 .asks-snooze time {
@@ -560,6 +573,15 @@
 }
 .asks-snooze kbd {
   justify-self: end;
+}
+/* Not in the drawing, which disables no choice. A disabled choice greys its
+   time and its key with its label, so the key does not read as live. The
+   key fades as an answer's key does when the answer cannot be given yet. */
+.asks-snooze [aria-disabled="true"] time {
+  color: var(--faint);
+}
+.asks-snooze [aria-disabled="true"] kbd {
+  opacity: 0.5;
 }
 /* Not in the drawing, which picks no time: a date and time field, then the
    button that snoozes until it. */

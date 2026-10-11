@@ -1032,7 +1032,7 @@ A row shows its controls on hover and on keyboard focus. Every control here only
   1. In 1 hour
   2. This afternoon at 14:00, shown before 13:00; This evening at 18:00, from 13:00 until 17:00; greyed out after 17:00, so the keys never move
   3. Tomorrow 09:00
-  4. Monday 09:00, a week ahead on a Monday
+  4. Monday 09:00, a week ahead on a Monday. *(Amended 2026-10-11, [#525](https://github.com/theagenticage/hercule/issues/525).)* On a Sunday it is eight days ahead, the Monday after tomorrow, so it is never the same time as Tomorrow
   5. Pick a time
   - The app calls `signal.snooze`; Unsnooze calls `signal.unsnooze`. What a snooze does to a signal is [Snooze and Not urgent](./10-triage-intake-and-notifications.md#97-snooze-and-not-urgent)'s. A Now signal can be snoozed.
 - **Not urgent** sits on a Now row, and in the pane of a Now signal. It calls `signal.lowerPriority`, which lowers the signal from `urgent` to `high`: the row moves to Signals and wears the `high` mark. It sends nothing to the source. It only lowers: v1 has no way to raise a signal to Now.

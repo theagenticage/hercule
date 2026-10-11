@@ -31,6 +31,14 @@ const scene = readScene();
 document.documentElement.dataset.scenes = INTAKE_SCENES.map((each) => each.name).join(" ");
 await mountIntakeSpecimen(scene.records, scene.intake);
 await scene.play?.();
+// A toast rises as it shows. The capture waits for that to end, so it never
+// catches the toast half drawn. Animations that never end are left alone.
+await Promise.all(
+  document
+    .getAnimations()
+    .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+    .map((animation) => animation.finished),
+);
 // The capture script reads this to move the pointer onto the element.
 if (scene.hover !== undefined) document.documentElement.dataset.hover = scene.hover;
 await markSheetReady();

@@ -32,8 +32,12 @@ export const SNOOZE_ANCHOR = "--intake-snooze";
  * Pick a time… swaps the choices for a date and time field. `onChoose` is
  * called with the instant the signals come back, after `onClose`.
  *
- * With `openedByKey`, as when `H` opens it, the focused choice is drawn
- * active from the start, so the user sees where `↩` lands.
+ * One choice at a time is drawn active: the one under the pointer, or the
+ * one the arrow keys moved to. With `openedByKey`, as when `H` opens it,
+ * the first choice is active from the start, so the user sees where `↩`
+ * lands. The active choice is kept in state rather than read from `:hover`
+ * and `:focus`, so the pointer and the keys never highlight two choices at
+ * once, and a window without the system's focus still draws it.
  *
  * The menu is a popover, so it draws above the list and the pane, and no
  * scrolling part clips it. It handles its own keys, and stops them there,
@@ -57,6 +61,7 @@ export function SnoozeMenu({
   const [picked, setPicked] = useState("");
   const [pickFailed, setPickFailed] = useState(false);
   const choices = buildSnoozeChoices(new Date(), timezone);
+  const [activeKey, setActiveKey] = useState<number | null>(openedByKey ? choices[0]!.key : null);
 
   const closeFromOutside = useEffectEvent(onClose);
   useLayoutEffect(() => {
@@ -117,10 +122,17 @@ export function SnoozeMenu({
     }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
-    const items = [...event.currentTarget.querySelectorAll<HTMLElement>("[role='menuitem']")];
+    // A disabled choice cannot be taken, so the arrow keys pass over it.
+    const items = [
+      ...event.currentTarget.querySelectorAll<HTMLElement>(
+        "[role='menuitem']:not([aria-disabled='true'])",
+      ),
+    ];
     const at = items.indexOf(document.activeElement as HTMLElement);
     const step = event.key === "ArrowDown" ? 1 : -1;
-    items[(at + step + items.length) % items.length]?.focus();
+    const next = items[(at + step + items.length) % items.length];
+    next?.focus();
+    setActiveKey(next === undefined ? null : Number(next.dataset.key));
   };
 
   const submitPicked = (event: FormEvent<HTMLFormElement>): void => {
@@ -138,7 +150,6 @@ export function SnoozeMenu({
       aria-label="Snooze until"
       className="pop asks-snooze"
       data-place={place}
-      data-opened-by-key={openedByKey || undefined}
       onKeyDown={handleKeys}
     >
       <p className="asks-snooze-h">Snooze until</p>
@@ -172,7 +183,15 @@ export function SnoozeMenu({
             key={choice.key}
             type="button"
             role="menuitem"
+            className={choice.key === activeKey ? "is-active" : undefined}
+            data-key={choice.key}
             aria-disabled={choice.disabled || undefined}
+            onPointerEnter={() => {
+              if (!choice.disabled) setActiveKey(choice.key);
+            }}
+            onPointerLeave={() => {
+              setActiveKey(null);
+            }}
             onClick={() => {
               takeChoice(choice.key);
             }}

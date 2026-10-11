@@ -925,9 +925,7 @@ describe("Intake's moves", () => {
     expect(bar.querySelector(".asks-toast-text")!.textContent).toBe("3 selected");
     const done = within(bar).getByRole("button", { name: /^Done/ });
     await userEvent.hover(done);
-    expect(bar.querySelector(".asks-toast-text")!.textContent).toBe(
-      "3 selected · Done 2 · keeps 1 proposal",
-    );
+    expect(bar.querySelector(".asks-toast-text")!.textContent).toBe("Done 2 · keeps 1 proposal");
     expect(done.getAttribute("title")).toBe("Marks 2 of 3 done. 1 proposal needs its own answer");
     expect(getItem(PROPOSAL).classList.contains("is-kept")).toBe(true);
     expect(getItem(REVIEW).classList.contains("is-acted")).toBe(true);
