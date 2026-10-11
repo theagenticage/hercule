@@ -1,0 +1,16 @@
+{
+  "name": "@hercule/plugin-sentry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hercule/plugin-host": "workspace:*",
+    "effect": "4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "@hercule/contract": "workspace:*"
+  }
+}
