@@ -58,13 +58,13 @@ All recorded.
   - `lastSeen:-90d`, and an absolute time, `lastSeen:>2026-10-01T00:00:00`
   - `environment:<name>`, inside the query
 - `environment`: repeat it for more than one. Repeated values are OR'd: two environments returned the union of each alone.
-- `project`: a project id; repeat it for more than one.
+- `project`: a project id; repeat it for more than one. Leaving it out returns every project the user can see, the same as `project=-1`. Recorded. **An unknown project id is an error**, unlike the other filters: it answered 403 with a `detail` message. Recorded.
 - `group`: an issue id; repeat it to read up to 100 named issues in one request. This is how a poller learns why an issue left its list.
 - `sort`: `date` (last seen, the default), `new` (first seen).
 - `statsPeriod`: the window for the `stats` field.
 - `collapse`: leaves fields out. `collapse=stats` drops the hourly counts and shrinks the response by about a third. **`collapse=lifetime` drops `firstSeen`, `lastSeen`, `count` and `userCount` too**, so a poller must not collapse it.
 
-**An unknown value is not an error.** `assigned:#no-such-team` answered 200 with an empty list. A team, project or environment that was renamed or deleted makes the filter match nothing, silently. Recorded.
+**An unknown value in the query is not an error.** `assigned:#no-such-team` answered 200 with an empty list. A team, project or environment that was renamed or deleted makes the filter match nothing, silently. Recorded.
 
 ### An issue
 
