@@ -334,8 +334,9 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Returns the `api` origin of a signal the caller raises: its stamp and,
-   * for a run's session or a run's step, the run and its workflow.
+   * Returns the `api` origin of a signal the caller raises: its stamp; for a
+   * run's session or a run's step, the run and its workflow; and for a
+   * session of an assistant's conversation, the assistant.
    */
   const buildApiOrigin = (
     caller: Exclude<Actor, { readonly _tag: "none" }>,
@@ -344,10 +345,12 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       let runId: string | null = null;
       let workflowId: string | null = null;
+      let assistantId: string | null = null;
       if (caller._tag === "run") {
         runId = caller.runId;
         workflowId = caller.workflowId;
       } else if (caller._tag === "session") {
+        assistantId = caller.assistantId;
         const session = yield* sessions.one(caller.sessionId);
         runId = Option.match(session, { onNone: () => null, onSome: (found) => found.runId });
         if (runId !== null) {
@@ -363,6 +366,7 @@ const make = Effect.gen(function* () {
         actor: buildActorStamp(caller),
         ...(runId === null ? {} : { runId }),
         ...(workflowId === null ? {} : { workflowId }),
+        ...(assistantId === null ? {} : { assistantId }),
         eventIds: input.eventIds,
         reason: input.reason,
       };

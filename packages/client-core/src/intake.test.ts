@@ -36,6 +36,13 @@ const PLUGINS = [
   { id: "slack", displayName: "Slack" },
 ];
 
+const TRIAGE_ID = "01a06d02-7f00-7000-8000-000000000001";
+const ADA_ID = "01a06d02-7e00-7000-8000-000000000001";
+const RAISERS = {
+  workflows: [{ id: TRIAGE_ID, name: "Triage" }],
+  assistants: [{ id: ADA_ID, name: "Ada" }],
+};
+
 const EVENT_ORIGIN = {
   type: "event",
   eventId: 1,
@@ -80,8 +87,10 @@ describe("parseSignalPluginId", () => {
 
 describe("nameSignalSource", () => {
   it("names a plugin kind's plugin, or its id when the plugin is not listed", () => {
-    expect(nameSignalSource(buildSignal("a"), PLUGINS)).toBe("GitHub");
-    expect(nameSignalSource(buildSignal("a", { kind: "jira/assigned" }), PLUGINS)).toBe("jira");
+    expect(nameSignalSource(buildSignal("a"), PLUGINS, RAISERS)).toBe("GitHub");
+    expect(nameSignalSource(buildSignal("a", { kind: "jira/assigned" }), PLUGINS, RAISERS)).toBe(
+      "jira",
+    );
   });
 
   it("names who raised a core signal", () => {
@@ -92,6 +101,7 @@ describe("nameSignalSource", () => {
           origin: { type: "api", actor, eventIds: [], reason: "r" },
         }),
         PLUGINS,
+        RAISERS,
       );
     expect(raisedBy("user")).toBe("You");
     expect(raisedBy("system")).toBe("Hercule");
@@ -100,22 +110,56 @@ describe("nameSignalSource", () => {
     expect(raisedBy("session:01a06d02-7300-7000-8000-000000000001")).toBe("An agent");
   });
 
+  it("names the workflow of a run and the assistant of a session, or stays general when they are gone", () => {
+    const raisedBy = (ids: {
+      readonly runId?: string;
+      readonly workflowId?: string;
+      readonly assistantId?: string;
+    }) =>
+      nameSignalSource(
+        buildSignal("a", {
+          kind: "offer",
+          origin: {
+            type: "api",
+            actor: "session:01a06d02-7300-7000-8000-000000000001",
+            eventIds: [],
+            reason: "r",
+            ...ids,
+          },
+        }),
+        PLUGINS,
+        RAISERS,
+      );
+    const runId = "01a06d02-7d00-7000-8000-000000000001";
+    const gone = "01a06d02-7c00-7000-8000-000000000001";
+    expect(raisedBy({ runId, workflowId: TRIAGE_ID })).toBe("Triage");
+    expect(raisedBy({ runId, workflowId: gone })).toBe("A workflow");
+    // A run of a sent workflow has no stored workflow to name.
+    expect(raisedBy({ runId })).toBe("A workflow");
+    expect(raisedBy({ assistantId: ADA_ID })).toBe("Ada");
+    expect(raisedBy({ assistantId: gone })).toBe("An agent");
+  });
+
   it("names Hercule for a core kind raised from an event", () => {
-    expect(nameSignalSource(buildSignal("a", { kind: "fyi" }), PLUGINS)).toBe("Hercule");
+    expect(nameSignalSource(buildSignal("a", { kind: "fyi" }), PLUGINS, RAISERS)).toBe("Hercule");
   });
 });
 
 describe("describeSignalProvenance", () => {
   it("joins the source and the kind's label", () => {
-    expect(describeSignalProvenance(buildSignal("a"), PLUGINS)).toBe("GitHub · Mentioned");
+    expect(describeSignalProvenance(buildSignal("a"), PLUGINS, RAISERS)).toBe("GitHub · Mentioned");
     expect(
-      describeSignalProvenance(buildSignal("a", { kind: "proposal", origin: fromUser() }), PLUGINS),
+      describeSignalProvenance(
+        buildSignal("a", { kind: "proposal", origin: fromUser() }),
+        PLUGINS,
+        RAISERS,
+      ),
     ).toBe("You · Proposal");
   });
 
   it("makes a plugin kind's word into a label, and labels the core kinds by hand", () => {
     const labelKind = (kind: string) =>
-      describeSignalProvenance(buildSignal("a", { kind }), PLUGINS).split(" · ")[1];
+      describeSignalProvenance(buildSignal("a", { kind }), PLUGINS, RAISERS).split(" · ")[1];
     expect(labelKind("github/review-requested")).toBe("Review requested");
     expect(labelKind("fyi")).toBe("FYI");
     expect(labelKind("unsure")).toBe("Unsure");
@@ -279,20 +323,25 @@ describe("describeSignalRow", () => {
           place: "acme/webshop#1296",
         }),
         PLUGINS,
+        RAISERS,
       ),
     ).toBe("Marta · review requested · acme/webshop#1296");
   });
 
   it("names a core signal's source when it has no asker", () => {
     expect(
-      describeSignalRow(buildSignal("a", { kind: "proposal", origin: fromUser() }), PLUGINS),
+      describeSignalRow(
+        buildSignal("a", { kind: "proposal", origin: fromUser() }),
+        PLUGINS,
+        RAISERS,
+      ),
     ).toBe("You · proposal");
   });
 
   it("keeps an acronym kind in capitals", () => {
-    expect(describeSignalRow(buildSignal("a", { kind: "fyi", origin: fromUser() }), PLUGINS)).toBe(
-      "You · FYI",
-    );
+    expect(
+      describeSignalRow(buildSignal("a", { kind: "fyi", origin: fromUser() }), PLUGINS, RAISERS),
+    ).toBe("You · FYI");
   });
 
   it("leaves the kind out of an unsure row, which carries its own label", () => {
@@ -300,6 +349,7 @@ describe("describeSignalRow", () => {
       describeSignalRow(
         buildSignal("a", { kind: "unsure", origin: fromUser(), place: "#ops" }),
         PLUGINS,
+        RAISERS,
       ),
     ).toBe("You · #ops");
   });
@@ -322,9 +372,10 @@ describe("describeBuildFailure", () => {
       describeBuildFailure(
         buildSignal("a", { buildError: { message: "boom", at: "2026-10-10T09:00:00.000Z" } }),
         PLUGINS,
+        RAISERS,
       ),
     ).toBe("GitHub couldn't draw this signal. Showing the event as it came in.");
-    expect(describeBuildFailure(buildSignal("a"), PLUGINS)).toBeNull();
+    expect(describeBuildFailure(buildSignal("a"), PLUGINS, RAISERS)).toBeNull();
   });
 });
 

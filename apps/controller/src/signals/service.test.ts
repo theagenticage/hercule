@@ -46,14 +46,21 @@ const USER: Actor = {
 
 const SIGNAL_GRANTS: ReadonlyArray<Grant> = ["signal.read", "signal.write"];
 
-/** Builds the actor of a session, in no run, whose profile holds `grants`. */
-const buildSessionActor = (sessionId: string, grants = SIGNAL_GRANTS): Actor => ({
+/**
+ * Builds the actor of a session, in no run, whose profile holds `grants`.
+ * `assistantId` names the assistant whose conversation the session answers.
+ */
+const buildSessionActor = (
+  sessionId: string,
+  grants = SIGNAL_GRANTS,
+  assistantId: string | null = null,
+): Actor => ({
   _tag: "session",
   sessionId,
   profileId: "0199e0e7-0000-7000-8000-00000000d001",
   grants,
   profileGrants: grants,
-  assistantId: null,
+  assistantId,
 });
 
 const TRIAGE_SESSION_ID = "0199e0e7-0000-7000-8000-00000000b501";
@@ -214,6 +221,23 @@ describe("signal.raise", () => {
     expect(entries.map((entry) => entry.payload)).toEqual([
       { signalId: signal.id, kind: "proposal" },
     ]);
+  });
+
+  it("stamps the assistant whose session raised the signal, and none for any other session", async () => {
+    const assistantId = "0199e0e7-0000-7000-8000-00000000a001";
+    const { byAssistant, bySession } = await run(
+      Effect.gen(function* () {
+        return {
+          byAssistant: yield* raiseAndRead(
+            PROPOSAL,
+            buildSessionActor("0199e0e7-0000-7000-8000-00000000b503", SIGNAL_GRANTS, assistantId),
+          ),
+          bySession: yield* raiseAndRead(PROPOSAL),
+        };
+      }),
+    );
+    expect(byAssistant.origin).toMatchObject({ type: "api", assistantId });
+    expect(bySession.origin).not.toHaveProperty("assistantId");
   });
 
   it("puts the raiser's actions first, then Hand to an agent, then the core's own", async () => {

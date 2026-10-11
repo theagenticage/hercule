@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { isId } from "@hercule/contract";
-import { signalQuery, signalsToDoQuery } from "../../../app/queries";
+import { readOnOpen, signalQuery, signalsToDoQuery, workflowsQuery } from "../../../app/queries";
 import { IntakeScreen } from "../../../screens/intake/intake-screen";
 
 /** The search params of Intake: the selected signal, whose pane is open. */
@@ -19,8 +19,13 @@ const validateIntakeSearch = (search: Record<string, unknown>): IntakeSearch =>
  *
  * The route is split into a chunk of its own, so Intake's code loads the
  * first time it opens, never at the app's first paint. The shell's loader
- * has already read To do and the plugins. The loader reads the selected
- * signal:
+ * has already read To do, the plugins and the assistants. Each time Intake
+ * opens, the loader reads the workflows, whose names label the signals their
+ * runs raised: no live push keeps them current, see `workflowsQuery`. A new
+ * selection does not read them again, so stepping through the list with `J`
+ * sends no request for them.
+ *
+ * The loader also reads the selected signal:
  *
  * - When To do holds it, the read runs in the background. The pane opens at
  *   once on the listed signal, and the read adds its answers' describe
@@ -33,14 +38,21 @@ export const Route = createFileRoute("/_connected/_shell/intake")({
   staticData: { title: "Intake" },
   validateSearch: validateIntakeSearch,
   loaderDeps: ({ search }) => ({ signal: search.signal }),
-  loader: async ({ context: { controller, queryClient }, deps }) => {
-    if (deps.signal === undefined) return;
+  loader: async ({ context: { controller, queryClient }, deps, cause }) => {
     const { client } = controller;
+    const workflows =
+      cause === "stay"
+        ? queryClient.ensureQueryData(workflowsQuery(client))
+        : readOnOpen(queryClient, workflowsQuery(client));
+    if (deps.signal === undefined) {
+      await workflows;
+      return;
+    }
     const listed = queryClient
       .getQueryData(signalsToDoQuery(client).queryKey)
       ?.some((signal) => signal.id === deps.signal);
     const read = queryClient.prefetchQuery(signalQuery(client, deps.signal));
-    if (listed !== true) await read;
+    await Promise.all([workflows, listed === true ? undefined : read]);
   },
   component: IntakeRoute,
 });

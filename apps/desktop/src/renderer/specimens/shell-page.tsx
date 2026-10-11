@@ -103,6 +103,7 @@ import {
   threadsQuery,
   transcriptQuery,
   userQuery,
+  workflowsQuery,
   workspacesQuery,
 } from "../app/queries";
 import {
@@ -399,6 +400,10 @@ const seedQueryCache = (
   }
   if (appearanceSettings !== undefined) {
     queryClient.setQueryData(connectionsQuery(client).queryKey, appearanceSettings.connections);
+  }
+  if (intake !== undefined) {
+    // The drawings' signals come from plugins, so no workflow names any of them.
+    queryClient.setQueryData(workflowsQuery(client).queryKey, []);
   }
   if (intake?.signal != null) {
     queryClient.setQueryData(signalQuery(client, intake.signal.id).queryKey, intake.signal);

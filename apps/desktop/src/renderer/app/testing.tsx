@@ -423,6 +423,8 @@ export const buildSidebarHandlers = (
   // The shell reads To do for Intake's count, and the plugins for its sources.
   "GET /api/v1/signals": { body: records.signals ?? [] },
   "GET /api/v1/plugins": { body: records.plugins ?? [] },
+  // Intake reads the workflows, whose names label the signals their runs raised.
+  "GET /api/v1/workflows": { body: { items: [] } },
 });
 
 /**

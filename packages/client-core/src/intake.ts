@@ -14,6 +14,7 @@ import {
   type PluginMark,
   type Signal,
   type SignalAction,
+  type SignalOrigin,
 } from "@hercule/contract";
 
 /** A plugin's id and the name the user knows it by, as `plugin.query` returns them. */
@@ -25,6 +26,18 @@ export interface PluginName {
 /** A plugin's id, its name and the mark it declares, as `plugin.query` returns them. */
 export interface PluginIdentity extends PluginName {
   readonly mark?: PluginMark;
+}
+
+/** A workflow's or an assistant's id and name, as `workflow.query` and `assistant.query` return them. */
+export interface RaiserName {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** The stored workflows and the assistants, whose names a signal they raised shows as its source. */
+export interface SignalRaiserNames {
+  readonly workflows: ReadonlyArray<RaiserName>;
+  readonly assistants: ReadonlyArray<RaiserName>;
 }
 
 /** The name the core's own signals carry as their source, such as an offer of an Ignore Rule. */
@@ -107,29 +120,65 @@ const nameActor = (actor: string, plugins: ReadonlyArray<PluginName>): string =>
 };
 
 /**
- * Returns the name of a signal's source, as its row, its pane and its
- * notification show it:
+ * Returns who raised a signal with `signal.raise`, as the middle of a
+ * sentence:
+ *
+ * - a run names its workflow, or "a workflow" for a run of a sent workflow,
+ *   or of a workflow `raisers` no longer lists because it was deleted;
+ * - a session of an assistant's conversation names the assistant, or "an
+ *   agent" for an assistant `raisers` no longer lists;
+ * - any other raiser is named from its actor stamp, as `nameActor` does. A
+ *   session that is neither a run's nor an assistant's stays "an agent",
+ *   because spec 10 §9.1 lists no other source it could name.
+ */
+const nameSignalRaiser = (
+  origin: Extract<SignalOrigin, { readonly type: "api" }>,
+  plugins: ReadonlyArray<PluginName>,
+  raisers: SignalRaiserNames,
+): string => {
+  if (origin.runId !== undefined || origin.workflowId !== undefined) {
+    return (
+      raisers.workflows.find((workflow) => workflow.id === origin.workflowId)?.name ?? "a workflow"
+    );
+  }
+  if (origin.assistantId !== undefined) {
+    return (
+      raisers.assistants.find((assistant) => assistant.id === origin.assistantId)?.name ??
+      "an agent"
+    );
+  }
+  return nameActor(origin.actor, plugins);
+};
+
+/**
+ * Returns the name of a signal's source, as its row and its pane show it:
  *
  * - a plugin kind names its plugin: "GitHub";
  * - a core kind raised from an event names the core: "Hercule";
- * - any other core kind names who raised it: "You", a plugin's name, "A
- *   workflow", "An agent" or "Hercule".
+ * - any other core kind names who raised it: "You", a plugin's name, the
+ *   workflow's or the assistant's name, "A workflow", "An agent" or
+ *   "Hercule".
  */
-export const nameSignalSource = (signal: Signal, plugins: ReadonlyArray<PluginName>): string => {
+export const nameSignalSource = (
+  signal: Signal,
+  plugins: ReadonlyArray<PluginName>,
+  raisers: SignalRaiserNames,
+): string => {
   const pluginId = parseSignalPluginId(signal.kind);
   if (pluginId !== null) return namePlugin(pluginId, plugins);
   if (signal.origin.type === "event") return CORE_SOURCE_NAME;
-  return upperFirst(nameActor(signal.origin.actor, plugins));
+  return upperFirst(nameSignalRaiser(signal.origin, plugins, raisers));
 };
 
 /**
  * Returns the provenance line at the top of the pane: the source and the
- * kind, such as "GitHub · Mentioned" or "You · Proposal".
+ * kind, such as "GitHub · Mentioned", "You · Proposal" or "Triage · Offer".
  */
 export const describeSignalProvenance = (
   signal: Signal,
   plugins: ReadonlyArray<PluginName>,
-): string => `${nameSignalSource(signal, plugins)} · ${nameSignalKind(signal.kind)}`;
+  raisers: SignalRaiserNames,
+): string => `${nameSignalSource(signal, plugins, raisers)} · ${nameSignalKind(signal.kind)}`;
 
 /**
  * Checks whether a signal on To do is back from a snooze. The To do view
@@ -258,9 +307,14 @@ export const groupSignalsIntoSections = (
  * with no asker names its source in the asker's place. An `unsure` signal
  * leaves its kind out, because its row labels it "Unsure" already.
  */
-export const describeSignalRow = (signal: Signal, plugins: ReadonlyArray<PluginName>): string => {
+export const describeSignalRow = (
+  signal: Signal,
+  plugins: ReadonlyArray<PluginName>,
+  raisers: SignalRaiserNames,
+): string => {
   const asker =
-    signal.asker ?? (isCoreSignalKind(signal.kind) ? nameSignalSource(signal, plugins) : undefined);
+    signal.asker ??
+    (isCoreSignalKind(signal.kind) ? nameSignalSource(signal, plugins, raisers) : undefined);
   const kind = signal.kind === "unsure" ? undefined : lowerFirst(nameSignalKind(signal.kind));
   return [asker, kind, signal.place].filter((part) => part !== undefined).join(" · ");
 };
@@ -286,10 +340,11 @@ export const describeSignalAsker = (signal: Signal): string | null => {
 export const describeBuildFailure = (
   signal: Signal,
   plugins: ReadonlyArray<PluginName>,
+  raisers: SignalRaiserNames,
 ): string | null =>
   signal.buildError === undefined
     ? null
-    : `${nameSignalSource(signal, plugins)} couldn't draw this signal. Showing the event as it came in.`;
+    : `${nameSignalSource(signal, plugins, raisers)} couldn't draw this signal. Showing the event as it came in.`;
 
 /** How the pane draws an answer. */
 export type SignalAnswerStyle =
@@ -448,6 +503,9 @@ export interface UrgentSignal {
  * Returns the Now signals on To do as their notifications show them, the
  * oldest first. Main notifies for each one it has not shown yet, while the
  * window is not focused.
+ *
+ * Only a plugin's kind may be `urgent` (spec 10 §9.3), so each title is a
+ * plugin's name, and no workflow or assistant is needed to name it.
  */
 export const listUrgentSignals = (
   signals: ReadonlyArray<Signal>,
@@ -456,11 +514,14 @@ export const listUrgentSignals = (
   signals
     .filter((signal) => signal.priority === "urgent")
     .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
-    .map((signal) => ({
-      signalId: signal.id,
-      title: nameSignalSource(signal, plugins),
-      body: signal.title,
-    }));
+    .map((signal) => {
+      const pluginId = parseSignalPluginId(signal.kind);
+      return {
+        signalId: signal.id,
+        title: pluginId === null ? CORE_SOURCE_NAME : namePlugin(pluginId, plugins),
+        body: signal.title,
+      };
+    });
 
 /**
  * Returns the id of the signal `step` rows away from `selectedId` in the

@@ -2,7 +2,16 @@
  * Intake's pane: the open signal, top to bottom as spec 17 §The pane lists
  * it, with its answers and the keys at its foot.
  */
-import { useEffect, useId, useImperativeHandle, useRef, useState, type JSX, type Ref } from "react";
+import {
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type JSX,
+  type Ref,
+} from "react";
 import { flushSync } from "react-dom";
 import {
   useMutation,
@@ -28,7 +37,13 @@ import {
   readErrorMessage,
   parseSignalPluginId,
 } from "@hercule/client-core";
-import { eventQuery, pluginsQuery, signalQuery } from "../../app/queries";
+import {
+  assistantsQuery,
+  eventQuery,
+  pluginsQuery,
+  signalQuery,
+  workflowsQuery,
+} from "../../app/queries";
 import { CheckIcon } from "../../icons/check";
 import { ExternalIcon } from "../../icons/external";
 import { SignalAnswers, type AnswerFailure } from "./signal-answers";
@@ -153,13 +168,16 @@ function SignalDetail({
   });
 
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
+  const { data: workflows } = useSuspenseQuery(workflowsQuery(client));
+  const { data: assistants } = useSuspenseQuery(assistantsQuery(client));
+  const raisers = { workflows, assistants };
   const origin = signal.origin;
   // Only a signal raised from an event has an event to read, so the list of
   // reads is empty for any other signal.
   const eventReads = origin.type === "event" ? [eventQuery(client, origin.eventId)] : [];
   const [event] = useQueries({ queries: eventReads });
   const sourceUrl = event?.data?.url ?? null;
-  const sourceName = nameSignalSource(signal, plugins);
+  const sourceName = nameSignalSource(signal, plugins, raisers);
 
   /** Puts the focus in the Reply box of `actionId`, opening it first. */
   const focusReply = (actionId: string): void => {
@@ -204,20 +222,32 @@ function SignalDetail({
 
   const asker = describeSignalAsker(signal);
   const askedAt = formatMessageTime(new Date(signal.createdAt), timezone, new Date());
-  const buildFailure = describeBuildFailure(signal, plugins);
+  const buildFailure = describeBuildFailure(signal, plugins, raisers);
   const outcome = describeSignalOutcome(signal, plugins);
   const resolvedElsewhere =
     openedOpen && !actedHere ? describeResolvedElsewhere(signal, plugins) : null;
   const keptDraft = openReplyId === null ? "" : (drafts[openReplyId] ?? "");
 
+  // When the signal resolves while the pane shows it, its answers and its
+  // Reply box are removed. If one of them had the focus, the focus falls to
+  // the page's body, outside the screen's keys, and J, K and Esc stop
+  // working. The focus moves to the pane instead. It never moves to the kept
+  // reply, a text box where the keys do not act.
+  const resolved = outcome !== null;
+  useLayoutEffect(() => {
+    if (!openedOpen || !resolved) return;
+    const focused = document.activeElement;
+    if (focused === null || focused === document.body) rootRef.current?.focus();
+  }, [openedOpen, resolved]);
+
   return (
     <>
-      <article ref={rootRef} className="ad">
+      <article ref={rootRef} className="ad" tabIndex={-1}>
         <header>
           <div className="ad-kind">
             <span className="src">
               <SourceMark pluginId={parseSignalPluginId(signal.kind)} plugins={plugins} size={14} />
-              {describeSignalProvenance(signal, plugins)}
+              {describeSignalProvenance(signal, plugins, raisers)}
             </span>
             <span className="spacer" />
             {sourceUrl !== null && (

@@ -263,9 +263,11 @@ export {
   type PluginIdentity,
   type PluginMarkDrawing,
   type PluginName,
+  type RaiserName,
   type SignalAnswer,
   type SignalAnswerStyle,
   type SignalOutcome,
+  type SignalRaiserNames,
   type UrgentSignal,
 } from "./intake";
 export { describeRefusalReason } from "./plugin-refusal";

@@ -1,8 +1,10 @@
 /**
- * Intake's list: the signals on To do in their sections, virtualized, one
- * line per row (spec 17 §The list on To do).
+ * Intake's list: the signals on To do in their sections, virtualized, two
+ * lines per row, each cut with an ellipsis (spec 17 §The list on To do).
  */
 import { memo, useCallback, useEffect, useId, useMemo, useRef, type JSX } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import type { Signal } from "@hercule/contract";
 import {
@@ -11,7 +13,9 @@ import {
   parseSignalPluginId,
   type IntakeSection,
   type PluginIdentity,
+  type SignalRaiserNames,
 } from "@hercule/client-core";
+import { assistantsQuery, workflowsQuery } from "../../app/queries";
 import { AlarmIcon } from "../../icons/alarm";
 import { AgeLabel } from "../age-label";
 import { SourceMark } from "./source-mark";
@@ -30,8 +34,8 @@ type ListItem =
 /**
  * Returns the height of a line, in pixels: a heading is 40px, and a row is
  * 52px with the 2px gap under it, except the last row of a section, which
- * has no gap. The list never measures a row. A row is one line, so these
- * heights are exact, except that the "Back" mark's icon makes its row 2px
+ * has no gap. The list never measures a row. A row's two lines never wrap,
+ * so these heights are exact, except that the "Back" mark's icon makes its row 2px
  * taller. Drawn rows take their own height, so that error reaches only the
  * spacers that stand in for undrawn rows.
  */
@@ -55,7 +59,9 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
 
 /**
  * Renders the list of `sections`, with the row of `selectedId` selected.
- * A click on a row calls `onSelect` with its signal's id.
+ * A click on a row calls `onSelect` with its signal's id. The list reads the
+ * workflows and the assistants, whose names label the core signals they
+ * raised.
  *
  * Only the rows in view, and a few past each edge, are drawn, so a list of
  * hundreds of signals costs as little as a short one. The selected row is
@@ -86,6 +92,14 @@ export const IntakeList = memo(function IntakeList({
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
   const listId = useId();
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const { data: workflows } = useSuspenseQuery(workflowsQuery(client));
+  const { data: assistants } = useSuspenseQuery(assistantsQuery(client));
+  // Each row is memoized, so the names it reads keep their identity between renders.
+  const raisers = useMemo<SignalRaiserNames>(
+    () => ({ workflows, assistants }),
+    [workflows, assistants],
+  );
   const items = useMemo(() => flattenSections(sections), [sections]);
   const selectedIndex = useMemo(
     () => items.findIndex((item) => item.key === selectedId),
@@ -145,6 +159,7 @@ export const IntakeList = memo(function IntakeList({
           signal={item.signal}
           lastInSection={item.lastInSection}
           plugins={plugins}
+          raisers={raisers}
           selected={item.signal.id === selectedId}
           onScreen={onScreen}
           ageId={`${listId}-${item.signal.id}-age`}
@@ -160,9 +175,7 @@ export const IntakeList = memo(function IntakeList({
       {items.length === 0 ? (
         <p className="asks-empty">Nothing on your list.</p>
       ) : (
-        <div className="asks-rows" style={{ height: virtualizer.getTotalSize() }}>
-          {drawn}
-        </div>
+        <div style={{ height: virtualizer.getTotalSize() }}>{drawn}</div>
       )}
     </div>
   );
@@ -188,6 +201,7 @@ const SignalRow = memo(function SignalRow({
   signal,
   lastInSection,
   plugins,
+  raisers,
   selected,
   onScreen,
   ageId,
@@ -196,6 +210,7 @@ const SignalRow = memo(function SignalRow({
   readonly signal: Signal;
   readonly lastInSection: boolean;
   readonly plugins: ReadonlyArray<PluginIdentity>;
+  readonly raisers: SignalRaiserNames;
   readonly selected: boolean;
   readonly onScreen: boolean;
   readonly ageId: string;
@@ -227,10 +242,10 @@ const SignalRow = memo(function SignalRow({
                   <AlarmIcon size={12} />
                   Back
                 </span>
-                {` · ${describeSignalRow(signal, plugins)}`}
+                {` · ${describeSignalRow(signal, plugins, raisers)}`}
               </>
             ) : (
-              describeSignalRow(signal, plugins)
+              describeSignalRow(signal, plugins, raisers)
             )}
           </span>
         </span>

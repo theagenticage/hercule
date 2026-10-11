@@ -350,7 +350,10 @@ export type Block = Schema.Schema.Type<typeof Block>;
  *   is the thread it is about. `screened` is set when the Screener let it
  *   through.
  * - `api`: an actor raised it with `signal.raise`. `runId` and `workflowId`
- *   are set when the actor is a run's session or step.
+ *   are set when the actor is a run's session or step. `assistantId` is set
+ *   when the actor is a session of an assistant's conversation, so a client
+ *   can name the assistant: the actor stamp `session:<id>` alone does not
+ *   say whose session it is.
  */
 export const SignalOrigin = Schema.Union([
   Schema.Struct({
@@ -365,6 +368,7 @@ export const SignalOrigin = Schema.Union([
     actor: Actor,
     runId: Schema.optionalKey(Id),
     workflowId: Schema.optionalKey(Id),
+    assistantId: Schema.optionalKey(Id),
     eventIds: Schema.Array(EventId),
     reason: Schema.String,
   }),

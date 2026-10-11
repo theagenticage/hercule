@@ -211,7 +211,7 @@ export const providersQuery = (client: HerculeClient) =>
 
 /**
  * The options of a read that no live topic covers: the settings, the
- * permission profiles and the controller's record. Such a read is fetched again each time a screen that
+ * permission profiles, the controller's record and the workflows. Such a read is fetched again each time a screen that
  * shows it opens, so a change made elsewhere, such as a default model set in
  * the web app, reaches the next Draft Thread and the next opening of
  * Settings > Profile. The screen's loader decides that, see `readOnOpen`.
@@ -399,6 +399,19 @@ export const pluginsQuery = (client: HerculeClient) =>
     queryKey: queryKeys.plugins(),
     queryFn: () => client.plugin.query(),
     ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads every workflow, for the name Intake gives a signal a workflow's run
+ * raised. The shell subscribes to no `workflow` topic, because the controller
+ * pushes on it at every cron fire, so Intake reads it each time it opens, see
+ * `readOnOpen`.
+ */
+export const workflowsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.workflows(),
+    queryFn: () => readEveryPage((page) => client.workflow.query({ query: page })),
+    ...READ_ON_OPEN_OPTIONS,
   });
 
 /**
