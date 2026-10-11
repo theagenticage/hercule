@@ -80,9 +80,16 @@ import { appendEvent } from "./append";
 import { SECURITY_KINDS } from "./audit-log";
 import { PluginIntake } from "../intake-settings";
 import { EventKindCatalog } from "./catalog";
-import { buildAnyHandling, NO_FACTS, readEventFacts } from "./event-facts";
-import { buildIsInIntake, readSwitchedOnEventKeys } from "./intake-events";
-import { EVENT_COLUMNS, parseEventRow, type EventRow } from "./log";
+import { buildAnyHandling, readEventFacts } from "./event-facts";
+import { buildIsInIntake, readSwitchedOnEventKinds } from "./intake-events";
+import {
+  EVENT_COLUMNS,
+  LISTED_EVENT_COLUMNS,
+  parseEventRow,
+  parseListedEventRow,
+  type EventRow,
+  type ListedEventRow,
+} from "./log";
 import { isControllerSource, MANUAL_SOURCE } from "./sources";
 
 /** The filters and paging options of `event.query`. */
@@ -217,7 +224,7 @@ const make = Effect.gen(function* () {
           );
         }
         if (decoded.intake === true) {
-          where.push(buildIsInIntake(sql, yield* readSwitchedOnEventKeys(sql, pluginIntake)));
+          where.push(buildIsInIntake(sql, yield* readSwitchedOnEventKinds(sql, pluginIntake)));
         }
         if (decoded.handling !== undefined && decoded.handling.length > 0) {
           where.push(buildAnyHandling(sql, decoded.handling));
@@ -238,10 +245,15 @@ const make = Effect.gen(function* () {
         );
         where.push(keyset);
 
-        const rows = yield* sql<EventRow>`
-          SELECT ${sql.literal(EVENT_COLUMNS)} FROM events
+        const rows = yield* sql<ListedEventRow>`
+          SELECT ${sql.literal(LISTED_EVENT_COLUMNS)} FROM events
           WHERE ${sql.and(where)} ${order} LIMIT ${limit + 1}
         `;
+        // A holder's title is private to whoever may read that kind of holder.
+        const titleAccess = {
+          sessions: checkActorHoldsGrant("session.read", actor) === undefined,
+          runs: checkActorHoldsGrant("run.read", actor) === undefined,
+        };
         // The facts are read after the page, for the ids on it only, so the
         // cost of the facts follows the page's size and not the filters'.
         const page = yield* buildPage(
@@ -252,11 +264,13 @@ const make = Effect.gen(function* () {
               readEventFacts(
                 sql,
                 read.map((row) => row.id),
+                titleAccess,
               ),
               (facts) =>
                 read.map((row): EventWithFacts => ({
-                  ...parseEventRow(row),
-                  ...(facts.get(row.id) ?? NO_FACTS),
+                  ...parseListedEventRow(row),
+                  // `readEventFacts` returns an entry for every id it is given.
+                  ...facts.get(row.id)!,
                 })),
             ),
           (last) => encodeIntegerKeyCursor(scope, last.id),

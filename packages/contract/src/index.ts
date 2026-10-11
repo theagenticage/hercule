@@ -555,6 +555,7 @@ export {
 } from "./groups/event-record";
 export {
   EVENT_HANDLINGS,
+  EventFacts,
   EventResolvedSignalFact,
   EventHandling,
   EventKnownByFact,

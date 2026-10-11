@@ -56,7 +56,9 @@ const USER: Actor = {
   credential: { kind: "login", id: "0199e0e7-0001-7000-8000-000000000000", tokenHash: "x" },
 };
 
-const buildSessionActor = (grants: ReadonlyArray<"event.read" | "event.audit">): Actor => ({
+const buildSessionActor = (
+  grants: ReadonlyArray<"event.read" | "event.audit" | "session.read" | "run.read">,
+): Actor => ({
   _tag: "session",
   sessionId: "0199e0e7-0000-7000-8000-00000000b501",
   profileId: "0199e0e7-0000-7000-8000-00000000d001",
@@ -463,9 +465,7 @@ describe("event.query facts", () => {
         return (yield* events.query({})).items[0]!.resolvedSignals;
       }),
     );
-    expect(resolved).toEqual([
-      { signalId: idOf(1), kind: "acme/asked", title: "Asked", outcome: "Merged" },
-    ]);
+    expect(resolved).toEqual([{ signalId: idOf(1), title: "Asked", outcome: "Merged" }]);
   });
 
   it("lists the Tasks of an event and leaves out a deleted Task", async () => {
@@ -510,6 +510,35 @@ describe("event.query facts", () => {
       { subscriptionId: idOf(60), holder: { kind: "run", id: idOf(50) }, title: "Nightly" },
     ]);
   });
+
+  it.each([
+    [["event.read"], null, null],
+    [["event.read", "session.read"], "Triage session", null],
+    [["event.read", "run.read"], null, "Nightly"],
+    [["event.read", "session.read", "run.read"], "Triage session", "Nightly"],
+  ] as const)(
+    "shows a holder's title only to a caller that holds the grant to read it (%j)",
+    async (grants, sessionTitle, runTitle) => {
+      const knownBy = await run(
+        Effect.gen(function* () {
+          const eventId = yield* insertEvent();
+          yield* insertSession(20, "Triage session");
+          yield* insertSubscription(30, "session", 20);
+          yield* insertSessionInput(40, 20, 30, eventId);
+          yield* insertRun(50, "Nightly");
+          yield* insertSubscription(60, "run", 50, { triggerId: "wanted" });
+          yield* insertRunStep(50, "wanted", eventId);
+          const events = yield* EventService;
+          return (yield* events.query({})).items[0]!.knownBy;
+        }),
+        buildSessionActor(grants),
+      );
+      expect(knownBy.map((fact) => [fact.holder.kind, fact.title])).toEqual([
+        ["session", sessionTitle],
+        ["run", runTitle],
+      ]);
+    },
+  );
 
   it("returns empty fact lists for an event nothing came of", async () => {
     const [item] = await run(
@@ -583,6 +612,27 @@ describe("event.query filters", () => {
       }),
     );
     expect(found).toEqual([]);
+  });
+
+  it("finds a title however its accents are spelled", async () => {
+    const decomposed = "re\u0301sume\u0301";
+    const composed = "r\u00e9sum\u00e9";
+    const [byDecomposed, byComposed, byPlain, expected] = await run(
+      Effect.gen(function* () {
+        const a = yield* insertEvent({ title: `My ${decomposed} draft` });
+        const b = yield* insertEvent({ title: `Your ${composed} draft` });
+        yield* insertEvent({ title: "Unrelated" });
+        return [
+          yield* queryIds({ text: decomposed }),
+          yield* queryIds({ text: composed }),
+          yield* queryIds({ text: "resume" }),
+          [b, a],
+        ] as const;
+      }),
+    );
+    expect(byDecomposed).toEqual(expected);
+    expect(byComposed).toEqual(expected);
+    expect(byPlain).toEqual(expected);
   });
 
   it("filters by source", async () => {
@@ -846,16 +896,38 @@ describe("event.query plans", () => {
     ["on-task", "task_provenance_event"],
     ["raised-signal", "signal_events_event"],
     ["evidence", "signal_events_event"],
-    ["known-work", "session_inputs_event"],
-    ["known-work", "run_steps_event"],
-  ] as const)("reads the %s filter by searching %s", async (name, index) => {
+  ] as const)("reads the %s filter by listing the event ids in %s", async (name, index) => {
     const plan = await explainPageQuery(handling(name));
-    expect(plan).toMatch(new RegExp(`SEARCH \\w+ USING (COVERING )?INDEX ${index} \\(`));
-    expect(listScans(plan)).toEqual([]);
+    // The events with this handling are few, so the filter reads the index
+    // of the fact table and looks those events up by id. It never reads the
+    // whole log.
+    expect(plan).toMatch(new RegExp(`(SCAN|SEARCH) \\w+ USING (COVERING )?INDEX ${index}\\b`));
+    expect(plan).toContain("SEARCH events USING INTEGER PRIMARY KEY");
+    expect(plan).not.toContain("SCAN events");
   });
 
-  it("reads the no-action filter without scanning the tables it checks", async () => {
-    expect(listScans(await explainPageQuery(handling("no-action")))).toEqual([]);
+  it.each([["session_inputs_event"], ["run_steps_event"]] as const)(
+    "reads the known-work filter by searching %s",
+    async (index) => {
+      const plan = await explainPageQuery(handling("known-work"));
+      expect(plan).toMatch(new RegExp(`SEARCH \\w+ USING (COVERING )?INDEX ${index} \\(`));
+      expect(listScans(plan)).toEqual([]);
+    },
+  );
+
+  it("reads the source filter through the events_source index", async () => {
+    const plan = await explainPageQuery({ source: "acme" });
+    expect(plan).toMatch(/SEARCH events USING (COVERING )?INDEX events_source \(/);
+  });
+
+  it("reads the no-action filter by walking the log newest first", async () => {
+    // No-action asks for the events that have nothing, which SQLite can find
+    // only by checking each event. The walk stops once the page is full, and
+    // the facts it checks are looked up through indexes.
+    const plan = await explainPageQuery(handling("no-action"));
+    expect(plan).toContain("SCAN events");
+    expect(plan).toContain("signal_events_event");
+    expect(plan).toContain("signals_resolution_event");
   });
 
   it("reads the facts of a page through indexes", async () => {

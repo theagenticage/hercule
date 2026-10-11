@@ -18,6 +18,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Fragment } from "effect/unstable/sql/Statement";
 import {
   CORE_SIGNAL_KINDS,
+  type EventFacts,
   type EventHandling,
   type EventKnownByFact,
   type EventResolvedSignalFact,
@@ -28,8 +29,8 @@ import { nowIso, uuidToString } from "../db";
 
 /**
  * Where one kind of fact is stored. A query adds its own condition on the
- * event, so one definition serves the filter (`eventId = +events.id`) and the
- * list (`eventId IN (the page's ids)`).
+ * event, so one definition serves the filter and the list (`eventId IN (the
+ * page's ids)`).
  */
 interface FactSource {
   /** The tables the fact is read from, with their joins. */
@@ -38,25 +39,26 @@ interface FactSource {
   readonly where: ReadonlyArray<Fragment>;
   /** The expression that holds the id of the event the fact is about. */
   readonly eventId: Fragment;
+  /**
+   * How the `handling` filter finds the events that have a fact.
+   *
+   * - `facts-first` lists the event ids in the fact tables, then looks those
+   *   events up. It suits facts that are few, because SQLite then never reads
+   *   the events that have none. Walking the log and checking each event
+   *   would read the whole log to find a handful of them.
+   * - `events-first` walks the log newest first and checks each event for a
+   *   fact. It suits facts that most events have, because the walk then ends
+   *   after one page.
+   */
+  readonly filterBy: "facts-first" | "events-first";
 }
-
-/** The facts of one event. Each list is empty when the event reached nothing of its kind. */
-export interface EventFacts {
-  readonly signals: ReadonlyArray<EventSignalFact>;
-  readonly resolvedSignals: ReadonlyArray<EventResolvedSignalFact>;
-  readonly tasks: ReadonlyArray<EventTaskFact>;
-  readonly knownBy: ReadonlyArray<EventKnownByFact>;
-}
-
-/** The facts of an event that reached nothing. */
-export const NO_FACTS: EventFacts = { signals: [], resolvedSignals: [], tasks: [], knownBy: [] };
 
 /**
  * Builds the sources of every kind of fact.
  *
- * Two of them read an expression index from migration 0072, so their
- * expression must be written exactly as the index writes it, or SQLite
- * does not use the index: `json_extract(resolution, '$.eventId')`.
+ * `signalsEndedByEvent` reads an expression index from migration 0072, so its
+ * expression must be written exactly as the index writes it, or SQLite does
+ * not use the index: `json_extract(resolution, '$.eventId')`.
  */
 const buildFactSources = (sql: SqlClient.SqlClient) => ({
   /**
@@ -68,24 +70,32 @@ const buildFactSources = (sql: SqlClient.SqlClient) => ({
     from: sql`signal_events se JOIN signals s ON s.id = se.signal_id`,
     where: [],
     eventId: sql`se.event_id`,
+    filterBy: "facts-first",
   } satisfies FactSource,
   /** A signal the event ended on its source, so the event is in its resolution. */
   signalsEndedByEvent: {
     from: sql`signals s`,
-    where: [],
+    // The index covers only signals with an event in their resolution, so
+    // SQLite uses it only when the query says the same.
+    where: [sql`json_extract(s.resolution, '$.eventId') IS NOT NULL`],
     eventId: sql`json_extract(s.resolution, '$.eventId')`,
+    filterBy: "facts-first",
   } satisfies FactSource,
   /** A Task that has not been deleted, and whose provenance names the event. */
   tasksFromEvent: {
     from: sql`task_provenance tp JOIN tasks t ON t.id = tp.task_id`,
-    where: [sql`t.deleted_at IS NULL`],
+    // The index on `event_id` covers only provenance rows that name an event,
+    // so SQLite uses it only when the query says the same.
+    where: [sql`t.deleted_at IS NULL`, sql`tp.event_id IS NOT NULL`],
     eventId: sql`tp.event_id`,
+    filterBy: "facts-first",
   } satisfies FactSource,
   /** A live Subscription held by a session, which queued the event as an input. */
   subscriptionsOfSessions: {
     from: sql`session_inputs si JOIN subscriptions sub ON sub.id = si.subscription_id`,
     where: [sql`sub.ended_at IS NULL`],
     eventId: sql`si.event_id`,
+    filterBy: "events-first",
   } satisfies FactSource,
   /**
    * A live Subscription held by a run, whose signal trigger started a step
@@ -104,6 +114,7 @@ const buildFactSources = (sql: SqlClient.SqlClient) => ({
       AND json_extract(sub.target, '$.triggerId') = rs.step_id`,
     where: [sql`sub.ended_at IS NULL`],
     eventId: sql`rs.event_id`,
+    filterBy: "events-first",
   } satisfies FactSource,
 });
 
@@ -111,20 +122,26 @@ const buildFactSources = (sql: SqlClient.SqlClient) => ({
  * Builds the condition that the event the outer query is reading has a fact
  * of this source, optionally narrowed by more conditions on the fact.
  *
- * The unary plus in `+events.id` strips the column's integer affinity. With
- * the affinity, SQLite will not use an expression index such as
- * `signals_resolution_event` to look the event up, and reads the whole index
- * for each event.
+ * For an `events-first` source, the unary plus in `+events.id` strips the
+ * column's integer affinity. With the affinity, SQLite will not use an
+ * expression index to look the event up, and reads the whole index for each
+ * event.
  */
 const buildHasFact = (
   sql: SqlClient.SqlClient,
   source: FactSource,
   narrowedBy: ReadonlyArray<Fragment> = [],
-): Fragment =>
-  sql`EXISTS (
-    SELECT 1 FROM ${source.from}
-    WHERE ${sql.and([...source.where, ...narrowedBy, sql`${source.eventId} = +events.id`])}
-  )`;
+): Fragment => {
+  const conditions = [...source.where, ...narrowedBy];
+  return source.filterBy === "facts-first"
+    ? sql`events.id IN (
+        SELECT ${source.eventId} FROM ${source.from} WHERE ${sql.and(conditions)}
+      )`
+    : sql`EXISTS (
+        SELECT 1 FROM ${source.from}
+        WHERE ${sql.and([...conditions, sql`${source.eventId} = +events.id`])}
+      )`;
+};
 
 /**
  * Builds the condition that the event the outer query is reading is one of
@@ -154,8 +171,14 @@ const buildHasKnownWork = (sql: SqlClient.SqlClient): Fragment => {
 /**
  * Builds the condition for one handling, on the event the outer query is
  * reading. `no-action` holds when none of the others does.
+ *
+ * `no-action` with few matches reads the whole log, because it asks for the
+ * events that have nothing and SQLite can only find them by checking every
+ * event. No rewrite of it was faster when measured. Its cost is bounded by the
+ * size of the log, and it is cheap whenever most events have no action,
+ * because the page then fills quickly.
  */
-const buildHandling = (sql: SqlClient.SqlClient, handling: EventHandling): Fragment => {
+const buildHasHandling = (sql: SqlClient.SqlClient, handling: EventHandling): Fragment => {
   const sources = buildFactSources(sql);
   const coreKinds = sql.in(CORE_SIGNAL_KINDS);
   switch (handling) {
@@ -185,7 +208,7 @@ const buildHandling = (sql: SqlClient.SqlClient, handling: EventHandling): Fragm
 export const buildAnyHandling = (
   sql: SqlClient.SqlClient,
   handlings: ReadonlyArray<EventHandling>,
-): Fragment => sql.or(handlings.map((handling) => buildHandling(sql, handling)));
+): Fragment => sql.or(handlings.map((handling) => buildHasHandling(sql, handling)));
 
 /** Groups rows by the event they are about, keeping each event's rows in the order read. */
 const groupByEvent = <Row extends { readonly event_id: number }, Fact>(
@@ -214,7 +237,6 @@ interface SignalRow {
 interface ResolvedSignalRow {
   readonly event_id: number;
   readonly signal_id: Uint8Array;
-  readonly kind: string;
   readonly title: string;
   readonly outcome: string;
 }
@@ -233,24 +255,43 @@ interface KnownByRow {
   readonly title: string | null;
 }
 
+/** Whether the caller may see the titles of the sessions and the runs that hold Subscriptions. */
+export interface HolderTitleAccess {
+  /** The caller holds `session.read`. */
+  readonly sessions: boolean;
+  /** The caller holds `run.read`. */
+  readonly runs: boolean;
+}
+
 /**
  * Reads the facts of the events with these ids, in one query for each kind of
- * fact whatever the number of events. An event that reached nothing has no
- * entry in the result.
+ * fact whatever the number of events. The result has an entry for every id,
+ * with empty lists for an event that reached nothing.
  *
  * Each list is in the order its facts were created, oldest first, so a
  * reader sees them in a fixed order.
+ *
+ * A holder's `title` is null unless `titleAccess` allows reading that kind of
+ * holder. A session's title is generated from the user's first prompt, so
+ * holding `event.read` alone does not entitle a caller to it.
  */
 export const readEventFacts = (
   sql: SqlClient.SqlClient,
   ids: ReadonlyArray<number>,
+  titleAccess: HolderTitleAccess,
 ): Effect.Effect<ReadonlyMap<number, EventFacts>, SqlError> =>
   Effect.gen(function* () {
     if (ids.length === 0) return new Map();
     const sources = buildFactSources(sql);
     const now = yield* nowIso;
-    const named = (source: FactSource) =>
+    const buildIsOnPage = (source: FactSource) =>
       sql.and([...source.where, sql`${source.eventId} IN ${sql.in(ids)}`]);
+    const sessionTitle = titleAccess.sessions
+      ? sql`(SELECT sessions.title FROM sessions WHERE sessions.id = sub.holder_id)`
+      : sql`NULL`;
+    const runTitle = titleAccess.runs
+      ? sql`(SELECT json_extract(runs.plan, '$.name') FROM runs WHERE runs.id = sub.holder_id)`
+      : sql`NULL`;
 
     const signalRows = yield* sql<SignalRow>`
       SELECT se.event_id AS event_id, s.id AS signal_id, s.kind AS kind, s.status AS status,
@@ -260,21 +301,21 @@ export const readEventFacts = (
              END AS snoozed_until,
              CASE WHEN s.status = 'resolved' THEN json_extract(s.resolution, '$.outcome') END AS outcome
       FROM ${sources.signalsNamingEvent.from}
-      WHERE ${named(sources.signalsNamingEvent)}
+      WHERE ${buildIsOnPage(sources.signalsNamingEvent)}
       ORDER BY s.created_at, s.id
     `;
     const resolvedRows = yield* sql<ResolvedSignalRow>`
-      SELECT ${sources.signalsEndedByEvent.eventId} AS event_id, s.id AS signal_id, s.kind AS kind,
+      SELECT ${sources.signalsEndedByEvent.eventId} AS event_id, s.id AS signal_id,
              s.title AS title, json_extract(s.resolution, '$.outcome') AS outcome
       FROM ${sources.signalsEndedByEvent.from}
-      WHERE ${named(sources.signalsEndedByEvent)}
+      WHERE ${buildIsOnPage(sources.signalsEndedByEvent)}
       ORDER BY s.created_at, s.id
     `;
     // A Task whose provenance names the event twice is one fact.
     const taskRows = yield* sql<TaskRow>`
       SELECT tp.event_id AS event_id, t.id AS task_id, t.title AS title
       FROM ${sources.tasksFromEvent.from}
-      WHERE ${named(sources.tasksFromEvent)}
+      WHERE ${buildIsOnPage(sources.tasksFromEvent)}
       GROUP BY tp.event_id, t.id
       ORDER BY t.created_at, t.id
     `;
@@ -284,16 +325,15 @@ export const readEventFacts = (
       SELECT * FROM (
         SELECT si.event_id AS event_id, sub.id AS subscription_id, sub.holder_kind AS holder_kind,
                sub.holder_id AS holder_id, sub.created_at AS created_at,
-               (SELECT sessions.title FROM sessions WHERE sessions.id = sub.holder_id) AS title
+               ${sessionTitle} AS title
         FROM ${sources.subscriptionsOfSessions.from}
-        WHERE ${named(sources.subscriptionsOfSessions)}
+        WHERE ${buildIsOnPage(sources.subscriptionsOfSessions)}
         UNION ALL
         SELECT rs.event_id AS event_id, sub.id AS subscription_id, sub.holder_kind AS holder_kind,
                sub.holder_id AS holder_id, sub.created_at AS created_at,
-               (SELECT json_extract(runs.plan, '$.name') FROM runs WHERE runs.id = sub.holder_id)
-                 AS title
+               ${runTitle} AS title
         FROM ${sources.subscriptionsOfRuns.from}
-        WHERE ${named(sources.subscriptionsOfRuns)}
+        WHERE ${buildIsOnPage(sources.subscriptionsOfRuns)}
       )
       GROUP BY event_id, subscription_id
       ORDER BY created_at, subscription_id
@@ -309,7 +349,6 @@ export const readEventFacts = (
     }));
     const resolvedSignals = groupByEvent(resolvedRows, (row): EventResolvedSignalFact => ({
       signalId: uuidToString(row.signal_id),
-      kind: row.kind,
       title: row.title,
       outcome: row.outcome,
     }));

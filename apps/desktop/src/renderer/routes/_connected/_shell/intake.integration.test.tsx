@@ -1394,9 +1394,7 @@ describe("Intake's Everything view", () => {
       signals: [
         { signalId: REVIEW.id, kind: "github/review-requested", status: "open", title: "Review" },
       ],
-      resolvedSignals: [
-        { signalId: MENTION.id, kind: "github/mentioned", title: "Mention", outcome: "Replied" },
-      ],
+      resolvedSignals: [{ signalId: MENTION.id, title: "Mention", outcome: "Replied" }],
       tasks: [{ taskId: TASK_ID, title: "Fix the flaky test" }],
       knownBy: [
         {

@@ -8,9 +8,8 @@
  *
  * The switches live in the plugins domain and in each Connection's `intake`
  * column, and applying them is code, not SQL. So the switches are worked out
- * here, and handed to the query as a list of keys, one per switched-on
- * (Connection, kind) pair. The query then checks each event's key against the
- * list.
+ * here, and handed to the query as a list of rows, one per switched-on
+ * (Connection, kind) pair. The query then looks each event up in the list.
  *
  * This domain cannot import the plugins or connections domains, because they
  * import this one. It reads the `plugins` and `connections` tables directly
@@ -21,47 +20,50 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Fragment } from "effect/unstable/sql/Statement";
 import type { IntakeOverrides } from "@hercule/contract";
-import { uuidToString } from "../db";
 import { applyIntakeOverrides, type PluginIntake } from "../intake-settings";
 import { buildHasSignalBehind } from "./event-facts";
 
-/** Returns the key of a Connection's id as SQLite's `hex()` writes it. */
-const writeHexKey = (id: Uint8Array): string => uuidToString(id).replaceAll("-", "").toUpperCase();
-
-/** Returns the key for an event kind of a plugin, as read through one Connection. */
-const buildConnectionKey = (hexId: string, source: string, kind: string): string =>
-  `c:${hexId}:${source}:${kind}`;
-
-/** Returns the key for an event kind of a plugin, as read through no Connection that exists. */
-const buildPluginKey = (source: string, kind: string): string => `p:${source}:${kind}`;
+/**
+ * An event kind of a plugin that is switched on for triage. `connectionHex` is
+ * the id of the Connection the switch is for, as SQLite's `hex()` writes it.
+ * It is null for the switch at the plugin's level, which serves events whose
+ * Connection was deleted.
+ */
+export interface SwitchedOnEventKind {
+  readonly connectionHex: string | null;
+  readonly source: string;
+  readonly kind: string;
+}
 
 interface ConnectionRow {
-  readonly id: Uint8Array;
+  readonly hex_id: string;
   readonly plugin_id: string;
   readonly intake: string;
 }
 
 /**
- * Returns the keys of every (Connection, event kind) pair that is switched
- * on for triage, and every (plugin, event kind) pair that is switched on at
- * the plugin's level. The second kind of key serves events whose Connection
- * was deleted: they fall back to the plugin's level.
+ * Returns every event kind that is switched on for triage, at each plugin's
+ * level and for each of its Connections.
  *
  * A plugin that has no row in the `plugins` table has no settings to read,
  * so its events never qualify this way.
  */
-export const readSwitchedOnEventKeys = (
+export const readSwitchedOnEventKinds = (
   sql: SqlClient.SqlClient,
   pluginIntake: PluginIntake["Service"],
-): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+): Effect.Effect<ReadonlyArray<SwitchedOnEventKind>, SqlError> =>
   Effect.gen(function* () {
     const plugins = yield* sql<{ readonly id: string }>`SELECT id FROM plugins`;
-    const connections = yield* sql<ConnectionRow>`SELECT id, plugin_id, intake FROM connections`;
-    const keys: Array<string> = [];
+    const connections = yield* sql<ConnectionRow>`
+      SELECT hex(id) AS hex_id, plugin_id, intake FROM connections
+    `;
+    const switchedOn: Array<SwitchedOnEventKind> = [];
     for (const { id: pluginId } of plugins) {
       const pluginLevel = yield* pluginIntake.read(pluginId);
       for (const setting of pluginLevel.eventKinds) {
-        if (setting.on) keys.push(buildPluginKey(pluginId, setting.kind));
+        if (setting.on) {
+          switchedOn.push({ connectionHex: null, source: pluginId, kind: setting.kind });
+        }
       }
       for (const connection of connections) {
         if (connection.plugin_id !== pluginId) continue;
@@ -72,34 +74,59 @@ export const readSwitchedOnEventKeys = (
         );
         for (const setting of settings.eventKinds) {
           if (setting.on) {
-            keys.push(buildConnectionKey(writeHexKey(connection.id), pluginId, setting.kind));
+            switchedOn.push({
+              connectionHex: connection.hex_id,
+              source: pluginId,
+              kind: setting.kind,
+            });
           }
         }
       }
     }
-    return keys;
+    return switchedOn;
   });
 
 /**
  * Builds the condition that the event the outer query is reading is one of
- * Intake's events. `switchedOnKeys` is what `readSwitchedOnEventKeys`
- * returned.
+ * Intake's events. `switchedOn` is what `readSwitchedOnEventKinds` returned.
  *
- * An event without a Connection never qualifies through its kind: a core
- * event is not something a plugin offers to triage.
+ * An event with a Connection that still exists matches the rows for that
+ * Connection. An event whose Connection was deleted matches the rows for the
+ * plugin's level. An event with no Connection never qualifies through its
+ * kind: a core event is not something a plugin offers to triage.
+ *
+ * The unary plus before `events.source` and `events.kind` keeps SQLite from
+ * using their indexes for this condition. Left to choose, it can pick the
+ * indexes, gather every switched-on event and sort them, instead of walking
+ * the log newest first and stopping after one page.
  */
 export const buildIsInIntake = (
   sql: SqlClient.SqlClient,
-  switchedOnKeys: ReadonlyArray<string>,
-): Fragment =>
-  sql.or([
+  switchedOn: ReadonlyArray<SwitchedOnEventKind>,
+): Fragment => {
+  const rows = (connectionTest: Fragment, columns: Fragment) => sql`(
+    SELECT ${columns}
+    FROM json_each(${JSON.stringify(switchedOn)}) AS switched_on
+    WHERE ${connectionTest}
+  )`;
+  return sql.or([
     sql`(
-      events.connection_id IS NOT NULL
-      AND CASE
-        WHEN EXISTS (SELECT 1 FROM connections WHERE connections.id = events.connection_id)
-          THEN 'c:' || hex(events.connection_id) || ':' || events.source || ':' || events.kind
-        ELSE 'p:' || events.source || ':' || events.kind
-      END IN (SELECT value FROM json_each(${JSON.stringify(switchedOnKeys)}))
+      (+events.source, +events.kind, hex(events.connection_id)) IN ${rows(
+        sql`json_extract(switched_on.value, '$.connectionHex') IS NOT NULL`,
+        sql`json_extract(switched_on.value, '$.source'),
+            json_extract(switched_on.value, '$.kind'),
+            json_extract(switched_on.value, '$.connectionHex')`,
+      )}
+      OR (
+        events.connection_id IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM connections WHERE connections.id = events.connection_id)
+        AND (+events.source, +events.kind) IN ${rows(
+          sql`json_extract(switched_on.value, '$.connectionHex') IS NULL`,
+          sql`json_extract(switched_on.value, '$.source'),
+              json_extract(switched_on.value, '$.kind')`,
+        )}
+      )
     )`,
     buildHasSignalBehind(sql),
   ]);
+};

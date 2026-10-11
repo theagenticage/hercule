@@ -18,7 +18,7 @@
  * are not linked to triggers or runs yet, and a filter that always returns an
  * empty page would mislead the caller.
  */
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
@@ -96,7 +96,6 @@ export type EventSignalFact = Schema.Schema.Type<typeof EventSignalFact>;
 /** A signal the event ended on its source (`resolution.eventId`). */
 export const EventResolvedSignalFact = Schema.Struct({
   signalId: Id,
-  kind: SignalKind,
   title: Schema.String,
   outcome: Schema.String,
 });
@@ -122,17 +121,32 @@ export const EventKnownByFact = Schema.Struct({
 export type EventKnownByFact = Schema.Schema.Type<typeof EventKnownByFact>;
 
 /**
- * An event as `event.query` lists it: the event, and the facts its handlings
- * are worked out from, read in the same query. Each list is empty when the
- * event reached nothing of its kind.
+ * What came of one event: the signals it raised or is evidence for, the
+ * signals it ended, the Tasks it is on, and the live Subscriptions that
+ * received it. Each list is empty when the event reached nothing of its kind.
  */
-export const EventWithFacts = Schema.Struct({
-  ...Event.fields,
+export const EventFacts = Schema.Struct({
   signals: Schema.Array(EventSignalFact),
   resolvedSignals: Schema.Array(EventResolvedSignalFact),
   tasks: Schema.Array(EventTaskFact),
   knownBy: Schema.Array(EventKnownByFact),
 });
+
+export type EventFacts = Schema.Schema.Type<typeof EventFacts>;
+
+/**
+ * An event as `event.query` lists it: the event and its facts. The facts are
+ * read after the page of events, one query for each kind of fact.
+ *
+ * A listed event carries no `raw`. The vendor payload is kept for debugging,
+ * no filter or mapping reads it, and it can be large, so a page of events
+ * would pay for it on every row. `event.read` still returns it. The `payload`
+ * stays, because triage agents read it from `event list --intake`.
+ */
+export const EventWithFacts = Event.mapFields((fields) => ({
+  ...Struct.omit(fields, ["raw"]),
+  ...EventFacts.fields,
+}));
 
 export type EventWithFacts = Schema.Schema.Type<typeof EventWithFacts>;
 

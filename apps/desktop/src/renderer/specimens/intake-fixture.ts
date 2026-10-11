@@ -636,7 +636,6 @@ const buildListedEvent = (
   refs: [],
   url: null,
   payload: {},
-  raw: null,
   actor: null,
   signals: [],
   resolvedSignals: [],
@@ -713,7 +712,6 @@ const EVENTS: ReadonlyArray<EventWithFacts> = [
     resolvedSignals: [
       {
         signalId: DONE[6]!.id,
-        kind: DONE[6]!.kind,
         title: DONE[6]!.title,
         outcome: "Pieter closed #1286 without merging it",
       },

@@ -798,7 +798,6 @@ describe("buildHandlingLabels", () => {
       resolvedSignals: [
         {
           signalId: "s2",
-          kind: "github/review-requested",
           title: "Review #12",
           outcome: "Approved",
         },
@@ -873,7 +872,7 @@ describe("buildHandlingLabels", () => {
         { signalId: "p", kind: "offer", status: "open", title: "Offer" },
         { ...MENTIONED, status: "open" },
       ],
-      resolvedSignals: [{ signalId: "e", kind: "github/mentioned", title: "Old", outcome: "Ok" }],
+      resolvedSignals: [{ signalId: "e", title: "Old", outcome: "Ok" }],
     });
     expect(labels.map((label) => label.handling)).toEqual([
       "raised-signal",

@@ -8,6 +8,8 @@
  *   signals it ended and the tasks it is the provenance of. The signals it
  *   raised, or is evidence for, are found through `signal_events`, which is
  *   already indexed by event.
+ * - An index on the event's source lets a filter on a rare source walk only
+ *   that source's events, newest first, instead of the whole log.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -63,4 +65,8 @@ export default Effect.gen(function* () {
   yield* sql`
     CREATE INDEX task_provenance_event ON task_provenance (event_id) WHERE event_id IS NOT NULL
   `;
+
+  // The events of one source in id order, which is the order of a page, so a
+  // `source` filter stops after one page without a sort.
+  yield* sql`CREATE INDEX events_source ON events (source, id)`;
 });

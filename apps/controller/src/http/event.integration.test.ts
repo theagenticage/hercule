@@ -9,7 +9,10 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import { EventWithFacts, type Task } from "@hercule/contract";
+import { ingestEvent } from "../daemon/testing";
 import { uuidFromString } from "../db";
+import { createIntakeFixture, INTAKE_FIXTURE } from "../plugins/testing";
+import { createConnection } from "../workflows/testing";
 import { completeSetup, get, post, send, USERNAME, withServer } from "./testing";
 
 /** One page of the log, as the API returns it. */
@@ -175,10 +178,13 @@ describe("the event log over HTTP", () => {
         refs: ["github:issue:owner/repo#42"],
         url: "https://github.com/owner/repo/issues/42",
         payload: { number: 42 },
-        raw: { raw: true },
         actor: null,
       });
+      // A listed event carries no `raw`, and reading it by id still returns it.
+      expect(page.items[0]).not.toHaveProperty("raw");
       expect(Schema.decodeUnknownExit(EventWithFacts)(page.items[0])._tag).toBe("Success");
+      const read = await get(base, `/api/v1/events/${String(page.items[0]!.id)}`, token);
+      expect(await read.json()).toMatchObject({ raw: { raw: true } });
     });
   });
 
@@ -194,8 +200,12 @@ describe("the event log over HTTP", () => {
 
       const read = await get(base, `/api/v1/events/${String(id)}`, token);
       expect(read.status).toBe(200);
-      // The listing adds the facts to the event that a read of one does not carry.
-      expect(page.items[0]).toMatchObject((await read.json()) as object);
+      // The listing adds the facts to the event that a read of one does not
+      // carry, and leaves out the event's `raw`, which only a read returns.
+      const readEvent = (await read.json()) as Record<string, unknown>;
+      expect(readEvent).toHaveProperty("raw");
+      delete readEvent.raw;
+      expect(page.items[0]).toMatchObject(readEvent);
 
       const missing = await get(base, "/api/v1/events/999999", token);
       expect(missing.status).toBe(404);
@@ -308,5 +318,35 @@ describe("the Intake filters over HTTP", () => {
       const refused = await get(base, "/api/v1/events?handling=ignored", token);
       expect(refused.status).toBe(400);
     });
+  });
+});
+
+describe("the events Intake shows, for a real plugin", () => {
+  it("returns an event of a kind available to triage and leaves out one of a kind that is off", async () => {
+    const fixture = createIntakeFixture();
+    await withServer(
+      async (harness) => {
+        const { base } = harness;
+        const token = await completeSetup(base);
+        const connectionId = await createConnection(base, token, INTAKE_FIXTURE.connectionType, {
+          token: "an-intaked-token",
+        });
+        const event = (kind: string) => ({
+          pluginId: INTAKE_FIXTURE.pluginId,
+          connectionId,
+          kind,
+          title: kind,
+          payload: { title: kind },
+        });
+        const opened = await ingestEvent(harness, event(INTAKE_FIXTURE.opened));
+        const labeled = await ingestEvent(harness, event(INTAKE_FIXTURE.labeled));
+
+        const intake = await listEvents(base, token, "?intake=true");
+        expect(listIds(intake)).toEqual([opened]);
+        const all = await listEvents(base, token, "?source=intaked");
+        expect(listIds(all)).toEqual([labeled, opened]);
+      },
+      { plugins: [fixture.plugin] },
+    );
   });
 });
