@@ -1,8 +1,9 @@
 /* The controls every screen shares: the buttons, the answer ledger, the
    pills, the segmented controls, the navigation rows, the counts, the text
-   field, the quiet text and dots, the priority bars and the section
-   headings. The rules and class names are the Bureau book's, as its
-   system.css spells them. Each departure from the book says why. */
+   field, the quiet text and dots, the priority bars, the bar over the main
+   pane, the tabs and the section headings. The rules and class names are
+   the Bureau book's, as its system.css spells them. Each departure from the
+   book says why. */
 
 /* ---------- Buttons ---------- */
 /* One doctrine for every button:
@@ -66,6 +67,11 @@
   padding: 0 10px;
   font-size: var(--t-12);
   gap: 5px;
+}
+/* A face before a button's label, such as the workflow on a Hand to an agent
+   answer, sits closer to the button's edge, as the book draws it. */
+.btn .cr {
+  margin-left: -6px;
 }
 /* The large button that ends a step of the first run, such as Add project. */
 .btn--lg {
@@ -636,6 +642,68 @@ input.field[type="password"]:not(:placeholder-shown) {
   background: var(--fail);
 }
 
+/* ---------- The bar ---------- */
+/* The header over the main pane. */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 16px 0 24px;
+  flex: none;
+}
+.title {
+  margin: 0;
+  font-size: var(--t-16);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  /* Not in the book. A record's name is the title and can be 128
+     characters, so a name too long for the header ends in an ellipsis rather
+     than pushing the header's actions out of the window. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Not in the book, which is a page, not a window. The bar lies in the
+   window's drag strip, so each control in it is marked as no part of the
+   strip, or a click on it would start dragging the window. */
+.bar :is(a, button, [role="tab"]) {
+  -webkit-app-region: no-drag;
+}
+
+/* ---------- Tabs ---------- */
+/* Topic tabs in a bar, such as Intake's sources: text on a tint while
+   selected, with a count beside. */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.tab:hover {
+  background: var(--hover);
+}
+.tab.is-on {
+  color: var(--ink);
+  background: var(--selected);
+}
+.tab small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- Section headings ---------- */
 /* A small bold heading over a group, with an icon before it. */
 .section-h {
@@ -647,4 +715,7 @@ input.field[type="password"]:not(:placeholder-shown) {
   font-size: var(--t-12);
   font-weight: var(--w-bold);
   letter-spacing: 0.005em;
+}
+.section-h .count {
+  height: 17px;
 }

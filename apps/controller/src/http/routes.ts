@@ -43,7 +43,7 @@ import {
   PromotionTransferLayer,
 } from "../promotion";
 import {
-  BindableOperationsLayer,
+  BoundOperationsLayer,
   ArrivalLayer,
   AssistantSessionsLayer,
   DispatchLayer,
@@ -70,9 +70,11 @@ import {
   RunTargetsLayer,
   TriggeredRunsLayer,
   WorkflowRunsLayer,
+  WorkflowSignalsLayer,
   WorkspaceStepsLayer,
 } from "../daemon";
 import { NotificationService, NotificationServiceLayer } from "../notifications";
+import { SignalService, SignalServiceLayer } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
@@ -261,6 +263,22 @@ const notificationRoutes = HttpApiBuilder.group(api, "notification", (handlers) 
       )
       .handle("act", ({ params, payload }) =>
         withApiErrors(notifications.act({ id: params.id, ...payload })),
+      );
+  }),
+);
+
+const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
+  Effect.gen(function* () {
+    const signals = yield* SignalService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(signals.query(query)))
+      .handle("read", ({ params }) => withApiErrors(signals.read(params.id)))
+      .handle("raise", ({ payload }) => withApiErrors(signals.raise(payload)))
+      .handle("act", ({ params, payload }) =>
+        withApiErrors(signals.act({ id: params.id, ...payload })),
+      )
+      .handle("withdraw", ({ params, payload }) =>
+        withApiErrors(signals.withdraw({ id: params.id, ...payload })),
       );
   }),
 );
@@ -644,6 +662,7 @@ const WorkflowDomainLayer = Layer.mergeAll(
   WorkflowServiceLayer.pipe(
     Layer.provide(EventKindsOperationLayer),
     Layer.provide(WorkflowRunsLayer),
+    Layer.provide(WorkflowSignalsLayer),
   ),
   CronTriggerSchedulerLayer,
 ).pipe(Layer.provideMerge(TriggerHealthLayer));
@@ -746,17 +765,17 @@ export const operationLayers = Layer.mergeAll(
   // - placement and `Live` both use dispatch, which is provided last.
   //
   // The inbound driver hands a workspace step's result to the run service.
-  // The notification service runs the operation of a chosen answer through
-  // its `BindableOperations` port, which the controller daemon implements,
-  // and the operation can be a task, run, live session or Permission Request
-  // operation. So the port gets the run layers, which include the task
-  // service, and the Permission Request use case, and sits in this group,
-  // which provides `Live`.
+  // The notification and signal services run the operation of a chosen
+  // answer through their `BoundOperations` port, which the controller daemon
+  // implements. The operation can be a task, run, live session or Permission
+  // Request operation, so the port gets the run layers, which include the
+  // task service, and the Permission Request use case, and sits in this
+  // group, which provides `Live`.
   Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunDomainLayer)),
-    NotificationServiceLayer.pipe(
+    Layer.mergeAll(NotificationServiceLayer, SignalServiceLayer).pipe(
       Layer.provide(
-        BindableOperationsLayer.pipe(
+        BoundOperationsLayer.pipe(
           Layer.provide(RunDomainLayer),
           Layer.provide(PermissionRequestsDomainLayer),
         ),
@@ -824,6 +843,7 @@ export const handlerLayers = Layer.mergeAll(
   controllerRoutes,
   taskRoutes,
   notificationRoutes,
+  signalRoutes,
   agentRoutes,
   assistantRoutes,
   conversationRoutes,

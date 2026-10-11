@@ -84,6 +84,9 @@ const bridge: Bridge = {
   waiting: {
     set: (requests) => invokeChannel("waiting.set", requests),
   },
+  urgentSignals: {
+    set: (signals) => invokeChannel("urgentSignals.set", signals),
+  },
   localController: {
     find: () => invokeChannel("localController.find"),
     start: () => invokeChannel("localController.start"),

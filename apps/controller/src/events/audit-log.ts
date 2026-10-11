@@ -105,6 +105,9 @@ export const AUDIT_KINDS = [
   "notification.created",
   "notification.decided",
   "notification.withdrawn",
+  "signal.raised",
+  "signal.decided",
+  "signal.withdrawn",
   "permission.requested",
 ] as const;
 
@@ -172,6 +175,9 @@ const RECORD_KINDS = {
   "notification.created": "created",
   "notification.decided": "updated",
   "notification.withdrawn": "updated",
+  "signal.raised": "created",
+  "signal.decided": "updated",
+  "signal.withdrawn": "updated",
   // The record it names is the asking session, whose list of open Permission
   // Requests gained one.
   "permission.requested": "updated",

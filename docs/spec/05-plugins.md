@@ -287,6 +287,8 @@ interface ActionContext {
 
 *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* The block above is now the shape as shipped. `api` is not in it (see the bullets on #79 below), and `credentials` holds the Connection's credential fields by name.
 
+*(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* **`run` is optional:** `run?: { runId, stepId }`. It is absent when the action runs as a Signal's answer, which the user takes outside any run ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)).
+
 *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#391](https://github.com/theagenticage/hercule/issues/391).)* **Where an action may be bound, and its describe line.** An action contribution gains two fields. Neither is built yet.
 
 ```ts

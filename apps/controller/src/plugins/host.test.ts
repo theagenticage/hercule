@@ -22,6 +22,7 @@ import {
   type Plugin,
   type PluginCapability,
   type ProviderDefinition,
+  type WorkflowActionContribution,
 } from "@hercule/plugin-host";
 import { PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
@@ -769,6 +770,38 @@ describe("the workflow action catalog", () => {
       "a Connection of type github/github, which the plugin borrowed does not declare",
     );
     expect(readErroredMessage(statuses.owned)).toBeUndefined();
+  });
+
+  it("marks a plugin errored if an action the user's answer may run has no describe, and keeps one that has it", async () => {
+    const found = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          // A cast gets past TypeScript, which refuses an answer place
+          // without describe, as a plugin built without types could.
+          buildActionPlugin("silent", {
+            ...NOTE_APPEND_ACTION,
+            usableIn: ["workflow.step", "signal.answer"],
+          } as unknown as WorkflowActionContribution),
+          buildActionPlugin("described", {
+            ...NOTE_APPEND_ACTION,
+            usableIn: ["signal.answer"],
+            describe: () => [{ kind: "text", text: "Append a note" }],
+          }),
+        ]);
+        return {
+          silent: yield* host.status("silent"),
+          described: yield* host.status("described"),
+          action: yield* host.findWorkflowAction("described/note.append"),
+        };
+      }),
+    );
+
+    expect(readErroredMessage(found.silent)).toContain(
+      "it lists signal.answer in usableIn but has no describe function",
+    );
+    expect(readErroredMessage(found.described)).toBeUndefined();
+    expect(Option.getOrThrow(found.action).usableIn).toEqual(["signal.answer"]);
   });
 });
 

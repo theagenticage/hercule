@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares seventeen pairs of
+ * For each theme, Whitehaven and Orient Express, it compares eighteen pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -49,7 +49,11 @@
  *   specimens/settings-profiles-reference.ts, and the specimen is
  *   settings-profiles.html. The two profile pages are taller than the
  *   window, so each is compared again scrolled to the end of its body, with
- *   `?scrolled=1` added to both pages' addresses.
+ *   `?scrolled=1` added to both pages' addresses;
+ * - Intake (the main pane) of the Intake design's page,
+ *   intake-directions/asks/desktop/intake.html, with Marta's review request
+ *   open: the design's page edited by specimens/intake-reference.ts, and the
+ *   Intake specimen (intake.html).
  *
  * Each reference module edits the book's page to show its fixture's data.
  * For each region pair, the capture:
@@ -111,7 +115,7 @@ interface PageItem {
 interface RegionPair {
   /** The region's name in the report and in its images' file names. */
   readonly name: string;
-  /** The book's page, under /design/crew-bureau-2/desktop/. */
+  /** The design page, as a path under /design/ (docs/design), such as `crew-bureau-2/desktop/session-active.html`. */
   readonly bookPage: string;
   /** The module that edits the book's page to show the fixture's data, under /specimens/. */
   readonly referenceModule: string;
@@ -528,13 +532,38 @@ const PROFILES_SETTINGS_PARTS = [
   ".set-row > .btn",
 ];
 
+// Every part of Intake whose box is compared, as a selector inside
+// `main.main`: the header and its tabs, the list with its section headings
+// and rows, and the pane with its head, its blocks and its answers.
+const INTAKE_PARTS = [
+  ".bar .title",
+  ".tabs .tab",
+  ".asks-list",
+  ".asks-sec",
+  ".ask-row",
+  ".ask-mark",
+  ".ask-title",
+  ".ask-sub",
+  ".ask-age",
+  ".asks-detail",
+  ".ad-kind",
+  ".ad-title",
+  ".ad-asked",
+  ".b-change",
+  ".b-msg",
+  ".ans",
+  ".ans .btn",
+  ".ans-desc",
+  ".ad-keys",
+];
+
 /** Returns the pair that compares one state of Settings > Permission profiles, `view` being the book's `?state=` and whether the page is scrolled. */
 const buildProfilesPair = (
   name: string,
   view: { readonly state?: string; readonly scrolled?: true } = {},
 ): RegionPair => ({
   name,
-  bookPage: "settings-profiles.html",
+  bookPage: "crew-bureau-2/desktop/settings-profiles.html",
   referenceModule: "settings-profiles-reference.ts",
   specimenPage: "settings-profiles.html",
   ...view,
@@ -547,7 +576,7 @@ const buildProfilesPair = (
 const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   {
     name: "sidebar",
-    bookPage: "session-active.html",
+    bookPage: "crew-bureau-2/desktop/session-active.html",
     referenceModule: "sidebar-reference.ts",
     specimenPage: "sidebar.html",
     region: SIDEBAR_REGION,
@@ -556,7 +585,7 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   },
   {
     name: "thread",
-    bookPage: "session-active.html",
+    bookPage: "crew-bureau-2/desktop/session-active.html",
     referenceModule: "thread-reference.ts",
     specimenPage: "thread.html",
     region: MAIN_PANE_REGION,
@@ -565,7 +594,7 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   },
   {
     name: "scrolled-thread",
-    bookPage: "session-active.html",
+    bookPage: "crew-bureau-2/desktop/session-active.html",
     referenceModule: "thread-reference.ts",
     specimenPage: "thread.html",
     state: "scrolled",
@@ -575,7 +604,7 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   },
   {
     name: "draft",
-    bookPage: "session-empty.html",
+    bookPage: "crew-bureau-2/desktop/session-empty.html",
     referenceModule: "draft-reference.ts",
     specimenPage: "draft.html",
     region: MAIN_PANE_REGION,
@@ -584,7 +613,7 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   },
   {
     name: "draft-first",
-    bookPage: "session-empty.html",
+    bookPage: "crew-bureau-2/desktop/session-empty.html",
     referenceModule: "draft-reference.ts",
     specimenPage: "draft.html",
     state: "first",
@@ -594,7 +623,7 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   },
   {
     name: "draft-first-no-repo",
-    bookPage: "session-empty.html",
+    bookPage: "crew-bureau-2/desktop/session-empty.html",
     referenceModule: "draft-reference.ts",
     specimenPage: "draft.html",
     state: "first-no-repo",
@@ -604,7 +633,7 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   },
   {
     name: "conversation",
-    bookPage: "assistant.html",
+    bookPage: "crew-bureau-2/desktop/assistant.html",
     referenceModule: "conversation-reference.ts",
     specimenPage: "conversation.html",
     region: CONVERSATION_REGION,
@@ -613,7 +642,7 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   },
   {
     name: "settings-assistants",
-    bookPage: "settings-assistants.html",
+    bookPage: "crew-bureau-2/desktop/settings-assistants.html",
     referenceModule: "settings-assistants-reference.ts",
     specimenPage: "settings-assistants.html",
     region: MAIN_PANE_REGION,
@@ -622,7 +651,7 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   },
   {
     name: "scrolled-settings-assistants",
-    bookPage: "settings-assistants.html",
+    bookPage: "crew-bureau-2/desktop/settings-assistants.html",
     referenceModule: "settings-assistants-reference.ts",
     specimenPage: "settings-assistants.html",
     state: "scrolled",
@@ -632,7 +661,7 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   },
   {
     name: "settings-appearance",
-    bookPage: "settings-appearance.html",
+    bookPage: "crew-bureau-2/desktop/settings-appearance.html",
     referenceModule: "settings-appearance-reference.ts",
     specimenPage: "settings-appearance.html",
     region: MAIN_PANE_REGION,
@@ -645,6 +674,15 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   buildProfilesPair("settings-profiles-shipped", { state: "shipped" }),
   buildProfilesPair("scrolled-settings-profiles-shipped", { state: "shipped", scrolled: true }),
   buildProfilesPair("settings-profiles-confirm", { state: "confirm" }),
+  {
+    name: "intake",
+    bookPage: "intake-directions/asks/desktop/intake.html",
+    referenceModule: "intake-reference.ts",
+    specimenPage: "intake.html",
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: INTAKE_PARTS,
+  },
 ];
 
 /**
@@ -805,7 +843,7 @@ async function compareRegion(
   const query = buildPageQuery({ theme, state, scrolled });
   const [reference, specimen] = await Promise.all([
     openSheet(
-      new URL(`/design/crew-bureau-2/desktop/${bookPage}${query}`, sheetsUrl).href,
+      new URL(`/design/${bookPage}${query}`, sheetsUrl).href,
       new URL(referenceModule, sheetsUrl).href,
     ),
     openSheet(`${sheetsUrl}${specimenPage}${query}`),

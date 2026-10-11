@@ -23,9 +23,11 @@
  * during the count. The controller stamps a thread's last activity with its
  * own clock, and no operation sets it. So before each launch,
  * `prepareLaunch` stops the controller, writes the idle threads' last
- * activity into its database, and starts it again on the same port. That
- * write is the only thing done to the database directly: the threads, and
- * every state they are in, come from the fleet.
+ * activity into its database, and starts it again on the same port. It sets
+ * the time each open signal was raised the same way, for Intake's age
+ * labels. Those times are the only things written to the database directly:
+ * the threads, and every state they are in, come from the fleet, and the
+ * signals from `signal.raise`.
  *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
@@ -102,6 +104,13 @@ const TWO_MINUTES_MS = 120_000;
  */
 const OTHER_PROJECTS_BACK_MS = 7 * HOUR_MS;
 
+/**
+ * How far back the newest open signal is set, and how far apart the oldest
+ * and the newest may be (see `backdateOpenSignals`).
+ */
+const NEWEST_SIGNAL_BACK_MS = 2.5 * HOUR_MS;
+const SIGNALS_BACK_SPREAD_MS = 10 * 60_000;
+
 /** The controller's database, inside its Hercule Home. */
 const DATABASE_PATH = ["data", "hercule.db"] as const;
 
@@ -173,7 +182,8 @@ export interface ThreadFixture {
    * the thread was created, and a header tab's the time since its last
    * activity, so both are set. With `twoMinuteRow`, one idle thread in the
    * first project is set only two minutes back instead, so exactly one row on
-   * screen shows minutes. Fails when a thread is not in its expected state
+   * screen shows minutes. Every open signal is set hours back too (see
+   * `backdateOpenSignals`). Fails when a thread is not in its expected state
    * afterwards.
    */
   readonly prepareLaunch: (options: { readonly twoMinuteRow: boolean }) => Promise<void>;
@@ -353,6 +363,7 @@ export async function runWithThreadFixture<T>(
           // The busy and waiting threads of every project but the first.
           [...busyIds.slice(1), ...waitingIds.slice(1)],
         );
+        backdateOpenSignals(home);
         controller = await startController({ home, binary: findCompiledBinary(), port });
         await Promise.all(runners.map((runner) => runner.reconnect()));
         for (const runner of runners) {
@@ -461,6 +472,41 @@ export async function runWithThreadFixture<T>(
   } finally {
     rmSync(home, { recursive: true, force: true });
     deleteMasterKeyItem(home);
+  }
+}
+
+/**
+ * Sets every open signal in the stopped controller's database in the Home
+ * `home` raised between 2 h 30 min and 2 h 40 min back, in the order they
+ * were raised. Intake's rows then all show "2h", and the next label change
+ * is 20 minutes or more away, so no label changes during a launch.
+ *
+ * Each open signal is set one second before the next, oldest first, so To
+ * do keeps its order. At most 600 signals fit in those 10 minutes, and the
+ * function fails with more.
+ */
+function backdateOpenSignals(home: string): void {
+  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
+  try {
+    const ids = database
+      .prepare("SELECT id FROM signals WHERE status = 'open' ORDER BY created_at, id")
+      .all()
+      .map((row) => row["id"] as Uint8Array);
+    if (ids.length > SIGNALS_BACK_SPREAD_MS / 1_000) {
+      throw new Error(
+        `the fixture backdates at most ${String(SIGNALS_BACK_SPREAD_MS / 1_000)} open signals, not ${String(ids.length)}`,
+      );
+    }
+    const update = database.prepare("UPDATE signals SET created_at = ? WHERE id = ?");
+    const newest = Date.now() - NEWEST_SIGNAL_BACK_MS;
+    database.exec("BEGIN");
+    for (const [index, id] of ids.entries()) {
+      const back = (ids.length - 1 - index) * 1_000;
+      update.run(new Date(newest - back).toISOString(), id);
+    }
+    database.exec("COMMIT");
+  } finally {
+    database.close();
   }
 }
 

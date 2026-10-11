@@ -9,31 +9,14 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { BoundAction, Notification, NotificationSubject } from "@hercule/contract";
 import { AuditLog } from "../events";
-import { BindableOperations } from "./bindable-operations";
+import { FakeBoundOperationsLayer } from "../bound-actions/testing";
 import { Notifier, NotifierLayer } from "./notifier";
 import { notificationRepository } from "./repository";
 import { NotificationService, NotificationServiceLayer } from "./service";
 
 /**
- * A fake of the `BindableOperations` port. `run` succeeds without doing
- * anything. `describe` writes each operation's id as its describe line, such
- * as "run.start".
- *
- * The real port lives in the controller daemon, which a domain's test cannot
- * import. A test that checks the real lines, or what an operation really
- * does, runs the controller over HTTP.
- */
-const FakeBindableOperationsLayer: Layer.Layer<BindableOperations> = Layer.succeed(
-  BindableOperations,
-  BindableOperations.of({
-    run: () => Effect.void,
-    describe: (operations) =>
-      Effect.succeed(operations.map((operation) => [{ kind: "text", text: operation.op }])),
-  }),
-);
-
-/**
- * The notification service and the notifier over the fake port above, for a
+ * The notification service and the notifier over the fake `BoundOperations`
+ * port, for a
  * test that reads notifications through the service. A test that only needs
  * the notifier uses `NotifierLayer` instead. Both still need the database and
  * the audit log.
@@ -43,7 +26,7 @@ export const NotificationServiceTestLayer: Layer.Layer<
   never,
   SqlClient.SqlClient | AuditLog
 > = NotificationServiceLayer.pipe(
-  Layer.provide(FakeBindableOperationsLayer),
+  Layer.provide(FakeBoundOperationsLayer),
   Layer.provideMerge(NotifierLayer),
 );
 

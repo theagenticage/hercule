@@ -222,7 +222,7 @@ export async function signInAndReadToken(
  * `./hercule`, in a scratch Hercule Home, never the user's own. With
  * `setUp: true`, it also completes first-run setup as `username`, or as
  * `USERNAME` when it is not given, so the app can sign in; otherwise setup
- * is still pending.
+ * is still pending. Returns the controller with the path of its home.
  *
  * The controller is stopped, and its home deleted, when the test finishes.
  * Fails when the binary has not been built, when the controller does not
@@ -231,7 +231,7 @@ export async function signInAndReadToken(
 export async function startControllerForTest(options: {
   readonly setUp: boolean;
   readonly username?: string | undefined;
-}): Promise<Controller> {
+}): Promise<Controller & { readonly home: string }> {
   const { home, remove } = createTemporaryHome();
   onTestFinished(remove);
   const controller = options.setUp
@@ -240,12 +240,24 @@ export async function startControllerForTest(options: {
   onTestFinished(async () => {
     await controller.stop();
   });
-  return controller;
+  return { ...controller, home };
 }
 
 /** A scratch controller that is set up, a fleet signed in to it, and a client for reading it back. */
 export interface ArrangedFleet {
   readonly url: string;
+  /**
+   * The controller's scratch Hercule Home, for the CLI a test runs and for
+   * the rare arrangement no operation can make.
+   */
+  readonly home: string;
+  /**
+   * Stops the controller, calls `whileStopped`, and starts it again on the
+   * same port and home. The controller holds its database locked while it
+   * runs, so this is the way to write to it directly. Call it at most once
+   * per test. Fails when the controller does not start again.
+   */
+  readonly restartController: (whileStopped: () => void) => Promise<void>;
   readonly fleet: Fleet;
   readonly client: HerculeClient;
   /** Waits until the thread's status is `status`, read through the API. */
@@ -279,6 +291,19 @@ export async function arrangeFleet(): Promise<ArrangedFleet> {
   await client.runner.retire({ params: { id: own!.id }, payload: {} });
   return {
     url: controller.url,
+    home: controller.home,
+    restartController: async (whileStopped) => {
+      await controller.stop();
+      whileStopped();
+      const restarted = await startController({
+        home: controller.home,
+        binary: findCompiledBinary(),
+        port: controller.port,
+      });
+      onTestFinished(async () => {
+        await restarted.stop();
+      });
+    },
     fleet,
     client,
     waitForStatus: async (sessionId, status) => {

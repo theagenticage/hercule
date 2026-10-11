@@ -923,7 +923,7 @@ describe("what an event subscription receives", () => {
           expect(expectPresent(events.received[0])._tag).toBe("delta");
           yield* Fiber.interrupt(events.fiber);
 
-          // The eight mutable topics carry no records, so a successful hello is
+          // The mutable topics carry no records, so a successful hello is
           // all they need: each one is accepted and kept.
           for (const topic of MUTABLE_LIVE_TOPICS) {
             const held = yield* collectMessages(client, { topic });

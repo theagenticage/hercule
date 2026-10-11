@@ -15,7 +15,8 @@
  *   main pane `pnpm compare:bureau` compares with the book's;
  * - settings-profiles.tsx, which opens Settings > Permission profiles, the
  *   list or one profile's page, and whose main pane `pnpm compare:bureau`
- *   compares with the book's.
+ *   compares with the book's;
+ * - intake.tsx, which opens Intake, with or without a signal's pane.
  *
  * The page builds a router whose routes have the app's route ids, so the
  * sidebar and the screens find the controller in their route context, and
@@ -53,13 +54,16 @@ import type {
   Assistant,
   Connection,
   ConversationMessage,
+  Event,
   Input,
+  PluginDetail,
   Profile,
   Project,
   ProviderInstance,
   Resource,
   Runner,
   Session,
+  Signal,
   SignedInUser,
   Task,
   TranscriptRow,
@@ -79,7 +83,9 @@ import {
   connectionsQuery,
   conversationMessagesQuery,
   currentConversationSessionQuery,
+  eventQuery,
   localRunnerQuery,
+  pluginsQuery,
   profilesQuery,
   projectsQuery,
   providersQuery,
@@ -90,6 +96,8 @@ import {
   senderSessionQuery,
   sessionQuery,
   settingsQuery,
+  signalQuery,
+  signalsToDoQuery,
   startTasksQuery,
   subagentsQuery,
   threadsQuery,
@@ -112,6 +120,7 @@ import { Route as AppearanceSettingsRoute } from "../routes/_connected/_shell/se
 import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/settings/assistants/route";
 import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/index";
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
+import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
 
@@ -144,6 +153,10 @@ export interface SidebarRecords {
    * Hercule face. None when left out. A screen that reads them too sets its own.
    */
   readonly connections?: ReadonlyArray<Connection>;
+  /** The signals on To do, which Intake's row and the Hercule segment count. None when left out. */
+  readonly signals?: ReadonlyArray<Signal>;
+  /** The installed plugins, which name each signal's source. None when left out. */
+  readonly plugins?: ReadonlyArray<PluginDetail>;
 }
 
 /** What the thread screen reads of the one thread it shows, as the thread route's loader reads it. */
@@ -205,6 +218,17 @@ export interface AppearanceSettingsRecords {
   readonly connections: ReadonlyArray<Connection>;
 }
 
+/**
+ * What Intake reads besides the shell's lists, which hold To do and the
+ * plugins: the selected signal and the event it was raised from.
+ */
+export interface IntakeRecords {
+  /** The selected signal, as the controller reads it, or `null` when none is selected. */
+  readonly signal: Signal | null;
+  /** The event the selected signal was raised from, or `null` for none. */
+  readonly event: Event | null;
+}
+
 /** The screens a shell specimen opens beside the sidebar. It opens at most one of them. */
 interface OpenScreens {
   readonly thread?: ThreadScreenRecords;
@@ -212,6 +236,7 @@ interface OpenScreens {
   readonly assistantsSettings?: AssistantsSettingsRecords;
   readonly permissionProfilesSettings?: PermissionProfilesSettingsRecords;
   readonly appearanceSettings?: AppearanceSettingsRecords;
+  readonly intake?: IntakeRecords;
 }
 
 /** An address that never answers. The client sends nothing to it. */
@@ -264,6 +289,9 @@ const REFUSING_BRIDGE: Bridge = {
     set: () => Promise.resolve(undefined),
   },
   waiting: {
+    set: () => Promise.resolve(undefined),
+  },
+  urgentSignals: {
     set: () => Promise.resolve(undefined),
   },
   localController: {
@@ -319,6 +347,7 @@ const seedQueryCache = (
     assistantsSettings,
     permissionProfilesSettings,
     appearanceSettings,
+    intake,
   }: OpenScreens,
 ): void => {
   queryClient.setQueryData(threadsQuery(client).queryKey, records.threads);
@@ -329,6 +358,8 @@ const seedQueryCache = (
   queryClient.setQueryData(providersQuery(client).queryKey, records.instances);
   queryClient.setQueryData(userQuery(client).queryKey, records.user);
   queryClient.setQueryData(connectionsQuery(client).queryKey, records.connections ?? []);
+  queryClient.setQueryData(signalsToDoQuery(client).queryKey, records.signals ?? []);
+  queryClient.setQueryData(pluginsQuery(client).queryKey, records.plugins ?? []);
   queryClient.setQueryData(
     assistantsQuery(client).queryKey,
     records.assistants.map(({ assistant }) => assistant),
@@ -368,6 +399,12 @@ const seedQueryCache = (
   }
   if (appearanceSettings !== undefined) {
     queryClient.setQueryData(connectionsQuery(client).queryKey, appearanceSettings.connections);
+  }
+  if (intake?.signal != null) {
+    queryClient.setQueryData(signalQuery(client, intake.signal.id).queryKey, intake.signal);
+  }
+  if (intake?.event != null) {
+    queryClient.setQueryData(eventQuery(client, intake.event.id).queryKey, intake.event);
   }
   if (thread !== undefined) {
     const sessionId = thread.session.id;
@@ -425,8 +462,8 @@ function AssistantRoute(): JSX.Element {
 /**
  * Builds the router: the root, the `_connected` and `_shell` layout routes,
  * the three screens the sidebar links to, `/`, `/threads/$sessionId` and
- * `/assistants/$assistantId`, and Settings with its Appearance, Assistants
- * and Permission profiles sections, starting at `path`. The ids are the app's, because the sidebar and the
+ * `/assistants/$assistantId`, Intake, and Settings with its Appearance,
+ * Assistants and Permission profiles sections, starting at `path`. The ids are the app's, because the sidebar and the
  * screens read their context, and the sidebar its selected thread or draft,
  * by route id.
  *
@@ -441,7 +478,8 @@ function AssistantRoute(): JSX.Element {
  * and their context through their own `Route`. The Assistants route is
  * attached without its loader: the loader reads the permission profiles and
  * the settings again each time the section opens, and the query cache
- * already holds both. The Permission profiles routes are attached the same way.
+ * already holds both. The Permission profiles routes are attached the same
+ * way, and so is Intake, whose loader reads the selected signal.
  */
 const buildRouter = (
   client: HerculeClient,
@@ -502,6 +540,12 @@ const buildRouter = (
     path: "/appearance",
     getParentRoute: () => settingsRoute,
   } as never);
+  const intakeRoute = IntakeRoute.update({
+    id: "/intake",
+    path: "/intake",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
   const routeTree = rootRoute.addChildren([
     connectedRoute.addChildren([
       shellRoute.addChildren([
@@ -519,6 +563,7 @@ const buildRouter = (
           path: "assistants/$assistantId",
           component: AssistantRoute,
         }),
+        intakeRoute,
         settingsRoute.addChildren([
           appearanceSettingsRoute,
           assistantsSettingsRoute,
@@ -549,8 +594,8 @@ const waitForElement = async (selector: string): Promise<void> => {
 /**
  * Checks that the page drew the sidebar's thread rows, the transcript when
  * `screens` opens a thread, an assistant's settings when it opens Settings >
- * Assistants, the theme cards when it opens Settings > Appearance, and the
- * start cards with the focus in the message field when
+ * Assistants, the theme cards when it opens Settings > Appearance, the
+ * list's rows or its empty line when it opens Intake, and the start cards with the focus in the message field when
  * it opens a draft, and started no read. Fails with the keys of the
  * reads it started, or with what it did not draw, otherwise.
  */
@@ -587,6 +632,11 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
   if (screens.appearanceSettings !== undefined && document.querySelector(".themes") === null) {
     throw new Error(
       "Settings > Appearance drew no theme cards. Check the page's console for the error.",
+    );
+  }
+  if (screens.intake !== undefined && document.querySelector(".ask-row, .asks-empty") === null) {
+    throw new Error(
+      "Intake drew no row and no empty line. Check the page's console for the error.",
     );
   }
   if (screens.draft !== undefined) {
@@ -651,6 +701,8 @@ async function mountShellSpecimen(
   // The starters, which a draft shows in a project with no open task, load
   // the first time they show, so they arrive after the first render.
   if (screens.draft !== undefined) await waitForElement(".start");
+  // The list draws its rows once it has measured its height, after the first render.
+  if (screens.intake !== undefined) await waitForElement(".ask-row, .asks-empty");
   assertShellDrawn(queryClient, screens);
 }
 
@@ -753,4 +805,21 @@ export async function mountAppearanceSettingsSpecimen(
   settings: AppearanceSettingsRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, "/settings/appearance", { appearanceSettings: settings });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Intake open: the main pane shows the app's real Intake screen, with
+ * the signals on To do from `records`, and the pane of `intake.signal` when
+ * it is not `null`. Returns once the list's rows, or its empty line, are in
+ * the document. Fails when the page has no `#root`, draws no sidebar row, no
+ * list row and no empty line, or tries to read a record the cache does not
+ * hold.
+ */
+export async function mountIntakeSpecimen(
+  records: SidebarRecords,
+  intake: IntakeRecords,
+): Promise<void> {
+  const path = intake.signal === null ? "/intake" : `/intake?signal=${intake.signal.id}`;
+  await mountShellSpecimen(records, path, { intake });
 }

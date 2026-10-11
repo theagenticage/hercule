@@ -15,6 +15,7 @@ import type {
   NotificationFilter,
   RunFilter,
   Runner,
+  SignalFilter,
   TaskFilter,
 } from "@hercule/contract";
 import { listLoopbackEndpoints } from "../local-runner";
@@ -151,6 +152,11 @@ export const queryKeys = {
    */
   workflowActions: (): LiveQueryKey => ["workflow-actions"],
   eventKinds: (): LiveQueryKey => ["event-kinds"],
+  /**
+   * One event, as `event.read` returns it. Not a live topic: the event log is
+   * append-only, so a stored event is read once and kept.
+   */
+  event: (id: number): LiveQueryKey => ["event", id],
   /** Not a live topic yet. A change to an Agent made elsewhere shows up on the next fetch. */
   agents: (): LiveQueryKey => ["agents"],
   assistants: (): LiveQueryKey => ["assistants"],
@@ -182,6 +188,14 @@ export const queryKeys = {
     since ?? null,
   ],
   /**
+   * Intake's lists, keyed on the filter. The `to-do` view is read whole, so
+   * one entry holds every open signal and its count.
+   */
+  signals: (filter?: SignalFilter): LiveQueryKey =>
+    filter === undefined ? ["signals"] : ["signals", filter],
+  /** One signal, as `signal.read` returns it, with the describe lines of its actions. */
+  signal: (id?: string): LiveQueryKey => (id === undefined ? ["signal"] : ["signal", id]),
+  /**
    * Keyed on the loopback endpoints detection asks among `runners`, because
    * the result depends on them. The same runners read again, with the same
    * endpoints, gives the same key, so detection does not run again.
@@ -191,6 +205,17 @@ export const queryKeys = {
     listLoopbackEndpoints(runners).map(({ id, port }) => `${id}:${String(port)}`),
   ],
 } as const;
+
+/**
+ * The keys of every signal read, the lists and each signal's own.
+ *
+ * A signal's actions carry describe lines, which the controller writes on
+ * each read from the current names of the workflows and Connections they
+ * name, and from the plugins that own their actions. A change to any of
+ * these sends no `signal` push, so the pushes of those three topics make
+ * every signal read stale as well.
+ */
+const SIGNAL_DESCRIBE_KEYS: ReadonlyArray<LiveQueryKey> = [queryKeys.signals(), queryKeys.signal()];
 
 /**
  * Returns the query keys to invalidate for a push on a mutable topic. A push
@@ -249,22 +274,29 @@ export const buildQueryKeys = (
   }
   // Any connection change refetches the list. A connection's own page is
   // refetched only when the push lists its id, or when the push lists no ids.
+  // Every signal read is refetched too, see `SIGNAL_DESCRIBE_KEYS`.
   if (topic === "connection") {
     return ids.length === 0
-      ? [queryKeys.connections(), queryKeys.connection()]
-      : [queryKeys.connections(), ...ids.map((id) => queryKeys.connection(id))];
+      ? [queryKeys.connections(), queryKeys.connection(), ...SIGNAL_DESCRIBE_KEYS]
+      : [
+          queryKeys.connections(),
+          ...ids.map((id) => queryKeys.connection(id)),
+          ...SIGNAL_DESCRIBE_KEYS,
+        ];
   }
   // Any workflow change refetches the listing. A workflow's own page and its
   // triggers are refetched only when the push lists its id, or when the push
   // lists no ids. A trigger's change, such as a pause or a failing filter, is
-  // pushed with its workflow's id.
+  // pushed with its workflow's id. Every signal read is refetched too, see
+  // `SIGNAL_DESCRIBE_KEYS`.
   if (topic === "workflow") {
     return ids.length === 0
-      ? [queryKeys.workflows(), queryKeys.workflow(), queryKeys.triggers()]
+      ? [queryKeys.workflows(), queryKeys.workflow(), queryKeys.triggers(), ...SIGNAL_DESCRIBE_KEYS]
       : [
           queryKeys.workflows(),
           ...ids.map((id) => queryKeys.workflow(id)),
           ...ids.map((id) => queryKeys.triggers(id)),
+          ...SIGNAL_DESCRIBE_KEYS,
         ];
   }
   // Any run change refetches the run list, whatever its filter. A run's own
@@ -305,9 +337,18 @@ export const buildQueryKeys = (
   // Notifications are read only as lists: the notification center's pages
   // and the sidebar's count. Any change refetches both, whatever their filter.
   if (topic === "notification") return [queryKeys.notifications()];
+  // Any signal change refetches every list, whatever its filter, because a
+  // raised or resolved signal moves in or out of them. A signal's own read is
+  // refetched only when the push lists its id, or when the push lists no ids.
+  if (topic === "signal") {
+    return ids.length === 0
+      ? [queryKeys.signals(), queryKeys.signal()]
+      : [queryKeys.signals(), ...ids.map((id) => queryKeys.signal(id))];
+  }
   // The plugin set is fixed at build time and read as one list, so the whole
-  // list is refetched whichever plugin changed.
-  if (topic === "plugin") return [queryKeys.plugins()];
+  // list is refetched whichever plugin changed. Every signal read is
+  // refetched too, see `SIGNAL_DESCRIBE_KEYS`.
+  if (topic === "plugin") return [queryKeys.plugins(), ...SIGNAL_DESCRIBE_KEYS];
   // Provider instances are read as one list (there is one per shipped
   // provider), so the whole list is refetched whichever instance changed.
   if (topic === "provider") return [queryKeys.providers()];

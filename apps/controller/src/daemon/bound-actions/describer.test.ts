@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as Statement from "effect/unstable/sql/Statement";
 import type {
-  BindableOperation,
+  AnswerOperation,
   DescribeLine,
   OpenRequest,
   WorkflowDefinition,
@@ -23,14 +23,14 @@ import {
   PermissionProfiles,
   PermissionProfilesLayer,
 } from "../../permissions";
-import { TestDatabase } from "../../db/testing";
+import { buildPluginStack } from "../../plugins/testing";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
 import { taskRepository } from "../../tasks";
 import { workflowRepository } from "../../workflows";
 import { buildDescribe } from "./describer";
 
-const layer = PermissionProfilesLayer.pipe(Layer.provideMerge(TestDatabase));
+const layer = PermissionProfilesLayer.pipe(Layer.provideMerge(buildPluginStack()));
 
 const AT = "2026-09-07T10:00:00.000Z";
 
@@ -47,7 +47,7 @@ const text = (value: string) => ({ kind: "text", text: value }) as const;
 const marked = (value: string) => ({ kind: "marked", text: value }) as const;
 
 /** Returns the describe line of one operation. */
-const describeOperation = (operation: BindableOperation) =>
+const describeOperation = (operation: AnswerOperation) =>
   Effect.flatMap(buildDescribe, (describe) =>
     Effect.map(describe([operation]), (lines) => lines[0]!),
   );
@@ -203,6 +203,36 @@ describe("run.start", () => {
       text(", "),
       text("mirror "),
       marked(`"${MISSING_ID}"`),
+    ]);
+  });
+});
+
+describe("task.create", () => {
+  it("leaves out an empty description, and the word with when no field is left", async () => {
+    const lines = await run(
+      Effect.gen(function* () {
+        return {
+          bare: yield* describeOperation({
+            op: "task.create",
+            input: { title: "Fix login", description: "" },
+          }),
+          described: yield* describeOperation({
+            op: "task.create",
+            input: { title: "Fix login", description: "It fails", priority: "high" },
+          }),
+        };
+      }),
+    );
+
+    expect(lines.bare).toEqual([text("Create task "), marked("Fix login")]);
+    expect(lines.described).toEqual([
+      text("Create task "),
+      marked("Fix login"),
+      text(" with "),
+      text("description "),
+      marked("It fails"),
+      text(", "),
+      text("priority high"),
     ]);
   });
 });

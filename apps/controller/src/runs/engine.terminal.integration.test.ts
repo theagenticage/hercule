@@ -115,7 +115,7 @@ describe("a terminal step that completes", () => {
           ]);
 
           // The running plugin action learns that its run ended.
-          const other = held.contexts.find((context) => context.run.stepId === "other");
+          const other = held.contexts.find((context) => context.run?.stepId === "other");
           await waitUntil("aborted the signal of the other step", () =>
             other?.signal.aborted === true ? true : undefined,
           );

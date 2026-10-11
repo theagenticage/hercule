@@ -1,28 +1,30 @@
-import { Effect, Exit, Schema } from "effect";
+import type { AnswerPlace } from "@hercule/plugin-host";
+import { Cause, Effect, Exit, Schema } from "effect";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 import { describe, expect, it } from "vitest";
 import { api } from "./api";
 import {
-  BINDABLE_OPERATION_IDS,
-  decodeBindableOperation,
-  dispatchBindableOperation,
+  decodeAnswerOperation,
+  dispatchAnswerOperation,
+  listAnswerOperations,
   OWN_SESSION_ALIAS,
-  type BindableOperation,
-  type BindableOperationHandlers,
+  type AnswerOperation,
+  type AnswerOperationHandlers,
 } from "./bound-operations";
 import { CLI } from "./cli";
-import { NotificationCreateInput } from "./groups/notification";
+import { listDecodeIssues } from "./errors";
+import { BoundOperation, NotificationCreateInput } from "./groups/notification";
 import { readRequirement } from "./operations";
 
 const SESSION_ID = "01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb";
 const PATH = ["actions", "0", "operation"];
 
-/** Runs `decodeBindableOperation` and returns its exit, so a test can read the success or the failure. */
-const check = (op: string, input: unknown) =>
-  Effect.runSyncExit(decodeBindableOperation({ op, input }, PATH));
+/** Runs `decodeAnswerOperation` for `place` and returns its exit, so a test can read the success or the failure. */
+const check = (op: string, input: unknown, place: AnswerPlace = "notification.answer") =>
+  Effect.runSyncExit(decodeAnswerOperation(place, { op, input }, PATH));
 
 /** Returns the issues of a failed check, or fails the test when the check succeeded. */
-const readIssues = (exit: Exit.Exit<BindableOperation, unknown>) => {
+const readIssues = (exit: Exit.Exit<AnswerOperation, unknown>) => {
   if (Exit.isSuccess(exit)) throw new Error("the check succeeded");
   const error = Exit.findErrorOption(exit);
   if (error._tag === "None") throw new Error("the check died instead of failing");
@@ -51,7 +53,22 @@ const listEndpointErrors = (): ReadonlyMap<string, ReadonlySet<Schema.Top["ast"]
   return found;
 };
 
+const NOTIFICATION_OPERATIONS = listAnswerOperations("notification.answer");
+const SIGNAL_OPERATIONS = listAnswerOperations("signal.answer");
+const ANSWER_OPERATIONS = [...new Set([...NOTIFICATION_OPERATIONS, ...SIGNAL_OPERATIONS])];
+
 describe("the operations an answer may run", () => {
+  it("are the ones whose usableIn lists an answer place", () => {
+    expect(NOTIFICATION_OPERATIONS).toEqual([
+      "permission.decide",
+      "task.update",
+      "run.start",
+      "session.input",
+      "session.respondToApprovalRequest",
+    ]);
+    expect(SIGNAL_OPERATIONS).toEqual(["task.create", "task.update", "run.start"]);
+  });
+
   // An answer runs as the user, without checking the producer's grants, so it
   // must never reach credentials, secrets, the infrastructure, permissions or
   // the management of Connections.
@@ -60,7 +77,7 @@ describe("the operations an answer may run", () => {
   // only it: it is how the user answers a Permission Request, and the core
   // refuses it from every producer but itself, so no producer can make a
   // click grant something the answer does not show.
-  it.each(BINDABLE_OPERATION_IDS)("do not let %s touch a guarded area", (op) => {
+  it.each(ANSWER_OPERATIONS)("do not let %s touch a guarded area", (op) => {
     const requirement = readRequirement(op);
     const guarded =
       op === "permission.decide"
@@ -71,29 +88,28 @@ describe("the operations an answer may run", () => {
   });
 
   // One click must never destroy anything wholesale.
-  it.each(BINDABLE_OPERATION_IDS)("do not let %s delete or purge", (op) => {
+  it.each(ANSWER_OPERATIONS)("do not let %s delete or purge", (op) => {
     expect(op).not.toMatch(/\.(delete|purge)$/);
   });
 
-  // `notification.act` returns the operation's own error when it fails, so
-  // its endpoint must declare every error the operation's endpoint declares.
-  it.each(BINDABLE_OPERATION_IDS)(
-    "fail notification.act only with errors its endpoint declares, for %s",
-    (op) => {
-      const errors = listEndpointErrors();
-      const actErrors = errors.get("notification.act") ?? new Set();
-      const opErrors = errors.get(op) ?? new Set();
-      expect(opErrors.size).toBeGreaterThan(0);
-      for (const error of opErrors) {
-        expect(actErrors.has(error), `an error of ${op} is missing from notification.act`).toBe(
-          true,
-        );
-      }
-    },
-  );
+  // `notification.act` and `signal.act` return the operation's own error when
+  // it fails, so each endpoint must declare every error that the endpoint of
+  // an operation usable in its place declares.
+  it.each([
+    ...NOTIFICATION_OPERATIONS.map((op) => ["notification.act", op] as const),
+    ...SIGNAL_OPERATIONS.map((op) => ["signal.act", op] as const),
+  ])("fail %s only with errors its endpoint declares, for %s", (act, op) => {
+    const errors = listEndpointErrors();
+    const actErrors = errors.get(act) ?? new Set();
+    const opErrors = errors.get(op) ?? new Set();
+    expect(opErrors.size).toBeGreaterThan(0);
+    for (const error of opErrors) {
+      expect(actErrors.has(error), `an error of ${op} is missing from ${act}`).toBe(true);
+    }
+  });
 });
 
-describe("decodeBindableOperation", () => {
+describe("decodeAnswerOperation", () => {
   it("accepts a valid input and returns it decoded", () => {
     const exit = check("session.input", { sessionId: SESSION_ID, text: "Event-sourced" });
     expect(exit).toEqual(
@@ -109,9 +125,25 @@ describe("decodeBindableOperation", () => {
     expect(issues).toEqual([
       {
         path: [...PATH, "op"],
-        message: `An answer cannot run secret.set. An answer can run one of: ${BINDABLE_OPERATION_IDS.join(", ")}.`,
+        message: `An answer on a notification cannot run secret.set. An answer on a notification can run one of: ${NOTIFICATION_OPERATIONS.join(", ")}, or a plugin action that lists notification.answer in its usableIn.`,
       },
     ]);
+  });
+
+  it("refuses an operation that is usable only in another place", () => {
+    const issues = readIssues(
+      check("session.input", { sessionId: SESSION_ID, text: "hi" }, "signal.answer"),
+    );
+    expect(issues).toEqual([
+      {
+        path: [...PATH, "op"],
+        message: `An answer on a signal cannot run session.input. An answer on a signal can run one of: ${SIGNAL_OPERATIONS.join(", ")}, or a plugin action that lists signal.answer in its usableIn.`,
+      },
+    ]);
+    expect(Exit.isFailure(check("task.create", { title: "T", description: "D" }))).toBe(true);
+    expect(
+      Exit.isSuccess(check("task.create", { title: "T", description: "D" }, "signal.answer")),
+    ).toBe(true);
   });
 
   it("refuses an input that does not fit, with each issue under the input's path", () => {
@@ -124,8 +156,8 @@ describe("decodeBindableOperation", () => {
   });
 });
 
-describe("dispatchBindableOperation", () => {
-  const handlers: BindableOperationHandlers<string> = {
+describe("dispatchAnswerOperation", () => {
+  const handlers: AnswerOperationHandlers<"notification.answer", string> = {
     "task.update": ({ taskId }) => `task.update of ${taskId}`,
     "run.start": ({ workflowId }) => `run.start of ${workflowId}`,
     "session.input": ({ sessionId, text }) => `session.input of "${text}" to ${sessionId}`,
@@ -137,17 +169,61 @@ describe("dispatchBindableOperation", () => {
 
   it("calls the handler for the operation with the operation's input", () => {
     expect(
-      dispatchBindableOperation(handlers, {
+      dispatchAnswerOperation(handlers, {
         op: "session.input",
         input: { sessionId: SESSION_ID, text: "hi" },
       }),
     ).toBe(`session.input of "hi" to ${SESSION_ID}`);
     expect(
-      dispatchBindableOperation(handlers, {
+      dispatchAnswerOperation(handlers, {
         op: "session.respondToApprovalRequest",
         input: { sessionId: SESSION_ID, requestId: "req-1", decision: "deny" },
       }),
     ).toBe("session.respondToApprovalRequest of deny to req-1");
+  });
+});
+
+describe("BoundOperation", () => {
+  const decode = Schema.decodeUnknownExit(BoundOperation);
+
+  it("accepts a contract operation id and a plugin action's qualified id", () => {
+    expect(Exit.isSuccess(decode({ op: "run.start", input: {} }))).toBe(true);
+    expect(
+      Exit.isSuccess(
+        decode({ op: "github/pr.merge", connectionId: SESSION_ID, input: { number: 1 } }),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses an id that is neither", () => {
+    expect(Exit.isFailure(decode({ op: "nothing.here", input: {} }))).toBe(true);
+    expect(Exit.isFailure(decode({ op: "Github/pr.merge", input: {} }))).toBe(true);
+  });
+});
+
+describe("notification.create", () => {
+  it("refuses an answer with a typed field, at the field's path", () => {
+    const exit = Schema.decodeUnknownExit(NotificationCreateInput)({
+      kind: "triage.unsure",
+      title: "A question",
+      actions: [
+        { id: "ok", label: "OK", operation: null },
+        {
+          id: "reply",
+          label: "Reply",
+          operation: null,
+          field: { name: "body", placeholder: "Write a reply" },
+        },
+      ],
+    });
+    if (Exit.isSuccess(exit)) throw new Error("the decode succeeded");
+    expect(listDecodeIssues(Cause.squash(exit.cause) as Schema.SchemaError)).toEqual([
+      {
+        path: ["actions", "1", "field"],
+        message:
+          "A notification's answer cannot take typed text. Leave out field, and let the user answer in the session instead.",
+      },
+    ]);
   });
 });
 

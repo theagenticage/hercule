@@ -373,6 +373,26 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the id and the stored definition of every enabled workflow,
+     * oldest first. A new signal reads it to offer Hand to an agent: one
+     * action per enabled workflow with a signal input that accepts its kind.
+     */
+    listEnabledDefinitions: (): Effect.Effect<
+      ReadonlyArray<{ readonly id: string; readonly definition: WorkflowDefinition }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array; readonly definition: string }>`
+          SELECT id, definition FROM workflows WHERE enabled = 1 ORDER BY created_at, id
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            id: uuidToString(row.id),
+            definition: JSON.parse(row.definition) as WorkflowDefinition,
+          })),
+      ),
+
+    /**
      * Returns the declared inputs of each stored workflow with one of the
      * ids, by workflow id. A workflow that declares no inputs has an empty
      * list, and an id no workflow has is not in the map.

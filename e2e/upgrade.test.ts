@@ -7,7 +7,8 @@
  * real data. The fixture is one representative conversation of several owner
  * turns, one named Provider Instance, one session with a few persisted
  * turns, the timezone first-run setup persisted, a project name and a
- * repository remote, and two user settings that migration 60 deletes.
+ * repository remote, two user settings that migration 60 deletes, and the
+ * shipped permission profiles that migration 63 gives the signal grants.
  * After the upgrade the test checks that those records, their content,
  * ordering and associations survived. It is not a matrix of session states or
  * provider behaviour.
@@ -74,6 +75,20 @@ const RETIRED_SETTINGS = {
 
 /** The migration that deletes `RETIRED_SETTINGS`. */
 const RETIRED_SETTINGS_MIGRATION = 60;
+
+/** The migration that adds `SIGNAL_GRANTS` to the `SIGNAL_PROFILES`. */
+const SIGNAL_GRANTS_MIGRATION = 63;
+
+/** The shipped profiles that hold `SIGNAL_GRANTS` from migration 63 on. */
+const SIGNAL_PROFILES = ["assistant", "worker", "unrestricted"] as const;
+
+const SIGNAL_GRANTS = ["signal.read", "signal.write"] as const;
+
+interface SeededProfile {
+  readonly id: string;
+  readonly name: string;
+  readonly grants: ReadonlyArray<string>;
+}
 
 interface SeededMessage {
   readonly id: string;
@@ -334,6 +349,19 @@ function persistRepresentativeSession(options: {
   return sessionId;
 }
 
+/** Returns the id of the last migration the database in `home` ran. */
+function readMigrationVersion(home: string): number {
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const { version } = database
+      .query("SELECT max(migration_id) AS version FROM effect_sql_migrations")
+      .get() as { version: number };
+    return version;
+  } finally {
+    database.close();
+  }
+}
+
 /**
  * Stores `RETIRED_SETTINGS` for the one user in the database the edge binary
  * created, when that database predates the migration that deletes them.
@@ -345,12 +373,9 @@ function persistRepresentativeSession(options: {
  * does not run twice, so the fixture is skipped there instead.
  */
 function persistRetiredSettings(home: string): boolean {
+  if (readMigrationVersion(home) >= RETIRED_SETTINGS_MIGRATION) return false;
   const database = new Database(join(home, "data", "hercule.db"));
   try {
-    const { version } = database
-      .query("SELECT max(migration_id) AS version FROM effect_sql_migrations")
-      .get() as { version: number };
-    if (version >= RETIRED_SETTINGS_MIGRATION) return false;
     const insert = database.query(
       `INSERT INTO user_settings (user_id, key, value, updated_at)
        SELECT id, ?, ?, ? FROM users`,
@@ -503,7 +528,7 @@ describe("upgrading from the previous edge release", () => {
         .sort((left, right) => left.id.localeCompare(right.id));
       expect(seededProviders.some((row) => row.id === createdProvider.id)).toBe(true);
 
-      const profiles = readListedItems<{ readonly id: string; readonly name: string }>(
+      const profiles = readListedItems<SeededProfile>(
         await runCli(["profile", "list", "--json"], edge),
       );
       const unrestricted = profiles.find((profile) => profile.name === "unrestricted");
@@ -560,6 +585,24 @@ describe("upgrading from the previous edge release", () => {
       const port = controller.port;
       expect(await controller.stop()).toBe(0);
       controller = undefined;
+
+      // A database from before migration 63 has shipped profiles without the
+      // signal grants, so the upgrade must add them. A newer one was seeded
+      // with them, and the checks after the upgrade only show they survived.
+      // The version is read only now, with the controller stopped, because a
+      // running controller holds the database file locked.
+      const signalGrantsMigrated = readMigrationVersion(home) < SIGNAL_GRANTS_MIGRATION;
+      if (signalGrantsMigrated) {
+        for (const name of SIGNAL_PROFILES) {
+          const profile = profiles.find((one) => one.name === name);
+          expect(profile, `the edge database has no ${name} profile`).toBeDefined();
+          for (const grant of SIGNAL_GRANTS) expect(profile?.grants).not.toContain(grant);
+        }
+      } else {
+        console.log(
+          `The edge database already ran migration ${String(SIGNAL_GRANTS_MIGRATION)}: checking that the signal grants survive the upgrade.`,
+        );
+      }
 
       const sessionId = persistRepresentativeSession({
         home,
@@ -694,6 +737,23 @@ describe("upgrading from the previous edge release", () => {
         summarizeRow,
       );
       expect(upgradedTranscript).toEqual(seededTranscript);
+
+      const upgradedProfiles = readListedItems<SeededProfile>(
+        await runCli(["profile", "list", "--json"], upgraded),
+      );
+      for (const name of SIGNAL_PROFILES) {
+        const listed = upgradedProfiles.find((profile) => profile.name === name);
+        expect(listed?.grants, `the ${name} profile after the upgrade`).toEqual(
+          expect.arrayContaining([...SIGNAL_GRANTS]),
+        );
+        const seeded = profiles.find((profile) => profile.name === name);
+        // Every grant the edge build seeded is still there beside the new ones.
+        expect(listed?.grants).toEqual(expect.arrayContaining([...(seeded?.grants ?? [])]));
+        const read = expectJson<SeededProfile>(
+          await runCli(["profile", "read", listed?.id ?? name, "--json"], upgraded),
+        );
+        expect(read).toMatchObject({ id: listed?.id, name, grants: listed?.grants });
+      }
     } finally {
       await controller?.stop().catch(() => -1);
     }

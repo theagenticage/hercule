@@ -26,12 +26,18 @@ import type * as JsonSchema from "effect/JsonSchema";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import {
+  ActionError,
+  BindingPlace,
   PluginError,
   WorkflowActionNames,
+  type ActionContext,
+  type AnswerAction,
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
 import {
+  formatIssue,
   Id,
+  listDecodeIssues,
   MAX_PLUGIN_MESSAGE_LENGTH,
   page,
   RunStartCall,
@@ -89,6 +95,16 @@ export interface RegisteredWorkflowAction {
    * below the domains those methods belong to.
    */
   readonly execute?: WorkflowActionContribution["execute"];
+  /**
+   * Where the action may be bound. A built-in action is a workflow step
+   * only: a contract operation that a user's answer may run is checked
+   * against the operation table instead.
+   */
+  readonly usableIn: ReadonlyArray<BindingPlace>;
+  /** Writes the describe line of one frozen input. Set when `usableIn` lists an answer place. */
+  readonly describe?: AnswerAction["describe"];
+  /** Writes the line a Signal keeps once the action, taken as its answer, succeeds. */
+  readonly outcome?: AnswerAction["outcome"];
 }
 
 /**
@@ -105,6 +121,7 @@ const WorkflowActionHeader = Schema.Struct({
   connection: Schema.optionalKey(
     Schema.Struct({ type: Schema.String.check(Schema.isMinLength(1)) }),
   ),
+  usableIn: Schema.optionalKey(Schema.Array(BindingPlace).check(Schema.isMinLength(1))),
 });
 
 const decodeWorkflowActionNames = Schema.decodeUnknownEffect(WorkflowActionNames, {
@@ -125,7 +142,13 @@ interface DeclaredWorkflowAction {
   readonly output: Schema.Top;
   readonly connection?: { readonly type: string };
   readonly execute?: WorkflowActionContribution["execute"];
+  readonly usableIn?: ReadonlyArray<BindingPlace>;
+  readonly describe?: AnswerAction["describe"];
+  readonly outcome?: AnswerAction["outcome"];
 }
+
+/** Where an action may be bound when it does not say: as a workflow step only. */
+const DEFAULT_USABLE_IN: ReadonlyArray<BindingPlace> = ["workflow.step"];
 
 /**
  * Adds one action to the catalog rows in `declared` and to the `actions` map.
@@ -164,8 +187,47 @@ const addWorkflowAction = (
     output: action.output,
     ...(action.connection === undefined ? {} : { connection: action.connection }),
     ...(action.execute === undefined ? {} : { execute: action.execute }),
+    usableIn: action.usableIn ?? DEFAULT_USABLE_IN,
+    ...(action.describe === undefined ? {} : { describe: action.describe }),
+    ...(action.outcome === undefined ? {} : { outcome: action.outcome }),
   });
 };
+
+/**
+ * Calls a plugin's action with an abort signal, and with the Connection it
+ * acts through, if any. Returns its result encoded with the action's output
+ * schema. Fails with the action's `ActionError`, or with an `ActionError` of
+ * code `unexpected` when the result does not match the output schema: a
+ * later step reads the output, so a result of the wrong shape must not be
+ * stored as if the action had succeeded.
+ *
+ * Interrupting the fiber that calls it, as cancelling a run does, aborts the
+ * signal, and the signal passes that on to whatever the action waits on
+ * outside the controller.
+ */
+export const executePluginAction = (
+  action: RegisteredWorkflowAction,
+  execute: WorkflowActionContribution["execute"],
+  input: unknown,
+  context: Pick<ActionContext, "run" | "connection">,
+): Effect.Effect<unknown, ActionError> =>
+  Effect.suspend(() => {
+    const cancelled = new AbortController();
+    return Effect.flatMap(
+      Effect.onInterrupt(execute(input, { ...context, signal: cancelled.signal }), () =>
+        Effect.sync(() => cancelled.abort()),
+      ),
+      (output) =>
+        Effect.mapError(
+          Schema.encodeUnknownEffect(action.output as Schema.Codec<unknown>)(output),
+          (error) =>
+            new ActionError({
+              code: "unexpected",
+              message: `The action returned a value that does not match its output schema: ${listDecodeIssues(error).map(formatIssue).join("; ")}`,
+            }),
+        ),
+    );
+  });
 
 /**
  * The param a step uses to name the Connection that an action acts through.
@@ -236,6 +298,7 @@ export const registerWorkflowActionContribution = (
       decodeWorkflowActionHeader({
         description: contribution.description,
         ...(contribution.connection === undefined ? {} : { connection: contribution.connection }),
+        ...(contribution.usableIn === undefined ? {} : { usableIn: contribution.usableIn }),
       }),
       (error) =>
         new PluginError({
@@ -271,6 +334,19 @@ export const registerWorkflowActionContribution = (
         );
       }
     }
+    // TypeScript refuses an answer place without `describe`, but a plugin
+    // that casts its contribution gets past that. Without `describe` the user
+    // could not be told what taking the answer does.
+    const usableIn = header.usableIn ?? DEFAULT_USABLE_IN;
+    const { describe, outcome } = contribution as Partial<AnswerAction>;
+    const answerPlaces = usableIn.filter((place) => place !== "workflow.step");
+    if (answerPlaces.length > 0 && typeof describe !== "function") {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the workflow action ${id} is invalid: it lists ${answerPlaces.join(" and ")} in usableIn but has no describe function. An action that the user's answer may run must write the line that tells the user what it does: add describe, or remove ${answerPlaces.join(" and ")} from usableIn`,
+        }),
+      );
+    }
     addWorkflowAction(
       pluginId,
       {
@@ -283,6 +359,9 @@ export const registerWorkflowActionContribution = (
         output: contribution.output,
         ...(header.connection === undefined ? {} : { connection: header.connection }),
         execute: contribution.execute,
+        usableIn,
+        ...(answerPlaces.length === 0 || describe === undefined ? {} : { describe }),
+        ...(answerPlaces.length === 0 || typeof outcome !== "function" ? {} : { outcome }),
       },
       declared,
       actions,

@@ -102,6 +102,11 @@ const COMMANDS: Record<string, string> = {
   "permission.decide": "permission decide",
   "permission.request": "permission request",
   "notification.act": "notification act",
+  "signal.query": "signal list",
+  "signal.read": "signal read",
+  "signal.raise": "signal raise",
+  "signal.act": "signal act",
+  "signal.withdraw": "signal withdraw",
 
   "project.query": "project list",
   "project.read": "project read",
@@ -246,6 +251,8 @@ const STDIN_FIELDS = [
   "task.create description",
   "task.update description",
   "notification.create body",
+  "signal.raise blocks",
+  "signal.act text",
   "project.create description",
   "project.update description",
   "agent.create systemPrompt",
@@ -280,6 +287,9 @@ const RESOLVES: Record<string, string> = {
   "notification.read id": "notification.query",
   "notification.withdraw id": "notification.query",
   "notification.act id": "notification.query",
+  "signal.read id": "signal.query",
+  "signal.act id": "signal.query",
+  "signal.withdraw id": "signal.query",
 
   "project.read id": "project.query",
   "project.update id": "project.query",
@@ -592,6 +602,7 @@ const USER_ONLY = [
   "controller.read",
   "controller.update",
   "conversation.send",
+  "signal.act",
 ];
 
 /**

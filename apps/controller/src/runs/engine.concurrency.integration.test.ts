@@ -181,7 +181,7 @@ describe("an edge that fires into a step whose record is running", () => {
               `busy#${String(record.iteration)} started before busy#${String(before.iteration)} finished`,
             ).toBe(true);
           }
-          expect(held.contexts.filter((context) => context.run.stepId === "busy")).toHaveLength(3);
+          expect(held.contexts.filter((context) => context.run?.stepId === "busy")).toHaveLength(3);
         } finally {
           held.release();
         }
@@ -236,7 +236,7 @@ describe("a step that fails while other branches are running", () => {
           expect(listIterations(run, "gate")).toEqual([[1, "completed"]]);
           expect(listIterations(run, "slow")).toEqual([[1, "cancelled"]]);
           expect(listIterations(run, "pause")).toEqual([[1, "cancelled"]]);
-          const slow = held.contexts.find((context) => context.run.stepId === "slow");
+          const slow = held.contexts.find((context) => context.run?.stepId === "slow");
           await waitUntil("aborted the signal of the slow step", () =>
             slow?.signal.aborted === true ? true : undefined,
           );
@@ -290,7 +290,7 @@ describe("a controller error at a step while other branches are running", () => 
             "unexpected",
           );
           expect(listIterations(run, "slow")).toEqual([[1, "cancelled"]]);
-          const slow = held.contexts.find((context) => context.run.stepId === "slow");
+          const slow = held.contexts.find((context) => context.run?.stepId === "slow");
           await waitUntil("aborted the signal of the slow step", () =>
             slow?.signal.aborted === true ? true : undefined,
           );
@@ -344,7 +344,7 @@ describe("a plugin action that ends in its own interrupt while other branches ar
             "unexpected",
           );
           expect(listIterations(run, "slow")).toEqual([[1, "cancelled"]]);
-          const slow = held.contexts.find((context) => context.run.stepId === "slow");
+          const slow = held.contexts.find((context) => context.run?.stepId === "slow");
           await waitUntil("aborted the signal of the slow step", () =>
             slow?.signal.aborted === true ? true : undefined,
           );

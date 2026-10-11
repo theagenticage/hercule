@@ -642,7 +642,7 @@ describe("the sidebar's faces", () => {
     expect(readSelectedSegments()).toEqual(["Threads"]);
   });
 
-  it("shows Waiting on you and the System section on the Hercule face, without leaving the screen", async () => {
+  it("shows Waiting on you, Work and the System section on the Hercule face, without leaving the screen", async () => {
     const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
 
     await userEvent.click(getSegment("Hercule"));
@@ -655,7 +655,7 @@ describe("the sidebar's faces", () => {
       within(nav)
         .getAllByRole("heading")
         .map((heading) => heading.textContent),
-    ).toEqual(["Waiting on you 1", "System"]);
+    ).toEqual(["Waiting on you 1", "Work", "System"]);
     expect(
       within(nav).getByRole("link", { name: "Write the retry runbook, waiting on you" }),
     ).toBeTruthy();

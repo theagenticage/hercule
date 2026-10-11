@@ -9,7 +9,8 @@ import { describe, expect, it } from "vitest";
  * - Keyframe animations change only `transform` and `opacity`.
  * - Transitions answer a user action, last at most `--dur-3`, and change only
  *   paint properties: color, background, border-color, box-shadow, opacity,
- *   transform.
+ *   transform. The one exception is the width of a split's sized column, as
+ *   its side pane opens or closes.
  *
  * It also checks that:
  *
@@ -64,6 +65,14 @@ const ENDLESS_ANIMATIONS = [
   { file: "faces/face.css", rule: ".cr--working.cr--animated .cr-tap" },
   { file: "styles/controls.css", rule: ".spin" },
 ];
+
+/**
+ * The rules allowed to transition `width`: the sized column of a split, as
+ * its side pane opens or closes. The rule makes this the one exception,
+ * because the column's rows are one line cut with an ellipsis, so a frame of
+ * the transition lays the column out without measuring text again.
+ */
+const SPLIT_WIDTH_TRANSITIONS = [{ file: "screens/intake/intake.css", rule: ".asks-list" }];
 
 /** One declaration of a stylesheet, with the blocks it sits in. */
 interface Declaration {
@@ -192,6 +201,10 @@ const appliesToEveryElement = (declaration: Declaration): boolean =>
 function checkTransition(declaration: Declaration): string[] {
   if (declaration.value === "none") return [];
   const where = describeLocation(declaration);
+  const isSplitColumn = SPLIT_WIDTH_TRANSITIONS.some(
+    (entry) => entry.file === declaration.file && declaration.blocks.at(-1) === entry.rule,
+  );
+  const allowed = isSplitColumn ? [...PAINT_PROPERTIES, "width"] : PAINT_PROPERTIES;
   return splitOutsideParentheses(declaration.value, /,/).flatMap((item) => {
     const words = splitOutsideParentheses(item, /\s/);
     const times = words.filter(isTime);
@@ -200,7 +213,7 @@ function checkTransition(declaration: Declaration): string[] {
     if (properties.length === 0) {
       messages.push(`${where}: "${item}" transitions every property; name a paint property.`);
     }
-    for (const property of properties.filter((each) => !PAINT_PROPERTIES.includes(each))) {
+    for (const property of properties.filter((each) => !allowed.includes(each))) {
       messages.push(`${where}: "${item}" transitions ${property}, which is not a paint property.`);
     }
     if (times.length !== 1 || !DURATIONS.includes(times[0]!)) {
@@ -403,6 +416,7 @@ describe("the renderer's motion", () => {
       .calm { transition: box-shadow var(--dur-3) var(--ease-out); animation: none; }
       [title*="x"] { transition: color var(--dur-1); }
       .snap * { transition: none; }
+      .asks-list { transition: width var(--dur-3); }
     `;
     expect(findMotionViolations(parseDeclarations("sample.css", css))).toEqual([
       "sample.css from: a keyframe sets width; keyframes may set only transform and opacity.",
@@ -418,6 +432,8 @@ describe("the renderer's motion", () => {
       "sample.css .link: a transition answers a user action at once, so it has no delay.",
       "sample.css *, *::before: sets transition-duration on every element, so a change to any element can start a transition. Set a transition only on the element that needs one; a rule for every element may only switch transitions off, with transition: none.",
       "sample.css *, *::before: transition-duration must be var(--dur-1), var(--dur-2) or var(--dur-3), not 0.01ms.",
+      // The split's width exception holds only for Intake's own rule.
+      'sample.css .asks-list: "width var(--dur-3)" transitions width, which is not a paint property.',
     ]);
   });
 });

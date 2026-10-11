@@ -257,12 +257,22 @@ export interface ForgePlugin {
  *   Connection, takes a `verdict` from a fixed list, and records the context
  *   and input of every call.
  *
- * The plugin config accepts `clientId`, which a refresh needs.
+ * The plugin config accepts `clientId`, which a refresh needs. When
+ * `reviewHeldUntil` is given, every review records its call and then waits
+ * for that promise before it returns, so a test can act while one runs.
+ * `reviewOutcome` replaces the review's outcome line, which is
+ * "Reviewed: <verdict>" by default.
  */
-export const buildForgePlugin = (options: { readonly tokenUrl?: string } = {}): ForgePlugin => {
+export const buildForgePlugin = (
+  options: {
+    readonly tokenUrl?: string;
+    readonly reviewHeldUntil?: Promise<void>;
+    readonly reviewOutcome?: string;
+  } = {},
+): ForgePlugin => {
   const contexts: Array<ActionContext> = [];
   const inputs: Array<unknown> = [];
-  const { tokenUrl } = options;
+  const { tokenUrl, reviewHeldUntil, reviewOutcome } = options;
   const plugin: Plugin = {
     manifest: {
       id: "forge",
@@ -295,12 +305,24 @@ export const buildForgePlugin = (options: { readonly tokenUrl?: string } = {}): 
             body: Schema.optionalKey(Schema.String),
           }),
           output: Schema.Struct({ reviewed: Schema.Boolean }),
+          usableIn: ["workflow.step", "signal.answer"],
+          describe: (input) => [
+            { kind: "text", text: "Submit a " },
+            { kind: "marked", text: String((input as { verdict?: unknown }).verdict) },
+            { kind: "text", text: " review" },
+          ],
+          outcome: (input) =>
+            reviewOutcome ?? `Reviewed: ${String((input as { verdict?: unknown }).verdict)}`,
           execute: (input, context) =>
             Effect.sync(() => {
               contexts.push(context);
               inputs.push(input);
-              return { reviewed: true };
-            }),
+            }).pipe(
+              Effect.andThen(
+                reviewHeldUntil === undefined ? Effect.void : Effect.promise(() => reviewHeldUntil),
+              ),
+              Effect.as({ reviewed: true }),
+            ),
         }),
       ),
     activate: () => Effect.succeed(Effect.void),

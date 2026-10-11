@@ -1,5 +1,6 @@
 /**
- * Test doubles for main's unit tests: a fake window, a settings file in a
+ * Test doubles for main's unit tests: a fake window, a fake of Electron's
+ * `Notification`, a settings file in a
  * temporary folder, a fake HTTP server with Node's `fetch` to reach it, and
  * helpers for tests that run programs.
  * Imported only by `*.test.ts`.
@@ -20,6 +21,7 @@ import * as Layer from "effect/Layer";
 import { type AppSettings, makeAppSettingsLayer } from "./app-settings";
 import type { FetchWithoutRedirects } from "./fetch-without-redirects";
 import { MainWindow } from "./main-window";
+import type { NativeNotification } from "./waiting-notifications";
 
 /** A fake of the app's window, and what it was asked to do. */
 export interface FakeMainWindow {
@@ -64,6 +66,57 @@ export const makeFakeMainWindow = (): FakeMainWindow => {
     }),
   };
   return fake;
+};
+
+/** A fake of Electron's `Notification` that records what is done to it. */
+export interface FakeNotification extends NativeNotification {
+  readonly title: string;
+  readonly body: string;
+  state: "new" | "shown" | "closed";
+  /** Clicks the notification, as the user does. */
+  click(): void;
+}
+
+/**
+ * Builds a fake of Electron's `Notification` class. Returns the class, and
+ * the list it adds each notification to as it is created.
+ */
+export const makeFakeNotificationClass = (): {
+  readonly Notification: new (options: {
+    readonly title: string;
+    readonly body: string;
+  }) => FakeNotification;
+  readonly notifications: Array<FakeNotification>;
+} => {
+  const notifications: Array<FakeNotification> = [];
+  class Notification implements FakeNotification {
+    readonly title: string;
+    readonly body: string;
+    state: "new" | "shown" | "closed" = "new";
+    private clickListener: (...args: never[]) => void = () => undefined;
+    constructor(options: { readonly title: string; readonly body: string }) {
+      this.title = options.title;
+      this.body = options.body;
+      notifications.push(this);
+    }
+    show() {
+      this.state = "shown";
+    }
+    close() {
+      this.state = "closed";
+    }
+    // Takes a listener of either event's type. Only the click's is kept, and
+    // it is called with no argument, as the services' click listeners take
+    // none.
+    once(event: "click" | "failed", listener: (...args: never[]) => void): this {
+      if (event === "click") this.clickListener = listener;
+      return this;
+    }
+    click() {
+      this.clickListener();
+    }
+  }
+  return { Notification, notifications };
 };
 
 /** Writes a `/bin/sh` script with `body` at `path`, and makes it executable. */

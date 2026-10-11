@@ -467,7 +467,7 @@ export interface HeldAction {
  */
 export const buildHeldAction = (): HeldAction => {
   const contexts: Array<ActionContext> = [];
-  let waiting: Array<{ readonly stepId: string; readonly finish: () => void }> = [];
+  let waiting: Array<{ readonly stepId: string | undefined; readonly finish: () => void }> = [];
   let released = false;
   const release = (): void => {
     released = true;
@@ -494,7 +494,7 @@ export const buildHeldAction = (): HeldAction => {
           resume(Effect.succeed({ released: true }));
         };
         if (released) return finish();
-        waiting.push({ stepId: context.run.stepId, finish });
+        waiting.push({ stepId: context.run?.stepId, finish });
         context.signal.addEventListener("abort", finish);
       }),
   });

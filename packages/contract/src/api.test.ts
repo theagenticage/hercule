@@ -151,6 +151,16 @@ const NEW_OPERATIONS = [
     method: "POST",
     path: "/api/v1/notifications/:id/act",
   },
+  { id: "signal.query", requires: "signal.read", method: "GET", path: "/api/v1/signals" },
+  { id: "signal.read", requires: "signal.read", method: "GET", path: "/api/v1/signals/:id" },
+  { id: "signal.raise", requires: "signal.write", method: "POST", path: "/api/v1/signals/raise" },
+  { id: "signal.act", requires: "signal.write", method: "POST", path: "/api/v1/signals/:id/act" },
+  {
+    id: "signal.withdraw",
+    requires: "signal.write",
+    method: "POST",
+    path: "/api/v1/signals/:id/withdraw",
+  },
   { id: "project.query", requires: "project.read", method: "GET", path: "/api/v1/projects" },
   { id: "project.read", requires: "project.read", method: "GET", path: "/api/v1/projects/:id" },
   { id: "project.create", requires: "project.write", method: "POST", path: "/api/v1/projects" },
@@ -247,7 +257,8 @@ const table: Record<string, { requires: string; method: string; path: string } |
 
 describe("the operations with an explicit row", () => {
   it.each(NEW_OPERATIONS)("puts $id in the operation table on $method $path", (operation) => {
-    expect(table[operation.id]).toEqual({
+    // A row may carry more than its route, such as `usableIn`; this test checks the route.
+    expect(table[operation.id]).toMatchObject({
       requires: operation.requires,
       method: operation.method,
       path: operation.path,

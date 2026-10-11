@@ -696,6 +696,133 @@ export const CLI = {
     },
   },
 
+  "signal.query": {
+    command: "signal list",
+    help: "Lists the signals on your To do list: what asks for your move now. Use it to find the id that `hercule signal read`, `hercule signal act` and `hercule signal withdraw` take.",
+    examples: [{ args: [] }, { args: ["--kind", "unsure"] }],
+    fields: {
+      view: {
+        flag: "view",
+        help: "to-do, the signals that ask for your move now. It is the default.",
+      },
+      kind: { flag: "kind", help: "Only signals of this kind, such as fyi or github/pr-review." },
+      source: {
+        flag: "source",
+        help: "Only signals whose kind belongs to this plugin, such as github.",
+      },
+    },
+  },
+  "signal.read": {
+    command: "signal read",
+    help: "Shows one signal: its blocks, its actions and where it came from.",
+    examples: [{ args: ["0b1c2d3e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The signal's id, or a tail of eight or more characters.",
+        resolves: "signal.query",
+      },
+    },
+  },
+  "signal.raise": {
+    command: "signal raise",
+    help: "Puts a proposal, an offer, an unsure item or an FYI on the user's Intake. A proposal carries the task it proposes in --task and takes no actions; the user's Accept creates the task. An action runs one operation as the user when the user takes it: task.create, task.update, run.start, or a plugin action that may answer a signal, such as github/pr.merge. Its input is the operation's whole input as one object, ids included. Returns the signal's id.",
+    examples: [
+      {
+        args: [
+          "--kind",
+          "fyi",
+          "--title",
+          "Release 4.2 shipped",
+          "--reason",
+          "Tagged and published by the release workflow",
+          "--event-id",
+          "81234",
+          "--blocks-stdin",
+        ],
+        stdin: JSON.stringify([{ type: "text", markdown: "Release notes are on the tag." }]),
+      },
+      {
+        args: [
+          "--kind",
+          "proposal",
+          "--title",
+          "Fix the flaky login test",
+          "--reason",
+          "It failed three of the last ten runs on main",
+          "--event-id",
+          "81240",
+          "--task",
+          '{"title":"Fix the flaky login test","description":""}',
+        ],
+      },
+    ],
+    fields: {
+      kind: { flag: "kind", help: "proposal, offer, unsure or fyi." },
+      title: { flag: "title", help: "One line saying what this is about; not a paragraph." },
+      reason: {
+        flag: "reason",
+        help: "One line saying why the user should see this. It is stored with where the signal came from.",
+      },
+      eventIds: {
+        flag: "event-id",
+        help: "The id of an event this signal is about. Repeat it for each event.",
+      },
+      priority: {
+        flag: "priority",
+        help: "high, normal or low. Only the core marks a signal urgent.",
+      },
+      blocks: {
+        stdin: true,
+        flag: "blocks",
+        help: 'The signal\'s content as a JSON list of blocks, such as [{"type":"text","markdown":"..."}].',
+      },
+      actions: {
+        flag: "action",
+        help: 'A JSON action: id, label, optional description and primary, and operation, {"op":"<operation>","input":{...}} or null to run nothing. A plugin action that declares a Connection type also needs the Connection\'s id as "connectionId" in operation, beside input. Add "field":{"name":"<input field>","placeholder":"..."} to make it a typed reply: the user\'s text fills that top-level text field of input. The ids accept, dismiss, done and hand-to-... are the core\'s. Repeat it for each action.',
+      },
+      task: {
+        flag: "task",
+        help: "On a proposal, the JSON input of the task.create that Accept runs, as `hercule task create` takes it.",
+      },
+    },
+  },
+  "signal.act": {
+    command: "signal act",
+    help: "Takes one of a signal's actions, as you. It runs the action's operation and resolves the signal; if the operation fails, the signal stays open and the error is returned.",
+    examples: [
+      { args: ["0b1c2d3e", "--action", "accept"] },
+      { args: ["0b1c2d3e", "--action", "reply", "--text-stdin"], stdin: "Thanks, merging now." },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The signal's id, or a tail of eight or more characters.",
+        resolves: "signal.query",
+      },
+      actionId: { flag: "action", help: "The id of the action to take." },
+      text: {
+        stdin: true,
+        flag: "text",
+        help: "The typed reply, for an action that asks for one.",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "signal.withdraw": {
+    command: "signal withdraw",
+    help: "Takes back a signal you raised, when its question no longer exists. The user sees it resolved with your reason.",
+    examples: [{ args: ["0b1c2d3e", "--reason", "the build passed on retry"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The signal's id, or a tail of eight or more characters.",
+        resolves: "signal.query",
+      },
+      reason: { flag: "reason", help: "One line the user reads under the withdrawn signal." },
+    },
+  },
+
   "project.query": {
     command: "project list",
     help: "Lists projects: the groupings that hold related work and its materials. A project carries no behaviour and no defaults. Use it to find the id that `hercule task create --project` takes.",
@@ -3108,6 +3235,11 @@ export const NOUNS = {
     summary:
       "Notifications: what Hercule and its producers raise for the user, to know or to decide.",
     flow: "hercule notification list to see what was raised, hercule notification read for one in full, hercule notification act to answer a decision, hercule notification create to raise one, hercule notification withdraw when its question is gone.",
+  },
+  signal: {
+    summary:
+      "Signals: what asks for the user's move on the Intake, raised by triage and by agents.",
+    flow: "hercule signal list to see To do, hercule signal read for one in full, hercule signal act to take an action, hercule signal raise to put one on the Intake, hercule signal withdraw when its question is gone.",
   },
   project: {
     summary: "Projects: groupings of related work and its materials. No behaviour, no defaults.",
