@@ -493,3 +493,99 @@ export const insertFixtureConnection = (
     }
     return Option.getOrThrow(yield* connections.one(inserted.id));
   });
+
+/**
+ * The plugin id, Connection type, event kinds and signal kinds of
+ * `createIntakeFixture`'s plugin. `opened` is available to triage by default
+ * and `labeled` is not. Both signal kinds start on.
+ */
+export const INTAKE_FIXTURE = {
+  pluginId: "intaked",
+  connectionType: "intaked/intaked",
+  opened: "intaked.opened",
+  labeled: "intaked.labeled",
+  asked: "intaked/asked",
+  mentioned: "intaked/mentioned",
+} as const;
+
+/** One of the fixture's signal kinds. The rule never raises, because these tests read only the settings. */
+const buildIntakeSignalKind = (word: string, label: string) => ({
+  word,
+  label,
+  description: `${label}, as the fixture describes it.`,
+  from: [INTAKE_FIXTURE.opened],
+  rule: '"no"',
+  guidance: "Never raised.",
+  threadRef: '"thread"',
+  namesYou: true,
+  priority: "high" as const,
+  matchFields: [],
+  ends: [],
+  build: () => Effect.fail(new PluginError({ message: "The fixture builds no signals" })),
+});
+
+/**
+ * Creates a plugin that declares what Intake settings are about: a Connection
+ * type, an event source with two event kinds, one available to triage by
+ * default and one not, and two signal kinds. `calls` records every `activate`
+ * and `deactivate`, so a test can check that a settings change never restarts
+ * the plugin.
+ */
+export const createIntakeFixture = (): {
+  readonly plugin: Plugin;
+  readonly calls: Array<string>;
+} => {
+  const calls: Array<string> = [];
+  const plugin: Plugin = {
+    manifest: {
+      id: INTAKE_FIXTURE.pluginId,
+      displayName: "Intaked",
+      hostApi: HOST_API,
+      capabilities: ["connections", "event-sources", "events"],
+      configSchema: Schema.Struct({}),
+    },
+    register: (host) =>
+      Effect.andThen(
+        registerConnectionType(host, {
+          type: "intaked",
+          displayName: "Intaked",
+          setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }],
+          validate: (credentials: Record<string, string>) =>
+            Effect.succeed({
+              displayName: "Intaked",
+              accountId: credentials["token"] ?? "intaked-1",
+            }),
+        }),
+        registerEventSource(host, {
+          id: "intaked",
+          connectionType: INTAKE_FIXTURE.connectionType,
+          feeds: IDLE_FEEDS,
+          open: IDLE_INGEST_OPEN,
+          kinds: {
+            [INTAKE_FIXTURE.opened]: {
+              description: "Something was opened.",
+              schema: Schema.Struct({ title: Schema.String }),
+              availableToTriage: true,
+            },
+            [INTAKE_FIXTURE.labeled]: {
+              description: "Something was labeled.",
+              schema: Schema.Struct({ title: Schema.String }),
+              availableToTriage: false,
+            },
+          },
+          signalKinds: [
+            buildIntakeSignalKind("asked", "Asked"),
+            buildIntakeSignalKind("mentioned", "Mentioned"),
+          ],
+        }),
+      ),
+    activate: () =>
+      Effect.sync(() => {
+        calls.push("activate");
+        return Effect.sync(() => {
+          calls.push("deactivate");
+        });
+      }),
+  };
+  return { plugin, calls };
+};

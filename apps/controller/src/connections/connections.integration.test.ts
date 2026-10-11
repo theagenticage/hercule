@@ -42,7 +42,7 @@ import {
   type ConnectionRecord,
   type TestPlugin,
 } from "./testing";
-import { IDLE_INGEST_OPEN } from "../plugins/testing";
+import { createIntakeFixture, IDLE_INGEST_OPEN, INTAKE_FIXTURE } from "../plugins/testing";
 
 /** The error envelope every failing operation returns. */
 interface ErrorBody {
@@ -164,6 +164,7 @@ const buildPlugins = () => ({
       slow: { defaultIntervalSeconds: 120 },
     },
   }),
+  intaked: createIntakeFixture(),
 });
 
 type Registry = ReturnType<typeof buildPlugins>;
@@ -613,6 +614,241 @@ describe("PATCH /connections/:id", () => {
       }
       const day = await patchConnection(base, token, one.id, { feedIntervals: { slow: 86_400 } });
       expect(day.status, await day.clone().text()).toBe(200);
+    });
+  });
+});
+
+/** A connection as `connection.read` and `connection.update` return it: with its Intake settings. */
+type ConnectionDetailRecord = ConnectionRecord & {
+  readonly intake: {
+    readonly eventKinds: ReadonlyArray<{ kind: string; on: boolean; level: string }>;
+    readonly signalKinds: ReadonlyArray<{ kind: string; on: boolean; level: string }>;
+  };
+};
+
+/** Turns a settings list into `kind -> "on@level"`, so a test reads one line per list. */
+const summarizeSettings = (
+  settings: ReadonlyArray<{ kind: string; on: boolean; level: string }>,
+): Record<string, string> =>
+  Object.fromEntries(
+    settings.map(({ kind, on, level }) => [kind, `${on ? "on" : "off"}@${level}`]),
+  );
+
+describe("the Intake settings of a Connection", () => {
+  const { opened, labeled, asked, mentioned } = INTAKE_FIXTURE;
+  const TYPE = INTAKE_FIXTURE.connectionType;
+
+  const patchIntake = (
+    base: string,
+    token: string,
+    id: string,
+    intake: { eventKinds?: Record<string, boolean>; signalKinds?: Record<string, boolean> },
+  ): Promise<Response> =>
+    send("PATCH", base, `/api/v1/connections/${id}`, {
+      body: { intake: { eventKinds: {}, signalKinds: {}, ...intake } },
+      token,
+    });
+
+  const setPluginIntake = async (
+    base: string,
+    token: string,
+    intake: { eventKinds?: Record<string, boolean>; signalKinds?: Record<string, boolean> },
+  ): Promise<void> => {
+    const response = await send("PUT", base, "/api/v1/plugins/intaked/intake", {
+      body: { intake: { eventKinds: {}, signalKinds: {}, ...intake } },
+      token,
+    });
+    expect(response.status, await response.clone().text()).toBe(200);
+  };
+
+  const readDetail = async (
+    base: string,
+    token: string,
+    id: string,
+  ): Promise<ConnectionDetailRecord> =>
+    (await readConnection(base, token, id)) as ConnectionDetailRecord;
+
+  it("are in GET /connections/{id}, from the plugin's defaults", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: TYPE });
+
+      const detail = await readDetail(base, token, one.id);
+
+      expect(summarizeSettings(detail.intake.eventKinds)).toEqual({
+        [opened]: "on@default",
+        [labeled]: "off@default",
+      });
+      expect(summarizeSettings(detail.intake.signalKinds)).toEqual({
+        [asked]: "on@default",
+        [mentioned]: "on@default",
+      });
+    });
+  });
+
+  it("are left out of the listing and of the response that creates a connection", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const created = await createConnectionOrFail(base, token, { type: TYPE });
+
+      expect(created).not.toHaveProperty("intake");
+      for (const listed of await listConnections(base, token)) {
+        expect(listed).not.toHaveProperty("intake");
+      }
+    });
+  });
+
+  it("are empty lists for a connection whose plugin declares no kinds", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
+
+      expect((await readDetail(base, token, one.id)).intake).toEqual({
+        eventKinds: [],
+        signalKinds: [],
+      });
+    });
+  });
+
+  it("are returned by PATCH with the level each value comes from", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: TYPE });
+
+      const response = await patchIntake(base, token, one.id, {
+        eventKinds: { [labeled]: true },
+        signalKinds: { [mentioned]: false },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const updated = (await response.json()) as ConnectionDetailRecord;
+      expect(updated.id).toBe(one.id);
+      expect(summarizeSettings(updated.intake.eventKinds)).toEqual({
+        [opened]: "on@default",
+        [labeled]: "on@connection",
+      });
+      expect(summarizeSettings(updated.intake.signalKinds)).toEqual({
+        [asked]: "on@default",
+        [mentioned]: "off@connection",
+      });
+      expect((await readDetail(base, token, one.id)).intake).toEqual(updated.intake);
+    });
+  });
+
+  it("follow the plugin's choice until the Connection makes its own", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      // Team review is off for the plugin. The "work" Connection turns it back on
+      // and the "personal" one makes no choice, so it follows the plugin and is off.
+      const work = await createConnectionOrFail(base, token, {
+        type: TYPE,
+        label: "work",
+        credentials: { token: "good-work" },
+      });
+      const personal = await createConnectionOrFail(base, token, {
+        type: TYPE,
+        label: "personal",
+        credentials: { token: "good-personal" },
+      });
+      await setPluginIntake(base, token, { signalKinds: { [asked]: false } });
+      await patchIntake(base, token, work.id, { signalKinds: { [asked]: true } });
+
+      const workSettings = (await readDetail(base, token, work.id)).intake;
+      const personalSettings = (await readDetail(base, token, personal.id)).intake;
+
+      expect(summarizeSettings(workSettings.signalKinds)[asked]).toBe("on@connection");
+      expect(summarizeSettings(personalSettings.signalKinds)[asked]).toBe("off@plugin");
+    });
+  });
+
+  it("drop an entry equal to what the plugin's level gives", async () => {
+    await withConnections(async ({ base, sql }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: TYPE });
+      await setPluginIntake(base, token, { signalKinds: { [asked]: false } });
+      const readStored = async (): Promise<unknown> => {
+        const rows = await Effect.runPromise(
+          Effect.orDie(
+            sql<{ readonly intake: string }>`SELECT intake FROM connections WHERE label = 'work'`,
+          ),
+        );
+        return JSON.parse(rows[0]!.intake);
+      };
+
+      // "off" is what the plugin gives, so the Connection stores nothing and
+      // follows the plugin. "on" differs, so it is stored.
+      const same = await patchIntake(base, token, one.id, { signalKinds: { [asked]: false } });
+      expect(same.status, await same.clone().text()).toBe(200);
+      expect(
+        summarizeSettings(((await same.json()) as ConnectionDetailRecord).intake.signalKinds)[
+          asked
+        ],
+      ).toBe("off@plugin");
+      expect(await readStored()).toEqual({ eventKinds: {}, signalKinds: {} });
+
+      await patchIntake(base, token, one.id, { signalKinds: { [asked]: true } });
+      expect(await readStored()).toEqual({ eventKinds: {}, signalKinds: { [asked]: true } });
+
+      // Toggling a kind on and then off again stores nothing.
+      await patchIntake(base, token, one.id, { eventKinds: { [labeled]: true } });
+      await patchIntake(base, token, one.id, { eventKinds: { [labeled]: false } });
+      expect(await readStored()).toEqual({ eventKinds: {}, signalKinds: {} });
+    });
+  });
+
+  it("make every kind follow the plugin again when the Connection writes empty choices", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: TYPE });
+      await patchIntake(base, token, one.id, { signalKinds: { [asked]: false } });
+
+      const response = await patchIntake(base, token, one.id, {});
+
+      const settings = ((await response.json()) as ConnectionDetailRecord).intake;
+      expect(summarizeSettings(settings.signalKinds)[asked]).toBe("on@default");
+    });
+  });
+
+  it("stay as they were when the PATCH does not mention them", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: TYPE });
+      await patchIntake(base, token, one.id, { signalKinds: { [asked]: false } });
+
+      const renamed = await send("PATCH", base, `/api/v1/connections/${one.id}`, {
+        body: { label: "renamed" },
+        token,
+      });
+
+      const body = (await renamed.json()) as ConnectionDetailRecord;
+      expect(body.label).toBe("renamed");
+      expect(summarizeSettings(body.intake.signalKinds)[asked]).toBe("off@connection");
+    });
+  });
+
+  it("refuse a kind the plugin does not declare, naming its path, and change nothing", async () => {
+    await withConnections(async ({ base, audit }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: TYPE });
+
+      const response = await patchIntake(base, token, one.id, {
+        eventKinds: { "intaked.unknown": true },
+        signalKinds: { "intaked/unknown": false, [asked]: false },
+      });
+
+      expect(response.status).toBe(400);
+      const error = await readError(response);
+      expect(error.code).toBe("validation");
+      expect(error.details?.issues?.map((issue) => issue.path)).toEqual([
+        ["intake", "eventKinds", "intaked.unknown"],
+        ["intake", "signalKinds", "intaked/unknown"],
+      ]);
+      expect(await audit("connection.updated")).toHaveLength(0);
+      const settings = (await readDetail(base, token, one.id)).intake;
+      expect(summarizeSettings(settings.signalKinds)[asked]).toBe("on@default");
+    });
+  });
+
+  it("are named in the audit entry's fields", async () => {
+    await withConnections(async ({ base, audit }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: TYPE });
+
+      await patchIntake(base, token, one.id, { signalKinds: { [asked]: false } });
+
+      const entries = await audit("connection.updated");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.payload).toEqual({ connectionId: one.id, fields: ["intake"] });
     });
   });
 });

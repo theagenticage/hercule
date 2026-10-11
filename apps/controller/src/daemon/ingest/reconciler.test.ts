@@ -17,6 +17,7 @@ import {
   asUser,
   buildPluginStack,
   createEventSourceFixture,
+  EVENT_SOURCE_FIXTURE,
   insertFixtureConnection,
   type EventSourceFixture,
 } from "../../plugins/testing";
@@ -57,7 +58,7 @@ const insertConnectionWithStatus = (label: string, status: ConnectionStatus) =>
 /** Applies an edit to a Connection, as the connection service would. */
 const editConnection = (
   id: string,
-  edit: Partial<Pick<StoredConnection, "status" | "config" | "feedIntervals">>,
+  edit: Partial<Pick<StoredConnection, "status" | "config" | "feedIntervals" | "intake">>,
 ) =>
   Effect.flatMap(connectionRepository, (connections) =>
     Effect.flatMap(nowIso, (at) => connections.update(id, edit, at)),
@@ -100,6 +101,24 @@ describe("the Ingest Reconciler", () => {
       Effect.gen(function* () {
         yield* insertFixtureConnection();
         yield* advance(2);
+        yield* advance(30);
+      }),
+    );
+
+    // The one close is the layer's teardown at the end of the test.
+    expect(countOpensAndCloses(fixture)).toEqual({ opens: 1, closes: 1 });
+  });
+
+  it("leaves the handle of a Connection alone when only its Intake choices changed", async () => {
+    const fixture = createEventSourceFixture();
+    await runWithReconciler(
+      fixture,
+      Effect.gen(function* () {
+        const connection = yield* insertFixtureConnection();
+        yield* advance(2);
+        yield* editConnection(connection.id, {
+          intake: { eventKinds: { [EVENT_SOURCE_FIXTURE.kind]: false }, signalKinds: {} },
+        });
         yield* advance(30);
       }),
     );

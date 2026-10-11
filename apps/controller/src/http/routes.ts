@@ -531,6 +531,9 @@ const pluginRoutes = HttpApiBuilder.group(api, "plugin", (handlers) =>
       .handle("resetState", ({ params }) => withApiErrors(plugins.resetState(params.id)))
       .handle("configure", ({ params, payload }) =>
         withApiErrors(plugins.configure(params.id, payload)),
+      )
+      .handle("updateIntake", ({ params, payload }) =>
+        withApiErrors(plugins.updateIntake(params.id, payload)),
       );
   }),
 );

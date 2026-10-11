@@ -65,6 +65,12 @@ import {
   type RegisteredEventKind,
   type RegisteredEventSource,
 } from "./event-sources";
+import {
+  applyIntakeOverrides,
+  buildDefaultIntakeSettings,
+  PluginIntake,
+  type DeclaredIntakeKinds,
+} from "../intake-settings";
 import type { RegisteredSignalKind } from "./signal-kinds";
 import { checkPluginMark } from "./mark";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
@@ -941,6 +947,34 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns every event kind and signal kind one plugin declares, in the
+     * order it declares them, whatever the status of the plugin: the Intake
+     * settings of a disabled plugin are still shown and still written. The
+     * lists are empty for a plugin whose registration failed or was refused,
+     * because none of its sources was registered.
+     */
+    readDeclaredIntakeKinds: (pluginId: string): Effect.Effect<DeclaredIntakeKinds> =>
+      Effect.map(Ref.get(eventSources), (sources) => {
+        const own = sources.filter((source) => source.pluginId === pluginId);
+        return {
+          eventKinds: own.flatMap((source) =>
+            [...source.kinds.values()].map(({ kind, description, availableToTriage }) => ({
+              kind,
+              description,
+              availableToTriage,
+            })),
+          ),
+          signalKinds: own.flatMap((source) =>
+            source.signalKinds.map(({ kind, label, description }) => ({
+              kind,
+              label,
+              description,
+            })),
+          ),
+        };
+      }),
+
+    /**
      * Returns the signal kind with this qualified name, such as
      * `github/review-requested`, whatever the status of its plugin, or `None`
      * when no plugin this boot loaded declared it. A signal whose raise was
@@ -1027,12 +1061,38 @@ export class PluginHost extends Context.Service<PluginHost, Effect.Success<typeo
 ) {}
 
 /**
- * Provides the plugin host and the ingest loops it closes when a plugin stops.
- * The ingest loops need an Ingest Executor, which the controller daemon
- * provides.
+ * Provides the plugins domain's `PluginIntake` service: a plugin's declared
+ * kinds from the host, with the user's choices for the plugin on top. The
+ * interface is declared in the intake settings domain, so the connections
+ * domain does not import this one.
+ */
+const PluginIntakeLayer: Layer.Layer<PluginIntake, never, SqlClient.SqlClient | PluginHost> =
+  Layer.effect(PluginIntake)(
+    Effect.gen(function* () {
+      const host = yield* PluginHost;
+      const repository = yield* pluginRepository;
+      return {
+        read: (pluginId: string) =>
+          Effect.gen(function* () {
+            const declared = yield* host.readDeclaredIntakeKinds(pluginId);
+            const { intake } = yield* Effect.catchTag(
+              repository.state(pluginId),
+              "SchemaError",
+              Effect.die,
+            );
+            return applyIntakeOverrides(buildDefaultIntakeSettings(declared), intake, "plugin");
+          }),
+      };
+    }),
+  );
+
+/**
+ * Provides the plugin host, the ingest loops it closes when a plugin stops,
+ * and the `PluginIntake` service that reads from the host. The ingest loops
+ * need an Ingest Executor, which the controller daemon provides.
  */
 export const PluginHostLayer: Layer.Layer<
-  PluginHost | IngestLoops,
+  PluginHost | IngestLoops | PluginIntake,
   never,
   | SqlClient.SqlClient
   | Secrets
@@ -1042,7 +1102,9 @@ export const PluginHostLayer: Layer.Layer<
   | IngestExecutor
   | OpenSignals
   | PromotionState
-> = Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer));
+> = PluginIntakeLayer.pipe(
+  Layer.provideMerge(Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer))),
+);
 
 /**
  * Provides the connections domain's `PluginConfigs` service, which reads a

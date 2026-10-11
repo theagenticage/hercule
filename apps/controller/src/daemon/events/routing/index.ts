@@ -21,6 +21,7 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { AuditLog } from "../../../events";
+import type { PluginIntake } from "../../../intake-settings";
 import type { Notifier } from "../../../notifications";
 import type { PluginHost } from "../../../plugins";
 import type { RunService } from "../../../runs";
@@ -50,6 +51,7 @@ export const buildRoutingTables: Effect.Effect<
   | TriggerHealth
   | TriggerEffects
   | PluginHost
+  | PluginIntake
   | AuditLog
 > = Effect.all([sessionRoutingTable, signalRoutingTable, triggerRoutingTable, intakeRoutingTable]);
 
