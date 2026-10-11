@@ -2126,6 +2126,25 @@ export const CLI = {
       },
     },
   },
+  "plugin.updateIntake": {
+    command: "plugin update-intake",
+    help: "Turns the plugin's event kinds and signal kinds on or off for Intake. Each Connection can still choose for itself. The plugin keeps running: only the core reads these settings. `hercule plugin read` shows every kind with the value in effect and where it comes from.",
+    examples: [
+      {
+        args: ["github", "--intake", '{"eventKinds":{"github.pr.labeled":true},"signalKinds":{}}'],
+      },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The plugin's id as its manifest declares it, such as github; a name, never a UUID and never a tail.",
+      },
+      intake: {
+        flag: "intake",
+        help: 'The plugin\'s choices as inline JSON: {"eventKinds":{...},"signalKinds":{...}}, each a map from a kind to true (on) or false (off). Both maps are replaced whole, so send every choice the plugin is to keep. An entry equal to the plugin\'s default is dropped, and a kind the plugin does not declare is refused.',
+      },
+    },
+  },
 
   "provider.query": {
     command: "provider list",
@@ -2291,10 +2310,17 @@ export const CLI = {
   },
   "connection.update": {
     command: "connection update",
-    help: "Edits a Connection's label, topics, config, and how often each of its feeds is polled. Never the account behind it. Rotate credentials with `hercule connection set-credentials`.",
+    help: "Edits a Connection's label, topics, config, feed intervals and Intake choices. Never the account behind it. Rotate credentials with `hercule connection set-credentials`.",
     examples: [
       { args: ["1f3a9c2e", "--label", "personal"] },
       { args: ["1f3a9c2e", "--feed-intervals", '{"repos":300}'] },
+      {
+        args: [
+          "1f3a9c2e",
+          "--intake",
+          '{"eventKinds":{},"signalKinds":{"github/team-review-requested":true}}',
+        ],
+      },
     ],
     fields: {
       id: {
@@ -2311,6 +2337,10 @@ export const CLI = {
       feedIntervals: {
         flag: "feed-intervals",
         help: 'Seconds between polls, per feed, as inline JSON such as {"repos":300}. The map is replaced whole, and a feed left out polls at its default, so {} puts every feed back on its default. Each feed has a shortest interval its plugin allows; `hercule plugin read` shows the feeds of the plugin\'s event source.',
+      },
+      intake: {
+        flag: "intake",
+        help: 'This Connection\'s own Intake choices as inline JSON: {"eventKinds":{...},"signalKinds":{...}}, each a map from a kind to true (on) or false (off). Both maps are replaced whole; a kind left out follows the plugin\'s choice, so {"eventKinds":{},"signalKinds":{}} makes every kind follow it again. An entry equal to what the plugin gives is dropped, and a kind the plugin does not declare is refused.',
       },
     },
   },

@@ -181,6 +181,7 @@ const COMMANDS: Record<string, string> = {
   "plugin.retry": "plugin retry",
   "plugin.resetState": "plugin reset-state",
   "plugin.configure": "plugin configure",
+  "plugin.updateIntake": "plugin update-intake",
 
   "provider.query": "provider list",
   "provider.read": "provider read",
