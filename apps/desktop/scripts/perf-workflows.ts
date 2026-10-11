@@ -4,9 +4,9 @@
  * measures the Per push row of spec 17 §What Workflows costs:
  *
  * - how many reads one `run` push causes, by what they read: each workflow's
- *   strip (`run.query({ workflowId, limit })`), the live runs
- *   (`run.query({ status: "running" })`), any other run read, and any other
- *   read;
+ *   strip (`run.query({ workflowId, limit })`), the live runs (one
+ *   `run.query` for the `running` status and one for `pending`), any other
+ *   run read, and any other read;
  * - how long after the push the last of those reads answered;
  * - the renderer's main thread and CPU, and the controller's CPU, per push.
  *
@@ -31,9 +31,6 @@
  *
  * The route's chunk and the first screen's bytes are not measured here:
  * `pnpm build:desktop`'s bundle check prints them.
- *
- * The list is still being built, so its selectors sit at the top of this
- * file, where they are easy to change.
  *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
@@ -185,15 +182,19 @@ export const openWorkflowsOnce = (userDataDir: string): Promise<void> =>
 /** What a read is for, by its URL. */
 type ReadKind = "strip" | "liveRuns" | "otherRuns" | "other";
 
+/** The reads of the live runs in one round: the `running` runs and the `pending` ones. */
+const LIVE_RUN_READS = 2;
+
 /**
  * Returns what the read of `url` is for: a workflow's strip when it reads
- * runs of one workflow, the live runs when it reads running runs, any other
- * run read, or anything else.
+ * runs of one workflow, the live runs when it reads running or pending
+ * runs, any other run read, or anything else.
  */
 function classifyRead(url: URL): ReadKind {
   if (url.pathname !== RUNS_PATH) return "other";
   if (url.searchParams.has("workflowId")) return "strip";
-  if (url.searchParams.get("status") === "running") return "liveRuns";
+  const status = url.searchParams.get("status");
+  if (status === "running" || status === "pending") return "liveRuns";
   return "otherRuns";
 }
 
@@ -384,6 +385,7 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
     .map(([path, count]) => `${path} ${String(count)}`)
     .join(", ");
   const mainThreadPerPushMs = pushes.rendererMainThreadMs / PUSH_COUNT;
+  const rounds = pushes.reads.liveRuns / LIVE_RUN_READS;
   // Budget, limit, measured, and whether the measurement is within the
   // limit, or null for a measure that is recorded but has no budget.
   const budgets: [string, string, string, boolean | null][] = [
@@ -395,21 +397,21 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
     ],
     [
       "Per push, live run reads",
-      "one a push; each is one round of reads",
+      "two a push, running and pending; each pair is one round of reads",
       formatPerPush(pushes.reads.liveRuns),
-      pushes.reads.liveRuns <= PUSH_COUNT,
+      pushes.reads.liveRuns <= LIVE_RUN_READS * PUSH_COUNT,
     ],
     [
       "Run reads per round of reads",
-      `${String(WORKFLOW_COUNT + 1)}: every strip and the live runs, once`,
-      pushes.reads.liveRuns === 0
+      `${String(WORKFLOW_COUNT + LIVE_RUN_READS)}: every strip and the live runs, once`,
+      rounds === 0
         ? "no round"
-        : `${((pushes.reads.strip + pushes.reads.liveRuns + pushes.reads.otherRuns) / pushes.reads.liveRuns).toFixed(1)} ` +
-          `over ${String(pushes.reads.liveRuns)} rounds`,
-      pushes.reads.liveRuns === 0
+        : `${((pushes.reads.strip + pushes.reads.liveRuns + pushes.reads.otherRuns) / rounds).toFixed(1)} ` +
+          `over ${String(rounds)} rounds`,
+      rounds === 0
         ? null
         : pushes.reads.strip + pushes.reads.liveRuns + pushes.reads.otherRuns <=
-          (WORKFLOW_COUNT + 1) * pushes.reads.liveRuns,
+          (WORKFLOW_COUNT + LIVE_RUN_READS) * rounds,
     ],
     [
       "Per push, other run reads",
