@@ -349,7 +349,10 @@ export type Block = Schema.Schema.Type<typeof Block>;
  *
  * - `event`: the core raised it from one event of a plugin's kind. `threadRef`
  *   is the thread it is about. `screened` is set when the Screener let it
- *   through.
+ *   through. `notScreened` is set when the kind's rule asked for the Screener
+ *   but no Screener decided, so the signal was raised anyway: a missed
+ *   question costs more than one the user marks Done. Its `reason` is
+ *   `no-screener` when no workflow screens signals.
  * - `api`: an actor raised it with `signal.raise`. `runId` and `workflowId`
  *   are set when the actor is a run's session or step. `assistantId` is set
  *   when the actor is a session of an assistant's conversation, so a client
@@ -363,6 +366,7 @@ export const SignalOrigin = Schema.Union([
     connectionId: Id,
     threadRef: Schema.String,
     screened: Schema.optionalKey(Schema.Struct({ runId: Id, reason: Schema.String })),
+    notScreened: Schema.optionalKey(Schema.Struct({ reason: Schema.Literal("no-screener") })),
   }),
   Schema.Struct({
     type: Schema.Literal("api"),

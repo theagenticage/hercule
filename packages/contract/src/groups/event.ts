@@ -69,6 +69,14 @@ export const Event = Schema.Struct({
    * a platform event's payload never repeats it.
    */
   actor: NullableActor,
+  /**
+   * One line saying what happened, set by the emitter: "marta requested your
+   * review on #1293". Null for an event stored before sources set it, and for
+   * an event sent with `event.emit`.
+   */
+  title: Schema.NullOr(Schema.String),
+  /** Who caused the event on its own system, such as a GitHub login, or null when nobody did. */
+  author: Schema.NullOr(Schema.String),
 });
 
 export type Event = Schema.Schema.Type<typeof Event>;

@@ -11,6 +11,7 @@ export {
   PluginCapability,
   PluginId,
   PluginManifest,
+  PluginMark,
   SchemaValue,
 } from "./manifest";
 
@@ -64,7 +65,16 @@ export {
   type IngestContext,
   type IngestHandle,
   type LinkedResource,
+  type OpenSignal,
   type PollResult,
+  type SignalBuildContext,
+  type SignalDraft,
+  type SignalDraftAction,
+  type SignalEndDeclaration,
+  type SignalKindDeclaration,
+  type SignalMatchField,
+  type SignalPriority,
+  type StoredEvent,
   type WorkflowActionContribution,
   type WorkflowStepAction,
 } from "./contributions";
