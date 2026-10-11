@@ -40,6 +40,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   decodeAgainst,
+  listChoiceFields,
   type ConnectionValidationFailed,
   type ExternalAccount,
 } from "@hercule/plugin-host";
@@ -54,6 +55,7 @@ import {
   ConnectionUpdateInput,
   DEFAULT_PAGE_LIMIT,
   Id,
+  MAX_CONFIG_CHOICES,
   createDecodeValidationError,
   createInvalidStateError,
   createNotFoundError,
@@ -61,6 +63,7 @@ import {
   listDecodeIssues,
   MAX_PLUGIN_MESSAGE_LENGTH,
   type Connection,
+  type ConnectionChoices,
   type ConnectionDevicePoll,
   type ConnectionDeviceStart,
   type ConnectionOAuthStart,
@@ -82,6 +85,7 @@ import {
 } from "../db";
 import { AuditLog } from "../events";
 import { Secrets, type SecretNameRef, type SecretOwner } from "../secrets";
+import { ActivePlugins } from "./active-plugins";
 import { deviceSetupRepository } from "./device-setups";
 import {
   buildAuthorizationUrl,
@@ -128,7 +132,13 @@ const CredentialsInput = Schema.Struct({ id: Id, ...ConnectionCredentialsInput.f
 
 export type CredentialsInput = Schema.Schema.Type<typeof CredentialsInput>;
 
+/** The input of `connection.listChoices`: the connection and the name of one config field. */
+const ListChoicesInput = Schema.Struct({ id: Id, field: Schema.String });
+
+export type ListChoicesInput = Schema.Schema.Type<typeof ListChoicesInput>;
+
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
+const decodeListChoices = Schema.decodeUnknownEffect(ListChoicesInput);
 const decodeCreate = Schema.decodeUnknownEffect(ConnectionCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeCredentials = Schema.decodeUnknownEffect(CredentialsInput);
@@ -349,6 +359,7 @@ const make = Effect.gen(function* () {
   const types = yield* ConnectionTypes;
   const audit = yield* AuditLog;
   const references = yield* ConnectionReferences;
+  const activePlugins = yield* ActivePlugins;
 
   const buildSecretOwner = (id: string): SecretOwner => ({ kind: "connection", id });
 
@@ -1022,6 +1033,81 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Loads the choices for one config field from the external account, with
+     * the connection's credentials and stored config. Nothing is cached and
+     * nothing is written: each call asks the plugin, which calls the account.
+     *
+     * Fails with:
+     *
+     * - `validation` when the field does not load its choices from the
+     *   account;
+     * - `invalid_state` when the plugin is not running, the credentials cannot
+     *   be read, the plugin fails to list the choices, or it returns more than
+     *   `MAX_CONFIG_CHOICES`. The message is the plugin's own where the plugin
+     *   failed.
+     *
+     * The credentials are read through the same runtime an ingest read uses,
+     * so an expired access token is refreshed first. The plugin is called
+     * outside any transaction, because it waits on the network.
+     */
+    listChoices: (
+      input: ListChoicesInput,
+    ): Effect.Effect<
+      ConnectionChoices,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("connection.listChoices");
+        const decoded = yield* Effect.mapError(
+          decodeListChoices(input),
+          createDecodeValidationError,
+        );
+        const row = yield* readStoredConnectionOrFail(decoded.id);
+        const { contribution } = yield* readStoredTypeOrFail(row);
+        const { configSchema, listChoices } = contribution;
+        if (
+          configSchema === undefined ||
+          listChoices === undefined ||
+          !listChoiceFields(configSchema).includes(decoded.field)
+        ) {
+          const message = `the config field ${decoded.field} of the type ${row.type} does not load its choices from the account`;
+          return yield* Effect.fail(createValidationError([{ path: ["field"], message }], message));
+        }
+        if (!(yield* activePlugins.isActive(row.pluginId))) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              `the plugin ${row.pluginId} is not enabled, so it cannot load choices: enable it first`,
+            ),
+          );
+        }
+        const credentials = yield* types
+          .runtimeFor(row.pluginId)
+          .credentials(row.id)
+          .pipe(Effect.mapError((error) => createInvalidStateError(error.message)));
+        const config = yield* Effect.mapError(decodeAgainst(configSchema, row.config), (error) =>
+          createInvalidStateError(
+            `the connection's config does not fit its type: ${listDecodeIssues(error)
+              .map((issue) => issue.message)
+              .join("; ")}`,
+          ),
+        );
+        const choices = yield* listChoices(decoded.field, { credentials, config }).pipe(
+          Effect.provide(FetchHttpClient.layer),
+          Effect.mapError((error) =>
+            createInvalidStateError(error.message.slice(0, MAX_PLUGIN_MESSAGE_LENGTH)),
+          ),
+        );
+        if (choices.length > MAX_CONFIG_CHOICES) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              `the account has ${String(choices.length)} choices for ${decoded.field}, and a picker holds at most ${String(MAX_CONFIG_CHOICES)}: the field should take a narrower list`,
+            ),
+          );
+        }
+        return { choices: choices.map(({ value, label }) => ({ value, label })) };
+      }),
+
+    /**
      * Starts an OAuth flow: stores everything the callback will need, and
      * returns the authorization URL to send the browser to. No connection
      * exists yet. A flow the user abandons leaves a setup row, which a later
@@ -1359,5 +1445,11 @@ export class ConnectionService extends Context.Service<
 export const ConnectionServiceLayer: Layer.Layer<
   ConnectionService,
   never,
-  SqlClient.SqlClient | Secrets | AuditLog | ConnectionTypes | PluginConfigs | ConnectionReferences
+  | SqlClient.SqlClient
+  | Secrets
+  | AuditLog
+  | ConnectionTypes
+  | PluginConfigs
+  | ConnectionReferences
+  | ActivePlugins
 > = Layer.effect(ConnectionService)(make);

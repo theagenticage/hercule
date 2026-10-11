@@ -28,6 +28,7 @@ import {
   PluginError,
   PluginManifest,
   ProviderDefinition,
+  listChoiceFields,
   listSecretFields,
   type ActivationContext,
   type ConnectionTypeContribution,
@@ -54,6 +55,7 @@ import { Secrets, type SecretOwner } from "../secrets";
 // both live in the connections domain: everything they touch is there. This is
 // the only direction the two point in.
 import {
+  ActivePlugins,
   ConnectionTypes,
   OAUTH_TOKENS,
   PluginConfigs,
@@ -239,6 +241,15 @@ const SECRET_FIELDS_ARE_PROVIDER_ONLY =
   "a secret-valued config field is supported on a provider definition only";
 
 /**
+ * Only a Connection's config form can load choices from the external account,
+ * through the connection type's `listChoices`. A `choices` field anywhere else
+ * would render as a plain input with no explanation, so it is refused at
+ * registration.
+ */
+const CHOICES_ARE_CONNECTION_ONLY =
+  "a config field that loads its choices from the account is supported on a connection type only";
+
+/**
  * Checks that a connection type declares what each of its token flows needs,
  * and nothing it has no step for. Returns the reason the type is refused, or
  * `undefined` when it is accepted.
@@ -308,6 +319,12 @@ const inspectManifest = (
       message: truncateMessage(`the plugin's own config: ${SECRET_FIELDS_ARE_PROVIDER_ONLY}`),
     });
   }
+  if (listChoiceFields(manifest.configSchema).length > 0) {
+    return Result.fail({
+      kind: "unsupportedConfigSchema",
+      message: truncateMessage(`the plugin's own config: ${CHOICES_ARE_CONNECTION_ONLY}`),
+    });
+  }
   return Result.mapError(deriveConfigJsonSchema(manifest.configSchema), (error) => ({
     kind: "unsupportedConfigSchema",
     message: truncateMessage(error.message),
@@ -342,6 +359,13 @@ const buildRegistrationHost = (
               const decoded = yield* decodeProvider(definition).pipe(
                 Effect.mapError(toPluginError),
               );
+              if (listChoiceFields(decoded.configSchema).length > 0) {
+                return yield* Effect.fail(
+                  new PluginError({
+                    message: `the provider ${decoded.id}: ${CHOICES_ARE_CONNECTION_ONLY}`,
+                  }),
+                );
+              }
               // The catalog stores the derived JSON Schema: the plugin's Effect
               // Schema is an object no catalog reader can use.
               const configSchema = deriveConfigJsonSchema(decoded.configSchema);
@@ -380,9 +404,9 @@ const buildRegistrationHost = (
         connections: {
           registerType: (contribution: ConnectionTypeContribution) =>
             Effect.gen(function* () {
-              // Everything except `validate`, which no JSON column can hold, so
-              // it is kept in memory instead.
-              const { validate, ...serializable } = contribution;
+              // Everything except `validate` and `listChoices`, which no JSON
+              // column can hold, so they are kept in memory instead.
+              const { validate, listChoices, ...serializable } = contribution;
               const decoded = yield* decodeConnectionType(serializable).pipe(
                 Effect.mapError(toPluginError),
               );
@@ -421,6 +445,17 @@ const buildRegistrationHost = (
                   }),
                 );
               }
+              if (
+                decoded.configSchema !== undefined &&
+                listChoices === undefined &&
+                listChoiceFields(decoded.configSchema).length > 0
+              ) {
+                return yield* Effect.fail(
+                  new PluginError({
+                    message: `the connection type ${type}: a config field is marked choices but the type has no listChoices to load them`,
+                  }),
+                );
+              }
               const configSchema =
                 decoded.configSchema === undefined
                   ? undefined
@@ -450,6 +485,7 @@ const buildRegistrationHost = (
                   ...decoded,
                   type,
                   validate: refuseEmptyAccountId(validate, type, manifest.id),
+                  ...(listChoices === undefined ? {} : { listChoices }),
                 },
               });
             }),
@@ -983,6 +1019,10 @@ const make = Effect.gen(function* () {
     findWorkflowAction: (id: string): Effect.Effect<Option.Option<RegisteredWorkflowAction>> =>
       Effect.map(Ref.get(workflowActions), (actions) => Option.fromUndefinedOr(actions.get(id))),
 
+    /** Checks whether the plugin is running, as `listActivePluginIds` defines it. */
+    isActive: (pluginId: string): Effect.Effect<boolean> =>
+      Effect.map(listActivePluginIds, (active) => active.has(pluginId)),
+
     /**
      * Returns the qualified names of the Connection types of every active
      * plugin. A workflow input can take a Connection of only these types,
@@ -1027,12 +1067,25 @@ export class PluginHost extends Context.Service<PluginHost, Effect.Success<typeo
 ) {}
 
 /**
- * Provides the plugin host and the ingest loops it closes when a plugin stops.
- * The ingest loops need an Ingest Executor, which the controller daemon
- * provides.
+ * Provides the connections domain's `ActivePlugins` service from the plugin
+ * host. The interface is declared in the connections domain, so the
+ * connections domain does not import this one.
+ */
+const ActivePluginsLayer: Layer.Layer<ActivePlugins, never, PluginHost> = Layer.effect(
+  ActivePlugins,
+)(
+  Effect.map(PluginHost, (host) => ({
+    isActive: (pluginId: string) => host.isActive(pluginId),
+  })),
+);
+
+/**
+ * Provides the plugin host, the ingest loops it closes when a plugin stops,
+ * and the connections domain's view of which plugins are running. The ingest
+ * loops need an Ingest Executor, which the controller daemon provides.
  */
 export const PluginHostLayer: Layer.Layer<
-  PluginHost | IngestLoops,
+  PluginHost | IngestLoops | ActivePlugins,
   never,
   | SqlClient.SqlClient
   | Secrets
@@ -1042,7 +1095,9 @@ export const PluginHostLayer: Layer.Layer<
   | IngestExecutor
   | OpenSignals
   | PromotionState
-> = Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer));
+> = ActivePluginsLayer.pipe(
+  Layer.provideMerge(Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer))),
+);
 
 /**
  * Provides the connections domain's `PluginConfigs` service, which reads a

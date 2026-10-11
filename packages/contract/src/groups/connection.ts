@@ -270,6 +270,27 @@ export const ConnectionDevicePoll = Schema.Union([
 
 export type ConnectionDevicePoll = Schema.Schema.Type<typeof ConnectionDevicePoll>;
 
+/**
+ * The most choices one config field may load. A picker longer than this is
+ * unusable, and the field should take a narrower list; the controller refuses
+ * a plugin's longer answer.
+ */
+export const MAX_CONFIG_CHOICES = 1000;
+
+/**
+ * One choice for a config field that loads its choices from the external
+ * account, such as a Sentry team. `value` is what the config stores; `label`
+ * is what the form shows.
+ */
+export const ConfigChoice = Schema.Struct({ value: Schema.String, label: Schema.String });
+
+export type ConfigChoice = Schema.Schema.Type<typeof ConfigChoice>;
+
+/** The choices `connection.listChoices` loaded from the account. */
+export const ConnectionChoices = Schema.Struct({ choices: Schema.Array(ConfigChoice) });
+
+export type ConnectionChoices = Schema.Schema.Type<typeof ConnectionChoices>;
+
 export const connection = HttpApiGroup.make("connection")
   .add(
     HttpApiEndpoint.get("query", "/connections", {
@@ -315,6 +336,15 @@ export const connection = HttpApiGroup.make("connection")
       // - the credentials belong to another account than the connection's,
       //   and the message names both. A connection keeps its account for
       //   life; the caller creates a new connection for the other account.
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    // `validation`: the field does not load its choices from the account.
+    // `invalid_state`: the choices cannot be loaded, or number more than
+    // `MAX_CONFIG_CHOICES`; the message says why, in the plugin's words when
+    // the plugin failed.
+    HttpApiEndpoint.get("listChoices", "/connections/:id/choices/:field", {
+      params: { id: Id, field: Schema.String },
+      success: ConnectionChoices,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     // Not under `/connections`: what it starts is a setup, and a setup is not a

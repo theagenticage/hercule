@@ -67,7 +67,8 @@ import { connectionRepository, type StoredConnection } from "./repository";
  */
 export interface RegisteredConnectionType {
   readonly pluginId: string;
-  readonly contribution: ConnectionType & Pick<ConnectionTypeContribution, "validate">;
+  readonly contribution: ConnectionType &
+    Pick<ConnectionTypeContribution, "validate" | "listChoices">;
   readonly feeds: Readonly<Record<string, FeedDeclaration>>;
 }
 

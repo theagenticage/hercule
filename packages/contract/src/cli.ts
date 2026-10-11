@@ -2343,6 +2343,26 @@ export const CLI = {
       },
     },
   },
+  "connection.listChoices": {
+    command: "connection list-choices",
+    help: "Lists the values a Connection config field can take, read live from the account. A Sentry team or project is one. Prints each choice as a value and a label; put the value in the config, not the label. Only a field that loads its choices has them; `hercule plugin read` shows the plugin's config schema, where such a field carries `x-choices`. At most 1,000 choices come back. Nothing is cached, so each call asks the account.",
+    examples: [{ args: ["1f3a9c2e", "team"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The connection's id, or a tail of eight or more characters.",
+        resolves: "connection.query",
+      },
+      field: {
+        positional: true,
+        help: "The config field's name, as the connection type's config schema spells it.",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the plugin is not enabled, the credentials cannot be read, the account could not be asked, or it answered with more than 1,000 choices; the message says which",
+    },
+  },
   "connection.startOAuth": {
     command: "connection start-oauth",
     help: "Starts a redirect flow and returns the authorization URL to open in a browser. The connection exists only once the provider sends the browser back. The redirect URI is built from --origin, so it must match the one registered with the provider byte for byte. Give --connection to reconnect an existing account instead of creating a second one.",

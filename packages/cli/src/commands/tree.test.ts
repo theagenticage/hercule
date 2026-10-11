@@ -323,6 +323,7 @@ describe("the placeholders a usage line shows", () => {
     "conversation read": "<conversation-id>",
     "conversation message list": "<conversation-id>",
     "conversation send": "<conversation-id>",
+    "connection list-choices": "<id> <field>",
     "trigger pause": "<workflow-id> <trigger-id>",
     "trigger resume": "<workflow-id> <trigger-id>",
     "signal done": "<signal-id>...",

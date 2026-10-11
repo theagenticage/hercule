@@ -20,6 +20,7 @@ export {
   decodeAgainst,
   secret,
   listSecretFields,
+  listChoiceFields,
   excludeSecretFields,
   UnsupportedConfigSchema,
 } from "./config-schema";

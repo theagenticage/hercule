@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Result, Schema } from "effect";
-import { deriveConfigJsonSchema, secret } from "./config-schema";
+import { deriveConfigJsonSchema, listChoiceFields, secret } from "./config-schema";
 
 const supported = Schema.Struct({
   token: Schema.String.annotate({ title: "API token", description: "Used for every call" }),
@@ -158,5 +158,65 @@ describe("a config field the plugin marked secret", () => {
     if (!Result.isFailure(result)) return;
     expect(result.failure._tag).toBe("UnsupportedConfigSchema");
     expect(result.failure.message).toContain("zaiApiKey");
+  });
+});
+
+/**
+ * A field marked `choices: true` takes its choices from the external account.
+ * The derived JSON Schema keeps the mark, and only a string or a list of
+ * strings can carry it, because the picker stores strings.
+ */
+describe("a config field the plugin marked choices", () => {
+  it("derives as its own kind with the choices marker", () => {
+    const schema = Schema.Struct({
+      team: Schema.String.annotate({ title: "Team", choices: true }),
+      projects: Schema.optionalKey(Schema.Array(Schema.String).annotate({ choices: true })),
+      note: Schema.String,
+    });
+    const result = deriveConfigJsonSchema(schema);
+
+    expect(Result.isSuccess(result)).toBe(true);
+    if (!Result.isSuccess(result)) return;
+    expect(result.success.properties).toEqual({
+      team: { type: "string", title: "Team", "x-choices": true },
+      projects: { type: "array", items: { type: "string" }, "x-choices": true },
+      note: { type: "string" },
+    });
+    expect(listChoiceFields(schema)).toEqual(["team", "projects"]);
+  });
+
+  it("finds the mark on a refinement of the field", () => {
+    const schema = Schema.Struct({
+      team: Schema.String.check(Schema.isMinLength(1)).annotate({ choices: true }),
+    });
+
+    expect(listChoiceFields(schema)).toEqual(["team"]);
+  });
+
+  it("lists nothing for a struct without the mark", () => {
+    expect(listChoiceFields(Schema.Struct({ team: Schema.String }))).toEqual([]);
+  });
+
+  it.each([
+    ["a number", Schema.Finite.annotate({ choices: true })],
+    ["a boolean", Schema.Boolean.annotate({ choices: true })],
+    ["a list of numbers", Schema.Array(Schema.Finite).annotate({ choices: true })],
+  ])("rejects %s marked choices, with the property in the message", (_label, marked) => {
+    const result = deriveConfigJsonSchema(Schema.Struct({ team: marked }));
+
+    expect(Result.isFailure(result)).toBe(true);
+    if (!Result.isFailure(result)) return;
+    expect(result.failure._tag).toBe("UnsupportedConfigSchema");
+    expect(result.failure.message).toContain("team");
+  });
+
+  it("explains that only a string or a list of strings can load choices", () => {
+    const result = deriveConfigJsonSchema(
+      Schema.Struct({ team: Schema.Boolean.annotate({ choices: true }) }),
+    );
+
+    expect(Result.isFailure(result)).toBe(true);
+    if (!Result.isFailure(result)) return;
+    expect(result.failure.message).toContain("string or a list of strings");
   });
 });

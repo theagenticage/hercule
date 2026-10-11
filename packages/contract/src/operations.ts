@@ -449,6 +449,11 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/connections/:id/credentials",
   },
+  "connection.listChoices": {
+    requires: "connection.manage",
+    method: "GET",
+    path: "/api/v1/connections/:id/choices/:field",
+  },
   "connection.startOAuth": {
     requires: "connection.manage",
     method: "POST",

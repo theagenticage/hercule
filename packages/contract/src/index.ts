@@ -315,7 +315,9 @@ export {
 export { OwnerKind, SECRET_SORT_FIELDS, SecretFilter, SecretRef } from "./groups/secret";
 export {
   CONNECTION_SORT_FIELDS,
+  ConfigChoice,
   Connection,
+  ConnectionChoices,
   ConnectionCreateInput,
   ConnectionCredentialsInput,
   ConnectionDevicePoll,
@@ -328,6 +330,7 @@ export {
   ConnectionUpdateInput,
   CredentialRef,
   GITHUB_CONNECTION_TYPE,
+  MAX_CONFIG_CHOICES,
   MAX_CONNECTION_LABEL_LENGTH,
   MAX_FEED_INTERVAL_SECONDS,
 } from "./groups/connection";

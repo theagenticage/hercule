@@ -39,6 +39,14 @@ export const secret = (words: {
 /** The key the derived JSON Schema uses to mark a secret property. */
 const SECRET_MARKER = "x-secret";
 
+/**
+ * The key the derived JSON Schema uses to mark a property whose choices load
+ * from the external account. A plugin author writes
+ * `Schema.String.annotate({ choices: true })` or
+ * `Schema.Array(Schema.String).annotate({ choices: true })`.
+ */
+const CHOICES_MARKER = "x-choices";
+
 /** Reads a string annotation. Annotations are typed `unknown`, so the type is checked here. */
 const readAnnotation = (ast: SchemaAST.AST, word: "title" | "description"): string | undefined => {
   const value = ast.annotations?.[word];
@@ -53,6 +61,31 @@ const readAnnotation = (ast: SchemaAST.AST, word: "title" | "description"): stri
 const isSecret = (ast: SchemaAST.AST): boolean =>
   ast.annotations?.secret === true ||
   (ast.checks ?? []).some((check) => check.annotations?.secret === true);
+
+/**
+ * Checks whether a field is marked `choices: true`. Like `isSecret`, it also
+ * looks at the schema's refinements, which is where an annotation lands on a
+ * schema such as `Schema.String.check(...)`.
+ */
+const isChoices = (ast: SchemaAST.AST): boolean =>
+  ast.annotations?.choices === true ||
+  (ast.checks ?? []).some((check) => check.annotations?.choices === true);
+
+/**
+ * Lists the names of the fields a plugin marked `choices: true`: the fields
+ * whose choices the connection type loads from the external account. The
+ * controller uses this to refuse a type that marks a field but has no
+ * `listChoices`, and to refuse a request for the choices of any other field.
+ *
+ * Reads the schema rather than its JSON Schema, for the reason
+ * `listSecretFields` gives.
+ */
+export const listChoiceFields = (schema: Schema.Top): ReadonlyArray<string> => {
+  if (!SchemaAST.isObjects(schema.ast)) return [];
+  return schema.ast.propertySignatures.flatMap(({ name, type }) =>
+    typeof name === "string" && isChoices(type) ? [name] : [],
+  );
+};
 
 /**
  * Lists the fields a plugin marked secret, with the title and description the
@@ -132,6 +165,19 @@ const findUnsupportedReason = (property: JsonSchema.JsonSchema): string | undefi
 };
 
 /**
+ * Returns why a property cannot load its choices from the account, or
+ * `undefined` when it can. Only a string or a list of strings can, because
+ * the picker stores the chosen `value`, which is a string.
+ */
+const findUnsupportedChoicesReason = (property: JsonSchema.JsonSchema): string | undefined => {
+  const items = property.items as JsonSchema.JsonSchema | undefined;
+  const isStringList = property.type === "array" && items?.type === "string";
+  return property.type === "string" || isStringList
+    ? undefined
+    : "is marked choices, which only a string or a list of strings can be";
+};
+
+/**
  * Derives the JSON Schema the catalog stores and the web app builds a form
  * from. Fails with `UnsupportedConfigSchema` when the form cannot render the
  * schema. Only a flat object of scalars renders, so anything deeper is caught
@@ -155,6 +201,7 @@ export const deriveConfigJsonSchema = (
   }
 
   const marked = new Set(listSecretFields(schema).map((field) => field.name));
+  const choiceFields = new Set(listChoiceFields(schema));
   const rendered: Record<string, JsonSchema.JsonSchema> = {};
   for (const [name, property] of Object.entries(properties)) {
     const reason = marked.has(name)
@@ -162,12 +209,18 @@ export const deriveConfigJsonSchema = (
         ? undefined
         : "is marked secret, which only a string can be: nothing else has a masked input"
       : findUnsupportedReason(property);
-    if (reason !== undefined) {
+    const failure =
+      reason ?? (choiceFields.has(name) ? findUnsupportedChoicesReason(property) : undefined);
+    if (failure !== undefined) {
       return Result.fail(
-        new UnsupportedConfigSchema({ message: `the config property "${name}" ${reason}` }),
+        new UnsupportedConfigSchema({ message: `the config property "${name}" ${failure}` }),
       );
     }
-    rendered[name] = marked.has(name) ? { ...property, [SECRET_MARKER]: true } : property;
+    rendered[name] = {
+      ...property,
+      ...(marked.has(name) ? { [SECRET_MARKER]: true } : {}),
+      ...(choiceFields.has(name) ? { [CHOICES_MARKER]: true } : {}),
+    };
   }
 
   // A secret-marked field is not part of the config at all: its value lives in
