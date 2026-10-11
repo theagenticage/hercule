@@ -1502,6 +1502,149 @@ describe("Intake's Everything view", () => {
     expect(field.value).toBe("beta");
   });
 
+  it("lets a link replace a typed draft while the link's list is still loading", async () => {
+    const events = [1, 2, 3].map((id) =>
+      buildListedEvent(id, { title: ["alpha", "beta", "gamma"][id - 1]! }),
+    );
+    const handlers = storeEvents(events);
+    const listEvents = handlers["GET /api/v1/events"] as (call: Call) => Answer;
+    let answerBeta: () => void = () => {};
+    handlers["GET /api/v1/events"] = (call: Call) =>
+      new URLSearchParams(call.search).get("text") === "beta"
+        ? new Promise<Answer>((resolve) => {
+            answerBeta = () => {
+              resolve(listEvents(call));
+            };
+          })
+        : listEvents(call);
+    const { calls, router } = await openIntake("/intake?view=everything&text=alpha", {
+      ...storeSignals(SIGNALS).handlers,
+      ...handlers,
+    });
+    await waitFor(() => {
+      expect(readEventTitles()).toEqual(["alpha"]);
+    });
+
+    vi.useFakeTimers();
+    const field = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search events" });
+    fireEvent.change(field, { target: { value: "gamma" } });
+    let navigating: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      navigating = router.navigate({ to: "/intake", search: { view: "everything", text: "beta" } });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // The typed wait ends while the link's list is still being read.
+    await act(() => vi.advanceTimersByTimeAsync(400));
+    expect(router.state.location.search).toEqual({ view: "everything", text: "beta" });
+    expect(field.value).toBe("beta");
+
+    vi.useRealTimers();
+    await act(async () => {
+      answerBeta();
+      await navigating;
+    });
+    await waitFor(() => {
+      expect(readEventTitles()).toEqual(["beta"]);
+    });
+    expect(field.value).toBe("beta");
+    expect(findEventReads(calls).some((read) => read.text?.[0] === "gamma")).toBe(false);
+  });
+
+  it("keeps the typed search in the field while its own list is still loading", async () => {
+    const events = [buildListedEvent(1, { title: "alpha" })];
+    const handlers = storeEvents(events);
+    const listEvents = handlers["GET /api/v1/events"] as (call: Call) => Answer;
+    let answerSearch: () => void = () => {};
+    handlers["GET /api/v1/events"] = (call: Call) =>
+      new URLSearchParams(call.search).has("text")
+        ? new Promise<Answer>((resolve) => {
+            answerSearch = () => {
+              resolve(listEvents(call));
+            };
+          })
+        : listEvents(call);
+    const { calls, router } = await openIntake("/intake?view=everything", {
+      ...storeSignals(SIGNALS).handlers,
+      ...handlers,
+    });
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+
+    vi.useFakeTimers();
+    const field = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search events" });
+    fireEvent.change(field, { target: { value: "alpha" } });
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    expect(router.state.location.search).toEqual({ view: "everything", text: "alpha" });
+    await act(() => vi.advanceTimersByTimeAsync(400));
+    expect(field.value).toBe("alpha");
+
+    vi.useRealTimers();
+    await act(async () => {
+      answerSearch();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(readEventTitles()).toEqual(["alpha"]);
+    });
+    expect(field.value).toBe("alpha");
+    expect(findEventReads(calls).filter((read) => "text" in read)).toHaveLength(1);
+  });
+
+  it("does not write a typed search after Everything closes", async () => {
+    const events = [buildListedEvent(1, { title: "alpha" })];
+    const { router } = await openEverything(events);
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search events" }), {
+      target: { value: "alpha" },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    vi.useRealTimers();
+    await userEvent.click(
+      within(screen.getByRole("group", { name: "View" })).getByRole("button", { name: /To do/ }),
+    );
+    await screen.findByRole("region", { name: "Signals" });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(router.state.location.search.text).toBeUndefined();
+  });
+
+  it("shows a failed refresh at the end of the list, and keeps the rows it has", async () => {
+    const events = [buildListedEvent(1)];
+    let failing = false;
+    const handlers = storeEvents(events);
+    const listEvents = handlers["GET /api/v1/events"] as (call: Call) => unknown;
+    handlers["GET /api/v1/events"] = ((call: Call) =>
+      failing
+        ? { status: 500, body: buildErrorBody("internal", "The database is busy.") }
+        : listEvents(call)) as Handler;
+    await openIntake("/intake?view=everything", { ...storeSignals(SIGNALS).handlers, ...handlers });
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+
+    const views = () => screen.getByRole("group", { name: "View" });
+    await userEvent.click(within(views()).getByRole("button", { name: /To do/ }));
+    await screen.findByRole("region", { name: "Signals" });
+    failing = true;
+    await userEvent.click(within(views()).getByRole("button", { name: "Everything" }));
+
+    const alert = await within(getEventList()).findByRole("alert");
+    expect(alert.textContent).toContain("Couldn't refresh the events.");
+    expect(alert.textContent).toContain("The database is busy.");
+    expect(getEventRow(events[0]!)).not.toBeNull();
+
+    failing = false;
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(within(getEventList()).queryByRole("alert")).toBeNull();
+    });
+    expect(getEventRow(events[0]!)).not.toBeNull();
+  });
+
   it("reads the first page again each time Everything opens", async () => {
     const events = Array.from({ length: 45 }, (_, index) => buildListedEvent(index + 1));
     const { calls } = await openEverything(events);

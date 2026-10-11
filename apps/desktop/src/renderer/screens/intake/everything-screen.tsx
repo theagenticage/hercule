@@ -13,7 +13,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { useInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { useRouteContext } from "@tanstack/react-router";
+import { useRouteContext, useRouterState } from "@tanstack/react-router";
 import { MAX_SEARCH_TEXT_LENGTH, type EventHandling } from "@hercule/contract";
 import {
   computeEventHorizonStart,
@@ -41,17 +41,17 @@ const SEARCH_WAIT_MS = 200;
 /** Returns the value of the filter menu's option for `handling`; "All events" is the empty string. */
 const toSelectValue = (handling: EventHandling | null): string => handling ?? "";
 
-/** Draws the error of a failed read as a line of the list, with a Retry that asks again. */
+/** Draws the `message` of a failed read as a line of the list, with a Retry that asks again. */
 function ReadFailure({
-  error,
+  message,
   onRetry,
 }: {
-  readonly error: Error | null;
+  readonly message: string;
   readonly onRetry: () => void;
 }): JSX.Element {
   return (
     <p className="asks-note asks-note--failed" role="alert">
-      <span>{readErrorMessage(error)}</span>
+      <span>{message}</span>
       <button type="button" className="btn btn--sm btn--quiet" onClick={onRetry}>
         Retry
       </button>
@@ -67,17 +67,22 @@ function ReadFailure({
  * `pluginId` (the source tab), `text`, `handling` and `selectedId` come from
  * the URL. The screen keeps what the user types in the search field and calls
  * `onSearchChange` once typing has paused, so the list is not read again for
- * each key. Only typing starts that wait: a `text` that arrives from outside,
- * such as a link, replaces what the field holds and ends any wait. A new
- * search, filter or tab starts a new list, and the route drops the selection
- * with it.
+ * each key. Only typing starts that wait: a search that arrives from outside,
+ * such as a link, replaces what the field holds and ends any wait. The screen
+ * sees such a search in the router's location as soon as the navigation
+ * starts, while the `text` prop changes only when the new list has loaded, so
+ * a slow list neither lets a draft overwrite the link nor empties the field
+ * after a search the user typed. A new search, filter or tab starts a new
+ * list, and the route drops the selection with it.
  *
  * `openedAt` is the moment the route loaded the list. The screen takes it as
  * "now" for the day headings and the row times, and counts the retention
  * horizon from it, so neither moves while the list stays.
  *
  * A page that fails to load ends the list with its error and a Retry. The list
- * does not ask for that page again until Retry is pressed.
+ * does not ask for that page again until Retry is pressed. A first page that
+ * fails to refresh while its rows are shown ends the list the same way, so the
+ * rows are not taken for current.
  *
  * The keys of spec 17 §Keys act while the focus is in the list or the pane
  * and never in a text field:
@@ -132,30 +137,42 @@ export function EverythingScreen({
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
-  // The field holds what the user typed. `sentText` is the last `text` this
-  // screen either sent to the route or saw there: a `text` that differs from it
-  // came from outside, and replaces the field.
-  const [draft, setDraft] = useState(text);
+  // The field holds what the user typed. `requestedText` is the search of the
+  // router's latest location, which a navigation changes as it starts, before
+  // the `text` prop does. The screen tells its own commit from one that came
+  // from outside:
+  //
+  // - `committedText` is the last search this screen sent to the route or took
+  //   from outside. A `requestedText` equal to it is the screen's own commit
+  //   arriving, and leaves the field alone.
+  // - Any other change came from outside. It replaces the field and ends the
+  //   wait for a pending commit.
+  const requestedText = useRouterState({ select: (state) => state.location.search.text ?? "" });
+  const [draft, setDraft] = useState(requestedText);
   const [waiting, setWaiting] = useState(false);
-  const [sentText, setSentText] = useState(text);
-  if (text !== sentText) {
-    setSentText(text);
-    setDraft(text);
-    setWaiting(false);
+  const [committedText, setCommittedText] = useState(requestedText);
+  const [seenRequestedText, setSeenRequestedText] = useState(requestedText);
+  if (requestedText !== seenRequestedText) {
+    setSeenRequestedText(requestedText);
+    if (requestedText !== committedText) {
+      setCommittedText(requestedText);
+      setDraft(requestedText);
+      setWaiting(false);
+    }
   }
   useEffect(() => {
     if (!waiting) return;
     const timer = setTimeout(() => {
       const trimmed = draft.trim();
       setWaiting(false);
-      if (trimmed === text) return;
-      setSentText(trimmed);
+      if (trimmed === requestedText) return;
+      setCommittedText(trimmed);
       onSearchChange(trimmed);
     }, SEARCH_WAIT_MS);
     return () => {
       clearTimeout(timer);
     };
-  }, [waiting, draft, text, onSearchChange]);
+  }, [waiting, draft, requestedText, onSearchChange]);
 
   const paged = useInfiniteQuery(
     eventsEverythingQuery(
@@ -200,6 +217,7 @@ export function EverythingScreen({
   const hasNextPage = paged.hasNextPage;
   const isFetchingNextPage = paged.isFetchingNextPage;
   const nextPageFailed = paged.isFetchNextPageError;
+  const refreshFailed = paged.isError && paged.data !== undefined && !nextPageFailed;
   const fetchNextPage = paged.fetchNextPage;
   // A failed page is not asked for again by scrolling: the list is still near
   // its end, so that would loop. The Retry at the end of the list asks again.
@@ -317,14 +335,25 @@ export function EverythingScreen({
               focusSelectedRow={focusSelectedRow}
               empty={
                 paged.isPending ? null : paged.data === undefined ? (
-                  <ReadFailure error={paged.error} onRetry={() => void paged.refetch()} />
+                  <ReadFailure
+                    message={readErrorMessage(paged.error)}
+                    onRetry={() => void paged.refetch()}
+                  />
                 ) : (
                   <p className="asks-note">{filtered ? "No events match." : "No events yet."}</p>
                 )
               }
               foot={
                 nextPageFailed ? (
-                  <ReadFailure error={paged.error} onRetry={() => void fetchNextPage()} />
+                  <ReadFailure
+                    message={readErrorMessage(paged.error)}
+                    onRetry={() => void fetchNextPage()}
+                  />
+                ) : refreshFailed ? (
+                  <ReadFailure
+                    message={`Couldn't refresh the events. ${readErrorMessage(paged.error)}`}
+                    onRetry={() => void paged.refetch()}
+                  />
                 ) : (
                   events.length > 0 &&
                   !hasNextPage && <p className="asks-note">{describeEventListEnd(retentionDays)}</p>
