@@ -381,8 +381,8 @@ describe("parseMarkdown footnotes", () => {
     expect(parseMarkdown("a[^nope]")).toEqual(blocks(paragraph(text("a[^nope]"))));
   });
 
-  it("matches a label without regard to case or spacing", () => {
-    expect(parseMarkdown("a[^A] b[^  x   y ]\n\n[^a]: One.\n[^X Y]: Two.")).toEqual({
+  it("matches a label without regard to case", () => {
+    expect(parseMarkdown("a[^A] b[^xY]\n\n[^a]: One.\n[^Xy]: Two.")).toEqual({
       blocks: [paragraph(text("a"), reference(1), text(" b"), reference(2))],
       footnotes: [
         { number: 1, children: [paragraph(text("One."), backReference(1))] },
@@ -562,9 +562,32 @@ describe("parseMarkdown footnotes", () => {
     ["HTML", "[^unused]: note\n    <div>\nIMPORTANT"],
     ["indented code after a blank line", "[^unused]: note\n\n        code\nIMPORTANT"],
     ["a heading underline", "[^unused]: note\n    ===\nIMPORTANT"],
+    ["a table", "[^unused]: a | b\n    --- | ---\nIMPORTANT"],
   ])("shows a line without indentation after %s in a footnote", (_, source) => {
     expect(parseMarkdown(source)).toEqual(blocks(paragraph(text("IMPORTANT"))));
   });
+
+  it("continues a later paragraph of the footnote with a line without indentation", () => {
+    expect(parseMarkdown("[^a]\n\n[^a]: first\n\n    second,\ncontinued")).toEqual({
+      blocks: [paragraph(reference(1))],
+      footnotes: [
+        {
+          number: 1,
+          children: [
+            paragraph(text("first")),
+            paragraph(text("second,\ncontinued"), backReference(1)),
+          ],
+        },
+      ],
+    });
+  });
+
+  it.each([["[^note 1]: IMPORTANT"], ["[^ ]: IMPORTANT"], ["[^a\tb]: IMPORTANT"]])(
+    "keeps %s as text, because a footnote label holds no whitespace",
+    (source) => {
+      expect(parseMarkdown(source)).toEqual(blocks(paragraph(text(source))));
+    },
+  );
 
   it("ends the footnote at a blank line followed by a line without indentation", () => {
     expect(parseMarkdown("[^a]\n\n[^a]: first\n\nafter")).toEqual({
