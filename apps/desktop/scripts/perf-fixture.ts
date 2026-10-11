@@ -25,10 +25,12 @@
  * `prepareLaunch` stops the controller, writes the idle threads' last
  * activity into its database, and starts it again on the same port. It sets
  * the time each open signal was raised the same way, for Intake's age
- * labels, and the title, author and arrival time of every event, for
- * Everything's rows. Those are the only things written to the database
- * directly: the threads, and every state they are in, come from the fleet,
- * the signals from `signal.raise`, and the events from `event.emit`.
+ * labels, the title, author and arrival time of every event, for
+ * Everything's rows, and on request spreads one workflow's finished runs over
+ * a day, for the Runs tab's timeline. Those are the only things written to
+ * the database directly: the threads, and every state they are in, come from
+ * the fleet, the signals from `signal.raise`, the events from `event.emit`,
+ * and the runs from `run.start`.
  *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
@@ -174,6 +176,13 @@ export interface LongThread {
   readonly rowCount: number;
 }
 
+/** The runs of one workflow, and the span of time `spreadRuns` spreads them over. */
+export interface RunSpread {
+  readonly workflowId: string;
+  readonly from: Date;
+  readonly to: Date;
+}
+
 /** A controller full of threads, and what the perf script does to it between launches. */
 export interface ThreadFixture {
   /** The controller's URL. It stays the same when the controller restarts. */
@@ -193,10 +202,14 @@ export interface ThreadFixture {
    * activity, so both are set. With `twoMinuteRow`, one idle thread in the
    * first project is set only two minutes back instead, so exactly one row on
    * screen shows minutes. Every open signal is set hours back too (see
-   * `backdateOpenSignals`). Fails when a thread is not in its expected state
-   * afterwards.
+   * `backdateOpenSignals`). With `spreadRuns`, the runs of one workflow are
+   * spread over a span of time too (see `spreadRuns`). Fails when a thread is
+   * not in its expected state afterwards.
    */
-  readonly prepareLaunch: (options: { readonly twoMinuteRow: boolean }) => Promise<void>;
+  readonly prepareLaunch: (options: {
+    readonly twoMinuteRow: boolean;
+    readonly spreadRuns?: RunSpread;
+  }) => Promise<void>;
   /**
    * Moves the first project's busy thread to idle, or back to busy, which
    * makes the controller push one change to the app.
@@ -335,7 +348,13 @@ export async function runWithThreadFixture<T>(
         );
       };
 
-      const prepareLaunch = async ({ twoMinuteRow }: { readonly twoMinuteRow: boolean }) => {
+      const prepareLaunch = async ({
+        twoMinuteRow,
+        spreadRuns: spread,
+      }: {
+        readonly twoMinuteRow: boolean;
+        readonly spreadRuns?: RunSpread;
+      }) => {
         // A Request is answered before the restart and opened again after it,
         // so the restart never has to decide what happens to one.
         for (const [id, requestId] of openRequests) {
@@ -375,6 +394,7 @@ export async function runWithThreadFixture<T>(
         );
         backdateOpenSignals(home);
         titleEvents(home);
+        if (spread !== undefined) spreadRuns(home, spread);
         controller = await startController({ home, binary: findCompiledBinary(), port });
         await Promise.all(runners.map((runner) => runner.reconnect()));
         for (const runner of runners) {
@@ -553,6 +573,68 @@ function titleEvents(home: string): void {
       );
     }
     database.exec("INSERT INTO events_fts (events_fts) VALUES ('rebuild')");
+    database.exec("COMMIT");
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Moves every run of the workflow `spread.workflowId`, in the stopped
+ * controller's database in the Home `home`, so the runs start evenly spread
+ * from `spread.from` to `spread.to`, oldest first, in the order they were
+ * created. Each run, and each of its steps, moves by the same amount, so it
+ * keeps the times it took. Fails when every run is not finished, because a
+ * live run's times are the controller's to keep.
+ *
+ * The controller stamps a run's times with its own clock, and no operation
+ * sets them, so a day of runs can only be made by writing them here.
+ */
+function spreadRuns(home: string, spread: RunSpread): void {
+  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
+  try {
+    const runs = database
+      .prepare(
+        "SELECT id, created_at, started_at, finished_at FROM runs " +
+          "WHERE hex(workflow_id) = upper(replace(?, '-', '')) ORDER BY created_at, id",
+      )
+      .all(spread.workflowId);
+    if (runs.some((run) => run["finished_at"] === null)) {
+      throw new Error(`the workflow ${spread.workflowId} has a run that has not finished`);
+    }
+    const updateRun = database.prepare(
+      "UPDATE runs SET created_at = ?, started_at = ?, finished_at = ? WHERE id = ?",
+    );
+    const listSteps = database.prepare(
+      "SELECT step_id, iteration, created_at, started_at, finished_at FROM run_steps WHERE run_id = ?",
+    );
+    const updateStep = database.prepare(
+      "UPDATE run_steps SET created_at = ?, started_at = ?, finished_at = ? " +
+        "WHERE run_id = ? AND step_id = ? AND iteration = ?",
+    );
+    const gapMs = (spread.to.getTime() - spread.from.getTime()) / Math.max(runs.length - 1, 1);
+    database.exec("BEGIN");
+    for (const [index, run] of runs.entries()) {
+      const byMs = spread.from.getTime() + index * gapMs - Date.parse(run["created_at"] as string);
+      const move = (time: unknown) =>
+        time === null ? null : new Date(Date.parse(time as string) + byMs).toISOString();
+      updateRun.run(
+        move(run["created_at"]),
+        move(run["started_at"]),
+        move(run["finished_at"]),
+        run["id"] as Uint8Array,
+      );
+      for (const step of listSteps.all(run["id"] as Uint8Array)) {
+        updateStep.run(
+          move(step["created_at"]),
+          move(step["started_at"]),
+          move(step["finished_at"]),
+          run["id"] as Uint8Array,
+          step["step_id"] as string,
+          step["iteration"] as number,
+        );
+      }
+    }
     database.exec("COMMIT");
   } finally {
     database.close();

@@ -6,6 +6,7 @@
  * Each finder fails rather than returning nothing, because an edit that
  * silently misses its element would only show up as differing pixels.
  */
+import { INTAKE_ICON_OUTLINES } from "../icons/intake-outlines";
 
 /** Returns the first element inside `scope` that matches `selector`. Fails when there is none. */
 export function findElement(scope: ParentNode, selector: string): Element {
@@ -46,12 +47,6 @@ export function findElementByText(scope: ParentNode, selector: string, text: str
 export function replaceTextAfterIcon(control: Element, text: string): void {
   control.replaceChildren(findElement(control, "svg"), text);
 }
-
-/** The outlines of the Intake icon, as the app's `IntakeIcon` draws them (and the book's `intake` icon). */
-const INTAKE_ICON_OUTLINES = [
-  "M2.4 9.2h3.2l1 1.8h2.8l1-1.8h3.2",
-  "M2.4 9.2l1.6-5.4h8l1.6 5.4v3.6a1 1 0 0 1-1 1H3.4a1 1 0 0 1-1-1z",
-];
 
 /**
  * Adds an Intake row after Threads in the book's settings list. The book

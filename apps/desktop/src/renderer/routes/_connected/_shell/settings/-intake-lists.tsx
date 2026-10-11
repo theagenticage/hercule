@@ -5,45 +5,55 @@ import {
   describeIntakeSource,
   type IntakeChange,
   type IntakeKindList,
+  type IntakeKindValue,
 } from "@hercule/client-core";
-import type { IntakeSettingLevel, IntakeSettings } from "@hercule/contract";
 import { IntakeKindRow } from "../../../../screens/settings/intake/intake-kind-row";
-import { buildIntakeRowKey, useSavedIntake, type IntakeTarget } from "./-saved-intake";
+import { useIntakeEditor } from "./-intake-editor";
 
 /**
  * Renders the Signals list and the Events available to triage list of one
- * level of a plugin: all its Connections, or one Connection. A list with no
- * kind is not drawn.
+ * level of a plugin: all its Connections, or the Connection `connectionId`
+ * names. A list with no kind is not drawn. While a Connection's settings are
+ * being read, a line says so instead of the lists; when the read fails, the
+ * line gives the error.
  *
  * Each toggle saves as soon as it is pressed, and a row whose value is a
- * choice of this level can be reset (see `useSavedIntake`). `pointedKind` is
+ * choice of this level can be reset (see `useIntakeEditor`). `pointedKind` is
  * the kind a link asks for, whose row scrolls into view and is highlighted.
- *
- * The component holds the saves of one level, so the section draws one for
- * each level it shows, with a key of its own.
  */
 export function IntakeLists({
-  target,
-  stored,
+  pluginId,
+  connectionId,
   pluginName,
   pointedKind,
 }: {
-  readonly target: IntakeTarget;
-  /** The saved settings of this level, as the cache holds them. */
-  readonly stored: IntakeSettings;
+  readonly pluginId: string;
+  readonly connectionId: string | undefined;
   readonly pluginName: string;
   readonly pointedKind: string | undefined;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const { settings, errors, save } = useSavedIntake(client, target, stored);
+  const editor = useIntakeEditor(client, pluginId, connectionId);
+  if (editor.status === "reading") {
+    return <p className="intake-status">{"Reading this Connection's settings…"}</p>;
+  }
+  if (editor.status === "unreadable") {
+    return (
+      <p className="set-err intake-status" role="alert">
+        {`Could not read this Connection: ${editor.message}`}
+      </p>
+    );
+  }
+  const { settings, level, findRowSave, save } = editor;
 
   const renderRow = (
     list: IntakeKindList,
-    row: { kind: string; on: boolean; level: IntakeSettingLevel },
+    row: IntakeKindValue,
     label: string,
     hint: string,
   ): JSX.Element => {
     const change = (on: boolean | null): IntakeChange => ({ list, kind: row.kind, on });
+    const { error, resetting } = findRowSave(list, row.kind);
     return (
       <IntakeKindRow
         key={row.kind}
@@ -52,9 +62,10 @@ export function IntakeLists({
         hintIsCode={list === "eventKinds"}
         on={row.on}
         source={describeIntakeSource(row, pluginName)}
-        canReset={canResetIntakeRow(row, target.level)}
+        canReset={canResetIntakeRow(row, level)}
+        resetting={resetting}
         pointed={pointedKind === row.kind}
-        error={errors.get(buildIntakeRowKey({ list, kind: row.kind })) ?? null}
+        error={error}
         onToggle={(on) => {
           save(change(on));
         }}

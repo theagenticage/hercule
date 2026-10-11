@@ -11,13 +11,27 @@
   max-width: 100%;
   margin-top: 10px;
 }
+/* A Connection's label has no length limit, and may be one long word. The
+   button shrinks to the control's width and its label is cut with an
+   ellipsis, so nothing runs past the column at the smallest window. */
+.intake-segments button {
+  min-width: 0;
+  max-width: 100%;
+}
+.intake-segments button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* The heading of one list, under the control: Signals, and Events available to
-   triage. Quieter than the plugin's heading, like the head of a table. */
+   triage. Quieter than the plugin's heading, and set as the book sets the head
+   of a table (`.tbl-h`): small, faint and medium. */
 .set-sec > .intake-list-head {
   margin: 22px 0 0;
   color: var(--faint);
-  font-size: var(--t-12);
+  font-size: var(--t-11);
   font-weight: var(--w-medium);
 }
 .set-sec > .intake-list-head + .set-row {

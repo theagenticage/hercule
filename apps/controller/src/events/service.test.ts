@@ -40,7 +40,7 @@ const buildPluginLevel = (pluginId: string): IntakeSettings => ({
   signalKinds: [],
 });
 
-const PluginIntakeStub = Layer.succeed(PluginIntake, {
+const PluginIntakeStub = Layer.mock(PluginIntake)({
   read: (pluginId) => Effect.succeed(buildPluginLevel(pluginId)),
 });
 

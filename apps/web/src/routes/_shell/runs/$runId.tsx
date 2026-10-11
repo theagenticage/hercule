@@ -29,8 +29,14 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
   staticData: { title: "Run", ownsTopBar: true },
   // The steps view is in the address, so a reload or a shared link keeps it.
   // The list is the default and leaves the address without it.
-  validateSearch: (search: Record<string, unknown>): { readonly steps?: StepsView } =>
-    search["steps"] === "timeline" ? { steps: "timeline" } : {},
+  // An invalid param is returned as `undefined` rather than left out: the
+  // router lays the returned params over the URL's, so a param left out would
+  // keep the URL's value.
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { readonly steps?: StepsView | undefined } => ({
+    steps: search["steps"] === "timeline" ? "timeline" : undefined,
+  }),
   // Loads the run, the runner and workspace it is pinned to, the run's
   // re-runs, the sessions its agent steps started, the action catalog and the
   // run's saved workflow before the page renders, so the page never waits on

@@ -164,12 +164,10 @@ export {
   PluginUpdateIntakeInput,
 } from "./groups/plugin";
 export {
-  EventKindIntakeSetting,
+  IntakeOverrideLevel,
   IntakeOverrides,
   IntakeSettingLevel,
   IntakeSettings,
-  MAX_INTAKE_OVERRIDES,
-  SignalKindIntakeSetting,
 } from "./groups/intake-settings";
 export {
   PERMISSION_DECISION_OUTCOMES,
@@ -590,19 +588,18 @@ export {
 export {
   ANY_CONNECTION,
   collectReachableSteps,
-  decodeWorkflowDefinition,
   EventSelector,
   isSchedule,
   Schedule,
   TriggerFiresOn,
   TriggerOn,
-  truncateIssues,
   listEntrySteps,
   readFieldNotation,
   WorkflowDefinition,
   WorkspacePolicy,
   type FieldNotation,
 } from "./groups/workflow-definition";
+export { decodeWorkflowDefinition, truncateIssues } from "./groups/workflow-definition-decode";
 export {
   parseWorkflowDocument,
   parseWorkflowSource,

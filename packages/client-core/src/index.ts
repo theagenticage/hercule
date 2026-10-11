@@ -178,15 +178,20 @@ export {
   canResetIntakeRow,
   describeIntakeSource,
   listIntakeSegments,
-  listPluginConnections,
   listPluginsWithIntake,
   type IntakeChange,
-  type IntakeEditedLevel,
   type IntakeKindList,
+  type IntakeKindValue,
   type IntakeSegment,
 } from "./intake-settings";
 export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
 export { isWebLink } from "./web-link";
+export {
+  parseMarkdown,
+  type ColumnAlignment,
+  type MarkdownBlock,
+  type MarkdownInline,
+} from "./markdown";
 export {
   listWaiting,
   listWaitingRunSessions,
@@ -278,6 +283,7 @@ export {
   type BoundActionRow,
   type NotificationMark,
 } from "./notifications";
+export { parsePluginId } from "./plugin-id";
 export { formatBlocksAsText, isKnownBlock, UNKNOWN_BLOCK_TEXT } from "./signal-blocks";
 export {
   buildHandlingLabels,
@@ -320,7 +326,6 @@ export {
   moveSignalSelection,
   nameSignalSource,
   parseIntakeListWidth,
-  parseSignalPluginId,
   trimAnswerEllipsis,
   type EventDaySection,
   type EventHandlingLabel,

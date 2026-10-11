@@ -19,8 +19,12 @@ export const Route = createFileRoute("/_shell/connections/")({
   staticData: { title: "Connections" },
   // The browser lands here after a provider redirect. The controller has
   // already finished the setup and puts the outcome in the `oauth` parameter.
-  validateSearch: (search: Record<string, unknown>): { readonly oauth?: string } =>
-    typeof search["oauth"] === "string" ? { oauth: search["oauth"] } : {},
+  // An invalid param is returned as `undefined` rather than left out: the
+  // router lays the returned params over the URL's, so a param left out would
+  // keep the URL's value.
+  validateSearch: (search: Record<string, unknown>): { readonly oauth?: string | undefined } => ({
+    oauth: typeof search["oauth"] === "string" ? search["oauth"] : undefined,
+  }),
   // Loads the connections and the plugin catalog (which the offers are built
   // from) before the screen renders, so it never renders empty.
   loader: async ({ context }) => {

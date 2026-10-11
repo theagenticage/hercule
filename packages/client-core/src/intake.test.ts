@@ -47,7 +47,6 @@ import {
   moveSignalSelection,
   nameSignalSource,
   parseIntakeListWidth,
-  parseSignalPluginId,
   trimAnswerEllipsis,
   type EventHandlingLabel,
 } from "./intake";
@@ -94,16 +93,6 @@ const action = (id: string, overrides: Partial<SignalAction> = {}): SignalAction
   label: id.charAt(0).toUpperCase() + id.slice(1),
   operation: { op: "github/pr.review", input: {} },
   ...overrides,
-});
-
-describe("parseSignalPluginId", () => {
-  it("returns the plugin before the slash of a plugin kind", () => {
-    expect(parseSignalPluginId("github/review-requested")).toBe("github");
-  });
-
-  it("returns null for a core kind", () => {
-    expect(parseSignalPluginId("proposal")).toBeNull();
-  });
 });
 
 describe("nameSignalSource", () => {

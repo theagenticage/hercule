@@ -6,7 +6,6 @@ import {
   canResetIntakeRow,
   describeIntakeSource,
   listIntakeSegments,
-  listPluginConnections,
   listPluginsWithIntake,
 } from "./intake-settings";
 
@@ -81,22 +80,6 @@ describe("listPluginsWithIntake", () => {
   });
 });
 
-describe("listPluginConnections", () => {
-  it("returns the Connections of the types the plugin declares, not those of another plugin", () => {
-    const github = buildPlugin("github", "GitHub", ["github/account"], SETTINGS);
-    const mine = buildConnection("c1", "github/account", "work");
-    const other = buildConnection("c2", "gmail/account", "mail");
-    expect(listPluginConnections(github, [other, mine])).toEqual([mine]);
-  });
-
-  it("does not match a Connection on the plugin's id, only on a declared type", () => {
-    const quiet = buildPlugin("github", "GitHub", [], SETTINGS);
-    expect(listPluginConnections(quiet, [buildConnection("c1", "github/account", "work")])).toEqual(
-      [],
-    );
-  });
-});
-
 describe("listIntakeSegments", () => {
   const github = buildPlugin("github", "GitHub", ["github/account"], SETTINGS);
 
@@ -107,10 +90,17 @@ describe("listIntakeSegments", () => {
       buildConnection("c3", "github/account", "personal"),
     ]);
     expect(segments).toEqual([
-      { target: "plugin", label: "All GitHub connections" },
-      { target: "connection", connectionId: "c1", label: "work" },
-      { target: "connection", connectionId: "c3", label: "personal" },
+      { connectionId: undefined, label: "All GitHub connections" },
+      { connectionId: "c1", label: "work" },
+      { connectionId: "c3", label: "personal" },
     ]);
+  });
+
+  it("matches a Connection on a type the plugin declares, not on the plugin's id", () => {
+    const declaresNoType = buildPlugin("github", "GitHub", [], SETTINGS);
+    expect(
+      listIntakeSegments(declaresNoType, [buildConnection("c1", "github/account", "work")]),
+    ).toEqual([]);
   });
 
   it("is empty for a plugin with no Connection, so the section draws no control", () => {

@@ -16,7 +16,6 @@
     "@codemirror/lint": "6.9.7",
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.13",
-    "@dagrejs/dagre": "3.1.1",
     "@hercule/client-core": "workspace:*",
     "@hercule/contract": "workspace:*",
     "@hercule/ui": "workspace:*",
@@ -25,10 +24,7 @@
     "@tanstack/react-router": "1.170.32",
     "@xyflow/react": "12.11.6",
     "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "react-markdown": "10.1.0",
-    "remark-breaks": "4.0.0",
-    "remark-gfm": "4.0.1"
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@babel/core": "8.0.1",

@@ -22,6 +22,7 @@ import {
   type SignalOrigin,
   type SignalView,
 } from "@hercule/contract";
+import { parsePluginId } from "./plugin-id";
 import { countCalendarDaysBetween, formatRelativeDay, formatRelativeMoment } from "./time-context";
 
 /** A plugin's id and the name the user knows it by, as `plugin.query` returns them. */
@@ -68,13 +69,6 @@ export const lowerFirst = (text: string): string =>
 
 /** Returns `text` with its first letter in upper case: "an agent" becomes "An agent". */
 const upperFirst = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
-
-/**
- * Returns the id of the plugin whose kind `kind` is, such as `github` for
- * `github/mentioned`, or `null` for a core kind, which no plugin owns.
- */
-export const parseSignalPluginId = (kind: string): string | null =>
-  isCoreSignalKind(kind) ? null : kind.slice(0, kind.indexOf("/"));
 
 /**
  * Returns the label of a signal's kind: "Mentioned" for `github/mentioned`,
@@ -171,7 +165,7 @@ export const nameSignalSource = (
   plugins: ReadonlyArray<PluginName>,
   raisers: SignalRaiserNames,
 ): string => {
-  const pluginId = parseSignalPluginId(signal.kind);
+  const pluginId = parsePluginId(signal.kind);
   if (pluginId !== null) return namePlugin(pluginId, plugins);
   if (signal.origin.type === "event") return CORE_SOURCE_NAME;
   return upperFirst(nameSignalRaiser(signal.origin, plugins, raisers));
@@ -244,9 +238,7 @@ export const buildIntakeTabs = (
   plugins: ReadonlyArray<IntakeTabPlugin>,
   pressedPluginId: string | null,
 ): ReadonlyArray<IntakeTab> => {
-  const current = signals
-    .map((signal) => parseSignalPluginId(signal.kind))
-    .filter((id) => id !== null);
+  const current = signals.map((signal) => parsePluginId(signal.kind)).filter((id) => id !== null);
   const wanted = new Set(current);
   if (pressedPluginId !== null) wanted.add(pressedPluginId);
   const listed = plugins.filter(
@@ -309,7 +301,7 @@ export const groupSignalsIntoSections = (
   pluginId: string | null,
 ): ReadonlyArray<IntakeSection> => {
   const shown = signals
-    .filter((signal) => pluginId === null || parseSignalPluginId(signal.kind) === pluginId)
+    .filter((signal) => pluginId === null || parsePluginId(signal.kind) === pluginId)
     .toSorted(compareInSection);
   const now = shown.filter((signal) => signal.priority === "urgent");
   const rest = shown.filter((signal) => signal.priority !== "urgent");
@@ -588,7 +580,7 @@ export const describeSignalOutcome = (
     resolution.kind === "decided" &&
     resolution.actor === "system" &&
     resolution.actionId !== undefined &&
-    parseSignalPluginId(signal.kind) !== null;
+    parsePluginId(signal.kind) !== null;
   const byUser = (resolution.kind === "decided" && resolution.actor === "user") || answeredOnSource;
   return {
     label: byUser ? "What you did" : "Left on its own",
@@ -611,7 +603,7 @@ const nameResolver = (
   actor: string,
   plugins: ReadonlyArray<PluginName>,
 ): string => {
-  const pluginId = parseSignalPluginId(signal.kind);
+  const pluginId = parsePluginId(signal.kind);
   return actor === "system" && pluginId !== null && signal.replacedBy === undefined
     ? namePlugin(pluginId, plugins)
     : nameActor(actor, plugins);
@@ -663,7 +655,7 @@ export const listUrgentSignals = (
     .filter((signal) => signal.priority === "urgent")
     .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
     .map((signal) => {
-      const pluginId = parseSignalPluginId(signal.kind);
+      const pluginId = parsePluginId(signal.kind);
       return {
         signalId: signal.id,
         title: pluginId === null ? CORE_SOURCE_NAME : namePlugin(pluginId, plugins),

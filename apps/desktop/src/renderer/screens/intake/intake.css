@@ -709,13 +709,14 @@
   color: var(--ink);
   font-weight: var(--w-medium);
 }
-/* An event's kind is a link to that kind's switches on Settings > Intake. It
-   keeps the look of plain muted text; hovering it underlines the text, as the
-   app's other text links do (`.link`). */
+/* The line of a plugin's signal, and an event's kind, are links to that
+   kind's switches on Settings > Intake. Each keeps the look of plain text;
+   hovering it underlines the text, as the app's other text links do (`.link`). */
 .ad-kind-type {
   color: var(--muted);
   text-decoration: none;
 }
+.ad-kind a.src:hover,
 .ad-kind-type:hover {
   text-decoration: underline;
   text-underline-offset: 2px;

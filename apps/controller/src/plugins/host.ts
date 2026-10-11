@@ -41,6 +41,8 @@ import {
 } from "@hercule/plugin-host";
 import {
   createDecodeValidationError,
+  type IntakeOverrides,
+  type IntakeSettings,
   type PluginRefusalReason,
   type PluginStatus,
   type Validation,
@@ -65,12 +67,7 @@ import {
   type RegisteredEventKind,
   type RegisteredEventSource,
 } from "./event-sources";
-import {
-  applyIntakeOverrides,
-  buildDefaultIntakeSettings,
-  PluginIntake,
-  type DeclaredIntakeKinds,
-} from "../intake-settings";
+import { applyIntakeOverrides, createPluginNotLoadedError, PluginIntake } from "../intake-settings";
 import type { RegisteredSignalKind } from "./signal-kinds";
 import { checkPluginMark } from "./mark";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
@@ -142,6 +139,12 @@ interface Entry extends LoadedPlugin {
    * restart.
    */
   readonly startable: boolean;
+  /**
+   * Whether `register` ran to the end. False for a `refused` plugin, whose
+   * code never ran, and for a plugin whose `register` failed. Neither has a
+   * registered event source, so its kinds are unknown.
+   */
+  readonly registered: boolean;
 }
 
 const toLoadedPlugin = (entry: Entry): LoadedPlugin => ({
@@ -780,6 +783,39 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  /**
+   * Returns the Intake settings a plugin gives before the user chooses
+   * anything: each event kind is as available to triage as the plugin
+   * declared it, and every signal kind is on. Kinds are in the order the
+   * plugin declares them, whatever the status of the plugin: the Intake
+   * settings of a disabled plugin are still shown and still written. Both
+   * lists are empty for a plugin whose registration failed or was refused,
+   * because none of its sources was registered.
+   */
+  const readDefaultIntakeSettings = (pluginId: string): Effect.Effect<IntakeSettings> =>
+    Effect.map(Ref.get(eventSources), (sources) => {
+      const own = sources.filter((source) => source.pluginId === pluginId);
+      return {
+        eventKinds: own.flatMap((source) =>
+          [...source.kinds.values()].map(({ kind, description, availableToTriage }) => ({
+            kind,
+            description,
+            on: availableToTriage,
+            level: "default" as const,
+          })),
+        ),
+        signalKinds: own.flatMap((source) =>
+          source.signalKinds.map(({ kind, label, description }) => ({
+            kind,
+            label,
+            description,
+            on: true,
+            level: "default" as const,
+          })),
+        ),
+      };
+    });
+
   return {
     /**
      * Loads the registry in four steps: check each manifest, register, write
@@ -827,6 +863,7 @@ const make = Effect.gen(function* () {
             manifest,
             deactivate: undefined,
             startable: true,
+            registered: false,
             id: manifest.id,
             displayName: manifest.displayName,
             hostApi: manifest.hostApi,
@@ -880,6 +917,7 @@ const make = Effect.gen(function* () {
           booted.set(manifest.id, {
             ...facts,
             startable: registered,
+            registered,
             configSchema: inspected.success,
             status,
           });
@@ -946,33 +984,30 @@ const make = Effect.gen(function* () {
         sources.filter((source) => active.has(source.pluginId)),
       ),
 
+    readDefaultIntakeSettings,
+
     /**
-     * Returns every event kind and signal kind one plugin declares, in the
-     * order it declares them, whatever the status of the plugin: the Intake
-     * settings of a disabled plugin are still shown and still written. The
-     * lists are empty for a plugin whose registration failed or was refused,
-     * because none of its sources was registered.
+     * Returns the Intake settings in effect at the plugin's level: the
+     * plugin's defaults with the user's choices for the plugin on top. The
+     * caller passes the stored choices, so a caller that already holds them
+     * does not read them twice.
      */
-    readDeclaredIntakeKinds: (pluginId: string): Effect.Effect<DeclaredIntakeKinds> =>
-      Effect.map(Ref.get(eventSources), (sources) => {
-        const own = sources.filter((source) => source.pluginId === pluginId);
-        return {
-          eventKinds: own.flatMap((source) =>
-            [...source.kinds.values()].map(({ kind, description, availableToTriage }) => ({
-              kind,
-              description,
-              availableToTriage,
-            })),
-          ),
-          signalKinds: own.flatMap((source) =>
-            source.signalKinds.map(({ kind, label, description }) => ({
-              kind,
-              label,
-              description,
-            })),
-          ),
-        };
-      }),
+    readPluginIntakeSettings: (
+      pluginId: string,
+      overrides: IntakeOverrides,
+    ): Effect.Effect<IntakeSettings> =>
+      Effect.map(readDefaultIntakeSettings(pluginId), (defaults) =>
+        applyIntakeOverrides(defaults, overrides, "plugin"),
+      ),
+
+    /**
+     * Returns whether the plugin's `register` ran to the end in this process.
+     * It is false for a `refused` plugin, for a plugin whose `register`
+     * failed, and for an id this boot did not load. Such a plugin has no
+     * registered kinds.
+     */
+    isRegistered: (pluginId: string): Effect.Effect<boolean> =>
+      Effect.map(Ref.get(entries), (booted) => booted.get(pluginId)?.registered ?? false),
 
     /**
      * Returns the signal kind with this qualified name, such as
@@ -1071,16 +1106,23 @@ const PluginIntakeLayer: Layer.Layer<PluginIntake, never, SqlClient.SqlClient | 
     Effect.gen(function* () {
       const host = yield* PluginHost;
       const repository = yield* pluginRepository;
+      const read = (pluginId: string) =>
+        Effect.gen(function* () {
+          const { intake } = yield* Effect.catchTag(
+            repository.state(pluginId),
+            "SchemaError",
+            Effect.die,
+          );
+          return yield* host.readPluginIntakeSettings(pluginId, intake);
+        });
       return {
-        read: (pluginId: string) =>
+        read,
+        readBeforeWrite: (pluginId: string) =>
           Effect.gen(function* () {
-            const declared = yield* host.readDeclaredIntakeKinds(pluginId);
-            const { intake } = yield* Effect.catchTag(
-              repository.state(pluginId),
-              "SchemaError",
-              Effect.die,
-            );
-            return applyIntakeOverrides(buildDefaultIntakeSettings(declared), intake, "plugin");
+            if (!(yield* host.isRegistered(pluginId))) {
+              return yield* Effect.fail(createPluginNotLoadedError(pluginId));
+            }
+            return yield* read(pluginId);
           }),
       };
     }),

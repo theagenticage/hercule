@@ -176,7 +176,7 @@ describe("the thread screen", () => {
       "Worked for 9s ›ran 2 commands",
       "Claude Code · Claude Sonnet 5 · 11:00The pin lives in .bun-version and in two workflows. I'll update all three.",
       "Worked for 1m 57s ›edited 3 filesran 2 commands",
-      "Claude Code · Claude Sonnet 5 · 11:02Done. The pin is now 1.3.2 in:\n\n.bun-version\n.github/workflows/ci.yml\n.github/workflows/release.yml\n\nbun install and bun test pass.",
+      "Claude Code · Claude Sonnet 5 · 11:02Done. The pin is now 1.3.2 in:.bun-version.github/workflows/ci.yml.github/workflows/release.ymlbun install and bun test pass.",
     ]);
 
     const transcript = findTranscript();
@@ -320,7 +320,7 @@ describe("the thread screen", () => {
     // The message has ended, so all of its text is drawn as markdown.
     expect(within(findTranscript()).getByText("retry").tagName).toBe("STRONG");
     expect(readBlocks().at(-1)).toBe(
-      "Claude Code · Claude Sonnet 5 · 11:03It is a race in the retry queue.\nThe fix is to lock it.",
+      "Claude Code · Claude Sonnet 5 · 11:03It is a race in the retry queue.The fix is to lock it.",
     );
     expect(findTranscript().querySelector(".cr--animated")).toBeNull();
   });

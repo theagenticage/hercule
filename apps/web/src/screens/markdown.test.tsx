@@ -1,10 +1,11 @@
 /**
  * Tests how the markdown renderer handles unusual input.
  *
- * The thread screen's tests cover how an answer looks. These tests cover edge
- * cases only this component is responsible for: a parse that overflows, a
- * class the renderer set for a reason, and a link whose target differs from
- * its text.
+ * The thread screen's tests cover how an answer looks. These tests cover what
+ * only this component is responsible for: drawing the parsed tree (lists,
+ * footnotes, images, table alignment), a parse that overflows, and a link
+ * whose target differs from its text. The parser's own tests are in
+ * `@hercule/client-core`.
  */
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -26,16 +27,6 @@ it("falls back to the characters the agent sent when the parser overflows", () =
   quiet.mockRestore();
 });
 
-it("keeps the class the renderer put on an element and adds its own", () => {
-  const { container } = render(<Markdown text={"Note[^1]\n\n[^1]: the body."} />);
-
-  // GFM hides the footnote section's heading visually; adding classes must
-  // not make it visible again.
-  const label = container.querySelector("#footnote-label");
-  expect(label?.className).toContain("sr-only");
-  expect(label?.className).toContain("font-emph");
-});
-
 it("opens a link in a new tab without a referrer", () => {
   render(<Markdown text="[the docs](https://example.com/docs)" />);
 
@@ -54,14 +45,112 @@ it("keeps a link within the page in the same tab", () => {
   expect(footnote?.getAttribute("rel")).toBeNull();
 });
 
-// react-markdown does this, not our code. The test catches it if someone
-// ever passes in a custom `urlTransform`.
-it("empties the href of a link that is not http, mailto or relative", () => {
+it("draws a link with an unsafe address as its text only", () => {
   const { container } = render(<Markdown text="[run me](<javascript:alert(1)>)" />);
 
-  const link = container.querySelector("a");
-  expect(link?.textContent).toBe("run me");
-  expect(link?.getAttribute("href")).toBe("");
+  expect(container.querySelector("a")).toBeNull();
+  expect(container.textContent).toBe("run me");
+});
+
+it("points a footnote's reference and back link at each other", () => {
+  const { container } = render(<Markdown text={"Note[^1] again[^1]\n\n[^1]: the body."} />);
+
+  const references = [...container.querySelectorAll("sup a")];
+  const note = container.querySelector("section li");
+  const backLink = screen.getByRole("link", { name: "Back to reference 1" });
+
+  // The back link goes to the first reference only; the second has no id.
+  expect(references).toHaveLength(2);
+  expect(references[0]?.id).not.toBe("");
+  expect(references[1]?.id).toBe("");
+  expect(backLink.getAttribute("href")).toBe(`#${references[0]?.id}`);
+  expect(references[0]?.getAttribute("href")).toBe(`#${note?.id}`);
+
+  // The link sits in the note's last paragraph, and the section is named by its hidden heading.
+  expect(backLink.closest("p")?.textContent).toBe("the body. \u21a9");
+  expect(backLink.textContent).toBe("\u21a9");
+  expect(backLink.className).toContain("underline");
+  const section = container.querySelector("section");
+  const heading = container.querySelector(`[id="${section?.getAttribute("aria-labelledby")}"]`);
+  expect(heading?.tagName).toBe("H2");
+  expect(heading?.textContent).toBe("Footnotes");
+  expect(heading?.className).toBe("sr-only");
+  expect(references[0]?.getAttribute("aria-describedby")).toBe(heading?.id);
+});
+
+it("keeps the footnote ids of two messages on one screen apart", () => {
+  const { container } = render(
+    <>
+      <Markdown text={"One[^1]\n\n[^1]: first."} />
+      <Markdown text={"Two[^1]\n\n[^1]: second."} />
+    </>,
+  );
+
+  const ids = [...container.querySelectorAll("[id]")].map((element) => element.id);
+  expect(ids).toHaveLength(6);
+  expect(new Set(ids).size).toBe(6);
+  const hrefs = [...container.querySelectorAll("a[href^='#']")].map((a) => a.getAttribute("href"));
+  expect(hrefs).toHaveLength(4);
+  for (const href of hrefs) {
+    expect(container.querySelectorAll(`[id="${href?.slice(1)}"]`)).toHaveLength(1);
+  }
+});
+
+it("draws a tight list's paragraphs bare and a loose list's in paragraphs", () => {
+  const tight = render(<Markdown text={"- one\n- two"} />);
+  expect(tight.container.querySelector("li p")).toBeNull();
+  expect(tight.container.querySelector("li")?.textContent).toBe("one");
+  tight.unmount();
+
+  const loose = render(<Markdown text={"- one\n\n- two"} />);
+  expect(loose.container.querySelectorAll("li p")).toHaveLength(2);
+});
+
+it("numbers an ordered list from its first number", () => {
+  const { container } = render(<Markdown text={"3. three\n4. four"} />);
+
+  expect(container.querySelector("ol")?.getAttribute("start")).toBe("3");
+});
+
+it("draws a task item with a disabled checkbox before its text", () => {
+  const { container } = render(<Markdown text={"- [x] done\n- [ ] todo"} />);
+
+  const boxes = [...container.querySelectorAll<HTMLInputElement>("li input[type=checkbox]")];
+  expect(boxes.map((box) => box.checked)).toEqual([true, false]);
+  expect(boxes.every((box) => box.disabled)).toBe(true);
+  expect(container.querySelector("li")?.textContent).toBe(" done");
+});
+
+it("draws a task item's checkbox inside its paragraph when the list is loose", () => {
+  const { container } = render(<Markdown text={"- [x] one\n\n- [ ] two"} />);
+
+  const boxes = [...container.querySelectorAll("li p > input[type=checkbox]")];
+  expect(boxes).toHaveLength(2);
+  expect(container.querySelector("li p")?.textContent).toBe(" one");
+});
+
+it("sets the title attribute of a link and an image, and omits it when there is none", () => {
+  const { container } = render(
+    <Markdown
+      text={
+        '[docs](https://example.com "The docs") [bare](https://example.com/b)\n\n![cat](https://example.com/c.png "A cat")'
+      }
+    />,
+  );
+
+  const [titled, bare] = [...container.querySelectorAll("a")];
+  expect(titled?.getAttribute("title")).toBe("The docs");
+  expect(bare?.hasAttribute("title")).toBe(false);
+  expect(container.querySelector("img")?.getAttribute("title")).toBe("A cat");
+});
+
+it("draws an image that sends no referrer", () => {
+  const { container } = render(<Markdown text="![a cat](https://example.com/cat.png)" />);
+
+  const image = container.querySelector("img");
+  expect(image?.getAttribute("src")).toBe("https://example.com/cat.png");
+  expect(image?.getAttribute("alt")).toBe("a cat");
+  expect(image?.getAttribute("referrerpolicy")).toBe("no-referrer");
 });
 
 const ALIGNED_TABLE = ["| l | c | r |", "|:---|:---:|---:|", "| 1 | 2 | 3 |"].join("\n");

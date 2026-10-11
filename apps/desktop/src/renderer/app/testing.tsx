@@ -366,6 +366,44 @@ export const stubResizeObserver = (): ((target?: Element) => void) => {
 };
 
 /**
+ * Replaces `IntersectionObserver`, which jsdom lacks, with one that reports
+ * each element on screen as soon as it is watched, as a browser does for a
+ * row in view. Returns a function that reports `element` inside or outside
+ * the visible part of its scroller, as a scroll would. The report runs
+ * inside `act`, so the renders it causes are done when it returns.
+ */
+export const stubIntersectionObserver = (): ((element: Element, onScreen: boolean) => void) => {
+  const callbacks = new Map<Element, IntersectionObserverCallback>();
+  const buildEntry = (element: Element, onScreen: boolean): IntersectionObserverEntry =>
+    ({ target: element, isIntersecting: onScreen }) as IntersectionObserverEntry;
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      readonly callback: IntersectionObserverCallback;
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback;
+      }
+      observe(element: Element): void {
+        callbacks.set(element, this.callback);
+        // A row watches from an effect, which already runs inside `act`.
+        this.callback([buildEntry(element, true)], this as unknown as IntersectionObserver);
+      }
+      unobserve(element: Element): void {
+        callbacks.delete(element);
+      }
+      disconnect(): void {
+        callbacks.clear();
+      }
+    },
+  );
+  return (element, onScreen) => {
+    act(() => {
+      callbacks.get(element)?.([buildEntry(element, onScreen)], {} as IntersectionObserver);
+    });
+  };
+};
+
+/**
  * Makes every element measure `width` by `height` CSS pixels, until
  * `vi.restoreAllMocks` runs. jsdom lays nothing out, so every element would
  * measure 0, and a virtualized list, which reads its own size to know how

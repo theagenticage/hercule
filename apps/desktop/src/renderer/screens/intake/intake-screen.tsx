@@ -39,7 +39,7 @@ import { IntakeDock } from "./intake-dock";
 import { IntakeFoot } from "./intake-foot";
 import { IntakeBar, IntakeSplit, IntakeViewSwitcher } from "./intake-frame";
 import { IntakeList, type BulkHighlight, type SignalRowAction } from "./intake-list";
-import { isTextField } from "./is-text-field";
+import { isTextField } from "../../app/text-field";
 import { pickSelectionAfterMove } from "./pick-selection-after-move";
 import { SignalPane, type SignalPaneHandle } from "./signal-pane";
 import { SnoozeMenu } from "./snooze-menu";

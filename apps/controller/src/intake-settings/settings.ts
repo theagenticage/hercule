@@ -14,57 +14,14 @@
 import * as Effect from "effect/Effect";
 import {
   createValidationError,
+  type IntakeOverrideLevel,
   type IntakeOverrides,
-  type IntakeSettingLevel,
   type IntakeSettings,
   type Validation,
 } from "@hercule/contract";
 
-/** One event kind as its plugin declares it. */
-export interface DeclaredEventKindIntake {
-  readonly kind: string;
-  readonly description: string;
-  /** The default of the kind's switch: whether triage may read its events. */
-  readonly availableToTriage: boolean;
-}
-
-/** One signal kind as its plugin declares it. A signal kind declares no default: it starts on. */
-export interface DeclaredSignalKindIntake {
-  /** The qualified kind, such as `github/review-requested`. */
-  readonly kind: string;
-  readonly label: string;
-  readonly description: string;
-}
-
-/** Every kind one plugin declares, in the order it declares them. */
-export interface DeclaredIntakeKinds {
-  readonly eventKinds: ReadonlyArray<DeclaredEventKindIntake>;
-  readonly signalKinds: ReadonlyArray<DeclaredSignalKindIntake>;
-}
-
 /** The overrides of a level where the user chose nothing. */
 export const NO_INTAKE_OVERRIDES: IntakeOverrides = { eventKinds: {}, signalKinds: {} };
-
-/**
- * Returns the settings a plugin gives before the user chooses anything: each
- * event kind is as available to triage as the plugin declared it, and every
- * signal kind is on.
- */
-export const buildDefaultIntakeSettings = (declared: DeclaredIntakeKinds): IntakeSettings => ({
-  eventKinds: declared.eventKinds.map(({ kind, description, availableToTriage }) => ({
-    kind,
-    description,
-    on: availableToTriage,
-    level: "default",
-  })),
-  signalKinds: declared.signalKinds.map(({ kind, label, description }) => ({
-    kind,
-    label,
-    description,
-    on: true,
-    level: "default",
-  })),
-});
 
 /**
  * Returns `settings` with the user's choices of one level on top. A kind with
@@ -75,7 +32,7 @@ export const buildDefaultIntakeSettings = (declared: DeclaredIntakeKinds): Intak
 export const applyIntakeOverrides = (
   settings: IntakeSettings,
   overrides: IntakeOverrides,
-  level: Exclude<IntakeSettingLevel, "default">,
+  level: IntakeOverrideLevel,
 ): IntakeSettings => ({
   eventKinds: settings.eventKinds.map((setting) =>
     Object.hasOwn(overrides.eventKinds, setting.kind)
@@ -93,7 +50,21 @@ export const applyIntakeOverrides = (
 const describeChoices = (what: string, kinds: ReadonlyArray<{ readonly kind: string }>): string =>
   kinds.length === 0
     ? `The plugin declares no ${what}, so there is nothing to choose.`
-    : `Choose from ${kinds.map(({ kind }) => kind).join(", ")}.`;
+    : `Choose ${what} from ${kinds.map(({ kind }) => kind).join(", ")}.`;
+
+/**
+ * Returns the entries of `choices` whose value differs from the value
+ * `settings` gives for the same kind.
+ */
+const keepDifferingChoices = (
+  choices: Readonly<Record<string, boolean>>,
+  settings: ReadonlyArray<{ readonly kind: string; readonly on: boolean }>,
+): Record<string, boolean> =>
+  Object.fromEntries(
+    Object.entries(choices).filter(
+      ([kind, on]) => settings.find((setting) => setting.kind === kind)?.on !== on,
+    ),
+  );
 
 /**
  * Checks one level's write against the value the level below gives, and
@@ -103,44 +74,56 @@ const describeChoices = (what: string, kinds: ReadonlyArray<{ readonly kind: str
  * Fails with `validation`, with one issue per refused kind at
  * `intake.eventKinds.<kind>` or `intake.signalKinds.<kind>`, when the write
  * names a kind that `below` does not list, which means the plugin does not
- * declare it. Nothing is stored in that case.
+ * declare it. The top-level message names the refused kinds and lists the
+ * kinds to choose from once. Nothing is stored in that case.
  */
 export const normalizeIntakeOverrides = (
   written: IntakeOverrides,
   below: IntakeSettings,
 ): Effect.Effect<IntakeOverrides, Validation> =>
   Effect.gen(function* () {
-    const issues = [
-      ...Object.keys(written.eventKinds)
-        .filter((kind) => !below.eventKinds.some((setting) => setting.kind === kind))
-        .map((kind) => ({
+    const refusedEventKinds = Object.keys(written.eventKinds).filter(
+      (kind) => !below.eventKinds.some((setting) => setting.kind === kind),
+    );
+    const refusedSignalKinds = Object.keys(written.signalKinds).filter(
+      (kind) => !below.signalKinds.some((setting) => setting.kind === kind),
+    );
+    if (refusedEventKinds.length > 0 || refusedSignalKinds.length > 0) {
+      const issues = [
+        ...refusedEventKinds.map((kind) => ({
           path: ["intake", "eventKinds", kind],
-          message: `${kind} is not an event kind of this plugin. ${describeChoices("event kinds", below.eventKinds)}`,
+          message: `${kind} is not an event kind of this plugin.`,
         })),
-      ...Object.keys(written.signalKinds)
-        .filter((kind) => !below.signalKinds.some((setting) => setting.kind === kind))
-        .map((kind) => ({
+        ...refusedSignalKinds.map((kind) => ({
           path: ["intake", "signalKinds", kind],
-          message: `${kind} is not a signal kind of this plugin. ${describeChoices("signal kinds", below.signalKinds)}`,
+          message: `${kind} is not a signal kind of this plugin.`,
         })),
-    ];
-    // Every message is also in the top-level message, which is the line the
-    // CLI prints.
-    if (issues.length > 0) {
-      const message = issues.map((issue) => issue.message).join(" ");
+      ];
+      // The top-level message is the line the CLI prints, so it lists the
+      // choices once instead of repeating them in every issue.
+      const message = [
+        `The plugin does not declare ${[...refusedEventKinds, ...refusedSignalKinds].join(", ")}.`,
+        ...(refusedEventKinds.length > 0 ? [describeChoices("event kinds", below.eventKinds)] : []),
+        ...(refusedSignalKinds.length > 0
+          ? [describeChoices("signal kinds", below.signalKinds)]
+          : []),
+      ].join(" ");
       return yield* Effect.fail(createValidationError(issues, message));
     }
-    const differing = (
-      choices: Readonly<Record<string, boolean>>,
-      settings: ReadonlyArray<{ readonly kind: string; readonly on: boolean }>,
-    ): Record<string, boolean> =>
-      Object.fromEntries(
-        Object.entries(choices).filter(
-          ([kind, on]) => settings.find((setting) => setting.kind === kind)?.on !== on,
-        ),
-      );
     return {
-      eventKinds: differing(written.eventKinds, below.eventKinds),
-      signalKinds: differing(written.signalKinds, below.signalKinds),
+      eventKinds: keepDifferingChoices(written.eventKinds, below.eventKinds),
+      signalKinds: keepDifferingChoices(written.signalKinds, below.signalKinds),
     };
   });
+
+/**
+ * Builds the error that refuses an Intake write for a plugin that did not
+ * load. Such a plugin registered no event source, so its kinds are unknown
+ * and any choice would look like an unknown kind.
+ */
+export const createPluginNotLoadedError = (pluginId: string): Validation => {
+  const message =
+    `The plugin ${pluginId} failed to load, so its Intake settings cannot be changed. ` +
+    "Fix the failure its status reports and restart the controller.";
+  return createValidationError([{ path: [], message }], message);
+};

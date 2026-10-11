@@ -31,7 +31,7 @@ import { SearchIcon } from "../../icons/search";
 import { EventPane, type EventPaneHandle } from "./event-pane";
 import { EverythingList } from "./everything-list";
 import { IntakeBar, IntakeSplit, IntakeViewSwitcher } from "./intake-frame";
-import { isTextField } from "./is-text-field";
+import { isTextField } from "../../app/text-field";
 import { useIntakeSplit } from "./use-intake-split";
 import { useIntakeTabs } from "./use-intake-tabs";
 

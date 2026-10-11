@@ -51,6 +51,14 @@ export const IntakeSettingLevel = Schema.Literals(["default", "plugin", "connect
 export type IntakeSettingLevel = Schema.Schema.Type<typeof IntakeSettingLevel>;
 
 /**
+ * A level the user can write: every level except `default`, which only the
+ * plugin's code sets.
+ */
+export const IntakeOverrideLevel = Schema.Literals(["plugin", "connection"]);
+
+export type IntakeOverrideLevel = Schema.Schema.Type<typeof IntakeOverrideLevel>;
+
+/**
  * One event kind and whether triage may read its events. A plugin declares
  * no label for an event kind, so its description is the only text.
  */

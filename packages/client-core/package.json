@@ -6,16 +6,26 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
+    "./graph-layout": "./src/graph-layout.ts",
+    "./graph-model": "./src/graph-model.ts",
     "./list-time": "./src/list-time.ts",
+    "./node-details": "./src/node-details.ts",
+    "./run-marks": "./src/run-marks.ts",
+    "./run-timeline": "./src/run-timeline.ts",
+    "./timeline-limit": "./src/timeline-limit.ts",
+    "./workflow-detail-rows": "./src/workflow-detail-rows.ts",
     "./workflow-rows": "./src/workflow-rows.ts",
     "./testing": "./src/testing.ts",
     "./threads/testing": "./src/threads/workspaces.testing.ts",
     "./workflow-source/testing": "./src/workflow-source.testing.ts"
   },
   "dependencies": {
+    "@dagrejs/dagre": "3.1.1",
     "@hercule/contract": "workspace:*",
     "@tanstack/query-core": "5.102.8",
+    "decode-named-character-reference": "1.3.0",
     "effect": "4.0.0-rc.112",
+    "marked": "18.0.14",
     "yaml": "2.9.1"
   }
 }

@@ -71,8 +71,12 @@
  *    each, and the script opens Workflows once, so one more plain launch
  *    opens on the workflow list. It measures memory and idle with the list
  *    open, what opening the list reads and how long that takes, and how many
- *    reads one `run` push causes and how long they take (see
- *    `perf-workflows.ts`). Pass `--workflows-only` to skip steps 2 to 6:
+ *    reads one `run` push causes and how long they take. One more workflow
+ *    has 300 runs spread over yesterday; the script then opens it beside
+ *    the list, and a last launch measures memory and idle with it open, its
+ *    virtualized Runs list, the reads and main thread time of a push on its
+ *    Runs list and on the timeline of its 300-run day, and drawing that day
+ *    (see `perf-workflows.ts`). Pass `--workflows-only` to skip steps 2 to 6:
  *
  *        pnpm --filter @hercule/desktop perf -- --workflows-only
  *
@@ -224,8 +228,12 @@ import {
 } from "./perf-intake.ts";
 import { measureSubagentLaunch, reportSubagentLaunch } from "./perf-subagents.ts";
 import {
+  measureOpenWorkflowWork,
   measureWorkflowWork,
+  openWorkflowOnce,
   openWorkflowsOnce,
+  pickPushRound,
+  reportOpenWorkflowWork,
   reportWorkflowWork,
   seedWorkflows,
 } from "./perf-workflows.ts";
@@ -1133,7 +1141,8 @@ function reportLaunch(measured: MeasuredLaunch): void {
 }
 
 /**
- * Whether the run measures only the workflow list (see `perf-workflows.ts`),
+ * Whether the run measures only Workflows, the list and one open workflow
+ * (see `perf-workflows.ts`),
  * on 40 threads, and skips every other launch, which take long.
  */
 const WORKFLOWS_ONLY = process.argv.includes("--workflows-only");
@@ -1249,9 +1258,20 @@ const launches = await runWithThreadFixture(async (fixture) => {
     const measured = WORKFLOWS_ONLY ? null : await measureLaunches(fixture, userDataDir);
     // The workflow list comes last, because its 50 runs stay live, and a
     // later `prepareLaunch` would restart the controller under them.
-    const runIds = await seedWorkflows(fixture);
+    const { liveRunIds, openWorkflowId } = await seedWorkflows(fixture);
     await openWorkflowsOnce(userDataDir);
-    reportWorkflowWork(await measureWorkflowWork(userDataDir, fixture, runIds));
+    reportWorkflowWork(
+      await measureWorkflowWork(userDataDir, fixture, pickPushRound(liveRunIds, 0)),
+    );
+    await openWorkflowOnce(userDataDir, openWorkflowId);
+    reportOpenWorkflowWork(
+      await measureOpenWorkflowWork(
+        userDataDir,
+        fixture,
+        pickPushRound(liveRunIds, 1),
+        pickPushRound(liveRunIds, 2),
+      ),
+    );
     return measured;
   } finally {
     rmSync(userDataDir, { recursive: true, force: true });

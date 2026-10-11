@@ -53,31 +53,33 @@ export interface IntakeSearch {
 const isEventHandling = (value: unknown): value is EventHandling =>
   EVENT_HANDLINGS.some((handling) => handling === value);
 
+/** Checks whether `value` is a non-empty string of at most `maxLength` characters. */
+const isBoundedText = (value: unknown, maxLength: number): value is string =>
+  typeof value === "string" && value !== "" && value.length <= maxLength;
+
 /**
  * Returns Intake's search params from the URL's. A `view` that is not Later,
  * Done or Everything, a `signal` that is not an id, an `event` that is not a
  * whole number from 1, a `text` or a `source` that is empty or too long, and a
  * `handling` that is not one the controller filters on are dropped.
+ *
+ * A dropped param is returned as `undefined` rather than left out, because
+ * the router lays the returned params over the URL's: a param left out
+ * would keep the URL's value.
  */
 const validateIntakeSearch = (search: Record<string, unknown>): IntakeSearch => ({
-  ...(search.view === "later" || search.view === "done" || search.view === "everything"
-    ? { view: search.view }
-    : {}),
-  ...(isId(search.signal) ? { signal: search.signal } : {}),
-  ...(typeof search.event === "number" && Number.isSafeInteger(search.event) && search.event >= 1
-    ? { event: search.event }
-    : {}),
-  ...(typeof search.text === "string" &&
-  search.text !== "" &&
-  search.text.length <= MAX_SEARCH_TEXT_LENGTH
-    ? { text: search.text }
-    : {}),
-  ...(isEventHandling(search.handling) ? { handling: search.handling } : {}),
-  ...(typeof search.source === "string" &&
-  search.source !== "" &&
-  search.source.length <= MAX_EVENT_SOURCE_LENGTH
-    ? { source: search.source }
-    : {}),
+  view:
+    search.view === "later" || search.view === "done" || search.view === "everything"
+      ? search.view
+      : undefined,
+  signal: isId(search.signal) ? search.signal : undefined,
+  event:
+    typeof search.event === "number" && Number.isSafeInteger(search.event) && search.event >= 1
+      ? search.event
+      : undefined,
+  text: isBoundedText(search.text, MAX_SEARCH_TEXT_LENGTH) ? search.text : undefined,
+  handling: isEventHandling(search.handling) ? search.handling : undefined,
+  source: isBoundedText(search.source, MAX_EVENT_SOURCE_LENGTH) ? search.source : undefined,
 });
 
 /**

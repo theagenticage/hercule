@@ -1,0 +1,197 @@
+/* The open workflow: its pane, its lead, its tab band and its tables, the
+   Bureau book's "Open workflow" rules (system.css), with their selectors.
+   The rows draw with the workflow list's table rules (workflow-list.css),
+   which the Workflows layout loads. Each departure from the book is
+   explained in a comment. */
+
+/* The open workflow scrolls as one: its lead, its graph, then the open
+   tab's table. Not in the book: `position: relative`, so the Runs list can
+   measure where it starts in the pane, which its virtualizer needs. */
+.open-pane {
+  --pad: 24px;
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 0 var(--pad) 40px;
+  container: open-pane / inline-size;
+}
+
+/* An opaque band as tall as the floating header, so the pills never float
+   over half a line. */
+.open-pane > .pill-room {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 calc(-1 * var(--pad));
+  padding: 56px var(--pad) 0;
+  background: var(--surface);
+}
+
+/* The workflow's name, as the page's heading, with its switch at the end,
+   as a settings section heading carries one. */
+.open-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0 6px;
+}
+.open-name > h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.open-switch {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.open-gist {
+  max-width: 700px;
+  margin: 0 0 4px;
+  font-size: var(--t-14);
+  line-height: 1.55;
+}
+/* The line under the description says what the switch does, because
+   "Enabled" alone does not. */
+.open-hint {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* Not in the book. Why a switch's save failed, in Settings' error type
+   (`.set-err`): under the name for the workflow's switch, and under its row
+   for a trigger's. */
+.open-err {
+  margin: 0 0 8px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.open-err--row {
+  margin: 4px 8px 8px;
+  text-align: right;
+}
+
+/* Chips in a wrapping row under a heading, as the Agent page lists tool
+   families. */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* Not in the book, whose chips are short. A chip is never wider than the
+   row: its text is cut short with an ellipsis, and its tooltip holds the
+   whole text. */
+.chip-row > .chip {
+  max-width: 100%;
+}
+.chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip--fail {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+
+/* The tab bar and the open tab's column heads stick under the pill room;
+   the hairline above the tabs ends the graph. */
+.tab-band {
+  position: sticky;
+  top: 56px;
+  z-index: 1;
+  margin: 0 calc(-1 * var(--pad));
+  padding: 0 var(--pad);
+  background: var(--surface);
+}
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 10px 0 8px;
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+/* Tools that pick how the open tab shows, such as List | Timeline, sit at
+   the bar's right end. */
+.tab-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+/* The open workflow's tables: Runs, Triggers and Inputs, each with its own
+   columns. */
+:is(.table-heads, .table-row).tbl-runs {
+  grid-template-columns: 14px minmax(0, 2fr) minmax(0, 1fr) 64px 72px;
+}
+:is(.table-heads, .table-row).tbl-triggers {
+  grid-template-columns: 14px minmax(0, 1fr) 104px minmax(0, 1.4fr) minmax(0, 1.2fr) 36px;
+}
+:is(.table-heads, .table-row).tbl-inputs {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px minmax(0, 1.4fr);
+}
+/* A cancelled or starting run has no mark: its words take the mark's
+   column too. */
+.status-text--no-mark {
+  grid-column: span 2;
+}
+/* The room of the icon a run started by an actor does not have, so every
+   name in Started by starts at the same place. */
+.no-icon {
+  flex: none;
+  width: 12px;
+}
+/* Not in the book. An input's default is JSON, so it is in mono. */
+.table-code {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+}
+/* Under the sticky column heads, whose hairline is already there, the first
+   row draws none. The first row is the tab panel list's first item, or sits
+   inside that item. */
+.open-pane [role="tabpanel"] > [role="list"] > .table-row:first-child::before,
+.open-pane [role="tabpanel"] > [role="list"] > :first-child > .table-row::before {
+  border-top-color: transparent;
+}
+/* Not in the book, whose tables are never empty. An empty tab says so in
+   muted ink, where its first row would be. */
+.table-empty {
+  margin: 0;
+  padding: 12px 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* The source is the one thing on the page a user may want to copy. */
+.open-pane .codeblock {
+  margin-top: 12px;
+  user-select: text;
+}
+
+/* A narrow pane drops who started each run and what each trigger does. */
+@container open-pane (width < 560px) {
+  :is(.table-heads, .table-row).tbl-runs {
+    grid-template-columns: 14px minmax(0, 1fr) 64px 72px;
+  }
+  :is(.table-heads, .table-row).tbl-triggers {
+    grid-template-columns: 14px minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.2fr) 36px;
+  }
+  :is(.col-by, .col-does) {
+    display: none;
+  }
+}

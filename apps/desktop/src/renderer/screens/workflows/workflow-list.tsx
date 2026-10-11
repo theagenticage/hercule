@@ -1,9 +1,16 @@
 /**
- * The workflow list as a table: the column heads in a sticky band as tall
- * as the floating header, then each group's heading and its rows,
- * virtualized (spec 17 §Workflows, "The list").
+ * The workflow list at one of its two widths (spec 17 §Workflows, "The
+ * list"):
+ *
+ * - the table, while no workflow is open: the column heads in a sticky band
+ *   as tall as the floating header, then each group's heading and its
+ *   one-line rows;
+ * - the column, beside the open workflow: the search field in that band,
+ *   then each group's heading and its two-line rows.
+ *
+ * The items are virtualized, each drawn at a fixed height.
  */
-import { useRef, type JSX } from "react";
+import { useRef, type JSX, type ReactNode } from "react";
 import {
   pickWorkflowFocusFallback,
   type WorkflowListItem,
@@ -12,34 +19,53 @@ import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
 import { VirtualList } from "../virtual-list";
 import {
   GROUP_HEADING_HEIGHT,
+  WORKFLOW_COLUMN_ROW_HEIGHT,
+  WORKFLOW_COLUMN_ROW_LEADING,
   WORKFLOW_ROW_HEIGHT,
+  WorkflowColumnRow,
   WorkflowGroupHeading,
-  WorkflowTableHeads,
   WorkflowTableRow,
 } from "./workflow-list-rows";
 import "./workflow-list.css";
 
-/**
- * The band above the rows: the floating header's 56px, which no row scrolls
- * into view under, then the 32px column heads.
- */
-const TABLE_HEAD = { height: 88, content: <WorkflowTableHeads /> };
+/** The list's two widths: the table fills the pane, and the column sits beside the open workflow. */
+export type WorkflowListWidth = "table" | "column";
 
 /**
- * Returns the space above the group heading at `index`, in CSS pixels. The
- * first heading sits 14px under the column heads, and every other one 22px
- * under the row before it.
+ * The height of the band above the rows, in CSS pixels: the floating
+ * header's 56px, which no row scrolls into view under, then the table's
+ * 32px column heads, or the column's 32px search field and 8px under it.
  */
-const computeHeadingLeading = (index: number): number => (index === 0 ? 14 : 22);
+const HEAD_HEIGHT: Readonly<Record<WorkflowListWidth, number>> = { table: 88, column: 96 };
 
-/** Returns the height of an item with the space above it, in CSS pixels. */
-const computeItemHeight = (item: WorkflowListItem, index: number): number =>
+/**
+ * Returns the space above the group heading at `index` in the table, in CSS
+ * pixels. The first heading sits 14px under the column heads, and every
+ * other one 22px under the row before it.
+ */
+const computeTableHeadingLeading = (index: number): number => (index === 0 ? 14 : 22);
+
+/**
+ * Returns the space above the group heading at `index` in the column, in
+ * CSS pixels: the sidebar's spacing, 8px under the search field for the
+ * first heading and 16px under the row before it for every other one.
+ */
+const computeColumnHeadingLeading = (index: number): number => (index === 0 ? 8 : 16);
+
+/** Returns the height of an item in the table with the space above it, in CSS pixels. */
+const computeTableItemHeight = (item: WorkflowListItem, index: number): number =>
   item.kind === "group-header"
-    ? computeHeadingLeading(index) + GROUP_HEADING_HEIGHT
+    ? computeTableHeadingLeading(index) + GROUP_HEADING_HEIGHT
     : WORKFLOW_ROW_HEIGHT;
 
-/** Returns the element that draws `item`, with its times shown in `timezone`. */
-const renderItem = (
+/** Returns the height of an item in the column with the space above it, in CSS pixels. */
+const computeColumnItemHeight = (item: WorkflowListItem, index: number): number =>
+  item.kind === "group-header"
+    ? computeColumnHeadingLeading(index) + GROUP_HEADING_HEIGHT
+    : WORKFLOW_COLUMN_ROW_LEADING + WORKFLOW_COLUMN_ROW_HEIGHT;
+
+/** Returns the element that draws `item` in the table, with its times shown in `timezone`. */
+const renderTableItem = (
   item: WorkflowListItem,
   index: number,
   onScreen: boolean,
@@ -49,7 +75,7 @@ const renderItem = (
     <WorkflowGroupHeading
       key={item.key}
       itemKey={item.key}
-      leading={computeHeadingLeading(index)}
+      leading={computeTableHeadingLeading(index)}
       title={item.title}
       count={item.count}
       isNeedsYou={item.group === "needsYou"}
@@ -77,38 +103,81 @@ const renderItem = (
     />
   );
 
+/** Returns the element that draws `item` in the column, with its time shown in `timezone`. */
+const renderColumnItem = (
+  item: WorkflowListItem,
+  index: number,
+  onScreen: boolean,
+  timezone: string,
+): JSX.Element =>
+  item.kind === "group-header" ? (
+    <WorkflowGroupHeading
+      key={item.key}
+      itemKey={item.key}
+      leading={computeColumnHeadingLeading(index)}
+      title={item.title}
+      count={item.count}
+      isNeedsYou={item.group === "needsYou"}
+    />
+  ) : (
+    <WorkflowColumnRow
+      key={item.key}
+      itemKey={item.key}
+      workflowId={item.row.id}
+      name={item.row.name}
+      mark={item.row.mark}
+      isOff={item.row.isOff}
+      statusText={item.row.statusText}
+      statusTone={item.row.statusTone}
+      lastRunAt={item.row.lastRunAt}
+      timezone={timezone}
+      onScreen={onScreen}
+    />
+  );
+
 /**
- * Renders `items` as the table, with its times shown in `timezone`. With no
- * items, it says "No workflows yet" when `hasWorkflows` is false, and "No
- * workflows match" when the filter and the search hide every workflow.
+ * Renders `items` at `width`, with its times shown in `timezone`, under
+ * `head`: the column heads over the table, the search field over the
+ * column. With no items, it says "No workflows yet" when `hasWorkflows` is
+ * false, and "No workflows match" when the filter and the search hide every
+ * workflow.
+ *
+ * The caller mounts the list afresh when `width` changes, because every
+ * item's height changes with it.
  */
 export function WorkflowList({
+  width,
   items,
   hasWorkflows,
   timezone,
+  head,
 }: {
+  readonly width: WorkflowListWidth;
   readonly items: ReadonlyArray<WorkflowListItem>;
   readonly hasWorkflows: boolean;
   readonly timezone: string;
+  readonly head: ReactNode;
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement>(null);
-  // The floating header keeps its search pill clear of a classic scroll bar
-  // (floating-header.css).
-  const showsScrollbar = useShowsClassicScrollbar(scrollRef);
+  // Over the table, the floating header keeps its search pill clear of a
+  // classic scroll bar (floating-header.css). The column's scroll bar is not
+  // at the pane's right edge, so the header there does not move.
+  const showsScrollbar = useShowsClassicScrollbar(scrollRef) && width === "table";
+  const isTable = width === "table";
   return (
     <VirtualList
       scrollRef={scrollRef}
-      className={
-        showsScrollbar
-          ? "workflow-list workflow-list--table has-scrollbar"
-          : "workflow-list workflow-list--table"
-      }
+      className={`workflow-list workflow-list--${width}${showsScrollbar ? " has-scrollbar" : ""}`}
       aria-label="Workflows"
       items={items}
-      computeItemHeight={computeItemHeight}
-      renderItem={(item, index, onScreen) => renderItem(item, index, onScreen, timezone)}
+      computeItemHeight={isTable ? computeTableItemHeight : computeColumnItemHeight}
+      renderItem={(item, index, onScreen) =>
+        isTable
+          ? renderTableItem(item, index, onScreen, timezone)
+          : renderColumnItem(item, index, onScreen, timezone)
+      }
       pickFocusFallback={pickWorkflowFocusFallback}
-      head={TABLE_HEAD}
+      head={{ height: HEAD_HEIGHT[width], content: head }}
     >
       {items.length === 0 ? (
         <p className="workflow-list-empty">

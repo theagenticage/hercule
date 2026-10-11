@@ -1753,3 +1753,19 @@ describe("Intake's Everything view", () => {
     expect(getEventList().querySelector(".ask-check, .ask-acts")).toBeNull();
   });
 });
+
+describe("Intake's search params", () => {
+  it("drops a view and a signal it does not know", async () => {
+    const { router } = await openIntake("/intake?view=archived&signal=not-an-id");
+
+    expect(router.state.matches.at(-1)!.search).toEqual({});
+  });
+
+  it("drops an event, a text, a source and a handling it does not accept", async () => {
+    const { router } = await openIntake(
+      "/intake?view=everything&event=0&text=&source=&handling=ignored",
+    );
+
+    expect(router.state.matches.at(-1)!.search).toEqual({ view: "everything" });
+  });
+});

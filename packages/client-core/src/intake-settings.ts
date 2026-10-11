@@ -11,6 +11,7 @@
  */
 import type {
   Connection,
+  IntakeOverrideLevel,
   IntakeOverrides,
   IntakeSettingLevel,
   IntakeSettings,
@@ -21,15 +22,8 @@ import { readJsonObject } from "./json-shape";
 /** The two lists of kinds a plugin's Intake settings hold. */
 export type IntakeKindList = keyof IntakeOverrides;
 
-/**
- * The level a segment edits: the plugin's own, for all its Connections, or
- * one Connection's. The controller also reports `default`, which no segment
- * edits.
- */
-export type IntakeEditedLevel = Exclude<IntakeSettingLevel, "default">;
-
 /** What a row of either list holds: the kind, and the value in effect with the level it comes from. */
-interface IntakeKindValue {
+export interface IntakeKindValue {
   readonly kind: string;
   readonly on: boolean;
   readonly level: IntakeSettingLevel;
@@ -45,10 +39,15 @@ export interface IntakeChange {
   readonly on: boolean | null;
 }
 
-/** One segment of the control above a plugin's lists. */
-export type IntakeSegment =
-  | { readonly target: "plugin"; readonly label: string }
-  | { readonly target: "connection"; readonly connectionId: string; readonly label: string };
+/**
+ * One segment of the control above a plugin's lists: all the plugin's
+ * Connections when `connectionId` is `undefined`, else the one Connection it
+ * names.
+ */
+export interface IntakeSegment {
+  readonly connectionId: string | undefined;
+  readonly label: string;
+}
 
 /**
  * Returns the plugins that get a section on Settings > Intake: those that
@@ -65,7 +64,7 @@ export const listPluginsWithIntake = (
  * a Connection names its type, so the two are matched on that name. A type's
  * name is never parsed for the plugin's id.
  */
-export const listPluginConnections = (
+const listPluginConnections = (
   plugin: PluginDetail,
   connections: ReadonlyArray<Connection>,
 ): ReadonlyArray<Connection> => {
@@ -90,12 +89,8 @@ export const listIntakeSegments = (
   const own = listPluginConnections(plugin, connections);
   if (own.length === 0) return [];
   return [
-    { target: "plugin", label: `All ${plugin.displayName} connections` },
-    ...own.map(({ id, label }): IntakeSegment => ({
-      target: "connection",
-      connectionId: id,
-      label,
-    })),
+    { connectionId: undefined, label: `All ${plugin.displayName} connections` },
+    ...own.map(({ id, label }): IntakeSegment => ({ connectionId: id, label })),
   ];
 };
 
@@ -122,13 +117,13 @@ export const describeIntakeSource = (
  */
 export const canResetIntakeRow = (
   row: Pick<IntakeKindValue, "level">,
-  editedLevel: IntakeEditedLevel,
+  editedLevel: IntakeOverrideLevel,
 ): boolean => row.level === editedLevel;
 
 /** Returns the choices stored at `editedLevel`: the rows whose value comes from that level. */
 const readStoredChoices = (
   rows: ReadonlyArray<IntakeKindValue>,
-  editedLevel: IntakeEditedLevel,
+  editedLevel: IntakeOverrideLevel,
 ): Record<string, boolean> =>
   Object.fromEntries(
     rows.filter((row) => row.level === editedLevel).map((row) => [row.kind, row.on]),
@@ -144,7 +139,7 @@ const readStoredChoices = (
  */
 export const buildIntakeOverrides = (
   settings: IntakeSettings,
-  editedLevel: IntakeEditedLevel,
+  editedLevel: IntakeOverrideLevel,
   change: IntakeChange,
 ): IntakeOverrides => {
   const stored = {
@@ -168,7 +163,7 @@ export const buildIntakeOverrides = (
  */
 export const applyIntakeChange = (
   settings: IntakeSettings,
-  editedLevel: IntakeEditedLevel,
+  editedLevel: IntakeOverrideLevel,
   change: IntakeChange,
 ): IntakeSettings => {
   if (change.on === null) return settings;
