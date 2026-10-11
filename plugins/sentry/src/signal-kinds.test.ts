@@ -311,15 +311,15 @@ describe("the declarations of the signal kinds", () => {
     ]);
   });
 
-  it("is decided by the user's own resolving and archiving, with the matching answer", () => {
+  it("is decided only when the user did the resolving or archiving, with the matching answer", () => {
     for (const kind of SENTRY_SIGNAL_KINDS) {
       expect(
         kind.ends
           .filter((end) => end.resolution === "decided")
-          .map((end) => [end.eventKind, end.actionId]),
+          .map((end) => [end.eventKind, end.condition, end.actionId]),
       ).toEqual([
-        ["sentry.issue.resolved", "resolve"],
-        ["sentry.issue.archived", "archive"],
+        ["sentry.issue.resolved", "event.payload.byYou", "resolve"],
+        ["sentry.issue.archived", "event.payload.byYou", "archive"],
       ]);
     }
   });

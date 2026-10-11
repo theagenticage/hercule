@@ -1174,6 +1174,25 @@ describe("Connections > configuring a setting that loads its choices", () => {
       `/api/v1/connections/${DESK.id}/choices/team`,
     ]);
   });
+
+  it("leaves every setting out of the setup form, and asks for no choices", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp([], {
+      "GET /api/v1/plugins": { body: [...CATALOG, buildPlugin("deskfront", DESK_TYPE)] },
+    });
+
+    await user.click(
+      within(await findTypeOffer("Deskfront")).getByRole("button", { name: "Connect" }),
+    );
+
+    // Setup asks for the credential alone. The settings, the ones that load
+    // choices and the plain note, are all edited under Configure.
+    const form = getFormWithField("Access token");
+    expect(within(form).queryByLabelText("Team")).toBeNull();
+    expect(within(form).queryByLabelText("Projects")).toBeNull();
+    expect(within(form).queryByLabelText("Note")).toBeNull();
+    expect(api.calls.filter((call) => call.path.includes("/choices/"))).toEqual([]);
+  });
 });
 
 describe("Connections > configuring how often a connection is polled", () => {
