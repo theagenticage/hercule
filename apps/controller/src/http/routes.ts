@@ -64,7 +64,6 @@ import {
   ProfileRemovalLayer,
   Provisioning,
   ProvisioningLayer,
-  TextGeneration,
   TextGenerationLayer,
   Retirement,
   RetirementLayer,
@@ -757,10 +756,8 @@ const TextGenerationStatusLayer = Layer.mergeAll(
  * state a session's stream is coalesced in, and no promotion phase, and would
  * write over the same rows the drivers use. The handlers get them from the boot.
  *
- * The list leaves `TextGeneration` for its caller to provide (`buildOperationLayers`),
- * so a test can put a fake in its place. The text generation status is provided
- * once, around the whole list, so `controller.read` reads the last failure the
- * text generation service writes.
+ * The text generation status is provided once, around the whole list, so
+ * `controller.read` reads the last failure the text generation service writes.
  */
 const operationServices = Layer.mergeAll(
   AuthLayer,
@@ -873,19 +870,11 @@ const operationServices = Layer.mergeAll(
   AttachmentServiceLayer,
 );
 
-/**
- * Builds the operation layers on top of the given `TextGeneration` layer.
- * The production controller uses `operationLayers` below; a test passes a
- * fake, so no test needs a runner with a model to see a generated title.
- */
-export const buildOperationLayers = <E, R>(textGeneration: Layer.Layer<TextGeneration, E, R>) =>
-  operationServices.pipe(
-    Layer.provideMerge(textGeneration),
-    Layer.provide(TextGenerationStatusLayer),
-  );
-
-/** Every service an operation uses, with text generation as the controller runs it. */
-export const operationLayers = buildOperationLayers(TextGenerationLayer);
+/** Every service an operation uses. */
+export const operationLayers = operationServices.pipe(
+  Layer.provideMerge(TextGenerationLayer),
+  Layer.provide(TextGenerationStatusLayer),
+);
 
 /** The handlers of every group, which `HttpApiBuilder.layer(api)` needs to build routes. */
 export const handlerLayers = Layer.mergeAll(

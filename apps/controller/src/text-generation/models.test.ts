@@ -6,19 +6,15 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { ProviderDefinition } from "@hercule/plugin-host";
-import type { ProbeResult } from "@hercule/protocol";
-import { nowIso } from "../db";
+import { TEXT_GENERATION_CAPABILITY, type ProbeResult } from "@hercule/protocol";
+import { nowIso, uuidFromString } from "../db";
 import { buildPluginStack, buildProviderDefinition, createPluginFixture } from "../plugins/testing";
 import { PluginHost } from "../plugins";
 import { providerRepository } from "../providers";
 import { runnerRepository } from "../runners";
 import { hashToken } from "../credentials";
 import { Settings, SettingsLayer } from "../settings";
-import {
-  AUTOMATIC_PROVIDER_ORDER,
-  TextGenerationModels,
-  TextGenerationModelsLayer,
-} from "./models";
+import { TextGenerationModels, TextGenerationModelsLayer } from "./models";
 
 const withSuggestion = (id: string, model: string): ProviderDefinition => ({
   ...buildProviderDefinition(id, { token: "t" }),
@@ -45,11 +41,19 @@ const probed = (
   })),
 });
 
-/** A fleet of two codex-like providers and three runners, arranged by `arrange`. */
+/** What a runner added by `addRunner` is like. Without traits it can take the call. */
+interface RunnerTraits {
+  readonly reserved?: boolean;
+  readonly online?: boolean;
+  /** Whether the runner negotiated the text generation capability at hello. */
+  readonly capable?: boolean;
+}
+
+/** A fleet of one instance per automatic provider, arranged by `arrange`. */
 const run = <A>(
   arrange: (fleet: {
     readonly instances: Readonly<Record<string, string>>;
-    readonly addRunner: (reserved: boolean) => Effect.Effect<string, never, never>;
+    readonly addRunner: (traits?: RunnerTraits) => Effect.Effect<string>;
     readonly snapshot: (
       instance: string,
       runner: string,
@@ -73,6 +77,7 @@ const run = <A>(
       );
       const instances = yield* providerRepository;
       const runners = yield* runnerRepository;
+      const sql = yield* SqlClient.SqlClient;
       const at = yield* nowIso;
       const ids: Record<string, string> = {};
       for (const providerId of ["codex", "pi", "claude-code"]) {
@@ -85,19 +90,22 @@ const run = <A>(
       }
       return yield* arrange({
         instances: ids,
-        addRunner: (reserved) =>
-          Effect.map(
-            runners.insert({
+        addRunner: (traits = {}) =>
+          Effect.gen(function* () {
+            const runner = yield* runners.insert({
               name: `runner-${crypto.randomUUID().slice(0, 4)}`,
-              connectivity: "online",
+              connectivity: traits.online === false ? "offline" : "online",
               lifecycle: "active",
-              reserved,
+              reserved: traits.reserved ?? false,
               labels: [],
               credentialHash: hashToken(crypto.randomUUID()),
               at,
-            }),
-            (runner) => runner.id,
-          ).pipe(Effect.orDie),
+            });
+            const capabilities = traits.capable === false ? [] : [TEXT_GENERATION_CAPABILITY];
+            yield* sql`UPDATE runners SET negotiated_capabilities = ${JSON.stringify(capabilities)}
+              WHERE id = ${uuidFromString(runner.id)}`;
+            return runner.id;
+          }).pipe(Effect.orDie),
         snapshot: (instance, runner, result) =>
           instances.recordSnapshot(instance, runner, result, at).pipe(Effect.orDie),
       });
@@ -107,14 +115,10 @@ const run = <A>(
 const resolve = Effect.flatMap(TextGenerationModels, (models) => models.resolve());
 
 describe("automatic", () => {
-  it("tries codex, then pi, then claude-code", () => {
-    expect(AUTOMATIC_PROVIDER_ORDER).toEqual(["codex", "pi", "claude-code"]);
-  });
-
   it("picks the first provider whose suggested model a logged-in runner offers", async () => {
-    const choice = await run(({ instances, addRunner, snapshot }) =>
+    const target = await run(({ instances, addRunner, snapshot }) =>
       Effect.gen(function* () {
-        const runner = yield* addRunner(false);
+        const runner = yield* addRunner();
         yield* snapshot(instances["codex"]!, runner, probed("ok", "something-else"));
         yield* snapshot(instances["pi"]!, runner, probed("ok", "pi-small"));
         yield* snapshot(instances["claude-code"]!, runner, probed("ok", "haiku"));
@@ -122,19 +126,19 @@ describe("automatic", () => {
       }),
     );
 
-    expect(choice).toEqual({
+    expect(target).toMatchObject({
       _tag: "resolved",
-      instanceId: expect.any(String) as unknown,
-      providerId: "pi",
+      instance: { providerId: "pi" },
       model: "pi-small",
+      runnerIds: [expect.any(String) as unknown],
     });
   });
 
   it("skips a login that expired and a snapshot on a reserved runner", async () => {
-    const choice = await run(({ instances, addRunner, snapshot }) =>
+    const target = await run(({ instances, addRunner, snapshot }) =>
       Effect.gen(function* () {
-        const open = yield* addRunner(false);
-        const reserved = yield* addRunner(true);
+        const open = yield* addRunner();
+        const reserved = yield* addRunner({ reserved: true });
         yield* snapshot(instances["codex"]!, open, probed("unauthenticated", "codex-mini"));
         yield* snapshot(instances["pi"]!, reserved, probed("ok", "pi-small"));
         yield* snapshot(instances["claude-code"]!, open, probed("ok", "haiku"));
@@ -142,42 +146,92 @@ describe("automatic", () => {
       }),
     );
 
-    expect(choice).toMatchObject({ _tag: "resolved", providerId: "claude-code", model: "haiku" });
+    expect(target).toMatchObject({
+      _tag: "resolved",
+      instance: { providerId: "claude-code" },
+      model: "haiku",
+    });
+  });
+
+  it("skips an instance that is logged in only on an offline runner", async () => {
+    const target = await run(({ instances, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const offline = yield* addRunner({ online: false });
+        const online = yield* addRunner();
+        yield* snapshot(instances["codex"]!, offline, probed("ok", "codex-mini"));
+        yield* snapshot(instances["pi"]!, online, probed("ok", "pi-small"));
+        return yield* resolve.pipe(Effect.orDie);
+      }),
+    );
+
+    expect(target).toMatchObject({ _tag: "resolved", instance: { providerId: "pi" } });
+  });
+
+  it("skips an instance that is logged in only on a runner without the text generation capability", async () => {
+    const target = await run(({ instances, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const old = yield* addRunner({ capable: false });
+        const current = yield* addRunner();
+        yield* snapshot(instances["codex"]!, old, probed("ok", "codex-mini"));
+        yield* snapshot(instances["pi"]!, current, probed("ok", "pi-small"));
+        return yield* resolve.pipe(Effect.orDie);
+      }),
+    );
+
+    expect(target).toMatchObject({ _tag: "resolved", instance: { providerId: "pi" } });
+  });
+
+  it("lists every runner that could take the call", async () => {
+    const [target, expected] = await run(({ instances, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const first = yield* addRunner();
+        const second = yield* addRunner();
+        const offline = yield* addRunner({ online: false });
+        for (const runner of [first, second, offline]) {
+          yield* snapshot(instances["codex"]!, runner, probed("ok", "codex-mini"));
+        }
+        return [yield* resolve.pipe(Effect.orDie), [first, second]] as const;
+      }),
+    );
+
+    expect(target._tag === "resolved" ? [...target.runnerIds].sort() : []).toEqual(
+      [...expected].sort(),
+    );
   });
 
   it("is unresolved, with a message to act on, when nothing matches", async () => {
-    const choice = await run(({ instances, addRunner, snapshot }) =>
+    const target = await run(({ instances, addRunner, snapshot }) =>
       Effect.gen(function* () {
-        const runner = yield* addRunner(false);
+        const runner = yield* addRunner();
         yield* snapshot(instances["codex"]!, runner, probed("ok", "other"));
         return yield* resolve.pipe(Effect.orDie);
       }),
     );
 
-    expect(choice).toMatchObject({
+    expect(target).toMatchObject({
       _tag: "unresolved",
       message: expect.stringContaining("choose a model in Settings") as unknown,
     });
   });
 
   it("is what an unset setting means", async () => {
-    const choice = await run(({ instances, addRunner, snapshot }) =>
+    const target = await run(({ instances, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const settings = yield* Settings;
         yield* settings.set("textGeneration.model", "automatic");
-        const runner = yield* addRunner(false);
+        const runner = yield* addRunner();
         yield* snapshot(instances["codex"]!, runner, probed("ok", "codex-mini"));
         return yield* resolve.pipe(Effect.orDie);
       }),
     );
 
-    expect(choice).toMatchObject({ _tag: "resolved", providerId: "codex" });
+    expect(target).toMatchObject({ _tag: "resolved", instance: { providerId: "codex" } });
   });
 });
 
 describe("off", () => {
   it("resolves to off", async () => {
-    const choice = await run(() =>
+    const target = await run(() =>
       Effect.gen(function* () {
         const settings = yield* Settings;
         yield* settings.set("textGeneration.model", "off");
@@ -185,15 +239,17 @@ describe("off", () => {
       }),
     );
 
-    expect(choice).toEqual({ _tag: "off" });
+    expect(target).toEqual({ _tag: "off", setting: JSON.stringify("off") });
   });
 });
 
 describe("a chosen instance and model", () => {
-  it("is returned as it is, even when no runner offers the model", async () => {
-    const choice = await run(({ instances }) =>
+  it("is returned as it is, with no runner, when no runner offers the model", async () => {
+    const target = await run(({ instances, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const settings = yield* Settings;
+        const runner = yield* addRunner();
+        yield* snapshot(instances["pi"]!, runner, probed("ok", "pi-small"));
         yield* settings.set("textGeneration.model", {
           instanceId: instances["pi"]!,
           model: "not-in-any-catalog",
@@ -202,20 +258,43 @@ describe("a chosen instance and model", () => {
       }),
     );
 
-    expect(choice).toEqual({
+    expect(target).toMatchObject({
       _tag: "resolved",
-      instanceId: expect.any(String) as unknown,
-      providerId: "pi",
+      instance: { providerId: "pi" },
       model: "not-in-any-catalog",
+      runnerIds: [],
     });
   });
 
+  it("lists only the runners that can take the call and list the model", async () => {
+    const [target, expected] = await run(({ instances, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const settings = yield* Settings;
+        const offers = yield* addRunner();
+        const lacksModel = yield* addRunner();
+        const offline = yield* addRunner({ online: false });
+        const old = yield* addRunner({ capable: false });
+        yield* snapshot(instances["pi"]!, offers, probed("ok", "pi-small"));
+        yield* snapshot(instances["pi"]!, lacksModel, probed("ok", "pi-large"));
+        yield* snapshot(instances["pi"]!, offline, probed("ok", "pi-small"));
+        yield* snapshot(instances["pi"]!, old, probed("ok", "pi-small"));
+        yield* settings.set("textGeneration.model", {
+          instanceId: instances["pi"]!,
+          model: "pi-small",
+        });
+        return [yield* resolve.pipe(Effect.orDie), [offers]] as const;
+      }),
+    );
+
+    expect(target).toMatchObject({ _tag: "resolved", runnerIds: expected });
+  });
+
   it("is unresolved once the instance is gone, and never replaced by automatic", async () => {
-    const choice = await run(({ instances, addRunner, snapshot }) =>
+    const target = await run(({ instances, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const settings = yield* Settings;
         const repository = yield* providerRepository;
-        const runner = yield* addRunner(false);
+        const runner = yield* addRunner();
         yield* snapshot(instances["codex"]!, runner, probed("ok", "codex-mini"));
         yield* settings.set("textGeneration.model", {
           instanceId: instances["pi"]!,
@@ -226,7 +305,7 @@ describe("a chosen instance and model", () => {
       }),
     );
 
-    expect(choice).toMatchObject({
+    expect(target).toMatchObject({
       _tag: "unresolved",
       message: expect.stringContaining("no longer exists") as unknown,
     });

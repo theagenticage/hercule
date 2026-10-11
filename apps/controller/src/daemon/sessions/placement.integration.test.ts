@@ -8,23 +8,20 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import * as Schema from "effect/Schema";
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import {
   MAX_OUTPUT_SCHEMA_LENGTH,
   type ModelDescriptor,
   type RunnerFacts,
+  type TextGenerationOutcome,
+  type TextGenerationRequest,
 } from "@hercule/protocol";
 import { get, post, send } from "../../http/testing";
-import {
-  TextGenerationError,
-  type TextGenerationRequest,
-  type TextGenerationShape,
-} from "../text-generation";
 import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
 import {
   spawnThreadUnder,
   findInstanceId,
+  listFrames,
   listInputs,
   readProfileNamed,
   createProfile,
@@ -592,36 +589,26 @@ describe("placeSession from an Agent", () => {
   });
 });
 
-/** What the fake text generation does when the controller asks it for a title. */
+/** What the fake runner does when the controller asks it for a title. */
 type TitleBehaviour =
   | { readonly kind: "answers"; readonly title: string; readonly needsRefinement: boolean }
   | { readonly kind: "fails" }
   | { readonly kind: "never-answers" };
 
-/** Builds a fake text generation that records every request and behaves as told. */
-const buildFakeTextGeneration = (behaviour: TitleBehaviour) => {
-  const requests: Array<TextGenerationRequest<unknown>> = [];
-  const textGeneration: TextGenerationShape = {
-    generate: (request) => {
-      requests.push(request);
-      switch (behaviour.kind) {
-        case "answers":
-          return Effect.orDie(
-            Schema.decodeUnknownEffect(request.output)({
-              title: behaviour.title,
-              needsRefinement: behaviour.needsRefinement,
-            }),
-          );
-        case "fails":
-          return Effect.fail(
-            new TextGenerationError({ reason: "unavailable", message: "no runner can take it" }),
-          );
-        case "never-answers":
-          return Effect.never;
-      }
-    },
-  };
-  return { requests, textGeneration };
+/** Decides the fake runner's answer to a text generation request. */
+const decideTitleAnswer = (behaviour: TitleBehaviour): TextGenerationOutcome | undefined => {
+  switch (behaviour.kind) {
+    case "answers":
+      return {
+        outcome: "ok",
+        value: { title: behaviour.title, needsRefinement: behaviour.needsRefinement },
+        usage: null,
+      };
+    case "fails":
+      return { outcome: "failed", message: "the harness could not start" };
+    case "never-answers":
+      return undefined;
+  }
 };
 
 /** Reads the stored `needs_refinement` of a session: null when no title was generated. */
@@ -643,17 +630,32 @@ describe("placeSession generates a Thread title", () => {
     behaviour: TitleBehaviour,
     body: (
       arranged: Arranged,
-      requests: ReadonlyArray<TextGenerationRequest<unknown>>,
+      requests: () => ReadonlyArray<TextGenerationRequest>,
     ) => Promise<void>,
-  ): Promise<void> => {
-    const { requests, textGeneration } = buildFakeTextGeneration(behaviour);
-    return sharedWithFleet((arranged) => body(arranged, requests), {
-      plugins: buildPlugins(),
-      facts: FACTS,
-      models: MODELS,
-      textGeneration,
-    });
-  };
+  ): Promise<void> =>
+    sharedWithFleet(
+      async (arranged) => {
+        arranged.wire.setTextGenerationAnswer(() => decideTitleAnswer(behaviour));
+        // None of the fixture providers is one `automatic` tries, so the
+        // Thread title runs on the instance the test chooses.
+        const chosen = await send("PATCH", arranged.harness.base, "/api/v1/settings", {
+          body: {
+            controller: {
+              "textGeneration.model": {
+                instanceId: findInstanceId(arranged, "alpha-provider"),
+                model: "clever",
+              },
+            },
+          },
+          token: arranged.token,
+        });
+        expect(chosen.status, await chosen.clone().text()).toBe(200);
+        await body(arranged, () =>
+          listFrames<TextGenerationRequest>(arranged.wire, "textGenerationRequest"),
+        );
+      },
+      { plugins: buildPlugins(), facts: FACTS, models: MODELS },
+    );
 
   const answers = {
     kind: "answers",
@@ -673,8 +675,7 @@ describe("placeSession generates a Thread title", () => {
       );
       expect(renamed.status).not.toBe("exited");
       expect(await readNeedsRefinement(arranged, session.id)).toBe(1);
-      expect(requests).toHaveLength(1);
-      expect(requests[0]).toMatchObject({ caller: "core:sessions", purpose: "thread.title" });
+      expect(requests()).toHaveLength(1);
     });
   });
 
@@ -684,10 +685,10 @@ describe("placeSession generates a Thread title", () => {
 
       await spawnSessionOrFail(arranged, { prompt });
 
-      await waitUntil("asked for a title", () => (requests.length > 0 ? requests : undefined));
-      expect(requests).toHaveLength(1);
-      expect(requests[0]?.input).toBe(prompt.slice(0, 4000));
-      expect(requests[0]?.instructions).not.toContain("a".repeat(20));
+      await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
+      expect(requests()).toHaveLength(1);
+      expect(requests()[0]?.spec.input).toBe(prompt.slice(0, 4000));
+      expect(requests()[0]?.spec.instructions).not.toContain("a".repeat(20));
     });
   });
 
@@ -708,8 +709,8 @@ describe("placeSession generates a Thread title", () => {
       // A Thread that does have text, spawned last: when its request has
       // arrived, the two spawns above had their chance to ask first.
       await spawnSessionOrFail(arranged, { prompt: "a real message" });
-      await waitUntil("asked for a title", () => (requests.length > 0 ? requests : undefined));
-      expect(requests.map((request) => request.input)).toEqual(["a real message"]);
+      await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
+      expect(requests().map((request) => request.spec.input)).toEqual(["a real message"]);
     });
   });
 
@@ -718,7 +719,7 @@ describe("placeSession generates a Thread title", () => {
       const session = await spawnSessionOrFail(arranged, { prompt: "slow title" });
 
       await waitForStartFrames(arranged, session.id, 1);
-      await waitUntil("asked for a title", () => (requests.length > 0 ? requests : undefined));
+      await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
       const after = await readSession(arranged, session.id);
       expect(after.title).toBe("slow title");
       expect(await listInputs(arranged, session.id)).toHaveLength(1);
@@ -729,7 +730,7 @@ describe("placeSession generates a Thread title", () => {
     await withTitles({ kind: "fails" }, async (arranged, requests) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "title will fail" });
 
-      await waitUntil("asked for a title", () => (requests.length > 0 ? requests : undefined));
+      await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
       await waitForStartFrames(arranged, session.id, 1);
       // Nothing happens after a failure, so there is nothing to wait for.
       await new Promise((resolve) => setTimeout(resolve, 100));

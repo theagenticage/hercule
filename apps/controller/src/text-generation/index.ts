@@ -4,10 +4,9 @@
  * controller daemon, which owns the wire to the runners.
  */
 export {
-  AUTOMATIC_PROVIDER_ORDER,
   TextGenerationModels,
   TextGenerationModelsLayer,
-  type TextGenerationChoice,
+  type TextGenerationTarget,
 } from "./models";
 export {
   LastTextGenerationFailure,

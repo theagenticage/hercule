@@ -120,7 +120,7 @@ export interface Wire {
    * to report, or with `undefined` to leave it unanswered, like a harness that
    * hangs. Until it is set, every request is left unanswered.
    */
-  readonly answeringTextGeneration: (
+  readonly setTextGenerationAnswer: (
     decide: (request: TextGenerationRequest) => TextGenerationOutcome | undefined,
   ) => void;
 }
@@ -226,7 +226,7 @@ const dial = (
         release: (answer) => {
           for (const held of withheld.splice(0)) writeAnswer(held, answer);
         },
-        answeringTextGeneration: (decide) => {
+        setTextGenerationAnswer: (decide) => {
           decideTextGeneration = decide;
         },
       });

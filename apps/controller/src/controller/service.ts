@@ -82,7 +82,7 @@ const make = Effect.gen(function* () {
   const readControllerInfo = (): Effect.Effect<ControllerInfo, SettingError | SqlError> =>
     Effect.gen(function* () {
       const record = yield* identity.readOrDie;
-      const choice = yield* textGenerationModels.resolve();
+      const target = yield* textGenerationModels.resolve();
       return {
         id: record.id,
         publicKey: Buffer.from(record.publicKey).toString("base64"),
@@ -91,10 +91,10 @@ const make = Effect.gen(function* () {
         localRunnerId: localRunnerId.read() ?? null,
         textGeneration: {
           model:
-            choice._tag === "resolved"
-              ? { instanceId: choice.instanceId, model: choice.model }
+            target._tag === "resolved"
+              ? { instanceId: target.instance.id, model: target.model }
               : null,
-          lastFailure: yield* lastTextGenerationFailure.read(),
+          lastFailure: yield* lastTextGenerationFailure.read(target.setting),
         },
       };
     });

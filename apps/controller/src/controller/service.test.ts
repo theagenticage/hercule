@@ -144,7 +144,7 @@ describe("controller.read text generation", () => {
         });
         yield* settings.set("textGeneration.model", { instanceId: instance.id, model: "mini" });
         const before = yield* controller.read();
-        yield* failures.record({
+        yield* failures.record(JSON.stringify({ instanceId: instance.id, model: "mini" }), {
           reason: "timeout",
           message: "the text generation did not finish in time",
           at: "2026-10-11T10:00:00.000Z",

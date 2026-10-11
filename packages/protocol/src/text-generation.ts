@@ -41,10 +41,7 @@ const Text = Schema.String.check(Schema.isMaxLength(MAX_TEXT_GENERATION_TEXT_LEN
 
 // Never empty: the controller shows the message to the user as the reason a
 // call failed, and an empty reason explains nothing.
-const Message = Schema.String.check(
-  Schema.isMinLength(1),
-  Schema.isMaxLength(MAX_MESSAGE_LENGTH),
-);
+const Message = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_MESSAGE_LENGTH));
 
 /** What one text generation asks the model: the same for every provider. */
 export const TextGenerationSpec = Schema.Struct({
@@ -84,7 +81,7 @@ export type TextGenerationRequest = Schema.Schema.Type<typeof TextGenerationRequ
  * - `ok`: the answer matched the output schema. `usage` is null when the
  *   harness reported no token counts.
  * - `invalid-output`: the harness answered, but not with a value that matches
- *   the output schema. `reason` says what did not match.
+ *   the output schema. `reason` describes what did not match.
  * - `timeout`: the harness ran past `TEXT_GENERATION_DEADLINE_MS` and the
  *   runner stopped it.
  * - `failed`: the call did not produce an answer at all: the harness would

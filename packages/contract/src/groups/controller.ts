@@ -16,6 +16,7 @@ import { closedStruct } from "../closed";
 import { Conflict, Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
 import { Authenticated } from "../security";
+import { InstanceModel } from "./settings";
 
 /** The reasons a text generation fails, the same in the record and in the status. */
 export const TextGenerationFailureReason = Schema.Literals([
@@ -37,7 +38,7 @@ export const TextGenerationStatus = Schema.Struct({
    * what `automatic` resolves to. Null when text generation is off, by the
    * setting or because `automatic` found no match.
    */
-  model: Schema.NullOr(Schema.Struct({ instanceId: Id, model: Schema.NonEmptyString })),
+  model: Schema.NullOr(InstanceModel),
   /**
    * Why the last text generation failed, or null when it succeeded or none
    * has run since the controller started.

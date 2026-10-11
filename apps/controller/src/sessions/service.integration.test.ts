@@ -1594,6 +1594,22 @@ describe("SessionService.setGeneratedTitle", () => {
     expect(result.title.startsWith("Fix the build xxx")).toBe(true);
   });
 
+  it("does not end in a space when the cut lands after one", async () => {
+    const result = await generateTitle("a", `${"x".repeat(79)} tail`, false);
+
+    expect(result.title).toBe("x".repeat(79));
+  });
+
+  it("removes control and format characters", async () => {
+    const result = await generateTitle(
+      "a",
+      "Fix\u0000 the\u200B login \u202Ebug\u0007 \uFEFF now",
+      false,
+    );
+
+    expect(result.title).toBe("Fix the login bug now");
+  });
+
   it("keeps the title it has when the generated one is empty", async () => {
     const result = await generateTitle("the first line", " \n ", true);
 

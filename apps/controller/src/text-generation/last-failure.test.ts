@@ -7,7 +7,9 @@ const run = <A>(effect: Effect.Effect<A, never, LastTextGenerationFailure>) =>
 
 describe("the last text generation failure", () => {
   it("is null until a call fails", async () => {
-    const last = await run(Effect.flatMap(LastTextGenerationFailure, (one) => one.read()));
+    const last = await run(
+      Effect.flatMap(LastTextGenerationFailure, (one) => one.read("automatic")),
+    );
 
     expect(last).toBeNull();
   });
@@ -16,19 +18,19 @@ describe("the last text generation failure", () => {
     const seen = await run(
       Effect.gen(function* () {
         const failure = yield* LastTextGenerationFailure;
-        yield* failure.record({
+        yield* failure.record("automatic", {
           reason: "timeout",
           message: "first",
           at: "2026-10-11T10:00:00.000Z",
         });
-        yield* failure.record({
+        yield* failure.record("automatic", {
           reason: "unavailable",
           message: "second",
           at: "2026-10-11T10:01:00.000Z",
         });
-        const held = yield* failure.read();
+        const held = yield* failure.read("automatic");
         yield* failure.clear();
-        return { held, cleared: yield* failure.read() };
+        return { held, cleared: yield* failure.read("automatic") };
       }),
     );
 
@@ -38,5 +40,21 @@ describe("the last text generation failure", () => {
       at: "2026-10-11T10:01:00.000Z",
     });
     expect(seen.cleared).toBeNull();
+  });
+
+  it("is not shown for another value of the setting", async () => {
+    const seen = await run(
+      Effect.gen(function* () {
+        const failure = yield* LastTextGenerationFailure;
+        yield* failure.record('"automatic"', {
+          reason: "timeout",
+          message: "slow",
+          at: "2026-10-11T10:00:00.000Z",
+        });
+        return yield* failure.read('{"instanceId":"x","model":"y"}');
+      }),
+    );
+
+    expect(seen).toBeNull();
   });
 });
