@@ -20,9 +20,9 @@
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
-import { stopSpecimenClockAt } from "./fixed-clock";
+import "./fixed-clock";
 import { RUN_RECORDS, type RunState } from "./run-fixture";
-import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
+import { SPECIMEN_RECORDS } from "./sidebar-fixture";
 import { WORKFLOWS_RECORDS } from "./workflows-fixture";
 import { mountRunSpecimen } from "./shell-page";
 import { markSheetReady, stillGraphPane } from "./sheet-page";
@@ -77,42 +77,15 @@ async function openDialog(dialog: string): Promise<void> {
   }
 }
 
-/** Returns how many times the app's age clock has fired its timer so far. */
-const countAgeClockFires = (): number => performance.getEntriesByName("age-clock-fire").length;
-
-/**
- * Waits until the app's age clock has fired its timer more than `firesBefore`
- * times, checking once a frame, then waits one frame more so the labels the
- * fire moved are drawn. Fails after five seconds when it never fires.
- *
- * The run's durations are on screen before `firesBefore` is counted, so the
- * awaited fire is one that sees them. An earlier fire may have moved nothing.
- */
-async function waitForAgeClockFire(firesBefore: number): Promise<void> {
-  const deadline = performance.now() + 5000;
-  while (countAgeClockFires() <= firesBefore) {
-    if (performance.now() > deadline) {
-      throw new Error(
-        "The age clock never fired, so the run's durations may still change after the page is ready.",
-      );
-    }
-    await waitForFrame();
-  }
-  await waitForFrame();
-}
-
 stillGraphPane();
 const state = readState();
-// The waiting run is live, so its durations count seconds, rounded to the
-// nearest one. The age clock trusts a timer that fires within a second of the
-// moment it was set for, and with the page's clock stopped every fire looks
-// that early. So the clock's first fire moves its labels to the next change,
-// half a second past the stopped moment, and the durations would read one
-// second more than the book's. Stopping the page's clock a second before the
-// book's moment lets that one move land half a second before it, where the
-// durations read as the book's. The page is ready only after the move; later
-// fires come too long before their changes to move anything.
-if (state === "waiting") stopSpecimenClockAt(SPECIMEN_NOW - 1000);
+// The waiting run is live, so its durations would count on. The page's clock
+// is stopped at the book's moment, but the age clock trusts a timer that fires
+// up to a second early and would move its durations one second past the
+// book's. A page that reports itself hidden gets no timer from the age clock,
+// so the durations stay at the stopped moment. Hidden, the page also drops its
+// live subscriptions, which the specimen does not use.
+Object.defineProperty(document, "visibilityState", { get: () => "hidden" });
 const records = RUN_RECORDS[state];
 await mountRunSpecimen(
   {
@@ -124,10 +97,8 @@ await mountRunSpecimen(
   { records, workflows: WORKFLOWS_RECORDS },
   search.get("steps") === "timeline" ? "timeline" : "graph",
 );
-const firesAfterMount = countAgeClockFires();
 const card = search.get("card");
 if (card !== null) await openCard(card);
 const dialog = search.get("dialog");
 if (dialog !== null) await openDialog(dialog);
-if (state === "waiting") await waitForAgeClockFire(firesAfterMount);
 await markSheetReady();
