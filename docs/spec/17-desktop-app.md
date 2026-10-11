@@ -2682,8 +2682,8 @@ The perf script's rows were measured 2026-10-11 on the reference machine, in one
 | Measure | Budget | Before | After |
 |---|---|---|---|
 | The first screen's JavaScript, gzipped | none new | 347.8 kB across 22 chunks | 349.6 kB across 22 chunks |
-| Intake's chunk, gzipped | none | 19.6 kB of JavaScript (20,103 bytes; 56,828 unzipped), 3.3 kB of CSS | 21.9 kB of JavaScript (22,425 bytes; 61,318 unzipped), 3.6 kB of CSS: the screen is 18.7 kB, and the bar, view switcher and split that Everything shares with it 3.2 kB |
-| Everything's chunk, gzipped | its own chunk | - | 7.7 kB of JavaScript (7,843 bytes; 19,129 unzipped), no CSS of its own |
+| Intake's chunk, gzipped | none | 19.6 kB of JavaScript (20,103 bytes; 56,828 unzipped), 3.3 kB of CSS | 21.9 kB of JavaScript (22,422 bytes; 61,318 unzipped), 3.6 kB of CSS: the screen is 18.7 kB, and the bar, view switcher and split that Everything shares with it 3.2 kB |
+| Everything's chunk, gzipped | its own chunk | - | 7.7 kB of JavaScript (7,850 bytes; 19,148 unzipped), no CSS of its own |
 | Main's startup file, minified | 160 kB | not measured; this change touches no code in main | 150.2 kB |
 
 - **Intake's chunk grew by 2.3 kB gzipped,** and the first screen by 1.8 kB. Both include everything the branch added since its base, not only Everything: the source tabs worked out from the plugins' Intake settings, the route's search params and its loader. Everything's list, pane and search are in the chunk of their own, which loads the first time the view opens.
