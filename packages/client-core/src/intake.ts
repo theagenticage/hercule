@@ -207,7 +207,7 @@ export const describeOrchestrationSegment = (toDoCount: number): string =>
   `Hercule, ${String(toDoCount)} to do`;
 
 /** One tab of Intake's bar: All, or one plugin's signals. */
-interface IntakeTab {
+export interface IntakeTab {
   /** The plugin whose signals the tab shows, or `null` for All. */
   readonly pluginId: string | null;
   readonly label: string;
@@ -798,49 +798,41 @@ export const buildHandlingLabels = (
         target: { kind: "signal", signalId: fact.signalId, view: standing.view },
       };
     }),
-    ...facts.resolvedSignals.map(
-      (fact): EventHandlingLabel => ({
-        handling: "ended-signal",
-        key: `ended-signal:${fact.signalId}`,
-        lead: `ended ${fact.title}`,
-        detail: fact.outcome,
-        target: { kind: "signal", signalId: fact.signalId, view: "done" },
-      }),
-    ),
-    ...evidence.map(
-      (fact): EventHandlingLabel => ({
-        handling: "evidence",
-        key: `evidence:${fact.signalId}`,
-        lead: `→ ${lowerFirst(nameSignalKind(fact.kind))}`,
-        detail: fact.title,
-        target: {
-          kind: "signal",
-          signalId: fact.signalId,
-          view: describeSignalStanding(fact, now, timezone).view,
-        },
-      }),
-    ),
-    ...facts.tasks.map(
-      (fact): EventHandlingLabel => ({
-        handling: "on-task",
-        key: `on-task:${fact.taskId}`,
-        lead: `→ ${fact.title}`,
-        detail: null,
-        target: { kind: "task", taskId: fact.taskId },
-      }),
-    ),
-    ...facts.knownBy.map(
-      (fact): EventHandlingLabel => ({
-        handling: "known-work",
-        key: `known-work:${fact.subscriptionId}`,
-        lead: "known",
-        detail: fact.title ?? (fact.holder.kind === "session" ? "a session" : "a run"),
-        target:
-          fact.holder.kind === "session"
-            ? { kind: "session", sessionId: fact.holder.id }
-            : { kind: "run", runId: fact.holder.id },
-      }),
-    ),
+    ...facts.resolvedSignals.map((fact): EventHandlingLabel => ({
+      handling: "ended-signal",
+      key: `ended-signal:${fact.signalId}`,
+      lead: `ended ${fact.title}`,
+      detail: fact.outcome,
+      target: { kind: "signal", signalId: fact.signalId, view: "done" },
+    })),
+    ...evidence.map((fact): EventHandlingLabel => ({
+      handling: "evidence",
+      key: `evidence:${fact.signalId}`,
+      lead: `→ ${lowerFirst(nameSignalKind(fact.kind))}`,
+      detail: fact.title,
+      target: {
+        kind: "signal",
+        signalId: fact.signalId,
+        view: describeSignalStanding(fact, now, timezone).view,
+      },
+    })),
+    ...facts.tasks.map((fact): EventHandlingLabel => ({
+      handling: "on-task",
+      key: `on-task:${fact.taskId}`,
+      lead: `→ ${fact.title}`,
+      detail: null,
+      target: { kind: "task", taskId: fact.taskId },
+    })),
+    ...facts.knownBy.map((fact): EventHandlingLabel => ({
+      handling: "known-work",
+      key: `known-work:${fact.subscriptionId}`,
+      lead: "known",
+      detail: fact.title ?? (fact.holder.kind === "session" ? "a session" : "a run"),
+      target:
+        fact.holder.kind === "session"
+          ? { kind: "session", sessionId: fact.holder.id }
+          : { kind: "run", runId: fact.holder.id },
+    })),
   ];
   if (labels.length > 0) return labels;
   return [
@@ -879,21 +871,31 @@ const EVENT_HANDLING_CAPTIONS: Readonly<Record<EventHandling, string>> = {
   "no-action": "No action",
 };
 
+/**
+ * Returns the caption of `handling`, the words the filter menu offers it by,
+ * which the event pane also puts over the block of each handling.
+ */
+export const describeHandlingCaption = (handling: EventHandling): string =>
+  EVENT_HANDLING_CAPTIONS[handling];
+
 /** The options of Everything's filter menu in the order it draws them: every event, then one per handling. */
 export const EVENT_HANDLING_OPTIONS: ReadonlyArray<EventHandlingOption> = [
   { handling: null, caption: "All events" },
   ...EVENT_HANDLINGS.map((handling) => ({ handling, caption: EVENT_HANDLING_CAPTIONS[handling] })),
 ];
 
+/** How many days the controller keeps events when the `retention.events` setting is not set. */
+const DEFAULT_EVENT_RETENTION_DAYS = 90;
+
 /**
- * Describes how far back Everything reaches, from the days the controller
- * keeps events: "Events from the last 90 days", or "Events from the last
- * day" for one.
+ * Describes how far back Everything reaches, from the `retention.events`
+ * setting: "Events from the last 90 days", or "Events from the last day"
+ * for one. A setting that is not set reads as the default of 90 days.
  */
-export const describeEventHorizon = (retentionDays: number): string =>
-  retentionDays === 1
-    ? "Events from the last day"
-    : `Events from the last ${String(retentionDays)} days`;
+export const describeEventHorizon = (retentionDays: number | undefined): string => {
+  const days = retentionDays ?? DEFAULT_EVENT_RETENTION_DAYS;
+  return days === 1 ? "Events from the last day" : `Events from the last ${String(days)} days`;
+};
 
 /** One day of Everything's list: its heading and the events received that day. */
 export interface EventDaySection {
@@ -934,4 +936,43 @@ export const groupEventsByDay = (
     });
   }
   return sections;
+};
+
+/**
+ * Returns the title an event's row and pane show: the one-line title its
+ * source set, or the event's kind for an event that has none.
+ */
+export const describeEventTitle = (event: Pick<EventWithFacts, "title" | "kind">): string =>
+  event.title ?? event.kind;
+
+/**
+ * Names the system an event came from, for its mark and its "Open in" link.
+ * A source that is a listed plugin gives the plugin's id and display name.
+ * Any other source is a core emitter, such as `cron` or `manual`, which gives
+ * no plugin id, so the caller draws the core's mark, and the core's name.
+ */
+export const describeEventSystem = (
+  source: string,
+  plugins: ReadonlyArray<PluginName>,
+): { readonly pluginId: string | null; readonly name: string } =>
+  plugins.some((plugin) => plugin.id === source)
+    ? { pluginId: source, name: namePlugin(source, plugins) }
+    : { pluginId: null, name: CORE_SOURCE_NAME };
+
+/**
+ * Returns the id of the event `step` rows away from `selectedId` in
+ * `events`, for `J`, `K` and the arrow keys on Everything. With no
+ * selection, or a selected event that has left the list, `J` selects the
+ * first row and `K` the last. At either end the selection stays where it is.
+ * Returns `null` when the list is empty.
+ */
+export const moveEventSelection = (
+  events: ReadonlyArray<Pick<EventWithFacts, "id">>,
+  selectedId: number | null,
+  step: 1 | -1,
+): number | null => {
+  if (events.length === 0) return null;
+  const index = selectedId === null ? -1 : events.findIndex((event) => event.id === selectedId);
+  if (index < 0) return step === 1 ? events[0]!.id : events.at(-1)!.id;
+  return events[Math.min(events.length - 1, Math.max(0, index + step))]!.id;
 };

@@ -20,6 +20,10 @@ import {
   describeAnswerKey,
   describeBuildFailure,
   describeEventHorizon,
+  describeHandlingCaption,
+  describeEventSystem,
+  describeEventTitle,
+  moveEventSelection,
   describeNotScreened,
   describeOrchestrationSegment,
   describeResolvedElsewhere,
@@ -792,7 +796,12 @@ describe("buildHandlingLabels", () => {
   it("names a signal the event ended and its outcome", () => {
     const [label] = buildLabels({
       resolvedSignals: [
-        { signalId: "s2", kind: "github/review-requested", title: "Review #12", outcome: "Approved" },
+        {
+          signalId: "s2",
+          kind: "github/review-requested",
+          title: "Review #12",
+          outcome: "Approved",
+        },
       ],
     });
     expect(label).toMatchObject({
@@ -920,10 +929,24 @@ describe("EVENT_HANDLING_OPTIONS", () => {
   });
 });
 
+describe("describeHandlingCaption", () => {
+  it("gives the caption the filter menu offers the handling by", () => {
+    for (const option of EVENT_HANDLING_OPTIONS) {
+      if (option.handling !== null) {
+        expect(describeHandlingCaption(option.handling)).toBe(option.caption);
+      }
+    }
+  });
+});
+
 describe("describeEventHorizon", () => {
   it("counts the days the controller keeps events", () => {
     expect(describeEventHorizon(90)).toBe("Events from the last 90 days");
     expect(describeEventHorizon(1)).toBe("Events from the last day");
+  });
+
+  it("reads an unset retention as the default of 90 days", () => {
+    expect(describeEventHorizon(undefined)).toBe("Events from the last 90 days");
   });
 });
 
@@ -951,5 +974,49 @@ describe("groupEventsByDay", () => {
       ["Wednesday", [1]],
     ]);
     expect(sections.map((section) => section.key)).toEqual(["day:0", "day:-1", "day:-4"]);
+  });
+});
+
+describe("describeEventTitle", () => {
+  it("shows the title the source set, or the kind when there is none", () => {
+    expect(
+      describeEventTitle({ title: "marta requested your review", kind: "github.review" }),
+    ).toBe("marta requested your review");
+    expect(describeEventTitle({ title: null, kind: "github.issue.opened" })).toBe(
+      "github.issue.opened",
+    );
+  });
+});
+
+describe("moveEventSelection", () => {
+  const events = [{ id: 9 }, { id: 8 }, { id: 7 }];
+
+  it("steps through the list and stays at either end", () => {
+    expect(moveEventSelection(events, 9, 1)).toBe(8);
+    expect(moveEventSelection(events, 8, -1)).toBe(9);
+    expect(moveEventSelection(events, 7, 1)).toBe(7);
+    expect(moveEventSelection(events, 9, -1)).toBe(9);
+  });
+
+  it("starts at the first row for J and the last for K when nothing is selected", () => {
+    expect(moveEventSelection(events, null, 1)).toBe(9);
+    expect(moveEventSelection(events, null, -1)).toBe(7);
+    expect(moveEventSelection(events, 42, 1)).toBe(9);
+  });
+
+  it("returns null for an empty list", () => {
+    expect(moveEventSelection([], null, 1)).toBeNull();
+  });
+});
+
+describe("describeEventSystem", () => {
+  const plugins = [{ id: "github", displayName: "GitHub" }];
+
+  it("names a listed plugin by its id and display name", () => {
+    expect(describeEventSystem("github", plugins)).toEqual({ pluginId: "github", name: "GitHub" });
+  });
+
+  it("gives a core emitter no plugin id and the core's name", () => {
+    expect(describeEventSystem("cron", plugins)).toEqual({ pluginId: null, name: "Hercule" });
   });
 });

@@ -10,6 +10,7 @@
  * would be a screen that silently stops updating.
  */
 import type {
+  EventHandling,
   Invalidate,
   MutableLiveTopic,
   NotificationFilter,
@@ -23,6 +24,14 @@ import { listLoopbackEndpoints } from "../local-runner";
 
 /** A cache key. This package does not read it; the app's query client does. */
 export type LiveQueryKey = ReadonlyArray<unknown>;
+
+/** The filter of an event listing that identifies it in the cache: what `event.query` filters on, without paging. */
+export interface EventListFilter {
+  readonly intake?: boolean;
+  readonly text?: string;
+  readonly source?: string;
+  readonly handling?: ReadonlyArray<EventHandling>;
+}
 
 /**
  * The key builder for every read the app makes. The argument of a list or
@@ -176,6 +185,14 @@ export const queryKeys = {
    * append-only, so a stored event is read once and kept.
    */
   event: (id: number): LiveQueryKey => ["event", id],
+  /**
+   * Pages of `event.query`, keyed on the filter without its cursor, so every
+   * page of one listing shares one key. Without the filter, the prefix of
+   * every event listing. Not a live topic: the event log is append-only, so a
+   * screen that shows a listing reads it again each time it opens.
+   */
+  events: (filter?: EventListFilter): LiveQueryKey =>
+    filter === undefined ? ["events"] : ["events", filter],
   /** Not a live topic yet. A change to an Agent made elsewhere shows up on the next fetch. */
   agents: (): LiveQueryKey => ["agents"],
   assistants: (): LiveQueryKey => ["assistants"],
