@@ -62,6 +62,7 @@
  */
 import {
   HAND_TO_ACTION_PREFIX,
+  type Connection,
   type Event,
   type EventWithFacts,
   type PluginDetail,
@@ -131,6 +132,29 @@ const CONNECTION_IDS: Readonly<Record<string, string>> = {
   linear: "01a0ec64-6e80-7000-8000-0000000000c3",
   slack: "01a0ec64-6e80-7000-8000-0000000000c4",
 };
+
+/** Builds the connected Connection of plugin `pluginId`, named `label`, made a day before the specimen's clock. */
+const buildConnection = (pluginId: string, label: string): Connection => ({
+  id: CONNECTION_IDS[pluginId]!,
+  type: `${pluginId}/${pluginId}`,
+  label,
+  displayName: label,
+  status: "connected",
+  labels: [],
+  config: {},
+  feedIntervals: {},
+  credentials: [],
+  createdAt: new Date(SPECIMEN_NOW - 24 * 60 * 60_000).toISOString(),
+  updatedAt: new Date(SPECIMEN_NOW - 24 * 60 * 60_000).toISOString(),
+});
+
+/** The four Connections the events came through, which the event pane names. */
+const INTAKE_CONNECTIONS: ReadonlyArray<Connection> = [
+  buildConnection("sentry", "acme"),
+  buildConnection("github", "rogier"),
+  buildConnection("linear", "acme"),
+  buildConnection("slack", "acme"),
+];
 
 /** Returns the moment `minutes` before the specimen's clock, as a timestamp. */
 const minutesAgo = (minutes: number): string =>
@@ -685,7 +709,7 @@ const EVENTS: ReadonlyArray<EventWithFacts> = [
   }),
   {
     ...buildSignalEvent(CHECKS, "https://github.com/rogier/webshop/pull/1300"),
-    tasks: [{ taskId: TASK_ID, title: "Show VAT per line on invoices" }],
+    tasks: [{ taskId: TASK_ID, title: "Fix VAT rounding on invoices" }],
     knownBy: [
       {
         subscriptionId: "01a0ec64-7d00-7000-8000-000000000001",
@@ -713,7 +737,7 @@ const EVENTS: ReadonlyArray<EventWithFacts> = [
       {
         signalId: DONE[6]!.id,
         title: DONE[6]!.title,
-        outcome: "Pieter closed #1286 without merging it",
+        outcome: "Withdrawn",
       },
     ],
     tasks: [{ taskId: TASK_ID, title: "Drop the checkout copy experiment" }],
@@ -817,6 +841,7 @@ const RECORDS: SidebarRecords = {
   later: LATER,
   done: DONE,
   plugins: INTAKE_PLUGINS,
+  connections: INTAKE_CONNECTIONS,
 };
 
 /** Waits until the page holds an element that matches `selector`. Fails after five seconds. */
@@ -1002,7 +1027,7 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
   buildEverythingScene("everything-end", { events: EVENTS }, async () => {
     const scroll = (await waitForElement(".asks-scroll")) as HTMLElement;
     scroll.scrollTop = scroll.scrollHeight;
-    await waitForElement(".asks-end");
+    await waitForElement(".asks-scroll > .asks-note");
   }),
   buildEverythingScene("everything-pane", { events: EVENTS, selectedEventId: 32 }),
   buildEverythingScene("everything-search", { events: searchEvents("pieter"), text: "pieter" }),

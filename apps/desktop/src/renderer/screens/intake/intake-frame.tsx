@@ -36,13 +36,6 @@ const VIEWS: ReadonlyArray<{ readonly view: IntakeView; readonly label: string }
   { view: "everything", label: "Everything" },
 ];
 
-/** Checks whether a key press lands in a text field, where Intake's keys never act. */
-export const isTextField = (target: EventTarget): boolean =>
-  target instanceof HTMLInputElement ||
-  target instanceof HTMLTextAreaElement ||
-  target instanceof HTMLSelectElement ||
-  (target instanceof HTMLElement && target.isContentEditable);
-
 /**
  * Renders Intake's bar: its name, the source tabs, and the pane's toggle.
  * `pluginId` is the pressed tab, `null` for All. The toggle is one name,

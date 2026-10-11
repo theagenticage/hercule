@@ -25,9 +25,10 @@
  * `prepareLaunch` stops the controller, writes the idle threads' last
  * activity into its database, and starts it again on the same port. It sets
  * the time each open signal was raised the same way, for Intake's age
- * labels. Those times are the only things written to the database directly:
- * the threads, and every state they are in, come from the fleet, and the
- * signals from `signal.raise`.
+ * labels, and the title, author and arrival time of every event, for
+ * Everything's rows. Those are the only things written to the database
+ * directly: the threads, and every state they are in, come from the fleet,
+ * the signals from `signal.raise`, and the events from `event.emit`.
  *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
@@ -110,6 +111,15 @@ const OTHER_PROJECTS_BACK_MS = 7 * HOUR_MS;
  */
 const NEWEST_SIGNAL_BACK_MS = 2.5 * HOUR_MS;
 const SIGNALS_BACK_SPREAD_MS = 10 * 60_000;
+
+/**
+ * How far back `titleEvents` spreads the events: the oldest one is set this
+ * long ago, inside Everything's 90-day horizon.
+ */
+const EVENTS_BACK_MS = 80 * 24 * HOUR_MS;
+
+/** The authors `titleEvents` hands out in turn. */
+const EVENT_AUTHORS = ["Marta", "Jonas", "Priya", "Tomas", "Ines"] as const;
 
 /** The controller's database, inside its Hercule Home. */
 const DATABASE_PATH = ["data", "hercule.db"] as const;
@@ -364,6 +374,7 @@ export async function runWithThreadFixture<T>(
           [...busyIds.slice(1), ...waitingIds.slice(1)],
         );
         backdateOpenSignals(home);
+        titleEvents(home);
         controller = await startController({ home, binary: findCompiledBinary(), port });
         await Promise.all(runners.map((runner) => runner.reconnect()));
         for (const runner of runners) {
@@ -504,6 +515,44 @@ function backdateOpenSignals(home: string): void {
       const back = (ids.length - 1 - index) * 1_000;
       update.run(new Date(newest - back).toISOString(), id);
     }
+    database.exec("COMMIT");
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Gives every event in the stopped controller's database in the Home `home`
+ * a title, an author and an arrival time, oldest first, spread evenly over
+ * the `EVENTS_BACK_MS` before now. `event.emit` sets none of the three, and
+ * only a plugin's ingest does, so without this Everything's rows would be
+ * untitled and all received at once, which no real log is.
+ *
+ * The full-text index over titles and authors is rebuilt afterwards, because
+ * the controller keeps it current only for events as they are inserted.
+ */
+function titleEvents(home: string): void {
+  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
+  try {
+    const ids = database
+      .prepare("SELECT id FROM events ORDER BY id")
+      .all()
+      .map((row) => row["id"] as number);
+    const update = database.prepare(
+      "UPDATE events SET title = ?, author = ?, received_at = ? WHERE id = ?",
+    );
+    const now = Date.now();
+    database.exec("BEGIN");
+    for (const [index, id] of ids.entries()) {
+      const back = ((ids.length - 1 - index) / Math.max(ids.length - 1, 1)) * EVENTS_BACK_MS;
+      update.run(
+        `Pull request #${String(1_000 + index)} needs a review`,
+        EVENT_AUTHORS[index % EVENT_AUTHORS.length]!,
+        new Date(now - back).toISOString(),
+        id,
+      );
+    }
+    database.exec("INSERT INTO events_fts (events_fts) VALUES ('rebuild')");
     database.exec("COMMIT");
   } finally {
     database.close();

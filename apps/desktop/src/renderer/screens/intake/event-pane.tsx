@@ -87,7 +87,7 @@ function EventDetail({
     },
   }));
 
-  const system = describeEventSystem(event.source, plugins);
+  const system = describeEventSystem(event, plugins);
   const receivedAt = formatMessageTime(new Date(event.receivedAt), timezone, new Date());
   const connection = connections.find((each) => each.id === event.connectionId);
   const labels = "signals" in event ? buildHandlingLabels(event, new Date(), timezone) : null;
@@ -96,16 +96,20 @@ function EventDetail({
       <article className="ad" tabIndex={-1}>
         <header>
           <div className="ad-kind">
+            <span className="src">
+              <SourceMark pluginId={system.pluginId} plugins={plugins} size={14} />
+              {system.name}
+            </span>
+            <span>·</span>
             {/* The kind opens its row on Settings > Intake, on the Connection the event came through. */}
             <Link
-              className="src"
+              className="ad-kind-type mono"
               to="/settings/intake"
               search={{
                 kind: event.kind,
                 ...(event.connectionId === null ? {} : { connection: event.connectionId }),
               }}
             >
-              <SourceMark pluginId={system.pluginId} plugins={plugins} size={14} />
               {event.kind}
             </Link>
             <span className="spacer" />
@@ -122,7 +126,9 @@ function EventDetail({
               </a>
             )}
           </div>
-          <h2 className="ad-title">{describeEventTitle(event)}</h2>
+          <h2 className={event.title === null ? "ad-title mono" : "ad-title"}>
+            {describeEventTitle(event)}
+          </h2>
           <p className="ad-asked">
             {event.author}
             {event.author !== null && receivedAt !== undefined && " · "}
@@ -149,14 +155,16 @@ function EventDetail({
               {connection !== undefined && (
                 <div>
                   <dt>Connection</dt>
-                  <dd>{connection.label}</dd>
+                  <dd>{`${system.name} · ${connection.label}`}</dd>
                 </div>
               )}
               {event.refs.length > 0 && (
                 <div>
                   <dt>References</dt>
                   {event.refs.map((externalRef) => (
-                    <dd key={externalRef}>{externalRef}</dd>
+                    <dd key={externalRef} className="mono">
+                      {externalRef}
+                    </dd>
                   ))}
                 </div>
               )}
@@ -183,18 +191,26 @@ function EventDetail({
 }
 
 /**
- * Renders one handling of an event as a block: its caption, its lead and its
- * detail. The block is a link to the record it names when the app has a
- * screen for that record. A Task and a run have none yet, so theirs are plain.
+ * Renders one handling of an event as a block: its caption, the record it is
+ * about in bold, and where that record stands. A handling that names no
+ * record, "No action", draws its caption in bold. The block is a link to the
+ * record when the app has a screen for it. A Task and a run have none yet, so
+ * theirs are plain.
  */
 function HandlingBlock({ label }: { readonly label: EventHandlingLabel }): JSX.Element {
-  const words = (
-    <span className="b-work-text">
-      <span className="b-work-label">{describeHandlingCaption(label.handling)}</span>
-      <b>{label.lead}</b>
-      {label.detail !== null && <span>{label.detail}</span>}
-    </span>
-  );
+  const caption = describeHandlingCaption(label.handling);
+  const words =
+    label.record === null ? (
+      <span className="b-work-text">
+        <b>{caption}</b>
+      </span>
+    ) : (
+      <span className="b-work-text">
+        <span className="b-work-label">{caption}</span>
+        <b>{label.record}</b>
+        {label.standing !== null && <span>{label.standing}</span>}
+      </span>
+    );
   const target = label.target;
   if (target?.kind === "signal") {
     return (

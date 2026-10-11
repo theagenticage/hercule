@@ -177,7 +177,7 @@ export const EverythingList = memo(function EverythingList({
   }
 
   return (
-    <div ref={scrollRef} className="asks-scroll">
+    <div ref={scrollRef} className="asks-scroll asks-scroll--faded">
       {items.length === 0 ? (
         empty
       ) : (
@@ -215,7 +215,7 @@ const EventRow = memo(function EventRow({
   readonly onSelect: (eventId: number) => void;
 }): JSX.Element {
   const { shown, more } = cutHandlingLabels(buildHandlingLabels(event, now, timezone));
-  const system = describeEventSystem(event.source, plugins);
+  const system = describeEventSystem(event, plugins);
   return (
     <div className="ask-item">
       <button
@@ -231,7 +231,9 @@ const EventRow = memo(function EventRow({
           <SourceMark pluginId={system.pluginId} plugins={plugins} size={16} />
         </span>
         <span className="ask-text">
-          <span className="ask-title">{describeEventTitle(event)}</span>
+          <span className={event.title === null ? "ask-title mono" : "ask-title"}>
+            {describeEventTitle(event)}
+          </span>
           <span className="ask-sub">
             {event.author !== null && `${event.author} · `}
             {shown.map((label, index) => (
@@ -241,7 +243,12 @@ const EventRow = memo(function EventRow({
                 {label.detail !== null && ` · ${label.detail}`}
               </Fragment>
             ))}
-            {more > 0 && ` · +${String(more)}`}
+            {more > 0 && (
+              <>
+                {" · "}
+                <span className="ev-more">{`+${String(more)}`}</span>
+              </>
+            )}
           </span>
         </span>
         <span className="ask-end">

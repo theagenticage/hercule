@@ -1195,13 +1195,21 @@ const isEventPaneShown = (): boolean => {
 const readEventTitles = () =>
   [...getEventList().querySelectorAll(".ask-title")].map((title) => title.textContent);
 /** Returns the requests that read the events listing, each with its query as a map of lists. */
-const findEventReads = (calls: ReadonlyArray<Call>) =>
+const findRawEventReads = (calls: ReadonlyArray<Call>) =>
   calls
     .filter((call) => call.method === "GET" && call.path === "/api/v1/events")
     .map((call) => {
       const query = new URLSearchParams(call.search);
       return Object.fromEntries([...new Set(query.keys())].map((key) => [key, query.getAll(key)]));
     });
+/**
+ * Returns the same requests without their `since`, which moves with the
+ * clock. One test checks it on its own.
+ */
+const findEventReads = (calls: ReadonlyArray<Call>) =>
+  findRawEventReads(calls).map((query) =>
+    Object.fromEntries(Object.entries(query).filter(([key]) => key !== "since")),
+  );
 
 describe("Intake's Everything view", () => {
   it("switches to Everything, which reads Intake's events newest first and states the horizon", async () => {
@@ -1350,15 +1358,16 @@ describe("Intake's Everything view", () => {
     });
   });
 
-  it("narrows the list to a source when its tab is pressed", async () => {
+  it("narrows the list to a source when its tab is pressed, in the URL, with one request", async () => {
     const events = [
       buildListedEvent(1, { source: "github" }),
       buildListedEvent(2, { source: "cron", connectionId: null, title: "Nightly" }),
     ];
-    const { calls } = await openEverything(events);
+    const { calls, router } = await openEverything(events, "/intake?view=everything&event=2");
     await waitFor(() => {
       expect(getEventRow(events[1]!)).not.toBeNull();
     });
+    const readsBefore = findEventReads(calls).length;
     const tabs = screen.getByRole("navigation", { name: "Sources" });
     await userEvent.click(within(tabs).getByRole("button", { name: /GitHub/ }));
 
@@ -1369,6 +1378,240 @@ describe("Intake's Everything view", () => {
       expect(getEventList().querySelector('[data-event-id="2"]')).toBeNull();
     });
     expect(getEventRow(events[0]!)).not.toBeNull();
+    // The tab is in the URL, and the selection of the other source is gone.
+    expect(router.state.location.search).toEqual({ view: "everything", source: "github" });
+    // Nothing asks again after the first request, such as the screen or a refresh.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(findEventReads(calls)).toHaveLength(readsBefore + 1);
+  });
+
+  it("reads events back to the retention horizon", async () => {
+    const startedAt = Date.now();
+    const { calls } = await openEverything([buildListedEvent(1)]);
+    await waitFor(() => {
+      expect(getEventRow(buildListedEvent(1))).not.toBeNull();
+    });
+    const since = findRawEventReads(calls)[0]!.since![0]!;
+    const ninetyDays = 90 * 24 * 60 * 60 * 1000;
+    expect(Math.abs(Date.parse(since) - (startedAt - ninetyDays))).toBeLessThan(60_000);
+  });
+
+  it("shows the failure of the first read in the list, with a Retry, and keeps the screen", async () => {
+    const events = [buildListedEvent(1)];
+    let failing = true;
+    const handlers = storeEvents(events);
+    const listEvents = handlers["GET /api/v1/events"] as (call: Call) => unknown;
+    handlers["GET /api/v1/events"] = ((call: Call) =>
+      failing
+        ? { status: 500, body: buildErrorBody("internal", "The database is busy.") }
+        : listEvents(call)) as Handler;
+    await openIntake("/intake?view=everything", { ...storeSignals(SIGNALS).handlers, ...handlers });
+
+    const alert = await within(getEventList()).findByRole("alert");
+    expect(alert.textContent).toContain("The database is busy.");
+    expect(screen.getByRole("searchbox", { name: "Search events" })).not.toBeNull();
+
+    failing = false;
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+    expect(within(getEventList()).queryByRole("alert")).toBeNull();
+  });
+
+  it("does not ask again for a page that failed, until Retry is pressed", async () => {
+    const events = Array.from({ length: 45 }, (_, index) => buildListedEvent(index + 1));
+    let failing = true;
+    const handlers = storeEvents(events);
+    const listEvents = handlers["GET /api/v1/events"] as (call: Call) => unknown;
+    handlers["GET /api/v1/events"] = ((call: Call) =>
+      failing && new URLSearchParams(call.search).has("cursor")
+        ? { status: 500, body: buildErrorBody("internal", "The database is busy.") }
+        : listEvents(call)) as Handler;
+    const { calls } = await openIntake("/intake?view=everything", {
+      ...storeSignals(SIGNALS).handlers,
+      ...handlers,
+    });
+    await waitFor(() => {
+      expect(getEventRow(events.at(-1)!)).not.toBeNull();
+    });
+    const readsOfSecondPage = () =>
+      findEventReads(calls).filter((read) => read.cursor?.[0] === "26").length;
+
+    const scroll = getEventList().querySelector<HTMLElement>(".asks-scroll")!;
+    scroll.scrollTop = 100_000;
+    fireEvent.scroll(scroll);
+    const alert = await within(getEventList()).findByRole("alert");
+    expect(alert.textContent).toContain("The database is busy.");
+    fireEvent.scroll(scroll);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(readsOfSecondPage()).toBe(1);
+
+    failing = false;
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(readsOfSecondPage()).toBe(2);
+    });
+    await waitFor(() => {
+      expect(within(getEventList()).queryByRole("alert")).toBeNull();
+    });
+  });
+
+  it("starts the search 200 ms after the last key, with one request", async () => {
+    const events = [buildListedEvent(1, { title: "Deploy failed" })];
+    const { calls, router } = await openEverything(events);
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+    const searchReads = () => findEventReads(calls).filter((read) => "text" in read);
+
+    vi.useFakeTimers();
+    const field = screen.getByRole("searchbox", { name: "Search events" });
+    fireEvent.change(field, { target: { value: "deploy" } });
+    await act(() => vi.advanceTimersByTimeAsync(199));
+    expect(searchReads()).toHaveLength(0);
+    expect(router.state.location.search).toEqual({ view: "everything" });
+
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(router.state.location.search).toEqual({ view: "everything", text: "deploy" });
+    vi.useRealTimers();
+    await waitFor(() => {
+      expect(searchReads()).toEqual([{ intake: ["true"], text: ["deploy"] }]);
+    });
+  });
+
+  it("keeps the text a link brings, and does not write the old text back", async () => {
+    const events = [buildListedEvent(1, { title: "Alpha release" })];
+    const { router } = await openEverything(events, "/intake?view=everything&text=alpha");
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+    const field = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search events" });
+    expect(field.value).toBe("alpha");
+
+    await act(() =>
+      router.navigate({ to: "/intake", search: { view: "everything", text: "beta" } }),
+    );
+
+    await waitFor(() => {
+      expect(field.value).toBe("beta");
+    });
+    // Longer than the wait after typing, which an old draft would use to write itself back.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(router.state.location.search).toEqual({ view: "everything", text: "beta" });
+    expect(field.value).toBe("beta");
+  });
+
+  it("reads the first page again each time Everything opens", async () => {
+    const events = Array.from({ length: 45 }, (_, index) => buildListedEvent(index + 1));
+    const { calls } = await openEverything(events);
+    await waitFor(() => {
+      expect(getEventRow(events.at(-1)!)).not.toBeNull();
+    });
+    const scroll = getEventList().querySelector<HTMLElement>(".asks-scroll")!;
+    scroll.scrollTop = 100_000;
+    fireEvent.scroll(scroll);
+    await waitFor(() => {
+      expect(findEventReads(calls).map((read) => read.cursor)).toEqual([undefined, ["26"], ["6"]]);
+    });
+
+    const views = screen.getByRole("group", { name: "View" });
+    await userEvent.click(within(views).getByRole("button", { name: /To do/ }));
+    await screen.findByRole("region", { name: "Signals" });
+    await userEvent.click(
+      within(screen.getByRole("group", { name: "View" })).getByRole("button", {
+        name: "Everything",
+      }),
+    );
+
+    // The list starts again from its first page, read once, and then reads
+    // the older pages as it is scrolled to them.
+    await waitFor(() => {
+      expect(
+        findEventReads(calls)
+          .slice(3)
+          .map((read) => read.cursor),
+      ).toEqual([undefined, ["26"]]);
+    });
+    await waitFor(() => {
+      expect(getEventRow(events.at(-1)!)).not.toBeNull();
+    });
+  });
+
+  describe("source tabs", () => {
+    /** GitHub with a signal kind switched on, so its tab shows with no signal on To do. */
+    const GITHUB_WITH_KIND: PluginDetail = {
+      ...GITHUB,
+      intake: {
+        eventKinds: [],
+        signalKinds: [
+          {
+            kind: "github/review-requested",
+            label: "Review requested",
+            description: "A review is requested of you",
+            on: true,
+            level: "default",
+          },
+        ],
+      },
+    };
+    const openWithNoSignals = (path: string) =>
+      openIntake(path, {
+        ...storeSignals([]).handlers,
+        ...storeEvents([buildListedEvent(1)]),
+        "GET /api/v1/plugins": { body: [GITHUB_WITH_KIND] },
+      });
+
+    it("keeps a plugin's tab when the view switches, with no signal on To do", async () => {
+      await openWithNoSignals("/intake");
+      expect(
+        within(screen.getByRole("navigation", { name: "Sources" })).getByRole("button", {
+          name: /GitHub/,
+        }),
+      ).not.toBeNull();
+
+      await userEvent.click(
+        within(screen.getByRole("group", { name: "View" })).getByRole("button", {
+          name: "Everything",
+        }),
+      );
+
+      await waitFor(() => {
+        expect(getEventRow(buildListedEvent(1))).not.toBeNull();
+      });
+      expect(
+        within(screen.getByRole("navigation", { name: "Sources" })).getByRole("button", {
+          name: /GitHub/,
+        }),
+      ).not.toBeNull();
+    });
+
+    it("carries the pressed tab to Everything and back", async () => {
+      const { router } = await openWithNoSignals("/intake");
+      await userEvent.click(
+        within(screen.getByRole("navigation", { name: "Sources" })).getByRole("button", {
+          name: /GitHub/,
+        }),
+      );
+      await userEvent.click(
+        within(screen.getByRole("group", { name: "View" })).getByRole("button", {
+          name: "Everything",
+        }),
+      );
+      await waitFor(() => {
+        expect(router.state.location.search).toEqual({ view: "everything", source: "github" });
+      });
+
+      await userEvent.click(
+        within(screen.getByRole("group", { name: "View" })).getByRole("button", { name: /To do/ }),
+      );
+      await screen.findByRole("region", { name: "Signals" });
+      expect(
+        within(screen.getByRole("navigation", { name: "Sources" }))
+          .getByRole("button", { name: /GitHub/ })
+          .getAttribute("aria-pressed"),
+      ).toBe("true");
+    });
   });
 
   it("reads the next page as the list is scrolled, and ends with a line when none is left", async () => {
@@ -1377,7 +1620,7 @@ describe("Intake's Everything view", () => {
     await waitFor(() => {
       expect(getEventRow(events.at(-1)!)).not.toBeNull();
     });
-    expect(screen.queryByText("No older events.")).toBeNull();
+    expect(screen.queryByText("No more events from the last 90 days.")).toBeNull();
 
     const scroll = getEventList().querySelector<HTMLElement>(".asks-scroll")!;
     scroll.scrollTop = 100_000;
@@ -1386,7 +1629,7 @@ describe("Intake's Everything view", () => {
     await waitFor(() => {
       expect(findEventReads(calls).map((read) => read.cursor)).toEqual([undefined, ["26"], ["6"]]);
     });
-    expect(await screen.findByText("No older events.")).not.toBeNull();
+    expect(await screen.findByText("No more events from the last 90 days.")).not.toBeNull();
   });
 
   it("opens the pane with every handling of the event, each linked where the app has a screen", async () => {
@@ -1420,10 +1663,10 @@ describe("Intake's Everything view", () => {
     expect(within(pane).getByRole("heading", { name: "What came of it" })).not.toBeNull();
     const blocks = [...pane.querySelectorAll(".ad-came-list .b-work")];
     expect(blocks.map((block) => block.textContent)).toEqual([
-      "Raised a signal→ signalon your To do list",
-      "Ended a signalended MentionReplied",
-      "Added to a Task→ Fix the flaky test",
-      "Known to running workknownRelease thread",
+      "Raised a signalReviewon your To do list",
+      "Ended a signalMentionReplied",
+      "Added to a TaskFix the flaky test",
+      "Known to running workRelease threadThread",
     ]);
     expect(blocks.map((block) => block.getAttribute("href"))).toEqual([
       `/intake?signal=${REVIEW.id}`,
@@ -1432,7 +1675,7 @@ describe("Intake's Everything view", () => {
       `/threads/${SESSION_ID}`,
     ]);
     expect(pane.querySelector(".b-fields")!.textContent).toBe(
-      "Connectionacme-botReferencesgithub:pr:acme/webshop#1",
+      "ConnectionGitHub · acme-botReferencesgithub:pr:acme/webshop#1",
     );
     const open = within(pane).getByRole("link", { name: /Open in GitHub/ });
     expect(open.getAttribute("href")).toBe("https://github.com/acme/webshop/pull/1");
@@ -1444,7 +1687,7 @@ describe("Intake's Everything view", () => {
     const pane = await findEventPane();
 
     const href = new URL(
-      pane.querySelector(".ad-kind a.src")!.getAttribute("href")!,
+      pane.querySelector(".ad-kind a.ad-kind-type")!.getAttribute("href")!,
       "http://app.test",
     );
     expect(href.pathname).toBe("/settings/intake");

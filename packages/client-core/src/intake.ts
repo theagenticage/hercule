@@ -12,6 +12,7 @@ import {
   EVENT_HANDLINGS,
   HAND_TO_ACTION_PREFIX,
   isCoreSignalKind,
+  type Event,
   type EventHandling,
   type EventWithFacts,
   type PluginMark,
@@ -215,39 +216,46 @@ export interface IntakeTab {
   readonly count: number;
 }
 
+/** A plugin as the tabs read it: its name, and the signal kinds its Intake settings switch on. */
+export interface IntakeTabPlugin extends PluginName {
+  readonly intake: { readonly signalKinds: ReadonlyArray<{ readonly on: boolean }> };
+}
+
 /**
- * Returns Intake's tabs: All, then one per plugin with a signal on To do
- * now or at any time in `seenSourceIds`, in the order `plugins` lists them.
- * Also returns the plugins seen so far, which the caller keeps and passes
- * back on the next call.
+ * Returns Intake's tabs: All, then one per plugin that has a signal kind
+ * switched on in its Intake settings, or a signal on To do now, or that is
+ * the tab `pressedPluginId` names. Plugins come in the order `plugins` lists
+ * them.
  *
- * A tab never disappears while the screen is mounted, even after its last
- * signal leaves, so the tabs keep their places as signals arrive and leave.
- * The returned set is `seenSourceIds` itself when no new plugin appeared,
- * so a caller can compare the two to see whether to store it.
+ * The tabs are worked out from the settings and the To do signals, which every
+ * view reads, so a switch between views keeps the same tabs, and a tab does
+ * not vanish when its last signal is done. A plugin with every signal kind
+ * switched off keeps its tab only while it has a signal on To do.
+ *
+ * A plugin that `plugins` does not list, such as one removed while its signals
+ * are still open, still gets its tab, named by its id, after the listed ones.
  *
  * Core signals have no tab of their own: they show under All only. The
  * Triage tab comes with the triage workflow (#533).
  */
 export const buildIntakeTabs = (
   signals: ReadonlyArray<Signal>,
-  plugins: ReadonlyArray<PluginName>,
-  seenSourceIds: ReadonlySet<string>,
-): { readonly tabs: ReadonlyArray<IntakeTab>; readonly seenSourceIds: ReadonlySet<string> } => {
+  plugins: ReadonlyArray<IntakeTabPlugin>,
+  pressedPluginId: string | null,
+): ReadonlyArray<IntakeTab> => {
   const current = signals
     .map((signal) => parseSignalPluginId(signal.kind))
     .filter((id) => id !== null);
-  const seen = current.every((id) => seenSourceIds.has(id))
-    ? seenSourceIds
-    : new Set([...seenSourceIds, ...current]);
-  const listed = plugins.filter((plugin) => seen.has(plugin.id));
-  // A plugin that `plugins` does not list, such as one removed while its
-  // signals are still open, still gets its tab, after the listed ones.
-  const unlisted = [...seen]
+  const wanted = new Set(current);
+  if (pressedPluginId !== null) wanted.add(pressedPluginId);
+  const listed = plugins.filter(
+    (plugin) => wanted.has(plugin.id) || plugin.intake.signalKinds.some((kind) => kind.on),
+  );
+  const unlisted = [...wanted]
     .filter((id) => !plugins.some((plugin) => plugin.id === id))
     .sort()
     .map((id) => ({ id, displayName: id }));
-  const tabs = [
+  return [
     { pluginId: null, label: "All", count: signals.length },
     ...[...listed, ...unlisted].map((plugin) => ({
       pluginId: plugin.id,
@@ -255,7 +263,6 @@ export const buildIntakeTabs = (
       count: current.filter((id) => id === plugin.id).length,
     })),
   ];
-  return { tabs, seenSourceIds: seen };
 };
 
 /** One section of an Intake list, under its heading. */
@@ -312,6 +319,40 @@ export const groupSignalsIntoSections = (
 };
 
 /**
+ * Groups `items` into runs that share a calendar date in `timezone`, in the
+ * order `items` holds them. `readTime` gives the moment that decides an
+ * item's date, and `buildLabel` the heading of a date from its name relative
+ * to `now`, as `formatRelativeDay` names it. A section's key is `day:` and the
+ * number of days from today.
+ */
+const groupByDay = <Item>(
+  items: ReadonlyArray<Item>,
+  readTime: (item: Item) => Date,
+  buildLabel: (day: string) => string,
+  now: Date,
+  timezone: string,
+): ReadonlyArray<{ readonly key: string; readonly label: string; readonly items: Item[] }> => {
+  const sections: Array<{ key: string; label: string; items: Item[] }> = [];
+  for (const item of items) {
+    const at = readTime(item);
+    const key = `day:${String(countCalendarDaysBetween(now, at, timezone))}`;
+    const last = sections.at(-1);
+    if (last?.key === key) {
+      last.items.push(item);
+      continue;
+    }
+    // Only a zone this runtime cannot read leaves a date unnamed; the
+    // heading is then left empty rather than wrong.
+    sections.push({
+      key,
+      label: buildLabel(formatRelativeDay(at, now, timezone) ?? ""),
+      items: [item],
+    });
+  }
+  return sections;
+};
+
+/**
  * Groups the signals of Later or Done into one section per calendar date in
  * `timezone`, in the order `signals` holds them, which the controller sorts:
  *
@@ -325,27 +366,14 @@ export const groupSignalsByDay = (
   view: "later" | "done",
   now: Date,
   timezone: string,
-): ReadonlyArray<IntakeSection> => {
-  const sections: Array<{ key: string; label: string; signals: Signal[] }> = [];
-  for (const signal of signals) {
-    const at = new Date((view === "later" ? signal.snooze?.until : signal.resolution?.at) ?? "");
-    const key = `day:${String(countCalendarDaysBetween(now, at, timezone))}`;
-    const last = sections.at(-1);
-    if (last?.key === key) {
-      last.signals.push(signal);
-      continue;
-    }
-    // Only a zone this runtime cannot read leaves a date unnamed; the
-    // heading is then left empty rather than wrong.
-    const day = formatRelativeDay(at, now, timezone) ?? "";
-    sections.push({
-      key,
-      label: view === "later" ? `Back ${day}` : upperFirst(day),
-      signals: [signal],
-    });
-  }
-  return sections;
-};
+): ReadonlyArray<IntakeSection> =>
+  groupByDay(
+    signals,
+    (signal) => new Date((view === "later" ? signal.snooze?.until : signal.resolution?.at) ?? ""),
+    (day) => (view === "later" ? `Back ${day}` : upperFirst(day)),
+    now,
+    timezone,
+  ).map(({ key, label, items }) => ({ key, label, signals: items }));
 
 /**
  * Returns the second line of a signal's row: who asks, the kind and where,
@@ -643,6 +671,23 @@ export const listUrgentSignals = (
     });
 
 /**
+ * Returns the id `step` places away from `selectedId` in `ids`, for `J`, `K`
+ * and the arrow keys. With no selection, or a selected id that is not in the
+ * list, `J` selects the first and `K` the last. At either end the selection
+ * stays where it is. Returns `null` when the list is empty.
+ */
+const moveSelection = <Id>(
+  ids: ReadonlyArray<Id>,
+  selectedId: Id | null,
+  step: 1 | -1,
+): Id | null => {
+  if (ids.length === 0) return null;
+  const index = selectedId === null ? -1 : ids.indexOf(selectedId);
+  if (index < 0) return step === 1 ? ids[0]! : ids.at(-1)!;
+  return ids[Math.min(ids.length - 1, Math.max(0, index + step))]!;
+};
+
+/**
  * Returns the id of the signal `step` rows away from `selectedId` in the
  * list's order, for `J`, `K` and the arrow keys. With no selection, or a
  * selected signal that has left the list, `J` selects the first row and `K`
@@ -653,13 +698,12 @@ export const moveSignalSelection = (
   sections: ReadonlyArray<IntakeSection>,
   selectedId: string | null,
   step: 1 | -1,
-): string | null => {
-  const ids = sections.flatMap((section) => section.signals.map((signal) => signal.id));
-  if (ids.length === 0) return null;
-  const index = selectedId === null ? -1 : ids.indexOf(selectedId);
-  if (index < 0) return step === 1 ? ids[0]! : ids.at(-1)!;
-  return ids[Math.min(ids.length - 1, Math.max(0, index + step))]!;
-};
+): string | null =>
+  moveSelection(
+    sections.flatMap((section) => section.signals.map((signal) => signal.id)),
+    selectedId,
+    step,
+  );
 
 /**
  * Returns the initials a message's author shows in place of an avatar: the
@@ -725,60 +769,72 @@ export type EventHandlingTarget =
   | { readonly kind: "session"; readonly sessionId: string }
   | { readonly kind: "run"; readonly runId: string };
 
-/** One handling of an event, as a row or the pane shows it. */
+/**
+ * One handling of an event, as a row or the pane shows it. A row draws
+ * `lead` and `detail` on one line. The pane draws the handling's caption, then
+ * `record`, then `standing`, one under the other.
+ */
 export interface EventHandlingLabel {
   /** The handling this label is for. */
   readonly handling: EventHandling;
   /** Tells the labels of one event apart: an event can have several of one handling. */
   readonly key: string;
-  /** The label's first part, which a client draws with more weight: "→ signal", "known", "no action". */
+  /** The row's first part, which it draws with more weight: "→ signal", "known to Release thread", "no action". */
   readonly lead: string;
-  /** What follows the lead, after " · ": the state, the title or the outcome. `null` when there is none. */
+  /** What follows the lead in the row, after " · ": the state, the title or the outcome. `null` when there is none. */
   readonly detail: string | null;
+  /** The pane's name of the record the handling is about: a signal's or a Task's title. `null` when it names none. */
+  readonly record: string | null;
+  /** The pane's line under the record: where it stands, such as "on your To do list" or "Thread". `null` when there is none. */
+  readonly standing: string | null;
   /** The record the label links to, or `null` when it names none. */
   readonly target: EventHandlingTarget | null;
 }
 
 /**
+ * Decides which view a signal is on, from the facts of an event: Done once
+ * resolved, Later while its snooze runs, else To do. A snooze whose time has
+ * passed no longer holds the signal back.
+ */
+const decideSignalView = (fact: EventFacts["signals"][number], now: Date): SignalView => {
+  if (fact.status === "resolved") return "done";
+  const snoozed = fact.snoozedUntil !== undefined && new Date(fact.snoozedUntil) > now;
+  return snoozed ? "later" : "to-do";
+};
+
+/**
  * Names where a signal stands, for the label of the event that raised it:
  * "on your To do list", "Later · back Monday" or "Done · Replied in Gmail".
- * A snooze whose time has passed no longer holds the signal back, so that
- * signal reads as on To do. Returns the view the signal is on beside the
- * words.
+ * The day a snoozed signal comes back is named in `timezone`.
  */
 const describeSignalStanding = (
   fact: EventFacts["signals"][number],
   now: Date,
   timezone: string,
-): { readonly view: SignalView; readonly words: string } => {
-  if (fact.status === "resolved") {
-    return {
-      view: "done",
-      words: fact.outcome === undefined ? "Done" : `Done · ${fact.outcome}`,
-    };
-  }
-  const until = fact.snoozedUntil === undefined ? undefined : new Date(fact.snoozedUntil);
-  if (until !== undefined && until > now) {
-    const day = formatRelativeDay(until, now, timezone);
-    return { view: "later", words: day === undefined ? "Later" : `Later · back ${day}` };
-  }
-  return { view: "to-do", words: "on your To do list" };
+): string => {
+  const view = decideSignalView(fact, now);
+  if (view === "done") return fact.outcome === undefined ? "Done" : `Done · ${fact.outcome}`;
+  if (view === "to-do") return "on your To do list";
+  const day = formatRelativeDay(new Date(fact.snoozedUntil!), now, timezone);
+  return day === undefined ? "Later" : `Later · back ${day}`;
 };
 
 /**
  * Builds the labels of what came of an event, in the order spec 10 §9.10
  * fixes, whatever order the facts come in:
  *
- * 1. a plugin's signal the event raised: "→ signal · on your To do list";
- * 2. a signal the event ended: "ended Review this PR · Approved on GitHub";
- * 4. a core signal that lists the event: "→ proposal · Fix the flaky test";
- * 5. a Task whose provenance carries the event: "→ Fix the flaky test";
- * 6. a live Subscription that received it: "known · Release thread";
- * 8. "no action", only when none of the others applies.
+ * - a plugin's signal the event raised: "→ signal · on your To do list";
+ * - a signal the event ended: "ended Review this PR · Approved on GitHub";
+ * - a core signal that lists the event: "→ proposal · Fix the flaky test";
+ * - a Task whose provenance carries the event: "→ Fix the flaky test";
+ * - a live Subscription that received it: "known to Release thread", or
+ *   "known to a Thread" when the caller may not read the holder's title;
+ * - "no action", only when none of the others applies.
  *
- * Handlings 3 and 7 and the Screener's wait for the features that produce
- * them, so no label is built for them. A signal's state is read as of `now`
- * in `timezone`, which names the day a snoozed signal comes back.
+ * Ignored events, pending triage and the Screener's two states wait for the
+ * features that produce them, so no label is built for them. A signal's state
+ * is read as of `now` in `timezone`, which names the day a snoozed signal
+ * comes back.
  */
 export const buildHandlingLabels = (
   facts: EventFacts,
@@ -794,8 +850,10 @@ export const buildHandlingLabels = (
         handling: "raised-signal",
         key: `raised-signal:${fact.signalId}`,
         lead: "→ signal",
-        detail: standing.words,
-        target: { kind: "signal", signalId: fact.signalId, view: standing.view },
+        detail: standing,
+        record: fact.title,
+        standing,
+        target: { kind: "signal", signalId: fact.signalId, view: decideSignalView(fact, now) },
       };
     }),
     ...facts.resolvedSignals.map((fact): EventHandlingLabel => ({
@@ -803,6 +861,8 @@ export const buildHandlingLabels = (
       key: `ended-signal:${fact.signalId}`,
       lead: `ended ${fact.title}`,
       detail: fact.outcome,
+      record: fact.title,
+      standing: fact.outcome,
       target: { kind: "signal", signalId: fact.signalId, view: "done" },
     })),
     ...evidence.map((fact): EventHandlingLabel => ({
@@ -810,33 +870,47 @@ export const buildHandlingLabels = (
       key: `evidence:${fact.signalId}`,
       lead: `→ ${lowerFirst(nameSignalKind(fact.kind))}`,
       detail: fact.title,
-      target: {
-        kind: "signal",
-        signalId: fact.signalId,
-        view: describeSignalStanding(fact, now, timezone).view,
-      },
+      record: fact.title,
+      standing: `${nameSignalKind(fact.kind)} · ${describeSignalStanding(fact, now, timezone)}`,
+      target: { kind: "signal", signalId: fact.signalId, view: decideSignalView(fact, now) },
     })),
     ...facts.tasks.map((fact): EventHandlingLabel => ({
       handling: "on-task",
       key: `on-task:${fact.taskId}`,
       lead: `→ ${fact.title}`,
       detail: null,
+      record: fact.title,
+      standing: null,
       target: { kind: "task", taskId: fact.taskId },
     })),
-    ...facts.knownBy.map((fact): EventHandlingLabel => ({
-      handling: "known-work",
-      key: `known-work:${fact.subscriptionId}`,
-      lead: "known",
-      detail: fact.title ?? (fact.holder.kind === "session" ? "a session" : "a run"),
-      target:
-        fact.holder.kind === "session"
+    ...facts.knownBy.map((fact): EventHandlingLabel => {
+      const isSession = fact.holder.kind === "session";
+      // The title is null when the caller may not read the holder.
+      const holder = fact.title ?? (isSession ? "a Thread" : "a run");
+      return {
+        handling: "known-work",
+        key: `known-work:${fact.subscriptionId}`,
+        lead: `known to ${holder}`,
+        detail: null,
+        record: holder,
+        standing: isSession ? "Thread" : "Run",
+        target: isSession
           ? { kind: "session", sessionId: fact.holder.id }
           : { kind: "run", runId: fact.holder.id },
-    })),
+      };
+    }),
   ];
   if (labels.length > 0) return labels;
   return [
-    { handling: "no-action", key: "no-action", lead: "no action", detail: null, target: null },
+    {
+      handling: "no-action",
+      key: "no-action",
+      lead: "no action",
+      detail: null,
+      record: null,
+      standing: null,
+      target: null,
+    },
   ];
 };
 
@@ -887,15 +961,38 @@ export const EVENT_HANDLING_OPTIONS: ReadonlyArray<EventHandlingOption> = [
 /** How many days the controller keeps events when the `retention.events` setting is not set. */
 const DEFAULT_EVENT_RETENTION_DAYS = 90;
 
+/** Names the span the `retention.events` setting keeps: "the last 90 days", or "the last day" for one. */
+const describeRetentionSpan = (retentionDays: number | undefined): string => {
+  const days = retentionDays ?? DEFAULT_EVENT_RETENTION_DAYS;
+  return days === 1 ? "the last day" : `the last ${String(days)} days`;
+};
+
 /**
  * Describes how far back Everything reaches, from the `retention.events`
  * setting: "Events from the last 90 days", or "Events from the last day"
  * for one. A setting that is not set reads as the default of 90 days.
  */
-export const describeEventHorizon = (retentionDays: number | undefined): string => {
-  const days = retentionDays ?? DEFAULT_EVENT_RETENTION_DAYS;
-  return days === 1 ? "Events from the last day" : `Events from the last ${String(days)} days`;
-};
+export const describeEventHorizon = (retentionDays: number | undefined): string =>
+  `Events from ${describeRetentionSpan(retentionDays)}`;
+
+/**
+ * Describes the end of Everything's list, which stops at the horizon:
+ * "No more events from the last 90 days."
+ */
+export const describeEventListEnd = (retentionDays: number | undefined): string =>
+  `No more events from ${describeRetentionSpan(retentionDays)}.`;
+
+/**
+ * Returns the moment Everything's list starts at, as an ISO timestamp for
+ * `event.query`'s `since`: `retentionDays` before `now`. The controller may
+ * still hold older events, because it removes them only at its next sweep,
+ * so the client asks for the horizon it shows. A setting that is not set reads
+ * as the default of 90 days.
+ */
+export const computeEventHorizonStart = (now: Date, retentionDays: number | undefined): string =>
+  new Date(
+    now.getTime() - (retentionDays ?? DEFAULT_EVENT_RETENTION_DAYS) * 24 * 60 * 60 * 1000,
+  ).toISOString();
 
 /** One day of Everything's list: its heading and the events received that day. */
 export interface EventDaySection {
@@ -917,26 +1014,10 @@ export const groupEventsByDay = (
   events: ReadonlyArray<EventWithFacts>,
   now: Date,
   timezone: string,
-): ReadonlyArray<EventDaySection> => {
-  const sections: Array<{ key: string; label: string; events: EventWithFacts[] }> = [];
-  for (const event of events) {
-    const at = new Date(event.receivedAt);
-    const key = `day:${String(countCalendarDaysBetween(now, at, timezone))}`;
-    const last = sections.at(-1);
-    if (last?.key === key) {
-      last.events.push(event);
-      continue;
-    }
-    // Only a zone this runtime cannot read leaves a date unnamed; the
-    // heading is then left empty rather than wrong.
-    sections.push({
-      key,
-      label: upperFirst(formatRelativeDay(at, now, timezone) ?? ""),
-      events: [event],
-    });
-  }
-  return sections;
-};
+): ReadonlyArray<EventDaySection> =>
+  groupByDay(events, (event) => new Date(event.receivedAt), upperFirst, now, timezone).map(
+    ({ key, label, items }) => ({ key, label, events: items }),
+  );
 
 /**
  * Returns the title an event's row and pane show: the one-line title its
@@ -948,15 +1029,18 @@ export const describeEventTitle = (event: Pick<EventWithFacts, "title" | "kind">
 /**
  * Names the system an event came from, for its mark and its "Open in" link.
  * A source that is a listed plugin gives the plugin's id and display name.
- * Any other source is a core emitter, such as `cron` or `manual`, which gives
- * no plugin id, so the caller draws the core's mark, and the core's name.
+ * A source that is not listed but came through a Connection is a plugin that
+ * was removed, so it gives its id as both, as `buildIntakeTabs` does. Any
+ * other source is a core emitter, such as `cron` or `manual`, which has no
+ * Connection and gives no plugin id, so the caller draws the core's mark, and
+ * the core's name.
  */
 export const describeEventSystem = (
-  source: string,
+  event: Pick<Event, "source" | "connectionId">,
   plugins: ReadonlyArray<PluginName>,
 ): { readonly pluginId: string | null; readonly name: string } =>
-  plugins.some((plugin) => plugin.id === source)
-    ? { pluginId: source, name: namePlugin(source, plugins) }
+  event.connectionId !== null || plugins.some((plugin) => plugin.id === event.source)
+    ? { pluginId: event.source, name: namePlugin(event.source, plugins) }
     : { pluginId: null, name: CORE_SOURCE_NAME };
 
 /**
@@ -970,9 +1054,9 @@ export const moveEventSelection = (
   events: ReadonlyArray<Pick<EventWithFacts, "id">>,
   selectedId: number | null,
   step: 1 | -1,
-): number | null => {
-  if (events.length === 0) return null;
-  const index = selectedId === null ? -1 : events.findIndex((event) => event.id === selectedId);
-  if (index < 0) return step === 1 ? events[0]!.id : events.at(-1)!.id;
-  return events[Math.min(events.length - 1, Math.max(0, index + step))]!.id;
-};
+): number | null =>
+  moveSelection(
+    events.map((event) => event.id),
+    selectedId,
+    step,
+  );

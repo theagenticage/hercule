@@ -269,13 +269,14 @@ export interface IntakeRecords {
   readonly view?: "later" | "done" | "everything";
   /**
    * What the Everything view reads: the events its one page holds, newest
-   * first, under the search text and the handling filter it opens with, and
-   * the event whose pane is open. Used only when `view` is "everything".
+   * first, under the search text, the handling filter and the source tab it
+   * opens with, and the event whose pane is open. Used only when `view` is "everything".
    */
   readonly everything?: {
     readonly events: ReadonlyArray<EventWithFacts>;
     readonly text?: string;
     readonly handling?: EventHandling;
+    readonly source?: string;
     readonly selectedEventId?: number;
   };
   /**
@@ -502,12 +503,10 @@ const seedQueryCache = (
     queryClient.setQueryData(workflowsQuery(client).queryKey, []);
   }
   if (intake?.everything !== undefined) {
-    const { events, text, handling } = intake.everything;
+    const { events, text, handling, source } = intake.everything;
     queryClient.setQueryData(
-      eventsEverythingQuery(client, {
-        ...(text === undefined ? {} : { text }),
-        ...(handling === undefined ? {} : { handling }),
-      }).queryKey,
+      // `since` is not part of the listing's key, so any value finds it.
+      eventsEverythingQuery(client, { text, handling, source }, "").queryKey,
       { pages: [{ items: events }], pageParams: [undefined] },
     );
   }
@@ -602,8 +601,10 @@ function AssistantRoute(): JSX.Element {
  * attached without its loader: the loader reads the permission profiles and
  * the settings again each time the section opens, and the query cache
  * already holds both. The Permission profiles routes are attached the same
- * way, and so are Intake, whose loader reads the selected signal, and
- * Workflows, whose loader reads the lists the cache already holds.
+ * way, and so is Workflows, whose loader reads the lists the cache already
+ * holds. Intake keeps a loader of its own that returns the moment it opened,
+ * because the screen reads that moment, and the cache already holds the
+ * records its real loader would read.
  */
 const buildRouter = (
   client: HerculeClient,
@@ -668,7 +669,9 @@ const buildRouter = (
     id: "/intake",
     path: "/intake",
     getParentRoute: () => shellRoute,
-    loader: undefined,
+    // The real loader reads the cache again; the screen needs only the moment
+    // it opened, which is the specimen's stopped clock.
+    loader: () => ({ openedAt: Date.now() }),
   } as never);
   const workflowsRoute = WorkflowsRoute.update({
     id: "/workflows",
@@ -765,7 +768,10 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
       "Settings > Appearance drew no theme cards. Check the page's console for the error.",
     );
   }
-  if (screens.intake !== undefined && document.querySelector(".ask-row, .asks-empty") === null) {
+  if (
+    screens.intake !== undefined &&
+    document.querySelector(".ask-row, .asks-empty, .asks-note") === null
+  ) {
     throw new Error(
       "Intake drew no row and no empty line. Check the page's console for the error.",
     );
@@ -979,6 +985,7 @@ export async function mountIntakeSpecimen(
   }
   if (everything?.text !== undefined) search.set("text", everything.text);
   if (everything?.handling !== undefined) search.set("handling", everything.handling);
+  if (everything?.source !== undefined) search.set("source", everything.source);
   const path = search.size === 0 ? "/intake" : `/intake?${search.toString()}`;
   await mountShellSpecimen(records, path, { intake });
 }

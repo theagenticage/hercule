@@ -29,11 +29,17 @@ import {
   type SignalMove,
   type SignalMovePlan,
 } from "@hercule/client-core";
-import { settingsQuery, signalsDoneQuery, signalsLaterQuery } from "../../app/queries";
+import {
+  settingsQuery,
+  signalsDoneQuery,
+  signalsLaterQuery,
+  signalsToDoQuery,
+} from "../../app/queries";
 import { IntakeDock } from "./intake-dock";
 import { IntakeFoot } from "./intake-foot";
+import { IntakeBar, IntakeSplit, IntakeViewSwitcher } from "./intake-frame";
 import { IntakeList, type BulkHighlight, type SignalRowAction } from "./intake-list";
-import { IntakeBar, IntakeSplit, IntakeViewSwitcher, isTextField } from "./intake-split";
+import { isTextField } from "./is-text-field";
 import { pickSelectionAfterMove } from "./pick-selection-after-move";
 import { SignalPane, type SignalPaneHandle } from "./signal-pane";
 import { SnoozeMenu } from "./snooze-menu";
@@ -104,7 +110,8 @@ export function IntakeScreen({
   readonly onPluginChange: (pluginId: string | null) => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const { tabs, plugins, toDo } = useIntakeTabs(pluginId);
+  const { tabs, plugins } = useIntakeTabs(pluginId);
+  const { data: toDo } = useSuspenseQuery(signalsToDoQuery(client));
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const timezone = resolveDisplayTimezone(settings.user.timezone);
   const moves = useSignalMoveRunner(client, timezone);

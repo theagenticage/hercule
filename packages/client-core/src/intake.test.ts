@@ -19,7 +19,9 @@ import {
   decidePluginMark,
   describeAnswerKey,
   describeBuildFailure,
+  computeEventHorizonStart,
   describeEventHorizon,
+  describeEventListEnd,
   describeHandlingCaption,
   describeEventSystem,
   describeEventTitle,
@@ -220,16 +222,24 @@ describe("countToDo and describeOrchestrationSegment", () => {
 });
 
 describe("buildIntakeTabs", () => {
-  it("lists All, then each plugin with a signal, in the plugins' order, never core signals", () => {
-    const { tabs } = buildIntakeTabs(
+  const switchedOn = { intake: { signalKinds: [{ on: true }] } };
+  const switchedOff = { intake: { signalKinds: [{ on: false }, { on: false }] } };
+  const TAB_PLUGINS = [
+    { id: "github", displayName: "GitHub", ...switchedOn },
+    { id: "slack", displayName: "Slack", ...switchedOn },
+    { id: "linear", displayName: "Linear", ...switchedOff },
+  ];
+
+  it("lists All, then each plugin with a signal kind switched on, in the plugins' order, never core signals", () => {
+    const tabs = buildIntakeTabs(
       [
         buildSignal("a", { kind: "slack/mentioned" }),
         buildSignal("b"),
         buildSignal("c"),
         buildSignal("d", { kind: "proposal", origin: fromUser() }),
       ],
-      PLUGINS,
-      new Set(),
+      TAB_PLUGINS,
+      null,
     );
     expect(tabs).toEqual([
       { pluginId: null, label: "All", count: 4 },
@@ -238,33 +248,30 @@ describe("buildIntakeTabs", () => {
     ]);
   });
 
-  it("keeps a plugin's tab after its last signal leaves", () => {
-    const first = buildIntakeTabs(
-      [buildSignal("a", { kind: "slack/mentioned" })],
-      PLUGINS,
-      new Set(),
-    );
-    const later = buildIntakeTabs([buildSignal("b")], PLUGINS, first.seenSourceIds);
-    expect(later.tabs).toEqual([
-      { pluginId: null, label: "All", count: 1 },
-      { pluginId: "github", label: "GitHub", count: 1 },
+  it("keeps a switched-on plugin's tab with no signal, so it survives its last one leaving", () => {
+    expect(buildIntakeTabs([], TAB_PLUGINS, null)).toEqual([
+      { pluginId: null, label: "All", count: 0 },
+      { pluginId: "github", label: "GitHub", count: 0 },
       { pluginId: "slack", label: "Slack", count: 0 },
     ]);
   });
 
-  it("returns the same seen set when no new plugin appears, so the caller stores nothing", () => {
-    const seen = new Set(["github"]);
-    expect(buildIntakeTabs([buildSignal("a")], PLUGINS, seen).seenSourceIds).toBe(seen);
-    expect(buildIntakeTabs([], PLUGINS, seen).seenSourceIds).toBe(seen);
+  it("gives a plugin with every kind switched off a tab only while it has a signal or is pressed", () => {
+    const labels = (signals: Signal[], pressed: string | null) =>
+      buildIntakeTabs(signals, TAB_PLUGINS, pressed).map((tab) => tab.label);
+    expect(labels([], null)).not.toContain("Linear");
+    expect(labels([buildSignal("a", { kind: "linear/assigned" })], null)).toContain("Linear");
+    expect(labels([], "linear")).toContain("Linear");
   });
 
   it("gives an unlisted plugin a tab named by its id, after the listed ones", () => {
-    const { tabs } = buildIntakeTabs(
+    const tabs = buildIntakeTabs(
       [buildSignal("a", { kind: "jira/assigned" }), buildSignal("b")],
-      PLUGINS,
-      new Set(),
+      TAB_PLUGINS,
+      null,
     );
-    expect(tabs.map((tab) => tab.label)).toEqual(["All", "GitHub", "jira"]);
+    expect(tabs.map((tab) => tab.label)).toEqual(["All", "GitHub", "Slack", "jira"]);
+    expect(buildIntakeTabs([], TAB_PLUGINS, "jira").map((tab) => tab.label)).toContain("jira");
   });
 });
 
@@ -758,7 +765,15 @@ describe("buildHandlingLabels", () => {
 
   it("reads no action for an event that came to nothing", () => {
     expect(buildLabels({})).toEqual([
-      { handling: "no-action", key: "no-action", lead: "no action", detail: null, target: null },
+      {
+        handling: "no-action",
+        key: "no-action",
+        lead: "no action",
+        detail: null,
+        record: null,
+        standing: null,
+        target: null,
+      },
     ]);
   });
 
@@ -845,10 +860,50 @@ describe("buildHandlingLabels", () => {
         ],
       }),
     ).toEqual([
-      ["known", "Release thread"],
-      ["known", "a run"],
-      ["known", "a session"],
+      ["known to Release thread", null],
+      ["known to a run", null],
+      ["known to a Thread", null],
     ]);
+  });
+
+  it("tells the pane the record each handling is about and where it stands", () => {
+    const readCard = (facts: Partial<EventFacts>) =>
+      buildLabels(facts).map((label) => [label.record, label.standing]);
+    expect(readCard({ signals: [{ ...MENTIONED, status: "open" }] })).toEqual([
+      ["Mentioned", "on your To do list"],
+    ]);
+    expect(
+      readCard({
+        resolvedSignals: [
+          {
+            signalId: "s2",
+            kind: "github/review-requested",
+            title: "Review #12",
+            outcome: "Approved",
+          },
+        ],
+      }),
+    ).toEqual([["Review #12", "Approved"]]);
+    expect(
+      readCard({
+        signals: [{ signalId: "p", kind: "proposal", status: "open", title: "Fix the flake" }],
+      }),
+    ).toEqual([["Fix the flake", "Proposal · on your To do list"]]);
+    expect(readCard({ tasks: [{ taskId: "t1", title: "Ship the release" }] })).toEqual([
+      ["Ship the release", null],
+    ]);
+    expect(
+      readCard({
+        knownBy: [
+          { subscriptionId: "a", holder: { kind: "session", id: "x" }, title: "Release thread" },
+          { subscriptionId: "b", holder: { kind: "run", id: "y" }, title: null },
+        ],
+      }),
+    ).toEqual([
+      ["Release thread", "Thread"],
+      ["a run", "Run"],
+    ]);
+    expect(readCard({})).toEqual([[null, null]]);
   });
 
   it("links the holder of a known event by its kind", () => {
@@ -900,6 +955,8 @@ describe("cutHandlingLabels", () => {
     key,
     lead: key,
     detail: null,
+    record: null,
+    standing: null,
     target: null,
   });
 
@@ -946,6 +1003,27 @@ describe("describeEventHorizon", () => {
 
   it("reads an unset retention as the default of 90 days", () => {
     expect(describeEventHorizon(undefined)).toBe("Events from the last 90 days");
+  });
+});
+
+describe("describeEventListEnd", () => {
+  it("names the horizon the list stops at", () => {
+    expect(describeEventListEnd(90)).toBe("No more events from the last 90 days.");
+    expect(describeEventListEnd(1)).toBe("No more events from the last day.");
+    expect(describeEventListEnd(undefined)).toBe("No more events from the last 90 days.");
+  });
+});
+
+describe("computeEventHorizonStart", () => {
+  const now = new Date("2026-10-11T08:00:00.000Z");
+
+  it("goes back the retention's days from now", () => {
+    expect(computeEventHorizonStart(now, 90)).toBe("2026-07-13T08:00:00.000Z");
+    expect(computeEventHorizonStart(now, 1)).toBe("2026-10-10T08:00:00.000Z");
+  });
+
+  it("reads an unset retention as the default of 90 days", () => {
+    expect(computeEventHorizonStart(now, undefined)).toBe(computeEventHorizonStart(now, 90));
   });
 });
 
@@ -1011,11 +1089,25 @@ describe("moveEventSelection", () => {
 describe("describeEventSystem", () => {
   const plugins = [{ id: "github", displayName: "GitHub" }];
 
+  const CONNECTION_ID = "01a06d02-7a00-7000-8000-000000000001";
+
   it("names a listed plugin by its id and display name", () => {
-    expect(describeEventSystem("github", plugins)).toEqual({ pluginId: "github", name: "GitHub" });
+    expect(describeEventSystem({ source: "github", connectionId: CONNECTION_ID }, plugins)).toEqual(
+      { pluginId: "github", name: "GitHub" },
+    );
   });
 
   it("gives a core emitter no plugin id and the core's name", () => {
-    expect(describeEventSystem("cron", plugins)).toEqual({ pluginId: null, name: "Hercule" });
+    expect(describeEventSystem({ source: "cron", connectionId: null }, plugins)).toEqual({
+      pluginId: null,
+      name: "Hercule",
+    });
+  });
+
+  it("names a plugin that was removed by its id, because its event came through a Connection", () => {
+    expect(describeEventSystem({ source: "jira", connectionId: CONNECTION_ID }, plugins)).toEqual({
+      pluginId: "jira",
+      name: "jira",
+    });
   });
 });
