@@ -27,21 +27,18 @@ import {
 } from "./run-display";
 import { describeSchedule } from "./schedule-text";
 import { formatDuration } from "./threads/duration";
-import { describeTriggerOn } from "./trigger-display";
-import type { WaitingRunSession } from "./waiting";
 import {
-  decideStripRunState,
+  decideRunMarkState,
   describeLiveRuns,
   describeWaitingRunSession,
-  type StripRunState,
-  type WorkflowStatusTone,
-} from "./workflow-rows";
+  type RunMarkState,
+} from "./run-marks";
+import { decideFiresOn, describeTriggerOn } from "./trigger-display";
+import type { WaitingRunSession } from "./waiting";
+import type { WorkflowStatusTone } from "./workflow-rows";
 
 /** Returns `text` with its first letter in upper case. */
 const capitalize = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
-
-/** Returns whether `on` fires on a schedule or on events, which picks the clock or the bolt. */
-const readFiresOn = (on: Trigger["on"]): TriggerFiresOn => (isSchedule(on) ? "schedule" : "event");
 
 /**
  * Returns `triggers` in the order `definition` declares them, so the page
@@ -78,7 +75,7 @@ export interface WorkflowChip {
 }
 
 /** Returns `count` with the noun after it, "1 agent" or "5 agents", or `undefined` for none. */
-const countNoun = (count: number, noun: string): string | undefined =>
+const formatCount = (count: number, noun: string): string | undefined =>
   count === 0 ? undefined : `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
 
 /**
@@ -100,7 +97,7 @@ export const buildWorkflowChips = (
       const isPaused = trigger.status === "paused";
       return {
         key: `trigger:${trigger.triggerId}`,
-        firesOn: readFiresOn(trigger.on),
+        firesOn: decideFiresOn(trigger.on),
         text: isBroken ? `${words} · error` : isPaused ? `${words} · paused` : words,
         nextFireAt: enabled && !isBroken && !isPaused ? (trigger.nextFireAt ?? null) : null,
         tone: isBroken ? "fail" : null,
@@ -108,9 +105,9 @@ export const buildWorkflowChips = (
     });
   const { steps } = definition;
   const counts = [
-    countNoun(steps.filter((step) => step.kind === "agent").length, "agent"),
-    countNoun(steps.filter((step) => step.kind === "action").length, "action"),
-    countNoun(
+    formatCount(steps.filter((step) => step.kind === "agent").length, "agent"),
+    formatCount(steps.filter((step) => step.kind === "action").length, "action"),
+    formatCount(
       (definition.triggers ?? []).filter((trigger) => trigger.kind === "signal").length,
       "signal",
     ),
@@ -127,7 +124,7 @@ export const buildWorkflowChips = (
 export interface RunRow {
   readonly id: string;
   /** The run's mark. `cancelled` and `starting` have none: the row shows its words in the mark's place. */
-  readonly state: StripRunState;
+  readonly state: RunMarkState;
   /**
    * What the run is doing or how it ended: what its step asks while it waits
    * on the user ("review asks: Ship v2.4?"), "At review", "Waiting for
@@ -199,13 +196,13 @@ export const buildRunRows = (
     const { startedAt, finishedAt } = readTimestamps(run);
     return {
       id: run.id,
-      state: decideStripRunState(run, waiting !== undefined),
+      state: decideRunMarkState(run, waiting !== undefined),
       statusText:
         waiting === undefined ? describeRunStatus(run) : describeWaitingRunSession(waiting),
       statusTone: waiting !== undefined ? "you" : run.status === "failed" ? "fail" : "muted",
       startedByText:
         origin.kind === "trigger" ? origin.triggerId : capitalize(describeRunOrigin(run).label),
-      startedByFiresOn: on === undefined ? null : readFiresOn(on),
+      startedByFiresOn: on === undefined ? null : decideFiresOn(on),
       createdAt: run.createdAt,
       startedAt: startedAt ?? null,
       finishedAt: finishedAt ?? null,
@@ -266,12 +263,14 @@ export interface TriggerRow {
   /** When the trigger fires next, an ISO instant, which the screen shows as "Next Fri 14:00". */
   readonly nextFireAt: string | null;
   /**
-   * Whether the start trigger starts runs, which its pause switch shows:
-   * false while it is paused. Null for a signal trigger, which has no switch.
+   * A start trigger's pause switch, or null for a signal trigger, which has
+   * none:
+   *
+   * - `isActive`: whether the trigger starts runs, so the switch is on. It
+   *   is false while the trigger is paused.
+   * - `label`: the switch's accessible name, "on_friday starts runs".
    */
-  readonly isActive: boolean | null;
-  /** The pause switch's accessible name, "on_friday starts runs", or null with no switch. */
-  readonly switchLabel: string | null;
+  readonly switch: { readonly isActive: boolean; readonly label: string } | null;
 }
 
 /**
@@ -293,7 +292,7 @@ export const buildTriggerRows = (
     const isQuiet = health?.state === "error" || !isStart || status === "paused" || !enabled;
     return {
       id: trigger.triggerId,
-      firesOn: readFiresOn(on),
+      firesOn: decideFiresOn(on),
       doesText: isStart ? "Starts a run" : "Resumes a run",
       firesOnText: isSchedule(on) ? describeSchedule(on) : describeTriggerOn(on),
       stateText:
@@ -310,8 +309,9 @@ export const buildTriggerRows = (
                   : "On event",
       stateTone: health?.state === "error" ? "fail" : "muted",
       nextFireAt: isQuiet ? null : (nextFireAt ?? null),
-      isActive: isStart ? status !== "paused" : null,
-      switchLabel: isStart ? `${trigger.triggerId} starts runs` : null,
+      switch: isStart
+        ? { isActive: status !== "paused", label: `${trigger.triggerId} starts runs` }
+        : null,
     };
   });
 

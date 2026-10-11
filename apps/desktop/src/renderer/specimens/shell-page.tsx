@@ -511,7 +511,11 @@ const seedQueryCache = (
       pageParams: [undefined],
     });
     queryClient.setQueryData(
-      workflowDayRunsQuery(client, workflow.id, todayRuns.activeSince, todayRuns.until).queryKey,
+      workflowDayRunsQuery(client, workflow.id, {
+        start: new Date(todayRuns.activeSince),
+        end: new Date(todayRuns.until),
+        isToday: true,
+      }).queryKey,
       todayRuns.runs,
     );
     queryClient.setQueryData(agentsQuery(client).queryKey, agents);

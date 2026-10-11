@@ -8,7 +8,7 @@
  * It is imported only by the graph, which loads with the open workflow's
  * route, so the layout engine stays off the first screen.
  */
-import { computeGraphLayout, type Size } from "@hercule/client-core/graph-layout";
+import { computeGraphLayout, type GraphLayout, type Size } from "@hercule/client-core/graph-layout";
 import type { GraphEdge, WorkflowGraphDrawing } from "@hercule/client-core/graph-model";
 
 /** The size of every card. A longer id or detail is cut short, and the card's tooltip holds it whole. */
@@ -64,7 +64,7 @@ const measureLabelRoom = (edge: GraphEdge): Size | undefined => {
 
 /** A laid out graph, and the size of its drawing with the end dots. */
 export interface GraphDrawingLayout {
-  readonly layout: ReturnType<typeof computeGraphLayout>;
+  readonly layout: GraphLayout;
   readonly size: Size;
 }
 

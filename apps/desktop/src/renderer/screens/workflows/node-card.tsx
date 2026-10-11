@@ -26,22 +26,19 @@ function TimeValue({
 /**
  * Renders the inside of `card`: the header with the node's icon, its id and
  * its kind, then its rows and its prompt where it has them. Time rows are
- * shown in `timezone`. `firesOnSchedule` picks the clock over the bolt for a
- * start trigger.
+ * shown in `timezone`.
  */
 export function NodeCardContent({
   card,
-  firesOnSchedule,
   timezone,
 }: {
   readonly card: NodeCard;
-  readonly firesOnSchedule: boolean;
   readonly timezone: string;
 }): JSX.Element {
   return (
     <>
       <div className="pop-h">
-        <NodeIcon kind={card.kind} firesOnSchedule={firesOnSchedule} />
+        <NodeIcon kind={card.kind} firesOn={card.firesOn} />
         <b>{card.id}</b>
         <span>{card.kindText}</span>
       </div>

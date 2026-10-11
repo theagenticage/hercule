@@ -120,6 +120,7 @@ describe("buildNodeCard", () => {
   it("says which values an agent step takes from its Agent, and keeps the prompt apart", () => {
     const review = buildCard("review");
     assert.strictEqual(review.kindText, "Agent step");
+    assert.isNull(review.firesOn);
     assert.strictEqual(review.prompt, "Review the change.");
     assert.deepStrictEqual(listFacts(review), {
       Agent: "Reviewer",
@@ -156,6 +157,7 @@ describe("buildNodeCard", () => {
   it("gives a scheduled trigger's next and last fire as instants for the age clock", () => {
     const nightly = buildCard("nightly");
     assert.strictEqual(nightly.kindText, "Start trigger");
+    assert.strictEqual(nightly.firesOn, "schedule");
     assert.deepStrictEqual(nightly.facts, [
       { kind: "text", label: "Fires on", value: "0 2 * * *", isCode: true },
       { kind: "time", label: "Next", at: "2026-09-30T02:00:00.000Z", direction: "future" },
@@ -175,6 +177,7 @@ describe("buildNodeCard", () => {
   });
 
   it("shows an event trigger's kind in words and its filter as code", () => {
+    assert.strictEqual(buildCard("labeled").firesOn, "event");
     assert.deepStrictEqual(buildCard("labeled").facts, [
       { kind: "text", label: "Fires on", value: "github.issue.labeled", isCode: false },
       { kind: "text", label: "Filter", value: 'event.payload.label == "ship"', isCode: true },

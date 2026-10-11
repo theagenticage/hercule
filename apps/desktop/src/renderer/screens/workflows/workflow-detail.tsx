@@ -6,6 +6,7 @@
  */
 import type { JSX, KeyboardEvent, ReactNode } from "react";
 import type { TriggerFiresOn } from "@hercule/contract";
+import { hasRunMark } from "@hercule/client-core/run-marks";
 import {
   describeRunRow,
   formatRunDuration,
@@ -202,7 +203,7 @@ export function WorkflowTabBar({
 
 /**
  * Renders the column heads of the Runs list. They are hidden from assistive
- * technology, because each row's name says what its cells show.
+ * technology, because each row's accessible name already describes its cells.
  */
 export function RunTableHeads(): JSX.Element {
   return (
@@ -265,11 +266,10 @@ export function RunListRow({
     row.isLive && row.startedAt !== null && onScreen,
     (now) => formatRunDuration(row, now),
   );
-  const hasMark = row.state !== "cancelled" && row.state !== "starting";
   const statusClass = [
     "status-text",
     row.statusTone === "muted" ? "" : `status-text--${row.statusTone}`,
-    hasMark ? "" : "status-text--no-mark",
+    hasRunMark(row.state) ? "" : "status-text--no-mark",
   ]
     .filter((name) => name !== "")
     .join(" ");
@@ -279,11 +279,11 @@ export function RunListRow({
       role="listitem"
       aria-label={describeRunRow(row, startedText, tookText)}
     >
-      {row.state === "cancelled" || row.state === "starting" ? null : (
+      {hasRunMark(row.state) ? (
         <span className="table-mark">
           <Mark state={row.state} />
         </span>
-      )}
+      ) : null}
       <span className={statusClass}>{row.statusText}</span>
       <span className="table-quiet col-by">
         <FiresOnIcon firesOn={row.startedByFiresOn} />
@@ -298,7 +298,7 @@ export function RunListRow({
 /**
  * Renders the Triggers tab's rows, each start trigger with its pause switch.
  * `error` is the trigger whose last save failed and why, shown under its row
- * as an alert. Shows a line saying so when the workflow has no trigger.
+ * as an alert. When the workflow has no trigger, shows a line of text instead.
  */
 export function TriggerTable({
   rows,
@@ -338,15 +338,15 @@ export function TriggerTable({
                 </span>
               )}
             </span>
-            {row.isActive === null || row.switchLabel === null ? (
+            {row.switch === null ? (
               <span />
             ) : (
               <button
                 type="button"
                 className="toggle"
                 role="switch"
-                aria-checked={row.isActive}
-                aria-label={row.switchLabel}
+                aria-checked={row.switch.isActive}
+                aria-label={row.switch.label}
                 onClick={() => {
                   onToggle(row.id);
                 }}

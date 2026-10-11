@@ -14,12 +14,14 @@ import {
   type Agent,
   type ProviderInstance,
   type Trigger,
+  type TriggerFiresOn,
   type WorkflowAction,
   type WorkflowDefinition,
 } from "@hercule/contract";
+import type { NodeKind } from "./graph-model";
 import { formatAccessMode } from "./threads/access-modes";
 import { findModelName } from "./threads/model-name";
-import { describeTriggerOn } from "./trigger-display";
+import { decideFiresOn, describeTriggerOn } from "./trigger-display";
 
 /**
  * One row of a node's card:
@@ -44,9 +46,6 @@ export type NodeFact =
       readonly direction: "past" | "future";
     };
 
-/** The kinds of node on the workflow graph. */
-export type NodeKind = "agent" | "action" | "start" | "signal";
-
 /** What a node's card shows. */
 export interface NodeCard {
   /** The step's or trigger's id, which is the card's title. */
@@ -54,6 +53,11 @@ export interface NodeCard {
   readonly kind: NodeKind;
   /** What kind of node it is, on the title's right: "Agent step". */
   readonly kindText: string;
+  /**
+   * Whether a trigger fires on a schedule or on events, which draws a clock
+   * or a bolt in the card's header. Null for a step.
+   */
+  readonly firesOn: TriggerFiresOn | null;
   readonly facts: ReadonlyArray<NodeFact>;
   /** The prompt an agent step starts its session with, as written, shown in a section of its own. */
   readonly prompt: string | undefined;
@@ -61,7 +65,7 @@ export interface NodeCard {
 
 /** The records a card names things from, beside the definition. */
 export interface NodeCardReads {
-  /** The workflow's triggers, which say whether a start trigger is paused, and when it fires next and fired last. */
+  /** The workflow's triggers, whose records hold whether a start trigger is paused, and when it fires next and fired last. */
   readonly triggers: ReadonlyArray<Trigger>;
   /** The Agents, which name an agent step's Agent, and give its model and access mode when the step sets none. */
   readonly agents: ReadonlyArray<
@@ -112,10 +116,10 @@ const listStepGraphFacts = (step: Step): ReadonlyArray<NodeFact> => [
 ];
 
 /**
- * Returns the names of the fields an output schema declares, such as
- * "verdict, notes", or `undefined` for a schema that names none.
+ * Describes the fields an output schema declares by their names, such as
+ * "verdict, notes", or returns `undefined` for a schema that names none.
  */
-const listOutputFields = (schema: unknown): string | undefined => {
+const describeOutputFields = (schema: unknown): string | undefined => {
   if (typeof schema !== "object" || schema === null || !("properties" in schema)) return undefined;
   const { properties } = schema;
   if (typeof properties !== "object" || properties === null) return undefined;
@@ -128,9 +132,9 @@ const formatParam = (value: unknown): string =>
   typeof value === "string" ? value : JSON.stringify(value);
 
 /**
- * Returns the rows of an agent step. The Model and Access rows say ", from
- * the Agent" when the step leaves the value to its Agent, because changing
- * it on the Agent changes it here too. A step whose Agent no longer exists
+ * Returns the rows of an agent step. The value of the Model or the Access
+ * row ends in ", from the Agent" when the step leaves the value to its
+ * Agent, because changing it on the Agent changes it here too. A step whose Agent no longer exists
  * shows the Agent's id, and no row for what only the Agent would give.
  */
 const listAgentStepFacts = (
@@ -141,7 +145,7 @@ const listAgentStepFacts = (
   const instance = instances.find((each) => each.id === agent?.instanceId);
   const model = step.model ?? agent?.model?.model;
   const accessMode = step.accessMode ?? agent?.accessMode;
-  const outputFields = listOutputFields(step.outputSchema);
+  const outputFields = describeOutputFields(step.outputSchema);
   const markFromAgent = (value: string, isOwn: boolean): string =>
     isOwn ? value : `${value}, from the Agent`;
   return [
@@ -239,6 +243,7 @@ export const buildNodeCard = (
       id: step.id,
       kind: step.kind,
       kindText: KIND_TEXTS[step.kind],
+      firesOn: null,
       facts:
         step.kind === "agent" ? listAgentStepFacts(step, reads) : listActionStepFacts(step, reads),
       prompt: step.kind === "agent" ? step.prompt : undefined,
@@ -250,6 +255,7 @@ export const buildNodeCard = (
     id: trigger.id,
     kind: trigger.kind,
     kindText: KIND_TEXTS[trigger.kind],
+    firesOn: decideFiresOn(trigger.on),
     facts: listTriggerFacts(trigger, reads),
     prompt: undefined,
   };

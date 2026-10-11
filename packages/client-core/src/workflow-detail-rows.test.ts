@@ -335,11 +335,11 @@ describe("buildTriggerRows", () => {
       MERGED,
     ]);
     assert.deepStrictEqual(
-      rows.map(({ isActive, switchLabel }) => [isActive, switchLabel]),
+      rows.map((row) => row.switch),
       [
-        [true, "labeled starts runs"],
-        [false, "friday starts runs"],
-        [null, null],
+        { isActive: true, label: "labeled starts runs" },
+        { isActive: false, label: "friday starts runs" },
+        null,
       ],
     );
   });

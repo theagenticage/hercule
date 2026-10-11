@@ -5,10 +5,10 @@ import {
   buildTimelineFires,
   buildTimelineHours,
   computeTimelineDay,
-  computeTimelineReadRange,
   findNextTimelineMinute,
   isHourLabelCovered,
   locateTimelineNow,
+  MAX_TIMELINE_DAYS_BACK,
   type TimelineBar,
   type TimelineDay,
 } from "./run-timeline";
@@ -69,7 +69,7 @@ const readMinutes = (place: number | null): number | null =>
 /** Returns what a test reads of each bar: the run's id, its ends in minutes, and its cuts. */
 const readBars = (bars: ReadonlyArray<TimelineBar>) =>
   bars.map((bar) => ({
-    id: bar.run.id,
+    id: bar.row.id,
     from: readMinutes(bar.from),
     to: readMinutes(bar.to),
     startsBefore: bar.startsBefore,
@@ -110,14 +110,40 @@ describe("computeTimelineDay", () => {
       ["2026-10-23T22:00:00.000Z", "2026-10-24T22:00:00.000Z"],
     );
   });
-});
 
-describe("computeTimelineReadRange", () => {
-  it("reads the runs that were live at some moment of the day", () => {
-    assert.deepStrictEqual(computeTimelineReadRange(TODAY), {
-      activeSince: "2026-09-29T00:00:00.000Z",
-      until: "2026-09-30T00:00:00.000Z",
-    });
+  it("starts a day whose clock skips midnight at 01:00, and one that reads midnight twice at the first", () => {
+    // Havana skips 00:00 on Sunday 8 March 2026, and reads it twice on Sunday 1 November.
+    assert.deepStrictEqual(
+      readDay(computeTimelineDay(new Date("2026-03-09T15:00:00Z"), 1, "America/Havana")),
+      ["2026-03-08T05:00:00.000Z", "2026-03-09T04:00:00.000Z"],
+    );
+    assert.deepStrictEqual(
+      readDay(computeTimelineDay(new Date("2026-11-02T15:00:00Z"), 1, "America/Havana")),
+      ["2026-11-01T04:00:00.000Z", "2026-11-02T05:00:00.000Z"],
+    );
+    // Santiago skips 00:00 on Sunday 6 September 2026, and on Sunday 5 April
+    // goes back from 00:00 to 23:00 on Saturday 4 April, which is 25 hours long.
+    assert.deepStrictEqual(
+      readDay(computeTimelineDay(new Date("2026-09-07T15:00:00Z"), 1, "America/Santiago")),
+      ["2026-09-06T04:00:00.000Z", "2026-09-07T03:00:00.000Z"],
+    );
+    assert.deepStrictEqual(
+      readDay(computeTimelineDay(new Date("2026-04-05T15:00:00Z"), 1, "America/Santiago")),
+      ["2026-04-04T03:00:00.000Z", "2026-04-05T04:00:00.000Z"],
+    );
+  });
+
+  it("counts back across leap years, and clamps daysBack to the range it allows", () => {
+    // Ten years back from 29 September 2026 is 3652 days, over 29 February 2020 and 2024.
+    const oldest = computeTimelineDay(NOW, MAX_TIMELINE_DAYS_BACK, "UTC");
+    assert.deepStrictEqual(readDay(oldest), [
+      "2016-10-01T00:00:00.000Z",
+      "2016-10-02T00:00:00.000Z",
+    ]);
+    assert.deepStrictEqual(readDay(computeTimelineDay(NOW, 100_000, "UTC")), readDay(oldest));
+    const beforeToday = computeTimelineDay(NOW, -3, "UTC");
+    assert.deepStrictEqual(readDay(beforeToday), readDay(TODAY));
+    assert.isTrue(beforeToday.isToday);
   });
 });
 
@@ -131,7 +157,7 @@ describe("buildTimelineBars", () => {
       { id: "r-done", from: 360, to: 390, startsBefore: false, endsAfter: false },
       { id: "r-live", from: 552, to: null, startsBefore: false, endsAfter: false },
     ]);
-    assert.strictEqual(bars[1]?.run.state, "working");
+    assert.strictEqual(bars[1]?.row.state, "working");
     assert.strictEqual(trackCount, 1);
   });
 
@@ -146,7 +172,7 @@ describe("buildTimelineBars", () => {
     };
     const [bar] = buildBars([pending]).bars;
     assert.deepInclude(bar, { from: 580 / DAY_MINUTES, to: null });
-    assert.strictEqual(bar?.run.state, "starting");
+    assert.strictEqual(bar?.row.state, "starting");
   });
 
   it("stacks the runs that overlap, and puts a later run back on the first free track", () => {
@@ -156,7 +182,7 @@ describe("buildTimelineBars", () => {
       buildRun("r-b", at("06:20"), at("07:30")),
     ]);
     assert.deepStrictEqual(
-      bars.map((bar) => [bar.run.id, bar.track]),
+      bars.map((bar) => [bar.row.id, bar.track]),
       [
         ["r-a", 0],
         ["r-b", 1],
@@ -259,6 +285,54 @@ describe("buildTimelineHours", () => {
     assert.deepStrictEqual(
       long.slice(0, 4).map((hour) => hour.label),
       ["01:00", "02:00", "02:00", "03:00"],
+    );
+  });
+
+  it("draws the lines on whole hours where the clock moves by half an hour", () => {
+    // Lord Howe Island moves from 02:00 to 02:30 on Sunday 4 October 2026,
+    // so the day is 23.5 hours long, and 03:00 comes 1.5 hours after 01:00.
+    const lordHowe = "Australia/Lord_Howe";
+    const october = computeTimelineDay(new Date("2026-10-05T03:00:00Z"), 1, lordHowe);
+    assert.deepStrictEqual(readDay(october), [
+      "2026-10-03T13:30:00.000Z",
+      "2026-10-04T13:00:00.000Z",
+    ]);
+    const short = buildTimelineHours(october, lordHowe);
+    assert.lengthOf(short, 22);
+    assert.isTrue(short.every((hour) => hour.label.endsWith(":00")));
+    assert.deepStrictEqual(
+      short.slice(0, 2).map((hour) => [hour.label, new Date(hour.startsAt).toISOString()]),
+      [
+        ["01:00", "2026-10-03T14:30:00.000Z"],
+        ["03:00", "2026-10-03T16:00:00.000Z"],
+      ],
+    );
+
+    // On Sunday 5 April 2026 it goes back from 02:00 to 01:30, so the day is
+    // 24.5 hours long, and 02:00 comes 1.5 hours after 01:00.
+    const april = computeTimelineDay(new Date("2026-04-06T03:00:00Z"), 1, lordHowe);
+    assert.deepStrictEqual(readDay(april), [
+      "2026-04-04T13:00:00.000Z",
+      "2026-04-05T13:30:00.000Z",
+    ]);
+    const long = buildTimelineHours(april, lordHowe);
+    assert.lengthOf(long, 23);
+    assert.isTrue(long.every((hour) => hour.label.endsWith(":00")));
+    assert.deepStrictEqual(
+      long.slice(0, 3).map((hour) => [hour.label, new Date(hour.startsAt).toISOString()]),
+      [
+        ["01:00", "2026-04-04T14:00:00.000Z"],
+        ["02:00", "2026-04-04T15:30:00.000Z"],
+        ["03:00", "2026-04-04T16:30:00.000Z"],
+      ],
+    );
+
+    // On a day the clock does not move, the lines are an hour apart.
+    const normal = buildTimelineHours(computeTimelineDay(NOW, 0, lordHowe), lordHowe);
+    assert.lengthOf(normal, 23);
+    assert.deepStrictEqual(
+      normal.slice(0, 2).map((hour) => hour.startsAt - normal[0]!.startsAt),
+      [0, 3_600_000],
     );
   });
 });

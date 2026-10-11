@@ -1,4 +1,4 @@
-/** The icon that says what a node of the workflow graph is. */
+/** The icon that shows what kind of node a node of the workflow graph is. */
 import type { JSX } from "react";
 import type { GraphNode } from "@hercule/client-core/graph-model";
 import { AgentIcon } from "../../icons/agent";
@@ -11,16 +11,13 @@ import { PuzzleIcon } from "../../icons/puzzle";
  * piece for an action step, and a clock or a bolt for a trigger that fires on
  * a schedule or on an event.
  */
-export function NodeIcon({
-  kind,
-  firesOnSchedule,
-}: Pick<GraphNode, "kind" | "firesOnSchedule">): JSX.Element {
+export function NodeIcon({ kind, firesOn }: Pick<GraphNode, "kind" | "firesOn">): JSX.Element {
   switch (kind) {
     case "agent":
       return <AgentIcon size={14} />;
     case "action":
       return <PuzzleIcon size={14} />;
     default:
-      return firesOnSchedule ? <ClockIcon size={14} /> : <BoltIcon size={14} />;
+      return firesOn === "schedule" ? <ClockIcon size={14} /> : <BoltIcon size={14} />;
   }
 }

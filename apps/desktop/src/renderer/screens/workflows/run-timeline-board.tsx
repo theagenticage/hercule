@@ -26,6 +26,7 @@ import {
   type RunRow,
 } from "@hercule/client-core/workflow-detail-rows";
 import { isHourLabelCovered } from "@hercule/client-core/run-timeline";
+import { hasRunMark } from "@hercule/client-core/run-marks";
 import { useListTime } from "./list-time";
 import { useDurationText } from "../../app/age-clock";
 import { ChevronLeftIcon } from "../../icons/chevron-left";
@@ -221,11 +222,11 @@ export function TimelineLanes({
   const lateRunIds = useLateRunIds(bars);
   const drawBar = (bar: TimelineBar, order: number): JSX.Element => (
     <RunBar
-      key={bar.run.id}
+      key={bar.row.id}
       bar={bar}
       order={order}
       now={now}
-      isLate={lateRunIds.has(bar.run.id)}
+      isLate={lateRunIds.has(bar.row.id)}
       timezone={timezone}
     />
   );
@@ -272,11 +273,11 @@ export function TimelineLanes({
  * user did not do, so it only pops in its mark.
  */
 function useLateRunIds(bars: ReadonlyArray<TimelineBar>): ReadonlySet<string> {
-  const [firstStates] = useState(() => new Map(bars.map((bar) => [bar.run.id, bar.run.state])));
+  const [firstStates] = useState(() => new Map(bars.map((bar) => [bar.row.id, bar.row.state])));
   const [lateRunIds, setLateRunIds] = useState<ReadonlySet<string>>(new Set());
   const newlyLate = bars
-    .filter((bar) => !lateRunIds.has(bar.run.id) && firstStates.get(bar.run.id) !== bar.run.state)
-    .map((bar) => bar.run.id);
+    .filter((bar) => !lateRunIds.has(bar.row.id) && firstStates.get(bar.row.id) !== bar.row.state)
+    .map((bar) => bar.row.id);
   // Set while rendering, so the late bar never draws one frame with its sweep.
   if (newlyLate.length > 0) setLateRunIds(new Set([...lateRunIds, ...newlyLate]));
   return lateRunIds;
@@ -288,10 +289,10 @@ function useLateRunIds(bars: ReadonlyArray<TimelineBar>): ReadonlySet<string> {
  * run's state, so the mark pops in again each time the state changes.
  */
 function BarMark({ state }: { readonly state: RunRow["state"] }): JSX.Element {
-  return state === "cancelled" || state === "starting" ? (
-    <span key={state} className="dot dot--mark" />
-  ) : (
+  return hasRunMark(state) ? (
     <Mark key={state} state={state} />
+  ) : (
+    <span key={state} className="dot dot--mark" />
   );
 }
 
@@ -318,20 +319,20 @@ function RunBar({
   readonly isLate: boolean;
   readonly timezone: string;
 }): JSX.Element {
-  const { run } = bar;
-  const startedText = useListTime(run.createdAt, timezone, "past", true);
+  const { row } = bar;
+  const startedText = useListTime(row.createdAt, timezone, "past", true);
   const tookText = useDurationText(
-    run.startedAt ?? run.createdAt,
-    run.isLive && run.startedAt !== null,
-    (nowMs) => formatRunDuration(run, nowMs),
+    row.startedAt ?? row.createdAt,
+    row.isLive && row.startedAt !== null,
+    (nowMs) => formatRunDuration(row, nowMs),
   );
-  const label = describeRunRow(run, startedText, tookText);
+  const label = describeRunRow(row, startedText, tookText);
   // A live bar on today ends at the now line, which is there whenever the
   // day is today; the 1 only covers the minute the day turns.
   const to = bar.to ?? now?.at ?? 1;
   const className = [
     "run-bar",
-    run.statusTone === "muted" ? "" : `run-bar--${run.statusTone}`,
+    row.statusTone === "muted" ? "" : `run-bar--${row.statusTone}`,
     bar.startsBefore ? "is-cut-start" : "",
     bar.endsAfter ? "is-cut-end" : "",
     isLate ? "is-late" : "",
@@ -362,7 +363,7 @@ function RunBar({
           <ChevronRightIcon size={12} />
         </span>
       ) : (
-        <BarMark state={run.state} />
+        <BarMark state={row.state} />
       )}
     </span>
   );

@@ -11,6 +11,7 @@ import {
   buildCurve,
   computeGraphLayout,
   type EdgeRoute,
+  type GraphLayout,
   type Point,
   type Size,
 } from "./graph-layout";
@@ -20,7 +21,6 @@ const LABEL: Size = { width: 120, height: 20 };
 /** The length at each end of a card's side where no edge attaches. */
 const SIDE_MARGIN = 14;
 
-type Layout = ReturnType<typeof computeGraphLayout>;
 type LayoutEdges = Parameters<typeof computeGraphLayout>[1];
 
 /** A rectangle in the drawing. */
@@ -28,13 +28,13 @@ type Box = Point & Size;
 
 const buildNodes = (...ids: ReadonlyArray<string>) => ids.map((id) => ({ id, ...CARD }));
 
-const readNode = (layout: Layout, id: string): Point => {
+const readNode = (layout: GraphLayout, id: string): Point => {
   const node = layout.nodes.get(id);
   if (node === undefined) throw new Error(`The layout places no node ${id}.`);
   return node;
 };
 
-const readRoute = (layout: Layout, id: string): EdgeRoute => {
+const readRoute = (layout: GraphLayout, id: string): EdgeRoute => {
   const route = layout.edges.get(id);
   if (route === undefined) throw new Error(`The layout routes no edge ${id}.`);
   return route;
@@ -70,7 +70,7 @@ const crossesBox = (from: Point, to: Point, box: Box): boolean => {
  * - no route runs through a node or another edge's label,
  * - no two edges meet a card at the same point.
  */
-const expectClearDrawing = (layout: Layout, edges: LayoutEdges): void => {
+const expectClearDrawing = (layout: GraphLayout, edges: LayoutEdges): void => {
   const { width, height } = layout.size;
   const isInside = (box: Box) =>
     box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height;
@@ -132,7 +132,7 @@ const isOnSide = (point: Point | undefined, card: Point, side: "left" | "right")
  * the target's left side. `back` means the opposite.
  */
 const expectHandleToHandle = (
-  layout: Layout,
+  layout: GraphLayout,
   id: string,
   from: string,
   to: string,

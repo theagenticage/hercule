@@ -14,30 +14,47 @@
 import {
   isSchedule,
   type Agent,
+  type TriggerFiresOn,
   type WorkflowAction,
   type WorkflowDefinition,
 } from "@hercule/contract";
+import { parsePluginId } from "./plugin-id";
 import { describeSchedule } from "./schedule-text";
+import { decideFiresOn } from "./trigger-display";
 import {
   abbreviateEdgeCondition,
   buildIndexedWorkflowGraph,
   shortenCondition,
   type IndexedWorkflowGraphEdge,
+  type NodeKind,
 } from "./workflow-graph";
+
+// The node kind is declared beside the graph `buildIndexedWorkflowGraph`
+// lists, which this module builds on, and exported here for the screens.
+export type { NodeKind } from "./workflow-graph";
 
 /** A trigger or a step, as a card on the graph. */
 export interface GraphNode {
   /** The trigger's or step's id, which is the card's title. */
   readonly id: string;
-  readonly kind: "start" | "signal" | "action" | "agent";
+  readonly kind: NodeKind;
   /**
    * The line under the title: the name of the Agent an agent step runs as,
    * the name of the action an action step calls, or what a trigger fires on,
    * with a schedule in words.
    */
   readonly detail: string;
-  /** Whether a start trigger fires on a schedule, which draws a clock instead of a bolt. */
-  readonly firesOnSchedule: boolean;
+  /**
+   * Whether a trigger fires on a schedule or on events, which draws a clock
+   * or a bolt. Null for a step.
+   */
+  readonly firesOn: TriggerFiresOn | null;
+  /**
+   * The id of the plugin whose action an action step calls, whose mark the
+   * step draws: `github` for `github/pr.create`. Null for a built-in action,
+   * which draws an app icon, and for every node that is not an action step.
+   */
+  readonly pluginId: string | null;
   /** Whether the step waits for every edge into it before it starts, which draws the tag "all". */
   readonly joinsAll: boolean;
   /** Whether the run ends when the step completes. */
@@ -91,7 +108,7 @@ export interface WorkflowGraphDrawing {
 }
 
 /** The id of the start triggers' junction. No trigger or step id has a space, so it never collides. */
-export const BUS_ID = "start bus";
+const BUS_ID = "start bus";
 
 /** Returns the ids of the steps a correlation expression reads the output of, such as `open_pr` in `steps.open_pr.output.number`. */
 const listCorrelatedSteps = (expression: string): ReadonlyArray<string> => [
@@ -120,7 +137,7 @@ const buildPlainEdge = (id: string, from: string, to: string): GraphEdge => ({
  * The edges are listed in this order: the start triggers' edges, then the
  * definition's own edges in its order, then the correlation edges. When two
  * or more start triggers lead to two or more entry steps, the start
- * triggers' edges go through the junction `BUS_ID`.
+ * triggers' edges go through a junction, whose id is the drawing's `busId`.
  */
 export const buildGraphDrawing = (
   definition: WorkflowDefinition,
@@ -148,7 +165,8 @@ export const buildGraphDrawing = (
       id: node.id,
       kind: node.kind,
       detail,
-      firesOnSchedule: on !== undefined && isSchedule(on),
+      firesOn: on === undefined ? null : decideFiresOn(on),
+      pluginId: step?.kind === "action" ? parsePluginId(step.action) : null,
       joinsAll: step?.join === "all",
       terminal: node.terminal === true,
     };

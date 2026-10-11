@@ -10,6 +10,7 @@
     "./graph-model": "./src/graph-model.ts",
     "./list-time": "./src/list-time.ts",
     "./node-details": "./src/node-details.ts",
+    "./run-marks": "./src/run-marks.ts",
     "./run-timeline": "./src/run-timeline.ts",
     "./workflow-detail-rows": "./src/workflow-detail-rows.ts",
     "./workflow-rows": "./src/workflow-rows.ts",

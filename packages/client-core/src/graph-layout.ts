@@ -59,7 +59,8 @@ export interface EdgeRoute {
   readonly label?: Point;
 }
 
-interface GraphLayout {
+/** Where `computeGraphLayout` puts a graph's nodes, and how it routes its edges. */
+export interface GraphLayout {
   /** The top-left corner of each node, keyed by node id. */
   readonly nodes: ReadonlyMap<string, Point>;
   /** The route of each edge, keyed by edge id. */

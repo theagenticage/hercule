@@ -1,6 +1,6 @@
 import { assert, describe, it } from "vitest";
 import type { WorkflowDefinition } from "@hercule/contract";
-import { BUS_ID, buildGraphDrawing, type GraphEdge } from "./graph-model";
+import { buildGraphDrawing, type GraphEdge } from "./graph-model";
 
 const AGENTS = [
   { id: "a-writer", name: "Writer" },
@@ -65,21 +65,56 @@ describe("buildGraphDrawing", () => {
       announce: "Writer",
     });
     const byId = new Map(nodes.map((node) => [node.id, node]));
-    assert.isTrue(byId.get("friday")?.firesOnSchedule);
-    assert.isFalse(byId.get("labeled")?.firesOnSchedule);
+    assert.deepStrictEqual(
+      nodes.map((node) => [node.id, node.firesOn]),
+      [
+        ["labeled", "event"],
+        ["friday", "schedule"],
+        ["merged", "event"],
+        ["notes", null],
+        ["review", null],
+        ["fix", null],
+        ["open_pr", null],
+        ["announce", null],
+      ],
+    );
     assert.isTrue(byId.get("open_pr")?.joinsAll);
     assert.isTrue(byId.get("announce")?.terminal);
   });
 
+  it("names the plugin of a plugin's action step, and none for a built-in action", () => {
+    const definition: WorkflowDefinition = {
+      name: "Track",
+      steps: [
+        { id: "open_pr", kind: "action", action: "github/pr.create" },
+        { id: "file", kind: "action", action: "task.create" },
+        { id: "notes", kind: "agent", agent: "a-writer", prompt: "Write the notes." },
+      ],
+      edges: [
+        { from: "open_pr", to: "file" },
+        { from: "file", to: "notes" },
+      ],
+    };
+    const { nodes } = buildGraphDrawing(definition, AGENTS, ACTIONS);
+    assert.deepStrictEqual(
+      nodes.map((node) => [node.id, node.pluginId]),
+      [
+        ["open_pr", "github"],
+        ["file", null],
+        ["notes", null],
+      ],
+    );
+  });
+
   it("fans two start triggers out to two entry steps through one junction", () => {
     const { edges, busId } = buildGraphDrawing(RELEASE, AGENTS, ACTIONS);
-    assert.strictEqual(busId, BUS_ID);
+    assert.isDefined(busId);
     assert.deepStrictEqual(
-      edges.filter((edge) => edge.to === BUS_ID).map((edge) => edge.from),
+      edges.filter((edge) => edge.to === busId).map((edge) => edge.from),
       ["labeled", "friday"],
     );
     assert.deepStrictEqual(
-      edges.filter((edge) => edge.from === BUS_ID).map((edge) => edge.to),
+      edges.filter((edge) => edge.from === busId).map((edge) => edge.to),
       ["notes", "review"],
     );
     assert.isFalse(edges.some((edge) => edge.from === "labeled" && edge.to === "notes"));

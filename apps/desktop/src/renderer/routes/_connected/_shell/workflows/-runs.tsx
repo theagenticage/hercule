@@ -7,7 +7,6 @@ import {
   buildTimelineBars,
   buildTimelineFires,
   computeTimelineDay,
-  computeTimelineReadRange,
   findNextTimelineMinute,
   locateTimelineNow,
   type TimelineDay,
@@ -98,15 +97,12 @@ export function RunDayLanes({
   readonly timezone: string;
 }): JSX.Element {
   const { day, dayText } = shown;
-  const { activeSince, until } = computeTimelineReadRange(day);
-  const { data: runs } = useSuspenseQuery(
-    workflowDayRunsQuery(client, workflowId, activeSince, until),
-  );
+  const { data: runs } = useSuspenseQuery(workflowDayRunsQuery(client, workflowId, day));
   const waitingRunSessions = useWaitingRunSessions();
   const { bars, trackCount } = buildTimelineBars(runs, definition, waitingRunSessions, day);
   return (
     <TimelineLanes
-      key={activeSince}
+      key={day.start.toISOString()}
       label={`Runs, ${dayText}`}
       hours={hours}
       now={now}

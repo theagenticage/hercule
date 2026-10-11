@@ -197,8 +197,7 @@ export function WorkflowGraph({
   const nodeRefs = useRef(new Map<string, HTMLButtonElement>());
   const [openNodeId, setOpenNodeId] = useState<string | undefined>(undefined);
   const openCard = openNodeId === undefined ? undefined : readCard(openNodeId);
-  const openNode = drawing.nodes.find((node) => node.id === openNodeId);
-  const isOpen = openCard !== undefined && openNode !== undefined;
+  const isOpen = openCard !== undefined;
 
   const placeOpenCard = useEffectEvent(() => {
     const anchor = openNodeId === undefined ? undefined : nodeRefs.current.get(openNodeId);
@@ -357,7 +356,7 @@ export function WorkflowGraph({
                 >
                   {node.joinsAll ? <span className="node-join">all</span> : null}
                   <span className="node-lead">
-                    <NodeIcon kind={node.kind} firesOnSchedule={node.firesOnSchedule} />
+                    <NodeIcon kind={node.kind} firesOn={node.firesOn} />
                   </span>
                   <span className="node-text">
                     <span className="node-title">
@@ -418,13 +417,7 @@ export function WorkflowGraph({
         className="pop node-pop"
         aria-label={isOpen ? `${openCard.id}, ${openCard.kindText}` : undefined}
       >
-        {isOpen ? (
-          <NodeCardContent
-            card={openCard}
-            firesOnSchedule={openNode.firesOnSchedule}
-            timezone={timezone}
-          />
-        ) : null}
+        {isOpen ? <NodeCardContent card={openCard} timezone={timezone} /> : null}
       </div>
     </div>
   );

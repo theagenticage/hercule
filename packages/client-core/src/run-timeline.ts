@@ -20,7 +20,14 @@
 import type { RunSummary, Trigger, WorkflowDefinition } from "@hercule/contract";
 import { computeDayStart } from "./list-time";
 import { readTimestamps } from "./run-display";
-import { computeMinutesOfDay, formatClock } from "./time-context";
+import {
+  addCalendarDays,
+  computeMinutesOfDay,
+  computeZonedInstant,
+  formatClock,
+  readWallClock,
+  type CalendarDate,
+} from "./time-context";
 import type { WaitingRunSession } from "./waiting";
 import { buildRunRows, type RunRow } from "./workflow-detail-rows";
 
@@ -30,14 +37,6 @@ export interface TimelineDay {
   readonly end: Date;
   /** Whether the day is the one the time fell on when it was computed. Only today has a now line. */
   readonly isToday: boolean;
-}
-
-/** The range of `run.query` that reads every run that was live at some moment of a day. */
-export interface TimelineReadRange {
-  /** Keeps the runs that had not ended before the day started. */
-  readonly activeSince: string;
-  /** Keeps the runs created before the day ended. */
-  readonly until: string;
 }
 
 /** One hour line, at the start of a local hour. */
@@ -65,7 +64,7 @@ export interface TimelineNow {
 /** One run's bar. */
 export interface TimelineBar {
   /** The run, as its row in the Runs tab's list shows it, which gives its mark, tone and words. */
-  readonly run: RunRow;
+  readonly row: RunRow;
   /**
    * Where the bar starts: when the run started, or when it was created for a
    * run that has not started a step, or 0 when that was on a day before.
@@ -107,7 +106,6 @@ export interface TimelineFire {
 }
 
 const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
 
 /**
  * The shortest time a bar holds its track for. A run of a few seconds is
@@ -119,43 +117,60 @@ const SHORTEST_TRACK_HOLD = 45 * MINUTE;
 /** The time on either side of now whose hour label the now pill covers. */
 const NOW_PILL_REACH = 45 * MINUTE;
 
-/** Returns the first instant of the day `instant` falls on in `timezone`, and fails for a zone that cannot be read. */
-const findDayStart = (instant: Date, timezone: string): Date => {
-  const start = computeDayStart(instant, timezone);
-  if (start === undefined) throw new Error(`The timezone "${timezone}" is not supported.`);
+/** Returns the error for a timezone the platform cannot read. */
+const buildUnsupportedTimezoneError = (timezone: string): Error =>
+  new Error(`The timezone "${timezone}" is not supported.`);
+
+/**
+ * Returns the first instant of `date` in `timezone`, and fails for a zone
+ * that cannot be read, or a date the zone's clock skipped.
+ *
+ * It finds the date's noon first, because no zone moves its clock across
+ * noon for daylight saving time, and then the start of the day noon falls on.
+ */
+const findDateStart = (date: CalendarDate, timezone: string): Date => {
+  const noon = computeZonedInstant(date, 12, 0, timezone);
+  const start = noon === undefined ? undefined : computeDayStart(new Date(noon), timezone);
+  if (start === undefined) {
+    throw new Error(
+      `The date ${String(date.year)}-${String(date.month)}-${String(date.day)} has no noon in the timezone "${timezone}".`,
+    );
+  }
   return start;
 };
 
 /**
+ * The most days back the timeline goes: ten years. The route's search
+ * validator refuses a `daysBack` above it, and `computeTimelineDay` clamps
+ * to it, so the day is always one the platform's timezone data covers well.
+ */
+export const MAX_TIMELINE_DAYS_BACK = 3650;
+
+/**
  * Computes the day `daysBack` days before the day `now` falls on in
- * `timezone`: 0 is today and 1 is yesterday. Days are counted on the
- * calendar, so stepping over a 23 or 25 hour day lands on midnight.
+ * `timezone`: 0 is today and 1 is yesterday. `daysBack` is clamped to the
+ * range from 0 to `MAX_TIMELINE_DAYS_BACK`, and `isToday` is read from the
+ * clamped value.
+ *
+ * Days are counted on the calendar, never in hours: today's date in the
+ * zone, minus `daysBack` dates, from that date's first instant up to the
+ * next date's. A day the clock moves for daylight saving time is then 23 or
+ * 25 hours long, and the time taken does not grow with `daysBack`.
  *
  * Fails when `timezone` is not a zone the platform can read; the display
  * timezone is checked when it is saved, so that is a bug.
  */
 export const computeTimelineDay = (now: Date, daysBack: number, timezone: string): TimelineDay => {
-  let start = findDayStart(now, timezone);
-  for (let step = 0; step < daysBack; step++) {
-    start = findDayStart(new Date(start.getTime() - 1), timezone);
-  }
-  // A day is 23 to 25 hours long, so 26 hours on always falls on the next one.
+  const clamped = Math.min(Math.max(daysBack, 0), MAX_TIMELINE_DAYS_BACK);
+  const today = readWallClock(now, timezone);
+  if (today === undefined) throw buildUnsupportedTimezoneError(timezone);
+  const date = addCalendarDays(today, -clamped);
   return {
-    start,
-    end: findDayStart(new Date(start.getTime() + 26 * HOUR), timezone),
-    isToday: daysBack === 0,
+    start: findDateStart(date, timezone),
+    end: findDateStart(addCalendarDays(date, 1), timezone),
+    isToday: clamped === 0,
   };
 };
-
-/**
- * Returns the filters that read every run drawn on `day`: those created
- * before the day ended and not ended before it started. A run that started
- * days before and is still going is read too.
- */
-export const computeTimelineReadRange = (day: TimelineDay): TimelineReadRange => ({
-  activeSince: day.start.toISOString(),
-  until: day.end.toISOString(),
-});
 
 /** Returns where `instant`, in milliseconds, falls across `day`: 0 at its start, 1 at its end. */
 const placeAcrossDay = (instant: number, day: TimelineDay): number =>
@@ -166,22 +181,31 @@ const placeAcrossDay = (instant: number, day: TimelineDay): number =>
  * whose line the timeline's edge already draws, read in `timezone`. On the
  * day the clock moves back, the repeated hour has two lines; on the day it
  * moves forward, the skipped hour has none.
+ *
+ * Each line sits where the clock reads a whole hour, found from the clock
+ * itself rather than by adding 60 minutes. Lord Howe Island moves its clock
+ * by half an hour, so there an hour after a line can read ":30"; the next
+ * whole hour is then 30 minutes on.
  */
 export const buildTimelineHours = (
   day: TimelineDay,
   timezone: string,
 ): ReadonlyArray<TimelineHour> => {
   const hours: TimelineHour[] = [];
-  for (let instant = day.start.getTime() + HOUR; instant < day.end.getTime(); instant += HOUR) {
+  for (let instant = day.start.getTime(); instant < day.end.getTime();) {
     const minutes = computeMinutesOfDay(new Date(instant), timezone);
-    if (minutes === undefined) continue;
-    const hour = Math.floor(minutes / 60);
-    hours.push({
-      at: placeAcrossDay(instant, day),
-      startsAt: instant,
-      label: `${String(hour).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`,
-      isMajor: hour % 3 === 0,
-    });
+    if (minutes === undefined) throw buildUnsupportedTimezoneError(timezone);
+    const minuteOfHour = minutes % 60;
+    if (minuteOfHour === 0 && instant > day.start.getTime()) {
+      const hour = minutes / 60;
+      hours.push({
+        at: placeAcrossDay(instant, day),
+        startsAt: instant,
+        label: `${String(hour).padStart(2, "0")}:00`,
+        isMajor: hour % 3 === 0,
+      });
+    }
+    instant += (60 - minuteOfHour) * MINUTE;
   }
   return hours;
 };
@@ -257,7 +281,7 @@ export const buildTimelineBars = (
       // A live run on a day before today went on past it.
       const endsAfter = ranTo > dayEnd && !(day.isToday && ranTo === Infinity);
       return {
-        run: row,
+        row,
         from: placeAcrossDay(Math.max(ranFrom, dayStart), day),
         to: endsAfter ? 1 : ranTo === Infinity ? null : placeAcrossDay(ranTo, day),
         track,

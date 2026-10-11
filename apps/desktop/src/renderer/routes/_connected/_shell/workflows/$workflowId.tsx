@@ -115,9 +115,7 @@ export const Route = createFileRoute("/_connected/_shell/workflows/$workflowId")
       const settings = await queryClient.ensureQueryData(settingsQuery(client));
       const timezone = resolveDisplayTimezone(settings.user.timezone);
       const day = computeTimelineDay(new Date(), daysBack, timezone);
-      return queryClient.ensureQueryData(
-        workflowDayRunsQuery(client, workflowId, day.start.toISOString(), day.end.toISOString()),
-      );
+      return queryClient.ensureQueryData(workflowDayRunsQuery(client, workflowId, day));
     };
     try {
       await Promise.all([

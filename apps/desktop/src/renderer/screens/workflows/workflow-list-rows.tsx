@@ -17,11 +17,8 @@
 import { Fragment, memo, useId, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type { TriggerFiresOn } from "@hercule/contract";
-import type {
-  StripRunState,
-  WorkflowRowMark,
-  WorkflowStatusTone,
-} from "@hercule/client-core/workflow-rows";
+import { hasRunMark, type RunMarkState } from "@hercule/client-core/run-marks";
+import type { WorkflowRowMark, WorkflowStatusTone } from "@hercule/client-core/workflow-rows";
 import { useListTime } from "./list-time";
 import { STRIP_RUN_LIMIT } from "../../app/queries";
 import { BoltIcon } from "../../icons/bolt";
@@ -117,19 +114,19 @@ function ListTime({
  * run that has not started, has no mark, so it is a faint dot named with its
  * state.
  */
-function RunStrip({ strip }: { readonly strip: ReadonlyArray<StripRunState> }): JSX.Element {
+function RunStrip({ strip }: { readonly strip: ReadonlyArray<RunMarkState> }): JSX.Element {
   return (
     <span className="strip col-strip">
       {strip.map((state, index) =>
-        state === "cancelled" || state === "starting" ? (
+        hasRunMark(state) ? (
+          <Mark key={index} state={state} size={STRIP_MARK_SIZE} />
+        ) : (
           <span
             key={index}
             className="dot"
             role="img"
             aria-label={state === "cancelled" ? "Cancelled" : "Starting"}
           />
-        ) : (
-          <Mark key={index} state={state} size={STRIP_MARK_SIZE} />
         ),
       )}
     </span>
@@ -175,7 +172,7 @@ interface WorkflowTableRowProps {
   /** For each text of `startsOnTexts`, whether it is shown as code. */
   readonly startsOnIsCode: ReadonlyArray<boolean>;
   /** The strip's run states, oldest first. */
-  readonly strip: ReadonlyArray<StripRunState>;
+  readonly strip: ReadonlyArray<RunMarkState>;
   readonly successText: string;
   readonly statusText: string;
   readonly statusTone: WorkflowStatusTone;

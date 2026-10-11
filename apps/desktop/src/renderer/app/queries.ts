@@ -28,6 +28,7 @@ import {
   type MessagePages,
   waitForSenderReads,
 } from "@hercule/client-core";
+import type { TimelineDay } from "@hercule/client-core/run-timeline";
 import {
   DEFAULT_PAGE_LIMIT,
   LIVE_SESSION_STATUSES,
@@ -651,19 +652,20 @@ export const workflowRunsQuery = (client: HerculeClient, workflowId: string) =>
   });
 
 /**
- * Reads every run of a workflow that was live at some moment from
- * `activeSince` to `until`: one day of the Runs tab's timeline. A run created
- * before the day that was still going in it is included, so a run that waits
- * on the user for days shows on each of them. Its key sits under the `runs`
+ * Reads every run of a workflow that was live at some moment of `day`: one
+ * day of the Runs tab's timeline. It reads the runs created before the day
+ * ended that had not ended before it started, so a run that waits on the
+ * user for days shows on each of them. Its key sits under the `runs`
  * prefix, so a push on the `run` topic reads it again.
  */
 export const workflowDayRunsQuery = (
   client: HerculeClient,
   workflowId: string,
-  activeSince: string,
-  until: string,
-) =>
-  queryOptions({
+  day: TimelineDay,
+) => {
+  const activeSince = day.start.toISOString();
+  const until = day.end.toISOString();
+  return queryOptions({
     queryKey: queryKeys.runs({ workflowId, activeSince, until }),
     queryFn: () =>
       readEveryPage((page) =>
@@ -671,6 +673,7 @@ export const workflowDayRunsQuery = (
       ),
     ...LIVE_KEPT_READ_OPTIONS,
   });
+};
 
 /**
  * Checks whether a failed read, such as a thread's records or an assistant's
