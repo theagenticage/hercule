@@ -1,9 +1,8 @@
 /**
  * Tests the pure rules of Intake settings:
  *
- * - the default of each kind comes from the plugin's declaration;
- * - a plugin's choice and a Connection's choice are layered on it, the
- *   Connection's winning;
+ * - a plugin's choice and a Connection's choice are layered on the plugin's
+ *   defaults, the Connection's winning;
  * - a write drops the entries that equal the level below, and refuses a kind
  *   the plugin does not declare;
  * - an entry for a kind the plugin no longer declares is ignored on read.
@@ -11,67 +10,43 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import type { IntakeOverrides } from "@hercule/contract";
+import type { IntakeOverrides, IntakeSettings } from "@hercule/contract";
 import {
   applyIntakeOverrides,
-  buildDefaultIntakeSettings,
+  createPluginNotLoadedError,
   normalizeIntakeOverrides,
   NO_INTAKE_OVERRIDES,
-  type DeclaredIntakeKinds,
 } from "./settings";
 
-const declared: DeclaredIntakeKinds = {
+/** What a plugin gives before the user chooses anything. */
+const defaults: IntakeSettings = {
   eventKinds: [
-    { kind: "pr.opened", description: "A pull request was opened.", availableToTriage: true },
-    { kind: "pr.labeled", description: "A label was added.", availableToTriage: false },
+    { kind: "pr.opened", description: "A pull request was opened.", on: true, level: "default" },
+    { kind: "pr.labeled", description: "A label was added.", on: false, level: "default" },
   ],
   signalKinds: [
     {
       kind: "github/team-review-requested",
       label: "Team review requested",
       description: "A review was requested from your team.",
+      on: true,
+      level: "default",
     },
     {
       kind: "github/review-requested",
       label: "Review requested",
       description: "A review was requested from you.",
+      on: true,
+      level: "default",
     },
   ],
 };
 
-const defaults = buildDefaultIntakeSettings(declared);
+const noKinds: IntakeSettings = { eventKinds: [], signalKinds: [] };
 
 const onOf = (
   settings: ReadonlyArray<{ readonly kind: string; readonly on: boolean; readonly level: string }>,
 ) => Object.fromEntries(settings.map(({ kind, on, level }) => [kind, `${on}@${level}`]));
-
-describe("buildDefaultIntakeSettings", () => {
-  it("makes an event kind as available as the plugin declared it, and every signal kind on", () => {
-    expect(onOf(defaults.eventKinds)).toEqual({
-      "pr.opened": "true@default",
-      "pr.labeled": "false@default",
-    });
-    expect(onOf(defaults.signalKinds)).toEqual({
-      "github/team-review-requested": "true@default",
-      "github/review-requested": "true@default",
-    });
-  });
-
-  it("keeps the declared order and the texts", () => {
-    expect(defaults.eventKinds.map(({ kind }) => kind)).toEqual(["pr.opened", "pr.labeled"]);
-    expect(defaults.signalKinds[0]).toMatchObject({
-      label: "Team review requested",
-      description: "A review was requested from your team.",
-    });
-  });
-
-  it("is empty for a plugin that declares nothing", () => {
-    expect(buildDefaultIntakeSettings({ eventKinds: [], signalKinds: [] })).toEqual({
-      eventKinds: [],
-      signalKinds: [],
-    });
-  });
-});
 
 describe("applyIntakeOverrides", () => {
   it("gives the plugin's choice the plugin level, and leaves other kinds at the default", () => {
@@ -90,6 +65,19 @@ describe("applyIntakeOverrides", () => {
     expect(onOf(plugin.signalKinds)).toEqual({
       "github/team-review-requested": "false@plugin",
       "github/review-requested": "true@default",
+    });
+  });
+
+  it("keeps the declared order and the texts", () => {
+    const plugin = applyIntakeOverrides(
+      defaults,
+      { eventKinds: { "pr.labeled": true }, signalKinds: {} },
+      "plugin",
+    );
+    expect(plugin.eventKinds.map(({ kind }) => kind)).toEqual(["pr.opened", "pr.labeled"]);
+    expect(plugin.signalKinds[0]).toMatchObject({
+      label: "Team review requested",
+      description: "A review was requested from your team.",
     });
   });
 
@@ -122,10 +110,10 @@ describe("applyIntakeOverrides", () => {
 
   it("does not treat an object property name as an entry", () => {
     const applied = applyIntakeOverrides(
-      buildDefaultIntakeSettings({
-        eventKinds: [{ kind: "toString", description: "", availableToTriage: true }],
+      {
+        eventKinds: [{ kind: "toString", description: "", on: true, level: "default" }],
         signalKinds: [],
-      }),
+      },
       NO_INTAKE_OVERRIDES,
       "plugin",
     );
@@ -136,6 +124,14 @@ describe("applyIntakeOverrides", () => {
 describe("normalizeIntakeOverrides", () => {
   const normalize = (written: IntakeOverrides, below = defaults) =>
     Effect.runSyncExit(normalizeIntakeOverrides(written, below));
+
+  /** Returns the validation error of a failed exit, or fails the test. */
+  const readValidationError = (exit: ReturnType<typeof normalize>) => {
+    if (!Exit.isFailure(exit)) throw new Error("expected the write to be refused");
+    const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail");
+    if (failure === undefined) throw new Error("expected a typed failure");
+    return failure.error;
+  };
 
   it("stores an entry that differs from the level below", () => {
     expect(
@@ -190,26 +186,53 @@ describe("normalizeIntakeOverrides", () => {
     expect(off).toEqual({ eventKinds: {}, signalKinds: {} });
   });
 
-  it("refuses a kind the plugin does not declare, with a path per kind", () => {
-    const exit = normalize({
-      eventKinds: { "pr.unknown": true },
-      signalKinds: { "github/unknown": false },
-    });
-    expect(Exit.isFailure(exit)).toBe(true);
-    const error = Exit.isFailure(exit) ? JSON.stringify(exit.cause) : "";
-    expect(error).toContain("intake");
-    expect(error).toContain("pr.unknown");
-    expect(error).toContain("github/unknown");
-    expect(error).toContain("Choose from pr.opened, pr.labeled.");
-    expect(error).toContain("Choose from github/team-review-requested, github/review-requested.");
+  it("refuses a kind the plugin does not declare, with one short issue and path per kind", () => {
+    const { error } = readValidationError(
+      normalize({
+        eventKinds: { "pr.unknown": true },
+        signalKinds: { "github/unknown": false },
+      }),
+    );
+    expect(error.details.issues).toEqual([
+      {
+        path: ["intake", "eventKinds", "pr.unknown"],
+        message: "pr.unknown is not an event kind of this plugin.",
+      },
+      {
+        path: ["intake", "signalKinds", "github/unknown"],
+        message: "github/unknown is not a signal kind of this plugin.",
+      },
+    ]);
+  });
+
+  it("lists the kinds to choose from once, in the top-level message", () => {
+    const { error } = readValidationError(
+      normalize({
+        eventKinds: { "pr.unknown": true, "pr.other": true },
+        signalKinds: { "github/unknown": false },
+      }),
+    );
+    expect(error.message).toBe(
+      "The plugin does not declare pr.unknown, pr.other, github/unknown. " +
+        "Choose event kinds from pr.opened, pr.labeled. " +
+        "Choose signal kinds from github/team-review-requested, github/review-requested.",
+    );
+  });
+
+  it("lists only the choices of the switch that was refused", () => {
+    const { error } = readValidationError(
+      normalize({ eventKinds: { "pr.unknown": true }, signalKinds: {} }),
+    );
+    expect(error.message).toBe(
+      "The plugin does not declare pr.unknown. Choose event kinds from pr.opened, pr.labeled.",
+    );
   });
 
   it("says there is nothing to choose for a plugin that declares no kinds", () => {
-    const exit = normalize(
-      { eventKinds: { "pr.opened": true }, signalKinds: {} },
-      buildDefaultIntakeSettings({ eventKinds: [], signalKinds: [] }),
+    const { error } = readValidationError(
+      normalize({ eventKinds: { "pr.opened": true }, signalKinds: {} }, noKinds),
     );
-    expect(JSON.stringify(exit)).toContain("declares no event kinds");
+    expect(error.message).toContain("declares no event kinds");
   });
 
   it("drops the stored entry of a removed kind on the next write", () => {
@@ -234,5 +257,14 @@ describe("normalizeIntakeOverrides", () => {
       ),
     );
     expect(written).toEqual({ eventKinds: { "pr.labeled": true }, signalKinds: {} });
+  });
+});
+
+describe("createPluginNotLoadedError", () => {
+  it("names the plugin, says it failed to load and says what to do", () => {
+    const { error } = createPluginNotLoadedError("github");
+    expect(error.code).toBe("validation");
+    expect(error.message).toContain("github failed to load");
+    expect(error.message).toContain("restart the controller");
   });
 });

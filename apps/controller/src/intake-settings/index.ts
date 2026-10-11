@@ -7,10 +7,7 @@
 export { PluginIntake } from "./plugin-intake";
 export {
   applyIntakeOverrides,
-  buildDefaultIntakeSettings,
+  createPluginNotLoadedError,
   normalizeIntakeOverrides,
   NO_INTAKE_OVERRIDES,
-  type DeclaredEventKindIntake,
-  type DeclaredIntakeKinds,
-  type DeclaredSignalKindIntake,
 } from "./settings";

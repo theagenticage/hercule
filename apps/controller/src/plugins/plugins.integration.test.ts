@@ -593,6 +593,34 @@ describe("the Intake settings of a plugin", () => {
     });
   });
 
+  it("refuse a plugin that failed to load, and say so instead of saying it declares no kinds", async () => {
+    const broken = createPluginFixture({
+      id: "broken",
+      registerFails: "broken could not register",
+    });
+    await withServer(
+      async ({ base, audit }) => {
+        const token = await completeSetup(base);
+        expect((await readPlugin(base, token, "broken")).status._tag).toBe("errored");
+
+        // A refused plugin is refused the same way: neither declares any kind.
+        for (const id of ["broken", ...REFUSED]) {
+          const response = await updatePluginIntake(base, token, id, {});
+          expect(response.status, id).toBe(400);
+          const body = (await response.json()) as {
+            readonly error: { readonly code: string; readonly message: string };
+          };
+          expect(body.error.code, id).toBe("validation");
+          expect(body.error.message, id).toContain(`The plugin ${id} failed to load`);
+          expect(body.error.message, id).toContain("restart the controller");
+          expect(body.error.message, id).not.toContain("declares no");
+        }
+        expect(await audit("plugin.intakeUpdated")).toHaveLength(0);
+      },
+      { plugins: [broken.plugin, ...buildPlugins()] },
+    );
+  });
+
   it("refuse a plugin this binary does not include", async () => {
     await withIntakePlugin(async ({ base }) => {
       const token = await completeSetup(base);

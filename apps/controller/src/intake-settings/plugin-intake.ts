@@ -11,7 +11,7 @@
  */
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
-import type { IntakeSettings } from "@hercule/contract";
+import type { IntakeSettings, Validation } from "@hercule/contract";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 export class PluginIntake extends Context.Service<
@@ -24,5 +24,14 @@ export class PluginIntake extends Context.Service<
      * loaded. A disabled plugin still lists its kinds.
      */
     readonly read: (pluginId: string) => Effect.Effect<IntakeSettings, SqlError>;
+
+    /**
+     * Returns the same settings as `read`, for a caller that is about to
+     * write the level above. Fails with `validation` when the plugin did not
+     * load, because its kinds are unknown and the write could not be checked.
+     */
+    readonly readBeforeWrite: (
+      pluginId: string,
+    ) => Effect.Effect<IntakeSettings, Validation | SqlError>;
   }
 >()("hercule/controller/intake-settings/PluginIntake") {}

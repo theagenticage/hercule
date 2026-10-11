@@ -942,8 +942,9 @@ const make = Effect.gen(function* () {
      *
      * An Intake choice equal to what the plugin's level gives is dropped, so
      * that kind follows the plugin again. Fails with `validation` for a kind
-     * the plugin does not declare. Intake choices are not part of what an
-     * ingest handle is opened with, so changing them leaves the handle open.
+     * the plugin does not declare, and for any write of Intake choices when
+     * the plugin failed to load. Intake choices are not part of what an ingest
+     * handle is opened with, so changing them leaves the handle open.
      */
     update: (
       input: UpdateInput,
@@ -965,13 +966,19 @@ const make = Effect.gen(function* () {
         if (patch.feedIntervals !== undefined) {
           yield* checkFeedIntervals(yield* readStoredTypeOrFail(row), patch.feedIntervals);
         }
-        const intake =
-          patch.intake === undefined
-            ? undefined
-            : yield* normalizeIntakeOverrides(patch.intake, yield* pluginIntake.read(row.pluginId));
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // The choices are checked against the plugin's level inside the
+            // transaction, so a plugin write that commits in between cannot
+            // make the check drop a choice that now differs from the level.
+            const intake =
+              patch.intake === undefined
+                ? undefined
+                : yield* normalizeIntakeOverrides(
+                    patch.intake,
+                    yield* pluginIntake.readBeforeWrite(row.pluginId),
+                  );
             const at = yield* nowIso;
             yield* connections.update(
               id,

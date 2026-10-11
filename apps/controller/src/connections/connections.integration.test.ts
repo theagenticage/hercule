@@ -42,7 +42,12 @@ import {
   type ConnectionRecord,
   type TestPlugin,
 } from "./testing";
-import { createIntakeFixture, IDLE_INGEST_OPEN, INTAKE_FIXTURE } from "../plugins/testing";
+import {
+  createIntakeFixture,
+  createPluginFixture,
+  IDLE_INGEST_OPEN,
+  INTAKE_FIXTURE,
+} from "../plugins/testing";
 
 /** The error envelope every failing operation returns. */
 interface ErrorBody {
@@ -165,6 +170,14 @@ const buildPlugins = () => ({
     },
   }),
   intaked: createIntakeFixture(),
+  // Declares no providers: the test server adds a working provider plugin only
+  // when none of the plugins offers providers, and setup needs one.
+  broken: createPluginFixture({
+    id: "broken",
+    capabilities: ["connections"],
+    definitions: [],
+    registerFails: "broken could not register",
+  }),
 });
 
 type Registry = ReturnType<typeof buildPlugins>;
@@ -837,6 +850,33 @@ describe("the Intake settings of a Connection", () => {
       expect(await audit("connection.updated")).toHaveLength(0);
       const settings = (await readDetail(base, token, one.id)).intake;
       expect(summarizeSettings(settings.signalKinds)[asked]).toBe("on@default");
+    });
+  });
+
+  it("refuse a write of choices when the plugin failed to load, and still allow other edits", async () => {
+    await withConnections(async ({ base, audit, sql }, _registry, token) => {
+      // A plugin that failed to register has no connection type, so no
+      // connection can be created for it. Hand a connection to it instead, the
+      // way a Connection saved by an earlier run of a now-broken plugin looks.
+      const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
+      await Effect.runPromise(
+        Effect.orDie(sql`UPDATE connections SET plugin_id = 'broken' WHERE label = 'work'`),
+      );
+
+      const response = await patchIntake(base, token, one.id, { signalKinds: { [asked]: false } });
+
+      expect(response.status).toBe(400);
+      const error = await readError(response);
+      expect(error.code).toBe("validation");
+      expect(error.message).toContain("The plugin broken failed to load");
+      expect(error.message).toContain("restart the controller");
+      expect(await audit("connection.updated")).toHaveLength(0);
+
+      const renamed = await send("PATCH", base, `/api/v1/connections/${one.id}`, {
+        body: { label: "renamed" },
+        token,
+      });
+      expect(renamed.status, await renamed.clone().text()).toBe(200);
     });
   });
 

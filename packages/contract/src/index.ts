@@ -164,12 +164,10 @@ export {
   PluginUpdateIntakeInput,
 } from "./groups/plugin";
 export {
-  EventKindIntakeSetting,
+  IntakeOverrideLevel,
   IntakeOverrides,
   IntakeSettingLevel,
   IntakeSettings,
-  MAX_INTAKE_OVERRIDES,
-  SignalKindIntakeSetting,
 } from "./groups/intake-settings";
 export {
   PERMISSION_DECISION_OUTCOMES,

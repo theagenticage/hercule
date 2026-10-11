@@ -11,6 +11,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -32,15 +33,11 @@ import { nowIso, withTransaction } from "../db";
 import { currentStamp, requireGrant } from "../actor";
 import { connectionStateRepository } from "../connections";
 import { AuditLog } from "../events";
-import {
-  applyIntakeOverrides,
-  buildDefaultIntakeSettings,
-  normalizeIntakeOverrides,
-} from "../intake-settings";
+import { createPluginNotLoadedError, normalizeIntakeOverrides } from "../intake-settings";
 import { PluginHost } from "./host";
 import { pluginRepository, readStoredStateOrDie } from "./repository";
 
-type MoveKind =
+type PluginWriteKind =
   | "plugin.enabled"
   | "plugin.disabled"
   | "plugin.configured"
@@ -49,11 +46,11 @@ type MoveKind =
   | "plugin.intakeUpdated";
 
 /**
- * The errors of a lifecycle change. The credential errors are included
+ * The errors of a change to a plugin. The credential errors are included
  * because the grant check runs inside the method, so a built-in caller that
  * does not come through a transport is checked like a request.
  */
-type MoveError =
+type PluginWriteError =
   Unauthenticated | Forbidden | NotFound | Validation | SqlError | Schema.SchemaError;
 
 type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
@@ -81,7 +78,6 @@ const make = Effect.gen(function* () {
           states.get(plugin.id),
           plugin.id,
         );
-        const declared = yield* host.readDeclaredIntakeKinds(plugin.id);
         return {
           ...plugin,
           enabled,
@@ -89,11 +85,14 @@ const make = Effect.gen(function* () {
           contributions: (contributions.get(plugin.id) ?? []).map(
             ({ extensionPoint, id, definition }) => ({ extensionPoint, id, definition }),
           ),
-          intake: applyIntakeOverrides(buildDefaultIntakeSettings(declared), intake, "plugin"),
+          intake: yield* host.readPluginIntakeSettings(plugin.id, intake),
         } satisfies PluginDetail;
       }),
     );
   });
+
+  const createPluginNotFoundError = (id: string): NotFound =>
+    createNotFoundError(`no plugin named ${id} is installed`);
 
   /** Reads one plugin without a grant check, for callers that already checked it. Fails with not found. */
   const readPluginOrFail = (
@@ -102,7 +101,7 @@ const make = Effect.gen(function* () {
     Effect.flatMap(details, (all) => {
       const found = all.find((detail) => detail.id === id);
       return found === undefined
-        ? Effect.fail(createNotFoundError(`no plugin named ${id} is installed`))
+        ? Effect.fail(createPluginNotFoundError(id))
         : Effect.succeed(found);
     });
 
@@ -142,13 +141,13 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Writes a lifecycle change and its audit entry in one transaction, so the
+   * Writes a change to a plugin and its audit entry in one transaction, so the
    * log never records a change the database rolled back. The entry names the
    * plugin as its record, which tells live subscribers to refetch it.
    */
-  const writeMove = (
+  const writePluginChange = (
     id: string,
-    kind: MoveKind,
+    kind: PluginWriteKind,
     change: (at: string) => Effect.Effect<void, SqlError>,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
@@ -200,14 +199,16 @@ const make = Effect.gen(function* () {
         }));
       }),
 
-    enable: (id: string): Effect.Effect<PluginDetail, MoveError> =>
+    enable: (id: string): Effect.Effect<PluginDetail, PluginWriteError> =>
       Effect.gen(function* () {
         yield* requireGrant("plugin.enable");
         return yield* host.serialized(
           Effect.gen(function* () {
             const detail = yield* readRestartablePluginOrFail(id);
             if (detail.enabled) return detail;
-            yield* writeMove(id, "plugin.enabled", (at) => repository.setEnabled(id, true, at));
+            yield* writePluginChange(id, "plugin.enabled", (at) =>
+              repository.setEnabled(id, true, at),
+            );
             yield* host.refresh(id);
             return yield* readPluginOrFail(id);
           }),
@@ -225,7 +226,7 @@ const make = Effect.gen(function* () {
      * because turning it off is how to deal with parts a failed teardown left
      * running.
      */
-    disable: (id: string): Effect.Effect<PluginDetail, MoveError> =>
+    disable: (id: string): Effect.Effect<PluginDetail, PluginWriteError> =>
       Effect.gen(function* () {
         yield* requireGrant("plugin.disable");
         return yield* host.serialized(
@@ -233,7 +234,9 @@ const make = Effect.gen(function* () {
             const detail = yield* readMovablePluginOrFail(id);
             if (!detail.enabled) return detail;
             yield* host.stop(id);
-            yield* writeMove(id, "plugin.disabled", (at) => repository.setEnabled(id, false, at));
+            yield* writePluginChange(id, "plugin.disabled", (at) =>
+              repository.setEnabled(id, false, at),
+            );
             return yield* readPluginOrFail(id);
           }),
         );
@@ -245,7 +248,10 @@ const make = Effect.gen(function* () {
      * The config is validated before anything is stopped or written, so an
      * invalid form leaves a running plugin running.
      */
-    configure: (id: string, input: PluginConfigureInput): Effect.Effect<PluginDetail, MoveError> =>
+    configure: (
+      id: string,
+      input: PluginConfigureInput,
+    ): Effect.Effect<PluginDetail, PluginWriteError> =>
       Effect.gen(function* () {
         yield* requireGrant("plugin.configure");
         const { config } = yield* Effect.mapError(
@@ -257,7 +263,9 @@ const make = Effect.gen(function* () {
             yield* readRestartablePluginOrFail(id);
             yield* host.validate(id, config);
             const stopped = yield* host.stop(id);
-            yield* writeMove(id, "plugin.configured", (at) => repository.setConfig(id, config, at));
+            yield* writePluginChange(id, "plugin.configured", (at) =>
+              repository.setConfig(id, config, at),
+            );
             if (stopped) yield* host.refresh(id);
             return yield* readPluginOrFail(id);
           }),
@@ -268,8 +276,9 @@ const make = Effect.gen(function* () {
      * Stores the user's Intake choices for the plugin, replacing the earlier
      * ones, and returns the value in effect at the plugin's level for every
      * kind. An entry equal to the plugin's default is dropped. Fails with
+     * `not_found` for a plugin this binary does not include. Fails with
      * `validation`, and stores nothing, when a kind is not one the plugin
-     * declares.
+     * declares, or when the plugin did not load and so declares nothing.
      *
      * The plugin keeps running and is not reloaded, because only the core
      * reads these settings. The change reaches new events at once.
@@ -277,21 +286,31 @@ const make = Effect.gen(function* () {
     updateIntake: (
       id: string,
       input: PluginUpdateIntakeInput,
-    ): Effect.Effect<IntakeSettings, MoveError> =>
+    ): Effect.Effect<IntakeSettings, PluginWriteError> =>
       Effect.gen(function* () {
         yield* requireGrant("plugin.updateIntake");
         const { intake } = yield* Effect.mapError(
           decodeUpdateIntake(input),
           createDecodeValidationError,
         );
-        yield* readPluginOrFail(id);
-        const defaults = buildDefaultIntakeSettings(yield* host.readDeclaredIntakeKinds(id));
+        if (Option.isNone(yield* host.status(id))) {
+          return yield* Effect.fail(createPluginNotFoundError(id));
+        }
+        if (!(yield* host.isRegistered(id))) {
+          return yield* Effect.fail(createPluginNotLoadedError(id));
+        }
+        // The level below a plugin's choices is the defaults its code declares.
+        // They are fixed for this process, so no concurrent write can change
+        // them between this check and the write.
+        const defaults = yield* host.readDefaultIntakeSettings(id);
         const stored = yield* normalizeIntakeOverrides(intake, defaults);
-        yield* writeMove(id, "plugin.intakeUpdated", (at) => repository.setIntake(id, stored, at));
-        return applyIntakeOverrides(defaults, stored, "plugin");
+        yield* writePluginChange(id, "plugin.intakeUpdated", (at) =>
+          repository.setIntake(id, stored, at),
+        );
+        return yield* host.readPluginIntakeSettings(id, stored);
       }),
 
-    retry: (id: string): Effect.Effect<PluginDetail, MoveError> =>
+    retry: (id: string): Effect.Effect<PluginDetail, PluginWriteError> =>
       Effect.gen(function* () {
         yield* requireGrant("plugin.retry");
         return yield* host.serialized(
@@ -301,7 +320,7 @@ const make = Effect.gen(function* () {
               const message = `the plugin ${id} is not errored, so there is nothing to retry`;
               return yield* Effect.fail(createValidationError([{ path: [], message }], message));
             }
-            yield* writeMove(id, "plugin.retried", () => Effect.void);
+            yield* writePluginChange(id, "plugin.retried", () => Effect.void);
             yield* host.refresh(id);
             return yield* readPluginOrFail(id);
           }),
@@ -317,14 +336,14 @@ const make = Effect.gen(function* () {
      * closed their ingest handles, and the controller daemon opens them again
      * once the plugin is active, so each starts from now.
      */
-    resetState: (id: string): Effect.Effect<PluginDetail, MoveError> =>
+    resetState: (id: string): Effect.Effect<PluginDetail, PluginWriteError> =>
       Effect.gen(function* () {
         yield* requireGrant("plugin.resetState");
         return yield* host.serialized(
           Effect.gen(function* () {
             yield* readRestartablePluginOrFail(id);
             const stopped = yield* host.stop(id);
-            yield* writeMove(id, "plugin.stateReset", () =>
+            yield* writePluginChange(id, "plugin.stateReset", () =>
               Effect.andThen(repository.kvWipe(id), connectionState.wipePluginState(id)),
             );
             if (stopped) yield* host.refresh(id);

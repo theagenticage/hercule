@@ -10,7 +10,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ConnectionStatus } from "@hercule/plugin-host";
-import { GITHUB_CONNECTION_TYPE, type IntakeOverrides } from "@hercule/contract";
+import { GITHUB_CONNECTION_TYPE, IntakeOverrides } from "@hercule/contract";
 import { NO_INTAKE_OVERRIDES } from "../intake-settings";
 import {
   mintUuid,
@@ -147,32 +147,45 @@ const CONNECTION_SORT_COLUMNS: Record<ConnectionSortField, SortColumn<StoredConn
  */
 const parseJson = <A>(text: string): A => JSON.parse(text) as A;
 
-const toConnection = (row: ConnectionRow): StoredConnection => ({
-  id: uuidToString(row.id),
-  pluginId: row.plugin_id,
-  type: row.type,
-  label: row.label,
-  displayName: row.display_name,
-  accountId: row.account_id,
-  status: row.status,
-  statusDetail: row.status_detail ?? undefined,
-  warning: row.warning ?? undefined,
-  labels: parseJson<ReadonlyArray<string>>(row.labels),
-  config: parseJson<Record<string, Schema.Json>>(row.config),
-  feedIntervals: parseJson<Record<string, number>>(row.feed_intervals),
-  intake: parseJson<IntakeOverrides>(row.intake),
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
+/** The `intake` column: JSON text holding the user's Intake choices for the Connection. */
+const decodeIntake = Schema.decodeUnknownEffect(Schema.fromJsonString(IntakeOverrides));
+
+/**
+ * Converts a row to a connection. Dies when the `intake` column does not hold
+ * valid choices: only this repository writes it, so that means the database is
+ * broken, not an error a caller can act on.
+ */
+const toConnection = (row: ConnectionRow): Effect.Effect<StoredConnection> =>
+  Effect.map(
+    Effect.catchTag(decodeIntake(row.intake), "SchemaError", Effect.die),
+    (intake): StoredConnection => ({
+      id: uuidToString(row.id),
+      pluginId: row.plugin_id,
+      type: row.type,
+      label: row.label,
+      displayName: row.display_name,
+      accountId: row.account_id,
+      status: row.status,
+      statusDetail: row.status_detail ?? undefined,
+      warning: row.warning ?? undefined,
+      labels: parseJson<ReadonlyArray<string>>(row.labels),
+      config: parseJson<Record<string, Schema.Json>>(row.config),
+      feedIntervals: parseJson<Record<string, number>>(row.feed_intervals),
+      intake,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }),
+  );
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   const one = (id: string): Effect.Effect<Option.Option<StoredConnection>, SqlError> =>
-    Effect.map(
+    Effect.flatMap(
       sql<ConnectionRow>`SELECT ${sql.literal(COLUMNS)} FROM connections
                          WHERE id = ${uuidFromString(id)}`,
-      (rows) => Option.fromNullishOr(rows[0]).pipe(Option.map(toConnection)),
+      (rows) =>
+        rows[0] === undefined ? Effect.succeedNone : Effect.map(toConnection(rows[0]), Option.some),
     );
 
   return {
@@ -274,10 +287,10 @@ const make = Effect.gen(function* () {
     listByStatus: (
       statuses: ReadonlyArray<ConnectionStatus>,
     ): Effect.Effect<ReadonlyArray<StoredConnection>, SqlError> =>
-      Effect.map(
+      Effect.flatMap(
         sql<ConnectionRow>`SELECT ${sql.literal(COLUMNS)} FROM connections
                            WHERE status IN ${sql.in(statuses)} ORDER BY created_at, id`,
-        (rows) => rows.map(toConnection),
+        (rows) => Effect.forEach(rows, toConnection),
       ),
 
     /** Removes the row. Its secrets are removed by the caller, in the same transaction. */
@@ -286,10 +299,10 @@ const make = Effect.gen(function* () {
 
     /** Lists every connection one plugin owns, oldest first, for its `ConnectionsRuntime`. */
     ofPlugin: (pluginId: string): Effect.Effect<ReadonlyArray<StoredConnection>, SqlError> =>
-      Effect.map(
+      Effect.flatMap(
         sql<ConnectionRow>`SELECT ${sql.literal(COLUMNS)} FROM connections
                            WHERE plugin_id = ${pluginId} ORDER BY created_at, id`,
-        (rows) => rows.map(toConnection),
+        (rows) => Effect.forEach(rows, toConnection),
       ),
 
     /**
@@ -319,7 +332,7 @@ const make = Effect.gen(function* () {
         return yield* buildPage(
           rows,
           request.limit,
-          (page) => Effect.succeed(page.map(toConnection)),
+          (page) => Effect.forEach(page, toConnection),
           encodeNextCursor,
         );
       }),
