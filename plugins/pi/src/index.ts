@@ -30,6 +30,9 @@ const definition: ProviderDefinition = {
     }),
   }),
   defaultConfig: {},
+  // The slug as pi's own model catalog lists it (`pi --list-models` prints
+  // `glm-5.3-flash` under the `zai` provider); the adapter adds the provider.
+  suggestedTextGenerationModel: "glm-5.3-flash",
   declared: {
     steering: "native",
     fork: "native",

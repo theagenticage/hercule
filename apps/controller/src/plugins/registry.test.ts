@@ -108,6 +108,7 @@ const SHIPPED = [
         additionalProperties: false,
       },
       defaultConfig: {},
+      suggestedTextGenerationModel: "glm-5.3-flash",
       declared: {
         steering: "native",
         fork: "native",
