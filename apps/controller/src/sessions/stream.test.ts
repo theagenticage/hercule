@@ -224,6 +224,20 @@ describe("merging deltas", () => {
       { seq: 3, event: { _tag: "item.completed" } },
     ]);
   });
+
+  it("writes a delta that alone reaches the flush size at once, after the words held before it", () => {
+    const huge = "y".repeat(DELTA_FLUSH_BYTES * 3);
+    const { folds, state } = applyEvents([
+      [1, buildDelta("i1", "held words")],
+      [2, buildDelta("i1", huge)],
+    ]);
+
+    expect(folds[1]!.rows).toMatchObject([
+      { seq: 1, event: { delta: "held " } },
+      { seq: 2, event: { delta: `words${huge}` } },
+    ]);
+    expect(state.buffers.size).toBe(0);
+  });
 });
 
 describe("every other event", () => {

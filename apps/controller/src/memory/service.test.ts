@@ -124,7 +124,7 @@ describe("memory.write", () => {
   });
 
   describe("versions", () => {
-    it("starts a topic at version 1 and adds one per write and append", async () => {
+    it("stores every write and append at a higher version, and reads the last one", async () => {
       const versions = await run(
         Effect.gen(function* () {
           const service = yield* memory;
@@ -135,42 +135,56 @@ describe("memory.write", () => {
           return [created.version, rewritten.version, appended.version, read.version];
         }),
       );
-      expect(versions).toEqual([1, 2, 3, 3]);
+      const [created, rewritten, appended, read] = versions;
+      expect(created).toBeGreaterThan(0);
+      expect(rewritten).toBeGreaterThan(created!);
+      expect(appended).toBeGreaterThan(rewritten!);
+      expect(read).toBe(appended);
     });
 
     it("writes when the document is still at the expected version", async () => {
       const document = await run(
         Effect.gen(function* () {
           const service = yield* memory;
-          yield* service.write({ id: ASSISTANT, name: "notes", body: "a" });
+          const created = yield* service.write({ id: ASSISTANT, name: "notes", body: "a" });
           return yield* service.write({
             id: ASSISTANT,
             name: "notes",
             body: "b",
-            expectedVersion: 1,
+            expectedVersion: created.version,
           });
         }),
       );
-      expect(document).toMatchObject({ body: "b", version: 2 });
+      expect(document).toMatchObject({ body: "b" });
     });
 
     it("refuses a write from a stale copy and keeps the newer text", async () => {
       const result = await run(
         Effect.gen(function* () {
           const service = yield* memory;
-          yield* service.write({ id: ASSISTANT, name: "decisions", body: "a" });
-          yield* service.append({ id: ASSISTANT, name: "decisions", body: "b" });
+          const read = yield* service.write({ id: ASSISTANT, name: "decisions", body: "a" });
+          const appended = yield* service.append({ id: ASSISTANT, name: "decisions", body: "b" });
           const refused = yield* Effect.flip(
-            service.write({ id: ASSISTANT, name: "decisions", body: "x", expectedVersion: 1 }),
+            service.write({
+              id: ASSISTANT,
+              name: "decisions",
+              body: "x",
+              expectedVersion: read.version,
+            }),
           );
-          return { refused, stored: yield* service.read({ id: ASSISTANT, name: "decisions" }) };
+          return {
+            read,
+            appended,
+            refused,
+            stored: yield* service.read({ id: ASSISTANT, name: "decisions" }),
+          };
         }),
       );
       expect(result.refused).toMatchObject({ error: { code: "conflict" } });
       expect(readMessage(result.refused)).toBe(
-        'topic "decisions" changed since you read it (version 2, you expected 1); read it again and redo your edit',
+        `topic "decisions" changed since you read it (version ${String(result.appended.version)}, you expected ${String(result.read.version)}); read it again and redo your edit`,
       );
-      expect(result.stored).toMatchObject({ body: "a\nb", version: 2 });
+      expect(result.stored).toMatchObject({ body: "a\nb", version: result.appended.version });
     });
 
     it("refuses a stale write before the shrink guard", async () => {
@@ -195,7 +209,7 @@ describe("memory.write", () => {
           service.write({ id: ASSISTANT, name: "fresh", body: "a", expectedVersion: 0 }),
         ),
       );
-      expect(document.version).toBe(1);
+      expect(document).toMatchObject({ name: "fresh", body: "a" });
     });
 
     it("refuses expectedVersion 0 for a topic that exists", async () => {
@@ -210,6 +224,28 @@ describe("memory.write", () => {
       expect(readMessage(error)).toBe(
         'a topic named "x" already exists; read it, or write without expectedVersion to replace it',
       );
+    });
+
+    it("refuses a write from a copy of a topic that was deleted and created again", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const service = yield* memory;
+          const read = yield* service.write({ id: ASSISTANT, name: "again", body: "old" });
+          yield* service.delete({ id: ASSISTANT, name: "again" });
+          yield* service.write({ id: ASSISTANT, name: "again", body: "new" });
+          const refused = yield* Effect.flip(
+            service.write({
+              id: ASSISTANT,
+              name: "again",
+              body: "from the deleted copy",
+              expectedVersion: read.version,
+            }),
+          );
+          return { refused, stored: yield* service.read({ id: ASSISTANT, name: "again" }) };
+        }),
+      );
+      expect(result.refused).toMatchObject({ error: { code: "conflict" } });
+      expect(result.stored.body).toBe("new");
     });
 
     it("refuses a write expecting a version of a topic that was deleted", async () => {

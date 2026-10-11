@@ -269,7 +269,15 @@ export const fold = (
         // delta's sequence number, and the rest stays held under this one:
         // two rows never share a sequence number, which would drop the second.
         rows.push(toFlushedRow({ ...held, text: held.text.slice(0, cut) }));
-        buffers.set(key, { first: event, text: held.text.slice(cut) + event.delta, seq });
+        const rest: Held = { first: event, text: held.text.slice(cut) + event.delta, seq };
+        // A delta that alone reaches the bound is written at once, as one
+        // with no word break would be, so no more than the bound is ever held.
+        if (rest.text.length < DELTA_FLUSH_BYTES) {
+          buffers.set(key, rest);
+        } else {
+          rows.push(toFlushedRow(rest));
+          buffers.delete(key);
+        }
       }
     }
     // A delta is not a boundary and moves nothing: `busy` is already where the

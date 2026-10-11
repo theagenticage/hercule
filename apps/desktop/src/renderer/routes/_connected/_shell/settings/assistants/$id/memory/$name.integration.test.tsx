@@ -2,7 +2,8 @@
  * Tests the page of one memory document in Settings > Assistants: the text
  * and a topic's gist save when committed, with the version the page read, a
  * save refused because an agent wrote since shows the agent's text and can
- * be sent again over it, a refusal shows under its row and puts the field
+ * be sent again over it, a save queued behind a refused one is refused
+ * too, a refusal shows under its row and puts the field
  * back, a refused cut saves once a dialog confirms it, and Delete asks first.
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -130,6 +131,50 @@ describe("Settings > Assistants, a memory document's page", () => {
       { body: newer, gist: "Payments, EU", expectedVersion: 2 },
     ]);
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("refuses a save queued behind one that an agent's write refused, instead of writing over it", async () => {
+    const message = "webshop is at version 2, not 1; read it again";
+    let stored = WEBSHOP;
+    let answerGistSave = (): void => {};
+    const gistSaveAnswered = new Promise<void>((resolve) => {
+      answerGistSave = resolve;
+    });
+    const { calls } = await openDocument("webshop", {
+      [`GET ${MEMORY_PATH}/webshop`]: () => ({ body: stored }),
+      [`PUT ${MEMORY_PATH}/webshop`]: async (call) => {
+        const { body, gist, expectedVersion } = call.body as MemoryWriteInput;
+        if (gist !== undefined) await gistSaveAnswered;
+        if (expectedVersion !== stored.version) {
+          return { status: 409, body: { error: { code: "conflict", message } } };
+        }
+        stored = buildMemoryDocument("webshop", body, gist ?? stored.gist, stored.version + 1);
+        return { body: stored };
+      },
+    });
+    const gist = await screen.findByRole("textbox", { name: "Gist" });
+    const text = screen.getByRole("textbox", { name: "Text" });
+
+    await userEvent.clear(gist);
+    await userEvent.type(gist, "Payments, EU{Enter}");
+    await userEvent.type(text, " Mollie for NL.");
+    await userEvent.tab();
+    // An agent writes the topic while the gist save is held, then the
+    // controller answers it.
+    stored = buildMemoryDocument("webshop", "Stripe only.", WEBSHOP.gist, 2);
+    answerGistSave();
+
+    await waitFor(() => {
+      expect(listWrites(calls, "webshop")).toHaveLength(2);
+    });
+    expect(listWrites(calls, "webshop")).toEqual([
+      { body: WEBSHOP.body, gist: "Payments, EU", expectedVersion: 1 },
+      { body: "Stripe checkout. Mollie for NL.", expectedVersion: 1 },
+    ]);
+    await waitFor(() => {
+      expect(text).toHaveProperty("value", "Stripe only.");
+    });
+    expect(stored.body).toBe("Stripe only.");
   });
 
   it("shows a refused save under its row, as the controller words it, and puts the text back", async () => {

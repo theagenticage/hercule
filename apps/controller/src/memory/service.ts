@@ -355,14 +355,15 @@ const make = Effect.gen(function* () {
             const previous = Option.getOrUndefined(existing);
             const gist = decoded.gist ?? previous?.gist ?? "";
             const document = { assistantId, name, gist, body, size, at, actor: stamp };
-            yield* previous === undefined ? memory.insert(document) : memory.update(document);
+            const version = yield* previous === undefined
+              ? memory.insert(document)
+              : memory.update(document);
             yield* audit.append({
               kind: "memory.written",
               actor: stamp,
               payload: { assistantId, name, size },
               at,
             });
-            const version = previous === undefined ? 1 : previous.version + 1;
             return { name, gist, body, size, version, updatedAt: at };
           }),
         );
@@ -416,14 +417,22 @@ const make = Effect.gen(function* () {
             yield* ensureWithinCap(name, size);
 
             const gist = existing.value.gist;
-            yield* memory.update({ assistantId, name, gist, body, size, at, actor: stamp });
+            const version = yield* memory.update({
+              assistantId,
+              name,
+              gist,
+              body,
+              size,
+              at,
+              actor: stamp,
+            });
             yield* audit.append({
               kind: "memory.appended",
               actor: stamp,
               payload: { assistantId, name, size },
               at,
             });
-            return { name, gist, body, size, version: existing.value.version + 1, updatedAt: at };
+            return { name, gist, body, size, version, updatedAt: at };
           }),
         );
       }),

@@ -87,6 +87,14 @@ export function MemoryDocumentCard({
       await queryClient.invalidateQueries({ queryKey: indexKey, exact: true });
     },
     onError: async (error) => {
+      // The document changed since the edit began. The cached copy is stale,
+      // so the edit is kept whole, even a field typed back to the cached
+      // text: the stored text is now another one. The index and the document
+      // are read again, so Save anyway writes over the version stored now.
+      if (isConflict(error)) {
+        await queryClient.invalidateQueries({ queryKey: indexKey });
+        return;
+      }
       // Nothing was stored, so a field typed back to the stored text while
       // the save ran is no longer an edit.
       const stored = queryClient.getQueryData(
@@ -95,10 +103,6 @@ export function MemoryDocumentCard({
       if (stored !== undefined) {
         onEditChange((current) => mergeMemoryEdit(stored, current, {}, false));
       }
-      // The document changed since the edit began: the index and the
-      // document are read again, so Save anyway writes over the version
-      // that is stored now.
-      if (isConflict(error)) await queryClient.invalidateQueries({ queryKey: indexKey });
     },
   });
   const remove = useMutation({

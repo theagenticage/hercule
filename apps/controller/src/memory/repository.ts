@@ -6,6 +6,11 @@
  * Rows are written with INSERT, UPDATE and DELETE and never with REPLACE,
  * because the full-text index is kept current by triggers that a REPLACE
  * would skip (migration 0062).
+ *
+ * Every insert and update takes the document's new version from its
+ * assistant's counter in `memory_versions`. The counter only goes up, so a
+ * version names one state of one document: a topic deleted and created
+ * again never comes back at a version an editor of the old one still holds.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -16,7 +21,7 @@ import { uuidFromString } from "../db";
 
 /**
  * A new document, or the new state of an existing one. It carries no version:
- * `insert` stores a new document at version 1 and `update` adds one.
+ * `insert` and `update` take the next one from the assistant's counter.
  */
 export interface MemoryDocumentWrite {
   readonly assistantId: string;
@@ -53,6 +58,21 @@ interface DocumentRow {
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  /**
+   * Adds one to the assistant's version counter and returns the new value.
+   * An assistant without a counter yet starts at 1.
+   */
+  const takeVersion = (assistantId: string): Effect.Effect<number, SqlError> =>
+    Effect.map(
+      sql<{ readonly last_version: number }>`
+        INSERT INTO memory_versions (assistant_id, last_version)
+        VALUES (${uuidFromString(assistantId)}, 1)
+        ON CONFLICT (assistant_id) DO UPDATE SET last_version = last_version + 1
+        RETURNING last_version
+      `,
+      (rows) => rows[0]!.last_version,
+    );
+
   return {
     /** Returns the index of an assistant's memory: `core` first, then the topics by name. */
     list: (assistantId: string): Effect.Effect<ReadonlyArray<MemoryEntry>, SqlError> =>
@@ -83,23 +103,34 @@ const make = Effect.gen(function* () {
           })),
       ),
 
-    /** Inserts a new document at version 1. */
-    insert: (document: MemoryDocumentWrite): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        INSERT INTO memory_documents
-          (assistant_id, name, gist, body, size, version, updated_at, updated_by)
-        VALUES (${uuidFromString(document.assistantId)}, ${document.name}, ${document.gist},
-                ${document.body}, ${document.size}, 1, ${document.at}, ${document.actor})
-      `),
+    /** Inserts a new document and returns the version it is stored at. */
+    insert: (document: MemoryDocumentWrite): Effect.Effect<number, SqlError> =>
+      Effect.gen(function* () {
+        const version = yield* takeVersion(document.assistantId);
+        yield* sql`
+          INSERT INTO memory_documents
+            (assistant_id, name, gist, body, size, version, updated_at, updated_by)
+          VALUES (${uuidFromString(document.assistantId)}, ${document.name}, ${document.gist},
+                  ${document.body}, ${document.size}, ${version}, ${document.at}, ${document.actor})
+        `;
+        return version;
+      }),
 
-    /** Replaces the gist and the body of an existing document and adds one to its version. */
-    update: (document: MemoryDocumentWrite): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE memory_documents
-        SET gist = ${document.gist}, body = ${document.body}, size = ${document.size},
-            version = version + 1, updated_at = ${document.at}, updated_by = ${document.actor}
-        WHERE assistant_id = ${uuidFromString(document.assistantId)} AND name = ${document.name}
-      `),
+    /**
+     * Replaces the gist and the body of an existing document and returns the
+     * version it is stored at.
+     */
+    update: (document: MemoryDocumentWrite): Effect.Effect<number, SqlError> =>
+      Effect.gen(function* () {
+        const version = yield* takeVersion(document.assistantId);
+        yield* sql`
+          UPDATE memory_documents
+          SET gist = ${document.gist}, body = ${document.body}, size = ${document.size},
+              version = ${version}, updated_at = ${document.at}, updated_by = ${document.actor}
+          WHERE assistant_id = ${uuidFromString(document.assistantId)} AND name = ${document.name}
+        `;
+        return version;
+      }),
 
     delete: (assistantId: string, name: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`

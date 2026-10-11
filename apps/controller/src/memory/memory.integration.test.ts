@@ -108,17 +108,17 @@ describe("memory over HTTP", () => {
         expectedVersion: 0,
       });
       expect(created.status, await created.clone().text()).toBe(200);
-      expect(((await created.json()) as MemoryDocument).version).toBe(1);
+      const { version } = (await created.json()) as MemoryDocument;
 
       const updated = await writeMemory(arranged, assistant.id, "notes", {
         body: "second",
-        expectedVersion: 1,
+        expectedVersion: version,
       });
-      expect(((await updated.json()) as MemoryDocument).version).toBe(2);
+      expect(updated.status, await updated.clone().text()).toBe(200);
 
       const stale = await writeMemory(arranged, assistant.id, "notes", {
         body: "from a stale copy",
-        expectedVersion: 1,
+        expectedVersion: version,
       });
       expect(stale.status).toBe(409);
       expect(await readErrorBody(stale)).toMatchObject({ code: "conflict" });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import {
   buildMemoryWrite,
@@ -36,9 +36,11 @@ export interface SavedMemoryDocument {
  * - While a save runs, the saved fields show the value being saved.
  * - A write replaces the whole text, so every save sends the version of the
  *   document it was built on, and the controller refuses it with `conflict`
- *   when an agent wrote the document since. The version is the cached
- *   document's when the save starts, so a save queued behind another builds
- *   on the document the earlier one stored.
+ *   when an agent wrote the document since. A save made while none runs
+ *   builds on the cached document. A save queued behind another builds on
+ *   the version the earlier one stored, and only a stored save moves that
+ *   version on: after a `conflict`, the saves queued behind it are refused
+ *   too, instead of writing over what the agent wrote.
  * - A failed save shows the stored value again, and `failure` holds the
  *   edit and the error until the next save. After a `conflict` the document
  *   and the index are read again first, so the page shows what the agent
@@ -63,12 +65,14 @@ export function useSavedMemoryDocument(
     select: (each) => (each.state.variables as MemorySave).edit,
   });
   const [failure, setFailure] = useState<SavedMemoryDocument["failure"]>(null);
+  // The version the next save in the queue writes over.
+  const expectedVersion = useRef(document.version);
   const mutation = useMutation({
     mutationKey,
     scope: { id: `memory:${assistantId}:${name}` },
     mutationFn: ({ edit, confirmShrink }: MemorySave) => {
       const latest = queryClient.getQueryData(documentKey) ?? document;
-      const write = buildMemoryWrite(latest, edit);
+      const write = { ...buildMemoryWrite(latest, edit), expectedVersion: expectedVersion.current };
       return client.memory.write({
         params: { id: assistantId, name },
         payload: confirmShrink ? { ...write, confirmShrink: true } : write,
@@ -84,6 +88,7 @@ export function useSavedMemoryDocument(
       setFailure({ edit, error });
     },
     onSuccess: (stored) => {
+      expectedVersion.current = stored.version;
       queryClient.setQueryData(documentKey, stored);
       queryClient.setQueryData(indexKey, (entries) =>
         entries === undefined ? undefined : updateMemoryEntry(entries, stored),
@@ -97,6 +102,9 @@ export function useSavedMemoryDocument(
     failure,
     save: (edit, confirmShrink = false) => {
       setFailure(null);
+      if (queryClient.isMutating({ mutationKey, exact: true }) === 0) {
+        expectedVersion.current = (queryClient.getQueryData(documentKey) ?? document).version;
+      }
       mutation.mutate({ edit, confirmShrink });
     },
   };

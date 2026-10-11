@@ -127,9 +127,10 @@ export const MemoryEntry = Schema.Struct({
 export type MemoryEntry = Schema.Schema.Type<typeof MemoryEntry>;
 
 /**
- * A version number of a memory document. A document is at version 1 when it
- * is created and each write or append adds one; a document that does not
- * exist is at version 0.
+ * A version number of a memory document. Every write or append stores the
+ * document at a higher version than any document of its assistant had
+ * before, so a topic deleted and created again never reuses one. A document
+ * that does not exist is at version 0.
  */
 export const MemoryVersion = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 

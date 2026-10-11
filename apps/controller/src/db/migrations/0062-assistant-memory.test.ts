@@ -84,6 +84,21 @@ describe("the assistant memory migration", () => {
     );
   });
 
+  it("starts every existing assistant's version counter at its core's version", async () => {
+    const rows = await seedAndMigrate(
+      Effect.flatMap(
+        SqlClient.SqlClient,
+        (sql) => sql<{ readonly assistant: string; readonly last_version: number }>`
+          SELECT lower(hex(assistant_id)) AS assistant, last_version
+          FROM memory_versions ORDER BY assistant`,
+      ),
+    );
+
+    expect(rows).toEqual(
+      ASSISTANTS.map((assistant) => ({ assistant: toHex(assistant), last_version: 1 })),
+    );
+  });
+
   it("keeps the full-text index current through insert, update and a cascading delete", async () => {
     const results = await seedAndMigrate(
       Effect.gen(function* () {

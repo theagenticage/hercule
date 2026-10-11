@@ -1456,6 +1456,40 @@ describe("Settings > Assistants: memory", () => {
     expect(body.value).toBe("Use SQLite.\nShip one binary.");
   });
 
+  it("keeps the old text typed back while a save runs that the assistant's write refuses", async () => {
+    const user = userEvent.setup();
+    const route = `PUT /api/v1/assistants/${ADA.id}/memory/decisions`;
+    const { held, release } = holdAnswer();
+    let assistantWrote = false;
+    const { api } = await openScreenAround([ADA], (_routes, answer) => ({
+      [route]: async (call) => {
+        await held;
+        if (!assistantWrote) {
+          assistantWrote = true;
+          await answer(route, { ...call, body: { body: "Use Postgres." } });
+        }
+        return answer(route, call);
+      },
+    }));
+
+    const body = await openTopic(user, "decisions");
+    await user.type(body, " Test on Bun.");
+    await user.click(screen.getByRole("button", { name: "Save topic decisions" }));
+    await user.clear(body);
+    await user.type(body, "Use SQLite.\nShip one binary.");
+    release();
+
+    expect(await screen.findByRole("alert")).toBeDefined();
+    expect(body.value).toBe("Use SQLite.\nShip one binary.");
+    await user.click(await screen.findByRole("button", { name: "Save anyway" }));
+
+    expect(await screen.findByText("Saved.")).toBeDefined();
+    expect(listMemoryWrites(api, ADA.id).at(-1)?.body).toEqual({
+      body: "Use SQLite.\nShip one binary.",
+      expectedVersion: 2,
+    });
+  });
+
   it("refuses a new topic the assistant created meanwhile, and names it as taken", async () => {
     const user = userEvent.setup();
     const route = `PUT /api/v1/assistants/${ADA.id}/memory/travel`;
