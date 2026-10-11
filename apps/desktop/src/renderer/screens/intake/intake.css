@@ -379,6 +379,58 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Everything's search field and filter menu, under the view switcher, then
+   the horizon the list reaches back to. */
+.asks-find {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.asks-search,
+.asks-stamp {
+  height: 30px;
+  font-size: var(--t-12);
+}
+.asks-search {
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+  color: var(--faint);
+}
+.asks-search input {
+  color: var(--ink);
+  font: inherit;
+}
+.asks-stamp {
+  width: 168px;
+}
+.asks-stamp select {
+  font: inherit;
+}
+.asks-search:focus-within,
+.asks-stamp:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.asks-horizon {
+  margin: 8px 0 0;
+  padding: 0 2px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+/* The last line of Everything's list, when no older event is left. */
+.asks-end {
+  margin: 0;
+  padding: 16px 10px 24px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* An event's first handling, ahead of what it led to. */
+.ev-stamp {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+
 /* The foot under To do: how many signals were cleared today. */
 .asks-cleared {
   margin: 8px 0 0;
@@ -1041,4 +1093,46 @@
 }
 .b-work-text span:last-child {
   color: var(--muted);
+}
+
+/* Everything's pane: what came of the event, one block per handling, under a
+   small heading. A handling that names a record is a link, drawn as the block
+   it is, and lifts on hover. */
+.ad-came-h {
+  margin: 0 0 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.ad-came-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.b-work--link {
+  color: inherit;
+  text-decoration: none;
+}
+.b-work--link:hover {
+  background: var(--hover);
+}
+/* The event's Connection and references, as the drawing's field list. */
+.b-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 32px;
+  margin: 0;
+}
+.b-fields dt {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.b-fields dd {
+  margin: 1px 0 0;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  overflow-wrap: anywhere;
 }
