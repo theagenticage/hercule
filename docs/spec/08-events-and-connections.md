@@ -174,6 +174,27 @@ GitHub and Gmail are event-source plugins. Cron, manual, and platform events are
   - **Teams.** `GET /user/teams` once an hour, to tell a request to one of the user's teams apart. A 403 or 404 (the token may not read teams) keeps the last list, or none, for the next hour. Any other failure keeps the last list and is tried again at the next poll.
   - **Worst case.** One `repos` poll sends up to about 350 requests: about 250 for the watch list (a cap of 100, which the poll of the last repository it reaches can pass by about 150) and about 100 for followed items. At about 0.5 s a request that is about 175 s, inside the host's 300 s. The watch-list cap is also checked between the items of one repository: once it is spent, the repository stops at the next item it may stop before, rather than diffing every listed item, which keeps the overrun near those 150.
 - *(Added 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* **Token warnings.** `validate` returns a `warning` the Connection shows ([./05-plugins.md](./05-plugins.md) section 10.1) when the token works but costs the user signals: a fine-grained token (prefix `github_pat_`), which GitHub's Notifications and Checks APIs refuse, and a classic token whose `X-OAuth-Scopes` lacks `read:org`, which cannot read the user's teams, so team review requests raise nothing.
+- *(Added 2026-10-11, [#527](https://github.com/theagenticage/hercule/issues/527).)* **Assignments, requested changes and failed checks, as built.**
+  - **Payload facts.** The three kinds read facts worked out at ingest, like `byYou` and `toYou` above:
+    - `github.issue.assigned` and `github.issue.unassigned` carry `{assignee, toYou, byYou}` and the actor as `author`. Both come from the item's history (`GET /repos/{owner}/{repo}/issues/{number}/events`), not from the snapshot diff, so they say who assigned whom. Both are emitted for issues and pull requests; a pull request's event has the pull request's ref. The history is read only for an item whose assignees changed, and the same cutoff as comments and reviews applies, so a new Connection raises nothing for an item already assigned.
+    - `github.pr.review-submitted` adds `reviewId` and `onYourPullRequest`.
+    - `github.pr.review-requested` also emits `reviewer: other` when the user asks anyone who is neither them nor one of their teams. It is what ends `github/changes-requested`. Because the kind is available to triage, the user's own requests now reach Everything too; this is accepted.
+    - `github.pr.checks-completed` adds `headSha`, `onYourPullRequest`, and `failedChecks`: the sorted names of the check runs that failed, empty unless `conclusion` is `failure`.
+  - **Rules.** `github/assigned` raises when the user was assigned by someone else: assigning yourself is your own move. `github/changes-requested` raises for a review that requests changes on the user's pull request. `github/checks-failed` raises for a failure on the user's pull request. *(The same change)* `github/team-review-requested` no longer raises when the user asked their own team.
+  - **Ends.**
+    - `github/assigned`: an unassignment of the user, or a close or merge, all withdrawn.
+    - `github/changes-requested`: any review request the user makes on the pull request is the re-request, `decided` with no `actionId`, because it maps to none of the signal's answers. A merge or a close withdraws it.
+    - `github/checks-failed`: a later verdict that is not `failure` withdraws it ("Checks passed"), and so do a merge and a close. A new failure on a new head commit is not an end: it raises a new signal, which replaces the older one (10 section 9.2).
+  - **Match fields.** `check` is the first name in `failedChecks`, or null when GitHub listed no failed run.
+  - **Blocks.**
+    - `github/assigned`: the item's description as one message, left out when it is empty.
+    - `github/changes-requested`: the review (an empty one reads "Requested changes"), then its newest 19 comments, each with its `location`; `omitted` counts the older ones.
+    - `github/checks-failed`: the failed check runs, then the pending ones, at most 20 rows. The log of each of the first 5 failed rows is the run's annotations, one line each as `path:line message`, or else its output `text`, or else its `summary`, without ANSI codes and cut to its last 40 lines and 8 KB. Actions job logs are not read: they are a redirect to a file of any size, and their last lines are mostly cleanup. So a check whose only report is "Process completed with exit code 1" shows that line; the row links to the run.
+  - **Actions.** Reply on `github/assigned` and `github/changes-requested` is not primary, as the table says. Re-run failed checks binds `checks.rerun` with the head commit the signal was raised for, so a click after a new push is refused rather than re-running the new commit's checks.
+  - **Rate budget.** On top of the budget above:
+    - `repos`: one history read for each item whose assignees changed; a followed issue costs one more request when it changed, as a pull request already did.
+    - `checks`: one `GET .../commits/{sha}/check-runs` for each failure verdict it emits, and none for a success.
+    - `build`: `github/assigned` sends 1 request, `github/changes-requested` 2 to 4, `github/checks-failed` at most 8 (3 pages of check runs, and one annotations read for each of the first 5 failed runs).
 
 The workflow-action roster is pinned in [./05-plugins.md](./05-plugins.md) section 4.4.
 
