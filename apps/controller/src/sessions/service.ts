@@ -570,13 +570,15 @@ const cutTitle = (title: string): string => title.trim().slice(0, MAX_TITLE_LENG
  * single spaces, control and format characters are removed, and the result is
  * cut by `cutTitle`. A model can emit zero-width or direction-changing
  * characters, which would show up as nothing in a sidebar row but break
- * searching and copying.
+ * searching and copying. The zero-width non-joiner and joiner (U+200C and
+ * U+200D) stay, because Persian and other scripts need them to shape letters,
+ * and emoji sequences need them to stay one emoji.
  */
 const cleanGeneratedTitle = (title: string): string =>
   cutTitle(
     title
       .replace(/\s+/g, " ")
-      .replace(/[\p{Cc}\p{Cf}]/gu, "")
+      .replace(/(?![\u200C\u200D])[\p{Cc}\p{Cf}]/gu, "")
       // Removing a character between two spaces leaves a double space.
       .replace(/ {2,}/g, " "),
   );

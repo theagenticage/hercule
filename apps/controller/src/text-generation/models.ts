@@ -44,7 +44,7 @@ import { Settings } from "../settings";
 const AUTOMATIC_PROVIDER_ORDER: ReadonlyArray<string> = ["codex", "pi", "claude-code"];
 
 /**
- * What the setting resolves to:
+ * What the setting resolves to now:
  *
  * - `off`: text generation is switched off.
  * - `resolved`: calls run on this instance and model. `runnerIds` lists the
@@ -53,11 +53,12 @@ const AUTOMATIC_PROVIDER_ORDER: ReadonlyArray<string> = ["codex", "pi", "claude-
  * - `unresolved`: no model can be used, and `message` explains why in words a
  *   user can act on. For example `automatic` found no match.
  *
- * Every variant carries `setting`, the value of `textGeneration.model` it was
- * resolved from, written as JSON. The last failure is stored with it, so a
- * failure of one model is never shown as the failure of another.
+ * Every variant carries `failureKey`, which names the setting value and what
+ * it resolved to. The last failure is stored under it and shown only under
+ * the same key. So a failure is hidden when the user chooses another model,
+ * and also when `automatic` starts resolving to another instance or model.
  */
-export type TextGenerationTarget = { readonly setting: string } & TextGenerationChoice;
+export type TextGenerationTarget = { readonly failureKey: string } & TextGenerationChoice;
 
 /** What a value of the setting resolves to, before it is tied to that value. */
 type TextGenerationChoice =
@@ -176,7 +177,11 @@ const make = Effect.gen(function* () {
             runnerIds: listRunnersOffering(capable, snapshots, found.value.id, setting.model),
           } as const;
         });
-        return { ...choice, setting: JSON.stringify(setting) };
+        const ran =
+          choice._tag === "resolved"
+            ? { instanceId: choice.instance.id, model: choice.model }
+            : null;
+        return { ...choice, failureKey: JSON.stringify({ setting, ran }) };
       }),
   };
 });

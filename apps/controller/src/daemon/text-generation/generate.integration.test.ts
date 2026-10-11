@@ -20,6 +20,7 @@ import { createPluginFixture, buildProviderDefinition } from "../../plugins/test
 import {
   findInstanceId,
   waitForFrames,
+  waitForRunnerGone,
   waitUntil,
   WAIT_DEADLINE_MS,
   withFleet as sharedWithFleet,
@@ -154,6 +155,13 @@ const logOut = (arranged: Arranged, runnerId: string): Promise<unknown> =>
            WHERE runner_id = ${uuidFromString(runnerId)}`.pipe(Effect.orDie),
   );
 
+/** Marks the login of one provider instance as expired, on every runner, as a probe would. */
+const logOutInstance = (arranged: Arranged, instanceId: string): Promise<unknown> =>
+  Effect.runPromise(
+    arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
+           WHERE instance_id = ${uuidFromString(instanceId)}`.pipe(Effect.orDie),
+  );
+
 const reserve = (arranged: Arranged, runnerId: string): Promise<unknown> =>
   Effect.runPromise(
     arranged.harness
@@ -252,6 +260,29 @@ describe("the last failure after the model setting changes", () => {
       expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
 
       expect((await readStatus(arranged)).lastFailure).toBeNull();
+    });
+  });
+
+  it("is not shown when automatic starts resolving to another model", async () => {
+    await withFleet(async (arranged) => {
+      const codex = findInstanceId(arranged, "codex");
+      const pi = findInstanceId(arranged, "pi");
+      arranged.wire.setTextGenerationAnswer(() => ({
+        outcome: "failed",
+        message: "codex went wrong",
+      }));
+      await generate(arranged);
+      expect(await readStatus(arranged)).toMatchObject({
+        model: { instanceId: codex, model: "codex-mini" },
+        lastFailure: { message: "codex went wrong" },
+      });
+
+      await logOutInstance(arranged, codex);
+
+      expect(await readStatus(arranged)).toEqual({
+        model: { instanceId: pi, model: "pi-small" },
+        lastFailure: null,
+      });
     });
   });
 
@@ -859,23 +890,37 @@ describe("a call that the runner cannot finish", () => {
       });
       expect(await arranged.harness.audit("textGeneration.failed")).toHaveLength(1);
       expect(await arranged.harness.audit("textGeneration.completed")).toEqual([]);
-      expect(await readStatus(arranged)).toMatchObject({ lastFailure: { reason: "unavailable" } });
+      await waitForRunnerGone(arranged);
+      // With its only runner gone, the setting resolves to no model, so the
+      // failure of a call that ran on that model is no longer shown.
+      expect(await readStatus(arranged)).toEqual({ model: null, lastFailure: null });
     });
   });
 
-  it("keeps controller.read working when a runner reports a failure with an empty message", async () => {
-    await withFleet(
-      async (arranged) => {
-        arranged.wire.setTextGenerationAnswer(() => ({ outcome: "failed", message: "" }));
+  it("drops a report with an empty message, closing the runner's connection, and keeps controller.read working", async () => {
+    await withFleet(async (arranged) => {
+      arranged.wire.setTextGenerationAnswer(() => ({ outcome: "failed", message: "" }));
 
-        const result = await generate(arranged);
+      const result = await generate(arranged);
 
-        expect(result.ok).toBe(false);
-        const status = await readStatus(arranged);
-        expect(status.lastFailure?.message).toMatch(/.+/);
-      },
-      { textGenerationDeadline: Duration.millis(500) },
-    );
+      // The empty message does not decode, so the controller does not take the
+      // report. It closes the connection, which ends the call.
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          reason: "unavailable",
+          message: expect.stringContaining("connection ended") as unknown,
+        },
+      });
+      await waitForRunnerGone(arranged);
+      expect(await readStatus(arranged)).toEqual({ model: null, lastFailure: null });
+      const entries = await arranged.harness.audit("textGeneration.failed");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.payload).toMatchObject({
+        reason: "unavailable",
+        message: expect.stringContaining("connection ended") as unknown,
+      });
+    });
   });
 });
 
@@ -910,6 +955,28 @@ describe("an error nobody expected", () => {
 });
 
 describe("a caller that gives a schema no provider accepts", () => {
+  it("dies at once when the schema is longer than a request frame allows", async () => {
+    await withFleet(async (arranged) => {
+      answerOk(arranged);
+      const started = Date.now();
+
+      const exit = await arranged.harness.runWithLiveSessions(
+        Effect.flatMap(TextGeneration, (service) =>
+          service.generate({
+            ...buildCall(),
+            output: Schema.Struct({
+              title: Schema.String.annotate({ description: "x".repeat(33_000) }),
+            }),
+          }),
+        ),
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(requestsOn(arranged)).toEqual([]);
+    });
+  });
+
   it("dies, because it is a bug in the caller", async () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);

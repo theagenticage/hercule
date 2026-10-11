@@ -142,11 +142,12 @@ const FAILURE_REASON_WORDS = {
  * generation is off, because a failure from before it was turned off no
  * longer applies to the current setting.
  *
- * The line names no model. The status does not carry which model failed, and
- * the controller keeps the failure until a later text generation succeeds, so
- * after the user picks another model the line can still be about the earlier
- * one. The reason `unavailable` also covers a model that exists but whose
- * harness failed, which is why it reads "failed" and not "no model".
+ * The line names no model. The status does not carry which model failed. It
+ * does not need to: the controller returns a failure only while the setting
+ * and the model it resolves to are the ones the failed call ran on, so the
+ * line is always about the model shown beside it. The reason `unavailable`
+ * also covers a model that exists but whose harness failed, which is why it
+ * reads "failed" and not "no model".
  */
 export const describeTextGenerationFailure = (
   stored: TextGenerationModel | undefined,

@@ -94,7 +94,7 @@ const make = Effect.gen(function* () {
             target._tag === "resolved"
               ? { instanceId: target.instance.id, model: target.model }
               : null,
-          lastFailure: yield* lastTextGenerationFailure.read(target.setting),
+          lastFailure: yield* lastTextGenerationFailure.read(target.failureKey),
         },
       };
     });

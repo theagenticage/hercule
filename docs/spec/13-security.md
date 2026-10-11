@@ -398,8 +398,8 @@ The event log ([./04-state-store.md](./04-state-store.md)) is the audit log; the
   - `caller`, such as `core:sessions` or `plugin:<id>`;
   - `instanceId`, `model` and `runnerId`, each null when the call failed before one was chosen;
   - `durationMs`;
-  - on `textGeneration.completed`, the `usage` when the provider reported it: token counts, and cost in US dollars when the provider reports cost (Claude Code and pi do, Codex does not);
-  - on `textGeneration.failed`, the `reason` (`unavailable`, `timeout` or `invalid-output`) and the `message`.
+  - on `textGeneration.completed`, the `usage` when the provider reported it, which holds token counts only, and `costUsd` beside it, at the top level of the payload, when the provider reports cost in US dollars (Claude Code and pi do, Codex does not);
+  - on `textGeneration.failed`, the `reason` (`unavailable`, `timeout` or `invalid-output`) and the `message`. The message never contains model output.
 
   An entry never holds the prompt, the instructions or the output. They can carry the user's private text, and the audit log is kept far longer than any of them is useful.
 

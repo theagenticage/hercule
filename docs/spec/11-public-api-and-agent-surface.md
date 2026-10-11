@@ -716,7 +716,7 @@ The user settings store: per-user preference and presentation state with a close
 - `"off"`: nothing makes text generations.
 - `{ "instanceId": "<id>", "model": "<slug>" }`: that model on that instance, and never another.
 
-Settings > System edits it ([./14-web-app.md](./14-web-app.md)), and `hercule settings update --controller '{"textGeneration.model": "off"}'` sets it from the CLI. `controller.read` returns what it resolves to now.
+Settings > System edits it ([./14-web-app.md](./14-web-app.md)), and `hercule settings update --controller '{"textGeneration.model": "off"}'` sets it from the CLI. `controller.read` returns what it resolves to now, and the last failure only while it still belongs to that setting value and resolved model ([./06-providers.md](./06-providers.md) section 14.5).
 
 ### project, resource
 

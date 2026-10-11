@@ -1610,6 +1610,18 @@ describe("SessionService.setGeneratedTitle", () => {
     expect(result.title).toBe("Fix the login bug now");
   });
 
+  it("keeps the zero-width joiner and non-joiner, which scripts and emoji sequences need", async () => {
+    // Persian "mi-khahad" is spelled with a zero-width non-joiner, and the
+    // family emoji is three people joined by zero-width joiners.
+    const persian = "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u062F";
+    const family = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}";
+
+    // A zero-width space between the two parts must still be stripped.
+    const result = await generateTitle("a", `${persian} \u200B${family}`, false);
+
+    expect(result.title).toBe(`${persian} ${family}`);
+  });
+
   it("keeps the title it has when the generated one is empty", async () => {
     const result = await generateTitle("the first line", " \n ", true);
 

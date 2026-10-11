@@ -40,8 +40,10 @@ export const TextGenerationStatus = Schema.Struct({
    */
   model: Schema.NullOr(InstanceModel),
   /**
-   * Why the last text generation failed, or null when it succeeded or none
-   * has run since the controller started.
+   * Why the last text generation failed, or null when it succeeded, none has
+   * run since the controller started, or it ran on another setting value or
+   * another resolved model than `model` now (for example before the user
+   * chose a different model, or before `automatic` began to resolve to one).
    */
   lastFailure: Schema.NullOr(
     Schema.Struct({
