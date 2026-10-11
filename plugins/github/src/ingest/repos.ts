@@ -22,8 +22,11 @@
  *    review between two polls: the reviewer leaves the list when they review
  *    and is back on it by the next poll, so the list alone looks unchanged,
  *    and the update time may not have moved either when both happened in
- *    the snapshot's own second. Reviews and history are read newest first, up to a
- *    page limit, and a listing cut short logs a warning.
+ *    the snapshot's own second. When the history holds a request or a
+ *    removal to emit, `GET .../pulls/{n}` once more, after the reviews and
+ *    the history, for who is asked now (see `emitReviewRequestEvents`).
+ *    Reviews and history are read newest first, up to a page limit, and a
+ *    listing cut short logs a warning.
  * 3. When the listing held any item, or the last poll's comment listing
  *    stopped at its page limit: one
  *    `GET /repos/{o}/{r}/issues/comments?since=<cursor>` for the whole
@@ -102,6 +105,7 @@ import {
   emitNewReviews,
   emitReviewRequestEvents,
   emitInTimeOrder,
+  fetchReviewRequests,
   isAtOrAfter,
   readReviewRequests,
   type ActivityPoll,
@@ -207,8 +211,8 @@ export const MAX_ITEMS_PER_REPO = 50;
  *   then up to 50 pages each of open issues, closed issues and open pull
  *   requests, 151 in all;
  * - a later poll: up to 10 listing pages, then one pull request's worst
- *   case, the pull request, 3 pages of reviews and 10 of history, and up to
- *   10 comment pages: 34 in all.
+ *   case, the pull request twice, 3 pages of reviews and 10 of history, and
+ *   up to 10 comment pages: 35 in all.
  *
  * So the watch list costs at most about 100 + 151 = 251 requests. The
  * followed items after it have their own budget, about 100 requests at most
@@ -724,6 +728,7 @@ const pollRepo = (
       let headSha = previous?.headSha;
       let reviewRequests = previous?.reviewRequests;
       if (item.kind === "pr") {
+        yield* emitNewReviews(poll, item, start);
         if (pull !== undefined && pull.state === "open") {
           headSha = pull.head.sha;
           const now = readReviewRequests(poll, pull);
@@ -736,11 +741,15 @@ const pollRepo = (
           // comment).
           const before = previous === undefined ? [] : previous.reviewRequests;
           if (now.length > 0 || (before !== undefined && haveReviewRequestsChanged(before, now))) {
-            yield* emitReviewRequestEvents(poll, item, start, Effect.succeed(now));
+            yield* emitReviewRequestEvents(
+              poll,
+              item,
+              start,
+              fetchReviewRequests(poll, item.number),
+            );
           }
           reviewRequests = now;
         }
-        yield* emitNewReviews(poll, item, start);
       }
       // Every diffed item arms the comment listing, not only one whose comment
       // count went up: a comment deleted and another added leave the count

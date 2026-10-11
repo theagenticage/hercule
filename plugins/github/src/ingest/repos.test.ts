@@ -62,6 +62,8 @@ interface StubRepository {
   comments: Array<StubComment>;
   /** The accounts each pull request asks for a review now. */
   requestedReviewers: Record<number, Array<{ login: string; id: number }>>;
+  /** The teams of the repository's owner, by slug, each pull request asks for a review now. */
+  requestedTeams: Record<number, Array<{ slug: string }>>;
   /** Each item's history, oldest first, as `GET .../issues/{n}/events` lists it. */
   history: Record<number, Array<object>>;
   /** How many items one page of an issue listing of all or open issues holds; GitHub's is 100. */
@@ -101,6 +103,7 @@ const buildRepository = (): StubRepository => ({
   reviews: {},
   comments: [],
   requestedReviewers: {},
+  requestedTeams: {},
   history: {},
   issuesPerPage: 100,
   commentsPerPage: 100,
@@ -209,6 +212,7 @@ const buildPullBody = (repository: StubRepository, issue: StubIssue) => ({
   user: issue.user,
   head: { sha: repository.heads[issue.number] },
   requested_reviewers: repository.requestedReviewers[issue.number] ?? [],
+  requested_teams: repository.requestedTeams[issue.number] ?? [],
   updated_at: issue.updated_at,
 });
 
@@ -579,6 +583,71 @@ describe("the repos feed", () => {
     expect(listEvents(harness).slice(1)).toEqual([
       `github.pr.review-submitted pr.review-submitted:200`,
       `github.pr.review-requested pr.review-requested:2`,
+    ]);
+  });
+
+  it("reads who is asked after the reviews, so a review submitted during the poll comes after its request", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    const second = "2026-10-01T10:00:00Z";
+    repository.requestedReviewers[2] = [TEST_ACCOUNT];
+    repository.history[2] = [buildReviewRequest(1, second)];
+    repository.issues[1] = { ...repository.issues[1]!, updated_at: second };
+    repository.etag = '"v2"';
+    // The user reviews in the same second, between the poll's first read
+    // of the pull request and its read of the reviews. The review clears
+    // the request, so the pull request no longer asks the user.
+    const answer = answerFrom(repository);
+    const route = (request: HttpClientRequest.HttpClientRequest) => {
+      if (readStubRequestTarget(request).path.endsWith("/pulls/2/reviews")) {
+        repository.reviews[2] = [
+          { id: 200, user: TEST_ACCOUNT, state: "APPROVED", submitted_at: second },
+        ];
+        repository.requestedReviewers[2] = [];
+      }
+      return answer(request);
+    };
+
+    await poll(harness, route);
+
+    expect(listEvents(harness)).toEqual([
+      `github.pr.review-requested pr.review-requested:1`,
+      `github.pr.review-submitted pr.review-submitted:200`,
+    ]);
+  });
+
+  it("reads who is asked after the history, so removing a team's last request during the poll ends it", async () => {
+    const repository = buildRepository();
+    repository.requestedTeams[2] = [{ slug: "web" }];
+    const harness = buildIngestHarness();
+    harness.state.set("teams", { fetchedAt: new Date().toISOString(), teams: ["octocat/web"] });
+    await poll(harness, answerFrom(repository));
+    const second = "2026-10-01T10:00:00Z";
+    repository.issues[1] = { ...repository.issues[1]!, updated_at: second };
+    repository.etag = '"v2"';
+    // Mona takes the team's request back after the poll's first read of the
+    // pull request, so that read still shows the team asked.
+    repository.history[2] = [
+      {
+        id: 3,
+        event: "review_request_removed",
+        created_at: second,
+        actor: { login: "mona", id: 1 },
+        requested_team: { slug: "web" },
+      },
+    ];
+    const answer = answerFrom(repository);
+    const route = (request: HttpClientRequest.HttpClientRequest) => {
+      if (readStubRequestTarget(request).path.endsWith("/issues/2/events")) {
+        repository.requestedTeams[2] = [];
+      }
+      return answer(request);
+    };
+
+    await poll(harness, route);
+
+    expect(harness.events.map((event) => event.payload)).toEqual([
+      expect.objectContaining({ reviewer: "team", team: "octocat/web", teamStillRequested: false }),
     ]);
   });
 

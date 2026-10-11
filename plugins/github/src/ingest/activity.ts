@@ -12,8 +12,15 @@ import type { EmittedEvent, IngestContext, PluginError } from "@hercule/plugin-h
 import { readReviewVerdict, type ReviewVerdict } from "../github-objects";
 import { findMention, isUserAccount, type GithubIdentity } from "../identity";
 import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
-import { IssueEvent, ListedReview, type ListedComment, type ListedPull } from "./feed-objects";
-import { decodeGithubValue, fetchNewestItems, truncateRaw, type FeedError } from "./requests";
+import { IssueEvent, ListedPull, ListedReview, type ListedComment } from "./feed-objects";
+import {
+  decodeGithubValue,
+  fetchFeedResponse,
+  fetchNewestItems,
+  readGithubObject,
+  truncateRaw,
+  type FeedError,
+} from "./requests";
 import { buildTeamName } from "./teams";
 
 /** What the activity emitters need besides the item: where events go, and who the user is. */
@@ -308,6 +315,27 @@ export const readReviewRequests = (poll: ActivityPoll, pull: ListedPull): Array<
 };
 
 /**
+ * Fetches a pull request and returns the reviews it asks of the user and
+ * their teams now, as `readReviewRequests` returns them. Fails as
+ * `fetchFeedResponse` fails, and with a `PluginError` when GitHub returns an
+ * object without the fields read.
+ */
+export const fetchReviewRequests = (
+  poll: ActivityPoll,
+  number: number,
+): Effect.Effect<ReadonlyArray<string>, FeedError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const response = yield* fetchFeedResponse({
+      method: "GET",
+      path: `/repos/${poll.repo}/pulls/${String(number)}`,
+      token: poll.token,
+    });
+    const body = yield* readGithubObject(response.body, "a pull request");
+    const pull = yield* decodeGithubValue(ListedPull, body, "a pull request");
+    return readReviewRequests(poll, pull);
+  });
+
+/**
  * Fetches a pull request's history, newest first, and emits `github.pr.review-requested`
  * and `github.pr.review-request-removed` for each request to the user or one
  * of their teams made or taken back at or after `start`. Each one's dedup
@@ -326,6 +354,14 @@ export const readReviewRequests = (poll: ActivityPoll, pull: ListedPull): Array<
  *   (`TIE_RANKS`);
  * - `teamStillRequested` on a team's removal: whether the pull request
  *   still asks another of the user's teams, so the team's signal stays open.
+ *
+ * So the answer must be read after the reviews and the history, which is why
+ * callers emit the reviews first and pass a fresh read such as
+ * `fetchReviewRequests`. A list read earlier can be stale: a review
+ * submitted after it clears the user's request, and a removal made after it
+ * still shows the removed team as asked. Either would keep a signal open
+ * that should end, and the next poll cannot correct it, because the events
+ * it emits again have the same dedup keys.
  */
 export const emitReviewRequestEvents = (
   poll: ActivityPoll,

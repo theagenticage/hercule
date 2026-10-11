@@ -56,11 +56,11 @@ import {
   emitNewReviews,
   emitReviewRequestEvents,
   emitInTimeOrder,
+  fetchReviewRequests,
   isAtOrAfter,
-  readReviewRequests,
   type ActivityPoll,
 } from "./activity";
-import { ListedComment, ListedIssue, ListedPull } from "./feed-objects";
+import { ListedComment, ListedIssue } from "./feed-objects";
 import { fetchOwnOpenPullRequests } from "./own-pulls";
 import {
   countRequests,
@@ -178,28 +178,6 @@ const addOneSecond = (time: string): string => new Date(Date.parse(time) + 1000)
 const GONE_STATUSES = [403, 404, 410];
 
 /**
- * Fetches a pull request outside the watch list and returns the reviews it
- * asks of the user and their teams now, as `readReviewRequests` returns
- * them. The item itself is read from the issues API, which does not list
- * requested reviewers. Fails as `fetchFeedResponse` fails, and with a
- * `PluginError` when GitHub returns an object without the fields read.
- */
-const fetchReviewRequests = (
-  poll: ActivityPoll,
-  number: number,
-): Effect.Effect<ReadonlyArray<string>, FeedError, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const response = yield* fetchFeedResponse({
-      method: "GET",
-      path: `/repos/${poll.repo}/pulls/${String(number)}`,
-      token: poll.token,
-    });
-    const body = yield* readGithubObject(response.body, "a pull request");
-    const pull = yield* decodeGithubValue(ListedPull, body, "a pull request");
-    return readReviewRequests(poll, pull);
-  });
-
-/**
  * Reads one followed item and emits what happened on it at or after
  * `stored.since`, as the header comment describes. Returns the item's new
  * state, or `Option.none()` when GitHub answers that the item is gone
@@ -268,8 +246,8 @@ const readFollowedItem = (
     }
 
     if (item.kind === "pr") {
-      yield* emitReviewRequestEvents(poll, item, since, fetchReviewRequests(poll, number));
       yield* emitNewReviews(poll, item, since);
+      yield* emitReviewRequestEvents(poll, item, since, fetchReviewRequests(poll, number));
     }
 
     if (

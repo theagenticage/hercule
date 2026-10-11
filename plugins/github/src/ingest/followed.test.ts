@@ -418,8 +418,8 @@ describe("pollFollowedItems", () => {
 
     await pollOnce(harness, route);
 
-    // History is read before reviews, but the review at 08:50 is emitted
-    // before the request at 09:00, or it would end that request's signal.
+    // The request at 09:00 is found after the review at 08:50, which is
+    // emitted first all the same, or it would end that request's signal.
     expect(harness.events.map((event) => event.kind)).toEqual([
       "github.pr.review-submitted",
       "github.pr.review-requested",
