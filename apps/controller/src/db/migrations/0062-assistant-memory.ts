@@ -4,6 +4,9 @@
  *
  * - `size` is the body's length in characters (Unicode code points), stored
  *   so the index of topics and the cap checks never count a body again.
+ * - `version` is 1 when the document is created and goes up by one with
+ *   every write or append, so an editor can refuse to replace text written
+ *   since it read the document.
  * - `updated_by` is the actor stamp of the last write.
  * - `core` never has a gist, which a CHECK enforces.
  * - A document is deleted with its assistant, through the foreign key.
@@ -30,6 +33,7 @@ export default Effect.gen(function* () {
       gist TEXT NOT NULL,
       body TEXT NOT NULL,
       size INTEGER NOT NULL,
+      version INTEGER NOT NULL,
       updated_at TEXT NOT NULL,
       updated_by TEXT NOT NULL,
       UNIQUE (assistant_id, name),
@@ -71,7 +75,8 @@ export default Effect.gen(function* () {
   `;
 
   yield* sql`
-    INSERT INTO memory_documents (assistant_id, name, gist, body, size, updated_at, updated_by)
-    SELECT agent_id, 'core', '', '', 0, created_at, 'system' FROM assistants
+    INSERT INTO memory_documents
+      (assistant_id, name, gist, body, size, version, updated_at, updated_by)
+    SELECT agent_id, 'core', '', '', 0, 1, created_at, 'system' FROM assistants
   `;
 });

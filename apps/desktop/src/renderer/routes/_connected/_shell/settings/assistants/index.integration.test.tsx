@@ -449,7 +449,34 @@ describe("Settings > Assistants, Memory", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "decisions" })).toBeTruthy();
     expect(
       calls.filter((call) => call.method === "PUT").map((call) => [call.path, call.body]),
-    ).toEqual([[`/api/v1/assistants/${ADA.id}/memory/decisions`, { body: "", gist: "" }]]);
+    ).toEqual([
+      [`/api/v1/assistants/${ADA.id}/memory/decisions`, { body: "", gist: "", expectedVersion: 0 }],
+    ]);
+  });
+
+  it("refuses a new topic the assistant created since the index was read, and lists it", async () => {
+    const store = storeMemory(ADA.id, ADA_MEMORY, ["decisions"]);
+    const path = `/api/v1/assistants/${ADA.id}/memory/decisions`;
+    await openAssistants(store);
+    const memory = await screen.findByRole("complementary", { name: "Memory" });
+    // The assistant creates the topic after the column read the index.
+    const createdByAssistant = store[`PUT ${path}`];
+    if (typeof createdByAssistant !== "function") throw new Error("no write handler");
+    await createdByAssistant({
+      method: "PUT",
+      path,
+      search: "",
+      body: { body: "Use SQLite." },
+      authorization: null,
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "New topic" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Topic name" }), "decisions{Enter}");
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Could not create: decisions is at version 1, not 0",
+    );
+    expect(await within(memory).findByText("decisions")).toBeTruthy();
   });
 
   it("refuses a new topic named like a stored one, or core, and sends nothing", async () => {

@@ -560,7 +560,7 @@ export const assistantQuery = (client: HerculeClient, id: string) =>
  * with its name, gist and size, for Settings > Assistants. There is no live
  * topic for memory, so a write an agent makes shows on the next read.
  */
-export const memoryQuery = (client: HerculeClient, assistantId: string) =>
+export const memoryIndexQuery = (client: HerculeClient, assistantId: string) =>
   queryOptions({
     queryKey: queryKeys.memory(assistantId),
     queryFn: () => client.memory.list({ params: { id: assistantId } }),
@@ -568,9 +568,10 @@ export const memoryQuery = (client: HerculeClient, assistantId: string) =>
 
 /**
  * Reads one memory document whole, for the editor that opens it. Its key sits
- * under the assistant's memory index, so invalidating the index after a write
- * refetches the documents too. An error is not retried: a topic the
- * assistant deleted returns 404 on every try.
+ * under the assistant's memory index, so invalidating the index without
+ * `exact` reads the documents again too. An error is not retried: a topic
+ * the assistant deleted returns 404 on every try. The desktop app reads it
+ * with the same setting.
  */
 export const memoryDocumentQuery = (client: HerculeClient, assistantId: string, name: string) =>
   queryOptions({

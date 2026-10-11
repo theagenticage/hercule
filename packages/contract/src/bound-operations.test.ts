@@ -6,12 +6,12 @@ import {
   BINDABLE_OPERATION_IDS,
   decodeBindableOperation,
   dispatchBindableOperation,
-  OWN_SESSION_ALIAS,
   type BindableOperation,
   type BindableOperationHandlers,
 } from "./bound-operations";
 import { CLI } from "./cli";
 import { NotificationCreateInput } from "./groups/notification";
+import { OWN_SESSION_ALIAS } from "./ids";
 import { readRequirement } from "./operations";
 
 const SESSION_ID = "01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb";

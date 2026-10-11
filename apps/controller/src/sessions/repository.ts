@@ -442,7 +442,7 @@ export interface TranscriptPageRequest {
  * A transcript search, with every `me` already resolved. Each field that is
  * `undefined` does not narrow the search.
  */
-export interface PassageSearchRequest {
+export interface PassageQueryRequest {
   /** The `MATCH` expression from `buildMatchExpression`. */
   readonly match: string;
   readonly sessionId: string | undefined;
@@ -780,8 +780,8 @@ const make = Effect.gen(function* () {
      * message, or a stored piece of an assistant message. A long assistant
      * message is stored in pieces, so it can match as more than one passage.
      */
-    searchTranscripts: (
-      request: PassageSearchRequest,
+    queryPassages: (
+      request: PassageQueryRequest,
     ): Effect.Effect<Page<Passage>, CursorError | SqlError> =>
       Effect.gen(function* () {
         const scope = buildPassageScope(request.direction);

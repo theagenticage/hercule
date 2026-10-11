@@ -62,6 +62,7 @@ import {
   TRANSCRIPT_SORT_FIELDS,
   type Forbidden,
   OWN_AGENT_ALIAS,
+  OWN_SESSION_ALIAS,
   PASSAGE_SORT_FIELDS,
   PassageFilter,
   type Input,
@@ -431,7 +432,7 @@ const resolveOwnStamp = (actor: Actor): Effect.Effect<string, Validation> =>
         createValidationError([
           {
             path: ["actor"],
-            message: `"${OWN_AGENT_ALIAS}" keeps the sessions the calling session created, and only a session creates sessions as itself; leave actor out`,
+            message: `"${OWN_SESSION_ALIAS}" keeps the sessions the calling session created, and only a session creates sessions as itself; leave actor out`,
           },
         ]),
       );
@@ -1489,7 +1490,7 @@ const make = Effect.gen(function* () {
         const match = buildMatchExpression(text);
         if (match === undefined) return { items: [] };
         const listing = yield* refuseCursor(
-          sessions.searchTranscripts({
+          sessions.queryPassages({
             match,
             sessionId,
             agentId: resolvedAgentId,

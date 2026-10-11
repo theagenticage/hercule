@@ -7,14 +7,18 @@ import {
   describeShrinkLoss,
   describeTopicCount,
   describeTopicNameConflict,
+  describeTopicVisibility,
   dropSavedMemoryEdit,
   formatMemorySize,
   formatMemoryUsage,
   hasUnsavedMemoryEdits,
-  isShrinkRejected,
   listMemoryTopics,
   mergeMemoryEdit,
   NO_MEMORY_EDITS,
+  rebaseMemoryEdit,
+  removeMemoryEntry,
+  replaceDocumentEdit,
+  updateMemoryEntry,
 } from "./memory";
 
 describe("formatMemoryUsage", () => {
@@ -50,15 +54,11 @@ describe("describeTopicCount", () => {
   });
 });
 
-describe("isShrinkRejected", () => {
-  it("is true only for a shrink_rejected response", () => {
-    expect(
-      isShrinkRejected(new ApiError("shrink_rejected", "x", { previousSize: 2000, size: 10 })),
-    ).toBe(true);
-    expect(isShrinkRejected(new ApiError("cap_exceeded", "x", { size: 5000, cap: 4000 }))).toBe(
-      false,
+describe("describeTopicVisibility", () => {
+  it("names the assistant and what it sees of every topic", () => {
+    expect(describeTopicVisibility("Ada")).toBe(
+      "Ada sees each topic’s name, size and gist at the start of every session, and reads its text when it needs it.",
     );
-    expect(isShrinkRejected(new Error("x"))).toBe(false);
   });
 });
 
@@ -69,10 +69,18 @@ const DECISIONS: MemoryDocument = {
   gist: "what we decided and why",
   size: 12,
   body: "Use SQLite.",
+  version: 3,
   updatedAt: AT,
 };
 
-const CORE: MemoryDocument = { name: "core", gist: "", size: 8, body: "Rogier.", updatedAt: AT };
+const CORE: MemoryDocument = {
+  name: "core",
+  gist: "",
+  size: 8,
+  body: "Rogier.",
+  version: 1,
+  updatedAt: AT,
+};
 
 describe("listMemoryTopics", () => {
   it("drops core and keeps the topics in order", () => {
@@ -107,51 +115,151 @@ describe("hasUnsavedMemoryEdits", () => {
 });
 
 describe("mergeMemoryEdit", () => {
-  it("keeps the fields that differ from the stored document", () => {
-    expect(mergeMemoryEdit(DECISIONS, {}, { gist: "decisions" })).toEqual({ gist: "decisions" });
-    expect(mergeMemoryEdit(DECISIONS, { gist: "decisions" }, { body: "Use Postgres." })).toEqual({
+  it("keeps the fields that differ from the stored document, based on its version", () => {
+    expect(mergeMemoryEdit(DECISIONS, {}, { gist: "decisions" }, false)).toEqual({
       gist: "decisions",
-      body: "Use Postgres.",
+      baseVersion: 3,
     });
+    expect(
+      mergeMemoryEdit(DECISIONS, { gist: "decisions" }, { body: "Use Postgres." }, false),
+    ).toEqual({ gist: "decisions", body: "Use Postgres.", baseVersion: 3 });
   });
 
-  it("drops a field typed back to its stored value", () => {
-    expect(mergeMemoryEdit(DECISIONS, { body: "Use" }, { body: "Use SQLite." })).toEqual({});
+  it("keeps the version an open edit began on when the document is read again", () => {
+    const readAgain = { ...DECISIONS, version: 4 };
+    expect(
+      mergeMemoryEdit(readAgain, { body: "Use", baseVersion: 3 }, { body: "Use Postgres." }, false),
+    ).toEqual({ body: "Use Postgres.", baseVersion: 3 });
+  });
+
+  it("drops a field typed back to its stored value, and the edit with its last field", () => {
+    expect(
+      mergeMemoryEdit(DECISIONS, { body: "Use", baseVersion: 3 }, { body: "Use SQLite." }, false),
+    ).toEqual({});
+  });
+
+  it("keeps a field typed back to its stored value while a save runs", () => {
+    expect(
+      mergeMemoryEdit(
+        DECISIONS,
+        { body: "Use Postgres.", baseVersion: 3 },
+        { body: "Use SQLite." },
+        true,
+      ),
+    ).toEqual({ body: "Use SQLite.", baseVersion: 3 });
   });
 });
 
 describe("buildMemoryWrite", () => {
   it("sends the stored body when only the gist was edited", () => {
-    expect(buildMemoryWrite(DECISIONS, { gist: "decisions" })).toEqual({
+    expect(buildMemoryWrite(DECISIONS, { gist: "decisions", baseVersion: 3 })).toEqual({
       body: "Use SQLite.",
       gist: "decisions",
+      expectedVersion: 3,
     });
   });
 
   it("leaves out a gist nobody edited, so another writer's gist is kept", () => {
-    expect(buildMemoryWrite(DECISIONS, { body: "Use Postgres." })).toEqual({
+    expect(buildMemoryWrite(DECISIONS, { body: "Use Postgres.", baseVersion: 3 })).toEqual({
       body: "Use Postgres.",
+      expectedVersion: 3,
     });
   });
 
   it("never sends a gist for core", () => {
     expect(buildMemoryWrite(CORE, { gist: "x", body: "Rogier, in Amsterdam." })).toEqual({
       body: "Rogier, in Amsterdam.",
+      expectedVersion: 1,
     });
+  });
+
+  it("expects the version the edit began on, not a newer one read since", () => {
+    expect(
+      buildMemoryWrite({ ...DECISIONS, version: 5 }, { body: "Use Postgres.", baseVersion: 3 }),
+    ).toMatchObject({ expectedVersion: 3 });
   });
 });
 
 describe("dropSavedMemoryEdit", () => {
-  it("drops what the save stored and keeps text typed while it ran", () => {
+  const saved: MemoryDocument = { ...DECISIONS, body: "Use Postgres.", version: 4 };
+
+  it("drops what the save stored and keeps text typed while it ran, based on the stored version", () => {
     expect(
       dropSavedMemoryEdit(
-        { gist: "decisions", body: "Use Postgres. And" },
-        {
-          gist: "decisions",
-          body: "Use Postgres.",
-        },
+        { gist: "decisions", body: "Use Postgres. And", baseVersion: 3 },
+        { gist: "decisions", body: "Use Postgres.", expectedVersion: 3 },
+        { ...saved, gist: "decisions" },
       ),
-    ).toEqual({ body: "Use Postgres. And" });
+    ).toEqual({ body: "Use Postgres. And", baseVersion: 4 });
+  });
+
+  it("keeps a revert to the old text typed while the save ran", () => {
+    // Stored A, the user saves B, and types A back while the save runs.
+    const sent = buildMemoryWrite(DECISIONS, { body: "Use Postgres.", baseVersion: 3 });
+    const reverted = mergeMemoryEdit(
+      DECISIONS,
+      { body: "Use Postgres.", baseVersion: 3 },
+      { body: "Use SQLite." },
+      true,
+    );
+    expect(dropSavedMemoryEdit(reverted, sent, saved)).toEqual({
+      body: "Use SQLite.",
+      baseVersion: 4,
+    });
+  });
+
+  it("leaves no edit when everything typed was stored", () => {
+    expect(
+      dropSavedMemoryEdit(
+        { body: "Use Postgres.", baseVersion: 3 },
+        { body: "Use Postgres.", expectedVersion: 3 },
+        saved,
+      ),
+    ).toEqual({});
+  });
+});
+
+describe("rebaseMemoryEdit", () => {
+  it("bases the edit on the document read after a conflict", () => {
+    expect(
+      rebaseMemoryEdit({ body: "Use Postgres.", baseVersion: 3 }, { ...DECISIONS, version: 6 }),
+    ).toEqual({ body: "Use Postgres.", baseVersion: 6 });
+  });
+});
+
+describe("replaceDocumentEdit", () => {
+  it("sets the edit of one document and leaves the others", () => {
+    const edits = { documents: { core: { body: "x", baseVersion: 1 } }, newTopic: null };
+    expect(replaceDocumentEdit(edits, "decisions", { gist: "decisions", baseVersion: 3 })).toEqual({
+      documents: {
+        core: { body: "x", baseVersion: 1 },
+        decisions: { gist: "decisions", baseVersion: 3 },
+      },
+      newTopic: null,
+    });
+  });
+
+  it("removes a document whose edit has no field left", () => {
+    const edits = { documents: { core: { body: "x", baseVersion: 1 } }, newTopic: null };
+    expect(replaceDocumentEdit(edits, "core", {})).toEqual(NO_MEMORY_EDITS);
+  });
+});
+
+describe("updateMemoryEntry and removeMemoryEntry", () => {
+  const entries = [
+    { name: "core", gist: "", size: 8 },
+    { name: "decisions", gist: "", size: 12 },
+  ];
+
+  it("puts a saved document's gist and size in its entry", () => {
+    expect(updateMemoryEntry(entries, { ...DECISIONS, gist: "why", size: 40 })).toEqual([
+      { name: "core", gist: "", size: 8 },
+      { name: "decisions", gist: "why", size: 40 },
+    ]);
+  });
+
+  it("takes a deleted document out of the index", () => {
+    expect(removeMemoryEntry(entries, "decisions")).toEqual([{ name: "core", gist: "", size: 8 }]);
   });
 });
 
@@ -191,5 +299,6 @@ describe("describeShrinkLoss", () => {
       undefined,
     );
     expect(describeShrinkLoss(new ApiError("shrink_rejected", "refused"))).toBe(undefined);
+    expect(describeShrinkLoss(new Error("refused"))).toBe(undefined);
   });
 });

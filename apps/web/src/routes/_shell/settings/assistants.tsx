@@ -17,7 +17,7 @@ import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
   assistantsQuery,
   memoryDocumentQuery,
-  memoryQuery,
+  memoryIndexQuery,
   profilesQuery,
   providersQuery,
 } from "../../../app/queries";
@@ -48,7 +48,7 @@ export const Route = createFileRoute("/_shell/settings/assistants")({
     const first = page.items[0];
     if (first === undefined) return;
     await Promise.all([
-      queryClient.prefetchQuery(memoryQuery(client, first.id)),
+      queryClient.prefetchQuery(memoryIndexQuery(client, first.id)),
       queryClient.prefetchQuery(memoryDocumentQuery(client, first.id, MEMORY_CORE)),
     ]);
   },

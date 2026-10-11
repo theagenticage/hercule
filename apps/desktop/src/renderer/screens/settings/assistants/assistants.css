@@ -249,7 +249,8 @@
 .set-sec .set-row > span.field.memory-gist {
   width: 320px;
 }
-/* The way past a refused cut, under the error it follows. */
-.memory-shrink {
+/* The way past a refused cut or a refused stale save, under the error it follows. */
+.memory-shrink,
+.memory-retry {
   margin-bottom: 10px;
 }

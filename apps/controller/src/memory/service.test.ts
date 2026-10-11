@@ -111,13 +111,124 @@ describe("memory.write", () => {
     expect(document.size).toBe(13);
   });
 
-  it("ignores a gist given for core", async () => {
-    const document = await run(
+  it("refuses a gist given for core", async () => {
+    const error = await runError(
       Effect.flatMap(memory, (service) =>
-        service.write({ id: ASSISTANT, name: "core", body: "x", gist: "ignored" }),
+        service.write({ id: ASSISTANT, name: "core", body: "x", gist: "refused" }),
       ),
     );
-    expect(document.gist).toBe("");
+    expect(error).toMatchObject({
+      error: { code: "validation", details: { issues: [{ path: ["gist"] }] } },
+    });
+    expect(JSON.stringify(error)).toContain("core has no gist");
+  });
+
+  describe("versions", () => {
+    it("starts a topic at version 1 and adds one per write and append", async () => {
+      const versions = await run(
+        Effect.gen(function* () {
+          const service = yield* memory;
+          const created = yield* service.write({ id: ASSISTANT, name: "notes", body: "a" });
+          const rewritten = yield* service.write({ id: ASSISTANT, name: "notes", body: "b" });
+          const appended = yield* service.append({ id: ASSISTANT, name: "notes", body: "c" });
+          const read = yield* service.read({ id: ASSISTANT, name: "notes" });
+          return [created.version, rewritten.version, appended.version, read.version];
+        }),
+      );
+      expect(versions).toEqual([1, 2, 3, 3]);
+    });
+
+    it("writes when the document is still at the expected version", async () => {
+      const document = await run(
+        Effect.gen(function* () {
+          const service = yield* memory;
+          yield* service.write({ id: ASSISTANT, name: "notes", body: "a" });
+          return yield* service.write({
+            id: ASSISTANT,
+            name: "notes",
+            body: "b",
+            expectedVersion: 1,
+          });
+        }),
+      );
+      expect(document).toMatchObject({ body: "b", version: 2 });
+    });
+
+    it("refuses a write from a stale copy and keeps the newer text", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const service = yield* memory;
+          yield* service.write({ id: ASSISTANT, name: "decisions", body: "a" });
+          yield* service.append({ id: ASSISTANT, name: "decisions", body: "b" });
+          const refused = yield* Effect.flip(
+            service.write({ id: ASSISTANT, name: "decisions", body: "x", expectedVersion: 1 }),
+          );
+          return { refused, stored: yield* service.read({ id: ASSISTANT, name: "decisions" }) };
+        }),
+      );
+      expect(result.refused).toMatchObject({ error: { code: "conflict" } });
+      expect(readMessage(result.refused)).toBe(
+        'topic "decisions" changed since you read it (version 2, you expected 1); read it again and redo your edit',
+      );
+      expect(result.stored).toMatchObject({ body: "a\nb", version: 2 });
+    });
+
+    it("refuses a stale write before the shrink guard", async () => {
+      const error = await runError(
+        Effect.gen(function* () {
+          const service = yield* memory;
+          yield* service.write({ id: ASSISTANT, name: "notes", body: "a".repeat(2_000) });
+          return yield* service.write({
+            id: ASSISTANT,
+            name: "notes",
+            body: "",
+            expectedVersion: 5,
+          });
+        }),
+      );
+      expect(error).toMatchObject({ error: { code: "conflict" } });
+    });
+
+    it("creates a topic when expectedVersion is 0 and it does not exist", async () => {
+      const document = await run(
+        Effect.flatMap(memory, (service) =>
+          service.write({ id: ASSISTANT, name: "fresh", body: "a", expectedVersion: 0 }),
+        ),
+      );
+      expect(document.version).toBe(1);
+    });
+
+    it("refuses expectedVersion 0 for a topic that exists", async () => {
+      const error = await runError(
+        Effect.gen(function* () {
+          const service = yield* memory;
+          yield* service.write({ id: ASSISTANT, name: "x", body: "a" });
+          return yield* service.write({ id: ASSISTANT, name: "x", body: "b", expectedVersion: 0 });
+        }),
+      );
+      expect(error).toMatchObject({ error: { code: "conflict" } });
+      expect(readMessage(error)).toBe(
+        'a topic named "x" already exists; read it, or write without expectedVersion to replace it',
+      );
+    });
+
+    it("refuses a write expecting a version of a topic that was deleted", async () => {
+      const error = await runError(
+        Effect.gen(function* () {
+          const service = yield* memory;
+          yield* service.write({ id: ASSISTANT, name: "gone", body: "a" });
+          yield* service.delete({ id: ASSISTANT, name: "gone" });
+          return yield* service.write({
+            id: ASSISTANT,
+            name: "gone",
+            body: "b",
+            expectedVersion: 1,
+          });
+        }),
+      );
+      expect(error).toMatchObject({ error: { code: "conflict" } });
+      expect(readMessage(error)).toContain("Write without expectedVersion to create it again");
+    });
   });
 
   it("accepts core at its cap and refuses one character more, naming the size and the cap", async () => {
@@ -257,6 +368,17 @@ describe("memory.append", () => {
     );
     expect(result.document).toMatchObject({ gist: "who", body: "Ada\nGrace", size: 9 });
     expect(result.entries[0]!.payload).toEqual({ assistantId: ASSISTANT, name: "people", size: 9 });
+  });
+
+  it("refuses empty text, which adds nothing", async () => {
+    const error = await runError(
+      Effect.flatMap(memory, (service) =>
+        service.append({ id: ASSISTANT, name: "core", body: "" }),
+      ),
+    );
+    expect(error).toMatchObject({
+      error: { code: "validation", details: { issues: [{ path: ["body"] }] } },
+    });
   });
 
   it("refuses a topic that does not exist, pointing to write", async () => {

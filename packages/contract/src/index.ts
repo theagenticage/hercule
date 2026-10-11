@@ -33,7 +33,6 @@ export { DESKTOP_APP_ORIGIN } from "./desktop-app";
 export {
   decodeBindableOperation,
   dispatchBindableOperation,
-  OWN_SESSION_ALIAS,
   type BindableOperation,
   type BindableOperationHandlers,
   type BindableOperationId,
@@ -75,7 +74,7 @@ export {
   isApiError,
   type ApiError,
   type CapDetails,
-  type ShrinkDetails,
+  ShrinkDetails,
   type ErrorCode,
 } from "./errors";
 
@@ -121,6 +120,7 @@ export {
   MAX_EXTERNAL_REF_LENGTH,
   NullableActor,
   OWN_AGENT_ALIAS,
+  OWN_SESSION_ALIAS,
   Timestamp,
 } from "./ids";
 
@@ -289,7 +289,6 @@ export {
 export {
   MAX_MEMORY_GIST_LENGTH,
   MAX_MEMORY_NAME_LENGTH,
-  MAX_MEMORY_WRITE_LENGTH,
   MEMORY_CORE,
   MEMORY_CORE_CAP,
   MEMORY_TOPIC_CAP,
@@ -297,10 +296,8 @@ export {
   MemoryDocument,
   MemoryDocumentName,
   MemoryEntry,
-  MemoryGist,
   MemoryMatch,
   MemoryWriteInput,
-  SHRINK_GUARD_MIN_SIZE,
   chooseMemoryCap,
   requiresShrinkConfirmation,
 } from "./groups/memory";

@@ -3,9 +3,11 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate, redirect } from "@tanstack/react-router";
 import {
   computeMemoryFill,
+  describeShrinkLoss,
+  describeTopicVisibility,
   formatMemoryUsage,
+  isConflict,
   isNotFound,
-  isShrinkRejected,
   readErrorMessage,
 } from "@hercule/client-core";
 import {
@@ -95,6 +97,23 @@ function MemoryDocumentRecord({
   const failedField = failure === null ? null : failure.edit.body === undefined ? "gist" : "body";
   const failureText =
     failure === null ? null : `Could not save: ${readErrorMessage(failure.error)}`;
+  const shrinkLoss = failure === null ? undefined : describeShrinkLoss(failure.error);
+  // After a save refused because an agent wrote the document since, the page
+  // shows what the agent wrote, and the user's text is kept in the failed
+  // save. This button, under the row that failed, writes it over that version.
+  const staleSaveOffer = failure !== null && isConflict(failure.error) && (
+    <div className="memory-retry">
+      <button
+        type="button"
+        className="btn btn--sm"
+        onClick={() => {
+          saved.save(failure.edit);
+        }}
+      >
+        {failedField === "gist" ? "Save my gist anyway" : "Save my text anyway"}
+      </button>
+    </div>
+  );
   return (
     <>
       <SettingsHeaderTitle
@@ -115,7 +134,7 @@ function MemoryDocumentRecord({
           <p>
             {isCore
               ? `${assistant.name} reads the whole core note at the start of every session. Keep in it what it must always know.`
-              : `${assistant.name} sees each topic’s name, size and gist at the start of every session, and reads its text when it needs it.`}
+              : describeTopicVisibility(assistant.name)}
           </p>
           <div className="meter">
             <i style={{ width: `${String(computeMemoryFill(document.size, cap) * 100)}%` }} />
@@ -129,6 +148,7 @@ function MemoryDocumentRecord({
               }}
             />
           )}
+          {failedField === "gist" && staleSaveOffer}
           <SettingTextRow
             label="Text"
             hint={describeTextHint(document)}
@@ -138,14 +158,15 @@ function MemoryDocumentRecord({
               saved.save({ body });
             }}
           />
-          {failure !== null && failedField === "body" && isShrinkRejected(failure.error) && (
+          {failure !== null && shrinkLoss !== undefined && (
             <ShrinkOffer
-              error={failure.error}
+              loss={shrinkLoss}
               onConfirm={() => {
                 saved.save(failure.edit, true);
               }}
             />
           )}
+          {failedField === "body" && staleSaveOffer}
         </section>
         {!isCore && <DeleteTopicSection assistant={assistant} name={name} />}
       </div>

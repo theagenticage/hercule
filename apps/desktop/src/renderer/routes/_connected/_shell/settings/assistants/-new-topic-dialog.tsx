@@ -1,9 +1,14 @@
 import { useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
-import { describeTopicNameConflict, readErrorMessage } from "@hercule/client-core";
+import {
+  describeTopicNameConflict,
+  describeTopicVisibility,
+  isConflict,
+  readErrorMessage,
+} from "@hercule/client-core";
 import { MAX_MEMORY_NAME_LENGTH, type Assistant, type MemoryEntry } from "@hercule/contract";
-import { memoryDocumentQuery } from "../../../../../app/queries";
+import { memoryDocumentQuery, memoryIndexQuery } from "../../../../../app/queries";
 import { ConfirmDialog } from "../../../../../screens/confirm-dialog";
 
 /**
@@ -13,8 +18,11 @@ import { ConfirmDialog } from "../../../../../screens/confirm-dialog";
  *
  * A name that `entries` already holds, or `core`, is refused before anything
  * is sent, because a write to an existing name would replace that document.
- * Any other refusal, such as a 25th topic, is the controller's, and shows as
- * it words it. `onClose` is called when the dialog closes.
+ * The write also asks the controller to refuse it if the topic exists by
+ * then, created by the assistant since the index was read; that refusal
+ * reads the index again, so the Memory column lists the topic. Any refusal
+ * is the controller's, and shows as it words it, such as a 25th topic.
+ * `onClose` is called when the dialog closes.
  */
 export function NewTopicDialog({
   assistant,
@@ -35,8 +43,17 @@ export function NewTopicDialog({
     mutationFn: (topic: string) =>
       client.memory.write({
         params: { id: assistant.id, name: topic },
-        payload: { body: "", gist: "" },
+        // Version 0 means the topic must not exist yet.
+        payload: { body: "", gist: "", expectedVersion: 0 },
       }),
+    onError: async (error) => {
+      if (isConflict(error)) {
+        await queryClient.invalidateQueries({
+          queryKey: memoryIndexQuery(client, assistant.id).queryKey,
+          exact: true,
+        });
+      }
+    },
     onSuccess: async (created) => {
       queryClient.setQueryData(
         memoryDocumentQuery(client, assistant.id, created.name).queryKey,
@@ -73,10 +90,7 @@ export function NewTopicDialog({
       onConfirm={submit}
       onClose={onClose}
     >
-      <p>
-        {assistant.name} sees each topic’s name, size and gist at the start of every session, and
-        reads its text when it needs it.
-      </p>
+      <p>{describeTopicVisibility(assistant.name)}</p>
       <span className="field memory-topic-name">
         <input
           type="text"

@@ -2,21 +2,18 @@ import { useId, useState, type FormEvent, type JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   buildMemoryWrite,
+  countCharacters,
   describeShrinkLoss,
   dropSavedMemoryEdit,
-  isShrinkRejected,
+  isConflict,
   mergeMemoryEdit,
   queryKeys,
   readErrorMessage,
+  rebaseMemoryEdit,
   type HerculeClient,
   type MemoryEdit,
 } from "@hercule/client-core";
-import {
-  chooseMemoryCap,
-  countCharacters,
-  MEMORY_CORE,
-  type MemoryWriteInput,
-} from "@hercule/contract";
+import { chooseMemoryCap, MEMORY_CORE, type MemoryWriteInput } from "@hercule/contract";
 import { Button, FormCard, Input, Row, Textarea } from "@hercule/ui";
 import { memoryDocumentQuery } from "../../../app/queries";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
@@ -35,10 +32,21 @@ export type ChangeMemoryEdit = (update: (current: MemoryEdit) => MemoryEdit) => 
  * - The unsaved edit belongs to the Assistants screen, which asks before
  *   switching assistants throws it away. The editor shows the edited fields
  *   and the stored value of every other field.
- * - Save writes the whole body, and the gist only when it was edited. A
- *   refused write shows the controller's message as it is. When the write
- *   would shrink a large document, the message is asked as a question
- *   whose answer, Save anyway, writes it again with the shrink confirmed.
+ * - Save writes the whole text, and the gist only when it was edited. It
+ *   sends the version the edit began on, so the controller refuses it when
+ *   the assistant wrote the document since.
+ * - Text typed while a save runs is kept, even when it is the text stored
+ *   before the save; once the save is stored, what it did not store stays
+ *   unsaved.
+ * - A refused write shows the controller's message as it is. Two refusals
+ *   are also asked as a question whose answer, Save anyway, writes the text
+ *   again:
+ *   - a write that would shrink a large document, which is written again
+ *     with the shrink confirmed;
+ *   - a write refused because the document changed since the edit began.
+ *     The document is read again, and the user's text stays in the fields.
+ *     Save anyway writes it over the newer version; Cancel keeps it
+ *     unsaved.
  * - `onDeleted` runs once the topic is deleted.
  */
 export function MemoryDocumentCard({
@@ -63,7 +71,7 @@ export function MemoryDocumentCard({
   const bodyId = useId();
 
   const isCore = name === MEMORY_CORE;
-  const title = isCore ? "Core memory" : <b className="text-row font-emph text-ink">{name}</b>;
+  const title = isCore ? "Core note" : <b className="text-row font-emph text-ink">{name}</b>;
   const indexKey = queryKeys.memory(assistantId);
   const params = { id: assistantId, name };
 
@@ -75,8 +83,22 @@ export function MemoryDocumentCard({
       // before the index is read again, and the editor never shows the old
       // text in between.
       queryClient.setQueryData(memoryDocumentQuery(client, assistantId, name).queryKey, saved);
-      onEditChange((current) => dropSavedMemoryEdit(current, sent));
+      onEditChange((current) => dropSavedMemoryEdit(current, sent, saved));
       await queryClient.invalidateQueries({ queryKey: indexKey, exact: true });
+    },
+    onError: async (error) => {
+      // Nothing was stored, so a field typed back to the stored text while
+      // the save ran is no longer an edit.
+      const stored = queryClient.getQueryData(
+        memoryDocumentQuery(client, assistantId, name).queryKey,
+      );
+      if (stored !== undefined) {
+        onEditChange((current) => mergeMemoryEdit(stored, current, {}, false));
+      }
+      // The document changed since the edit began: the index and the
+      // document are read again, so Save anyway writes over the version
+      // that is stored now.
+      if (isConflict(error)) await queryClient.invalidateQueries({ queryKey: indexKey });
     },
   });
   const remove = useMutation({
@@ -109,10 +131,11 @@ export function MemoryDocumentCard({
   const gist = edit.gist ?? document.gist;
   const body = edit.body ?? document.body;
   const hasChanges = Object.keys(edit).length > 0;
-  const shrinkRejected = isShrinkRejected(write.error);
+  const shrinkLoss = describeShrinkLoss(write.error);
+  const changedSince = isConflict(write.error);
 
   const recordEdit = (fields: MemoryEdit): void => {
-    onEditChange((current) => mergeMemoryEdit(document, current, fields));
+    onEditChange((current) => mergeMemoryEdit(document, current, fields, write.isPending));
   };
   const submit = (event: FormEvent): void => {
     event.preventDefault();
@@ -138,7 +161,7 @@ export function MemoryDocumentCard({
         {isCore ? (
           <Textarea
             // The card's title names the note, so it has no label of its own.
-            aria-label="Core memory"
+            aria-label="Core note"
             // The body is not cut at the cap: an over-cap write must reach
             // the controller, whose refusal says how much to cut.
             rows={8}
@@ -148,7 +171,7 @@ export function MemoryDocumentCard({
             }}
           />
         ) : (
-          <Row label="Body" htmlFor={bodyId}>
+          <Row label="Text" htmlFor={bodyId}>
             <Textarea
               id={bodyId}
               rows={10}
@@ -160,7 +183,7 @@ export function MemoryDocumentCard({
           </Row>
         )}
         <MemoryUsage
-          label={isCore ? "Core memory used" : `${name} used`}
+          label={isCore ? "Core note used" : `${name} used`}
           size={countCharacters(body)}
           cap={chooseMemoryCap(name)}
         />
@@ -175,7 +198,7 @@ export function MemoryDocumentCard({
             type="submit"
             variant="form"
             // The screen has a Save on every card, so each names what it saves.
-            aria-label={isCore ? "Save core memory" : `Save topic ${name}`}
+            aria-label={isCore ? "Save core note" : `Save topic ${name}`}
             disabled={write.isPending || !hasChanges}
           >
             Save
@@ -184,7 +207,11 @@ export function MemoryDocumentCard({
             saved={write.isSuccess && !hasChanges}
             // A shrink the controller refused is asked as a question below,
             // so its message is not shown twice.
-            failure={write.error === null || shrinkRejected ? null : readErrorMessage(write.error)}
+            failure={
+              write.error === null || shrinkLoss !== undefined
+                ? null
+                : readErrorMessage(write.error)
+            }
           />
           {isCore ? null : (
             <Button
@@ -201,14 +228,29 @@ export function MemoryDocumentCard({
           )}
         </div>
 
-        {shrinkRejected && write.error !== null ? (
+        {changedSince ? (
+          <InPlaceQuestion
+            question="Your text is kept. Save it over the current version?"
+            declineLabel="Cancel"
+            acceptLabel="Save anyway"
+            // The document is being read again, and Save anyway must write
+            // over the version read, not the one the edit began on.
+            disabled={write.isPending || read.isFetching}
+            onDecline={() => {
+              write.reset();
+            }}
+            onAccept={() => {
+              write.mutate(buildMemoryWrite(document, rebaseMemoryEdit(edit, document)));
+            }}
+          />
+        ) : null}
+        {shrinkLoss === undefined ? null : (
           <InPlaceQuestion
             // The question names the old and new sizes, which is the whole
             // point of asking, so it wraps instead of being cut short. The
-            // controller's own message is written for agents and the CLI, so
-            // it is shown only when the error lacks the sizes.
+            // controller's own message is written for agents and the CLI.
             stacked
-            question={describeShrinkLoss(write.error) ?? readErrorMessage(write.error)}
+            question={shrinkLoss}
             declineLabel="Cancel"
             acceptLabel="Save anyway"
             disabled={write.isPending}
@@ -219,10 +261,10 @@ export function MemoryDocumentCard({
               write.mutate({ ...buildMemoryWrite(document, edit), confirmShrink: true });
             }}
           />
-        ) : null}
+        )}
         {confirmingDelete ? (
           <InPlaceQuestion
-            question={`Delete the topic ${name}? Its gist and body are deleted.`}
+            question={`Delete the topic ${name}? Its gist and text are deleted.`}
             declineLabel="Cancel"
             acceptLabel="Delete"
             onDecline={() => {

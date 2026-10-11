@@ -4,6 +4,7 @@
  *
  * - every route reaches its operation, `search` included, which shares its
  *   path shape with `read`;
+ * - a stale write is refused with 409 and control characters with 400;
  * - an assistant has a `core` from its creation and loses its memory with
  *   its delete;
  * - an assistant's conversation session starts with its memory in the spec
@@ -95,6 +96,38 @@ describe("memory over HTTP", () => {
       const auditEntries = await arranged.harness.audit("memory.written");
       expect(auditEntries).toHaveLength(1);
       expect(JSON.stringify(auditEntries)).not.toContain("Amsterdam");
+    });
+  });
+
+  it("refuses a stale write with 409, and text with control characters with 400", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { assistant } = await readDefaultConversation(arranged);
+
+      const created = await writeMemory(arranged, assistant.id, "notes", {
+        body: "first",
+        expectedVersion: 0,
+      });
+      expect(created.status, await created.clone().text()).toBe(200);
+      expect(((await created.json()) as MemoryDocument).version).toBe(1);
+
+      const updated = await writeMemory(arranged, assistant.id, "notes", {
+        body: "second",
+        expectedVersion: 1,
+      });
+      expect(((await updated.json()) as MemoryDocument).version).toBe(2);
+
+      const stale = await writeMemory(arranged, assistant.id, "notes", {
+        body: "from a stale copy",
+        expectedVersion: 1,
+      });
+      expect(stale.status).toBe(409);
+      expect(await readErrorBody(stale)).toMatchObject({ code: "conflict" });
+
+      const controlled = await writeMemory(arranged, assistant.id, "notes", {
+        body: "a \u0002 b",
+      });
+      expect(controlled.status).toBe(400);
+      expect((await readErrorBody(controlled)).issues).toEqual([["body"]]);
     });
   });
 

@@ -205,6 +205,25 @@ describe("merging deltas", () => {
     expect(state.buffers.size).toBe(0);
     expect(listTags(fold(state, 3, buildCompletedItem("i1"))!)).toEqual(["item.completed"]);
   });
+
+  it("ends a row written at the flush size on a word break, and keeps the rest held", () => {
+    const words = "word ".repeat(DELTA_FLUSH_BYTES / 5 - 2);
+    const { folds, state } = applyEvents([
+      [1, buildDelta("i1", `${words}datab`)],
+      [2, buildDelta("i1", "ase migrated")],
+      [3, buildCompletedItem("i1")],
+    ]);
+
+    // The first row holds only the first delta's words, so it takes that
+    // delta's sequence number, and the word split across the deltas is
+    // written whole in the next row.
+    expect(folds[1]!.rows).toMatchObject([{ seq: 1, event: { delta: words } }]);
+    expect(state.buffers.size).toBe(0);
+    expect(folds[2]!.rows).toMatchObject([
+      { seq: 2, event: { delta: "database migrated" } },
+      { seq: 3, event: { _tag: "item.completed" } },
+    ]);
+  });
 });
 
 describe("every other event", () => {

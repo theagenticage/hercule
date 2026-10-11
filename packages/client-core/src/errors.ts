@@ -104,6 +104,13 @@ export const isNotFound = (error: unknown): boolean =>
   error instanceof ApiError && error.code === "not_found";
 
 /**
+ * Returns true when the error is a `conflict` response from the controller:
+ * the record changed since the caller read it, or a name is already taken.
+ */
+export const isConflict = (error: unknown): boolean =>
+  error instanceof ApiError && error.code === "conflict";
+
+/**
  * Returns the issues of a `validation` error response, in order, or
  * `undefined` for any other error. Only a `validation` response lists what was
  * wrong with the request.

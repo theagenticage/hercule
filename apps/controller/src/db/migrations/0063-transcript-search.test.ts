@@ -25,7 +25,7 @@ const runOnDatabase = <A>(test: Effect.Effect<A, unknown, SqlClient.SqlClient>):
   Effect.runPromise(test.pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie));
 
 /**
- * Writes three sessions, the audit entries of two of them, and stream rows of
+ * Writes three sessions, audit entries for two of them, and stream rows of
  * every kind to the first, then runs migration 63.
  */
 const prepare = Effect.gen(function* () {
@@ -41,6 +41,8 @@ const prepare = Effect.gen(function* () {
   const audit = [
     [SPAWNED, "session.spawned", SPAWNER],
     [FORKED, "session.continued", "user"],
+    // A later entry for a session already created: the earliest entry wins.
+    [SPAWNED, "session.continued", "user"],
   ] as const;
   for (const [sessionId, kind, actor] of audit) {
     yield* sql`INSERT INTO events (source, system, kind, occurred_at, received_at, dedup_key,
@@ -127,7 +129,7 @@ describe("the transcript search migration", () => {
     expect(matches).toEqual([{ position: 6 }]);
   });
 
-  it("gives each session the actor that created it, and null where the audit entry is gone", async () => {
+  it("gives each session the actor of its earliest creation entry, and null where the audit entry is gone", async () => {
     const sessions = await runOnDatabase(
       Effect.gen(function* () {
         const sql = yield* prepare;

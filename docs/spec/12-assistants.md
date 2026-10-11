@@ -212,7 +212,7 @@ Assistants read and write memory exclusively through the public API; the CLI sur
 hercule memory list me
 hercule memory read me <name>
 hercule memory search me --text <words>
-hercule memory write me <name> [--gist "<one line>"] [--confirm-shrink true]
+hercule memory write me <name> [--gist "<one line>"] [--confirm-shrink true] [--expected-version <n>]
 hercule memory append me <name>
 hercule memory delete me <name>
 ```
@@ -234,7 +234,7 @@ This section is the normative owner of the memory tiers and caps; other document
 | `core` | exactly one, seeded at assistant creation | 4,000 chars | always, in full | who the user is, standing preferences, what is live |
 | topics | 0 to 24 named documents | 12,000 chars each | index only (name, size, gist) | anything the assistant drills into on demand |
 
-- **The gist is a field, not a header.** A topic document is `{ name, gist, body }`: `write <name> --gist "<one line>"` sets the gist (optional; unchanged when omitted; empty allowed), `append` never touches it, and the body is pure content with no header convention. The web app edits the gist as a field. This replaces the earlier `# name` / `> gist` two-line header, and with it the whole class of "malformed body" rejections - which matter because every rejection is a chance for the model to rewrite and drop content (section 6.4). The prototype behind ADR 0020 tested the header form; moving the gist to a flag changes nothing the model has to reason about.
+- **The gist is a field, not a header.** A topic document is `{ name, gist, body }`: `write <name> --gist "<one line>"` sets the gist (optional; unchanged when omitted; empty allowed; refused with `validation` on `core`, which has no gist, rather than ignored *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))*), `append` never touches it, and the body is pure content with no header convention. The web app edits the gist as a field. This replaces the earlier `# name` / `> gist` two-line header, and with it the whole class of "malformed body" rejections - which matter because every rejection is a chance for the model to rewrite and drop content (section 6.4). The prototype behind ADR 0020 tested the header form; moving the gist to a flag changes nothing the model has to reason about.
 - Topic names are free-form. The index is generated from the rows (name, size, gist); it is not a document the assistant maintains.
 - Caps are in characters, provider-agnostic, and count the body only.
 
@@ -253,8 +253,10 @@ Every assistant session starts with `core` in full and the topic index injected.
 - **Shrink guard (v1).** A `write` that would shrink a document of 1,000 or more characters by more than 50% fails with `shrink_rejected`, naming the old and new sizes and the way to confirm (`confirmShrink: true`, CLI `--confirm-shrink`). This is OpenClaw's guard, adopted after the experiment behind ADR 0020 saw a cap rejection lead Codex to rewrite a 12,009-char topic to 1,146 chars, losing fifteen unique decisions. The error is the teaching channel: it tells the model what it is about to discard.
 - Enforcement lives on this one seam, so overflow and content loss are visible events, never silent. (In the experiment a Codex write landed at 12,009 chars and was caught here; as a file write it would have passed silently.)
 - `delete core` is refused (`core` is seeded and always injected); `write core` with an empty body is how it is cleared.
+- An `append` with empty text is refused with `validation` on `body`: it would add nothing and still count as a change. *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))*
+- **Versions** *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))*. Every document carries a `version`: 1 when it is created, plus one on every `write` and `append`; a document that does not exist is at version 0. A `write` may pass `expectedVersion` (CLI `--expected-version`), the version it read: the write is then refused with `conflict` (409) unless the document is still at that version, and `0` refuses it unless the document does not exist yet. The message says what happened and what to do, for example `topic "decisions" changed since you read it (version 4, you expected 3); read it again and redo your edit`. The check runs inside the write's transaction, after the document lookup and before the caps and the shrink guard, so an editor working from a stale copy learns that first. This is what keeps the web app's editor and an assistant from silently replacing each other's text. Without `expectedVersion`, a write replaces whatever is there, as before.
 
-Memory version history stays post-v1 (decided 2026-08-28); the shrink guard is the v1-shaped alternative. The retrofit of history is additive (a history table beside the live document).
+Memory version history stays post-v1 (decided 2026-08-28); the shrink guard is the v1-shaped alternative. The version number above is a counter for refusing stale writes, not history: no earlier body is kept *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))*. The retrofit of history is additive (a history table beside the live document).
 
 ### 6.5 Recall
 

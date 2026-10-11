@@ -64,9 +64,10 @@ describe("the assistant memory migration", () => {
           readonly name: string;
           readonly body: string;
           readonly size: number;
+          readonly version: number;
           readonly updated_at: string;
         }>`
-          SELECT lower(hex(assistant_id)) AS assistant, name, body, size, updated_at
+          SELECT lower(hex(assistant_id)) AS assistant, name, body, size, version, updated_at
           FROM memory_documents ORDER BY assistant`,
       ),
     );
@@ -77,6 +78,7 @@ describe("the assistant memory migration", () => {
         name: "core",
         body: "",
         size: 0,
+        version: 1,
         updated_at: at,
       })),
     );
@@ -90,8 +92,8 @@ describe("the assistant memory migration", () => {
         yield* sql`UPDATE memory_documents SET body = 'likes tulips'
           WHERE assistant_id = unhex(${first!})`;
         yield* sql`INSERT INTO memory_documents
-          (assistant_id, name, gist, body, size, updated_at, updated_by)
-          VALUES (unhex(${second!}), 'garden', '', 'tulips and roses', 16, ${at}, 'user')`;
+          (assistant_id, name, gist, body, size, version, updated_at, updated_by)
+          VALUES (unhex(${second!}), 'garden', '', 'tulips and roses', 16, 1, ${at}, 'user')`;
         const before = yield* search("tulips");
         yield* sql`UPDATE memory_documents SET body = 'likes roses'
           WHERE assistant_id = unhex(${first!}) AND name = 'core'`;

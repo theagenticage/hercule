@@ -14,7 +14,10 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import { MEMORY_CORE, type MemoryDocument, type MemoryEntry } from "@hercule/contract";
 import { uuidFromString } from "../db";
 
-/** A new document, or the new state of an existing one. */
+/**
+ * A new document, or the new state of an existing one. It carries no version:
+ * `insert` stores a new document at version 1 and `update` adds one.
+ */
 export interface MemoryDocumentWrite {
   readonly assistantId: string;
   readonly name: string;
@@ -43,6 +46,7 @@ interface DocumentRow {
   readonly gist: string;
   readonly body: string;
   readonly size: number;
+  readonly version: number;
   readonly updated_at: string;
 }
 
@@ -65,7 +69,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Option.Option<MemoryDocument>, SqlError> =>
       Effect.map(
         sql<DocumentRow>`
-          SELECT name, gist, body, size, updated_at FROM memory_documents
+          SELECT name, gist, body, size, version, updated_at FROM memory_documents
           WHERE assistant_id = ${uuidFromString(assistantId)} AND name = ${name}
         `,
         (rows) =>
@@ -74,23 +78,26 @@ const make = Effect.gen(function* () {
             gist: row.gist,
             body: row.body,
             size: row.size,
+            version: row.version,
             updatedAt: row.updated_at,
           })),
       ),
 
+    /** Inserts a new document at version 1. */
     insert: (document: MemoryDocumentWrite): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        INSERT INTO memory_documents (assistant_id, name, gist, body, size, updated_at, updated_by)
+        INSERT INTO memory_documents
+          (assistant_id, name, gist, body, size, version, updated_at, updated_by)
         VALUES (${uuidFromString(document.assistantId)}, ${document.name}, ${document.gist},
-                ${document.body}, ${document.size}, ${document.at}, ${document.actor})
+                ${document.body}, ${document.size}, 1, ${document.at}, ${document.actor})
       `),
 
-    /** Replaces the gist and the body of an existing document. */
+    /** Replaces the gist and the body of an existing document and adds one to its version. */
     update: (document: MemoryDocumentWrite): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE memory_documents
         SET gist = ${document.gist}, body = ${document.body}, size = ${document.size},
-            updated_at = ${document.at}, updated_by = ${document.actor}
+            version = version + 1, updated_at = ${document.at}, updated_by = ${document.actor}
         WHERE assistant_id = ${uuidFromString(document.assistantId)} AND name = ${document.name}
       `),
 

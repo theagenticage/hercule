@@ -1446,6 +1446,7 @@ describe("memory output", () => {
     gist: "What we decided",
     size: 1234,
     body: "- deploys on Tuesdays\n- no Friday releases",
+    version: 4,
     updatedAt: "2026-10-11T09:00:00.000Z",
   };
 
@@ -1469,21 +1470,21 @@ describe("memory output", () => {
     ).toEqual(["core is empty"]);
   });
 
-  it("prints how full a document is after a write, against its own cap", () => {
+  it("prints the new version and how full a document is after a write, against its own cap", () => {
     expect(
       renderHuman(
         { kind: "value", value: document },
         lookUpCommand("memory", "write"),
         CONTROLLER_URL,
       ),
-    ).toEqual(["wrote decisions: 1,234 of 12,000 characters"]);
+    ).toEqual(["wrote decisions (version 4): 1,234 of 12,000 characters"]);
     expect(
       renderHuman(
         { kind: "value", value: { ...document, name: "core", size: 80 } },
         lookUpCommand("memory", "append"),
         CONTROLLER_URL,
       ),
-    ).toEqual(["appended to core: 80 of 4,000 characters"]);
+    ).toEqual(["appended to core (version 4): 80 of 4,000 characters"]);
   });
 
   it("lists the index as a table", () => {

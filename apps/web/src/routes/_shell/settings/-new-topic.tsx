@@ -1,15 +1,18 @@
 import { useId, type FormEvent, type JSX } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
+  countCharacters,
   describeTopicNameConflict,
+  describeTopicVisibility,
+  isConflict,
   queryKeys,
   readErrorMessage,
   type HerculeClient,
   type NewTopicDraft,
 } from "@hercule/client-core";
-import { countCharacters, MEMORY_TOPIC_CAP, type MemoryEntry } from "@hercule/contract";
+import { MEMORY_TOPIC_CAP, type MemoryEntry } from "@hercule/contract";
 import { Button, FormCard, Input, Row, Textarea } from "@hercule/ui";
-import { memoryDocumentQuery } from "../../../app/queries";
+import { assistantsQuery, memoryDocumentQuery } from "../../../app/queries";
 import { SaveStatus } from "../../../screens/save-status";
 import { ASSISTANT_MUTATION_KEY } from "./-assistant-form";
 import { MemoryUsage } from "./-memory-usage";
@@ -21,7 +24,9 @@ import { MemoryUsage } from "./-memory-usage";
  * - The draft belongs to the Assistants screen, which asks before switching
  *   assistants throws it away.
  * - A name an existing document already has is refused here, before any
- *   write: a write to that name would replace the document.
+ *   write: a write to that name would replace the document. The write also
+ *   asks the controller to refuse it if the topic exists by then; that
+ *   refusal reads the index again, so the name shows as taken.
  * - Every other refusal, such as a 25th topic or a name with a slash, is the
  *   controller's or the contract's message, shown as it is.
  * - `onSaved` runs with the stored topic's name once it is written.
@@ -49,12 +54,19 @@ export function NewTopicCard({
   const gistId = useId();
   const bodyId = useId();
 
+  // The screen's loader read the assistants, so this never waits.
+  const assistant = useSuspenseQuery(assistantsQuery(client)).data.items.find(
+    (each) => each.id === assistantId,
+  );
+
   const write = useMutation({
     mutationKey: [...ASSISTANT_MUTATION_KEY, "memory", "create"],
     mutationFn: (sent: NewTopicDraft) =>
       client.memory.write({
         params: { id: assistantId, name: sent.name },
-        payload: { body: sent.body, gist: sent.gist },
+        // Version 0 means the topic must not exist yet, so a topic the
+        // assistant created since the list was read is never replaced.
+        payload: { body: sent.body, gist: sent.gist, expectedVersion: 0 },
       }),
     onSuccess: async (saved) => {
       queryClient.setQueryData(
@@ -66,6 +78,14 @@ export function NewTopicCard({
         queryKey: queryKeys.memory(assistantId),
         exact: true,
       });
+    },
+    onError: async (error) => {
+      if (isConflict(error)) {
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.memory(assistantId),
+          exact: true,
+        });
+      }
     },
   });
 
@@ -104,7 +124,7 @@ export function NewTopicCard({
             }}
           />
         </Row>
-        <Row label="Body" htmlFor={bodyId}>
+        <Row label="Text" htmlFor={bodyId}>
           <Textarea
             id={bodyId}
             rows={10}
@@ -119,9 +139,9 @@ export function NewTopicCard({
           size={countCharacters(draft.body)}
           cap={MEMORY_TOPIC_CAP}
         />
-        <p className="text-fine text-faint">
-          Sessions see the name, size and gist of every topic, and read the body when they need it.
-        </p>
+        {assistant === undefined ? null : (
+          <p className="text-fine text-faint">{describeTopicVisibility(assistant.name)}</p>
+        )}
 
         <div className="flex items-center gap-3 pt-2">
           {/* The answer that declines comes first, as everywhere in the app. */}

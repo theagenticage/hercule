@@ -41,7 +41,7 @@ export const buildSnippets = (markedBody: string): ReadonlyArray<string> => {
   for (const hit of hits) {
     if (snippets.length === MAX_SNIPPETS_PER_DOCUMENT) break;
     if (hit.start < covered) continue;
-    const start = findWordStart(body, Math.max(0, hit.start - CONTEXT_LENGTH));
+    const start = findWordStart(body, Math.max(0, hit.start - CONTEXT_LENGTH), hit.start);
     const end = findWordEnd(body, Math.min(body.length, hit.end + CONTEXT_LENGTH), hit.end);
     snippets.push(
       (start > 0 ? ELLIPSIS : "") +
@@ -54,13 +54,14 @@ export const buildSnippets = (markedBody: string): ReadonlyArray<string> => {
 };
 
 /**
- * Returns where the first whole word at or after `from` starts, so a window
- * that starts mid-word drops the cut part. A window with no space in it is
- * left as it is.
+ * Returns where the first whole word at or after `from` starts, never after
+ * `maximum`, the start of the hit, so a window that starts mid-word drops the
+ * cut part. A window with no space before the hit, such as a long URL or
+ * text without spaces, is left as it is.
  */
-const findWordStart = (body: string, from: number): number => {
+const findWordStart = (body: string, from: number, maximum: number): number => {
   if (from === 0 || /\s/.test(body[from - 1]!)) return from;
-  const space = body.slice(from).search(/\s/);
+  const space = body.slice(from, maximum).search(/\s/);
   return space === -1 ? from : from + space + 1;
 };
 

@@ -6,15 +6,21 @@
  * Every operation names the assistant by id or as `me`. The checks run in the
  * order the API promises, and the first that fails is the answer:
  *
- * 1. The input decodes, and `me` names an assistant: only a session in an
- *    assistant's conversation has one (`Validation`).
+ * 1. The input decodes and makes sense: `me` names an assistant, which only
+ *    a session in an assistant's conversation has; a gist is not given for
+ *    `core`; an append has text to add (`Validation`).
  * 2. The assistant exists (`NotFound`).
  * 3. A session reaches only its own assistant's memory (`Forbidden`).
  * 4. The document exists, for the operations that need it (`NotFound`).
- * 5. The caps and the shrink guard (`CapExceeded`, `ShrinkRejected`).
+ * 5. The document is still at the version the writer expects, when a write
+ *    names one (`Conflict`).
+ * 6. The caps and the shrink guard (`CapExceeded`, `ShrinkRejected`).
  *
  * The document is looked up only after the scope check, so a session cannot
- * learn which topics another assistant has from the answers it gets.
+ * learn which topics another assistant has from the answers it gets. The
+ * version check comes before the caps and the shrink guard, so an editor
+ * working from a stale copy learns that first: its write would be wrong even
+ * if it fitted.
  *
  * Every mutation writes one audit entry in the same transaction, with the
  * assistant, the name and the size. The body is never recorded: every actor
@@ -32,6 +38,7 @@ import {
   chooseMemoryCap,
   countCharacters,
   createCapExceededError,
+  createConflictError,
   createDecodeValidationError,
   createForbiddenError,
   createNotFoundError,
@@ -47,6 +54,7 @@ import {
   OWN_AGENT_ALIAS,
   requiresShrinkConfirmation,
   type CapExceeded,
+  type Conflict,
   type Forbidden,
   type Grant,
   type MemoryDocument,
@@ -101,6 +109,44 @@ const explainNoOwnAssistant = (actor: Actor): string => {
     case "none":
       return `"${OWN_AGENT_ALIAS}" names a session's own assistant; name the assistant by its id`;
   }
+};
+
+/**
+ * Fails with `Conflict` when a write expects a version and the document is
+ * not at it. `expectedVersion` 0 expects no document; `existing` is the
+ * document as stored, if there is one. The message says what changed and
+ * how to redo the edit.
+ */
+const ensureExpectedVersion = (
+  name: string,
+  expectedVersion: number,
+  existing: Option.Option<MemoryDocument>,
+): Effect.Effect<void, Conflict> => {
+  const document = describeDocument(name);
+  if (Option.isNone(existing)) {
+    return expectedVersion === 0
+      ? Effect.void
+      : Effect.fail(
+          createConflictError(
+            `there is no ${document} (you expected version ${String(expectedVersion)}); it was probably deleted since you read it. Write without expectedVersion to create it again.`,
+          ),
+        );
+  }
+  const version = existing.value.version;
+  if (version === expectedVersion) return Effect.void;
+  if (expectedVersion === 0) {
+    const named = name === MEMORY_CORE ? MEMORY_CORE : `a topic named "${name}"`;
+    return Effect.fail(
+      createConflictError(
+        `${named} already exists; read it, or write without expectedVersion to replace it`,
+      ),
+    );
+  }
+  return Effect.fail(
+    createConflictError(
+      `${document} changed since you read it (version ${String(version)}, you expected ${String(expectedVersion)}); read it again and redo your edit`,
+    ),
+  );
 };
 
 /**
@@ -235,9 +281,11 @@ const make = Effect.gen(function* () {
      * Replaces a document's body, creating the topic when it does not exist,
      * and returns the document as stored.
      *
-     * The gist is set when the input has one and kept otherwise; `core` never
-     * has one, so a gist given for `core` is ignored. Fails with:
+     * The gist is set when the input has one and kept otherwise. Fails with:
      *
+     * - `Validation` when a gist is given for `core`, which has none;
+     * - `Conflict` when `expectedVersion` is given and the document is not
+     *   at that version, or exists when it is 0;
      * - `CapExceeded` when the write would create a topic past the topic
      *   count cap, or when the body is longer than the document's cap;
      * - `ShrinkRejected` when the write would discard more than half of a
@@ -247,12 +295,23 @@ const make = Effect.gen(function* () {
       input: WriteInput,
     ): Effect.Effect<
       MemoryDocument,
-      Forbidden | Validation | NotFound | CapExceeded | ShrinkRejected | SqlError
+      Forbidden | Validation | NotFound | Conflict | CapExceeded | ShrinkRejected | SqlError
     > =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("memory.write");
         const decoded = yield* Effect.mapError(decodeWrite(input), createDecodeValidationError);
         const { name, body } = decoded;
+        if (name === MEMORY_CORE && decoded.gist !== undefined) {
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: ["gist"],
+                message:
+                  "core has no gist, because it is always given whole; leave the gist out when you write core",
+              },
+            ]),
+          );
+        }
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -261,6 +320,9 @@ const make = Effect.gen(function* () {
             const assistantId = yield* resolveAssistant(actor, decoded.id, "memory.write");
             const existing = yield* memory.read(assistantId, name);
             const size = countCharacters(body);
+            if (decoded.expectedVersion !== undefined) {
+              yield* ensureExpectedVersion(name, decoded.expectedVersion, existing);
+            }
 
             if (Option.isNone(existing)) {
               // `core` always exists, so a missing document is a new topic.
@@ -290,19 +352,18 @@ const make = Effect.gen(function* () {
               );
             }
 
-            const gist =
-              name === MEMORY_CORE
-                ? ""
-                : (decoded.gist ?? Option.getOrUndefined(existing)?.gist ?? "");
+            const previous = Option.getOrUndefined(existing);
+            const gist = decoded.gist ?? previous?.gist ?? "";
             const document = { assistantId, name, gist, body, size, at, actor: stamp };
-            yield* Option.isSome(existing) ? memory.update(document) : memory.insert(document);
+            yield* previous === undefined ? memory.insert(document) : memory.update(document);
             yield* audit.append({
               kind: "memory.written",
               actor: stamp,
               payload: { assistantId, name, size },
               at,
             });
-            return { name, gist, body, size, updatedAt: at };
+            const version = previous === undefined ? 1 : previous.version + 1;
+            return { name, gist, body, size, version, updatedAt: at };
           }),
         );
       }),
@@ -313,9 +374,12 @@ const make = Effect.gen(function* () {
      * already ends with one. The gist is never changed, and the shrink guard
      * does not apply, because an append removes nothing.
      *
-     * Fails with `NotFound` when the document does not exist, since only a
-     * write creates a topic, and with `CapExceeded` when the result would be
-     * longer than the document's cap.
+     * Fails with:
+     *
+     * - `Validation` when the text is empty, since there is nothing to add;
+     * - `NotFound` when the document does not exist, since only a write
+     *   creates a topic;
+     * - `CapExceeded` when the result would be longer than the document's cap.
      */
     append: (
       input: AppendInput,
@@ -324,6 +388,13 @@ const make = Effect.gen(function* () {
         const actor = yield* requireGrant("memory.append");
         const decoded = yield* Effect.mapError(decodeAppend(input), createDecodeValidationError);
         const { name } = decoded;
+        if (decoded.body === "") {
+          return yield* Effect.fail(
+            createValidationError([
+              { path: ["body"], message: "there is nothing to append; the text is empty" },
+            ]),
+          );
+        }
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -352,7 +423,7 @@ const make = Effect.gen(function* () {
               payload: { assistantId, name, size },
               at,
             });
-            return { name, gist, body, size, updatedAt: at };
+            return { name, gist, body, size, version: existing.value.version + 1, updatedAt: at };
           }),
         );
       }),

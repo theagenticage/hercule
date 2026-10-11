@@ -17,6 +17,7 @@ import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import {
   CapExceeded,
+  Conflict,
   Forbidden,
   Internal,
   NotFound,
@@ -98,8 +99,20 @@ export const MemoryGist = Schema.String.check(
   ),
 );
 
-/** The text a write or append carries. */
-export const MemoryText = Schema.String.check(Schema.isMaxLength(MAX_MEMORY_WRITE_LENGTH));
+/**
+ * The text a write or append carries. Control characters other than tab and
+ * line breaks are refused: memory is text, and search marks its hits with
+ * control characters.
+ */
+export const MemoryText = Schema.String.check(
+  Schema.isMaxLength(MAX_MEMORY_WRITE_LENGTH),
+  Schema.makeFilter((text: string) =>
+    // eslint-disable-next-line no-control-regex -- control characters are what this refuses
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)
+      ? "memory text cannot contain control characters other than tab and line breaks"
+      : undefined,
+  ),
+);
 
 /**
  * One entry of the index: what an assistant sees about a document without
@@ -113,10 +126,18 @@ export const MemoryEntry = Schema.Struct({
 
 export type MemoryEntry = Schema.Schema.Type<typeof MemoryEntry>;
 
+/**
+ * A version number of a memory document. A document is at version 1 when it
+ * is created and each write or append adds one; a document that does not
+ * exist is at version 0.
+ */
+export const MemoryVersion = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
 /** A whole document. */
 export const MemoryDocument = Schema.Struct({
   ...MemoryEntry.fields,
   body: Schema.String,
+  version: MemoryVersion,
   updatedAt: Timestamp,
 });
 
@@ -133,10 +154,16 @@ export type MemoryMatch = Schema.Schema.Type<typeof MemoryMatch>;
 /** The input of `memory.write`. */
 export const MemoryWriteInput = Schema.Struct({
   body: MemoryText,
-  /** Sets a topic's gist. Unchanged when absent; ignored for `core`. */
+  /** Sets a topic's gist. Unchanged when absent; refused for `core`, which has none. */
   gist: Schema.optionalKey(MemoryGist),
   /** Confirms a write the shrink guard would refuse. */
   confirmShrink: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Refuses the write with `conflict` unless the document is still at this
+   * version; `0` refuses it unless the document does not exist yet. An editor
+   * sends the version it read, so it never replaces text written since.
+   */
+  expectedVersion: Schema.optionalKey(MemoryVersion),
 });
 
 export type MemoryWriteInput = Schema.Schema.Type<typeof MemoryWriteInput>;
@@ -171,6 +198,7 @@ export const memory = HttpApiGroup.make("memory")
         Forbidden,
         Validation,
         NotFound,
+        Conflict,
         CapExceeded,
         ShrinkRejected,
         Internal,

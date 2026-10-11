@@ -23,7 +23,7 @@ import { ProviderEvent, StructuredResult, SubagentId } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
-import { Id, IdOrMe, OWN_AGENT_ALIAS, Timestamp } from "../ids";
+import { Id, IdOrMe, OWN_SESSION_ALIAS, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
@@ -79,7 +79,7 @@ export const PassageFilter = Schema.Struct({
   /** The Agent whose sessions to search. `me` is the Agent the calling session runs as. */
   agentId: Schema.optionalKey(IdOrMe),
   /** `me` keeps the sessions the calling session spawned. */
-  actor: Schema.optionalKey(Schema.Literal(OWN_AGENT_ALIAS)),
+  actor: Schema.optionalKey(Schema.Literal(OWN_SESSION_ALIAS)),
   since: Schema.optionalKey(Timestamp),
   until: Schema.optionalKey(Timestamp),
 });

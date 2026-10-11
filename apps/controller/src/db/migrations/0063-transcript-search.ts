@@ -25,7 +25,9 @@ export default Effect.gen(function* () {
   //   `assistant_text`; its `item.started` and `item.completed` carry no text.
   //   The controller coalesces the deltas into one row per item, flushed at
   //   4 KiB, so a long message is stored as several rows. Each row holds a
-  //   different piece of the message, and each piece is indexed once.
+  //   different piece of the message, and each piece is indexed once. A
+  //   piece now ends on a word break, but rows written before that change may
+  //   end in the middle of a word, and a search for that word misses them.
   //
   // Reasoning and command output are not messages, so they are left out.
   //
@@ -76,16 +78,34 @@ export default Effect.gen(function* () {
   // `actor: "me"` never matches it. The first input's actor is not a source
   // either: `input.update` replaces it with the actor of whoever edited it.
   yield* sql`ALTER TABLE sessions ADD COLUMN created_by TEXT`;
-  // An entry's `sessionId` is the canonical id as text, and the row's id is
-  // its 16 bytes, so both are compared as lowercase hex without dashes.
+  // A session's creator is the actor of its earliest creation entry.
+  //
+  // - `creations` reads every creation entry once and keeps the earliest per
+  //   session. A subquery that searched the event log once per session took
+  //   minutes on a large database.
+  // - An entry's `sessionId` is the canonical id as text, and the row's id is
+  //   its 16 bytes, so both are compared as lowercase hex without dashes.
+  //   `unhex` would compare on the bytes, but it needs SQLite 3.41, and the
+  //   system SQLite of older macOS releases is older than that.
+  // - The lookup per session uses an index SQLite builds on `creations` for
+  //   this one statement, so the update reads each table once.
   yield* sql`
+    WITH creations AS MATERIALIZED (
+      SELECT session_hex, actor FROM (
+        SELECT lower(replace(json_extract(payload, '$.sessionId'), '-', '')) AS session_hex,
+          actor,
+          row_number() OVER (
+            PARTITION BY lower(replace(json_extract(payload, '$.sessionId'), '-', ''))
+            ORDER BY id
+          ) AS position
+        FROM events
+        WHERE source = 'platform' AND kind IN ('session.spawned', 'session.continued')
+      )
+      WHERE position = 1
+    )
     UPDATE sessions SET created_by = (
-      SELECT events.actor FROM events
-      WHERE events.source = 'platform'
-        AND events.kind IN ('session.spawned', 'session.continued')
-        AND lower(replace(json_extract(events.payload, '$.sessionId'), '-', ''))
-          = lower(hex(sessions.id))
-      ORDER BY events.id LIMIT 1
+      SELECT creations.actor FROM creations
+      WHERE creations.session_hex = lower(hex(sessions.id))
     )
   `;
 });

@@ -18,6 +18,16 @@ describe("buildSnippets", () => {
     expect(snippet).toMatch(/^…word (word )*needle( more)+…$/);
   });
 
+  it("keeps the hit when the text before it has no space to cut at", () => {
+    const [snippet] = buildSnippets(`${"a".repeat(100)}${mark("hit")} tail words here`);
+    expect(snippet).toBe(`…${"a".repeat(60)}hit tail words here`);
+  });
+
+  it("drops a cut word that ends right before the hit", () => {
+    const [snippet] = buildSnippets(`${"a".repeat(100)} ${mark("hit")} tail`);
+    expect(snippet).toBe("…hit tail");
+  });
+
   it("adds no snippet for a hit inside the previous one", () => {
     expect(buildSnippets(`${mark("one")} and ${mark("two")}`)).toEqual(["one and two"]);
   });

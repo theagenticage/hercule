@@ -1,7 +1,7 @@
 import { useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
-import { readErrorMessage } from "@hercule/client-core";
+import { readErrorMessage, removeMemoryEntry } from "@hercule/client-core";
 import type { Assistant } from "@hercule/contract";
 import { memoryDocumentQuery, memoryIndexQuery } from "../../../../../../../app/queries";
 import { ConfirmDialog } from "../../../../../../../screens/confirm-dialog";
@@ -30,7 +30,7 @@ export function DeleteTopicSection({
     onSuccess: async () => {
       dialogRef.current?.close();
       queryClient.setQueryData(memoryIndexQuery(client, assistant.id).queryKey, (entries) =>
-        entries?.filter((entry) => entry.name !== name),
+        entries === undefined ? undefined : removeMemoryEntry(entries, name),
       );
       await navigate({ to: "/settings/assistants", search: { assistant: assistant.id } });
       // Removed once the page is gone, so nothing on it reads the document again.

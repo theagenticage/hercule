@@ -66,18 +66,25 @@ export {
   describeShrinkLoss,
   describeTopicCount,
   describeTopicNameConflict,
+  describeTopicVisibility,
   dropSavedMemoryEdit,
   formatMemorySize,
   formatMemoryUsage,
   hasUnsavedMemoryEdits,
-  isShrinkRejected,
   listMemoryTopics,
   mergeMemoryEdit,
   NO_MEMORY_EDITS,
+  rebaseMemoryEdit,
+  removeMemoryEntry,
+  replaceDocumentEdit,
+  updateMemoryEntry,
   type MemoryEdit,
   type MemoryEdits,
   type NewTopicDraft,
 } from "./assistants/memory";
+// Re-exported so the screens that show how full an unsaved memory text is
+// count its characters the way the controller counts them for the caps.
+export { countCharacters } from "@hercule/contract";
 export { buildAssistantProviderField } from "./assistants/provider-field";
 export { buildAssistantRows, decideAssistantPose, type AssistantRow } from "./assistants/rows";
 export { checkImageFile, formatAttachmentSize, type ImageFile } from "./attachments/files";
@@ -156,6 +163,7 @@ export {
 export {
   ApiError,
   ConnectionError,
+  isConflict,
   isNotFound,
   readErrorMessage,
   readValidationIssues,

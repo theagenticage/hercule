@@ -270,12 +270,15 @@ export const memoryIndexQuery = (client: HerculeClient, assistantId: string) =>
 /**
  * Reads one document of an assistant's memory, `core` or a topic, with its
  * body. Memory has no live topic, so a screen that shows it reads it with
- * `readOnOpen`.
+ * `readOnOpen`. An error is not retried: a topic the assistant deleted
+ * returns 404 on every try, and the page goes back to the section at once.
+ * The web app reads it with the same setting.
  */
 export const memoryDocumentQuery = (client: HerculeClient, assistantId: string, name: string) =>
   queryOptions({
     queryKey: queryKeys.memory(assistantId, name),
     queryFn: () => client.memory.read({ params: { id: assistantId, name } }),
+    retry: false,
     ...READ_ON_OPEN_OPTIONS,
   });
 

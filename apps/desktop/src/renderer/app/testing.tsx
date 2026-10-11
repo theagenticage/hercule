@@ -421,13 +421,19 @@ const MEMORY_UPDATED_AT = "2026-10-01T09:00:00.000Z";
 
 /**
  * Returns the memory document `name` holding `body`, with its size counted
- * in characters as the controller counts them, and `gist`.
+ * in characters as the controller counts them, `gist`, and `version`.
  */
-export const buildMemoryDocument = (name: string, body: string, gist = ""): MemoryDocument => ({
+export const buildMemoryDocument = (
+  name: string,
+  body: string,
+  gist = "",
+  version = 1,
+): MemoryDocument => ({
   name,
   gist,
   size: [...body].length,
   body,
+  version,
   updatedAt: MEMORY_UPDATED_AT,
 });
 
@@ -440,7 +446,9 @@ export const buildMemoryDocument = (name: string, body: string, gist = ""): Memo
  *   deleted. A read of one that is not stored answers 404;
  * - a write creates the document when it is not stored, with an empty gist
  *   unless the write sets one, and otherwise replaces its text, and its gist
- *   when the write sets one. The core note keeps an empty gist.
+ *   when the write sets one. The core note keeps an empty gist. Each write
+ *   adds one to the version, and a write whose `expectedVersion` is not the
+ *   stored version, 0 for a document not stored, answers 409 `conflict`.
  *
  * A handler for the same path, spread after these, answers in its place.
  */
@@ -466,12 +474,23 @@ export const storeMemory = (
       return document === undefined ? notFound : { body: document };
     };
     handlers[`PUT ${path}`] = (call) => {
-      const { body, gist } = call.body as MemoryWriteInput;
+      const { body, gist, expectedVersion } = call.body as MemoryWriteInput;
       const previous = stored.find((each) => each.name === name);
+      const version = previous?.version ?? 0;
+      if (expectedVersion !== undefined && expectedVersion !== version) {
+        return {
+          status: 409,
+          body: buildErrorBody(
+            "conflict",
+            `${name} is at version ${String(version)}, not ${String(expectedVersion)}`,
+          ),
+        };
+      }
       const written = buildMemoryDocument(
         name,
         body,
         name === MEMORY_CORE ? "" : (gist ?? previous?.gist ?? ""),
+        version + 1,
       );
       stored = [...stored.filter((each) => each.name !== name), written];
       return { body: written };

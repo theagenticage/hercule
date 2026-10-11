@@ -132,6 +132,7 @@ export const ADA_CORE_NOTE: MemoryDocument = {
   gist: "",
   size: 1284,
   body: "Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays. Customers write in English, Dutch and German; answer in the language they write in. Money: ask before spending more than €50, and never move funds between accounts. Calendar: no meetings before 09:30, and keep Friday afternoons free. Invoices go out on the first working day of the month from the shared billing inbox; Marta at Brightline checks them. When a deploy fails, roll back first and explain after. Status page lives at status.acme.dev; update it within 10 minutes of any customer-facing incident. Backups run nightly at 04:00 to B2; check the report each morning and raise anything red. Rogier prefers a short summary first, then the details, and dislikes long preambles. Use plain words and name the file, the ticket or the person. When unsure, ask one clear question instead of guessing. Keep secrets out of chat: point to the vault entry instead. Weekly: a revenue summary on Monday at 08:30 and a look at open support threads on Thursday. Projects in order of importance this quarter: payments-api v2 launch, webshop checkout speed, then ops clean-up. Do not touch the legacy admin panel; it is frozen until the rewrite is done and tested. In doubt? Ask Rogier.",
+  version: 1,
   updatedAt: CREATED_AT,
 };
 

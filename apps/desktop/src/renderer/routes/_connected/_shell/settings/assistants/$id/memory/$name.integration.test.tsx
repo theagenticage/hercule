@@ -1,14 +1,14 @@
 /**
  * Tests the page of one memory document in Settings > Assistants: the text
- * and a topic's gist save when committed, a save of the gist alone sends
- * the text the controller holds, a refusal shows under its row and puts the
- * field back, a refused cut saves once a dialog confirms it, and Delete asks
- * first.
+ * and a topic's gist save when committed, with the version the page read, a
+ * save refused because an agent wrote since shows the agent's text and can
+ * be sent again over it, a refusal shows under its row and puts the field
+ * back, a refused cut saves once a dialog confirms it, and Delete asks first.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MEMORY_CORE } from "@hercule/contract";
+import { MEMORY_CORE, type MemoryWriteInput } from "@hercule/contract";
 import { forgetLastSettingsSection } from "../../../../../../../app/last-settings-section";
 import {
   buildFixtureAssistant,
@@ -84,7 +84,7 @@ describe("Settings > Assistants, a memory document's page", () => {
 
     await waitFor(() => {
       expect(listWrites(calls, MEMORY_CORE)).toEqual([
-        { body: "Rogier runs Acme alone. Be brief. Never deploy on Fridays." },
+        { body: "Rogier runs Acme alone. Be brief. Never deploy on Fridays.", expectedVersion: 1 },
       ]);
     });
     await userEvent.click(
@@ -94,22 +94,42 @@ describe("Settings > Assistants, a memory document's page", () => {
     expect(await within(memory).findByText("58 of 4,000")).toBeTruthy();
   });
 
-  it("saves a gist alone with the text the controller holds, not the page's copy", async () => {
+  it("refuses a save over what an agent wrote since, shows the agent's text, and saves again over it", async () => {
     const newer = "Stripe checkout. Mollie for NL.";
+    const message = "webshop is at version 2, not 1; read it again";
     let stored = WEBSHOP;
     const { calls } = await openDocument("webshop", {
       [`GET ${MEMORY_PATH}/webshop`]: () => ({ body: stored }),
+      [`PUT ${MEMORY_PATH}/webshop`]: (call) => {
+        const { body, gist, expectedVersion } = call.body as MemoryWriteInput;
+        if (expectedVersion !== stored.version) {
+          return { status: 409, body: { error: { code: "conflict", message } } };
+        }
+        stored = buildMemoryDocument("webshop", body, gist ?? stored.gist, stored.version + 1);
+        return { body: stored };
+      },
     });
     // An agent writes the topic after the page read it.
-    stored = buildMemoryDocument("webshop", newer, WEBSHOP.gist);
+    stored = buildMemoryDocument("webshop", newer, WEBSHOP.gist, 2);
     const gist = await screen.findByRole("textbox", { name: "Gist" });
 
     await userEvent.clear(gist);
     await userEvent.type(gist, "Payments, EU{Enter}");
 
+    expect((await screen.findByRole("alert")).textContent).toBe(`Could not save: ${message}`);
     await waitFor(() => {
-      expect(listWrites(calls, "webshop")).toEqual([{ body: newer, gist: "Payments, EU" }]);
+      expect(screen.getByRole("textbox", { name: "Text" })).toHaveProperty("value", newer);
     });
+    await userEvent.click(screen.getByRole("button", { name: "Save my gist anyway" }));
+
+    await waitFor(() => {
+      expect(gist).toHaveProperty("value", "Payments, EU");
+    });
+    expect(listWrites(calls, "webshop")).toEqual([
+      { body: WEBSHOP.body, gist: "Payments, EU", expectedVersion: 1 },
+      { body: newer, gist: "Payments, EU", expectedVersion: 2 },
+    ]);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("shows a refused save under its row, as the controller words it, and puts the text back", async () => {
@@ -170,8 +190,8 @@ describe("Settings > Assistants, a memory document's page", () => {
 
     await waitFor(() => {
       expect(listWrites(calls, MEMORY_CORE)).toEqual([
-        { body: "Hi." },
-        { body: "Hi.", confirmShrink: true },
+        { body: "Hi.", expectedVersion: 1 },
+        { body: "Hi.", expectedVersion: 1, confirmShrink: true },
       ]);
     });
     await waitFor(() => {

@@ -655,7 +655,7 @@ CLI: `hercule reminder create --at 2026-09-03T09:00 "Remind Rogier to chase the 
 
 ### memory (assistant-scoped)
 
-Section 6.4 specifies the operations. Grant family `memory` (`read`: `list`, `read`, `search`; `write`: `write`, `append`, `delete`). Routes: `GET /assistants/{id}/memory` (list), `GET .../memory/search?text=`, `GET` / `PUT` / `DELETE .../memory/{name}`, `POST .../memory/{name}/append`. `PUT` takes `{ body, gist?, confirmShrink? }`. `{id}` is `me` for a session token (section 6.4 pins the scope rule).
+Section 6.4 specifies the operations. Grant family `memory` (`read`: `list`, `read`, `search`; `write`: `write`, `append`, `delete`). Routes: `GET /assistants/{id}/memory` (list), `GET .../memory/search?text=`, `GET` / `PUT` / `DELETE .../memory/{name}`, `POST .../memory/{name}/append`. `PUT` takes `{ body, gist?, confirmShrink?, expectedVersion? }` *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))*. `{id}` is `me` for a session token (section 6.4 pins the scope rule).
 
 ### permission, profile
 
@@ -856,8 +856,8 @@ Assistant memory is reached only through these operations ([ADR 0020](../adr/002
 | `list me` | Returns the index: per document, name, size and gist. This is the same index injected at session start. |
 | `read me <name>` | Returns the full body of `core` or one topic. |
 | `search me --text <words>` | SQLite FTS5 over `core` and every topic; returns per matching document `{ name, snippets[] }`. The API's substitute for `grep`. |
-| `write me <name> [--gist "..."] [--confirm-shrink true]` | Replaces the whole body of `core` or a topic; creates the topic if absent. Content on stdin; `--gist` sets the topic's one-line gist (optional, unchanged when omitted, ignored for `core`). |
-| `append me <name>` | Appends content to an existing document. Content on stdin. Never touches the gist. |
+| `write me <name> [--gist "..."] [--confirm-shrink true] [--expected-version <n>]` | Replaces the whole body of `core` or a topic; creates the topic if absent. Content on stdin; `--gist` sets the topic's one-line gist (optional, unchanged when omitted, ~~ignored for `core`~~ refused with `validation` on `gist` for `core`, which has none *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))*). `--expected-version` writes only if the document is still at that version *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))*. |
+| `append me <name>` | Appends content to an existing document. Content on stdin, and not empty: empty text is `validation` on `body` *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))*. Never touches the gist. |
 | `delete me <name>` | Removes a topic. `delete core` is refused (`core` is seeded and always injected; `write core` with an empty body clears it). |
 
 Enforcement at the write seam (hard rules):
@@ -865,6 +865,8 @@ Enforcement at the write seam (hard rules):
 - A `write` or `append` whose resulting size exceeds the document's cap fails with `cap_exceeded`, naming the current size and the cap so the agent can consolidate. The over-cap write is a visible event, never a silent truncation.
 - A `write` that would exceed the topic count cap fails with `cap_exceeded`, naming the topic count and its cap.
 - **Shrink guard.** A `write` that would shrink a document of 1,000 or more characters by more than 50% fails with `shrink_rejected`, naming old and new sizes, unless the call carries `confirmShrink: true`. The error is the teaching channel ([./12-assistants.md](./12-assistants.md) section 6.4).
+- **Versions** *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))*. Every document carries `version`: 1 at creation, plus one on every `write` and `append`; an absent document is at version 0. `PUT` takes an optional `expectedVersion`: the write fails with `conflict` (409) unless the document is still at that version, and `0` fails it unless the document does not exist yet. The message names the stored and the expected version and says to read the document again and redo the edit; for `0` on an existing topic it says the topic exists and how to replace it. The check runs in the write's transaction, after the document lookup and before the caps and the shrink guard. Without `expectedVersion` a write replaces whatever is there.
+- Memory text (`body` of `write` and `append`) refuses control characters other than tab, line feed and carriage return, with `validation` on `body` *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))*: search marks its hits with control characters, and memory is text.
 - Every write is actor-stamped (section 3). Writes from a tainted session (one that has been delivered third-party lines) get provenance metadata *on* the document, set by the core, rendered by `read` as a trailing `> provenance:` line ([./12-assistants.md](./12-assistants.md) section 6.7, [./13-security.md](./13-security.md) section 10).
 
 **Scope (hard rule, the one scoped family in v1):** memory operations from a session token act on the memory of that session's assistant and on nothing else; `assistantId` (`/assistants/{id}/memory`) is honoured for user credentials only, and a session token naming another assistant gets 403 `forbidden`. A session under a profile without `memory` (the `worker` profile) reaches no memory at all. The user reaches every assistant's memory through the same operations; the web app's memory view is a client of them.

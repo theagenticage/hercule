@@ -16,7 +16,7 @@
  * manual: what the command does and when to use it, what it returns, and
  * what to call next, by its exact spelling. A field's line is one line.
  */
-import { OWN_SESSION_ALIAS } from "./bound-operations";
+import { OWN_SESSION_ALIAS } from "./ids";
 import type { ErrorCode } from "./errors";
 import {
   MEMORY_CORE_CAP,
@@ -2580,7 +2580,7 @@ export const CLI = {
   },
   "memory.write": {
     command: "memory write",
-    help: `Replaces the whole body of \`core\` or a topic with what is piped to stdin. A new name creates the topic. \`core\` holds at most ${MEMORY_CORE_CAP_TEXT} characters and each topic ${MEMORY_TOPIC_CAP_TEXT}, with at most ${String(MEMORY_TOPIC_COUNT_CAP)} topics. A write that would remove more than half of a document of ${SHRINK_GUARD_MIN_SIZE_TEXT} characters or more is refused unless you pass --confirm-shrink true; check that you are not dropping anything you still need first. To add to a document without rewriting it, use \`hercule memory append\`.`,
+    help: `Replaces the whole body of \`core\` or a topic with what is piped to stdin. A new name creates the topic. \`core\` holds at most ${MEMORY_CORE_CAP_TEXT} characters and each topic ${MEMORY_TOPIC_CAP_TEXT}, with at most ${String(MEMORY_TOPIC_COUNT_CAP)} topics. A write that would remove more than half of a document of ${SHRINK_GUARD_MIN_SIZE_TEXT} characters or more is refused unless you pass --confirm-shrink true; check that you are not dropping anything you still need first. Pass --expected-version with the version you read, so the write is refused if the document changed since. Prints the document's new version. To add to a document without rewriting it, use \`hercule memory append\`.`,
     examples: [
       {
         args: ["me", "decisions", "--gist", "What we decided about the deploy pipeline"],
@@ -2606,15 +2606,21 @@ export const CLI = {
       },
       gist: {
         flag: "gist",
-        help: "The topic's one-line summary, shown in the index. Unchanged when left out; ignored for `core`.",
+        help: "The topic's one-line summary, shown in the index. Unchanged when left out; refused for `core`, which has none.",
       },
       confirmShrink: {
         flag: "confirm-shrink",
         help: "true writes even when the write removes more than half of a large document.",
       },
+      expectedVersion: {
+        flag: "expected-version",
+        help: "Writes only if the document is still at this version; 0 writes only if it does not exist yet. Left out, the write replaces whatever is there.",
+      },
     },
     errors: {
       forbidden: MEMORY_FORBIDDEN,
+      conflict:
+        "the document changed since you read it, or it exists when you passed --expected-version 0; the message says which. Read it again with `hercule memory read`, redo your edit, and write again",
       cap_exceeded:
         "the document would be over its cap, or this would be one topic too many; the message gives the size and the cap. Make the text shorter, or merge topics, and write again",
       shrink_rejected:
@@ -2623,7 +2629,7 @@ export const CLI = {
   },
   "memory.append": {
     command: "memory append",
-    help: "Adds what is piped to stdin to the end of an existing document, on a new line. The gist does not change. Use `hercule memory write` to create a topic.",
+    help: "Adds what is piped to stdin to the end of an existing document, on a new line. The gist does not change, and the text must not be empty. Use `hercule memory write` to create a topic.",
     examples: [
       { args: ["me", "decisions"], stdin: "- 2026-10-08: staging deploys are allowed on Fridays." },
     ],

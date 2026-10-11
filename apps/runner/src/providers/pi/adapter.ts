@@ -527,13 +527,15 @@ const buildUserMaterialFlags = (material: UserMaterial | undefined): ReadonlyArr
 
 /**
  * Which pi process `buildArgv` builds the arguments for: the session's own,
- * with the transcript it continues, if any, or a subagent's.
+ * with the transcript it continues and the file its instructions were written
+ * to, if any, or a subagent's.
  */
 type AgentLaunch =
   | {
       readonly kind: "session";
       readonly sessionId: string;
       readonly transcript: string | undefined;
+      readonly systemPromptFile: string | undefined;
     }
   | { readonly kind: "subagent" };
 
@@ -602,9 +604,9 @@ const buildArgv = (
     getSessionThinkingLevel(selection),
     // Added after pi's own system prompt, never replacing it, and passed as
     // the path `prepareHome` wrote it to, not as the text.
-    ...(buildSessionInstructions(spec) === undefined || session === undefined
+    ...(session?.systemPromptFile === undefined
       ? []
-      : ["--append-system-prompt", buildSystemPromptPath(ctx.home, session.sessionId)]),
+      : ["--append-system-prompt", session.systemPromptFile]),
     // A Thread on the controller's local runner is the exception to the
     // `--no-*` flags above: it also sees the user's own skills, prompt
     // templates and instructions (spec 06 section 9.1). pi still loads a
@@ -1243,12 +1245,15 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
 
   /**
    * Prepares the instance's home for a session: creates the sessions
-   * directory and writes the session's instructions. Throws when a write
-   * fails.
+   * directory and writes the session's instructions, when it has any. Throws
+   * when a write fails.
    */
-  const prepareHome = (ctx: ProviderRunnerContext, sessionId: string, spec: SessionSpec): void => {
+  const prepareHome = (
+    ctx: ProviderRunnerContext,
+    sessionId: string,
+    instructions: string | undefined,
+  ): void => {
     mkdirSync(buildSessionsDir(ctx.home), { recursive: true, mode: 0o700 });
-    const instructions = buildSessionInstructions(spec);
     if (instructions !== undefined) {
       writeFileAtomically(buildSystemPromptPath(ctx.home, sessionId), instructions);
     }
@@ -1386,14 +1391,13 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         // Compute the path before the launch, because `prepareHome` below
         // writes the file, and the file must be deleted whether the session
         // ends or never starts.
-        const instructions =
-          buildSessionInstructions(spec) === undefined
-            ? undefined
-            : buildSystemPromptPath(ctx.home, sessionId);
+        const instructions = buildSessionInstructions(spec);
+        const systemPromptFile =
+          instructions === undefined ? undefined : buildSystemPromptPath(ctx.home, sessionId);
         const extensionFile = buildExtensionPath(ctx.home, sessionId);
         const child = yield* Effect.try({
           try: () => {
-            prepareHome(ctx, sessionId, spec);
+            prepareHome(ctx, sessionId, instructions);
             return spawnAgent(
               [
                 binary,
@@ -1401,7 +1405,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
                   spec,
                   ctx,
                   spec.modelSelection,
-                  { kind: "session", sessionId, transcript },
+                  { kind: "session", sessionId, transcript, systemPromptFile },
                   extensionFile,
                 ),
               ],
@@ -1418,7 +1422,9 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
             // A pi that never started has no session to end, and ending the
             // session is what deletes this file. So delete it here, or the
             // instructions of every failed launch would stay in the home.
-            if (instructions !== undefined) attempt(() => rmSync(instructions, { force: true }));
+            if (systemPromptFile !== undefined) {
+              attempt(() => rmSync(systemPromptFile, { force: true }));
+            }
             return error instanceof Error ? error.message : String(error);
           },
         });
@@ -1444,7 +1450,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           subagentProcesses: 0,
           parks: new Map(),
           modelSelection: spec.modelSelection,
-          systemPromptFile: instructions,
+          systemPromptFile,
           stopping: false,
           inputGeneration: 0,
         };

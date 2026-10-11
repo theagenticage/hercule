@@ -5,13 +5,14 @@ import {
   formatMemorySize,
   listMemoryTopics,
   readErrorMessage,
+  replaceDocumentEdit,
   type HerculeClient,
   type MemoryEdit,
   type MemoryEdits,
 } from "@hercule/client-core";
 import { MEMORY_CORE } from "@hercule/contract";
 import { Button, Group, LaneLabel, ListRow } from "@hercule/ui";
-import { memoryQuery } from "../../../app/queries";
+import { memoryIndexQuery } from "../../../app/queries";
 import { ASSISTANT_MUTATION_KEY } from "./-assistant-form";
 import { MemoryDocumentCard } from "./-memory-document";
 import { NewTopicCard } from "./-new-topic";
@@ -46,7 +47,7 @@ export function AssistantMemory({
   readonly edits: MemoryEdits;
   readonly onEditsChange: ChangeMemoryEdits;
 }): JSX.Element {
-  const index = useQuery(memoryQuery(client, assistantId));
+  const index = useQuery(memoryIndexQuery(client, assistantId));
   const [open, setOpen] = useState<OpenEditor | null>(null);
   const openTopic = open?._tag === "topic" ? open.name : null;
   const busy = useIsMutating({ mutationKey: ASSISTANT_MUTATION_KEY }) > 0;
@@ -54,18 +55,10 @@ export function AssistantMemory({
   const changeDocumentEdit =
     (name: string) =>
     (update: (current: MemoryEdit) => MemoryEdit): void => {
-      onEditsChange((current) => {
-        const next = update(current.documents[name] ?? {});
-        const documents = { ...current.documents, [name]: next };
-        // An edit with no fields left is dropped, so an untouched document
-        // never counts as unsaved.
-        if (Object.keys(next).length === 0) delete documents[name];
-        return { ...current, documents };
-      });
+      onEditsChange((current) =>
+        replaceDocumentEdit(current, name, update(current.documents[name] ?? {})),
+      );
     };
-  const dropDocumentEdit = (name: string): void => {
-    changeDocumentEdit(name)(() => ({}));
-  };
 
   const entries = index.data ?? [];
   const topics = listMemoryTopics(entries);
@@ -178,7 +171,7 @@ export function AssistantMemory({
           edit={edits.documents[openTopic] ?? {}}
           onEditChange={changeDocumentEdit(openTopic)}
           onDeleted={() => {
-            dropDocumentEdit(openTopic);
+            onEditsChange((current) => replaceDocumentEdit(current, openTopic, {}));
             setOpen(null);
           }}
         />

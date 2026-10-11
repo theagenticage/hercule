@@ -885,9 +885,15 @@ const renderPromotionToken = (
 const renderMemoryBody = ({ name, body }: MemoryDocument): ReadonlyArray<string> =>
   body === "" ? [`${name} is empty`] : [body];
 
-/** Returns one line saying which document changed and how full it is now. */
-const renderMemorySaved = (verb: string, { name, size }: MemoryDocument): ReadonlyArray<string> => [
-  `${verb} ${name}: ${formatMemoryUsage(size, chooseMemoryCap(name))} characters`,
+/**
+ * Returns one line saying which document changed, its new version, which a
+ * later write can pass as `--expected-version`, and how full it is now.
+ */
+const renderMemorySaved = (
+  verb: string,
+  { name, size, version }: MemoryDocument,
+): ReadonlyArray<string> => [
+  `${verb} ${name} (version ${String(version)}): ${formatMemoryUsage(size, chooseMemoryCap(name))} characters`,
 ];
 
 /** Returns each matching document's name, with its snippets indented under it. */
