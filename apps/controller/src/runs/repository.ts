@@ -635,6 +635,13 @@ const make = Effect.gen(function* () {
    * every run of a workflow whose history holds many runs the filters refuse.
    * Without a narrowing filter, ranking this way would rank every run the
    * controller ever had, which is why that case has a source of its own.
+   *
+   * `filters` leaves out the filter on `workflowId`, which the check against
+   * the `workflows` table applies instead. Given the workflow in the WHERE
+   * clause, SQLite walks that workflow's runs on `runs_workflow`, which also
+   * serves the ranking's sort, and never reaches the narrowing index. A
+   * workflow's ranks do not depend on the other workflows' runs, so ranking
+   * them all and keeping one workflow's returns the same runs.
    */
   const buildNewestNarrowedRunsPerWorkflowSource = (
     perWorkflow: number,
@@ -732,25 +739,28 @@ const make = Effect.gen(function* () {
             request.workflowId === undefined
               ? []
               : [sql`workflow_id = ${uuidFromString(request.workflowId)}`];
-          const filters = [...workflowClauses];
+          // Every filter but the workflow's. The narrowed source leaves the
+          // workflow's filter out: see `buildNewestNarrowedRunsPerWorkflowSource`.
+          const otherFilters: Array<Statement.Fragment> = [];
           if (request.status !== undefined) {
-            filters.push(sql`status = ${request.status}`);
+            otherFilters.push(sql`status = ${request.status}`);
             // SQLite reads the partial index `runs_unfinished` only when the
             // query itself shows that the status is pending or running, and a
             // bound value shows nothing. Without this clause, listing the
             // running runs scans every run the controller ever had.
             if (request.status === "pending" || request.status === "running") {
-              filters.push(sql`status IN ('pending', 'running')`);
+              otherFilters.push(sql`status IN ('pending', 'running')`);
             }
           }
           if (request.originalRunId !== undefined) {
-            filters.push(sql`original_run_id = ${uuidFromString(request.originalRunId)}`);
+            otherFilters.push(sql`original_run_id = ${uuidFromString(request.originalRunId)}`);
           }
-          if (request.since !== undefined) filters.push(sql`created_at >= ${request.since}`);
-          if (request.until !== undefined) filters.push(sql`created_at <= ${request.until}`);
+          if (request.since !== undefined) otherFilters.push(sql`created_at >= ${request.since}`);
+          if (request.until !== undefined) otherFilters.push(sql`created_at <= ${request.until}`);
           if (request.actor !== undefined) {
-            filters.push(sql`${sql.literal(STARTING_ACTOR)} = ${request.actor}`);
+            otherFilters.push(sql`${sql.literal(STARTING_ACTOR)} = ${request.actor}`);
           }
+          const filters = [...workflowClauses, ...otherFilters];
           const unranked =
             request.activeSince === undefined
               ? sql`runs`
@@ -774,7 +784,7 @@ const make = Effect.gen(function* () {
                         request.newestPerWorkflow,
                         request.workflowId,
                         unranked,
-                        filters,
+                        otherFilters,
                       )
                     : buildNewestRunsPerWorkflowSource(
                         request.newestPerWorkflow,

@@ -631,6 +631,33 @@ describe("the run list's query plans", () => {
     },
   );
 
+  it.each([
+    ["running runs", { status: "running" }, "runs_unfinished (status=?)"],
+    [
+      "running runs a user started",
+      { status: "running", actor: "user" },
+      "runs_unfinished (status=?)",
+    ],
+    [
+      "re-runs",
+      { originalRunId: "0190c000-0000-7000-8000-000000000001" },
+      "runs_original_run_id (original_run_id=?)",
+    ],
+  ] as const)(
+    "finds one workflow's newest %s through the filter's own index, not runs_workflow",
+    async (_, filter, index) => {
+      const plan = await explainListQuery({
+        ...filter,
+        newestPerWorkflow: 20,
+        workflowId: "0190c000-0000-7000-8000-000000000002",
+      });
+
+      expect(plan).toContain(index);
+      expect(plan).not.toContain("runs_workflow");
+      expect(plan).not.toContain("SCAN runs");
+    },
+  );
+
   it("finds the running runs with runs_unfinished", async () => {
     const plan = await explainListQuery({ status: "running" });
 
