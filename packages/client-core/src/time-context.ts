@@ -86,7 +86,7 @@ const buildFormatter = (shape: Shape, timezone: string): Intl.DateTimeFormat | n
  * Returns a function that reads one part of the formatted instant, or
  * `undefined` when the zone or the instant is invalid.
  */
-const buildPartReader = (
+export const buildPartReader = (
   shape: Shape,
   instant: Date,
   timezone: string,
@@ -216,7 +216,7 @@ export const isSameDay = (a: Date, b: Date, timezone: string): boolean => {
  * exactly 1, however long the day between them was. Also returns that date's
  * year. Returns `undefined` in the same cases as `formatTimeContext`.
  */
-const readCalendarDate = (
+export const readCalendarDate = (
   instant: Date,
   timezone: string,
 ): { readonly dayNumber: number; readonly year: number } | undefined => {

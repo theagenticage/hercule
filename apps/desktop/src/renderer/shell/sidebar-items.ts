@@ -25,6 +25,7 @@ import {
   type ThreadCounts,
   type ThreadRowEnd,
   type Waiting,
+  type WaitingRunSession,
   type WaitingSection,
   type WorkspaceLabel,
 } from "@hercule/client-core";
@@ -74,6 +75,19 @@ export type SidebarItemContent =
       readonly key: string;
       readonly assistantId: string;
       readonly name: string;
+      readonly question: string;
+    }
+  /** "From runs", the label over the runs' sessions in Waiting on you. */
+  | { readonly kind: "waiting-runs-label"; readonly key: string }
+  /**
+   * A run's session that waits on the user, under "From runs". Its title is
+   * the session's, "<workflow> · <step>" for a run's step.
+   */
+  | {
+      readonly kind: "waiting-run-row";
+      readonly key: string;
+      readonly sessionId: string;
+      readonly title: string;
       readonly question: string;
     }
   | {
@@ -146,8 +160,9 @@ export type SidebarItemKind = SidebarItem["kind"];
  * the same numbers):
  *
  * - a section header (`h3.side-h`) is 24;
- * - a Waiting on you row (`.side-row--wait`) is 38, a thread's and an
- *   assistant's alike;
+ * - a Waiting on you row (`.side-row--wait`) is 38, a thread's, an
+ *   assistant's and a run's session's alike;
+ * - the "From runs" label (`.side-sub`) is 16;
  * - a "more" row (`.side-row--more`, in the book's swarm state) is 28.
  *
  * The book's thread row (`.side-row`) is 35, with two lines. This app's
@@ -164,6 +179,8 @@ export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
   "waiting-header": 24,
   "waiting-thread-row": 38,
   "waiting-assistant-row": 38,
+  "waiting-runs-label": 16,
+  "waiting-run-row": 38,
   "project-header": 24,
   "thread-row": 59,
   "draft-row": 59,
@@ -175,6 +192,20 @@ const SECTION_LEADING = 8;
 
 /** The space between two items of a section: the book's `.side-sec { gap: 1px }`. */
 const ITEM_LEADING = 1;
+
+/**
+ * The space above "From runs": the section's 1px gap plus the book's
+ * `.side-sub { margin-top: 6px }`, which sets the runs apart from the
+ * threads and assistants above them.
+ */
+const RUNS_LABEL_LEADING = ITEM_LEADING + 6;
+
+/**
+ * How many runs' sessions Waiting on you shows until the user expands it.
+ * The runs have a cap of their own, apart from the threads', so one busy
+ * workflow never hides a waiting thread.
+ */
+const WAITING_RUN_SESSION_LIMIT = 3;
 
 /** Returns the section key of a project's section. */
 const buildProjectSectionKey = (projectId: string | null): SectionKey =>
@@ -245,9 +276,22 @@ const buildWaitingRow = (waiting: Waiting): SidebarItemContent => {
   }
 };
 
+/** Returns the content of a run's session's row in Waiting on you, under "From runs". */
+const buildWaitingRunRow = (run: WaitingRunSession): SidebarItemContent => ({
+  kind: "waiting-run-row",
+  key: `waiting-run:${run.sessionId}`,
+  sessionId: run.sessionId,
+  title: run.title,
+  question: run.question,
+});
+
 /** What the items need to know about the threads, beyond the sections. */
 interface SidebarItemSources {
   readonly sections: SidebarSections;
+  /** The runs' sessions waiting on the user, newest activity first. */
+  readonly waitingRunSessions: readonly WaitingRunSession[];
+  /** Whether the user expanded Waiting on you, so it shows every run's session too. */
+  readonly waitingExpanded: boolean;
   readonly sessions: ReadonlyMap<string, Session>;
   /** Each thread's pose and its row's end, by session id. */
   readonly poses: ReadonlyMap<string, Pose>;
@@ -280,27 +324,55 @@ const placeInSection = (
   contents.map((content, index) => ({
     ...content,
     section,
-    leading: index === 0 ? SECTION_LEADING : ITEM_LEADING,
+    leading:
+      index === 0
+        ? SECTION_LEADING
+        : content.kind === "waiting-runs-label"
+          ? RUNS_LABEL_LEADING
+          : ITEM_LEADING,
   }));
 
 /**
- * Returns what Waiting on you draws: its header, its rows, threads and
- * assistants in the section's order, and its "more" row when it hides some.
+ * Returns what Waiting on you draws, or nothing when nothing waits:
+ *
+ * - its header, with the count of everything that waits, shown or hidden;
+ * - its threads and assistants, in `waiting`'s order;
+ * - "From runs" and the runs' sessions in `waitingRunSessions`, at most
+ *   `WAITING_RUN_SESSION_LIMIT` of them unless `expanded` is true;
+ * - its "more" row when it hides some threads, assistants or runs' sessions.
+ *
+ * `waiting` is `null` when no thread or assistant waits.
  */
-const buildWaitingContents = (waiting: WaitingSection): SidebarItemContent[] => {
+const buildWaitingContents = (
+  waiting: WaitingSection | null,
+  waitingRunSessions: readonly WaitingRunSession[],
+  expanded: boolean,
+): SidebarItemContent[] => {
+  const rows = waiting?.rows ?? [];
+  const shownRuns = expanded
+    ? waitingRunSessions
+    : waitingRunSessions.slice(0, WAITING_RUN_SESSION_LIMIT);
+  const hiddenCount = (waiting?.hiddenCount ?? 0) + waitingRunSessions.length - shownRuns.length;
+  if (rows.length === 0 && shownRuns.length === 0) return [];
   const contents: SidebarItemContent[] = [
     {
       kind: "waiting-header",
       key: buildHeaderKey("waiting"),
-      count: waiting.rows.length + waiting.hiddenCount,
+      count: rows.length + shownRuns.length + hiddenCount,
     },
-    ...waiting.rows.map(buildWaitingRow),
+    ...rows.map(buildWaitingRow),
   ];
-  if (waiting.hiddenCount > 0) {
+  if (shownRuns.length > 0) {
+    contents.push(
+      { kind: "waiting-runs-label", key: "label:waiting-runs" },
+      ...shownRuns.map(buildWaitingRunRow),
+    );
+  }
+  if (hiddenCount > 0) {
     contents.push({
       kind: "more",
       key: buildMoreRowKey("waiting"),
-      label: formatMoreLabel("waiting", waiting.hiddenCount),
+      label: formatMoreLabel("waiting", hiddenCount),
     });
   }
   return contents;
@@ -412,20 +484,21 @@ const dropEmptyWorkspaceGroups = (groups: readonly ProjectGroup[]): readonly Pro
   });
 
 /**
- * Returns the sidebar's items, top to bottom: Waiting on you when a thread or
- * an assistant is waiting, then each project's section in the order of
- * `sections.projects`.
+ * Returns the sidebar's items, top to bottom: Waiting on you when a thread,
+ * an assistant or a run's session is waiting, then each project's section in
+ * the order of `sections.projects`.
  *
  * A thread row whose session is missing from `sessions`, `poses` or `ends`
  * is left out. All of them are built from one read of the thread list, so
  * this does not happen.
  */
 const buildSidebarItems = (sources: SidebarItemSources): readonly SidebarItem[] => {
-  const { sections } = sources;
+  const { sections, waitingRunSessions, waitingExpanded } = sources;
   return [
-    ...(sections.waiting === null
-      ? []
-      : placeInSection("waiting", buildWaitingContents(sections.waiting))),
+    ...placeInSection(
+      "waiting",
+      buildWaitingContents(sections.waiting, waitingRunSessions, waitingExpanded),
+    ),
     ...sections.projects.flatMap((project) =>
       placeInSection(
         buildProjectSectionKey(project.projectId),
@@ -440,6 +513,11 @@ export interface SidebarSources {
   readonly threads: readonly Session[];
   /** The threads and the assistants waiting on the user, as `listWaiting` returns them. */
   readonly waiting: readonly Waiting[];
+  /**
+   * The runs' sessions waiting on the user, newest activity first, as
+   * `listWaitingRunSessions` returns them.
+   */
+  readonly waitingRunSessions: readonly WaitingRunSession[];
   /** The project list in its own order, which decides each project's tint. */
   readonly projects: readonly Project[];
   readonly workspaces: readonly Workspace[];
@@ -480,6 +558,7 @@ export interface Sidebar {
 export const buildSidebar = ({
   threads,
   waiting,
+  waitingRunSessions,
   projects,
   workspaces,
   resources,
@@ -523,6 +602,8 @@ export const buildSidebar = ({
   });
   const items = buildSidebarItems({
     sections,
+    waitingRunSessions,
+    waitingExpanded: expanded.has("waiting"),
     sessions,
     poses,
     ends,
@@ -542,7 +623,9 @@ const GO_MENU_LIMIT = 9;
 
 /**
  * Returns the Go menu item of a sidebar item that opens a thread or an
- * assistant, or `null` for any other item.
+ * assistant, or `null` for any other item. A run's session's row is not
+ * listed: the Go menu stays about the user's own threads and assistants
+ * (spec 17, "From runs" in Waiting on you).
  */
 const buildGoMenuItem = (item: SidebarItem): GoMenuItem | null => {
   switch (item.kind) {
@@ -554,6 +637,8 @@ const buildGoMenuItem = (item: SidebarItem): GoMenuItem | null => {
         destination: { kind: "assistant", assistantId: item.assistantId },
         title: item.name,
       };
+    case "waiting-run-row":
+    case "waiting-runs-label":
     case "waiting-header":
     case "project-header":
     case "draft-row":
@@ -567,7 +652,7 @@ const buildGoMenuItem = (item: SidebarItem): GoMenuItem | null => {
  * top to bottom, for the Go menu. A waiting thread shows twice, under Waiting
  * on you and in its project, and is listed once, where it shows first. An
  * assistant is listed only while Waiting on you shows it: the Assistants
- * section is not part of the list.
+ * section is not part of the list. A run's session is not listed.
  */
 export const listGoMenuItems = (items: readonly SidebarItem[]): GoMenuItem[] => {
   const listed = new Map<string, GoMenuItem>();
@@ -587,8 +672,9 @@ export const listGoMenuItems = (items: readonly SidebarItem[]): GoMenuItem[] => 
  * is the list that held the item and `after` the list without it. The first
  * of these that exists wins:
  *
- * - when a "more" row leaves, because its section expanded: the first thread
- *   row the section now shows that it did not show before;
+ * - when a "more" row leaves, because its section expanded: the first row
+ *   of a thread, an assistant or a run's session that the section now shows
+ *   and did not show before;
  * - the section's "more" row;
  * - the section's header;
  * - the item that now sits where the gone item sat, or the last item when the
@@ -612,6 +698,7 @@ export const pickFocusFallback = (
           item.section === gone.section &&
           (item.kind === "waiting-thread-row" ||
             item.kind === "waiting-assistant-row" ||
+            item.kind === "waiting-run-row" ||
             item.kind === "thread-row") &&
           !shownBefore.has(item.key),
       );

@@ -18,6 +18,7 @@ import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import type * as Statement from "effect/unstable/sql/Statement";
 import type {
   FailedEdge,
   FailureReason,
@@ -555,6 +556,108 @@ const make = Effect.gen(function* () {
     );
   };
 
+  /**
+   * Returns the run list's source for the `activeSince` filter: the runs
+   * whose `finished_at` is NULL or at or after `activeSince`, of the workflow
+   * `workflowClauses` names or of every workflow.
+   *
+   * Written as that `OR` in the WHERE clause, SQLite walks `runs_workflow`
+   * over every run of the workflow instead, because that index also serves
+   * the sort. So the runs come from the two lookups the filter names, each on
+   * `runs_workflow_finished`, or on `runs_finished` for runs of any workflow,
+   * and `CROSS JOIN` makes SQLite read those first: it never reorders a
+   * `CROSS JOIN`.
+   */
+  const buildActiveRunsSource = (
+    workflowClauses: ReadonlyArray<Statement.Fragment>,
+    activeSince: string,
+  ): Statement.Fragment =>
+    sql`(SELECT id AS active_id FROM runs
+         WHERE ${sql.and([...workflowClauses, sql`finished_at IS NULL`])}
+         UNION ALL
+         SELECT id FROM runs
+         WHERE ${sql.and([...workflowClauses, sql`finished_at >= ${activeSince}`])})
+        CROSS JOIN runs ON id = active_id`;
+
+  /** Returns the WHERE clause that keeps only `workflowId` of the `workflows` table, or nothing. */
+  const buildStoredWorkflowCondition = (workflowId: string | undefined): Statement.Fragment =>
+    workflowId === undefined ? sql`` : sql`WHERE id = ${uuidFromString(workflowId)}`;
+
+  /**
+   * Returns the run list's source for the `newestPerWorkflow` filter when no
+   * filter narrows the runs through an index of its own: for each stored
+   * workflow, or only for `workflowId` when it is given, its newest
+   * `perWorkflow` runs among those `filters` keep. Newest is the latest
+   * `created_at`, then the greatest id.
+   *
+   * The source loops over the `workflows` table and makes one lookup per
+   * workflow:
+   *
+   * - `CROSS JOIN` makes SQLite loop over the workflows first, because it
+   *   never reorders a `CROSS JOIN`;
+   * - for each workflow, the subquery walks `runs_workflow` from the newest
+   *   run backwards and stops after `perWorkflow` runs the filters keep.
+   *
+   * With no filters, or with `since` and `until`, which `runs_workflow` reads
+   * as a range, each lookup reads `perWorkflow` runs. Any other filter is
+   * checked run by run, so a workflow with many runs the filter refuses is
+   * read further back, as far as the run list without this filter would read.
+   *
+   * Ranking with a window function over `runs` instead would read every run
+   * the controller ever had. Starting from `workflows` also leaves out the
+   * runs of a deleted workflow, which keep its id in `workflow_id`, and the
+   * runs of a sent workflow, whose `workflow_id` is NULL.
+   */
+  const buildNewestRunsPerWorkflowSource = (
+    perWorkflow: number,
+    workflowId: string | undefined,
+    filters: ReadonlyArray<Statement.Fragment>,
+  ): Statement.Fragment =>
+    // The workflow id is renamed to `workflow` because `workflows` also has
+    // an `id` and a `created_at`, which the list reads from `runs` by name.
+    sql`(SELECT runs.* FROM (SELECT id AS workflow FROM workflows
+                             ${buildStoredWorkflowCondition(workflowId)})
+         CROSS JOIN runs ON runs.id IN (
+           SELECT id FROM runs WHERE ${sql.and([sql`workflow_id = workflow`, ...filters])}
+           ORDER BY created_at DESC, id DESC LIMIT ${perWorkflow}))`;
+
+  /**
+   * Returns the run list's source for the `newestPerWorkflow` filter when a
+   * filter narrows the runs through an index of its own: the same runs as
+   * `buildNewestRunsPerWorkflowSource` returns, read the other way round.
+   *
+   * `candidates` is the source the run list reads without this filter, so
+   * the runs `filters` keep are found through the same index: pending and
+   * running runs through `runs_unfinished`, the runs live since an instant
+   * through the `finished_at` indexes, a run's re-runs through
+   * `runs_original_run_id`. Only those runs are ranked, by a window function
+   * per workflow. A lookup per workflow on `runs_workflow` would instead read
+   * every run of a workflow whose history holds many runs the filters refuse.
+   * Without a narrowing filter, ranking this way would rank every run the
+   * controller ever had, which is why that case has a source of its own.
+   *
+   * `filters` leaves out the filter on `workflowId`, which the check against
+   * the `workflows` table applies instead. Given the workflow in the WHERE
+   * clause, SQLite walks that workflow's runs on `runs_workflow`, which also
+   * serves the ranking's sort, and never reaches the narrowing index. A
+   * workflow's ranks do not depend on the other workflows' runs, so ranking
+   * them all and keeping one workflow's returns the same runs.
+   */
+  const buildNewestNarrowedRunsPerWorkflowSource = (
+    perWorkflow: number,
+    workflowId: string | undefined,
+    candidates: Statement.Fragment,
+    filters: ReadonlyArray<Statement.Fragment>,
+  ): Statement.Fragment =>
+    sql`(SELECT runs.* FROM (
+           SELECT id AS ranked_id, workflow_id AS ranked_workflow,
+                  ROW_NUMBER() OVER (PARTITION BY workflow_id
+                                     ORDER BY created_at DESC, id DESC) AS newness
+           FROM ${candidates} WHERE ${sql.and(filters)})
+         CROSS JOIN runs ON runs.id = ranked_id
+         WHERE newness <= ${perWorkflow}
+           AND ranked_workflow IN (SELECT id FROM workflows ${buildStoredWorkflowCondition(workflowId)}))`;
+
   return {
     /** Inserts a pending run and a pending step record for each entry step. Returns the run's id. */
     insert: (run: NewRun, at: string): Effect.Effect<string, SqlError> =>
@@ -605,8 +708,11 @@ const make = Effect.gen(function* () {
     /**
      * Returns one page of runs, without their plans and step records, sorted
      * by when they were created. Every filter given must hold; `since`,
-     * `until` and `activeSince` are inclusive. A running run's summary says
-     * which steps are active and which signals it waits on. The runs and
+     * `until` and `activeSince` are inclusive. With `newestPerWorkflow`,
+     * only each stored workflow's newest runs among those the other filters
+     * keep are listed; `buildNewestRunsPerWorkflowSource` says which. A running
+     * run's summary says which steps are active and which signals it waits
+     * on. The runs and
      * their step records are read in one transaction, so both are from the
      * same moment: a run that ends between the two reads would otherwise
      * read as running with no active step, which looks like waiting.
@@ -633,41 +739,60 @@ const make = Effect.gen(function* () {
             request.workflowId === undefined
               ? []
               : [sql`workflow_id = ${uuidFromString(request.workflowId)}`];
-          const clauses = [keyset, ...workflowClauses];
+          // Every filter but the workflow's. The narrowed source leaves the
+          // workflow's filter out: see `buildNewestNarrowedRunsPerWorkflowSource`.
+          const otherFilters: Array<Statement.Fragment> = [];
           if (request.status !== undefined) {
-            clauses.push(sql`status = ${request.status}`);
+            otherFilters.push(sql`status = ${request.status}`);
             // SQLite reads the partial index `runs_unfinished` only when the
             // query itself shows that the status is pending or running, and a
             // bound value shows nothing. Without this clause, listing the
             // running runs scans every run the controller ever had.
             if (request.status === "pending" || request.status === "running") {
-              clauses.push(sql`status IN ('pending', 'running')`);
+              otherFilters.push(sql`status IN ('pending', 'running')`);
             }
           }
           if (request.originalRunId !== undefined) {
-            clauses.push(sql`original_run_id = ${uuidFromString(request.originalRunId)}`);
+            otherFilters.push(sql`original_run_id = ${uuidFromString(request.originalRunId)}`);
           }
-          if (request.since !== undefined) clauses.push(sql`created_at >= ${request.since}`);
-          if (request.until !== undefined) clauses.push(sql`created_at <= ${request.until}`);
+          if (request.since !== undefined) otherFilters.push(sql`created_at >= ${request.since}`);
+          if (request.until !== undefined) otherFilters.push(sql`created_at <= ${request.until}`);
           if (request.actor !== undefined) {
-            clauses.push(sql`${sql.literal(STARTING_ACTOR)} = ${request.actor}`);
+            otherFilters.push(sql`${sql.literal(STARTING_ACTOR)} = ${request.actor}`);
           }
-          // `activeSince` keeps the runs whose `finished_at` is NULL or at or
-          // after it. Written as that `OR` in the WHERE clause, SQLite walks
-          // `runs_workflow` over every run of the workflow instead, because
-          // that index also serves the sort. So the runs come from the two
-          // lookups the filter names, each on `runs_workflow_finished`, or on
-          // `runs_finished` for runs of any workflow, and `CROSS JOIN` makes
-          // SQLite read those first: it never reorders a `CROSS JOIN`.
-          const source =
+          const filters = [...workflowClauses, ...otherFilters];
+          const unranked =
             request.activeSince === undefined
               ? sql`runs`
-              : sql`(SELECT id AS active_id FROM runs
-                   WHERE ${sql.and([...workflowClauses, sql`finished_at IS NULL`])}
-                   UNION ALL
-                   SELECT id FROM runs
-                   WHERE ${sql.and([...workflowClauses, sql`finished_at >= ${request.activeSince}`])})
-                  CROSS JOIN runs ON id = active_id`;
+              : buildActiveRunsSource(workflowClauses, request.activeSince);
+          // A filter that SQLite answers from an index of its own narrows the
+          // runs before they are ranked; see the two sources for why.
+          const narrows =
+            request.status === "pending" ||
+            request.status === "running" ||
+            request.activeSince !== undefined ||
+            request.originalRunId !== undefined;
+          // With `newestPerWorkflow`, the filters pick each workflow's newest
+          // runs inside the source, and the keyset pages through what the
+          // source returns, so a cursor never changes which runs are newest.
+          const { source, clauses } =
+            request.newestPerWorkflow === undefined
+              ? { source: unranked, clauses: [keyset, ...filters] }
+              : {
+                  source: narrows
+                    ? buildNewestNarrowedRunsPerWorkflowSource(
+                        request.newestPerWorkflow,
+                        request.workflowId,
+                        unranked,
+                        otherFilters,
+                      )
+                    : buildNewestRunsPerWorkflowSource(
+                        request.newestPerWorkflow,
+                        request.workflowId,
+                        filters,
+                      ),
+                  clauses: [keyset],
+                };
           const rows = yield* sql<SummaryRow>`
           SELECT id, workflow_id, json_extract(plan, '$.name') AS workflow_name, origin, status,
                  failure_reason, failed_step_id, failure_message, created_at, started_at,

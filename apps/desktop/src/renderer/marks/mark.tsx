@@ -45,8 +45,8 @@ const MARK_GLYPHS: { readonly [State in MarkState]: JSX.Element } = {
 
 /**
  * Renders a state mark: the state's glyph, `size` CSS pixels square (14 by
- * default, 16 where the drawing sets a mark in a 28-pixel circle), in the
- * state's colour. The mark is hidden from assistive technology, because
+ * default, 10 in a workflow's strip of runs, 16 where the drawing sets a mark
+ * in a 28-pixel circle), in the state's colour. The mark is hidden from assistive technology, because
  * every place that draws one also names the state in words, such as a thread
  * row's name "Fix checkout, working".
  *
@@ -60,7 +60,7 @@ export function Mark({
   size = 14,
 }: {
   readonly state: MarkState;
-  readonly size?: 14 | 16;
+  readonly size?: 10 | 14 | 16;
 }): JSX.Element {
   return (
     <span className={`mark mark--${state}`} aria-hidden="true">

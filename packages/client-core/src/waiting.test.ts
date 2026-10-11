@@ -1,13 +1,14 @@
 /**
  * Tests `listWaiting`, which decides the threads and assistants the desktop
  * app counts on its dock badge, shows notifications for, and lists in
- * Waiting on you and its Go menu.
+ * Waiting on you and its Go menu, and `listWaitingRunSessions`, which decides
+ * the runs' sessions Waiting on you lists under "From runs".
  */
 import { describe, expect, it } from "vitest";
 import type { OpenRequest, Session } from "@hercule/contract";
 import type { AssistantRow } from "./assistants/rows";
 import { buildSession } from "./threads/workspaces.testing";
-import { listWaiting } from "./waiting";
+import { listWaiting, listWaitingRunSessions } from "./waiting";
 
 const EARLY = "2026-09-10T09:00:00.000Z";
 const MIDDLE = "2026-09-10T09:05:00.000Z";
@@ -282,5 +283,63 @@ describe("listWaiting", () => {
         activityAt: EARLY,
       },
     ]);
+  });
+});
+
+describe("listWaitingRunSessions", () => {
+  it("lists the run sessions with an open Request, most recently active first, with their oldest question", () => {
+    expect(
+      listWaitingRunSessions([
+        buildSession({
+          id: "s-security",
+          title: "Release · security",
+          runId: "run-1",
+          stepId: "security",
+          lastActivityAt: EARLY,
+          openRequests: [buildCommandRequest("r-1", "npm audit fix")],
+        }),
+        buildSession({
+          id: "s-publish",
+          title: "Release · publish",
+          runId: "run-1",
+          stepId: "publish",
+          lastActivityAt: LATE,
+          openRequests: [
+            buildCommandRequest("r-2", "npm publish"),
+            buildCommandRequest("r-3", "git push --tags"),
+          ],
+        }),
+      ]),
+    ).toEqual([
+      {
+        sessionId: "s-publish",
+        runId: "run-1",
+        stepId: "publish",
+        title: "Release · publish",
+        question: "Run npm publish?",
+        activityAt: LATE,
+      },
+      {
+        sessionId: "s-security",
+        runId: "run-1",
+        stepId: "security",
+        title: "Release · security",
+        question: "Run npm audit fix?",
+        activityAt: EARLY,
+      },
+    ]);
+  });
+
+  it("leaves out a run session that asks nothing, and a waiting session of no run", () => {
+    expect(
+      listWaitingRunSessions([
+        buildSession({ id: "s-step", runId: "run-1", stepId: "build", lastActivityAt: MIDDLE }),
+        buildSession({
+          id: "s-assistant",
+          conversationId: "c-1",
+          openRequests: [buildCommandRequest("r-1", "git push")],
+        }),
+      ]),
+    ).toEqual([]);
   });
 });

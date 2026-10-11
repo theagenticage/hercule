@@ -65,7 +65,7 @@ export function ThreadTabsPill({
   const project = projects.find((each) => each.id === projectId);
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
   return (
-    <nav className="pill" aria-label="Threads in this workspace">
+    <nav className="pill thread-tabs" aria-label="Threads in this workspace">
       <span className="pill-crumb">
         <ProjectTile
           tint={project === undefined ? null : pickProjectTint(project.id, projects)}

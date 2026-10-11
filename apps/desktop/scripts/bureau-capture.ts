@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares eighteen pairs of
+ * For each theme, Whitehaven and Orient Express, it compares nineteen pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -53,7 +53,11 @@
  * - Intake (the main pane) of the Intake design's page,
  *   intake-directions/asks/desktop/intake.html, with Marta's review request
  *   open: the design's page edited by specimens/intake-reference.ts, and the
- *   Intake specimen (intake.html).
+ *   Intake specimen (intake.html);
+ * - the workflow list (the main pane) of workflows.html, in its table view:
+ *   the book's page stilled by specimens/workflows-reference.ts, and the
+ *   Workflows specimen (workflows.html). The app draws only the rows near
+ *   the window, so the items of this pair are only those inside the window.
  *
  * Each reference module edits the book's page to show its fixture's data.
  * For each region pair, the capture:
@@ -139,6 +143,12 @@ interface RegionPair {
    * the book, so the parts are named by class, not by tag.
    */
   readonly parts: ReadonlyArray<string>;
+  /**
+   * Whether only the items whose box reaches into the window are compared.
+   * Set it for a page whose list mounts only the rows near the window, as
+   * the app's long lists do, where the book draws every row.
+   */
+  readonly itemsInWindowOnly?: true;
 }
 
 /** The outcome of one region pair's comparison in one theme. */
@@ -573,6 +583,37 @@ const INTAKE_PARTS = [
   ".ad-keys",
 ];
 
+// Every part of the workflow list's table whose box is compared, as a
+// selector inside `main.main`: the header with its filters and search, the
+// column heads, the group headings, and each row's cells.
+const WORKFLOWS_PARTS = [
+  ".top > .pill",
+  ".pill-title",
+  ".ptab",
+  ".ptab > small",
+  ".pill.find",
+  ".find > svg",
+  ".find > input",
+  ".find > kbd",
+  ".workflow-list",
+  ".table-heads",
+  ".table-heads > span",
+  ".group-h",
+  ".group-h > span",
+  ".group-h > .count",
+  ".table-row",
+  ".table-mark",
+  ".table-mark > svg",
+  ".table-name",
+  ".table-quiet",
+  ".table-quiet > svg",
+  ".strip",
+  ".strip > *",
+  ".col-success",
+  ".status-text",
+  ".table-num",
+];
+
 /** Returns the pair that compares one state of Settings > Permission profiles, `view` being the book's `?state=` and whether the page is scrolled. */
 const buildProfilesPair = (
   name: string,
@@ -699,6 +740,16 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
     scope: "main.main",
     parts: INTAKE_PARTS,
   },
+  {
+    name: "workflows",
+    bookPage: "crew-bureau-2/desktop/workflows.html",
+    referenceModule: "workflows-reference.ts",
+    specimenPage: "workflows.html",
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: WORKFLOWS_PARTS,
+    itemsInWindowOnly: true,
+  },
 ];
 
 /**
@@ -709,19 +760,30 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
  *   which has no box;
  * - one inside an element with an opacity of 0, such as a fold of the
  *   book's shrunk composer, which keeps its box where the app's fold has
- *   none.
+ *   none;
+ * - when `inWindowOnly` is true, one whose box lies wholly outside the
+ *   window.
  */
-function buildReadItemsScript(scope: string, parts: ReadonlyArray<string>): string {
+function buildReadItemsScript(
+  scope: string,
+  parts: ReadonlyArray<string>,
+  inWindowOnly: boolean,
+): string {
   return `(() => {
   const scope = document.querySelector(${JSON.stringify(scope)});
   const measure = (element) => {
     const { x, y, width, height } = element.getBoundingClientRect();
     return { x, y, width, height };
   };
+  const isInWindow = (element) => {
+    const { top, bottom, left, right } = element.getBoundingClientRect();
+    return bottom > 0 && top < innerHeight && right > 0 && left < innerWidth;
+  };
   const describe = (element) => element.textContent.replace(/\\s+/g, " ").trim().slice(0, 40);
   const items = ${JSON.stringify(parts)}.flatMap((selector) =>
     [...scope.querySelectorAll(selector)]
       .filter((element) => element.checkVisibility({ opacityProperty: true }))
+      .filter((element) => !${String(inWindowOnly)} || isInWindow(element))
       .map((element, index) => ({ name: selector + " #" + index, text: describe(element), box: measure(element) })),
   );
   return [...items, { name: ${JSON.stringify(scope)}, text: "", box: measure(scope) }];
@@ -854,8 +916,18 @@ async function compareRegion(
   themeDir: string,
   pair: RegionPair,
 ): Promise<RegionResult> {
-  const { name, bookPage, referenceModule, specimenPage, state, scrolled, region, scope, parts } =
-    pair;
+  const {
+    name,
+    bookPage,
+    referenceModule,
+    specimenPage,
+    state,
+    scrolled,
+    region,
+    scope,
+    parts,
+    itemsInWindowOnly = false,
+  } = pair;
   const query = buildPageQuery({ theme, state, scrolled });
   const [reference, specimen] = await Promise.all([
     openSheet(
@@ -865,7 +937,7 @@ async function compareRegion(
     openSheet(`${sheetsUrl}${specimenPage}${query}`),
   ]);
   try {
-    const readItems = buildReadItemsScript(scope, parts);
+    const readItems = buildReadItemsScript(scope, parts, itemsInWindowOnly);
     const [referenceItems, specimenItems] = (await Promise.all([
       reference.webContents.executeJavaScript(readItems),
       specimen.webContents.executeJavaScript(readItems),

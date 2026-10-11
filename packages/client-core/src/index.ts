@@ -174,7 +174,14 @@ export {
 export { toIdTail } from "./id-tail";
 export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
 export { isWebLink } from "./web-link";
-export { listWaiting, type Waiting, type WaitingAssistant, type WaitingThread } from "./waiting";
+export {
+  listWaiting,
+  listWaitingRunSessions,
+  type Waiting,
+  type WaitingAssistant,
+  type WaitingRunSession,
+  type WaitingThread,
+} from "./waiting";
 export { buildIdOptions } from "./id-options";
 export { readJsonObject, readStringList } from "./json-shape";
 export { listJsonLines } from "./json-lines";

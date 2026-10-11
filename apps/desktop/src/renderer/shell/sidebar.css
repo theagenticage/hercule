@@ -70,21 +70,8 @@
 .side-scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
   margin: 0 -12px;
   padding: 0 12px 12px;
-  /* The virtualized list places its items itself. The browser must not also
-     move the scroll position when items mount above the visible part. */
-  overflow-anchor: none;
-}
-
-/* Not in the book, which lays its sections out in flow. The virtualized list
-   mounts only the items near the visible part: they stack in flow, each with
-   the space above it as its top margin and its height set inline, and an
-   empty spacer stands in for the items that are not mounted. `flow-root`
-   keeps the first item's top margin inside the list. */
-.side-list {
-  display: flow-root;
 }
 
 /* Sections are separated by space and a small label, never by a rule. The
@@ -214,6 +201,27 @@
 .side-row--wait {
   min-height: 38px;
   padding-left: 6px;
+}
+/* "From runs", the book's label over the runs' sessions in Waiting on you,
+   indented to the rows' text: the row's 6px padding, the 24px face and the
+   9px gap. The 6px above it is part of the item's leading, set inline. */
+.side-sub {
+  height: 16px;
+  margin: 0;
+  padding-left: 39px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+  line-height: 16px;
+}
+/* A run's session's row draws its state mark in the face's 24px slot, so
+   every row's text starts at the same place. */
+.side-lead {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
 }
 .side-row--more {
   min-height: 28px;

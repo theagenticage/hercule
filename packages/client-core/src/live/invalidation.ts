@@ -46,9 +46,11 @@ const readAfterPush = (queryClient: QueryClient, query: Query): void => {
   }
   const wasReading = query.state.fetchStatus !== "idle";
   // Starts a read, or joins the running one. An inactive query is only
-  // marked stale, and is read when a screen uses it again.
+  // marked stale, and is read when a screen uses it again. The filter
+  // compares the query itself rather than its key: an exact key match hashes
+  // the key of every query in the cache, once for each query a push reads.
   void queryClient.invalidateQueries(
-    { queryKey: query.queryKey, exact: true },
+    { predicate: (candidate) => candidate === query },
     { cancelRefetch: false },
   );
   const read = query.promise;

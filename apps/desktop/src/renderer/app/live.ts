@@ -37,6 +37,7 @@ import { useRouter } from "@tanstack/react-router";
 import { invalidateWithoutCancelling, queryKeys, type Live } from "@hercule/client-core";
 import type { MutableLiveTopic } from "@hercule/contract";
 import { ageClock } from "./age-clock";
+import { useWindowVisible } from "./window-visibility";
 
 /** The topics the shell keeps subscribed. */
 const SHELL_TOPICS: readonly MutableLiveTopic[] = [
@@ -129,4 +130,34 @@ export const useSubagentsLive = (
       for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
     });
   }, [live, queryClient, sessionId]);
+};
+
+/** The topics `useWorkflowsLive` holds: the workflows with their triggers, and the runs. */
+const WORKFLOW_TOPICS: readonly MutableLiveTopic[] = ["workflow", "run"];
+
+/**
+ * Keeps the workflow pages' reads current while the calling component is
+ * mounted and the window is visible: subscribes to the `workflow` topic,
+ * whose pushes read the workflows and the triggers again, and to `run`, whose
+ * pushes read every run list again.
+ *
+ * The shell holds neither topic, because the controller pushes on both at
+ * every cron fire. While the window is hidden nobody reads the pages, so
+ * both topics are dropped (spec 17 §Rules, rule 3). When the window shows
+ * again, they are subscribed again, and the controller's first push on each
+ * reads every list they cover again.
+ */
+export const useWorkflowsLive = (live: Live, queryClient: QueryClient): void => {
+  const visible = useWindowVisible();
+  useEffect(() => {
+    if (!visible) return;
+    const unsubscribes = WORKFLOW_TOPICS.map((topic) =>
+      live.subscribe(topic, (keys) => {
+        for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
+      }),
+    );
+    return () => {
+      for (const unsubscribe of unsubscribes) unsubscribe();
+    };
+  }, [live, queryClient, visible]);
 };

@@ -260,10 +260,6 @@
   pointer-events: auto;
   -webkit-app-region: no-drag;
 }
-.office .pill-title {
-  padding: 0 8px 0 10px;
-  font-weight: var(--w-bold);
-}
 .office .ptab[aria-expanded="true"] {
   background: var(--hover);
 }

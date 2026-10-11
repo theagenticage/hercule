@@ -851,13 +851,12 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("runner", []), [["runners"], ["runner"]]);
   });
 
-  it("maps a workflow push to the workflow list, the page and triggers of each workflow in it, and every signal", () => {
+  it("maps a workflow push to the workflow list, the page of each workflow in it, every trigger list, and every signal", () => {
     assert.deepStrictEqual(buildQueryKeys("workflow", ["w1", "w2"]), [
       queryKeys.workflows(),
       queryKeys.workflow("w1"),
       queryKeys.workflow("w2"),
-      queryKeys.triggers("w1"),
-      queryKeys.triggers("w2"),
+      queryKeys.triggers(),
       queryKeys.signals(),
       queryKeys.signal(),
     ]);

@@ -116,12 +116,19 @@ describe("the requests of the renderer-to-main channels", () => {
 describe("the menu commands", () => {
   const decode = Schema.decodeUnknownSync(MenuCommand);
 
-  it.each(["signOut", "newThread", "openOffice", "openSettings", "send"])(
-    "decodes %s",
-    (command) => {
-      expect(decode(command)).toBe(command);
-    },
-  );
+  it.each([
+    "signOut",
+    "newThread",
+    "openOffice",
+    "openIntake",
+    "openWorkflows",
+    "openSettings",
+    "send",
+    "showThreadsFace",
+    "showOrchestrationFace",
+  ])("decodes %s", (command) => {
+    expect(decode(command)).toBe(command);
+  });
 
   it("refuses a command no menu item sends", () => {
     expect(() => decode("openPreferences")).toThrow();
