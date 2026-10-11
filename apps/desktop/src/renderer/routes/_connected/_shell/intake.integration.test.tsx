@@ -9,6 +9,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import type { Event, PluginDetail, Signal, SignalAction } from "@hercule/contract";
 import {
+  answerSignalQuery,
   buildErrorBody,
   buildFixtureAssistant,
   buildSidebarHandlers,
@@ -160,8 +161,16 @@ const ALERT = buildSignal("01a06d02-7a00-7000-8000-000000000003", 3, "11:02", {
 
 const SIGNALS = [REVIEW, MENTION, ALERT];
 
-/** Returns the signal as resolved by `actor`, with the one line its outcome reads. */
-const resolve = (signal: Signal, actor: string, outcome: string): Signal => ({
+/**
+ * Returns the signal as resolved by `actor` at `at`, with the one line its
+ * outcome reads.
+ */
+const resolve = (
+  signal: Signal,
+  actor: string,
+  outcome: string,
+  at = "2026-10-10T11:30:00.000Z",
+): Signal => ({
   ...signal,
   status: "resolved",
   resolution: {
@@ -170,7 +179,7 @@ const resolve = (signal: Signal, actor: string, outcome: string): Signal => ({
     outcome,
     actor,
     origin: actor === "user" ? "web" : "plugin:github",
-    at: "2026-10-10T11:30:00.000Z",
+    at,
   },
 });
 
@@ -182,7 +191,7 @@ const resolve = (signal: Signal, actor: string, outcome: string): Signal => ({
 const storeSignals = (initial: ReadonlyArray<Signal>) => {
   let stored = [...initial];
   const handlers: Record<string, Handler> = {
-    "GET /api/v1/signals": () => ({ body: stored.filter((signal) => signal.status === "open") }),
+    "GET /api/v1/signals": (call) => answerSignalQuery(stored, call),
     "GET /api/v1/plugins": { body: [GITHUB] },
   };
   for (const signal of initial) {
@@ -199,6 +208,44 @@ const storeSignals = (initial: ReadonlyArray<Signal>) => {
   const store = (changed: Signal): void => {
     stored = stored.map((signal) => (signal.id === changed.id ? changed : signal));
   };
+  /** Changes each stored signal the call names with `change`, and returns their ids. */
+  const moveSignals = (call: Call, change: (signal: Signal) => Signal): ReadonlyArray<string> => {
+    const { signalIds } = call.body as { signalIds: ReadonlyArray<string> };
+    stored = stored.map((signal) => (signalIds.includes(signal.id) ? change(signal) : signal));
+    return signalIds;
+  };
+  handlers["POST /api/v1/signals/mark-done"] = (call) => ({
+    body: {
+      done: moveSignals(call, (signal) => resolve(signal, "user", "Marked done")),
+      skipped: [],
+    },
+  });
+  handlers["POST /api/v1/signals/snooze"] = (call) => {
+    const { until } = call.body as { until: string };
+    const snoozedAt = new Date().toISOString();
+    return {
+      body: {
+        snoozed: moveSignals(call, (signal) => ({ ...signal, snooze: { until, snoozedAt } })),
+        skipped: [],
+      },
+    };
+  };
+  handlers["POST /api/v1/signals/unsnooze"] = (call) => ({
+    body: {
+      unsnoozed: moveSignals(call, (signal) => {
+        const unsnoozed: { -readonly [Key in keyof Signal]: Signal[Key] } = { ...signal };
+        delete unsnoozed.snooze;
+        return unsnoozed;
+      }),
+      skipped: [],
+    },
+  });
+  handlers["POST /api/v1/signals/lower-priority"] = (call) => ({
+    body: {
+      lowered: moveSignals(call, (signal) => ({ ...signal, priority: "high" })),
+      skipped: [],
+    },
+  });
   return { handlers, store };
 };
 
@@ -235,6 +282,27 @@ const isPaneShown = (): boolean => {
 const readSelected = (search: Record<string, unknown>) => search.signal;
 /** Checks whether a request answers a signal; the app's other requests include POSTs of its own. */
 const isAct = (call: Call) => call.method === "POST" && call.path.endsWith("/act");
+/** Waits for the toast of the last move, which is not the bulk bar. */
+const findToast = () =>
+  waitFor(() => {
+    const toast = document.querySelector<HTMLElement>(".asks-toast:not(.asks-bulk)");
+    expect(toast).not.toBeNull();
+    return toast!;
+  });
+/** Returns the item that holds `signal`'s row, its checkbox and its moves. */
+const getItem = (signal: Signal) => getRow(signal).closest<HTMLElement>(".ask-item")!;
+/**
+ * Clicks the move `name` on `signal`'s row. The moves show only while the
+ * pointer is on the row, and jsdom matches no `:hover`, so the click skips
+ * the check that the moves take the pointer.
+ */
+const clickRowMove = (signal: Signal, name: string) =>
+  userEvent.click(within(getItem(signal)).getByRole("button", { name }), {
+    pointerEventsCheck: 0,
+  });
+/** Returns the request of the move `path`, such as `mark-done`, or `undefined` when none was sent. */
+const findMove = (calls: ReadonlyArray<Call>, path: string) =>
+  calls.find((call) => call.method === "POST" && call.path === `/api/v1/signals/${path}`);
 
 describe("Intake's list", () => {
   it("draws Now above Signals, each oldest first, and counts each tab", async () => {
@@ -334,14 +402,17 @@ describe("Intake's pane", () => {
     expect(getRow(REVIEW).getAttribute("aria-current")).toBe("true");
   });
 
-  it("draws Done as an answer that is not built yet, and sends nothing for it", async () => {
-    const { calls } = await openIntake(`/intake?signal=${REVIEW.id}`);
+  it("marks the signal done with Done, and opens the next one", async () => {
+    const { calls, router } = await openIntake(`/intake?signal=${REVIEW.id}`);
     const pane = await findPane();
-    const done = within(pane).getByRole("button", { name: "Done" });
-    expect(done.getAttribute("aria-disabled")).toBe("true");
-    expect(done.getAttribute("title")).toBe("Not built yet");
-    await userEvent.click(done);
+    await userEvent.click(within(pane).getByRole("button", { name: "Done" }));
+    expect(findMove(calls, "mark-done")?.body).toEqual({ signalIds: [REVIEW.id] });
     expect(calls.some(isAct)).toBe(false);
+    expect((await findToast()).textContent).toBe("Marked done");
+    await waitFor(() => {
+      expect(readSelected(router.state.location.search)).toBe(MENTION.id);
+    });
+    expect(getList().querySelector(`[data-signal-id="${REVIEW.id}"]`)).toBeNull();
   });
 
   it("shows what the user did once an answer succeeds", async () => {
@@ -659,5 +730,213 @@ describe("Intake's split", () => {
     expect(isPaneShown()).toBe(true);
     expect(split.classList.contains("has-pane")).toBe(true);
     matchMedia.mockRestore();
+  });
+});
+
+describe("Intake's views", () => {
+  /** A signal snoozed until two days from now, which Later lists. */
+  const SNOOZED = buildSignal("01a06d02-7a00-7000-8000-000000000021", 21, "08:00", {
+    title: "Bump the TLS library",
+    actions: [DONE],
+    snooze: {
+      until: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+      snoozedAt: new Date().toISOString(),
+    },
+  });
+  /** A signal resolved now, so the foot counts it as cleared today. */
+  const CLEARED = resolve(
+    buildSignal("01a06d02-7a00-7000-8000-000000000022", 22, "07:00", { title: "Old review" }),
+    "user",
+    "Approved #22",
+    new Date().toISOString(),
+  );
+
+  it("switches to Later, which shows when each signal comes back, and clears the checks", async () => {
+    const { router } = await openIntake("/intake", storeSignals([...SIGNALS, SNOOZED]).handlers);
+    const views = screen.getByRole("group", { name: "View" });
+    expect(
+      within(views)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["To do3", "Later1", "Done"]);
+    await userEvent.click(within(getItem(REVIEW)).getByRole("checkbox"));
+    await userEvent.click(within(views).getByRole("button", { name: /^Later/ }));
+    expect(router.state.location.search).toEqual({ view: "later" });
+    await waitFor(() => {
+      expect(getRow(SNOOZED)).not.toBeNull();
+    });
+    expect(getItem(SNOOZED).querySelector(".ask-until")!.textContent).toMatch(/^Back /);
+    expect(getList().querySelectorAll(".ask-item")).toHaveLength(1);
+    expect(screen.queryByRole("toolbar", { name: "Checked rows" })).toBeNull();
+    await userEvent.click(within(views).getByRole("button", { name: /^To do/ }));
+    expect(within(getItem(REVIEW)).getByRole("checkbox").getAttribute("aria-checked")).toBe(
+      "false",
+    );
+  });
+
+  it("puts a signal back on To do with U on Later", async () => {
+    const { calls } = await openIntake(
+      `/intake?view=later&signal=${SNOOZED.id}`,
+      storeSignals([...SIGNALS, SNOOZED]).handlers,
+    );
+    await findPane();
+    act(() => {
+      getRow(SNOOZED).focus();
+    });
+    await userEvent.keyboard("u");
+    await waitFor(() => {
+      expect(findMove(calls, "unsnooze")?.body).toEqual({ signalIds: [SNOOZED.id] });
+    });
+    expect((await findToast()).textContent).toBe("Back on To do");
+    expect(screen.getByText("Nothing snoozed.", { exact: false })).toBeTruthy();
+  });
+
+  it("lists Done with each outcome and no controls, and counts what was cleared today", async () => {
+    await openIntake("/intake", storeSignals([...SIGNALS, CLEARED]).handlers);
+    const foot = await screen.findByText(/cleared today/);
+    expect(foot.textContent).toBe("1 cleared today. See Done.");
+    await userEvent.click(within(foot).getByRole("link", { name: "See Done" }));
+    await waitFor(() => {
+      expect(getRow(CLEARED)).not.toBeNull();
+    });
+    expect(getItem(CLEARED).querySelector(".ask-sub")!.textContent).toBe("Approved #22");
+    expect(within(getItem(CLEARED)).queryAllByRole("button")).toHaveLength(1);
+    expect(getList().querySelector(".asks-rows--quiet")).not.toBeNull();
+  });
+
+  it("has no foot when nothing was cleared today", async () => {
+    await openIntake();
+    expect(screen.queryByText(/cleared today/)).toBeNull();
+  });
+});
+
+describe("Intake's moves", () => {
+  /** A proposal, which has no Done: Done in the bulk bar keeps it. */
+  const PROPOSAL = buildSignal("01a06d02-7a00-7000-8000-000000000031", 0, "12:00", {
+    kind: "proposal",
+    title: "Group the webhook alerts",
+    origin: { type: "api", actor: "user", eventIds: [], reason: "Seen twice" },
+  });
+
+  it("gives each row its moves, with Done's describe line as its tooltip", async () => {
+    await openIntake();
+    const moves = (signal: Signal) =>
+      [...getItem(signal).querySelectorAll(".ask-act")].map((button) =>
+        button.getAttribute("aria-label"),
+      );
+    expect(moves(ALERT)).toEqual(["Snooze", "Not urgent"]);
+    expect(moves(REVIEW)).toEqual(["Snooze", "Done"]);
+    expect(
+      within(getItem(REVIEW)).getByRole("button", { name: "Done" }).getAttribute("title"),
+    ).toBe("Marks it done");
+  });
+
+  it("moves a Now signal to Signals with Not urgent", async () => {
+    const { calls } = await openIntake();
+    await clickRowMove(ALERT, "Not urgent");
+    await waitFor(() => {
+      expect(findMove(calls, "lower-priority")?.body).toEqual({ signalIds: [ALERT.id] });
+    });
+    expect((await findToast()).textContent).toBe("Moved out of Now");
+    await waitFor(() => {
+      expect(
+        within(getList())
+          .getAllByRole("heading")
+          .map((heading) => heading.textContent),
+      ).toEqual(["Signals3"]);
+    });
+    expect(getItem(ALERT).querySelector(".ask-high")).not.toBeNull();
+  });
+
+  it("snoozes the selected signal with H and a choice's key", async () => {
+    const { calls } = await openIntake(`/intake?signal=${MENTION.id}`);
+    await findPane();
+    act(() => {
+      getRow(MENTION).focus();
+    });
+    await userEvent.keyboard("h");
+    // jsdom has no popover API, so the menu counts as hidden there and has no
+    // accessible name; it is found by its class instead.
+    const menu = document.querySelector<HTMLElement>(".asks-snooze[role=menu]")!;
+    expect(menu.getAttribute("aria-label")).toBe("Snooze until");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem", { hidden: true })
+        .map((item) => item.querySelector("span")!.textContent),
+    ).toEqual(["In 1 hour", "This afternoon", "Tomorrow", "Monday", "Pick a time"]);
+    await userEvent.keyboard("3");
+    await waitFor(() => {
+      expect(findMove(calls, "snooze")).toBeDefined();
+    });
+    const { signalIds, until } = findMove(calls, "snooze")!.body as {
+      signalIds: string[];
+      until: string;
+    };
+    expect(signalIds).toEqual([MENTION.id]);
+    expect(until).toMatch(/T09:00:00(\.000)?Z$/);
+    expect((await findToast()).textContent).toBe("Snoozed until tomorrow 09:00");
+    expect(document.querySelector(".asks-snooze")).toBeNull();
+  });
+
+  it("checks rows with X and ⇧J, and Done in the bar sends only the rows that have it", async () => {
+    const { calls } = await openIntake(
+      `/intake?signal=${REVIEW.id}`,
+      storeSignals([...SIGNALS, PROPOSAL]).handlers,
+    );
+    await findPane();
+    act(() => {
+      getRow(REVIEW).focus();
+    });
+    // The list reads Now, then Signals: the review, the mention, the proposal.
+    await userEvent.keyboard("x");
+    await userEvent.keyboard("{Shift>}J{/Shift}");
+    await userEvent.keyboard("{Shift>}J{/Shift}");
+    const bar = screen.getByRole("toolbar", { name: "Checked rows" });
+    expect(bar.querySelector(".asks-toast-text")!.textContent).toBe("3 selected");
+    const done = within(bar).getByRole("button", { name: /^Done/ });
+    await userEvent.hover(done);
+    expect(bar.querySelector(".asks-toast-text")!.textContent).toBe("Done 2 · keeps 1 proposal");
+    expect(getItem(PROPOSAL).classList.contains("is-kept")).toBe(true);
+    expect(getItem(REVIEW).classList.contains("is-acted")).toBe(true);
+    await userEvent.click(done);
+    await waitFor(() => {
+      expect(findMove(calls, "mark-done")?.body).toEqual({ signalIds: [REVIEW.id, MENTION.id] });
+    });
+    expect((await findToast()).textContent).toBe("Marked 2 done. Kept 1 proposal");
+    await waitFor(() => {
+      expect(bar.querySelector(".asks-toast-text")!.textContent).toBe("1 selected");
+    });
+    expect(within(getItem(PROPOSAL)).getByRole("checkbox").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+  });
+
+  it("clears the checks with Esc before it closes the pane", async () => {
+    await openIntake(`/intake?signal=${REVIEW.id}`);
+    await findPane();
+    act(() => {
+      getRow(REVIEW).focus();
+    });
+    await userEvent.keyboard("x");
+    expect(screen.getByRole("toolbar", { name: "Checked rows" })).toBeTruthy();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("toolbar", { name: "Checked rows" })).toBeNull();
+    expect(isPaneShown()).toBe(true);
+  });
+
+  it("shows a failed move in the toast's place, and the row stays", async () => {
+    await openIntake("/intake", {
+      ...storeSignals(SIGNALS).handlers,
+      "POST /api/v1/signals/mark-done": {
+        status: 500,
+        body: buildErrorBody("internal", "The database is busy."),
+      },
+    });
+    await clickRowMove(REVIEW, "Done");
+    const toast = await findToast();
+    expect(toast.getAttribute("role")).toBe("alert");
+    expect(toast.classList.contains("asks-toast--fail")).toBe(true);
+    expect(toast.textContent).toBe("The database is busy.");
+    expect(getRow(REVIEW)).not.toBeNull();
   });
 });

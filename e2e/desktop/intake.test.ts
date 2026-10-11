@@ -13,8 +13,9 @@
  * - a new Now signal notifies while the window is not focused, and a click
  *   on the notification opens Intake with the signal selected.
  *
- * Done and Snooze are not built in this slice, so the count is not tested
- * against them yet.
+ * - the moves (slice 26): `H` and a number snooze a signal into Later, `U`
+ *   brings it back, `E` marks one done, `X` and `⇧J` check two rows whose
+ *   Done the bulk bar sends, and Done lists all three.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
@@ -149,6 +150,19 @@ async function readToDoCounts(page: Page): Promise<{ segment: string; row: strin
   };
 }
 
+/** Shows the view of Intake's list named `label`: "To do", "Later" or "Done". */
+async function showView(page: Page, label: string): Promise<void> {
+  const button = page.getByRole("group", { name: "View" }).getByRole("button", { name: label });
+  await button.click();
+  await expect.poll(() => button.getAttribute("aria-pressed")).toBe("true");
+}
+
+/** Selects the row titled `title` with a click, which also gives it the focus the keys need. */
+async function selectRow(page: Page, title: string): Promise<void> {
+  await page.locator(".ask-row", { hasText: title }).click();
+  await expect.poll(() => readSelectedTitle(page)).toBe(title);
+}
+
 /** The pane of the open signal. */
 const openSignalPane = (page: Page) => page.getByRole("region", { name: "The open signal" });
 
@@ -262,6 +276,71 @@ describe("Intake", () => {
       .toEqual(["Bump the checkout timeout"]);
     await expect.poll(() => readRowTitles(page)).toEqual(["Fix the flaky login test"]);
     expect(await readToDoCounts(page)).toEqual({ segment: "Hercule, 1 to do", row: "1" });
+  });
+
+  it("snoozes a signal into Later with H, brings it back with U, marks one done with E, and marks two checked rows done from the bulk bar", async () => {
+    const arranged = await arrangeFleet();
+    const titles = ["Release 4.2 shipped", "Docs moved to the wiki", "Staging was rebuilt"];
+    for (const title of titles) await raiseSignal(arranged, "fyi", title);
+    const { app, page } = await openSignedIn(arranged.url);
+    await chooseMenuItem(app, "Go", "Intake");
+    await expect
+      .poll(async () => (await readRowTitles(page)).toSorted())
+      .toEqual(titles.toSorted());
+    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 3 to do" });
+
+    // H opens the snooze menu on the selected row, and a choice's number
+    // snoozes it. Tomorrow is always open to choose.
+    await selectRow(page, "Release 4.2 shipped");
+    await page.keyboard.press("h");
+    const menu = page.getByRole("menu", { name: "Snooze until" });
+    const tomorrow = menu.getByRole("menuitem", { name: /^Tomorrow/ });
+    const tomorrowKey = (await tomorrow.locator("kbd").textContent()) ?? "";
+    await page.keyboard.press(tomorrowKey);
+    await expect.poll(() => menu.count()).toBe(0);
+    await expect
+      .poll(async () => (await readRowTitles(page)).toSorted())
+      .toEqual(["Docs moved to the wiki", "Staging was rebuilt"]);
+    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 2 to do" });
+
+    // Later lists it with when it comes back; U brings it back to To do.
+    await showView(page, "Later");
+    await expect.poll(() => readRowTitles(page)).toEqual(["Release 4.2 shipped"]);
+    expect(await page.locator(".ask-until").textContent()).toMatch(/^Back tomorrow 09:00$/i);
+    await selectRow(page, "Release 4.2 shipped");
+    await page.keyboard.press("u");
+    await expect.poll(() => readRowTitles(page)).toEqual([]);
+    await showView(page, "To do");
+    await expect
+      .poll(async () => (await readRowTitles(page)).toSorted())
+      .toEqual(titles.toSorted());
+    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 3 to do" });
+
+    // E marks the selected row done, and the toast says so.
+    await selectRow(page, "Docs moved to the wiki");
+    await page.keyboard.press("e");
+    await expect
+      .poll(async () => (await readRowTitles(page)).toSorted())
+      .toEqual(["Release 4.2 shipped", "Staging was rebuilt"]);
+    await expect.poll(() => page.locator(".asks-toast[role=status]").count()).toBe(1);
+
+    // X checks the first row and ⇧J adds the next one; the bulk bar's Done
+    // sends both.
+    const [first] = await readRowTitles(page);
+    await selectRow(page, first!);
+    await page.keyboard.press("x");
+    await page.keyboard.press("Shift+J");
+    const bar = page.getByRole("toolbar", { name: "Checked rows" });
+    await expect.poll(() => bar.locator(".asks-toast-text").textContent()).toBe("2 selected");
+    await bar.getByRole("button", { name: /^Done/ }).click();
+    await expect.poll(() => readRowTitles(page)).toEqual([]);
+    await expect.poll(() => bar.count()).toBe(0);
+    await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule" });
+
+    await showView(page, "Done");
+    await expect
+      .poll(async () => (await readRowTitles(page)).toSorted())
+      .toEqual(titles.toSorted());
   });
 
   it("notifies a new Now signal while the window is not focused, and opens Intake on it when the notification is clicked", async () => {

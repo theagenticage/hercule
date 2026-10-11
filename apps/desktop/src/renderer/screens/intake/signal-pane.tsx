@@ -21,7 +21,7 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import type { Signal } from "@hercule/contract";
+import { DONE_ACTION_ID, type Signal } from "@hercule/contract";
 import {
   buildSignalAnswers,
   describeAnswerKey,
@@ -33,9 +33,11 @@ import {
   findReplyAnswer,
   findSuggestedAnswer,
   formatMessageTime,
+  hasDoneAction,
   nameSignalSource,
   readErrorMessage,
   parseSignalPluginId,
+  planBulkAction,
 } from "@hercule/client-core";
 import {
   assistantsQuery,
@@ -48,7 +50,9 @@ import { CheckIcon } from "../../icons/check";
 import { ExternalIcon } from "../../icons/external";
 import { SignalAnswers, type AnswerFailure } from "./signal-answers";
 import { SignalBlocks } from "./signal-blocks";
+import { SignalMoves } from "./signal-moves";
 import { SourceMark } from "./source-mark";
+import { useIntakeMoves } from "./use-signal-moves";
 
 /** What Intake's keys do in the pane, called by the screen's key handler. */
 export interface SignalPaneHandle {
@@ -135,6 +139,7 @@ function SignalDetail({
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
+  const moves = useIntakeMoves();
   const idPrefix = useId();
   const rootRef = useRef<HTMLElement>(null);
   const sourceLinkRef = useRef<HTMLAnchorElement>(null);
@@ -278,7 +283,7 @@ function SignalDetail({
               answers={answers}
               openReplyId={openReplyId}
               drafts={drafts}
-              locked={act.isPending}
+              locked={act.isPending || moves.pending}
               failure={failure}
               idPrefix={idPrefix}
               onOpenReply={focusReply}
@@ -286,7 +291,11 @@ function SignalDetail({
                 setDrafts((current) => ({ ...current, [actionId]: text }));
               }}
               onAct={(actionId, text) => {
-                act.mutate(text === undefined ? { actionId } : { actionId, text });
+                // Done takes the signal off the list with `signal.markDone`, as on a row.
+                if (actionId === DONE_ACTION_ID) {
+                  setActedHere(true);
+                  moves.run(planBulkAction([signal], "done"));
+                } else act.mutate(text === undefined ? { actionId } : { actionId, text });
               }}
             />
           )
@@ -316,11 +325,14 @@ function SignalDetail({
             )}
           </div>
         )}
+        <SignalMoves signal={signal} />
       </article>
       {signal.status === "open" && (
         <PaneKeys
           suggestedKey={suggested === undefined ? null : describeAnswerKey(suggested, "↩")}
           replyKey={reply === undefined ? null : describeAnswerKey(reply, "R")}
+          canMarkDone={hasDoneAction(signal)}
+          later={moves.view === "later"}
           canOpen={sourceUrl !== null}
         />
       )}
@@ -328,14 +340,22 @@ function SignalDetail({
   );
 }
 
-/** Renders the keys at the foot of the pane, each with what it does for this signal. */
+/**
+ * Renders the keys at the foot of the pane, each with what it does for this
+ * signal. `later` is set when the pane shows a signal on Later, which `U`
+ * puts back on To do.
+ */
 function PaneKeys({
   suggestedKey,
   replyKey,
+  canMarkDone,
+  later,
   canOpen,
 }: {
   readonly suggestedKey: string | null;
   readonly replyKey: string | null;
+  readonly canMarkDone: boolean;
+  readonly later: boolean;
   readonly canOpen: boolean;
 }): JSX.Element {
   return (
@@ -352,6 +372,19 @@ function PaneKeys({
       {replyKey !== null && (
         <span>
           <kbd>R</kbd> {replyKey}
+        </span>
+      )}
+      {canMarkDone && (
+        <span>
+          <kbd>E</kbd> done
+        </span>
+      )}
+      <span>
+        <kbd>H</kbd> snooze
+      </span>
+      {later && (
+        <span>
+          <kbd>U</kbd> unsnooze
         </span>
       )}
       {canOpen && (

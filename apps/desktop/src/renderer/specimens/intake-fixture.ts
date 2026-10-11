@@ -21,7 +21,18 @@
  *   while its pane is open says "Resolved elsewhere" instead, which a still
  *   page cannot show; intake.integration.test.tsx covers it;
  * - `closed`: no signal selected, so the list has the full width;
- * - `empty`: nothing on To do.
+ * - `empty`: nothing on To do;
+ * - `snooze`: Marta's review request with its snooze menu open, as `H` opens it;
+ * - `bulk`: three rows checked, with the bar's Done hovered: the row
+ *   Done leaves alone fades, and the rows it takes get the accent rule;
+ * - `toast`: Marta's review request marked done with `E`, and the toast
+ *   that says so;
+ * - `failed`: the same move failing, its error in the toast's place;
+ * - `later`: the Later view, with Pieter's snoozed review request open;
+ * - `done`: the Done view, with Sanne's approved review request open.
+ *
+ * Every scene on To do shows the foot, because the Done list holds seven
+ * signals cleared today, as the design does.
  */
 import {
   HAND_TO_ACTION_PREFIX,
@@ -31,8 +42,9 @@ import {
   type Signal,
   type SignalAction,
 } from "@hercule/contract";
+import type { FetchLike } from "@hercule/client-core";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
-import type { SidebarRecords } from "./shell-page";
+import type { IntakeRecords, SidebarRecords } from "./shell-page";
 
 /** Builds an installed, active plugin named `displayName`, with `mark` when it declares one. */
 const buildPlugin = (id: string, displayName: string, mark?: PluginMark): PluginDetail => ({
@@ -377,6 +389,157 @@ const SLACK = buildSignal(6, 12, {
 /** The signals on To do, in the order the controller lists them: oldest first. */
 const TO_DO: ReadonlyArray<Signal> = [ALERT, CHANGES, REVIEW, CHECKS, MENTION, SLACK];
 
+/** Returns the moment at `clock`, `HH:MM` in UTC, `days` after the specimen's day. */
+const atClock = (days: number, clock: string): string => {
+  const [hours = 0, minutes = 0] = clock.split(":").map(Number);
+  const day = new Date(SPECIMEN_NOW);
+  return new Date(
+    Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() + days, hours, minutes),
+  ).toISOString();
+};
+
+/** Pieter's review request, snoozed until this afternoon. */
+const LAZY_IMAGES = buildSignal(7, 100, {
+  kind: "github/review-requested",
+  title: "Lazy-load product images",
+  asker: "Pieter",
+  place: "webshop #1296",
+  snooze: { until: atClock(0, "14:00"), snoozedAt: minutesAgo(96) },
+  blocks: [
+    {
+      type: "messages",
+      omitted: 0,
+      messages: [
+        {
+          author: { name: "Pieter" },
+          at: minutesAgo(100),
+          text: "Images below the fold now load when they scroll into view. The product page drops from 2.1 MB to 640 KB.",
+        },
+      ],
+    },
+  ],
+  actions: [
+    buildAction(
+      "approve",
+      "Approve",
+      "github/pr.review",
+      "Approves pull request **#1296** in **rogier/webshop** as **rogier**",
+      { primary: true },
+    ),
+    buildDone("GitHub"),
+  ],
+});
+
+/** Sanne's question on a Linear issue, snoozed until Monday morning. */
+const VAT_COPY = buildSignal(8, 970, {
+  kind: "linear/question-for-you",
+  title: "Checkout copy for the VAT line",
+  asker: "Sanne",
+  place: "PAY-219",
+  snooze: { until: atClock(6, "09:00"), snoozedAt: minutesAgo(958) },
+  actions: [buildDone("Linear")],
+});
+
+/** The signals on Later, soonest snooze first, as the controller lists them. */
+const LATER: ReadonlyArray<Signal> = [LAZY_IMAGES, VAT_COPY];
+
+/**
+ * Builds a signal resolved `resolvedMinutes` ago, with `outcome` as the line
+ * the Done list shows. `actor` resolved it: the user by default, or a plugin
+ * when the signal ended on its source.
+ */
+const buildResolved = (
+  number: number,
+  resolvedMinutes: number,
+  outcome: string,
+  signal: Pick<Signal, "kind" | "title"> & Partial<Signal>,
+  { kind = "decided", actor = "user" }: { kind?: "decided" | "withdrawn"; actor?: string } = {},
+): Signal =>
+  buildSignal(number, resolvedMinutes + 20, {
+    ...signal,
+    status: "resolved",
+    resolution: {
+      kind,
+      outcome,
+      actor,
+      origin: actor === "user" ? "web" : actor,
+      at: minutesAgo(resolvedMinutes),
+    },
+  });
+
+/**
+ * The signals on Done, newest first: the seven the design clears today, then
+ * one from yesterday, so the foot counts today's seven.
+ */
+const DONE: ReadonlyArray<Signal> = [
+  buildResolved(9, 38, "Approved #1293", {
+    kind: "github/review-requested",
+    title: "Show stock per warehouse",
+    asker: "Sanne",
+    place: "webshop #1293",
+  }),
+  buildResolved(
+    10,
+    65,
+    "Answered in Linear",
+    {
+      kind: "linear/question-for-you",
+      title: "Currency for refunds in the ledger",
+      asker: "Jonas",
+      place: "PAY-209",
+    },
+    { actor: "plugin:linear" },
+  ),
+  buildResolved(11, 93, "Handed to Fix bug", {
+    kind: "github/checks-failed",
+    title: "Round cart totals once, at checkout",
+    asker: "GitHub Actions",
+    place: "webshop #1291",
+  }),
+  buildResolved(12, 109, "Replied in #releases", {
+    kind: "slack/tagged-in-a-thread",
+    title: "Is the acceptance deploy blocked?",
+    asker: "Jonas",
+    place: "#releases",
+  }),
+  buildResolved(
+    13,
+    135,
+    "Reviewed on GitHub",
+    {
+      kind: "github/review-requested",
+      title: "Remove the old promo flag",
+      asker: "Sanne",
+      place: "webshop #1282",
+    },
+    { actor: "plugin:github" },
+  ),
+  buildResolved(14, 160, "Done, nothing sent", {
+    kind: "linear/assigned-to-you",
+    title: "Write the weekly planning notes",
+    asker: "Sanne",
+    place: "PAY-200",
+  }),
+  buildResolved(
+    15,
+    185,
+    "Withdrawn",
+    {
+      kind: "github/review-requested",
+      title: "Try the new checkout copy",
+      asker: "Pieter",
+      place: "webshop #1286",
+    },
+    { kind: "withdrawn", actor: "plugin:github" },
+  ),
+  buildResolved(16, 1101, "Handed to Address review", {
+    kind: "github/changes-requested",
+    title: "Coupon field loses focus on mobile",
+    asker: "Pieter",
+    place: "webshop #1288",
+  }),
+];
+
 /** Builds the event a signal was raised from, whose address gives the pane its "Open on" link. */
 const buildEvent = (signal: Signal, url: string): Event => {
   if (signal.origin.type !== "event")
@@ -404,52 +567,170 @@ const buildEvent = (signal: Signal, url: string): Event => {
 export interface IntakeScene {
   /** The scene's name in `?scene=` and in its capture's file name. */
   readonly name: string;
-  /** The shell's records, with the signals on To do and the plugins. */
+  /** The shell's records, with the signals on To do, Later and Done, and the plugins. */
   readonly records: SidebarRecords;
-  /** The selected signal, as the controller reads it, or `null` for none. */
-  readonly signal: Signal | null;
-  /** The event the selected signal was raised from, or `null` for none. */
-  readonly event: Event | null;
+  /** What Intake opens on: the selected signal, its event, the view, and how moves are answered. */
+  readonly intake: IntakeRecords;
+  /**
+   * Plays what the user does after Intake opens, such as pressing `H`.
+   * Resolves once the page shows the result. None when left out.
+   */
+  readonly play?: () => Promise<void>;
 }
 
-const RECORDS: SidebarRecords = { ...SPECIMEN_RECORDS, signals: TO_DO, plugins: INTAKE_PLUGINS };
+const RECORDS: SidebarRecords = {
+  ...SPECIMEN_RECORDS,
+  signals: TO_DO,
+  later: LATER,
+  done: DONE,
+  plugins: INTAKE_PLUGINS,
+};
 
-/** Returns a scene that opens `signal`, read as `read`, with the event at `url`. */
+/** Waits until the page holds an element that matches `selector`. Fails after five seconds. */
+const waitForElement = async (selector: string): Promise<Element> => {
+  const deadline = performance.now() + 5000;
+  for (;;) {
+    const element = document.querySelector(selector);
+    if (element !== null) return element;
+    if (performance.now() > deadline) {
+      throw new Error(`The scene never drew ${selector}. Check the page's console for the error.`);
+    }
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+};
+
+/**
+ * Presses `keys` on Intake's selected row, one after the other, as the user
+ * would. A key written `Shift+j` is pressed with Shift held.
+ */
+const pressKeys = async (...keys: ReadonlyArray<string>): Promise<void> => {
+  ((await waitForElement(".ask-row.is-on")) as HTMLElement).focus();
+  for (const key of keys) {
+    const shiftKey = key.startsWith("Shift+");
+    const name = shiftKey ? key.slice("Shift+".length) : key;
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: shiftKey ? name.toUpperCase() : name,
+        shiftKey,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+};
+
+/** Answers a move as the controller does when every signal it names moved. */
+const answerMoveDone: FetchLike = async (url, init) => {
+  // The client sends the body as bytes, which a Response reads back as JSON.
+  const { signalIds } = (await new Response(init?.body).json()) as { signalIds: string[] };
+  const field = { "mark-done": "done", snooze: "snoozed", unsnooze: "unsnoozed" }[
+    url.slice(url.lastIndexOf("/") + 1)
+  ];
+  return Response.json({ [field ?? "lowered"]: signalIds, skipped: [] });
+};
+
+/** Fails a move as the controller does when its database cannot take the write. */
+const answerMoveFailed: FetchLike = () =>
+  Promise.resolve(
+    Response.json(
+      { error: { code: "internal", message: "The database is busy. Try again in a moment." } },
+      { status: 500 },
+    ),
+  );
+
+/**
+ * Returns a scene that opens `signal`, read as `read`, with the event at
+ * `url`. `intake` adds what else the scene opens with, such as its view,
+ * and `play` what the user does once it opens.
+ */
 const buildScene = (
   name: string,
   signal: Signal,
   url: string,
-  read: Signal = signal,
+  {
+    read = signal,
+    intake = {},
+    play,
+  }: {
+    read?: Signal;
+    intake?: Partial<IntakeRecords>;
+    play?: () => Promise<void>;
+  } = {},
 ): IntakeScene => ({
   name,
   records: RECORDS,
-  signal: read,
-  event: buildEvent(signal, url),
+  intake: { signal: read, event: buildEvent(signal, url), ...intake },
+  ...(play !== undefined && { play }),
 });
+
+const REVIEW_URL = "https://github.com/rogier/payments-api/pull/1294";
 
 /** Every scene, in the order they are captured. The first is the one `pnpm compare:bureau` compares. */
 export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
-  buildScene("review", REVIEW, "https://github.com/rogier/payments-api/pull/1294"),
+  buildScene("review", REVIEW, REVIEW_URL),
   buildScene("changes", CHANGES, "https://github.com/rogier/webshop/pull/1298"),
   buildScene("checks", CHECKS, "https://github.com/rogier/webshop/pull/1300"),
   buildScene("mention", MENTION, "https://linear.app/acme/issue/PAY-212"),
-  buildScene("resolved", REVIEW, "https://github.com/rogier/payments-api/pull/1294", {
-    ...REVIEW,
-    status: "resolved",
-    resolution: {
-      kind: "decided",
-      actionId: "approve",
-      outcome: "Approved #1294",
-      actor: "plugin:github",
-      origin: "plugin:github",
-      at: minutesAgo(2),
+  buildScene("resolved", REVIEW, REVIEW_URL, {
+    read: {
+      ...REVIEW,
+      status: "resolved",
+      resolution: {
+        kind: "decided",
+        actionId: "approve",
+        outcome: "Approved #1294",
+        actor: "plugin:github",
+        origin: "plugin:github",
+        at: minutesAgo(2),
+      },
     },
   }),
-  { name: "closed", records: RECORDS, signal: null, event: null },
+  { name: "closed", records: RECORDS, intake: { signal: null, event: null } },
   {
     name: "empty",
     records: { ...RECORDS, signals: [] },
-    signal: null,
-    event: null,
+    intake: { signal: null, event: null },
   },
+  buildScene("snooze", REVIEW, REVIEW_URL, {
+    play: async () => {
+      await pressKeys("h");
+      await waitForElement(".asks-snooze");
+    },
+  }),
+  buildScene("bulk", CHANGES, "https://github.com/rogier/webshop/pull/1298", {
+    play: async () => {
+      // Checks Sanne's changes, then the alert above it, then Marta's review
+      // request below. The alert offers no Done, so Done leaves it alone.
+      await pressKeys("x", "Shift+k", "Shift+j", "Shift+j");
+      const bar = await waitForElement(".asks-bulk");
+      const done = [...bar.querySelectorAll("button")].find((button) =>
+        button.textContent.startsWith("Done"),
+      );
+      // The capture window never has the system's focus, so it gets no focus
+      // events, and the scene hovers the button instead.
+      done?.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+      await waitForElement(".ask-item.is-kept");
+    },
+  }),
+  buildScene("toast", REVIEW, REVIEW_URL, {
+    intake: { answerMove: answerMoveDone },
+    play: async () => {
+      await pressKeys("e");
+      await waitForElement(".asks-toast:not(.asks-toast--fail)");
+    },
+  }),
+  buildScene("failed", REVIEW, REVIEW_URL, {
+    intake: { answerMove: answerMoveFailed },
+    play: async () => {
+      await pressKeys("e");
+      await waitForElement(".asks-toast--fail");
+    },
+  }),
+  buildScene("later", LAZY_IMAGES, "https://github.com/rogier/webshop/pull/1296", {
+    intake: { view: "later" },
+  }),
+  buildScene("done", DONE[0]!, "https://github.com/rogier/webshop/pull/1293", {
+    intake: { view: "done" },
+  }),
 ];

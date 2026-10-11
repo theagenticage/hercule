@@ -1,24 +1,55 @@
 /**
- * Intake's list: the signals on To do in their sections, virtualized, two
- * lines per row, each cut with an ellipsis (spec 17 §The list on To do).
+ * Intake's list: the signals of one view, virtualized, two lines per row,
+ * each cut with an ellipsis (spec 17 §The list on To do, §Views). Each row
+ * carries its controls and its checkbox (spec 17 §Row controls and the bulk
+ * bar).
  */
-import { memo, useCallback, useEffect, useId, useMemo, useRef, type JSX } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  type JSX,
+  type ReactNode,
+} from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
-import type { Signal } from "@hercule/contract";
+import type { Signal, SignalView } from "@hercule/contract";
 import {
+  decideSignalRowControls,
+  describeDoneRowOutcome,
   describeSignalRow,
+  describeSnoozeUntil,
+  formatMessageTime,
   isBackFromSnooze,
   parseSignalPluginId,
   type IntakeSection,
   type PluginIdentity,
+  type SignalMove,
   type SignalRaiserNames,
 } from "@hercule/client-core";
 import { assistantsQuery, workflowsQuery } from "../../app/queries";
 import { AlarmIcon } from "../../icons/alarm";
+import { ArrowIcon } from "../../icons/arrow";
+import { CheckIcon } from "../../icons/check";
+import { UndoIcon } from "../../icons/undo";
 import { AgeLabel } from "../age-label";
+import { SNOOZE_ANCHOR } from "./snooze-menu";
 import { SourceMark } from "./source-mark";
+
+/** What a press on a row's own controls asks for: its checkbox, or one of its moves. */
+export type SignalRowAction = "check" | SignalMove;
+
+/** How the bulk highlight marks the checked rows while a bulk button has hover or focus. */
+export interface BulkHighlight {
+  /** The rows the button acts on, which get the accent rule. */
+  readonly actedIds: ReadonlySet<string>;
+  /** The checked rows the button leaves alone, which fade. */
+  readonly keptIds: ReadonlySet<string>;
+}
 
 /** One drawn line of the list: a section's heading or a signal's row. */
 type ListItem =
@@ -35,9 +66,11 @@ type ListItem =
  * Returns the height of a line, in pixels: a heading is 40px, and a row is
  * 52px with the 2px gap under it, except the last row of a section, which
  * has no gap. The list never measures a row. A row's two lines never wrap,
- * so these heights are exact, except that the "Back" mark's icon makes its row 2px
- * taller. Drawn rows take their own height, so that error reaches only the
- * spacers that stand in for undrawn rows.
+ * so these heights are close but not exact: the text's line boxes make a row
+ * a fraction of a pixel taller, and the "Back" mark's icon adds 2px more.
+ * Drawn rows take their own height, and the rows' box only sets a minimum
+ * height, so the error reaches only the spacers that stand in for undrawn
+ * rows, never the foot under the list.
  */
 const estimateItemHeight = (item: ListItem): number =>
   item.kind === "section" ? 40 : item.lastInSection ? 52 : 54;
@@ -45,10 +78,17 @@ const estimateItemHeight = (item: ListItem): number =>
 /** How many lines past each edge of the visible part stay drawn, so a fast scroll shows no gap. */
 const OVERSCAN = 8;
 
-/** Returns the sections' headings and rows as one list, in the order they are drawn. */
-const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<ListItem> =>
+/**
+ * Returns the sections' headings and rows as one list, in the order they are
+ * drawn. With `headings` false, as on Later and Done, the rows are drawn
+ * with no heading.
+ */
+const flattenSections = (
+  sections: ReadonlyArray<IntakeSection>,
+  headings: boolean,
+): ReadonlyArray<ListItem> =>
   sections.flatMap((section) => [
-    { kind: "section" as const, key: `section:${section.key}`, section },
+    ...(headings ? [{ kind: "section" as const, key: `section:${section.key}`, section }] : []),
     ...section.signals.map((signal, index) => ({
       kind: "row" as const,
       key: signal.id,
@@ -58,10 +98,24 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
   ]);
 
 /**
- * Renders the list of `sections`, with the row of `selectedId` selected.
- * A click on a row calls `onSelect` with its signal's id. The list reads the
- * workflows and the assistants, whose names label the core signals they
- * raised.
+ * Renders the list of `sections` in `view`, with the row of `selectedId`
+ * selected. To do draws each section's heading; Later and Done draw one run
+ * of rows, Done's quieter. A click on a row calls `onSelect` with its
+ * signal's id, and a press on a row's checkbox or one of its moves calls
+ * `onRowAction`. The list reads the workflows and the assistants, whose
+ * names label the core signals they raised.
+ *
+ * - `checkedIds` are the checked rows, which wear the selected tint.
+ * - `highlight` marks the checked rows while a bulk button has hover or
+ *   focus, and while its move holds them for one beat.
+ * - `menuRowId` is the row whose Snooze opened the snooze menu: its
+ *   controls stay shown, and anchor the menu.
+ * - `timezone` is the user's timezone setting, which the times on Later and
+ *   Done rows are read in.
+ * - `onNearEnd` is called while the last rows are drawn, so a paged view
+ *   reads its next page before the user reaches the end.
+ * - `empty` shows in place of the rows when there are none, and `foot`
+ *   shows under the rows, inside the scrolling list.
  *
  * Only the rows in view, and a few past each edge, are drawn, so a list of
  * hundreds of signals costs as little as a short one. The selected row is
@@ -74,19 +128,37 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
  * next key acts from there.
  */
 export const IntakeList = memo(function IntakeList({
+  view,
   sections,
   plugins,
   selectedId,
+  checkedIds,
+  highlight,
+  menuRowId,
+  timezone,
   focusSelectedRow,
+  empty,
+  foot,
   onSelect,
+  onRowAction,
+  onNearEnd,
   onFocusedSelectedRow,
 }: {
+  readonly view: SignalView;
   readonly sections: ReadonlyArray<IntakeSection>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly selectedId: string | null;
+  readonly checkedIds: ReadonlySet<string>;
+  readonly highlight: BulkHighlight | null;
+  readonly menuRowId: string | null;
+  readonly timezone: string;
   /** Asks the list to put the focus on the selected row, as `J` and `K` do from the pane. */
   readonly focusSelectedRow: boolean;
+  readonly empty: ReactNode;
+  readonly foot: ReactNode;
   readonly onSelect: (signalId: string) => void;
+  readonly onRowAction: (signalId: string, action: SignalRowAction) => void;
+  readonly onNearEnd: () => void;
   /** Called once the list has put the focus on the selected row that `focusSelectedRow` asked for. */
   readonly onFocusedSelectedRow: () => void;
 }): JSX.Element {
@@ -100,7 +172,7 @@ export const IntakeList = memo(function IntakeList({
     () => ({ workflows, assistants }),
     [workflows, assistants],
   );
-  const items = useMemo(() => flattenSections(sections), [sections]);
+  const items = useMemo(() => flattenSections(sections, view === "to-do"), [sections, view]);
   const selectedIndex = useMemo(
     () => items.findIndex((item) => item.key === selectedId),
     [items, selectedId],
@@ -141,12 +213,18 @@ export const IntakeList = memo(function IntakeList({
     if (focusSelectedRow) onFocusedSelectedRow();
   }, [virtualizer, selectedIndex, selectedId, focusSelectedRow, onFocusedSelectedRow]);
 
+  const virtualItems = virtualizer.getVirtualItems();
+  const lastDrawn = virtualItems.at(-1)?.index;
+  useEffect(() => {
+    if (lastDrawn !== undefined && lastDrawn >= items.length - 1 - OVERSCAN) onNearEnd();
+  }, [lastDrawn, items.length, onNearEnd]);
+
   // The drawn lines in list order. Before each run of lines that is not
   // drawn, an empty spacer takes up the run's height.
   const drawn: JSX.Element[] = [];
   const visible = virtualizer.range;
   let end = 0;
-  for (const { index, key, start, size } of virtualizer.getVirtualItems()) {
+  for (const { index, key, start, size } of virtualItems) {
     if (start > end) drawn.push(<div key={`gap:${key}`} style={{ height: start - end }} />);
     const item = items[index]!;
     const onScreen = visible !== null && index >= visible.startIndex && index <= visible.endIndex;
@@ -156,14 +234,26 @@ export const IntakeList = memo(function IntakeList({
       ) : (
         <SignalRow
           key={key}
+          view={view}
           signal={item.signal}
           lastInSection={item.lastInSection}
           plugins={plugins}
           raisers={raisers}
           selected={item.signal.id === selectedId}
+          checked={checkedIds.has(item.signal.id)}
+          marked={
+            highlight?.actedIds.has(item.signal.id)
+              ? "acted"
+              : highlight?.keptIds.has(item.signal.id)
+                ? "kept"
+                : null
+          }
+          menuOpen={item.signal.id === menuRowId}
+          timezone={timezone}
           onScreen={onScreen}
           ageId={`${listId}-${item.signal.id}-age`}
           onSelect={onSelect}
+          onRowAction={onRowAction}
         />
       ),
     );
@@ -173,10 +263,16 @@ export const IntakeList = memo(function IntakeList({
   return (
     <div ref={scrollRef} className="asks-scroll">
       {items.length === 0 ? (
-        <p className="asks-empty">Nothing on your list.</p>
+        empty
       ) : (
-        <div style={{ height: virtualizer.getTotalSize() }}>{drawn}</div>
+        <div
+          className={view === "done" ? "asks-rows asks-rows--quiet" : "asks-rows"}
+          style={{ minHeight: virtualizer.getTotalSize() }}
+        >
+          {drawn}
+        </div>
       )}
+      {foot}
     </div>
   );
 });
@@ -192,38 +288,91 @@ function SectionHeading({ section }: { readonly section: IntakeSection }): JSX.E
   );
 }
 
+/** Returns the text of a describe line, without its marks, for a tooltip. */
+const readDescribeLineText = (signal: Signal, actionId: string): string | undefined =>
+  signal.actions
+    .find((action) => action.id === actionId)
+    ?.describeLine?.map((part) => part.text)
+    .join("");
+
 /**
- * Renders one signal's row: its source's mark, its title, then "Back" when
- * its snooze ran out, who asks, the kind and where, and at its end the age
- * and the marigold mark of a `high` signal.
+ * Renders one signal's row: its source's mark, its title, the line under
+ * it, and at its end what the view shows of it:
+ *
+ * - To do: "Back" leads the line when its snooze ran out; the end holds the
+ *   age and the marigold mark of a `high` signal.
+ * - Later: the end holds when it comes back, "Back Monday 09:00".
+ * - Done: the line is its outcome, and the end the time it was resolved.
+ *
+ * Beside the row sit its checkbox and its moves, as `decideSignalRowControls`
+ * decides them. They show while the pointer or the focus is on the row.
  */
 const SignalRow = memo(function SignalRow({
+  view,
   signal,
   lastInSection,
   plugins,
   raisers,
   selected,
+  checked,
+  marked,
+  menuOpen,
+  timezone,
   onScreen,
   ageId,
   onSelect,
+  onRowAction,
 }: {
+  readonly view: SignalView;
   readonly signal: Signal;
   readonly lastInSection: boolean;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly raisers: SignalRaiserNames;
   readonly selected: boolean;
+  readonly checked: boolean;
+  /** How the bulk highlight marks the row, or `null` when it does not. */
+  readonly marked: "acted" | "kept" | null;
+  readonly menuOpen: boolean;
+  readonly timezone: string;
   readonly onScreen: boolean;
   readonly ageId: string;
   readonly onSelect: (signalId: string) => void;
+  readonly onRowAction: (signalId: string, action: SignalRowAction) => void;
 }): JSX.Element {
+  const controls = decideSignalRowControls(signal, view);
+  const line = describeSignalRow(signal, plugins, raisers);
+  const classes = [
+    "ask-item",
+    lastInSection ? "ask-item--last" : "",
+    checked ? "is-checked" : "",
+    menuOpen ? "has-menu" : "",
+    marked === null ? "" : `is-${marked}`,
+  ];
   return (
-    <div className={lastInSection ? "ask-item ask-item--last" : "ask-item"}>
+    <div className={classes.filter((each) => each !== "").join(" ")}>
+      {controls.checkable && (
+        <button
+          type="button"
+          className="ask-check"
+          role="checkbox"
+          aria-checked={checked}
+          aria-label={`Select ${signal.title}`}
+          title="Select  X"
+          onClick={() => {
+            onRowAction(signal.id, "check");
+          }}
+        >
+          <span className="ask-box">
+            <CheckIcon size={12} />
+          </span>
+        </button>
+      )}
       <button
         type="button"
         className={selected ? "ask-row is-on" : "ask-row"}
         data-signal-id={signal.id}
         aria-current={selected ? "true" : undefined}
-        aria-describedby={ageId}
+        aria-describedby={view === "to-do" ? ageId : undefined}
         onClick={() => {
           onSelect(signal.id);
         }}
@@ -236,32 +385,116 @@ const SignalRow = memo(function SignalRow({
           {/* The separator after "Back" and the row's line are one string, so
               the line is shaped as one run of text, as the drawing's is. */}
           <span className="ask-sub">
-            {isBackFromSnooze(signal) ? (
+            {view === "done" ? (
+              describeDoneRowOutcome(signal)
+            ) : view === "to-do" && isBackFromSnooze(signal) ? (
               <>
                 <span className="ask-back">
                   <AlarmIcon size={12} />
                   Back
                 </span>
-                {` · ${describeSignalRow(signal, plugins, raisers)}`}
+                {` · ${line}`}
               </>
             ) : (
-              describeSignalRow(signal, plugins, raisers)
+              line
             )}
           </span>
         </span>
         <span className="ask-end">
-          <AgeLabel
-            at={signal.createdAt}
-            onScreen={onScreen}
-            descriptionId={ageId}
-            as="span"
-            className="ask-age"
-          />
-          {signal.priority === "high" && (
-            <span className="ask-high" role="img" aria-label="High priority" />
+          {view === "to-do" && (
+            <>
+              <AgeLabel
+                at={signal.createdAt}
+                onScreen={onScreen}
+                descriptionId={ageId}
+                as="span"
+                className="ask-age"
+              />
+              {signal.priority === "high" && (
+                <span className="ask-high" role="img" aria-label="High priority" />
+              )}
+            </>
+          )}
+          {view === "later" && signal.snooze !== undefined && (
+            <span className="ask-until">
+              <AlarmIcon size={12} />
+              {`Back ${describeSnoozeUntil(signal.snooze.until, new Date(), timezone)}`}
+            </span>
+          )}
+          {view === "done" && signal.resolution !== undefined && (
+            <time className="ask-age" dateTime={signal.resolution.at}>
+              {formatMessageTime(new Date(signal.resolution.at), timezone, new Date())}
+            </time>
           )}
         </span>
       </button>
+      {controls.moves.length > 0 && (
+        <span className="ask-acts" style={menuOpen ? { anchorName: SNOOZE_ANCHOR } : undefined}>
+          {controls.moves.map((move) => (
+            <RowMove
+              key={move}
+              move={move}
+              doneTitle={readDescribeLineText(signal, "done")}
+              menuOpen={menuOpen}
+              onPress={() => {
+                onRowAction(signal.id, move);
+              }}
+            />
+          ))}
+        </span>
+      )}
     </div>
   );
 });
+
+/** Each row move's icon and label, and the key the tooltip names. */
+const ROW_MOVES: Readonly<
+  Record<SignalMove, { readonly icon: ReactNode; readonly label: string; readonly key: string }>
+> = {
+  snooze: { icon: <AlarmIcon size={14} />, label: "Snooze", key: "H" },
+  unsnooze: { icon: <UndoIcon size={14} />, label: "Unsnooze", key: "U" },
+  done: { icon: <CheckIcon size={14} />, label: "Done", key: "E" },
+  "not-urgent": {
+    icon: (
+      <span className="asks-down">
+        <ArrowIcon size={14} />
+      </span>
+    ),
+    label: "Not urgent",
+    key: "",
+  },
+};
+
+/**
+ * Renders one of a row's moves as an icon button. Done's tooltip is its
+ * describe line, `doneTitle`; every other tooltip names the move and its
+ * key. Snooze opens the snooze menu, so it says whether the menu is open.
+ */
+function RowMove({
+  move,
+  doneTitle,
+  menuOpen,
+  onPress,
+}: {
+  readonly move: SignalMove;
+  readonly doneTitle: string | undefined;
+  readonly menuOpen: boolean;
+  readonly onPress: () => void;
+}): JSX.Element {
+  const { icon, label, key } = ROW_MOVES[move];
+  const opensMenu = move === "snooze";
+  return (
+    <button
+      type="button"
+      className="ask-act"
+      aria-label={label}
+      title={move === "done" && doneTitle !== undefined ? doneTitle : `${label}  ${key}`.trim()}
+      data-opens-snooze={opensMenu || undefined}
+      aria-haspopup={opensMenu ? "menu" : undefined}
+      aria-expanded={opensMenu ? menuOpen : undefined}
+      onClick={onPress}
+    >
+      {icon}
+    </button>
+  );
+}

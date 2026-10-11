@@ -29,5 +29,6 @@ function readScene(): IntakeScene {
 const scene = readScene();
 // The capture script reads this to know which scenes there are to capture.
 document.documentElement.dataset.scenes = INTAKE_SCENES.map((each) => each.name).join(" ");
-await mountIntakeSpecimen(scene.records, { signal: scene.signal, event: scene.event });
+await mountIntakeSpecimen(scene.records, scene.intake);
+await scene.play?.();
 await markSheetReady();
