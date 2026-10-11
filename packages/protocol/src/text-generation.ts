@@ -10,7 +10,7 @@
 import { Schema } from "effect";
 import { OutputSchema } from "./output-schema";
 import { Fact, InstanceId, InstanceSecrets } from "./primitives";
-import { MAX_MESSAGE_LENGTH, ModelSelection, Usage } from "./sessions";
+import { MAX_MESSAGE_LENGTH, Usage } from "./sessions";
 
 /**
  * The capability for text generation. A runner lists it at hello when it
@@ -30,18 +30,26 @@ export const MAX_TEXT_GENERATION_TEXT_LENGTH = 64 * 1024;
 
 /**
  * How long the runner lets one text generation run before it stops the
- * harness. The controller waits for the answer for at most as long, so a
- * harness that hangs never outlives the caller that gave up on it.
+ * harness and answers `timeout`. The runner always answers within this time,
+ * or its connection ends, so the controller can hold the call's slot until
+ * the answer arrives and never count a harness as finished while it still
+ * runs.
  */
 export const TEXT_GENERATION_DEADLINE_MS = 60_000;
 
 const Text = Schema.String.check(Schema.isMaxLength(MAX_TEXT_GENERATION_TEXT_LENGTH));
 
-const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
+// Never empty: the controller shows the message to the user as the reason a
+// call failed, and an empty reason explains nothing.
+const Message = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_MESSAGE_LENGTH),
+);
 
 /** What one text generation asks the model: the same for every provider. */
 export const TextGenerationSpec = Schema.Struct({
-  model: ModelSelection,
+  /** The model, as the instance's model list names it. A text generation takes no model options. */
+  model: Fact,
   /** What the model is told to do. Given to the harness as its system prompt. */
   instructions: Text,
   /** What the model works on. Given to the harness as the one user message. */
@@ -77,8 +85,10 @@ export type TextGenerationRequest = Schema.Schema.Type<typeof TextGenerationRequ
  *   harness reported no token counts.
  * - `invalid-output`: the harness answered, but not with a value that matches
  *   the output schema. `reason` says what did not match.
+ * - `timeout`: the harness ran past `TEXT_GENERATION_DEADLINE_MS` and the
+ *   runner stopped it.
  * - `failed`: the call did not produce an answer at all: the harness would
- *   not start, was not logged in, errored, or ran past its deadline.
+ *   not start, was not logged in, or errored.
  */
 export const TextGenerationOutcome = Schema.Union([
   Schema.Struct({
@@ -87,6 +97,7 @@ export const TextGenerationOutcome = Schema.Union([
     usage: Schema.NullOr(Usage),
   }),
   Schema.Struct({ outcome: Schema.Literal("invalid-output"), reason: Message }),
+  Schema.Struct({ outcome: Schema.Literal("timeout") }),
   Schema.Struct({ outcome: Schema.Literal("failed"), message: Message }),
 ]);
 
