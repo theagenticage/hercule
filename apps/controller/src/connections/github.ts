@@ -59,9 +59,10 @@ export const githubTokens = Effect.gen(function* () {
      * Returns the token a GitHub connection holds and the login it belongs
      * to. Returns `none` when the connection is gone, is not a GitHub
      * connection, or holds no usable token, because none of those can
-     * authenticate a push. A device flow token that has expired, or is about
-     * to, is not usable: the GitHub type cannot refresh it, so the user has to
-     * sign in again.
+     * authenticate a push. A token that has an expiry and has expired, or is
+     * about to, is not usable, because this read never refreshes a token. A
+     * GitHub token has no expiry and no refresh token, so in practice it is
+     * never refreshed and never stale.
      *
      * This is a plain read: it never calls GitHub and never changes the
      * connection's status, so callers may run it inside a transaction. Fails

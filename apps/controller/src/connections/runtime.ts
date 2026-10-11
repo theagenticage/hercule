@@ -306,36 +306,43 @@ const make = Effect.gen(function* () {
       if (!isStale(tokens, millis)) return tokens;
 
       const endpoint = yield* findRefreshEndpoint(row, type);
-      if (tokens.refreshToken === undefined || Option.isNone(endpoint)) {
+      const { refreshToken } = tokens;
+      if (refreshToken === undefined || Option.isNone(endpoint)) {
         return yield* markTokensNeedReauth(row.id, held, "this connection cannot be refreshed");
       }
-      const answer = yield* refreshAccess({
-        ...endpoint.value,
-        refreshToken: tokens.refreshToken,
-      }).pipe(
-        Effect.provide(FetchHttpClient.layer),
-        Effect.catchTag("ProviderRefused", (error) =>
-          markTokensNeedReauth(row.id, held, error.message),
-        ),
-        Effect.catchTag("ProviderUnreachable", (error) =>
-          Effect.fail(new ConnectionUnavailable({ message: error.message })),
-        ),
+      // The request and the write that stores its answer are uninterruptible
+      // together. A provider that rotates its refresh token invalidates the old
+      // one the moment it answers, so a caller cancelled between the answer and
+      // the write (a timeout, a cancelled run) would lose the only tokens that
+      // still work. `refreshAccess` bounds the request with its own timeout,
+      // so this cannot hold the caller or the lock for long.
+      return yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const answer = yield* refreshAccess({ ...endpoint.value, refreshToken }).pipe(
+            Effect.provide(FetchHttpClient.layer),
+            Effect.catchTag("ProviderRefused", (error) =>
+              markTokensNeedReauth(row.id, held, error.message),
+            ),
+            Effect.catchTag("ProviderUnreachable", (error) =>
+              Effect.fail(new ConnectionUnavailable({ message: error.message })),
+            ),
+          );
+          // When the response has no refresh token, the old one is still valid.
+          const next: TokenSet = { ...answer, refreshToken: answer.refreshToken ?? refreshToken };
+          yield* writeWhileTokensHeld(
+            row.id,
+            held,
+            Effect.orDie(
+              secrets.set(
+                { kind: "connection", id: row.id },
+                OAUTH_TOKENS,
+                Redacted.make(serializeTokens(next)),
+              ),
+            ),
+          );
+          return next;
+        }),
       );
-      // When the response has no refresh token, the old one is still valid.
-      const keep = answer.refreshToken ?? tokens.refreshToken;
-      const next: TokenSet = { ...answer, refreshToken: keep };
-      yield* writeWhileTokensHeld(
-        row.id,
-        held,
-        Effect.orDie(
-          secrets.set(
-            { kind: "connection", id: row.id },
-            OAUTH_TOKENS,
-            Redacted.make(serializeTokens(next)),
-          ),
-        ),
-      );
-      return next;
     });
 
   /**
@@ -351,10 +358,16 @@ const make = Effect.gen(function* () {
    * A refresh passes the promotion gate as one unit, before the provider is
    * called: it waits while a promotion freezes the controller, and never
    * happens once it is sealed. The provider's answer and the write that
-   * stores it cannot be split. Many providers rotate the refresh token and
-   * invalidate the old one, so a refresh whose new tokens are not in the
-   * copy would leave the new machine holding a refresh token that no longer
-   * works.
+   * stores it are never separated by a promotion's freeze: many providers rotate the
+   * refresh token and invalidate the old one, so a refresh whose new tokens
+   * are not in the copy would leave the new machine holding a refresh token
+   * that no longer works.
+   *
+   * Cancelling the caller does not cancel a refresh that has started. The
+   * request, its 30-second timeout and the write that stores the answer run
+   * to their end first, for the same reason: the provider has already
+   * invalidated the old tokens by the time it answers. So a cancelled caller
+   * can wait up to the timeout before it stops.
    */
   const readFreshAccessToken = (
     row: StoredConnection,

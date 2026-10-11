@@ -31,6 +31,7 @@
  */
 import { createHash } from "node:crypto";
 import * as Clock from "effect/Clock";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
@@ -387,10 +388,22 @@ export const exchangeCode = (request: {
   });
 
 /**
+ * How long the token endpoint has to answer a refresh. A refresh holds the
+ * connection's one-at-a-time lock and, once sent, runs to its end even when its
+ * caller is cancelled (see `refreshTokens`), so a provider that never answers
+ * needs a limit of its own.
+ */
+export const REFRESH_TIMEOUT_SECONDS = 30;
+
+/**
  * Exchanges the refresh token for a new token set. Sends the client's secret
  * only when it has one, so a device flow's public client sends none. When the
  * response has no new refresh token, the old one is still valid, and the
  * caller keeps it.
+ *
+ * Fails with `ProviderUnreachable` when the endpoint has not answered within
+ * `REFRESH_TIMEOUT_SECONDS`. The request stays interruptible even when the
+ * caller runs this effect uninterruptibly, so that the timeout can cancel it.
  */
 export const refreshAccess = (request: {
   readonly tokenUrl: string;
@@ -404,7 +417,16 @@ export const refreshAccess = (request: {
     ...(request.client.clientSecret === undefined
       ? {}
       : { client_secret: request.client.clientSecret }),
-  });
+  }).pipe(
+    Effect.interruptible,
+    Effect.timeoutOrElse({
+      duration: Duration.seconds(REFRESH_TIMEOUT_SECONDS),
+      orElse: () =>
+        failProviderUnreachable(
+          `the token endpoint did not answer within ${String(REFRESH_TIMEOUT_SECONDS)} seconds`,
+        ),
+    }),
+  );
 
 /** The grant type a device code is exchanged with (RFC 8628 section 3.4). */
 const DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
