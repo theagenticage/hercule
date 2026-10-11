@@ -31,7 +31,7 @@ import { buildSessionStamp, CurrentActor, type Actor, type SessionActor } from "
 import { buildHomePaths, HerculeHome } from "../config";
 import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } from "../connections";
 import { hashToken } from "../credentials";
-import { IngestExecutorLayer } from "../daemon/ingest";
+import { IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
 import {
   AfterCommit,
   mintUuid,
@@ -74,7 +74,7 @@ let homes: Array<string> = [];
  */
 const buildHostLayer = (secrets: Layer.Layer<Secrets, unknown, SqlClient.SqlClient>) =>
   PluginHostLayer.pipe(
-    Layer.provide(IngestExecutorLayer),
+    Layer.provide([IngestExecutorLayer, OpenSignalsLayer]),
     Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(secrets),

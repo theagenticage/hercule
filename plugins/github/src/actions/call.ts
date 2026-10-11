@@ -26,7 +26,12 @@
 import { Clock, Effect, Schema } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
-import { ActionError, type ActionContext, type WorkflowStepAction } from "@hercule/plugin-host";
+import {
+  ActionError,
+  type ActionContext,
+  type AnswerAction,
+  type WorkflowStepAction,
+} from "@hercule/plugin-host";
 import {
   computeRateLimitWaitSeconds,
   isRateLimited,
@@ -39,32 +44,47 @@ import {
 import { GITHUB_CONNECTION_TYPE } from "../connection-type";
 
 /**
- * A GitHub workflow action as this plugin writes it: the contribution the
- * host registers, plus `perform`, which does the work.
+ * Where a GitHub workflow action may be bound. A step-only action leaves
+ * `usableIn` out. An action the user's answer on a Signal may run lists
+ * `signal.answer` and writes its own describe line, and usually its outcome.
+ */
+type GithubActionPlacement =
+  Pick<WorkflowStepAction, "usableIn"> | Pick<AnswerAction, "usableIn" | "describe" | "outcome">;
+
+/**
+ * A GitHub workflow action as this plugin writes it: its id, names, schemas
+ * and placement, plus `perform`, which does the work.
  *
  * `perform` still requires an `HttpClient`. The contribution's `execute`
  * provides the fetch client, and a test calls `perform` with a stub client
  * instead (see `testing.ts`).
  */
-export interface GithubAction<
+type GithubActionDefinition<Input extends Schema.Top, Output extends Schema.Top> = Pick<
+  WorkflowStepAction,
+  "id" | "displayName" | "description"
+> &
+  GithubActionPlacement & {
+    readonly input: Input;
+    readonly output: Output;
+    readonly perform: (
+      input: Input["Type"],
+      context: ActionContext,
+    ) => Effect.Effect<Output["Type"], ActionError, HttpClient.HttpClient>;
+  };
+
+/** A GitHub workflow action: its definition plus what the host registers it with. */
+export type GithubAction<
   Input extends Schema.Top,
   Output extends Schema.Top,
-> extends WorkflowStepAction {
-  readonly input: Input;
-  readonly output: Output;
-  readonly perform: (
-    input: Input["Type"],
-    context: ActionContext,
-  ) => Effect.Effect<Output["Type"], ActionError, HttpClient.HttpClient>;
-}
+> = GithubActionDefinition<Input, Output> & Pick<WorkflowStepAction, "connection" | "execute">;
 
 /**
- * Builds a GitHub workflow action from its id, names, schemas and `perform`.
- * The action declares the GitHub Connection type, and its `execute` calls
- * `perform` with the fetch client.
+ * Builds a GitHub workflow action from its definition. The action declares
+ * the GitHub Connection type, and its `execute` calls `perform` with the
+ * fetch client.
  */
 export const defineGithubAction = <Input extends Schema.Top, Output extends Schema.Top>(
-  definition: Omit<GithubAction<Input, Output>, "connection" | "execute">,
+  definition: GithubActionDefinition<Input, Output>,
 ): GithubAction<Input, Output> => ({
   ...definition,
   connection: { type: GITHUB_CONNECTION_TYPE },

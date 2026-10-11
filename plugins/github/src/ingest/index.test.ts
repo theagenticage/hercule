@@ -14,6 +14,7 @@ import {
   type GithubStub,
   type IngestHarness,
   type StubResponse,
+  TEST_IDENTITY,
 } from "../testing";
 import type { GithubConnectionConfig } from "../connection-type";
 import { openGithubIngest, pollGithubFeed, type GithubFeed } from "./index";
@@ -24,7 +25,14 @@ const poll = (
   feed: GithubFeed = "notifications",
   harness: IngestHarness = buildIngestHarness(),
   config: GithubConnectionConfig = {},
-) => runAgainstStub(pollGithubFeed(feed, config, harness.context), stub);
+) => runAgainstStub(pollGithubFeed(feed, config, harness.context, TEST_IDENTITY), stub);
+
+/** The Connection the ingest tests open: the test user's account. */
+const TEST_CONNECTION = {
+  id: "conn_1",
+  accountId: TEST_IDENTITY.accountId,
+  displayName: TEST_IDENTITY.login,
+};
 
 /** Returns a stub that answers every request with `response`. */
 const answerAlways = (response: StubResponse): GithubStub => stubGithub(() => response);
@@ -152,7 +160,7 @@ describe("openGithubIngest", () => {
 
     const result = await Effect.runPromise(
       Effect.result(
-        openGithubIngest({ id: "conn_1", config: { checksWindowDays: 90 } }, harness.context),
+        openGithubIngest({ ...TEST_CONNECTION, config: { checksWindowDays: 90 } }, harness.context),
       ),
     );
 
@@ -163,7 +171,7 @@ describe("openGithubIngest", () => {
     const harness = buildIngestHarness();
 
     const result = await Effect.runPromise(
-      Effect.result(openGithubIngest({ id: "conn_1", config: {} }, harness.context)),
+      Effect.result(openGithubIngest({ ...TEST_CONNECTION, config: {} }, harness.context)),
     );
 
     expect(Result.isSuccess(result)).toBe(true);

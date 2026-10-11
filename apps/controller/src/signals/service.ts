@@ -1,6 +1,7 @@
 /**
  * The signal operations: `signal.query`, `read`, `raise`, `act` and
- * `withdraw`.
+ * `withdraw`, and the four moves that send nothing to the source:
+ * `markDone`, `snooze`, `unsnooze` and `lowerPriority`.
  *
  * A signal is what Intake puts in front of the user because a move is asked
  * of them. This service raises the core's four kinds (`proposal`, `offer`,
@@ -15,30 +16,40 @@
  *
  * Only the user takes an action, through `act`. Each action's operation is
  * checked, run and described through the `BoundOperations` port, which the
- * controller daemon implements. Spec 10 §9 owns the rules.
+ * controller daemon implements.
+ *
+ * The four moves each take a list of ids, because one user action, such as a
+ * bulk snooze, is one call. Each call:
+ *
+ * - fails as a whole with `NotFound` when an id names no signal;
+ * - treats an id given twice as given once;
+ * - skips a signal that resolved before the call, and returns it in
+ *   `skipped`;
+ * - writes one audit entry naming the signals it changed, and none when it
+ *   changed nothing.
+ *
+ * Spec 10 §9 owns the rules.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   ACCEPT_ACTION_ID,
   countJsonBytes,
   createForbiddenError,
+  DEFAULT_PAGE_LIMIT,
   createInvalidStateError,
   createNotFoundError,
   createValidationError,
   DISMISS_ACTION_ID,
   DONE_ACTION_ID,
   HAND_TO_ACTION_PREFIX,
-  listSchemaIssues,
   MAX_BOUND_INPUT_BYTES,
-  MAX_SIGNAL_BYTES,
-  Signal,
+  type Signal,
   Validation,
   type BoundAction,
   type CoreSignalKind,
@@ -51,17 +62,25 @@ import {
   type SignalAction,
   type SignalActInput,
   type SignalFilter,
+  type SignalIdsInput,
+  type SignalLowerPriorityResult,
+  type SignalMarkDoneResult,
   type SignalOrigin,
+  type SignalPage,
+  type SignalSnoozeInput,
+  type SignalSnoozeResult,
+  type SignalUnsnoozeResult,
+  type SkippedSignal,
   type SignalRaiseInput,
   type SignalRaiseResult,
   type SignalResolution,
   type SignalWithdrawInput,
   type Unauthenticated,
-  type WorkflowDefinition,
 } from "@hercule/contract";
 import {
   buildActorStamp,
   buildResolutionOrigin,
+  requireActor,
   requireGrant,
   requireUserActor,
   type Actor,
@@ -73,11 +92,13 @@ import {
   type BoundOperationError,
   type CheckedOperation,
 } from "../bound-actions";
-import { mintUuid, nowIso, uuidToString, withTransaction } from "../db";
+import { mintUuid, nowIso, refuseCursor, uuidToString, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import { PluginHost } from "../plugins";
 import { runRepository } from "../runs";
 import { sessionRepository } from "../sessions";
 import { workflowRepository } from "../workflows";
+import { buildHandToActions, checkSignalFits, listOwnActionIssues } from "./actions";
 import { signalRepository } from "./repository";
 
 /** The input of `signal.act`: the signal's id, the action to take and its typed reply. */
@@ -102,12 +123,35 @@ const NO_OPERATION_DESCRIBE_LINE: DescribeLine = [{ kind: "text", text: "Does no
 const DONE_DESCRIBE_LINE: DescribeLine = [{ kind: "text", text: "Takes it off your list" }];
 
 /**
+ * Returns the describe line of the core's Done on a plugin's signal. Done
+ * resolves the signal in the controller only, so the line says that the
+ * source, such as a pull request's review request, stays as it is.
+ */
+const buildPluginDoneDescribeLine = (pluginDisplayName: string): DescribeLine => [
+  { kind: "text", text: `Takes it off your list. ${pluginDisplayName} is not told` },
+];
+
+/**
  * The refusal for a caller who is not the user taking an action. A session
  * may hold `signal.write`, the grant this operation checks, so the message
  * says why the grant does not help.
  */
 const ONLY_THE_USER =
   "only the user may take a signal's action: it runs its operation as the user, so a session or a workflow step may not take one; ask the user instead";
+
+/** The refusal of `markDone` for a caller who is not the user. */
+const ONLY_THE_USER_MARKS_DONE =
+  "only the user may mark a signal done: Done is the user's answer, so a session or a workflow step may not give it; ask the user instead";
+
+/**
+ * The refusal of `lowerPriority` for a caller who is not the user. An agent
+ * must not quietly lower what the user was told is urgent.
+ */
+const ONLY_THE_USER_LOWERS_PRIORITY =
+  "only the user may move a signal out of Now: the user was told it is urgent, so a session or a workflow step may not lower it; ask the user instead";
+
+/** The resolution outcome of Done, which sends nothing to the source. */
+const DONE_OUTCOME = "Done, nothing sent";
 
 const ALREADY_RESOLVED = "the signal is already resolved, so its actions can no longer be taken";
 
@@ -118,6 +162,16 @@ const SIGNAL_BUSY_FOR_ACT =
 /** The refusal of `withdraw` while an action on the same signal runs. */
 const SIGNAL_BUSY_FOR_WITHDRAW =
   "an action on this signal is running; withdraw it once it finishes";
+
+/** The refusal of `markDone` while an action or a withdrawal on one of its signals runs. */
+const SIGNALS_BUSY_FOR_MARK_DONE =
+  "an action or a withdrawal on one of these signals is still running; wait for it to finish, then read the signals again";
+
+/**
+ * Returns the ids in the order given, each once. A list operation treats an
+ * id given twice as given once.
+ */
+const removeDuplicateIds = (ids: ReadonlyArray<string>): ReadonlyArray<string> => [...new Set(ids)];
 
 /** The core's Dismiss: an action that resolves the signal and runs nothing. */
 const DISMISS_ACTION: BoundAction = {
@@ -162,64 +216,6 @@ const buildCoreActions = (input: SignalRaiseInput): ReadonlyArray<BoundAction> =
       return [];
   }
 };
-
-/**
- * Returns one Hand to an agent action for each workflow that has a signal
- * input accepting `kind`. Each binds `run.start` with the signal's id as the
- * first such input. A proposal gets none: a workflow input cannot accept
- * `proposal`, so work always keeps its Task.
- *
- * A workflow with another required input that has no default is left out.
- * The action fills only the signal input, so `run.start` would refuse its
- * click.
- */
-const buildHandToActions = (
-  signalId: string,
-  kind: string,
-  workflows: ReadonlyArray<{ readonly id: string; readonly definition: WorkflowDefinition }>,
-): ReadonlyArray<BoundAction> =>
-  workflows.flatMap(({ id, definition }) => {
-    const inputs = definition.inputs ?? [];
-    const input = inputs.find((declared) => declared.signal?.kinds.includes(kind));
-    const needsMore = inputs.some(
-      (declared) => declared !== input && declared.required && declared.default === undefined,
-    );
-    return input === undefined || needsMore
-      ? []
-      : [
-          {
-            id: `${HAND_TO_ACTION_PREFIX}${id}`,
-            label: `Hand to ${definition.name}`,
-            operation: {
-              op: "run.start",
-              input: { workflowId: id, inputs: { [input.name]: signalId } },
-            },
-          },
-        ];
-  });
-
-/**
- * Lists the raiser's actions that the core's own actions would make
- * ambiguous: one with the id or the label of a core action. The user picks an
- * action by its label, so two "Dismiss" buttons would be one too many.
- */
-const listCollisionIssues = (
-  own: ReadonlyArray<BoundAction>,
-  core: ReadonlyArray<BoundAction>,
-): ReadonlyArray<Issue> =>
-  own.flatMap((action, index) => {
-    const clash = core.find(
-      (coreAction) => coreAction.id === action.id || coreAction.label === action.label,
-    );
-    return clash === undefined
-      ? []
-      : [
-          {
-            path: ["actions", String(index)],
-            message: `The core adds its own "${clash.label}" action (id ${clash.id}) to this signal. Give your action another id and label.`,
-          },
-        ];
-  });
 
 /**
  * Returns the reply-filled operation of an action for `act`: the stored
@@ -283,6 +279,7 @@ const make = Effect.gen(function* () {
   const workflows = yield* workflowRepository;
   const audit = yield* AuditLog;
   const operations = yield* BoundOperations;
+  const host = yield* PluginHost;
 
   // The signals an action or a withdrawal is running on. A plugin action runs
   // outside any transaction, so this set is what stops a second click, or a
@@ -291,25 +288,31 @@ const make = Effect.gen(function* () {
   const actingOn = new Set<string>();
 
   /**
-   * Runs `effect` while it holds the claim on one signal, and gives the claim
-   * up when `effect` ends, however it ends. Fails with `InvalidState`, with
-   * the message `refusal`, when another caller holds the claim. Checking and
-   * taking the claim is one synchronous step, so two requests that arrive
-   * together cannot both take it.
+   * Runs `effect` while it holds the claim on every one of the signals, and
+   * gives the claims up when `effect` ends, however it ends. Fails with
+   * `InvalidState`, with the message `refusal`, when another caller holds the
+   * claim on any of them, and then takes none. Checking and taking the claims
+   * is one synchronous step, so two requests that arrive together cannot both
+   * take one.
    */
-  const withSignalClaimed = <A, E, R>(
-    signalId: string,
+  const withSignalsClaimed = <A, E, R>(
+    signalIds: ReadonlyArray<string>,
     refusal: string,
     effect: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E | InvalidState, R> =>
     Effect.acquireUseRelease(
       Effect.suspend(() => {
-        if (actingOn.has(signalId)) return Effect.fail(createInvalidStateError(refusal));
-        actingOn.add(signalId);
+        if (signalIds.some((id) => actingOn.has(id))) {
+          return Effect.fail(createInvalidStateError(refusal));
+        }
+        for (const id of signalIds) actingOn.add(id);
         return Effect.void;
       }),
       () => effect,
-      () => Effect.sync(() => actingOn.delete(signalId)),
+      () =>
+        Effect.sync(() => {
+          for (const id of signalIds) actingOn.delete(id);
+        }),
     );
 
   const readOrFail = (id: string): Effect.Effect<Signal, NotFound | SqlError> =>
@@ -320,6 +323,40 @@ const make = Effect.gen(function* () {
         onSome: Effect.succeed,
       }),
     );
+
+  /**
+   * Returns the signals with these ids, in the order of the ids, which must
+   * hold no duplicates. Fails with `NotFound` naming every id that has no
+   * signal, so a list operation changes nothing when one id is wrong.
+   */
+  const readManyOrFail = (
+    ids: ReadonlyArray<string>,
+  ): Effect.Effect<ReadonlyArray<Signal>, NotFound | SqlError> =>
+    Effect.gen(function* () {
+      const byId = new Map((yield* signals.readMany(ids)).map((signal) => [signal.id, signal]));
+      const missing = ids.filter((id) => !byId.has(id));
+      if (missing.length > 0) {
+        return yield* Effect.fail(
+          createNotFoundError(
+            `no signal has the id ${missing.join(", ")}; nothing was changed. Check the ids, then try again`,
+          ),
+        );
+      }
+      return ids.map((id) => byId.get(id)!);
+    });
+
+  /**
+   * Splits signals into the open ones, which a list operation changes, and
+   * the resolved ones, which it returns in `skipped`.
+   */
+  const splitResolved = (
+    list: ReadonlyArray<Signal>,
+  ): { readonly open: ReadonlyArray<Signal>; readonly skipped: ReadonlyArray<SkippedSignal> } => ({
+    open: list.filter((signal) => signal.status === "open"),
+    skipped: list
+      .filter((signal) => signal.status !== "open")
+      .map((signal) => ({ signalId: signal.id, reason: "resolved" as const })),
+  });
 
   /**
    * Checks an action's operation through the port, and returns the checked
@@ -379,31 +416,19 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Checks the raiser's own actions: each one's operation through the port,
-   * a typed reply only beside an operation, and no collision with a core
-   * action. Fails with `Validation` listing every problem.
+   * Checks the raiser's own actions with `listOwnActionIssues`. Fails with
+   * `Validation` listing every problem.
    */
   const checkRaisedActions = (
     own: ReadonlyArray<BoundAction>,
     core: ReadonlyArray<BoundAction>,
   ): Effect.Effect<void, Validation | SqlError> =>
     Effect.gen(function* () {
-      const issues: Array<Issue> = [...listCollisionIssues(own, core)];
-      for (const [index, action] of own.entries()) {
-        const path = ["actions", String(index)];
-        if (action.operation === null) {
-          if (action.field !== undefined) {
-            issues.push({
-              path: [...path, "field"],
-              message:
-                "A typed reply fills the input of the action's operation, and this action has none. Leave out field.",
-            });
-          }
-          continue;
-        }
-        const checked = yield* checkOperation(action.operation, action.field, path);
-        if (Result.isFailure(checked)) issues.push(...checked.failure.error.details.issues);
-      }
+      const issues = yield* Effect.provideService(
+        listOwnActionIssues(own, core),
+        BoundOperations,
+        operations,
+      );
       if (issues.length > 0) return yield* Effect.fail(createValidationError(issues));
     });
 
@@ -414,13 +439,19 @@ const make = Effect.gen(function* () {
    */
   const checkForDescribeLine = (
     action: SignalAction,
+    kind: string,
   ): Effect.Effect<PendingDescribeLine, SqlError> => {
     if (action.operation === null) {
-      return Effect.succeed({
+      if (action.id !== DONE_ACTION_ID) {
+        return Effect.succeed({ _tag: "written", describeLine: NO_OPERATION_DESCRIBE_LINE });
+      }
+      return Effect.map(host.findSignalKind(kind), (registered): PendingDescribeLine => ({
         _tag: "written",
-        describeLine:
-          action.id === DONE_ACTION_ID ? DONE_DESCRIBE_LINE : NO_OPERATION_DESCRIBE_LINE,
-      });
+        describeLine: Option.match(registered, {
+          onNone: () => DONE_DESCRIBE_LINE,
+          onSome: (pluginKind) => buildPluginDoneDescribeLine(pluginKind.pluginDisplayName),
+        }),
+      }));
     }
     return Effect.map(
       checkOperation(action.operation, action.field, []),
@@ -451,7 +482,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const pending = yield* Effect.forEach(list, (signal) =>
         signal.status === "open"
-          ? Effect.forEach(signal.actions, checkForDescribeLine)
+          ? Effect.forEach(signal.actions, (action) => checkForDescribeLine(action, signal.kind))
           : Effect.succeed([]),
       );
       const lines = yield* operations.describe(
@@ -543,26 +574,50 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Returns every open signal, oldest first, with the filters applied. The
-     * list is not paged: every client counts the whole of To do.
+     * Returns one view of the signals, with the filters applied:
      *
-     * - `kind` keeps one kind.
-     * - `source` keeps the kinds of one plugin, such as `github`. A core
-     *   kind belongs to no plugin, so it never matches a source.
+     * - `to-do`, the default: the open signals that are not snoozed, or
+     *   whose snooze ran out by now. The signals back from a snooze come
+     *   first, then the rest oldest first. The view is not paged: every
+     *   client counts the whole of To do.
+     * - `later`: the signals snoozed until a future time, soonest first,
+     *   one page at a time.
+     * - `done`: the resolved signals, newest resolution first, one page at a
+     *   time.
      *
-     * The describe lines are added only for the user, the only caller who
-     * can take an action.
+     * `kind` keeps one kind, and `source` the kinds of one plugin, such as
+     * `github`. A core kind belongs to no plugin, so it never matches a
+     * source. The describe lines are added only for the user, the only
+     * caller who can take an action.
+     *
+     * Fails with `Validation` when the cursor belongs to another view or
+     * another operation.
      */
     query: (
       filter: SignalFilter,
-    ): Effect.Effect<ReadonlyArray<Signal>, Unauthenticated | Forbidden | SqlError> =>
+    ): Effect.Effect<SignalPage, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         const caller = yield* requireGrant("signal.query");
-        const open = yield* signals.listOpen({
+        const listFilter = {
           ...(filter.kind === undefined ? {} : { kind: filter.kind }),
           ...(filter.source === undefined ? {} : { source: filter.source }),
-        });
-        return caller._tag === "user" ? yield* addDescribeLines(open) : open;
+        };
+        const request = { limit: filter.limit ?? DEFAULT_PAGE_LIMIT, cursor: filter.cursor };
+        const now = yield* nowIso;
+        const listing = yield* refuseCursor(
+          filter.view === "later"
+            ? signals.listLater(listFilter, request, now)
+            : filter.view === "done"
+              ? signals.listDone(listFilter, request)
+              : Effect.map(signals.listToDo(listFilter, now), (items) => ({
+                  items,
+                  nextCursor: undefined,
+                })),
+        );
+        return {
+          items: caller._tag === "user" ? yield* addDescribeLines(listing.items) : listing.items,
+          ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
+        };
       }),
 
     /**
@@ -599,8 +654,7 @@ const make = Effect.gen(function* () {
       input: SignalRaiseInput,
     ): Effect.Effect<SignalRaiseResult, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
-        const caller = yield* requireGrant("signal.raise");
-        if (caller._tag === "none") return yield* Effect.die("signal.raise reached with no actor");
+        const caller = yield* requireActor("signal.raise");
         const id = uuidToString(mintUuid());
         const own = input.actions ?? [];
         const handTo =
@@ -625,25 +679,15 @@ const make = Effect.gen(function* () {
           status: "open",
           createdAt,
         };
-        const encoded = yield* Effect.mapError(Schema.encodeEffect(Signal)(signal), (error) =>
-          createValidationError(
-            listSchemaIssues(error.issue),
-            "the signal does not fit the Signal schema once the core adds its own actions",
-          ),
-        );
-        // The raise input was checked against the same limit, but Accept
+        // The raise input was checked against the same limits, but Accept
         // copies the task and Hand to adds one action per workflow, so the
         // signal as written can still be larger.
-        if (countJsonBytes(encoded) > MAX_SIGNAL_BYTES) {
-          return yield* Effect.fail(
-            createValidationError([
-              {
-                path: [],
-                message: `With the actions the core adds, the signal is larger than ${MAX_SIGNAL_BYTES} bytes of JSON. Shorten its blocks or the task description, and link to the source for the rest.`,
-              },
-            ]),
-          );
-        }
+        yield* Effect.mapError(checkSignalFits(signal), (refusal) =>
+          createValidationError(
+            refusal.error.details.issues,
+            "the signal does not fit the contract once the core adds its own actions",
+          ),
+        );
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -695,8 +739,8 @@ const make = Effect.gen(function* () {
     act: (input: ActInput): Effect.Effect<Signal, BoundOperationError> =>
       Effect.gen(function* () {
         const caller = yield* requireUserActor("signal.act", ONLY_THE_USER);
-        return yield* withSignalClaimed(
-          input.id,
+        return yield* withSignalsClaimed(
+          [input.id],
           SIGNAL_BUSY_FOR_ACT,
           Effect.gen(function* () {
             const signal = yield* readOrFail(input.id);
@@ -757,9 +801,7 @@ const make = Effect.gen(function* () {
       Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
     > =>
       Effect.gen(function* () {
-        const caller = yield* requireGrant("signal.withdraw");
-        if (caller._tag === "none")
-          return yield* Effect.die("signal.withdraw reached with no actor");
+        const caller = yield* requireActor("signal.withdraw");
         const actor = buildActorStamp(caller);
         const withdrawInTransaction = withTransaction(
           sql,
@@ -790,10 +832,228 @@ const make = Effect.gen(function* () {
               payload: { signalId: input.id, reason: input.reason },
               at: resolution.at,
             });
-            return { ...signal, status: "resolved" as const, resolution };
+            // Read again rather than patched: resolving also deleted the
+            // signal's snooze.
+            return yield* readOrFail(input.id);
           }),
         );
-        return yield* withSignalClaimed(input.id, SIGNAL_BUSY_FOR_WITHDRAW, withdrawInTransaction);
+        return yield* withSignalsClaimed(
+          [input.id],
+          SIGNAL_BUSY_FOR_WITHDRAW,
+          withdrawInTransaction,
+        );
+      }),
+
+    /**
+     * Marks open signals done as the user: resolves each one as `decided`
+     * with the core's Done action, which sends nothing to the source, and
+     * returns the ids it resolved and the ones it skipped because they had
+     * already resolved.
+     *
+     * Fails with:
+     *
+     * - `Forbidden` for any caller but the user;
+     * - `NotFound` when an id names no signal;
+     * - `Validation`, naming the ids, when a signal's kind has no Done
+     *   action. That is checked before a signal is skipped as resolved, so a
+     *   client that offers Done where there is none hears of it;
+     * - `InvalidState` when an action or a withdrawal on one of the signals
+     *   is running. The whole call is refused rather than that signal
+     *   skipped, because the running action may still fail and leave the
+     *   signal open, so it is not resolved yet.
+     *
+     * Nothing is changed when the call fails.
+     */
+    markDone: (
+      input: SignalIdsInput,
+    ): Effect.Effect<
+      SignalMarkDoneResult,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        const caller = yield* requireUserActor("signal.markDone", ONLY_THE_USER_MARKS_DONE);
+        const ids = removeDuplicateIds(input.signalIds);
+        // The claims are taken before the signals are read, as in `act`, so
+        // Done never resolves a signal whose action is still on its way.
+        return yield* withSignalsClaimed(
+          ids,
+          SIGNALS_BUSY_FOR_MARK_DONE,
+          withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const list = yield* readManyOrFail(ids);
+              const issues = list.flatMap((signal, index): ReadonlyArray<Issue> =>
+                signal.actions.some((action) => action.id === DONE_ACTION_ID)
+                  ? []
+                  : [
+                      {
+                        path: ["signalIds", String(input.signalIds.indexOf(ids[index]!))],
+                        message: `The signal ${signal.id} is of kind ${signal.kind}, which has no Done action. Answer it with one of its own actions instead.`,
+                      },
+                    ],
+              );
+              if (issues.length > 0) return yield* Effect.fail(createValidationError(issues));
+              const { open, skipped } = splitResolved(list);
+              const actor = buildActorStamp(caller);
+              const at = yield* nowIso;
+              const resolution: SignalResolution = {
+                kind: "decided",
+                actionId: DONE_ACTION_ID,
+                outcome: DONE_OUTCOME,
+                actor,
+                origin: buildResolutionOrigin(caller),
+                at,
+              };
+              const resolved = yield* signals.resolveMany(
+                open.map((signal) => signal.id),
+                resolution,
+              );
+              const done = ids.filter((id) => resolved.has(id));
+              if (done.length > 0) {
+                yield* audit.append({
+                  kind: "signal.markedDone",
+                  actor,
+                  record: { topic: "signal", ids: done },
+                  payload: { signalIds: done },
+                  at,
+                });
+              }
+              return { done, skipped };
+            }),
+          ),
+        );
+      }),
+
+    /**
+     * Snoozes open signals until `until`, and returns the ids it snoozed and
+     * the ones it skipped because they had already resolved. A signal that
+     * is already snoozed gets the new time. Any holder of `signal.write` may
+     * snooze, because a snooze is not an answer.
+     *
+     * Fails with `Validation` when `until` is not after now, and with
+     * `NotFound` when an id names no signal. Nothing is changed when the
+     * call fails.
+     */
+    snooze: (
+      input: SignalSnoozeInput,
+    ): Effect.Effect<
+      SignalSnoozeResult,
+      Unauthenticated | Forbidden | Validation | NotFound | SqlError
+    > =>
+      Effect.gen(function* () {
+        const caller = yield* requireActor("signal.snooze");
+        const ids = removeDuplicateIds(input.signalIds);
+        const now = yield* nowIso;
+        // The contract decodes `until` to a canonical UTC timestamp, so two
+        // times compare as text.
+        if (input.until <= now) {
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: ["until"],
+                message: `The time ${input.until} is not in the future. Pick a time after ${now}.`,
+              },
+            ]),
+          );
+        }
+        const actor = buildActorStamp(caller);
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const { open, skipped } = splitResolved(yield* readManyOrFail(ids));
+            const snoozed = open.map((signal) => signal.id);
+            if (snoozed.length > 0) {
+              yield* signals.snooze(snoozed, { until: input.until, snoozedAt: now, actor });
+              yield* audit.append({
+                kind: "signal.snoozed",
+                actor,
+                record: { topic: "signal", ids: snoozed },
+                payload: { signalIds: snoozed, until: input.until },
+                at: now,
+              });
+            }
+            return { snoozed, skipped };
+          }),
+        );
+      }),
+
+    /**
+     * Puts snoozed signals back on To do, and returns the ids it unsnoozed
+     * and the ones it skipped because they had already resolved. An open
+     * signal that is not snoozed is in neither list, and nothing is written
+     * for it. Any holder of `signal.write` may unsnooze.
+     *
+     * Fails with `NotFound` when an id names no signal, and then changes
+     * nothing.
+     */
+    unsnooze: (
+      input: SignalIdsInput,
+    ): Effect.Effect<SignalUnsnoozeResult, Unauthenticated | Forbidden | NotFound | SqlError> =>
+      Effect.gen(function* () {
+        const caller = yield* requireActor("signal.unsnooze");
+        const ids = removeDuplicateIds(input.signalIds);
+        const actor = buildActorStamp(caller);
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const { open, skipped } = splitResolved(yield* readManyOrFail(ids));
+            const deleted = yield* signals.unsnooze(open.map((signal) => signal.id));
+            const unsnoozed = ids.filter((id) => deleted.has(id));
+            if (unsnoozed.length > 0) {
+              yield* audit.append({
+                kind: "signal.unsnoozed",
+                actor,
+                record: { topic: "signal", ids: unsnoozed },
+                payload: { signalIds: unsnoozed },
+              });
+            }
+            return { unsnoozed, skipped };
+          }),
+        );
+      }),
+
+    /**
+     * Moves open `urgent` signals to `high` as the user, which takes them out
+     * of Now, and returns the ids it lowered and the ones it skipped because
+     * they had already resolved. An open signal of any other priority is in
+     * neither list. Each lowered signal is marked lowered, so the code that
+     * raises a replacement can read that mark through
+     * `isPriorityLowered` and keep the lower priority (issue #526).
+     *
+     * Fails with `Forbidden` for any caller but the user, and with
+     * `NotFound` when an id names no signal. Nothing is changed when the call
+     * fails.
+     */
+    lowerPriority: (
+      input: SignalIdsInput,
+    ): Effect.Effect<
+      SignalLowerPriorityResult,
+      Unauthenticated | Forbidden | NotFound | SqlError
+    > =>
+      Effect.gen(function* () {
+        const caller = yield* requireUserActor(
+          "signal.lowerPriority",
+          ONLY_THE_USER_LOWERS_PRIORITY,
+        );
+        const ids = removeDuplicateIds(input.signalIds);
+        const actor = buildActorStamp(caller);
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const { open, skipped } = splitResolved(yield* readManyOrFail(ids));
+            const changed = yield* signals.lowerPriority(open.map((signal) => signal.id));
+            const lowered = ids.filter((id) => changed.has(id));
+            if (lowered.length > 0) {
+              yield* audit.append({
+                kind: "signal.priorityLowered",
+                actor,
+                record: { topic: "signal", ids: lowered },
+                payload: { signalIds: lowered },
+              });
+            }
+            return { lowered, skipped };
+          }),
+        );
       }),
   };
 });
@@ -806,5 +1066,5 @@ export class SignalService extends Context.Service<SignalService, Effect.Success
 export const SignalServiceLayer: Layer.Layer<
   SignalService,
   never,
-  SqlClient.SqlClient | AuditLog | BoundOperations
+  SqlClient.SqlClient | AuditLog | BoundOperations | PluginHost
 > = Layer.effect(SignalService)(make);

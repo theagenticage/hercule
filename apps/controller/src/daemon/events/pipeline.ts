@@ -1,14 +1,20 @@
 /**
- * The loop that runs the event pipeline on an interval.
+ * The loops that run the event pipeline on an interval.
  *
- * Each tick has two steps:
+ * Each tick of the main loop has two steps:
  *
  * 1. The router reads the log after its cursor, and every routing table writes
  *    a row for each route that matched.
- * 2. Every delivery reads its rows and sends the ones that can be sent now.
+ * 2. Every tick delivery reads its rows and sends the ones that can be sent
+ *    now.
  *
  * These are two steps rather than one call chain, because a routing table
  * writes inside a transaction, while a delivery waits on a runner outside it.
+ *
+ * The signal raise delivery runs on a second loop beside the first. It waits
+ * on each plugin's `build`, which may call the source for up to
+ * `BUILD_TIMEOUT_SECONDS`, and that wait must hold back neither the routing
+ * of new events nor the other deliveries.
  *
  * The routing tables and deliveries are listed in `routing/index.ts`.
  */
@@ -17,15 +23,18 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { AuditLog } from "../../events";
 import type { Notifier } from "../../notifications";
+import type { PluginHost } from "../../plugins";
 import type { RunService } from "../../runs";
 import type { SessionService } from "../../sessions";
+import type { SignalRaises } from "../../signals";
 import type { TriggerEffects, TriggerHealth } from "../../workflows";
 import { PromotionState } from "../../promotion";
 import { absorbFailures } from "../absorbing";
 import { EventRouter } from "./event-router";
 import { Live } from "../sessions";
-import { buildDeliveries, buildRoutingTables } from "./routing";
+import { buildRoutingTables, buildTickDeliveries, signalRaiseDelivery } from "./routing";
 
 /** How often the pipeline looks for events the router has not read. */
 const EVENT_ROUTING_INTERVAL: Duration.Duration = Duration.seconds(1);
@@ -39,7 +48,8 @@ export const EventRoutingInterval = Context.Reference<Duration.Duration>(
 const make = Effect.gen(function* () {
   const router = yield* EventRouter;
   const routingTables = yield* buildRoutingTables;
-  const deliveries = yield* buildDeliveries;
+  const deliveries = yield* buildTickDeliveries;
+  const raises = yield* signalRaiseDelivery;
   const promotion = yield* PromotionState;
 
   const tick = Effect.gen(function* () {
@@ -51,26 +61,38 @@ const make = Effect.gen(function* () {
     }
   });
 
-  return {
-    /**
-     * Runs a tick every interval, forever. A tick that fails is logged and
-     * the next one runs, because one bad tick must not stop the pipeline that
-     * every later matched input depends on.
-     */
-    driving: Effect.gen(function* () {
+  /**
+   * Runs `step` every interval, forever. A step that fails is logged and the
+   * next one runs, because one bad step must not stop the loop that every
+   * later event depends on. `step` passes the promotion gate itself.
+   */
+  const repeatEveryInterval = <E>(failureMessage: string, step: Effect.Effect<void, E>) =>
+    Effect.gen(function* () {
       const interval = yield* EventRoutingInterval;
       while (true) {
         yield* Effect.sleep(interval);
-        yield* absorbFailures(
+        yield* absorbFailures(failureMessage, step);
+      }
+    });
+
+  return {
+    /** Runs the tick loop and the signal raise loop side by side, forever. */
+    driving: Effect.all(
+      [
+        repeatEveryInterval(
           "Running a tick of the event pipeline failed",
           promotion.whenServing(tick),
-        );
-      }
-    }),
+        ),
+        // The signal raise delivery passes the gate once per raise, so a
+        // freeze never waits for a whole pass of builds.
+        repeatEveryInterval(`Delivering ${raises.name} failed`, raises.deliverWaiting()),
+      ],
+      { concurrency: "unbounded", discard: true },
+    ),
   };
 });
 
-/** The loop that runs the event pipeline. */
+/** The loops that run the event pipeline. */
 export class Pipeline extends Context.Service<Pipeline, Effect.Success<typeof make>>()(
   "hercule/controller/daemon/Pipeline",
 ) {}
@@ -87,4 +109,7 @@ export const PipelineLayer: Layer.Layer<
   | Live
   | PromotionState
   | SqlClient.SqlClient
+  | PluginHost
+  | SignalRaises
+  | AuditLog
 > = Layer.effect(Pipeline)(make);

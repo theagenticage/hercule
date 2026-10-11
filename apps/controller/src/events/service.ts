@@ -341,6 +341,8 @@ const make = Effect.gen(function* () {
               dedupKey,
               refs,
               url: null,
+              title: null,
+              author: null,
               payload: decoded.payload,
               raw: null,
               actor,

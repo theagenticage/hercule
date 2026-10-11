@@ -32,6 +32,7 @@ import {
   type AnswerOperation,
   type BoundAction,
   type BoundOperation,
+  type CoreNotificationKind,
   type DescribeLine,
   type Forbidden,
   type Id,
@@ -64,6 +65,7 @@ import { AuditLog } from "../events";
 import { BoundOperations, type BoundOperationError } from "../bound-actions";
 import { Notifier } from "./notifier";
 import { notificationRepository } from "./repository";
+import { SignalBuildFailures } from "./signal-build-failures";
 
 /** The input of `notification.query`: the filter, plus the page size, cursor and sort. */
 const QueryInput = Schema.Struct({
@@ -104,6 +106,9 @@ const RUN_CANNOT_WITHDRAW =
 /** The refusal for a caller who withdraws a notification someone else produced. */
 const NOT_THE_PRODUCER = "only the producer of a notification may withdraw it";
 
+/** The kind of the notification that counts its signal kind's failed builds when it is read. */
+const SIGNAL_BUILD_FAILED_KIND: CoreNotificationKind = "core.signal-build-failed";
+
 /** The describe line of an answer that runs nothing. */
 const NO_OPERATION_DESCRIBE_LINE: DescribeLine = [{ kind: "text", text: "Does nothing" }];
 
@@ -137,6 +142,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
   const operations = yield* BoundOperations;
+  const buildFailures = yield* SignalBuildFailures;
 
   /**
    * Checks an answer's stored operation again before it is described. A
@@ -189,6 +195,26 @@ const make = Effect.gen(function* () {
       return { ...notification, actions };
     });
 
+  /**
+   * Returns a `core.signal-build-failed` notification with the number of
+   * failed builds of its signal kind from its event on, and any other
+   * notification as stored. The event is the one whose signal's build
+   * failed first, so the count includes that failure.
+   */
+  const addFailedBuildCount = (
+    notification: Notification,
+  ): Effect.Effect<Notification, SqlError> => {
+    if (notification.kind !== SIGNAL_BUILD_FAILED_KIND) return Effect.succeed(notification);
+    const subject = notification.subject.find((candidate) => candidate.kind === "signalKind");
+    if (subject === undefined || notification.eventId === undefined) {
+      return Effect.succeed(notification);
+    }
+    return Effect.map(
+      buildFailures.countSince(subject.id, notification.eventId),
+      (failedBuildCount) => ({ ...notification, failedBuildCount }),
+    );
+  };
+
   const readOrFail = (id: string): Effect.Effect<Notification, NotFound | SqlError> =>
     Effect.flatMap(
       notifications.read(id),
@@ -237,11 +263,9 @@ const make = Effect.gen(function* () {
             direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
           }),
         );
+        const items = yield* Effect.forEach(listing.items, addFailedBuildCount);
         return {
-          items:
-            caller._tag === "user"
-              ? yield* Effect.forEach(listing.items, addDescribeLines)
-              : listing.items,
+          items: caller._tag === "user" ? yield* Effect.forEach(items, addDescribeLines) : items,
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
         };
       }),
@@ -256,7 +280,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Notification, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         const caller = yield* requireGrant("notification.read");
-        const notification = yield* readOrFail(id);
+        const notification = yield* addFailedBuildCount(yield* readOrFail(id));
         return caller._tag === "user" ? yield* addDescribeLines(notification) : notification;
       }),
 
@@ -413,5 +437,5 @@ export class NotificationService extends Context.Service<
 export const NotificationServiceLayer: Layer.Layer<
   NotificationService,
   never,
-  SqlClient.SqlClient | AuditLog | Notifier | BoundOperations
+  SqlClient.SqlClient | AuditLog | Notifier | BoundOperations | SignalBuildFailures
 > = Layer.effect(NotificationService)(make);

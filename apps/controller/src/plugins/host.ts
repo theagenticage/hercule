@@ -35,6 +35,7 @@ import {
   type KeyValueStore,
   type Plugin,
   type PluginCapability,
+  type PluginMark,
   type PluginSecrets,
   type RegistrationHost,
 } from "@hercule/plugin-host";
@@ -64,8 +65,11 @@ import {
   type RegisteredEventKind,
   type RegisteredEventSource,
 } from "./event-sources";
+import type { RegisteredSignalKind } from "./signal-kinds";
+import { checkPluginMark } from "./mark";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
 import type { IngestExecutor } from "./ingest-executor";
+import type { OpenSignals } from "./open-signals";
 import { PromotionState } from "../promotion";
 import { pluginRepository, type NewContribution } from "./repository";
 import {
@@ -107,6 +111,10 @@ export interface LoadedPlugin {
   readonly displayName: string;
   readonly hostApi: number;
   readonly capabilities: ReadonlyArray<PluginCapability>;
+  /** The plugin's mark, absent when it declares none or the check dropped it. */
+  readonly mark?: PluginMark;
+  /** Why the check dropped the plugin's mark, as one sentence. */
+  readonly markError?: string;
   /** Absent for a `refused` plugin: the schema is derived only after the manifest is accepted. */
   readonly configSchema?: JsonSchema.JsonSchema;
   readonly status: PluginStatus;
@@ -135,6 +143,8 @@ const toLoadedPlugin = (entry: Entry): LoadedPlugin => ({
   displayName: entry.displayName,
   hostApi: entry.hostApi,
   capabilities: entry.capabilities,
+  ...(entry.mark === undefined ? {} : { mark: entry.mark }),
+  ...(entry.markError === undefined ? {} : { markError: entry.markError }),
   ...(entry.configSchema === undefined ? {} : { configSchema: entry.configSchema }),
   status: entry.status,
 });
@@ -815,6 +825,7 @@ const make = Effect.gen(function* () {
             displayName: manifest.displayName,
             hostApi: manifest.hostApi,
             capabilities: manifest.capabilities,
+            ...checkPluginMark(manifest.mark),
           };
 
           const inspected = inspectManifest(manifest);
@@ -930,6 +941,22 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the signal kind with this qualified name, such as
+     * `github/review-requested`, whatever the status of its plugin, or `None`
+     * when no plugin this boot loaded declared it. A signal whose raise was
+     * decided before its plugin stopped is still written, from its event, so
+     * the lookup does not filter by status.
+     */
+    findSignalKind: (kind: string): Effect.Effect<Option.Option<RegisteredSignalKind>> =>
+      Effect.map(Ref.get(eventSources), (sources) =>
+        Option.fromUndefinedOr(
+          sources
+            .flatMap((source) => source.signalKinds)
+            .find((registered) => registered.kind === kind),
+        ),
+      ),
+
+    /**
      * Returns the workflow actions that new work may use, sorted by id: the
      * built-in actions and the actions of every active plugin. Saving a
      * workflow and starting a run read this list, so the actions of a plugin
@@ -1013,6 +1040,7 @@ export const PluginHostLayer: Layer.Layer<
   | Notifier
   | ConnectionTypes
   | IngestExecutor
+  | OpenSignals
   | PromotionState
 > = Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer));
 

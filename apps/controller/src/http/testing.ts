@@ -50,6 +50,7 @@ import {
   IngestReconcileInterval,
   Live,
   LostRunnerSweepInterval,
+  OpenSignalsLayer,
   RunFibers,
   SchedulerInterval,
   AttachmentSweepInterval,
@@ -170,7 +171,7 @@ const buildServices = (
         Layer.provideMerge(RunnerConnectionsLayer),
         Layer.provideMerge(
           PluginHostLayer.pipe(
-            Layer.provide(IngestExecutorLayer),
+            Layer.provide([IngestExecutorLayer, OpenSignalsLayer]),
             Layer.provideMerge(ConnectionTypesLayer),
             Layer.provideMerge(PluginConfigsLayer),
           ),

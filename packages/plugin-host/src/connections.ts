@@ -149,7 +149,12 @@ export interface ExternalAccount {
    * validation, because an empty id would match any other empty id.
    */
   readonly accountId: string;
-  readonly detail?: string;
+  /**
+   * One sentence the Connection shows as long as these credentials are in
+   * use, when they work but cost the user something: "This fine-grained
+   * token cannot read notifications, so review requests raise no signal."
+   */
+  readonly warning?: string;
 }
 
 /**

@@ -1,7 +1,16 @@
 import { assert, describe, it } from "vitest";
 import {
+  addCalendarDays,
   computeMinutesOfDay,
+  computeNextMidnight,
+  computeWeekday,
+  computeZonedInstant,
   chooseStamps,
+  formatClock,
+  formatRelativeDay,
+  formatRelativeMoment,
+  formatShortMoment,
+  readWallClock,
   formatDay,
   formatDayStamp,
   formatPreciseStamp,
@@ -292,5 +301,177 @@ describe("computeMinutesOfDay", () => {
 
   it("returns undefined for a zone this runtime does not know", () => {
     assert.isUndefined(computeMinutesOfDay(AT, "Mars/Olympus"));
+  });
+});
+
+// Sunday 11 October 2026, 10:00 in Amsterdam (UTC+2).
+const SUNDAY_TEN = new Date("2026-10-11T08:00:00Z");
+const AMSTERDAM = "Europe/Amsterdam";
+
+describe("formatClock", () => {
+  it("formats the clock time in the zone, on a 24-hour clock", () => {
+    assert.strictEqual(formatClock(SUNDAY_TEN, AMSTERDAM), "10:00");
+    assert.strictEqual(formatClock(new Date("2026-10-11T22:05:00Z"), AMSTERDAM), "00:05");
+  });
+
+  it("returns undefined for a zone this runtime cannot format", () => {
+    assert.isUndefined(formatClock(SUNDAY_TEN, "Not/AZone"));
+  });
+});
+
+describe("formatRelativeDay and formatRelativeMoment", () => {
+  const at = (iso: string) => formatRelativeMoment(new Date(iso), SUNDAY_TEN, AMSTERDAM);
+
+  it("names today, tomorrow and yesterday in lower case", () => {
+    assert.strictEqual(at("2026-10-11T12:00:00Z"), "today 14:00");
+    assert.strictEqual(at("2026-10-12T07:00:00Z"), "tomorrow 09:00");
+    assert.strictEqual(at("2026-10-10T08:42:00Z"), "yesterday 10:42");
+  });
+
+  it("names the weekday up to a week ahead and six days back", () => {
+    assert.strictEqual(at("2026-10-13T07:00:00Z"), "Tuesday 09:00");
+    assert.strictEqual(at("2026-10-18T07:00:00Z"), "Sunday 09:00");
+    assert.strictEqual(at("2026-10-05T07:00:00Z"), "Monday 09:00");
+  });
+
+  it("names the date further off", () => {
+    assert.strictEqual(at("2026-11-04T08:00:00Z"), "4 Nov 09:00");
+    assert.strictEqual(at("2026-10-04T07:00:00Z"), "4 Oct 09:00");
+  });
+
+  it("counts calendar days in the zone, not 24 hours", () => {
+    // 23:30 tonight in Amsterdam is already tomorrow in UTC, and the reverse.
+    assert.strictEqual(
+      formatRelativeDay(new Date("2026-10-11T21:30:00Z"), SUNDAY_TEN, AMSTERDAM),
+      "today",
+    );
+    assert.strictEqual(
+      formatRelativeDay(new Date("2026-10-11T22:30:00Z"), SUNDAY_TEN, AMSTERDAM),
+      "tomorrow",
+    );
+  });
+
+  it("returns undefined for a zone this runtime cannot format", () => {
+    assert.isUndefined(formatRelativeMoment(SUNDAY_TEN, SUNDAY_TEN, "Not/AZone"));
+  });
+});
+
+describe("formatShortMoment", () => {
+  const at = (iso: string) => formatShortMoment(new Date(iso), SUNDAY_TEN, AMSTERDAM);
+
+  it("shows only the clock today", () => {
+    assert.strictEqual(at("2026-10-11T12:00:00Z"), "14:00");
+  });
+
+  it("shows the short weekday on another date within a week", () => {
+    assert.strictEqual(at("2026-10-12T07:00:00Z"), "Mon 09:00");
+    assert.strictEqual(at("2026-10-18T07:00:00Z"), "Sun 09:00");
+  });
+
+  it("shows the date further off", () => {
+    assert.strictEqual(at("2026-11-04T08:00:00Z"), "4 Nov 09:00");
+  });
+});
+
+describe("readWallClock", () => {
+  it("reads the date and the clock in the zone, with midnight at hour 0", () => {
+    assert.deepStrictEqual(readWallClock(new Date("2026-10-11T22:05:09Z"), AMSTERDAM), {
+      year: 2026,
+      month: 10,
+      day: 12,
+      hour: 0,
+      minute: 5,
+      second: 9,
+    });
+  });
+
+  it("returns undefined for an invalid date or zone", () => {
+    assert.isUndefined(readWallClock(new Date(Number.NaN), AMSTERDAM));
+    assert.isUndefined(readWallClock(SUNDAY_TEN, "Not/AZone"));
+  });
+});
+
+describe("addCalendarDays and computeWeekday", () => {
+  it("rolls over months and years", () => {
+    assert.deepStrictEqual(addCalendarDays({ year: 2026, month: 12, day: 30 }, 3), {
+      year: 2027,
+      month: 1,
+      day: 2,
+    });
+  });
+
+  it("returns the weekday from Sunday 0", () => {
+    assert.strictEqual(computeWeekday({ year: 2026, month: 10, day: 11 }), 0);
+    assert.strictEqual(computeWeekday({ year: 2026, month: 10, day: 12 }), 1);
+  });
+});
+
+describe("computeZonedInstant", () => {
+  const iso = (instant: number | undefined) =>
+    instant === undefined ? undefined : new Date(instant).toISOString();
+
+  it("computes the instant the zone's clock reads the time", () => {
+    assert.strictEqual(
+      iso(computeZonedInstant({ year: 2026, month: 10, day: 12 }, 9, 0, AMSTERDAM)),
+      "2026-10-12T07:00:00.000Z",
+    );
+    assert.strictEqual(
+      iso(computeZonedInstant({ year: 2026, month: 10, day: 12 }, 9, 0, "Asia/Kolkata")),
+      "2026-10-12T03:30:00.000Z",
+    );
+  });
+
+  it("uses the offset after a change on the day the clock changes", () => {
+    // Amsterdam moves back from UTC+2 to UTC+1 at 03:00 on 25 October 2026.
+    assert.strictEqual(
+      iso(computeZonedInstant({ year: 2026, month: 10, day: 25 }, 9, 0, AMSTERDAM)),
+      "2026-10-25T08:00:00.000Z",
+    );
+  });
+
+  it("returns the later instant of a repeated hour", () => {
+    // New York repeats 01:00 to 02:00 on 1 November 2026: first at UTC-4, then at UTC-5.
+    assert.strictEqual(
+      iso(computeZonedInstant({ year: 2026, month: 11, day: 1 }, 1, 30, "America/New_York")),
+      "2026-11-01T06:30:00.000Z",
+    );
+    // Amsterdam repeats 02:00 to 03:00 on 25 October 2026: first at UTC+2, then at UTC+1.
+    assert.strictEqual(
+      iso(computeZonedInstant({ year: 2026, month: 10, day: 25 }, 2, 30, AMSTERDAM)),
+      "2026-10-25T01:30:00.000Z",
+    );
+  });
+
+  it("returns undefined for a time the clock skips", () => {
+    // New York skips 02:00 to 03:00 on 8 March 2026.
+    assert.isUndefined(
+      computeZonedInstant({ year: 2026, month: 3, day: 8 }, 2, 30, "America/New_York"),
+    );
+    // Samoa skipped 30 December 2011 when it moved across the date line.
+    assert.isUndefined(
+      computeZonedInstant({ year: 2011, month: 12, day: 30 }, 9, 0, "Pacific/Apia"),
+    );
+  });
+
+  it("returns undefined for a zone this runtime cannot format", () => {
+    assert.isUndefined(computeZonedInstant({ year: 2026, month: 10, day: 12 }, 9, 0, "Not/AZone"));
+  });
+});
+
+describe("computeNextMidnight", () => {
+  it("returns the start of the next date in the zone", () => {
+    assert.strictEqual(
+      computeNextMidnight(SUNDAY_TEN, AMSTERDAM)?.toISOString(),
+      "2026-10-11T22:00:00.000Z",
+    );
+    // The night the clock moves back, the next midnight is at UTC+1.
+    assert.strictEqual(
+      computeNextMidnight(new Date("2026-10-25T10:00:00Z"), AMSTERDAM)?.toISOString(),
+      "2026-10-25T23:00:00.000Z",
+    );
+  });
+
+  it("returns undefined for a zone this runtime cannot format", () => {
+    assert.isUndefined(computeNextMidnight(SUNDAY_TEN, "Not/AZone"));
   });
 });

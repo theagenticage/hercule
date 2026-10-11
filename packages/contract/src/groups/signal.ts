@@ -16,7 +16,13 @@
  * Spec 10 §9 owns the record and its rules; spec 11 §2 (`signal`) owns the
  * operations.
  */
-import { PluginId } from "@hercule/plugin-host";
+import {
+  MAX_BLOCK_NAME_LENGTH,
+  MAX_BLOCK_URL_LENGTH,
+  MAX_MESSAGE_TEXT_LENGTH,
+  MAX_SIGNAL_TITLE_LENGTH,
+  PluginId,
+} from "@hercule/plugin-host";
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
@@ -29,7 +35,8 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
-import { Actor, Id, isQualifiedId, Timestamp } from "../ids";
+import { Actor, Id, isQualifiedId, Timestamp, TimestampWithOffset } from "../ids";
+import { cursorParams, MAX_PAGE_LIMIT, page } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 import { EventId } from "./event";
@@ -46,11 +53,19 @@ import {
 } from "./notification";
 import { TaskCreateInput, TaskPriority } from "./task";
 
+/**
+ * Re-exported from the package plugins are written against, so a plugin cuts
+ * its text to the same limits this API checks.
+ */
+export {
+  MAX_BLOCK_NAME_LENGTH,
+  MAX_BLOCK_URL_LENGTH,
+  MAX_MESSAGE_TEXT_LENGTH,
+  MAX_SIGNAL_TITLE_LENGTH,
+} from "@hercule/plugin-host";
+
 /** The longest kind: a core kind, or a plugin's qualified kind such as `github/review-requested`. */
 export const MAX_SIGNAL_KIND_LENGTH = 128;
-
-/** The longest title. A title is a line, not a paragraph. */
-export const MAX_SIGNAL_TITLE_LENGTH = 512;
 
 /** The longest `asker`, the name of who waits on the user. */
 export const MAX_SIGNAL_ASKER_LENGTH = 256;
@@ -73,9 +88,6 @@ export const MAX_TEXT_BLOCK_LENGTH = 32 * 1024;
 /** The most messages a messages block holds. The producer records the rest in `omitted`. */
 export const MAX_BLOCK_MESSAGES = 20;
 
-/** The longest text of one message, in characters. The producer sets `truncated` when it cuts. */
-export const MAX_MESSAGE_TEXT_LENGTH = 16 * 1024;
-
 /** The most people one message lists as recipients, in `to` and in `cc` each. */
 export const MAX_MESSAGE_RECIPIENTS = 50;
 
@@ -90,12 +102,6 @@ export const MAX_CHECK_LOG_LINES = 40;
 
 /** The longest log of a check, in characters, so 40 very long lines are still refused. */
 export const MAX_CHECK_LOG_LENGTH = 8 * 1024;
-
-/** The longest name a block shows: a person, a branch, a file path, a check. */
-export const MAX_BLOCK_NAME_LENGTH = 256;
-
-/** The longest link a block carries. */
-export const MAX_BLOCK_URL_LENGTH = 2048;
 
 /**
  * The longest typed reply, in characters. The reply fills a field of the
@@ -348,7 +354,10 @@ export type Block = Schema.Schema.Type<typeof Block>;
  *
  * - `event`: the core raised it from one event of a plugin's kind. `threadRef`
  *   is the thread it is about. `screened` is set when the Screener let it
- *   through.
+ *   through. `notScreened` is set when the kind's rule asked for the Screener
+ *   but no Screener decided, so the signal was raised anyway: a missed
+ *   question costs more than one the user marks Done. Its `reason` is
+ *   `no-screener` when no workflow screens signals.
  * - `api`: an actor raised it with `signal.raise`. `runId` and `workflowId`
  *   are set when the actor is a run's session or step. `assistantId` is set
  *   when the actor is a session of an assistant's conversation, so a client
@@ -362,6 +371,7 @@ export const SignalOrigin = Schema.Union([
     connectionId: Id,
     threadRef: Schema.String,
     screened: Schema.optionalKey(Schema.Struct({ runId: Id, reason: Schema.String })),
+    notScreened: Schema.optionalKey(Schema.Struct({ reason: Schema.Literal("no-screener") })),
   }),
   Schema.Struct({
     type: Schema.Literal("api"),
@@ -461,17 +471,123 @@ export const Signal = Schema.Struct({
 export type Signal = Schema.Schema.Type<typeof Signal>;
 
 /**
- * The filters of `signal.query`. `view` picks the list; only `to-do` exists
- * so far, the open signals that are not snoozed. `source` is the id of the
- * plugin whose kind the signal is.
+ * The lists `signal.query` returns:
+ *
+ * - `to-do`: the open signals that are not snoozed, or whose snooze has run
+ *   out, oldest first. It is not paged: every client counts the whole list.
+ * - `later`: the open signals snoozed until a future time, soonest first.
+ * - `done`: the resolved signals, newest first.
+ */
+export const SignalView = Schema.Literals(["to-do", "later", "done"]);
+
+export type SignalView = Schema.Schema.Type<typeof SignalView>;
+
+/**
+ * The filters of `signal.query`. `view` picks the list, and defaults to
+ * `to-do`. `source` is the id of the plugin whose kind the signal is.
+ *
+ * `later` and `done` are read page by page with `limit` and `cursor`. Each
+ * view has one fixed order, so there is no `sort`. `to-do` refuses `limit`
+ * and `cursor`, because it always returns the whole list.
  */
 export const SignalFilter = Schema.Struct({
-  view: Schema.optionalKey(Schema.Literals(["to-do"])),
+  view: Schema.optionalKey(SignalView),
   kind: Schema.optionalKey(SignalKind),
   source: Schema.optionalKey(PluginId),
-});
+  ...cursorParams.fields,
+}).check(
+  Schema.makeFilter((filter) =>
+    (filter.view ?? "to-do") === "to-do" &&
+    (filter.limit !== undefined || filter.cursor !== undefined)
+      ? "The to-do view is not paged: it returns every signal on To do. Leave out limit and cursor, or ask for the later or done view."
+      : undefined,
+  ),
+);
 
 export type SignalFilter = Schema.Schema.Type<typeof SignalFilter>;
+
+/** What `signal.query` returns. `nextCursor` is absent on the last page, and always on `to-do`. */
+export const SignalPage = page(Signal);
+
+export type SignalPage = Schema.Schema.Type<typeof SignalPage>;
+
+/** The most signals one call of `markDone`, `snooze`, `unsnooze` or `lowerPriority` names. */
+export const MAX_SIGNAL_IDS = MAX_PAGE_LIMIT;
+
+/**
+ * The signals one call of `markDone`, `snooze`, `unsnooze` or `lowerPriority`
+ * changes: one user action, such as a bulk snooze, is one call.
+ */
+const SignalIds = atMost(Id, MAX_SIGNAL_IDS).check(Schema.isMinLength(1));
+
+/**
+ * A signal a list operation left alone because it had resolved before the
+ * call. That is normal, not an error: a signal may end on its source while
+ * the user clicks.
+ */
+export const SkippedSignal = Schema.Struct({
+  signalId: Id,
+  reason: Schema.Literal("resolved"),
+});
+
+export type SkippedSignal = Schema.Schema.Type<typeof SkippedSignal>;
+
+/** The payload of `signal.markDone`, `signal.unsnooze` and `signal.lowerPriority`. */
+export const SignalIdsInput = Schema.Struct({ signalIds: SignalIds });
+
+export type SignalIdsInput = Schema.Schema.Type<typeof SignalIdsInput>;
+
+/**
+ * The payload of `signal.snooze`: the signals, and the exact time they come
+ * back to To do. `until` is written with its offset, such as
+ * `2026-10-13T09:00+02:00`, and decodes to the UTC timestamp the controller
+ * stores. A time in the past is refused.
+ */
+export const SignalSnoozeInput = Schema.Struct({
+  signalIds: SignalIds,
+  until: TimestampWithOffset,
+});
+
+export type SignalSnoozeInput = Schema.Schema.Type<typeof SignalSnoozeInput>;
+
+/** What `signal.markDone` returns: the signals it resolved, and those already resolved. */
+export const SignalMarkDoneResult = Schema.Struct({
+  done: Schema.Array(Id),
+  skipped: Schema.Array(SkippedSignal),
+});
+
+export type SignalMarkDoneResult = Schema.Schema.Type<typeof SignalMarkDoneResult>;
+
+/** What `signal.snooze` returns: the signals it snoozed, and those already resolved. */
+export const SignalSnoozeResult = Schema.Struct({
+  snoozed: Schema.Array(Id),
+  skipped: Schema.Array(SkippedSignal),
+});
+
+export type SignalSnoozeResult = Schema.Schema.Type<typeof SignalSnoozeResult>;
+
+/**
+ * What `signal.unsnooze` returns: the signals it put back on To do, and those
+ * already resolved. An open signal that was not snoozed is in neither list.
+ */
+export const SignalUnsnoozeResult = Schema.Struct({
+  unsnoozed: Schema.Array(Id),
+  skipped: Schema.Array(SkippedSignal),
+});
+
+export type SignalUnsnoozeResult = Schema.Schema.Type<typeof SignalUnsnoozeResult>;
+
+/**
+ * What `signal.lowerPriority` returns: the signals it moved from `urgent` to
+ * `high`, and those already resolved. An open signal that was not urgent is
+ * in neither list.
+ */
+export const SignalLowerPriorityResult = Schema.Struct({
+  lowered: Schema.Array(Id),
+  skipped: Schema.Array(SkippedSignal),
+});
+
+export type SignalLowerPriorityResult = Schema.Schema.Type<typeof SignalLowerPriorityResult>;
 
 /**
  * The payload of `signal.raise`. The core fills in the origin from the
@@ -605,16 +721,17 @@ export const SignalWithdrawInput = Schema.Struct({
 export type SignalWithdrawInput = Schema.Schema.Type<typeof SignalWithdrawInput>;
 
 /**
- * The signal operations: list To do, read one signal, raise a signal, take
- * one of its actions as the user, and withdraw a signal its raiser no longer
- * needs answered.
+ * The signal operations: list To do, Later or Done, read one signal, raise a
+ * signal, take one of its actions as the user, withdraw a signal its raiser
+ * no longer needs answered, and the moves that send nothing to the source:
+ * Done, snooze, unsnooze and Not urgent.
  */
 export const signal = HttpApiGroup.make("signal")
   .add(
     // The to-do view is not paged: every client counts the whole list.
     HttpApiEndpoint.get("query", "/signals", {
       query: SignalFilter,
-      success: Schema.Array(Signal),
+      success: SignalPage,
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     HttpApiEndpoint.get("read", "/signals/:id", {
@@ -648,6 +765,26 @@ export const signal = HttpApiGroup.make("signal")
       payload: SignalWithdrawInput,
       success: Signal,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("markDone", "/signals/mark-done", {
+      payload: SignalIdsInput,
+      success: SignalMarkDoneResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("snooze", "/signals/snooze", {
+      payload: SignalSnoozeInput,
+      success: SignalSnoozeResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    HttpApiEndpoint.post("unsnooze", "/signals/unsnooze", {
+      payload: SignalIdsInput,
+      success: SignalUnsnoozeResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    HttpApiEndpoint.post("lowerPriority", "/signals/lower-priority", {
+      payload: SignalIdsInput,
+      success: SignalLowerPriorityResult,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
   )
   .middleware(Authenticated);

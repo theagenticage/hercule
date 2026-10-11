@@ -28,28 +28,61 @@ const Subject = Schema.Struct({
   url: Schema.String,
 }).annotate({
   // Named, so the catalog stores the block once, under its name, and each of
-  // the fifteen kinds refers to it instead of repeating it.
+  // the kinds refers to it instead of repeating it.
   identifier: "GithubSubject",
 });
 
 export type GithubSubject = Schema.Schema.Type<typeof Subject>;
 
+/**
+ * Whether an account the event names is the user's, worked out at ingest from
+ * the Connection's identity, so a rule can read it without knowing the
+ * user's login.
+ */
+const ByYou = Schema.Boolean;
+
+/**
+ * Who a review was requested from: the user, or one of the user's teams.
+ * Requests to anyone else emit nothing.
+ */
+const Reviewer = Schema.Literals(["you", "team"]);
+
 /** Declares a kind whose payload is only the subject: what happened, and to what. */
-const declareSubjectKind = (description: string): EventKindDeclaration => ({
+const declareSubjectKind = (
+  description: string,
+  availableToTriage: boolean,
+): EventKindDeclaration => ({
   description,
   schema: Schema.Struct({ subject: Subject }),
+  availableToTriage,
 });
 
 /** Declares a label kind: which labels were added and which were removed, in one event. */
-const declareLabelKind = (description: string): EventKindDeclaration => ({
+const declareLabelKind = (
+  description: string,
+  availableToTriage: boolean,
+): EventKindDeclaration => ({
   description,
   schema: Schema.Struct({
     subject: Subject,
     added: Schema.Array(Schema.String),
     removed: Schema.Array(Schema.String),
   }),
+  availableToTriage,
 });
 
+/** Declares a comment kind: who wrote the comment is in the event's `author`, and whether it was the user here. */
+const declareCommentKind = (description: string): EventKindDeclaration => ({
+  description,
+  schema: Schema.Struct({ subject: Subject, byYou: ByYou }),
+  availableToTriage: true,
+});
+
+/**
+ * Every kind this plugin emits. `availableToTriage` is false for the kinds
+ * that only end a signal or would flood triage: a removed review request, a
+ * new head commit, a pull request's labels, and finished checks.
+ */
 export const GITHUB_EVENT_KINDS: Record<string, EventKindDeclaration> = {
   "github.notification": {
     description:
@@ -59,29 +92,68 @@ export const GITHUB_EVENT_KINDS: Record<string, EventKindDeclaration> = {
       /** GitHub's own word: mention, assign, review_requested, state_change and more. */
       reason: Schema.String,
     }),
+    availableToTriage: true,
   },
 
-  "github.issue.opened": declareSubjectKind("An issue was opened."),
-  "github.issue.closed": declareSubjectKind("An issue was closed."),
-  "github.issue.reopened": declareSubjectKind("An issue was reopened."),
-  "github.issue.labeled": declareLabelKind("The labels on an issue changed."),
-  "github.issue.assigned": declareSubjectKind("An issue was assigned."),
-  "github.issue.commented": declareSubjectKind("A comment was added to an issue."),
+  "github.issue.opened": declareSubjectKind("An issue was opened.", true),
+  "github.issue.closed": declareSubjectKind("An issue was closed.", true),
+  "github.issue.reopened": declareSubjectKind("An issue was reopened.", true),
+  "github.issue.labeled": declareLabelKind("The labels on an issue changed.", true),
+  "github.issue.assigned": declareSubjectKind("An issue was assigned.", true),
+  "github.issue.commented": declareCommentKind("A comment was added to an issue."),
 
-  "github.pr.opened": declareSubjectKind("A pull request was opened."),
-  "github.pr.synchronized": declareSubjectKind("A pull request got a new head commit."),
+  "github.pr.opened": declareSubjectKind("A pull request was opened.", true),
+  "github.pr.synchronized": declareSubjectKind("A pull request got a new head commit.", false),
+  "github.pr.review-requested": {
+    description: "A review was requested on a pull request from the user or one of their teams.",
+    schema: Schema.Struct({
+      subject: Subject,
+      reviewer: Reviewer,
+      /** The team, as `org/slug`, when `reviewer` is `team`. */
+      team: Schema.optionalKey(Schema.String),
+      /** The login of who asked for the review, or null when GitHub did not say. */
+      requestedBy: Schema.NullOr(Schema.String),
+      /** True when the user asked for the review. */
+      byYou: ByYou,
+      /** True when the request names the user, rather than one of their teams. */
+      toYou: Schema.Boolean,
+    }),
+    availableToTriage: true,
+  },
+  "github.pr.review-request-removed": {
+    description:
+      "A review request to the user or one of their teams was taken back on a pull request.",
+    schema: Schema.Struct({
+      subject: Subject,
+      reviewer: Reviewer,
+      /** The team, as `org/slug`, when `reviewer` is `team`. */
+      team: Schema.optionalKey(Schema.String),
+      /**
+       * When `reviewer` is `team`: true when the pull request still asks
+       * another of the user's teams for a review, as GitHub listed its
+       * requests when the removal was read.
+       */
+      teamStillRequested: Schema.optionalKey(Schema.Boolean),
+      /** True when the user took the request back. */
+      byYou: ByYou,
+    }),
+    availableToTriage: false,
+  },
   "github.pr.review-submitted": {
     description: "A review was submitted on a pull request.",
     schema: Schema.Struct({
       subject: Subject,
       reviewer: Schema.String,
       verdict: ReviewVerdict,
+      /** True when the user submitted the review. */
+      byYou: ByYou,
     }),
+    availableToTriage: true,
   },
-  "github.pr.commented": declareSubjectKind("A comment was added to a pull request."),
-  "github.pr.merged": declareSubjectKind("A pull request was merged."),
-  "github.pr.closed": declareSubjectKind("A pull request was closed without being merged."),
-  "github.pr.labeled": declareLabelKind("The labels on a pull request changed."),
+  "github.pr.commented": declareCommentKind("A comment was added to a pull request."),
+  "github.pr.merged": declareSubjectKind("A pull request was merged.", true),
+  "github.pr.closed": declareSubjectKind("A pull request was closed without being merged.", true),
+  "github.pr.labeled": declareLabelKind("The labels on a pull request changed.", false),
   "github.pr.checks-completed": {
     description:
       "Every check suite on a pull request's head commit finished; one rolled-up verdict.",
@@ -91,5 +163,20 @@ export const GITHUB_EVENT_KINDS: Record<string, EventKindDeclaration> = {
       conclusion: Schema.String,
       suites: Schema.Array(Schema.Struct({ name: Schema.String, conclusion: Schema.String })),
     }),
+    availableToTriage: false,
+  },
+
+  "github.mentioned": {
+    description: "A comment on an issue or a pull request mentions the user by login.",
+    schema: Schema.Struct({
+      subject: Subject,
+      commentId: Schema.Int,
+      commentUrl: Schema.String,
+      /** The comment's text around the mention, at most about 280 characters. */
+      excerpt: Schema.String,
+      /** True when the user wrote the comment, mentioning themselves. */
+      byYou: ByYou,
+    }),
+    availableToTriage: true,
   },
 };

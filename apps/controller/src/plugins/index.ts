@@ -13,7 +13,11 @@ export {
 } from "./ingest";
 export { IngestExecutor } from "./ingest-executor";
 export { deriveCatalogJsonSchema } from "./json-schema";
+export { OpenSignals } from "./open-signals";
 export type { RegisteredEventSource } from "./event-sources";
+export { summarizeCause, truncateMessage } from "./errors";
+export { BUILD_TIMEOUT_SECONDS, signalBuilds } from "./signal-build";
+export type { RegisteredSignalKind } from "./signal-kinds";
 export { registry } from "./registry";
 export { Plugins, PluginsLayer } from "./service";
 export {

@@ -3,6 +3,7 @@ import type { Notification, Resolution } from "@hercule/contract";
 import {
   buildBoundActionRows,
   chooseNotificationMark,
+  describeFailedBuildCount,
   describeProducer,
   describeResolution,
   formatDescribeLine,
@@ -114,6 +115,49 @@ describe("chooseNotificationMark", () => {
       }),
       "withdrawn",
     );
+  });
+});
+
+describe("describeFailedBuildCount", () => {
+  const failed: Notification = {
+    ...informational,
+    kind: "core.signal-build-failed",
+    producer: { type: "core" },
+    createdAt: "2026-09-28T07:12:00.000Z",
+    failedBuildCount: 14,
+  };
+  const sameDay = new Date("2026-09-28T15:00:00.000Z");
+
+  it("counts the failures since the notification's time, in the user's zone", () => {
+    assert.strictEqual(
+      describeFailedBuildCount(failed, "Europe/Amsterdam", sameDay),
+      "failed 14 times since 09:12",
+    );
+  });
+
+  it("says once for a single failure", () => {
+    assert.strictEqual(
+      describeFailedBuildCount({ ...failed, failedBuildCount: 1 }, "Europe/Amsterdam", sameDay),
+      "failed once since 09:12",
+    );
+  });
+
+  it("names the day when the notification is from another day", () => {
+    assert.strictEqual(
+      describeFailedBuildCount(failed, "Europe/Amsterdam", new Date("2026-09-30T08:00:00.000Z")),
+      "failed 14 times since 28 Sep 09:12",
+    );
+  });
+
+  it("leaves out the time when the zone cannot be formatted", () => {
+    assert.strictEqual(
+      describeFailedBuildCount(failed, "Europe/Nowhere", sameDay),
+      "failed 14 times",
+    );
+  });
+
+  it("returns nothing for a notification with no count", () => {
+    assert.isUndefined(describeFailedBuildCount(informational, "Europe/Amsterdam", sameDay));
   });
 });
 

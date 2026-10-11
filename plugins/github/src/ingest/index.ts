@@ -17,6 +17,7 @@ import {
 } from "@hercule/plugin-host";
 import { readToken } from "../api";
 import { DEFAULT_CHECKS_WINDOW_DAYS, GithubConnectionConfig } from "../connection-type";
+import type { GithubIdentity } from "../identity";
 import { readWatchList } from "../watch-list";
 import { pollChecks } from "./checks";
 import { pollNotifications } from "./notifications";
@@ -44,11 +45,12 @@ const readConnectionToken = (
     return token;
   });
 
-/** Polls one feed once, with the Connection's token and config. */
+/** Polls one feed once, with the Connection's token, config and GitHub account. */
 type FeedPoll = (
   token: string,
   config: GithubConnectionConfig,
   context: IngestContext,
+  identity: GithubIdentity,
 ) => Effect.Effect<PollResult, FeedError, HttpClient.HttpClient>;
 
 /**
@@ -57,13 +59,19 @@ type FeedPoll = (
  */
 const FEED_POLLS: Record<"notifications" | "repos" | "checks", FeedPoll> = {
   notifications: (token, _config, context) => pollNotifications(token, context),
-  repos: (token, config, context) =>
+  repos: (token, config, context, identity) =>
     Effect.flatMap(readWatchList(context.resources, config.repos ?? []), (watchList) =>
-      pollRepos(token, context, watchList),
+      pollRepos(token, context, watchList, identity),
     ),
-  checks: (token, config, context) =>
+  checks: (token, config, context, identity) =>
     Effect.flatMap(readWatchList(context.resources, config.repos ?? []), (watchList) =>
-      pollChecks(token, context, watchList, config.checksWindowDays ?? DEFAULT_CHECKS_WINDOW_DAYS),
+      pollChecks(
+        token,
+        context,
+        watchList,
+        config.checksWindowDays ?? DEFAULT_CHECKS_WINDOW_DAYS,
+        identity,
+      ),
     ),
 };
 
@@ -82,9 +90,10 @@ export const pollGithubFeed = (
   feed: GithubFeed,
   config: GithubConnectionConfig,
   context: IngestContext,
+  identity: GithubIdentity,
 ): Effect.Effect<PollResult, AuthError | PluginError, HttpClient.HttpClient> =>
   Effect.flatMap(readConnectionToken(context), (token) =>
-    FEED_POLLS[feed](token, config, context),
+    FEED_POLLS[feed](token, config, context, identity),
   ).pipe(
     Effect.catchTag("GithubRateLimited", (limit) =>
       Effect.succeed({ nextAfterSeconds: limit.retryAfterSeconds }),
@@ -111,11 +120,13 @@ export const openGithubIngest: EventSourceContribution["open"] = (connection, co
     ),
     (config) => ({
       // The host polls only the feeds the event source declares, which are
-      // the keys of `FEED_POLLS`.
+      // the keys of `FEED_POLLS`. The Connection's account is the user:
+      // `validate` returned GitHub's numeric user id and the login.
       poll: (feed) =>
-        pollGithubFeed(feed as GithubFeed, config, context).pipe(
-          Effect.provide(FetchHttpClient.layer),
-        ),
+        pollGithubFeed(feed as GithubFeed, config, context, {
+          accountId: connection.accountId,
+          login: connection.displayName,
+        }).pipe(Effect.provide(FetchHttpClient.layer)),
       close: Effect.void,
     }),
   );

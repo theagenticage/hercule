@@ -49,6 +49,7 @@ interface Connection {
   readonly displayName: string;
   readonly status: string;
   readonly statusDetail?: string;
+  readonly warning?: string;
   readonly labels: readonly string[];
   readonly config: Record<string, unknown>;
   readonly feedIntervals: Record<string, number>;
@@ -431,6 +432,15 @@ describe("Connections", () => {
     expect(sky).toMatch(/needs.reauth/i);
     expect(sky).toContain("the refresh token was rejected");
     expect(sky).toContain("Business");
+  });
+
+  it("shows the warning a connection's sign-in returned, in the attention colour", async () => {
+    const warning = "This token cannot read notifications, so review requests raise no signal.";
+    await openApp([{ ...PAPER, warning }, SKY]);
+
+    const line = within(await findConnectionRow(PAPER)).getByText(warning);
+    expect(line.className).toContain("text-attn");
+    expect(readPageText(await findConnectionRow(SKY))).not.toContain(warning);
   });
 
   it("shows the account once when the connection is named after it, and no topic when it has none", async () => {

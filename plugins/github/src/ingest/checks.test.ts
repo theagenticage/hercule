@@ -14,6 +14,9 @@ import {
   stubGithub,
   type IngestHarness,
   type StubResponse,
+  TEST_IDENTITY,
+  answerUserRequests,
+  isUserRequest,
 } from "../testing";
 import type { GithubCheckSuite } from "./feed-objects";
 import { pollChecks, rollUpConclusion } from "./checks";
@@ -139,11 +142,15 @@ const poll = async (
   windowDays = 7,
   repo = REPO,
 ) => {
-  const stub = stubGithub(answerFrom(repository, repo));
+  const stub = stubGithub(answerUserRequests(answerFrom(repository, repo)));
   await Effect.runPromise(
-    pollChecks("token", harness.context, [repo], windowDays).pipe(Effect.provide(stub.layer)),
+    pollChecks("token", harness.context, [repo], windowDays, TEST_IDENTITY).pipe(
+      Effect.provide(stub.layer),
+    ),
   );
-  return stub.requests.map((request) => readStubRequestTarget(request).path);
+  return stub.requests
+    .filter((request) => !isUserRequest(request))
+    .map((request) => readStubRequestTarget(request).path);
 };
 
 /** Returns a harness whose feed has baselined the repository. */
@@ -266,13 +273,16 @@ describe("the checks feed", () => {
     const repository = buildRepository();
     const harness = await baseline(repository);
     await poll(harness, repository);
-    const stub = stubGithub(answerFrom(repository));
+    const stub = stubGithub(answerUserRequests(answerFrom(repository)));
 
     await Effect.runPromise(
-      pollChecks("token", harness.context, [REPO], 7).pipe(Effect.provide(stub.layer)),
+      pollChecks("token", harness.context, [REPO], 7, TEST_IDENTITY).pipe(
+        Effect.provide(stub.layer),
+      ),
     );
 
-    expect(stub.requests.map((request) => request.headers["if-none-match"])).toEqual([
+    const repositoryRequests = stub.requests.filter((request) => !isUserRequest(request));
+    expect(repositoryRequests.map((request) => request.headers["if-none-match"])).toEqual([
       '"p1"',
       expect.stringMatching(/^"/),
     ]);

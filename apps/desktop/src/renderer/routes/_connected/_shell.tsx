@@ -5,6 +5,7 @@ import { listUrgentSignals } from "@hercule/client-core";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
+import { SnoozeTimer } from "../../app/snooze-timer";
 import { ensureShellData, pluginsQuery, signalsToDoQuery } from "../../app/queries";
 import { useWaiting } from "../../app/waiting";
 import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
@@ -24,6 +25,9 @@ import { NewThreadDialogs, type NewThreadDialog } from "./-new-thread-dialogs";
  * the sidebar's New thread open, and the New project dialog that the
  * picker's last row opens. A project added there opens a Draft Thread in it.
  * Go > Office (⌘⇧O) opens the Office, and Settings… (⌘,) opens Settings.
+ *
+ * The shell runs the snooze timer, which brings a snoozed signal back to
+ * To do when its snooze runs out, whichever screen shows.
  *
  * While the user is signed in, the shell sends main the threads and the
  * assistants waiting on the user whenever that list changes, for the dock
@@ -142,6 +146,7 @@ function ShellLayout(): JSX.Element {
         <Outlet />
       </Shell>
       <NewThreadDialogs dialog={dialog} setDialog={setDialog} onDraft={openDraft} />
+      <SnoozeTimer client={controller.client} />
     </>
   );
 }

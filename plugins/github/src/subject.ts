@@ -8,9 +8,11 @@
  * one spelling everywhere: a filter on `subject.repo` and a `task.query` on a
  * ref both match whatever case GitHub reported.
  */
-import type { EmittedEvent } from "@hercule/plugin-host";
+import { MAX_EVENT_TITLE_LENGTH, type EmittedEvent } from "@hercule/plugin-host";
 import type { Schema } from "effect";
 import type { GithubSubject } from "./kinds";
+import { REPO_NAME_PATTERN } from "./repo-name";
+import { cutText } from "./text";
 
 /** The root of every web URL this plugin builds. */
 const GITHUB_WEB_URL = "https://github.com";
@@ -47,9 +49,34 @@ export const buildRepoRef = (repo: string): string => `github:repo:${repo.toLowe
  * repository's, so a filter can match either.
  */
 const buildItemRefs = (item: GithubItem): ReadonlyArray<string> => [
-  `github:${item.kind}:${item.repo.toLowerCase()}#${String(item.number)}`,
+  buildItemRef(item),
   buildRepoRef(item.repo),
 ];
+
+/** Returns the External Ref of an issue or a pull request, such as `github:pr:owner/repo#87`. */
+export const buildItemRef = (item: Pick<GithubItem, "repo" | "kind" | "number">): string =>
+  `github:${item.kind}:${item.repo.toLowerCase()}#${String(item.number)}`;
+
+/** The External Ref of an issue or a pull request, with the kind, the repository and the number captured. */
+const ITEM_REF_PATTERN = new RegExp(`^github:(issue|pr):(${REPO_NAME_PATTERN})#(\\d+)$`);
+
+/**
+ * Parses the External Ref of an issue or a pull request, such as
+ * `github:pr:owner/repo#87`. Returns undefined for any other string, and
+ * for a repository name GitHub would not allow, because the repository is
+ * put into a REST path as it is.
+ */
+export const parseItemRef = (
+  ref: string,
+): Pick<GithubItem, "repo" | "kind" | "number"> | undefined => {
+  const match = ITEM_REF_PATTERN.exec(ref);
+  if (match === null) return undefined;
+  return {
+    kind: match[1] as "issue" | "pr",
+    repo: match[2]!.toLowerCase(),
+    number: Number(match[3]),
+  };
+};
 
 /** Returns the `subject` block of an event about an issue or a pull request. */
 const buildItemSubject = (item: GithubItem): GithubSubject => ({
@@ -71,11 +98,22 @@ export const buildRepoSubject = (repo: string, title?: string): GithubSubject =>
   url: buildRepoUrl(repo),
 });
 
+/**
+ * Returns how an event's title names an issue or a pull request:
+ * `owner/repo#42`, the way GitHub writes a cross-repository reference.
+ */
+export const buildItemPlace = (item: Pick<GithubItem, "repo" | "number">): string =>
+  `${item.repo.toLowerCase()}#${String(item.number)}`;
+
 /** What a feed knows about one event before the subject, refs and URL are added. */
-interface EventFacts {
+export interface EventFacts {
   readonly kind: string;
   readonly dedupKey: string;
   readonly occurredAt: string;
+  /** One line saying what happened, such as "marta requested your review on acme/webshop#1293". */
+  readonly title: string;
+  /** The login of who caused the event, or null when GitHub does not say. */
+  readonly author: string | null;
   /** The payload's fields beside `subject`, such as `added` and `removed` for a label kind. */
   readonly fields?: Readonly<Record<string, unknown>>;
   readonly raw: Schema.JsonObject;
@@ -96,6 +134,8 @@ export const buildItemEvent = (item: GithubItem, facts: EventFacts): EmittedEven
     refs: buildItemRefs(item),
     url: subject.url,
     raw: facts.raw,
+    title: cutText(facts.title, MAX_EVENT_TITLE_LENGTH),
+    author: facts.author,
   };
 };
 
@@ -115,5 +155,7 @@ export const buildRepoEvent = (repo: string, title: string, facts: EventFacts): 
     refs: [buildRepoRef(repo)],
     url: subject.url,
     raw: facts.raw,
+    title: cutText(facts.title, MAX_EVENT_TITLE_LENGTH),
+    author: facts.author,
   };
 };

@@ -53,6 +53,13 @@ export const formatFieldName = (field: Field): string =>
       : `--${field.spelling}`;
 
 /**
+ * Returns how a positional is shown in usage lines: `<signal-id>`, or
+ * `<signal-id>...` for a list positional, which takes one or more words.
+ */
+export const formatPositionalShape = (field: Field): string =>
+  field.repeated ? `<${field.spelling}>...` : `<${field.spelling}>`;
+
+/**
  * Converts the text given for a field into the field's value. Throws a
  * `UsageError` when the text is not a valid value.
  *
@@ -304,7 +311,9 @@ export const parseArguments = async (
       cursor = value();
       continue;
     }
-    if (command.paged && name === "sort") {
+    // A list with one fixed order has no sort fields, so `--sort` is an
+    // unknown flag there.
+    if (command.paged && command.sortFields.length > 0 && name === "sort") {
       // Each `--sort` adds a key after the ones before it, so the first one
       // written orders the list and each later one breaks its ties.
       (sort ??= []).push(parseSort(value(), command, help));
@@ -349,10 +358,17 @@ export const parseArguments = async (
 
   // Check everything that argv alone can decide before reading the pipe, so a
   // command line that cannot work does not consume stdin first.
-  if (positionals.length !== command.positionals.length) {
-    const expected = command.positionals.map((field) => `<${field.spelling}>`).join(" ");
+  // A list positional is always the last, and takes every word left, one
+  // or more.
+  const takesList = command.positionals.at(-1)?.repeated === true;
+  if (
+    takesList
+      ? positionals.length < command.positionals.length
+      : positionals.length !== command.positionals.length
+  ) {
+    const expected = command.positionals.map(formatPositionalShape).join(" ");
     throw new UsageError(
-      `${help} takes ${command.positionals.length} argument(s): ${expected || "none"}`,
+      `${help} takes ${command.positionals.length}${takesList ? " or more" : ""} argument(s): ${expected || "none"}`,
       help,
     );
   }

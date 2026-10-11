@@ -5,7 +5,7 @@
  */
 import { Clock, Effect, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
-import { ActionError } from "@hercule/plugin-host";
+import { ActionError, type DescribeLinePart } from "@hercule/plugin-host";
 import { readGithubExplanation, type GithubResponse } from "../api";
 import {
   callGithub,
@@ -30,6 +30,13 @@ import {
   type GithubPullRequest,
 } from "./objects";
 import { RepoName } from "../repo-name";
+import {
+  describeItem,
+  describeSentText,
+  isInputFlagSet,
+  nameItemBriefly,
+  readInputText,
+} from "./describe";
 
 /** The fields that name one pull request. */
 const PULL_REQUEST_ADDRESS = {
@@ -82,6 +89,13 @@ export const prComment = defineGithubAction({
   displayName: "Comment on a GitHub pull request",
   description:
     "Adds a comment to a pull request's conversation, as the Connection's account. The output holds the comment's id and URL.",
+  usableIn: ["workflow.step", "signal.answer"],
+  describe: (input) => [
+    { kind: "text", text: "Comments on " },
+    ...describeItem(input, "pull request"),
+    ...describeSentText(input),
+  ],
+  outcome: (input) => `Commented on ${nameItemBriefly(input, "pull request")}`,
   input: Schema.Struct({
     ...PULL_REQUEST_ADDRESS,
     body: Schema.NonEmptyString.annotate({ description: "The comment, in GitHub Markdown." }),
@@ -115,11 +129,49 @@ const GITHUB_REVIEW_VERDICTS = {
   comment: "COMMENT",
 } as const;
 
+/**
+ * Returns a review's describe line, which depends on the stored input's
+ * verdict: "Approves pull request #1293 in acme/webshop", "Requests changes
+ * on ..." or "Reviews ... with a comment".
+ */
+const describeReview = (input: unknown): ReadonlyArray<DescribeLinePart> => {
+  const item = describeItem(input, "pull request");
+  const body = describeSentText(input);
+  switch (readInputText(input, "verdict")) {
+    case "approve":
+      return [{ kind: "text", text: "Approves " }, ...item, ...body];
+    case "request-changes":
+      return [{ kind: "text", text: "Requests changes on " }, ...item, ...body];
+    default:
+      return [
+        { kind: "text", text: "Reviews " },
+        ...item,
+        { kind: "text", text: " with a comment" },
+        ...body,
+      ];
+  }
+};
+
+/** Returns the words a review's outcome starts with, from the stored input's verdict. */
+const describeReviewOutcome = (input: unknown): string => {
+  switch (readInputText(input, "verdict")) {
+    case "approve":
+      return "Approved";
+    case "request-changes":
+      return "Requested changes on";
+    default:
+      return "Reviewed";
+  }
+};
+
 export const prReview = defineGithubAction({
   id: "pr.review",
   displayName: "Review a GitHub pull request",
   description:
     "Submits a review of a pull request, as the Connection's account, with the verdict approve, request-changes or comment. The output holds the review's id, verdict and URL.",
+  usableIn: ["workflow.step", "signal.answer"],
+  describe: describeReview,
+  outcome: (input) => `${describeReviewOutcome(input)} ${nameItemBriefly(input, "pull request")}`,
   input: Schema.Struct({
     ...PULL_REQUEST_ADDRESS,
     verdict: Schema.Literals(["approve", "request-changes", "comment"]).annotate({
@@ -428,11 +480,60 @@ const deleteMergedBranch = (
     });
   });
 
+/**
+ * Returns the end of a merge's describe line: how it merges, the commit
+ * title and message it sends, the commit it holds the merge to, and whether
+ * it deletes the branch. Each value the merge sends is shown in full.
+ */
+const describeMergeDetails = (input: unknown): ReadonlyArray<DescribeLinePart> => {
+  const method = readInputText(input, "method");
+  const commitTitle = readInputText(input, "commitTitle");
+  const commitMessage = readInputText(input, "commitMessage");
+  const sha = readInputText(input, "sha");
+  const how =
+    method === "squash"
+      ? " as one squashed commit"
+      : method === "rebase"
+        ? " by rebasing its commits"
+        : "";
+  return [
+    ...(how === "" ? [] : [{ kind: "text" as const, text: how }]),
+    ...(commitTitle === undefined
+      ? []
+      : [
+          { kind: "text" as const, text: ", with the commit title " },
+          { kind: "marked" as const, text: commitTitle },
+        ]),
+    ...(commitMessage === undefined
+      ? []
+      : [
+          { kind: "text" as const, text: ", with the commit message " },
+          { kind: "marked" as const, text: commitMessage },
+        ]),
+    ...(sha === undefined
+      ? []
+      : [
+          { kind: "text" as const, text: ", only if its branch is at " },
+          { kind: "marked" as const, text: sha },
+        ]),
+    ...(isInputFlagSet(input, "deleteBranch")
+      ? [{ kind: "text" as const, text: ", and deletes its branch" }]
+      : []),
+  ];
+};
+
 export const prMerge = defineGithubAction({
   id: "pr.merge",
   displayName: "Merge a GitHub pull request",
   description:
     "Merges a pull request, and deletes its branch afterwards when deleteBranch is true. The branch is deleted in the repository it is in, which for a pull request from a fork is the fork. With sha, or with deleteBranch, the merge happens only if the branch still points at the expected commit. The output holds the merge commit.",
+  usableIn: ["workflow.step", "signal.answer"],
+  describe: (input) => [
+    { kind: "text", text: "Merges " },
+    ...describeItem(input, "pull request"),
+    ...describeMergeDetails(input),
+  ],
+  outcome: (input) => `Merged ${nameItemBriefly(input, "pull request")}`,
   input: Schema.Struct({
     ...PULL_REQUEST_ADDRESS,
     method: Schema.optionalKey(

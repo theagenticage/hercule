@@ -408,15 +408,31 @@ const make = Effect.gen(function* () {
      * once each time it occurs rather than on every check. `about` names
      * fewer subjects when each notification also names something of its own,
      * such as the run in a failed run's notification.
+     *
+     * With `unlessOpenAbout`, it creates nothing while an open decision of
+     * the same kind lists any of those subjects. A condition reported this
+     * way is reported once until its decision is resolved, however long it
+     * lasts, and again once it comes back after that.
      */
     createCoreNotification: (
       notification: CoreNotification,
-      options?: { readonly unlessRaised?: UnlessRaised | undefined },
+      options?: {
+        readonly unlessRaised?: UnlessRaised | undefined;
+        readonly unlessOpenAbout?: ReadonlyArray<NotificationSubject> | undefined;
+      },
     ): Effect.Effect<void, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
           const now = yield* nowIso;
+          const unlessOpenAbout = options?.unlessOpenAbout;
+          if (
+            unlessOpenAbout !== undefined &&
+            (yield* notifications.listOpenDecisionsAbout(unlessOpenAbout, notification.kind))
+              .length > 0
+          ) {
+            return;
+          }
           const unlessRaised = options?.unlessRaised;
           if (
             unlessRaised !== undefined &&
@@ -504,15 +520,20 @@ const make = Effect.gen(function* () {
      * went with it. It runs in the caller's transaction, the one that removes
      * the subject, and is stamped as the core. There is no grant check: only
      * the controller calls it.
+     *
+     * `kind` withdraws only the decisions of that kind. A caller that knows
+     * the kind passes it, so the lookup reads the open decisions of that kind
+     * by index instead of the subject of every open decision.
      */
     withdrawDecisionsAbout: (
       subjects: ReadonlyArray<NotificationSubject>,
       reason: string,
+      kind?: string,
     ): Effect.Effect<void, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const open = yield* notifications.listOpenDecisionsAbout(subjects);
+          const open = yield* notifications.listOpenDecisionsAbout(subjects, kind);
           if (open.length === 0) return;
           const at = yield* nowIso;
           const resolution = {

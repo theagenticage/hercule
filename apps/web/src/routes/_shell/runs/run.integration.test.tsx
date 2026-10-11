@@ -1448,6 +1448,8 @@ describe("A run's page > a run a trigger started", () => {
       refs: [],
       url: ISSUE_URL,
       payload: { issue: { number: 7, title: "Login fails" } },
+      title: "Login fails",
+      author: "marta",
       actor: null,
     },
   };
@@ -1479,7 +1481,7 @@ describe("A run's page > a run a trigger started", () => {
     expect(readPageText(header)).toContain("started by trigger on_issue on github.issue.opened");
   });
 
-  it("shows the triggering event above the inputs: its kind, source, time, id, link and payload", async () => {
+  it("shows the triggering event above the inputs: its title, kind, source, author, time, id, link and payload", async () => {
     await openRunPage(BY_TRIGGER);
     await findPageHeader();
 
@@ -1492,8 +1494,10 @@ describe("A run's page > a run a trigger started", () => {
       ]),
     );
     expect(facts).toEqual({
+      title: "Login fails",
       kind: "github.issue.opened",
       source: "github",
+      author: "marta",
       occurred: "27 Sep 17:21:08",
       event: "42 Open",
     });
@@ -1517,6 +1521,20 @@ describe("A run's page > a run a trigger started", () => {
     const block = screen.getByRole("region", { name: "Triggering event" });
     expect(within(block).queryByRole("link")).toBeNull();
     expect(readPageText(block)).not.toContain("Open");
+  });
+
+  it("leaves out the title and the author when the event has none", async () => {
+    const triggerEvent = BY_TRIGGER.triggerEvent;
+    if (triggerEvent === undefined) throw new Error("BY_TRIGGER has no triggering event");
+    await openRunPage({
+      ...BY_TRIGGER,
+      triggerEvent: { ...triggerEvent, title: null, author: null },
+    });
+    await findPageHeader();
+
+    const block = screen.getByRole("region", { name: "Triggering event" });
+    const terms = [...block.querySelectorAll("dt")].map((term) => readPageText(term));
+    expect(terms).toEqual(["kind", "source", "occurred", "event"]);
   });
 
   it("shows no triggering event for a run the user started", async () => {

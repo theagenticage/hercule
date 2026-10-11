@@ -71,6 +71,20 @@ const buildInput = (inputId: string, sessionId: string) => ({
   reason: null,
 });
 
+/** Returns an open signal, as `signal list` returns it. */
+const buildSignal = (tail: string) => ({
+  id: buildId(tail),
+  kind: "fyi",
+  origin: { type: "api", actor: "user", eventIds: [7], reason: "Tagged" },
+  title: "Release 4.2 shipped",
+  priority: "normal",
+  blocks: [],
+  actions: [],
+  match: {},
+  status: "open",
+  createdAt: "2026-10-10T09:00:00.000Z",
+});
+
 // Tests how a tail is resolved through the list operation a row's `resolves` names.
 describe("a positional whose row resolves tails", () => {
   it("reads the list the row names, then calls the operation with the full id", async () => {
@@ -117,20 +131,11 @@ describe("a positional whose row resolves tails", () => {
     });
   });
 
-  it("resolves a signal tail through signal list, which returns the whole list rather than a page", async () => {
-    const signal = {
-      id: buildId("ccccccc3"),
-      kind: "fyi",
-      origin: { type: "api", actor: "user", eventIds: [7], reason: "Tagged" },
-      title: "Release 4.2 shipped",
-      priority: "normal",
-      blocks: [],
-      actions: [],
-      match: {},
-      status: "open",
-      createdAt: "2026-10-10T09:00:00.000Z",
-    };
-    const { fetch, client } = stubClient(() => (fetch.calls.length === 1 ? [signal] : signal));
+  it("resolves a signal tail through signal list, whose To do view is one page", async () => {
+    const signal = buildSignal("ccccccc3");
+    const { fetch, client } = stubClient(() =>
+      fetch.calls.length === 1 ? { items: [signal] } : signal,
+    );
     const command = lookUpCommand("signal", "read");
     const args = await parseArguments(command, ["0ccccccc3"], refuseStdinRead);
 
@@ -138,6 +143,77 @@ describe("a positional whose row resolves tails", () => {
 
     expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/signals" });
     expect(fetch.calls[1]).toMatchObject({ method: "GET", path: `/api/v1/signals/${signal.id}` });
+  });
+
+  it("sends the full ids of a repeated positional as one list, without reading the list", async () => {
+    const first = "0199e0e7-7b21-7000-8000-000000000001";
+    const second = "0199e0e7-7b21-7000-8000-000000000002";
+    const { fetch, client } = stubClient(() => ({ done: [first, second], skipped: [] }));
+    const command = lookUpCommand("signal", "done");
+    const args = await parseArguments(command, [first, second], refuseStdinRead);
+
+    await execute(client, command, args);
+
+    expect(fetch.calls).toMatchObject([
+      { method: "POST", path: "/api/v1/signals/mark-done", body: { signalIds: [first, second] } },
+    ]);
+  });
+
+  it("resolves each tail of a repeated positional, reading the list once", async () => {
+    const signals = [buildSignal("ccccccc3"), buildSignal("ddddddd4")];
+    const full = "0199e0e7-7b21-7000-8000-000000000001";
+    const { fetch, client } = stubClient((request) =>
+      request.method === "GET" ? { items: signals } : { snoozed: [], skipped: [] },
+    );
+    const command = lookUpCommand("signal", "snooze");
+    const args = await parseArguments(
+      command,
+      ["0ccccccc3", full, "0ddddddd4", "--until", "2026-10-13T09:00+02:00"],
+      refuseStdinRead,
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls).toMatchObject([
+      { method: "GET", path: "/api/v1/signals" },
+      {
+        method: "POST",
+        path: "/api/v1/signals/snooze",
+        body: {
+          signalIds: [signals[0]!.id, full, signals[1]!.id],
+          // The CLI decodes the time to UTC, as the contract does.
+          until: "2026-10-13T07:00:00.000Z",
+        },
+      },
+    ]);
+  });
+
+  it("resolves an unsnooze tail among the snoozed signals", async () => {
+    const signal = buildSignal("ccccccc3");
+    const { fetch, client } = stubClient((request) =>
+      request.method === "GET" ? { items: [signal] } : { unsnoozed: [signal.id], skipped: [] },
+    );
+    const command = lookUpCommand("signal", "unsnooze");
+    const args = await parseArguments(command, ["0ccccccc3"], refuseStdinRead);
+
+    await execute(client, command, args);
+
+    expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/signals" });
+    expect(fetch.calls[0]!.query.get("view")).toBe("later");
+    expect(fetch.calls[1]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/signals/unsnooze",
+      body: { signalIds: [signal.id] },
+    });
+  });
+
+  it("fails with not_found for a tail no listed signal has, and sends nothing", async () => {
+    const { fetch, client } = stubClient(() => ({ items: [buildSignal("ccccccc3")] }));
+    const command = lookUpCommand("signal", "done");
+    const args = await parseArguments(command, ["0ccccccc3", "0eeeeeee5"], refuseStdinRead);
+
+    await expect(execute(client, command, args)).rejects.toThrow(/no signal whose id ends with/);
+    expect(fetch.calls.map((call) => call.method)).toEqual(["GET"]);
   });
 });
 

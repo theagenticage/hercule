@@ -37,7 +37,7 @@ import { AuditLogLayer } from "../events";
 import { NotificationServiceTestLayer } from "../notifications/testing";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { connectionRepository, ConnectionTypesLayer, type StoredConnection } from "../connections";
-import { IngestExecutorLayer } from "../daemon/ingest";
+import { IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
 import { nowIso } from "../db";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
@@ -87,7 +87,13 @@ export const buildPluginStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-plugins-"));
   homes.push(home);
   return PluginsLayer.pipe(
-    Layer.provideMerge(PluginHostLayer.pipe(Layer.provide(IngestExecutorLayer))),
+    Layer.provideMerge(
+      PluginHostLayer.pipe(
+        Layer.provide(IngestExecutorLayer),
+        // Merged, so a test can build an ingest context of its own.
+        Layer.provideMerge(OpenSignalsLayer),
+      ),
+    ),
     Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(SecretLayer),
@@ -423,6 +429,7 @@ export const createEventSourceFixture = (
               [EVENT_SOURCE_FIXTURE.kind]: {
                 description: "Something was done in Acme.",
                 schema: Schema.Struct({ title: Schema.String }),
+                availableToTriage: true,
               },
             },
             open: (connection, context) =>

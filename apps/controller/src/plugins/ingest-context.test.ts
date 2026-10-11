@@ -47,7 +47,12 @@ const runWithContext = <A, E>(
       if (source === undefined) return yield* Effect.die("the fixture registered no source");
       const contexts = yield* ingestContexts;
       return yield* body(
-        contexts.buildIngestContext(source, { id: connection.id, config: {} }),
+        contexts.buildIngestContext(source, {
+          id: connection.id,
+          config: {},
+          accountId: connection.accountId,
+          displayName: connection.displayName,
+        }),
         connection.id,
       );
     }).pipe(Effect.provide(buildPluginStack()), asUser),
@@ -59,6 +64,8 @@ const THING_DONE: EmittedEvent = {
   occurredAt: "2026-09-01T10:00:00Z",
   payload: { title: "Shipped" },
   refs: ["acme:thing:1"],
+  title: "Shipped",
+  author: "marta",
 };
 
 interface EventRow {

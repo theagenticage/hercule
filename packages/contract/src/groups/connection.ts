@@ -120,6 +120,14 @@ export const Connection = Schema.Struct({
   displayName: Schema.String,
   status: ConnectionStatus,
   statusDetail: Schema.optionalKey(Schema.String),
+  /**
+   * One sentence the type's `validate` returned with the account, when the
+   * credentials work but cost the user something, such as "This fine-grained
+   * token cannot read notifications, so review requests raise no signal".
+   * It stays until the next sign-in, which replaces or clears it. Absent
+   * when there is nothing to warn about.
+   */
+  warning: Schema.optionalKey(Schema.String),
   labels: Schema.Array(Label),
   config: Config,
   /** The user's own poll interval per feed. Empty when every feed polls at its default. */
