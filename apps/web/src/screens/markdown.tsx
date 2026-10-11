@@ -14,13 +14,7 @@
  * already used elsewhere in the app.
  */
 import { parseMarkdown } from "@hercule/client-core";
-import type {
-  ColumnAlignment,
-  MarkdownBlock,
-  MarkdownFootnote,
-  MarkdownInline,
-  MarkdownListItem,
-} from "@hercule/client-core";
+import type { ColumnAlignment, MarkdownBlock, MarkdownInline } from "@hercule/client-core";
 import { Component, Fragment, memo, useId, type JSX, type ReactNode } from "react";
 
 /** The gap between two blocks, with no gap above the first block in its container. */
@@ -44,14 +38,12 @@ const HEADINGS = {
 
 const PARAGRAPH = `${STACKED} leading-relaxed`;
 
-// The agent writes the link text, and the target may not match it, so a
-// click opens a new tab and sends no referrer. A link within the page, such
-// as a footnote number and its back link, stays in this tab: opening it in
-// a new tab would open a second copy of the app.
 const LINK = "underline decoration-line underline-offset-[3px]";
 
 // Weight 500, not the browser's 700: heavier bold looks cramped in this font.
 const STRONG = "font-emph";
+
+const INLINE_TAGS = { strong: "strong", emphasis: "em", strikethrough: "del" } as const;
 
 // A translucent tint rather than an opaque chip, because inline code
 // appears both on the page and inside the user's bubble. A translucent
@@ -82,6 +74,7 @@ const QUOTE = `${STACKED} border-l-2 border-line-soft pl-3 text-muted`;
 const TABLE_SCROLLER = `${STACKED} overflow-x-auto`;
 
 const CELL = "border border-line-soft px-2 py-1 align-top";
+const HEADER_CELL = `${CELL} font-emph`;
 
 // A column's alignment is a class and never an inline `style`, so markdown
 // written by an agent never reaches a style attribute. The controller's
@@ -90,164 +83,144 @@ const CELL = "border border-line-soft px-2 py-1 align-top";
 // policy would break nothing. A column with no alignment reads as left.
 const ALIGNMENT = { left: "text-left", center: "text-center", right: "text-right" } as const;
 
-/** What a paragraph is drawn with besides its own text. */
-interface ParagraphExtras {
-  /** Draws the text with no `<p>` around it, as a tight list item shows it. */
-  readonly bare?: boolean;
-  /** Goes before the text, such as a task item's checkbox. */
-  readonly lead?: ReactNode;
-  /** Goes after the text, inside the same paragraph, such as a footnote's back link. */
-  readonly tail?: ReactNode;
-}
-
-/** Throws for a node type the drawing functions do not handle, so the compiler flags a new type. */
-const failUnhandled = (node: never): never => {
-  throw new Error(`Unhandled markdown node: ${JSON.stringify(node)}`);
-};
-
 /**
- * Draws inline content. `prefix` makes the ids of footnote references unique
- * to one message, because two messages on a screen both have a footnote 1.
+ * Draws a run of inline elements. `idPrefix` makes the ids of footnote
+ * references unique to one message, because two messages on a screen both have
+ * a footnote 1.
  */
-const renderInlines = (inlines: ReadonlyArray<MarkdownInline>, prefix: string): ReactNode[] =>
-  inlines.map((inline, index) => renderInline(inline, index, prefix));
+const drawInlines = (inlines: ReadonlyArray<MarkdownInline>, idPrefix: string): ReactNode =>
+  inlines.map((inline, index) => <Fragment key={index}>{drawInline(inline, idPrefix)}</Fragment>);
 
-/** Draws one inline element, or returns its text. */
-const renderInline = (inline: MarkdownInline, key: number, prefix: string): ReactNode => {
+/** Draws one inline element. Its return type has no `undefined`, so a missing case fails to compile. */
+const drawInline = (inline: MarkdownInline, idPrefix: string): string | JSX.Element => {
   switch (inline.type) {
     case "text":
       return inline.text;
     case "strong":
-      return (
-        <strong key={key} className={STRONG}>
-          {renderInlines(inline.children, prefix)}
-        </strong>
-      );
     case "emphasis":
-      return <em key={key}>{renderInlines(inline.children, prefix)}</em>;
-    case "strikethrough":
-      return <del key={key}>{renderInlines(inline.children, prefix)}</del>;
-    case "inlineCode":
+    case "strikethrough": {
+      const Tag = INLINE_TAGS[inline.type];
       return (
-        <code key={key} className={INLINE_CODE}>
-          {inline.text}
-        </code>
+        <Tag className={inline.type === "strong" ? STRONG : undefined}>
+          {drawInlines(inline.children, idPrefix)}
+        </Tag>
       );
+    }
+    case "inlineCode":
+      return <code className={INLINE_CODE}>{inline.text}</code>;
     case "break":
-      return <br key={key} />;
+      return <br />;
     case "link":
+      // The agent writes the link text, and the target may not match it, so a
+      // click opens a new tab and sends no referrer. A link within the page,
+      // such as a footnote number and its back link, stays in this tab:
+      // opening it in a new tab would open a second copy of the app.
       return (
         <a
-          key={key}
           href={inline.href}
+          title={inline.title}
           {...(inline.href.startsWith("#") ? {} : { target: "_blank", rel: "noreferrer" })}
           className={LINK}
         >
-          {renderInlines(inline.children, prefix)}
+          {drawInlines(inline.children, idPrefix)}
         </a>
       );
     case "image":
       // No referrer, so reading a message does not tell the image's host which page was read.
-      return <img key={key} src={inline.src} alt={inline.alt} referrerPolicy="no-referrer" />;
+      return (
+        <img src={inline.src} alt={inline.alt} title={inline.title} referrerPolicy="no-referrer" />
+      );
+    case "checkbox":
+      // Disabled: the message is a record, not a form.
+      return (
+        <>
+          <input type="checkbox" checked={inline.checked} disabled />{" "}
+        </>
+      );
     case "footnoteReference":
       return (
-        <sup key={key}>
+        <sup>
           <a
-            href={`#${prefix}fn-${inline.number}`}
-            id={inline.isFirstReference ? `${prefix}fnref-${inline.number}` : undefined}
-            aria-describedby={`${prefix}footnote-label`}
+            href={`#${idPrefix}fn-${inline.number}`}
+            id={inline.isFirstReference ? `${idPrefix}fnref-${inline.number}` : undefined}
+            aria-describedby={`${idPrefix}footnote-label`}
             className={LINK}
           >
             {inline.number}
           </a>
         </sup>
       );
-    default:
-      return failUnhandled(inline);
+    case "footnoteBackReference":
+      return (
+        <>
+          {" "}
+          <a
+            href={`#${idPrefix}fnref-${inline.number}`}
+            aria-label={`Back to reference ${inline.number}`}
+            className={LINK}
+          >
+            ↩
+          </a>
+        </>
+      );
   }
 };
 
 /** Draws blocks one after another, with no wrapper element. */
-const renderBlocks = (blocks: ReadonlyArray<MarkdownBlock>, prefix: string): ReactNode[] =>
-  blocks.map((block, index) => renderBlock(block, index, prefix));
+const drawBlocks = (blocks: ReadonlyArray<MarkdownBlock>, idPrefix: string): ReactNode =>
+  blocks.map((block, index) => <Fragment key={index}>{drawBlock(block, idPrefix)}</Fragment>);
 
-/** Draws one block. `extras` applies to a paragraph and is ignored for any other block. */
-const renderBlock = (
-  block: MarkdownBlock,
-  key: number,
-  prefix: string,
-  extras: ParagraphExtras = {},
-): ReactNode => {
+/** Draws one block. Its return type has no `undefined`, so a missing case fails to compile. */
+const drawBlock = (block: MarkdownBlock, idPrefix: string): JSX.Element => {
   switch (block.type) {
-    case "paragraph": {
-      const content = (
-        <>
-          {extras.lead}
-          {renderInlines(block.children, prefix)}
-          {extras.tail}
-        </>
-      );
-      return extras.bare === true ? (
-        <Fragment key={key}>{content}</Fragment>
-      ) : (
-        <p key={key} className={PARAGRAPH}>
-          {content}
-        </p>
-      );
-    }
+    case "paragraph":
+      return <p className={PARAGRAPH}>{drawInlines(block.children, idPrefix)}</p>;
     case "heading": {
       const Heading = `h${block.depth}` as const;
       return (
-        <Heading key={key} className={HEADINGS[block.depth]}>
-          {renderInlines(block.children, prefix)}
-        </Heading>
+        <Heading className={HEADINGS[block.depth]}>{drawInlines(block.children, idPrefix)}</Heading>
       );
     }
     case "list": {
-      const items = block.items.map((item, index) =>
-        renderListItem(item, index, block.loose, prefix),
-      );
+      const items = block.items.map((item, index) => (
+        <li key={index} className={LIST_ITEM}>
+          {item.children.map((child, childIndex) => (
+            <Fragment key={childIndex}>
+              {
+                // A tight list shows an item's paragraphs as bare text.
+                child.type === "paragraph" && !block.loose
+                  ? drawInlines(child.children, idPrefix)
+                  : drawBlock(child, idPrefix)
+              }
+            </Fragment>
+          ))}
+        </li>
+      ));
       return block.start === undefined ? (
-        <ul key={key} className={BULLETED_LIST}>
-          {items}
-        </ul>
+        <ul className={BULLETED_LIST}>{items}</ul>
       ) : (
-        <ol key={key} start={block.start === 1 ? undefined : block.start} className={NUMBERED_LIST}>
+        <ol start={block.start === 1 ? undefined : block.start} className={NUMBERED_LIST}>
           {items}
         </ol>
       );
     }
     case "blockquote":
-      return (
-        <blockquote key={key} className={QUOTE}>
-          {renderBlocks(block.children, prefix)}
-        </blockquote>
-      );
+      return <blockquote className={QUOTE}>{drawBlocks(block.children, idPrefix)}</blockquote>;
     case "code":
       return (
-        <pre key={key} className={FENCE}>
+        <pre className={FENCE}>
           <code className={INLINE_CODE}>{block.text}</code>
         </pre>
       );
     case "table":
       return (
-        <div key={key} className={TABLE_SCROLLER}>
+        <div className={TABLE_SCROLLER}>
           <table className="w-full border-collapse">
-            <thead>
-              <tr>
-                {block.header.map((cell, column) =>
-                  renderTableCell("th", column, cell, block.align[column], prefix),
-                )}
-              </tr>
-            </thead>
+            <thead>{drawTableRow(block.header, block.align, "th", idPrefix)}</thead>
             {block.rows.length > 0 && (
               <tbody>
                 {block.rows.map((row, index) => (
-                  <tr key={index}>
-                    {row.map((cell, column) =>
-                      renderTableCell("td", column, cell, block.align[column], prefix),
-                    )}
-                  </tr>
+                  <Fragment key={index}>{drawTableRow(row, block.align, "td", idPrefix)}</Fragment>
                 ))}
               </tbody>
             )}
@@ -255,98 +228,28 @@ const renderBlock = (
         </div>
       );
     case "rule":
-      return <hr key={key} className={`${STACKED} border-line`} />;
-    default:
-      return failUnhandled(block);
+      return <hr className={`${STACKED} border-line`} />;
   }
 };
 
-/**
- * Draws a list item. In a tight list its paragraphs are bare text, and a task
- * item starts with its checkbox. The checkbox is disabled: the message is a
- * record, not a form.
- */
-const renderListItem = (
-  item: MarkdownListItem,
-  key: number,
-  loose: boolean,
-  prefix: string,
-): ReactNode => {
-  const checkbox =
-    item.checked === undefined ? null : (
-      <>
-        <input type="checkbox" checked={item.checked} disabled />{" "}
-      </>
-    );
-  return (
-    <li key={key} className={LIST_ITEM}>
-      {item.children[0]?.type === "paragraph" ? null : checkbox}
-      {item.children.map((child, index) =>
-        renderBlock(child, index, prefix, { bare: !loose, lead: index === 0 ? checkbox : null }),
-      )}
-    </li>
-  );
-};
-
-/** Draws a header or body cell, aligned by its column's alignment. */
-const renderTableCell = (
-  tag: "th" | "td",
-  key: number,
-  cell: ReadonlyArray<MarkdownInline>,
-  alignment: ColumnAlignment,
-  prefix: string,
-): ReactNode => {
-  const Cell = tag;
-  const className = `${tag === "th" ? `${CELL} font-emph` : CELL} ${ALIGNMENT[alignment ?? "left"]}`;
-  return (
-    <Cell key={key} className={className}>
-      {renderInlines(cell, prefix)}
-    </Cell>
-  );
-};
-
-/**
- * Draws the footnotes after the blocks: a section with a visually hidden
- * heading, and a numbered list. Each footnote ends with a link back to its
- * first reference, inside its last paragraph when it ends with one.
- */
-const renderFootnotes = (footnotes: ReadonlyArray<MarkdownFootnote>, prefix: string): ReactNode => {
-  const labelId = `${prefix}footnote-label`;
-  return (
-    <section aria-labelledby={labelId}>
-      <h2 id={labelId} className={`sr-only ${HEADINGS[2]}`}>
-        Footnotes
-      </h2>
-      <ol className={NUMBERED_LIST}>
-        {footnotes.map(({ number, children }) => {
-          const backLink = (
-            <>
-              {" "}
-              <a
-                href={`#${prefix}fnref-${number}`}
-                aria-label={`Back to reference ${number}`}
-                className={LINK}
-              >
-                ↩
-              </a>
-            </>
-          );
-          const endsWithParagraph = children.at(-1)?.type === "paragraph";
-          return (
-            <li key={number} id={`${prefix}fn-${number}`} className={LIST_ITEM}>
-              {children.map((child, index) =>
-                renderBlock(child, index, prefix, {
-                  tail: endsWithParagraph && index === children.length - 1 ? backLink : null,
-                }),
-              )}
-              {endsWithParagraph ? null : backLink}
-            </li>
-          );
-        })}
-      </ol>
-    </section>
-  );
-};
+/** Draws a header row (`th`) or a body row (`td`), each cell aligned as its column is. */
+const drawTableRow = (
+  cells: ReadonlyArray<ReadonlyArray<MarkdownInline>>,
+  align: ReadonlyArray<ColumnAlignment>,
+  Cell: "th" | "td",
+  idPrefix: string,
+): JSX.Element => (
+  <tr>
+    {cells.map((cell, column) => (
+      <Cell
+        key={column}
+        className={`${Cell === "th" ? HEADER_CELL : CELL} ${ALIGNMENT[align[column] ?? "left"]}`}
+      >
+        {drawInlines(cell, idPrefix)}
+      </Cell>
+    ))}
+  </tr>
+);
 
 /**
  * An error boundary that shows the raw text when the markdown fails to render.
@@ -359,7 +262,7 @@ const renderFootnotes = (footnotes: ReadonlyArray<MarkdownFootnote>, prefix: str
  * permanently unreadable. Showing the raw text keeps the answer readable and
  * the rest of the thread intact.
  */
-class Legible extends Component<
+class PlainTextOnError extends Component<
   { readonly text: string; readonly children: ReactNode },
   { readonly failed: boolean }
 > {
@@ -385,19 +288,34 @@ class Legible extends Component<
 }
 
 /**
- * Parses and draws `text`. It renders below the error boundary on purpose: the
- * parser throws on text nested deeper than its stack, and React can overflow
- * while drawing a very deep tree, and the boundary must catch both.
+ * Parses `text` and draws the tree: the blocks, then the footnotes they
+ * reference. It is a component of its own so the error boundary above it
+ * catches both a parser that throws on text nested deeper than its stack and
+ * React overflowing the stack while drawing a very deep tree.
  */
-function ParsedMarkdown({ text, breaks }: { text: string; breaks: boolean }): JSX.Element {
+function MarkdownTree({ text, breaks }: { text: string; breaks: boolean }): JSX.Element {
   // React's ids contain characters such as ":" that are awkward in a URL
   // fragment. The prefix keeps the footnote ids of two messages on one screen apart.
-  const prefix = `${useId().replace(/[^A-Za-z0-9_-]/g, "")}-`;
+  const idPrefix = `${useId().replace(/[^A-Za-z0-9_-]/g, "")}-`;
   const { blocks, footnotes } = parseMarkdown(text, { breaks });
+  const footnoteLabelId = `${idPrefix}footnote-label`;
   return (
     <>
-      {renderBlocks(blocks, prefix)}
-      {footnotes.length > 0 && renderFootnotes(footnotes, prefix)}
+      {drawBlocks(blocks, idPrefix)}
+      {footnotes.length > 0 && (
+        <section aria-labelledby={footnoteLabelId}>
+          <h2 id={footnoteLabelId} className="sr-only">
+            Footnotes
+          </h2>
+          <ol className={NUMBERED_LIST}>
+            {footnotes.map(({ number, children }) => (
+              <li key={number} id={`${idPrefix}fn-${number}`} className={LIST_ITEM}>
+                {drawBlocks(children, idPrefix)}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
     </>
   );
 }
@@ -427,8 +345,8 @@ export const Markdown = memo(function Markdown({
   // their direct parent. The thread's live tail must sit beside them as a
   // sibling; a wrapper here would separate it from the prose it continues.
   return (
-    <Legible text={text}>
-      <ParsedMarkdown text={text} breaks={breaks} />
-    </Legible>
+    <PlainTextOnError text={text}>
+      <MarkdownTree text={text} breaks={breaks} />
+    </PlainTextOnError>
   );
 });

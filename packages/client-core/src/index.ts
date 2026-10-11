@@ -182,7 +182,6 @@ export {
   type MarkdownFootnote,
   type MarkdownInline,
   type MarkdownListItem,
-  type MarkdownTableCell,
 } from "./markdown";
 export { listWaiting, type Waiting, type WaitingAssistant, type WaitingThread } from "./waiting";
 export { buildIdOptions } from "./id-options";

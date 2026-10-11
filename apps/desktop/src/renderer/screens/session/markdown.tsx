@@ -9,16 +9,18 @@
  * so a `<script>` from an agent shows as plain text, and an address that is
  * not safe to open is not in the tree.
  *
- * The elements carry no classes, with three exceptions. `messages.css`
- * styles them through their container, `.msg-body` or `.bubble`, as the
- * Bureau book does.
+ * The elements carry no classes, with three exceptions, all styled in
+ * `messages.css`: `codeblock` on a fence, `table-scroll` on the box around a
+ * table, and `markdown-failed` on the raw text shown when the markdown cannot
+ * be drawn. The rest of that file styles the elements through their
+ * container, `.msg-body` or `.bubble`, as the Bureau book does.
  */
 import { Component, Fragment, memo, useId, type JSX, type ReactNode } from "react";
 import {
   parseMarkdown,
+  type ColumnAlignment,
   type MarkdownBlock,
   type MarkdownInline,
-  type MarkdownTableCell,
 } from "@hercule/client-core";
 
 /** What drawing a message needs besides the tree. */
@@ -32,20 +34,18 @@ interface DrawContext {
   readonly inlineImages: boolean;
 }
 
-/** What a paragraph or an item can be given besides its own text. */
-interface BlockExtras {
-  /** Draws a list item's paragraphs as bare text, with no `<p>`. */
-  readonly tight?: boolean;
-  /** Content drawn before the blocks' first paragraph, such as a task item's checkbox. */
-  readonly lead?: ReactNode;
-  /** Content drawn after the blocks' last paragraph, such as a footnote's back link. */
-  readonly tail?: ReactNode;
-}
-
 /** Renders an image as a link to it, or its alt text alone when it has no address. */
-function ImageLink({ src, alt }: { readonly src: string; readonly alt: string }): JSX.Element {
+function ImageLink({
+  src,
+  alt,
+  title,
+}: {
+  readonly src: string;
+  readonly alt: string;
+  readonly title: string | undefined;
+}): JSX.Element {
   return src !== "" ? (
-    <a href={src} target="_blank" rel="noreferrer">
+    <a href={src} title={title} target="_blank" rel="noreferrer">
       {alt === "" ? src : alt}
     </a>
   ) : (
@@ -54,7 +54,9 @@ function ImageLink({ src, alt }: { readonly src: string; readonly alt: string })
 }
 
 /**
- * Draws one run of text inside a block.
+ * Draws one run of text inside a block. `key` goes on the element itself, and
+ * text is a bare string, so a long message does not build a Fragment for
+ * every inline.
  *
  * - A link opens in the default browser, where the address is visible, and
  *   sends no referrer, because the agent writes both the link text and its
@@ -65,25 +67,34 @@ function ImageLink({ src, alt }: { readonly src: string; readonly alt: string })
  *   the window's content security policy loads no other image. Anywhere else
  *   an image shows as a link to it, named by its alt text, or by its address
  *   when it has none. The inline image is fetched with no referrer.
+ * - A task item's checkbox and a footnote's back link each come with the
+ *   space that separates them from the text beside them, so each is a
+ *   Fragment: there is no single element to key.
  */
-function drawInline(inline: MarkdownInline, context: DrawContext): ReactNode {
+function drawInline(
+  inline: MarkdownInline,
+  context: DrawContext,
+  key: number,
+): string | JSX.Element {
   switch (inline.type) {
     case "text":
       return inline.text;
     case "strong":
-      return <strong>{drawInlines(inline.children, context)}</strong>;
+      return <strong key={key}>{drawInlines(inline.children, context)}</strong>;
     case "emphasis":
-      return <em>{drawInlines(inline.children, context)}</em>;
+      return <em key={key}>{drawInlines(inline.children, context)}</em>;
     case "strikethrough":
-      return <del>{drawInlines(inline.children, context)}</del>;
+      return <del key={key}>{drawInlines(inline.children, context)}</del>;
     case "inlineCode":
-      return <code>{inline.text}</code>;
+      return <code key={key}>{inline.text}</code>;
     case "break":
-      return <br />;
+      return <br key={key} />;
     case "link":
       return (
         <a
+          key={key}
           href={inline.href}
+          title={inline.title}
           {...(inline.href.startsWith("#") ? {} : { target: "_blank", rel: "noreferrer" })}
         >
           {drawInlines(inline.children, context)}
@@ -91,13 +102,25 @@ function drawInline(inline: MarkdownInline, context: DrawContext): ReactNode {
       );
     case "image":
       return context.inlineImages && inline.src.startsWith("https://") ? (
-        <img src={inline.src} alt={inline.alt} referrerPolicy="no-referrer" />
+        <img
+          key={key}
+          src={inline.src}
+          alt={inline.alt}
+          title={inline.title}
+          referrerPolicy="no-referrer"
+        />
       ) : (
-        <ImageLink src={inline.src} alt={inline.alt} />
+        <ImageLink key={key} src={inline.src} alt={inline.alt} title={inline.title} />
+      );
+    case "checkbox":
+      return (
+        <Fragment key={key}>
+          <input type="checkbox" checked={inline.checked} disabled />{" "}
+        </Fragment>
       );
     case "footnoteReference":
       return (
-        <sup>
+        <sup key={key}>
           <a
             href={`#${context.idPrefix}fn-${inline.number}`}
             id={inline.isFirstReference ? `${context.idPrefix}fnref-${inline.number}` : undefined}
@@ -106,103 +129,111 @@ function drawInline(inline: MarkdownInline, context: DrawContext): ReactNode {
           </a>
         </sup>
       );
-    default:
-      return inline satisfies never;
+    case "footnoteBackReference":
+      return (
+        <Fragment key={key}>
+          {" "}
+          <a
+            href={`#${context.idPrefix}fnref-${inline.number}`}
+            aria-label={`Back to reference ${inline.number}`}
+          >
+            ↩
+          </a>
+        </Fragment>
+      );
   }
 }
 
 /** Draws a run of text, in order. */
-function drawInlines(inlines: ReadonlyArray<MarkdownInline>, context: DrawContext): ReactNode {
-  return inlines.map((inline, index) => (
-    <Fragment key={index}>{drawInline(inline, context)}</Fragment>
-  ));
+function drawInlines(
+  inlines: ReadonlyArray<MarkdownInline>,
+  context: DrawContext,
+): Array<string | JSX.Element> {
+  return inlines.map((inline, index) => drawInline(inline, context, index));
 }
 
 /** Draws a table cell with the alignment its column sets, if any. */
 function drawCell(
   Tag: "th" | "td",
-  cell: MarkdownTableCell,
-  align: "left" | "center" | "right" | undefined,
+  cell: ReadonlyArray<MarkdownInline>,
+  align: ColumnAlignment,
+  column: number,
   context: DrawContext,
 ): JSX.Element {
   // The alignment is an attribute that `messages.css` reads, never a `style`:
   // an agent's markdown must not reach a style attribute.
-  return <Tag data-align={align}>{drawInlines(cell, context)}</Tag>;
+  return (
+    <Tag key={column} data-align={align}>
+      {drawInlines(cell, context)}
+    </Tag>
+  );
 }
 
 /**
- * Draws one block. Only a paragraph reads `extras`.
+ * Draws one block. `tight` draws a paragraph as bare text with no `<p>`, as a
+ * tight list does for its items. It reaches the paragraphs of this block
+ * only, not those of a block inside it.
  *
  * A fence is the book's `.codeblock`, with no syntax colours: the book's
  * colours are sample highlighting, and no highlighter is loaded.
  */
-function drawBlock(block: MarkdownBlock, context: DrawContext, extras: BlockExtras): ReactNode {
+function drawBlock(
+  block: MarkdownBlock,
+  context: DrawContext,
+  tight: boolean,
+  key: number,
+): JSX.Element {
   switch (block.type) {
-    case "paragraph": {
-      const content = (
-        <>
-          {extras.lead}
-          {drawInlines(block.children, context)}
-          {extras.tail}
-        </>
+    case "paragraph":
+      // A bare paragraph has no element to carry the key.
+      return tight ? (
+        <Fragment key={key}>{drawInlines(block.children, context)}</Fragment>
+      ) : (
+        <p key={key}>{drawInlines(block.children, context)}</p>
       );
-      return extras.tight ? content : <p>{content}</p>;
-    }
     case "heading": {
       const Tag = `h${block.depth}` as const;
-      return <Tag>{drawInlines(block.children, context)}</Tag>;
+      return <Tag key={key}>{drawInlines(block.children, context)}</Tag>;
     }
     case "list": {
       const items = block.items.map((item, index) => (
-        <li key={index}>
-          {drawBlocks(item.children, context, {
-            tight: !block.loose,
-            lead:
-              item.checked === undefined ? null : (
-                <>
-                  <input type="checkbox" checked={item.checked} disabled />{" "}
-                </>
-              ),
-          })}
-        </li>
+        <li key={index}>{drawBlocks(item.children, context, !block.loose)}</li>
       ));
       return block.start === undefined ? (
-        <ul>{items}</ul>
+        <ul key={key}>{items}</ul>
       ) : (
-        <ol start={block.start === 1 ? undefined : block.start}>{items}</ol>
+        <ol key={key} start={block.start === 1 ? undefined : block.start}>
+          {items}
+        </ol>
       );
     }
     case "blockquote":
-      return <blockquote>{drawBlocks(block.children, context)}</blockquote>;
+      return <blockquote key={key}>{drawBlocks(block.children, context, false)}</blockquote>;
     case "code":
       return (
-        <pre className="codeblock">
+        <pre key={key} className="codeblock">
           <code>{block.text}</code>
         </pre>
       );
     case "table":
       // A wide table scrolls on its own rather than widening the column.
       return (
-        <div className="table-scroll">
+        <div key={key} className="table-scroll">
           <table>
             <thead>
               <tr>
-                {block.header.map((cell, column) => (
-                  <Fragment key={column}>
-                    {drawCell("th", cell, block.align[column], context)}
-                  </Fragment>
-                ))}
+                {block.header.map((cell, column) =>
+                  drawCell("th", cell, block.align[column], column, context),
+                )}
               </tr>
             </thead>
             {block.rows.length > 0 && (
               <tbody>
                 {block.rows.map((row, index) => (
                   <tr key={index}>
-                    {row.map((cell, column) => (
-                      <Fragment key={column}>
-                        {drawCell("td", cell, block.align[column], context)}
-                      </Fragment>
-                    ))}
+                    {row.map((cell, column) =>
+                      drawCell("td", cell, block.align[column], column, context),
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -211,40 +242,20 @@ function drawBlock(block: MarkdownBlock, context: DrawContext, extras: BlockExtr
         </div>
       );
     case "rule":
-      return <hr />;
-    default:
-      return block satisfies never;
+      return <hr key={key} />;
   }
 }
 
 /**
- * Draws blocks in order, with no wrapper element.
- *
- * `lead` and `tail` go inside the first and last paragraph, so a checkbox
- * stays on the item's first line and a back link on the footnote's last. When
- * that block is not a paragraph, they stand beside the blocks instead.
+ * Draws blocks in order, with no wrapper element. `tight` is passed to each
+ * block, see `drawBlock`.
  */
 function drawBlocks(
   blocks: ReadonlyArray<MarkdownBlock>,
   context: DrawContext,
-  { tight = false, lead = null, tail = null }: BlockExtras = {},
-): ReactNode {
-  const lastIndex = blocks.length - 1;
-  return (
-    <>
-      {blocks[0]?.type !== "paragraph" && lead}
-      {blocks.map((block, index) => (
-        <Fragment key={index}>
-          {drawBlock(block, context, {
-            tight,
-            lead: index === 0 ? lead : null,
-            tail: index === lastIndex ? tail : null,
-          })}
-        </Fragment>
-      ))}
-      {blocks[lastIndex]?.type !== "paragraph" && tail}
-    </>
-  );
+  tight: boolean,
+): JSX.Element[] {
+  return blocks.map((block, index) => drawBlock(block, context, tight, index));
 }
 
 /**
@@ -307,25 +318,13 @@ function MarkdownTree({
   const { blocks, footnotes } = parseMarkdown(text, { breaks });
   return (
     <>
-      {drawBlocks(blocks, context)}
+      {drawBlocks(blocks, context, false)}
       {footnotes.length > 0 && (
         <section aria-label="Footnotes">
           <ol>
             {footnotes.map(({ number, children }) => (
               <li key={number} id={`${idPrefix}fn-${number}`}>
-                {drawBlocks(children, context, {
-                  tail: (
-                    <>
-                      {" "}
-                      <a
-                        href={`#${idPrefix}fnref-${number}`}
-                        aria-label={`Back to reference ${number}`}
-                      >
-                        ↩
-                      </a>
-                    </>
-                  ),
-                })}
+                {drawBlocks(children, context, false)}
               </li>
             ))}
           </ol>

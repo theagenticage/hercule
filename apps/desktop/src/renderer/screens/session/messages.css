@@ -139,8 +139,9 @@ table :is(th, td)[data-align="center"] {
 table :is(th, td)[data-align="right"] {
   text-align: right;
 }
-/* The footnotes under a message: smaller and muted, set apart from the text
-   above them. The last list's margin would add space under the message. */
+/* Not in the book. The book has no footnotes. The ones under a message are
+   muted and 13px, set apart from the text above them. The last list's margin
+   would add space under the message. */
 :is(.msg-body, .bubble) section {
   color: var(--muted);
   font-size: var(--t-13);

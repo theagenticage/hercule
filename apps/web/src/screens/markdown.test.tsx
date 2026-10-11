@@ -68,12 +68,13 @@ it("points a footnote's reference and back link at each other", () => {
 
   // The link sits in the note's last paragraph, and the section is named by its hidden heading.
   expect(backLink.closest("p")?.textContent).toBe("the body. \u21a9");
+  expect(backLink.textContent).toBe("\u21a9");
+  expect(backLink.className).toContain("underline");
   const section = container.querySelector("section");
   const heading = container.querySelector(`[id="${section?.getAttribute("aria-labelledby")}"]`);
   expect(heading?.tagName).toBe("H2");
   expect(heading?.textContent).toBe("Footnotes");
-  expect(heading?.className).toContain("sr-only");
-  expect(heading?.className).toContain("font-emph");
+  expect(heading?.className).toBe("sr-only");
   expect(references[0]?.getAttribute("aria-describedby")).toBe(heading?.id);
 });
 
@@ -118,6 +119,29 @@ it("draws a task item with a disabled checkbox before its text", () => {
   expect(boxes.map((box) => box.checked)).toEqual([true, false]);
   expect(boxes.every((box) => box.disabled)).toBe(true);
   expect(container.querySelector("li")?.textContent).toBe(" done");
+});
+
+it("draws a task item's checkbox inside its paragraph when the list is loose", () => {
+  const { container } = render(<Markdown text={"- [x] one\n\n- [ ] two"} />);
+
+  const boxes = [...container.querySelectorAll("li p > input[type=checkbox]")];
+  expect(boxes).toHaveLength(2);
+  expect(container.querySelector("li p")?.textContent).toBe(" one");
+});
+
+it("sets the title attribute of a link and an image, and omits it when there is none", () => {
+  const { container } = render(
+    <Markdown
+      text={
+        '[docs](https://example.com "The docs") [bare](https://example.com/b)\n\n![cat](https://example.com/c.png "A cat")'
+      }
+    />,
+  );
+
+  const [titled, bare] = [...container.querySelectorAll("a")];
+  expect(titled?.getAttribute("title")).toBe("The docs");
+  expect(bare?.hasAttribute("title")).toBe(false);
+  expect(container.querySelector("img")?.getAttribute("title")).toBe("A cat");
 });
 
 it("draws an image that sends no referrer", () => {

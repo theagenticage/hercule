@@ -49,6 +49,14 @@ describe("Markdown", () => {
     expect(link.getAttribute("rel")).toBe("noreferrer");
   });
 
+  it("sets a link's title as the tooltip, and none when it has no title", () => {
+    renderMarkdown(
+      '[titled](https://example.com/a "The runbook") and [plain](https://example.com/b)',
+    );
+    expect(screen.getByRole("link", { name: "titled" }).getAttribute("title")).toBe("The runbook");
+    expect(screen.getByRole("link", { name: "plain" }).hasAttribute("title")).toBe(false);
+  });
+
   it("keeps a link within the message in the window", () => {
     renderMarkdown("Jump to [the notes](#notes).");
     const link = screen.getByRole("link", { name: "the notes" });
@@ -85,6 +93,19 @@ describe("Markdown", () => {
     expect(named.getAttribute("target")).toBe("_blank");
     expect(named.getAttribute("rel")).toBe("noreferrer");
     expect(screen.getByRole("link", { name: "https://example.com/raw.png" })).toBeTruthy();
+  });
+
+  it("sets an image's title on the inline image and on the link that stands for it", () => {
+    const { container } = render(
+      <div className="b-words">
+        <Markdown
+          text={'![a](https://example.com/a.png "Shown") ![b](http://example.com/b.png "Linked")'}
+          inlineImages
+        />
+      </div>,
+    );
+    expect(container.querySelector("img")?.getAttribute("title")).toBe("Shown");
+    expect(screen.getByRole("link", { name: "b" }).getAttribute("title")).toBe("Linked");
   });
 
   it("wraps a table so a wide one scrolls on its own", () => {
@@ -129,6 +150,20 @@ describe("Markdown", () => {
       " done",
       " open",
     ]);
+  });
+
+  it("draws a loose task item's checkbox at the start of its first paragraph", () => {
+    const body = renderMarkdown("- [x] first\n\n  second\n\n- [ ] open");
+    const paragraphs = [...body.querySelectorAll("li > p")];
+    expect(paragraphs.map((p) => p.querySelectorAll("input").length)).toEqual([1, 0, 1]);
+    expect(paragraphs[0]?.firstElementChild?.tagName).toBe("INPUT");
+  });
+
+  it("puts a footnote's back link in its last paragraph only", () => {
+    const body = renderMarkdown("A claim.[^1]\n\n[^1]: First part.\n\n    Second part.");
+    const paragraphs = [...body.querySelectorAll("section li p")];
+    expect(paragraphs.map((p) => p.textContent)).toEqual(["First part.", "Second part. ↩"]);
+    expect(body.querySelectorAll("section a")).toHaveLength(1);
   });
 
   it("links a footnote's reference and its back link to each other", () => {

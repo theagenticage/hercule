@@ -41,10 +41,7 @@ describe("parseMarkdown blocks", () => {
         type: "list",
         start: undefined,
         loose: false,
-        items: [
-          { checked: undefined, children: [paragraph(text("a"))] },
-          { checked: undefined, children: [paragraph(text("b"))] },
-        ],
+        items: [{ children: [paragraph(text("a"))] }, { children: [paragraph(text("b"))] }],
       }),
     );
   });
@@ -55,10 +52,7 @@ describe("parseMarkdown blocks", () => {
         type: "list",
         start: 3,
         loose: false,
-        items: [
-          { checked: undefined, children: [paragraph(text("a"))] },
-          { checked: undefined, children: [paragraph(text("b"))] },
-        ],
+        items: [{ children: [paragraph(text("a"))] }, { children: [paragraph(text("b"))] }],
       }),
     );
   });
@@ -69,7 +63,7 @@ describe("parseMarkdown blocks", () => {
         type: "list",
         start: 0,
         loose: false,
-        items: [{ checked: undefined, children: [paragraph(text("a"))] }],
+        items: [{ children: [paragraph(text("a"))] }],
       }),
     );
   });
@@ -80,10 +74,7 @@ describe("parseMarkdown blocks", () => {
         type: "list",
         start: undefined,
         loose: true,
-        items: [
-          { checked: undefined, children: [paragraph(text("a"))] },
-          { checked: undefined, children: [paragraph(text("b"))] },
-        ],
+        items: [{ children: [paragraph(text("a"))] }, { children: [paragraph(text("b"))] }],
       }),
     );
   });
@@ -96,14 +87,13 @@ describe("parseMarkdown blocks", () => {
         loose: false,
         items: [
           {
-            checked: undefined,
             children: [
               paragraph(text("a")),
               {
                 type: "list",
                 start: 1,
                 loose: false,
-                items: [{ checked: undefined, children: [paragraph(text("b"))] }],
+                items: [{ children: [paragraph(text("b"))] }],
               },
             ],
           },
@@ -112,16 +102,69 @@ describe("parseMarkdown blocks", () => {
     );
   });
 
-  it("parses task items as checked or unchecked, with no checkbox in the text", () => {
+  it("starts a task item with its checkbox, ticked or not", () => {
     expect(parseMarkdown("- [x] done\n- [ ] open")).toEqual(
       blocks({
         type: "list",
         start: undefined,
         loose: false,
         items: [
-          { checked: true, children: [paragraph(text("done"))] },
-          { checked: false, children: [paragraph(text("open"))] },
+          { children: [paragraph({ type: "checkbox", checked: true }, text("done"))] },
+          { children: [paragraph({ type: "checkbox", checked: false }, text("open"))] },
         ],
+      }),
+    );
+  });
+
+  it("starts the first paragraph of a loose task item with its checkbox", () => {
+    expect(parseMarkdown("- [x] done\n\n- [ ] open\n\n  more")).toEqual(
+      blocks({
+        type: "list",
+        start: undefined,
+        loose: true,
+        items: [
+          { children: [paragraph({ type: "checkbox", checked: true }, text("done"))] },
+          {
+            children: [
+              paragraph({ type: "checkbox", checked: false }, text("open")),
+              paragraph(text("more")),
+            ],
+          },
+        ],
+      }),
+    );
+  });
+
+  it("keeps the blocks that follow the first paragraph of a task item", () => {
+    expect(parseMarkdown("- [ ] a\n  - b")).toEqual(
+      blocks({
+        type: "list",
+        start: undefined,
+        loose: false,
+        items: [
+          {
+            children: [
+              paragraph({ type: "checkbox", checked: false }, text("a")),
+              {
+                type: "list",
+                start: undefined,
+                loose: false,
+                items: [{ children: [paragraph(text("b"))] }],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+  });
+
+  it("leaves a box with no text after it as text", () => {
+    expect(parseMarkdown("- [ ]")).toEqual(
+      blocks({
+        type: "list",
+        start: undefined,
+        loose: false,
+        items: [{ children: [paragraph(text("[ ]"))] }],
       }),
     );
   });
@@ -136,7 +179,7 @@ describe("parseMarkdown blocks", () => {
             type: "list",
             start: undefined,
             loose: false,
-            items: [{ checked: undefined, children: [paragraph(text("item"))] }],
+            items: [{ children: [paragraph(text("item"))] }],
           },
         ],
       }),
@@ -177,7 +220,12 @@ describe("parseMarkdown inline elements", () => {
   it("parses a link", () => {
     expect(parseMarkdown("[docs](https://example.com/a?b=1)")).toEqual(
       blocks(
-        paragraph({ type: "link", href: "https://example.com/a?b=1", children: [text("docs")] }),
+        paragraph({
+          type: "link",
+          href: "https://example.com/a?b=1",
+          title: undefined,
+          children: [text("docs")],
+        }),
       ),
     );
   });
@@ -208,7 +256,7 @@ describe("parseMarkdown inline elements", () => {
 
   it("parses an image", () => {
     expect(parseMarkdown("![A *small* cat](/cat.png)")).toEqual(
-      blocks(paragraph({ type: "image", src: "/cat.png", alt: "A small cat" })),
+      blocks(paragraph({ type: "image", src: "/cat.png", alt: "A small cat", title: undefined })),
     );
   });
 
@@ -220,10 +268,16 @@ describe("parseMarkdown inline elements", () => {
           {
             type: "link",
             href: "https://example.com/a",
+            title: undefined,
             children: [text("https://example.com/a")],
           },
           text(" and "),
-          { type: "link", href: "http://www.example.org", children: [text("www.example.org")] },
+          {
+            type: "link",
+            href: "http://www.example.org",
+            title: undefined,
+            children: [text("www.example.org")],
+          },
           text("."),
         ),
       ),
@@ -234,9 +288,19 @@ describe("parseMarkdown inline elements", () => {
     expect(parseMarkdown("<https://example.com> <me@example.com>")).toEqual(
       blocks(
         paragraph(
-          { type: "link", href: "https://example.com", children: [text("https://example.com")] },
+          {
+            type: "link",
+            href: "https://example.com",
+            title: undefined,
+            children: [text("https://example.com")],
+          },
           text(" "),
-          { type: "link", href: "mailto:me@example.com", children: [text("me@example.com")] },
+          {
+            type: "link",
+            href: "mailto:me@example.com",
+            title: undefined,
+            children: [text("me@example.com")],
+          },
         ),
       ),
     );
@@ -266,20 +330,26 @@ describe("parseMarkdown line breaks", () => {
   });
 });
 
+/** A reference to the footnote with this number. */
+const reference = (number: number, isFirstReference = true): MarkdownInline => ({
+  type: "footnoteReference",
+  number,
+  isFirstReference,
+});
+
+/** The back reference that ends the footnote with this number. */
+const backReference = (number: number): MarkdownInline => ({
+  type: "footnoteBackReference",
+  number,
+});
+
 describe("parseMarkdown footnotes", () => {
   it("numbers footnotes by their first reference, not by their definition", () => {
     expect(parseMarkdown("a[^b] c[^a]\n\n[^a]: Alpha.\n[^b]: Bravo.")).toEqual({
-      blocks: [
-        paragraph(
-          text("a"),
-          { type: "footnoteReference", number: 1, isFirstReference: true },
-          text(" c"),
-          { type: "footnoteReference", number: 2, isFirstReference: true },
-        ),
-      ],
+      blocks: [paragraph(text("a"), reference(1), text(" c"), reference(2))],
       footnotes: [
-        { number: 1, children: [paragraph(text("Bravo."))] },
-        { number: 2, children: [paragraph(text("Alpha."))] },
+        { number: 1, children: [paragraph(text("Bravo."), backReference(1))] },
+        { number: 2, children: [paragraph(text("Alpha."), backReference(2))] },
       ],
     });
   });
@@ -287,51 +357,117 @@ describe("parseMarkdown footnotes", () => {
   it("marks only the first reference to a footnote as the first", () => {
     expect(parseMarkdown("a[^1] b[^1]\n\n> c[^1]\n\n[^1]: One.")).toEqual({
       blocks: [
-        paragraph(
-          text("a"),
-          { type: "footnoteReference", number: 1, isFirstReference: true },
-          text(" b"),
-          { type: "footnoteReference", number: 1, isFirstReference: false },
-        ),
-        {
-          type: "blockquote",
-          children: [
-            paragraph(text("c"), {
-              type: "footnoteReference",
-              number: 1,
-              isFirstReference: false,
-            }),
-          ],
-        },
+        paragraph(text("a"), reference(1), text(" b"), reference(1, false)),
+        { type: "blockquote", children: [paragraph(text("c"), reference(1, false))] },
       ],
-      footnotes: [{ number: 1, children: [paragraph(text("One."))] }],
+      footnotes: [{ number: 1, children: [paragraph(text("One."), backReference(1))] }],
     });
   });
 
   it("leaves out a footnote that no reference names", () => {
     expect(parseMarkdown("a[^1]\n\n[^1]: Used.\n[^2]: Unused.")).toEqual({
-      blocks: [
-        paragraph(text("a"), { type: "footnoteReference", number: 1, isFirstReference: true }),
-      ],
-      footnotes: [{ number: 1, children: [paragraph(text("Used."))] }],
+      blocks: [paragraph(text("a"), reference(1))],
+      footnotes: [{ number: 1, children: [paragraph(text("Used."), backReference(1))] }],
     });
   });
 
-  it("keeps a reference to a missing footnote as text", () => {
-    expect(parseMarkdown("a[^x]")).toEqual(blocks(paragraph(text("a[^x]"))));
+  it("leaves out a chain of footnotes that no visible text starts", () => {
+    expect(parseMarkdown("text\n\n[^a]: A with [^b].\n[^b]: B.")).toEqual(
+      blocks(paragraph(text("text"))),
+    );
   });
 
-  it("parses a footnote that holds several blocks", () => {
-    expect(parseMarkdown("a[^1]\n\n[^1]: First.\n\n    Second, with `code`.")).toEqual({
-      blocks: [
-        paragraph(text("a"), { type: "footnoteReference", number: 1, isFirstReference: true }),
+  it("keeps a reference to a missing footnote as text", () => {
+    expect(parseMarkdown("a[^nope]")).toEqual(blocks(paragraph(text("a"), text("[^nope]"))));
+  });
+
+  it("matches a label without regard to case or spacing", () => {
+    expect(parseMarkdown("a[^A] b[^  x   y ]\n\n[^a]: One.\n[^X Y]: Two.")).toEqual({
+      blocks: [paragraph(text("a"), reference(1), text(" b"), reference(2))],
+      footnotes: [
+        { number: 1, children: [paragraph(text("One."), backReference(1))] },
+        { number: 2, children: [paragraph(text("Two."), backReference(2))] },
       ],
+    });
+  });
+
+  it("uses the first definition of a label", () => {
+    expect(parseMarkdown("a[^1]\n\n[^1]: First.\n[^1]: Second.")).toEqual({
+      blocks: [paragraph(text("a"), reference(1))],
+      footnotes: [{ number: 1, children: [paragraph(text("First."), backReference(1))] }],
+    });
+  });
+
+  it("numbers a footnote that another footnote references after the footnotes already waiting", () => {
+    expect(parseMarkdown("a[^a] b[^c]\n\n[^a]: A with [^b].\n[^b]: B.\n[^c]: C.")).toEqual({
+      blocks: [paragraph(text("a"), reference(1), text(" b"), reference(2))],
+      footnotes: [
+        {
+          number: 1,
+          children: [paragraph(text("A with "), reference(3), text("."), backReference(1))],
+        },
+        { number: 2, children: [paragraph(text("C."), backReference(2))] },
+        { number: 3, children: [paragraph(text("B."), backReference(3))] },
+      ],
+    });
+  });
+
+  it("numbers a footnote that only a footnote references", () => {
+    expect(parseMarkdown("[^a]: A with [^b].\n[^b]: B.\n\nx[^a]")).toEqual({
+      blocks: [paragraph(text("x"), reference(1))],
+      footnotes: [
+        {
+          number: 1,
+          children: [paragraph(text("A with "), reference(2), text("."), backReference(1))],
+        },
+        { number: 2, children: [paragraph(text("B."), backReference(2))] },
+      ],
+    });
+  });
+
+  it("does not let a reference in an image's alt text take a number or mark a reference", () => {
+    expect(parseMarkdown("![a[^1]b](/i.png) c[^1]\n\n[^1]: One.")).toEqual({
+      blocks: [
+        paragraph(
+          { type: "image", src: "/i.png", alt: "ab", title: undefined },
+          text(" c"),
+          reference(1),
+        ),
+      ],
+      footnotes: [{ number: 1, children: [paragraph(text("One."), backReference(1))] }],
+    });
+  });
+
+  it("parses a footnote that holds several blocks and puts the back reference in the last paragraph", () => {
+    expect(parseMarkdown("a[^1]\n\n[^1]: First.\n\n    Second, with `code`.")).toEqual({
+      blocks: [paragraph(text("a"), reference(1))],
       footnotes: [
         {
           number: 1,
           children: [
             paragraph(text("First.")),
-            paragraph(text("Second, with "), { type: "inlineCode", text: "code" }, text(".")),
+            paragraph(
+              text("Second, with "),
+              { type: "inlineCode", text: "code" },
+              text("."),
+              backReference(1),
+            ),
+          ],
+        },
+      ],
+    });
+  });
+
+  it("puts the back reference in a new paragraph when the footnote does not end in one", () => {
+    expect(parseMarkdown("a[^1]\n\n[^1]: Intro.\n\n    ```\n    code\n    ```")).toEqual({
+      blocks: [paragraph(text("a"), reference(1))],
+      footnotes: [
+        {
+          number: 1,
+          children: [
+            paragraph(text("Intro.")),
+            { type: "code", text: "code" },
+            paragraph(backReference(1)),
           ],
         },
       ],
@@ -342,6 +478,15 @@ describe("parseMarkdown footnotes", () => {
     const first = parseMarkdown("a[^1]\n\n[^1]: One.");
     parseMarkdown("b[^x] c[^y]\n\n[^x]: X.\n[^y]: Y.");
     expect(parseMarkdown("a[^1]\n\n[^1]: One.")).toEqual(first);
+  });
+
+  it("takes a footnote definition inside a quote as text", () => {
+    expect(parseMarkdown("> [^1]: One.\n\na[^1]")).toEqual(
+      blocks(
+        { type: "blockquote", children: [paragraph(text("[^1]: One."))] },
+        paragraph(text("a"), text("[^1]")),
+      ),
+    );
   });
 });
 
@@ -389,18 +534,100 @@ describe("parseMarkdown addresses", () => {
     ).toEqual(
       blocks(
         paragraph(
-          { type: "link", href: "/docs/a:b", children: [text("a")] },
+          { type: "link", href: "/docs/a:b", title: undefined, children: [text("a")] },
           text(" "),
-          { type: "link", href: "#top", children: [text("b")] },
+          { type: "link", href: "#top", title: undefined, children: [text("b")] },
           text(" "),
-          { type: "link", href: "?q=a:b", children: [text("c")] },
+          { type: "link", href: "?q=a:b", title: undefined, children: [text("c")] },
           text(" "),
-          { type: "link", href: "mailto:me@example.com", children: [text("d")] },
+          { type: "link", href: "mailto:me@example.com", title: undefined, children: [text("d")] },
           text(" "),
-          { type: "link", href: "HTTP://example.com", children: [text("e")] },
+          { type: "link", href: "HTTP://example.com", title: undefined, children: [text("e")] },
         ),
       ),
     );
+  });
+
+  it("keeps a title on a link and an image, with its references decoded", () => {
+    expect(parseMarkdown('[a](/a "T &amp; \\" x") ![b](/b.png \'tt\')')).toEqual(
+      blocks(
+        paragraph(
+          { type: "link", href: "/a", title: 'T & " x', children: [text("a")] },
+          text(" "),
+          { type: "image", src: "/b.png", alt: "b", title: "tt" },
+        ),
+      ),
+    );
+  });
+
+  it("takes the title of a link from its definition", () => {
+    expect(parseMarkdown('[a][r]\n\n[r]: /a "Title"')).toEqual(
+      blocks(paragraph({ type: "link", href: "/a", title: "Title", children: [text("a")] })),
+    );
+  });
+
+  it("keeps the ampersands of an autolink as written", () => {
+    expect(parseMarkdown("<https://e.com/?a=1&amp;b=2> https://e.com/?c=1&amp;d")).toEqual(
+      blocks(
+        paragraph(
+          {
+            type: "link",
+            href: "https://e.com/?a=1&amp;b=2",
+            title: undefined,
+            children: [text("https://e.com/?a=1&amp;b=2")],
+          },
+          text(" "),
+          {
+            type: "link",
+            href: "https://e.com/?c=1&amp;d",
+            title: undefined,
+            children: [text("https://e.com/?c=1&amp;d")],
+          },
+        ),
+      ),
+    );
+  });
+
+  it.each([
+    ["[x](<https://example.com/a\\b>)", "https://example.com/a%5Cb"],
+    ["[x](https://e.com/a&#10;b)", "https://e.com/a%0Ab"],
+    ["[x](https://e.com/caf%C3%A9)", "https://e.com/caf%C3%A9"],
+    ["[x](https://e.com/café)", "https://e.com/caf%C3%A9"],
+    ["[x](<https://e.com/a b>)", "https://e.com/a%20b"],
+    ["[x](https://e.com/100%)", "https://e.com/100%25"],
+    ["[x](https://e.com/%zz%4)", "https://e.com/%zz%254"],
+    ["[x](https://e.com/&#x1F600;)", "https://e.com/%F0%9F%98%80"],
+    ["[x](https://e.com/a&#xD800;b)", "https://e.com/a%EF%BF%BDb"],
+    ["[x](https://e.com/?q=a:b&r=(c)#d)", "https://e.com/?q=a:b&r=(c)#d"],
+  ])("percent-encodes the address in %s", (markdown, href) => {
+    expect(parseMarkdown(markdown)).toEqual(
+      blocks(paragraph({ type: "link", href, title: undefined, children: [text("x")] })),
+    );
+  });
+
+  it("percent-encodes the address of an image and of an autolink", () => {
+    expect(parseMarkdown("![a](</a b.png>) <https://e.com/\\x>")).toEqual(
+      blocks(
+        paragraph({ type: "image", src: "/a%20b.png", alt: "a", title: undefined }, text(" "), {
+          type: "link",
+          href: "https://e.com/%5Cx",
+          title: undefined,
+          children: [text("https://e.com/\\x")],
+        }),
+      ),
+    );
+  });
+
+  it("encodes a lone surrogate in an address, as a replacement character", () => {
+    expect(parseMarkdown("[x](/a\uD800b)")).toEqual(
+      blocks(
+        paragraph({ type: "link", href: "/a%EF%BF%BDb", title: undefined, children: [text("x")] }),
+      ),
+    );
+  });
+
+  it("checks the scheme after the address is normalized", () => {
+    expect(parseMarkdown("[x](java&#9;script:alert(1))")).toEqual(blocks(paragraph(text("x"))));
   });
 
   it("replaces an image with an unsafe address by its alt text", () => {
@@ -433,6 +660,22 @@ describe("parseMarkdown character references", () => {
     expect(parseMarkdown("&#0; &#xD800; &#1114112;")).toEqual(blocks(paragraph(text("� � �"))));
   });
 
+  it("replaces control characters written as numbers by the replacement character", () => {
+    expect(parseMarkdown("&#128; &#x9f; &#8; &#127; &#xFDD0; &#xFFFE; &#x1FFFF; &#9;")).toEqual(
+      blocks(paragraph(text("\uFFFD \uFFFD \uFFFD \uFFFD \uFFFD \uFFFD \uFFFD \t"))),
+    );
+  });
+
+  it("decodes a reference once", () => {
+    expect(parseMarkdown("&#38;#35; &amp;amp;")).toEqual(blocks(paragraph(text("&#35; &amp;"))));
+  });
+
+  it("shows a reference shaped like markup as the text it is", () => {
+    expect(parseMarkdown("&<img src=x onerror=alert(1)>; and &a<b;")).toEqual(
+      blocks(paragraph(text("&"), text("<img src=x onerror=alert(1)>"), text("; and &a<b;"))),
+    );
+  });
+
   it("decodes references in a heading, a table cell and a link's text", () => {
     expect(parseMarkdown("# a &lt; b\n\n| x |\n|---|\n| &gt; |\n\n[&amp;](/a)")).toEqual(
       blocks(
@@ -443,7 +686,7 @@ describe("parseMarkdown character references", () => {
           header: [[text("x")]],
           rows: [[[text(">")]]],
         },
-        paragraph({ type: "link", href: "/a", children: [text("&")] }),
+        paragraph({ type: "link", href: "/a", title: undefined, children: [text("&")] }),
       ),
     );
   });
@@ -451,11 +694,16 @@ describe("parseMarkdown character references", () => {
   it("decodes references in a link address and an image's address and alt text", () => {
     expect(parseMarkdown("[a](/?x=1&amp;y=2) ![&lt;b&gt;](/i.png?x=1&amp;y=2)")).toEqual(
       blocks(
-        paragraph({ type: "link", href: "/?x=1&y=2", children: [text("a")] }, text(" "), {
-          type: "image",
-          src: "/i.png?x=1&y=2",
-          alt: "<b>",
-        }),
+        paragraph(
+          { type: "link", href: "/?x=1&y=2", title: undefined, children: [text("a")] },
+          text(" "),
+          {
+            type: "image",
+            src: "/i.png?x=1&y=2",
+            alt: "<b>",
+            title: undefined,
+          },
+        ),
       ),
     );
   });
@@ -473,10 +721,22 @@ describe("parseMarkdown deep nesting", () => {
   it("parses footnotes correctly after a call that threw", () => {
     expect(() => parseMarkdown(`${">".repeat(50_000)} x`)).toThrow(RangeError);
     expect(parseMarkdown("a[^1]\n\n[^1]: One.")).toEqual({
-      blocks: [
-        paragraph(text("a"), { type: "footnoteReference", number: 1, isFirstReference: true }),
-      ],
-      footnotes: [{ number: 1, children: [paragraph(text("One."))] }],
+      blocks: [paragraph(text("a"), reference(1))],
+      footnotes: [{ number: 1, children: [paragraph(text("One."), backReference(1))] }],
     });
+  });
+});
+
+describe("parseMarkdown worst-case input", () => {
+  it("parses an unterminated HTML comment followed by many blank lines in linear time", () => {
+    const started = performance.now();
+    parseMarkdown(`<!--${"\n".repeat(200_000)}x`);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it("parses a long run of footnote-like brackets in linear time", () => {
+    const started = performance.now();
+    parseMarkdown("[^".repeat(100_000));
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 });
