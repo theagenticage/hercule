@@ -47,7 +47,7 @@ const buildSuite = (
   conclusion,
   updated_at: updatedAt,
   latest_check_runs_count: runs,
-  app: { name: app },
+  app: { name: app, slug: app.toLowerCase().replaceAll(" ", "-") },
 });
 
 /** One open pull request in the stub repository. */

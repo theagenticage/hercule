@@ -17,8 +17,12 @@
  * operations.
  */
 import {
+  MAX_BLOCK_MESSAGES,
   MAX_BLOCK_NAME_LENGTH,
   MAX_BLOCK_URL_LENGTH,
+  MAX_CHECK_LOG_LENGTH,
+  MAX_CHECK_LOG_LINES,
+  MAX_CHECK_ROWS,
   MAX_MESSAGE_TEXT_LENGTH,
   MAX_SIGNAL_TITLE_LENGTH,
   PluginId,
@@ -58,8 +62,12 @@ import { TaskCreateInput, TaskPriority } from "./task";
  * its text to the same limits this API checks.
  */
 export {
+  MAX_BLOCK_MESSAGES,
   MAX_BLOCK_NAME_LENGTH,
   MAX_BLOCK_URL_LENGTH,
+  MAX_CHECK_LOG_LENGTH,
+  MAX_CHECK_LOG_LINES,
+  MAX_CHECK_ROWS,
   MAX_MESSAGE_TEXT_LENGTH,
   MAX_SIGNAL_TITLE_LENGTH,
 } from "@hercule/plugin-host";
@@ -85,23 +93,11 @@ export const MAX_SIGNAL_BLOCKS = 8;
 /** The longest markdown of a text block, in characters. */
 export const MAX_TEXT_BLOCK_LENGTH = 32 * 1024;
 
-/** The most messages a messages block holds. The producer records the rest in `omitted`. */
-export const MAX_BLOCK_MESSAGES = 20;
-
 /** The most people one message lists as recipients, in `to` and in `cc` each. */
 export const MAX_MESSAGE_RECIPIENTS = 50;
 
 /** The most attachments one message lists by name. */
 export const MAX_MESSAGE_ATTACHMENTS = 50;
-
-/** The most failed or pending rows a checks block holds. The producer records the rest in `omitted`. */
-export const MAX_CHECK_ROWS = 20;
-
-/** The most lines of a check's log. */
-export const MAX_CHECK_LOG_LINES = 40;
-
-/** The longest log of a check, in characters, so 40 very long lines are still refused. */
-export const MAX_CHECK_LOG_LENGTH = 8 * 1024;
 
 /**
  * The longest typed reply, in characters. The reply fills a field of the

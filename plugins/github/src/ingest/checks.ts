@@ -112,7 +112,7 @@ const describeConclusion = (conclusion: string): string => {
 };
 
 /** The conclusions that do not make a commit's checks fail. */
-const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
+export const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 
 /**
  * Returns the one conclusion of a commit's finished check suites:

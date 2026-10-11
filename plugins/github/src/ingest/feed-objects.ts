@@ -94,7 +94,8 @@ export type ListedComment = Schema.Schema.Type<typeof ListedComment>;
  * One entry of an issue's or a pull request's history, as
  * `GET /repos/{owner}/{repo}/issues/{number}/events` returns it, oldest
  * first. `event` is GitHub's word, such as `review_requested`, `merged` or
- * `closed`. A review request names either one reviewer or one team.
+ * `closed`. A review request names either one reviewer or one team; an
+ * assignment names its `assignee`.
  */
 export const IssueEvent = Schema.Struct({
   id: Schema.Int,
@@ -104,6 +105,7 @@ export const IssueEvent = Schema.Struct({
   requested_reviewer: Schema.optionalKey(Schema.NullOr(GithubAccount)),
   requested_team: Schema.optionalKey(Schema.NullOr(ListedTeamRef)),
   review_requester: Schema.optionalKey(Schema.NullOr(GithubAccount)),
+  assignee: Schema.optionalKey(Schema.NullOr(GithubAccount)),
 });
 
 export type IssueEvent = Schema.Schema.Type<typeof IssueEvent>;
@@ -154,7 +156,32 @@ export const GithubCheckSuite = Schema.Struct({
   conclusion: Schema.NullOr(Schema.String),
   updated_at: Schema.NullOr(Schema.String),
   latest_check_runs_count: Schema.Int,
-  app: Schema.NullOr(Schema.Struct({ name: Schema.String })),
+  /** The app that ran the suite; `slug` is `github-actions` for GitHub Actions. */
+  app: Schema.NullOr(Schema.Struct({ name: Schema.String, slug: Schema.String })),
 });
 
 export type GithubCheckSuite = Schema.Schema.Type<typeof GithubCheckSuite>;
+
+/**
+ * One check run on a commit, as an entry of the `check_runs` list that
+ * `GET /repos/{owner}/{repo}/commits/{sha}/check-runs` returns. `output`
+ * holds what the check reported: `summary` and `text` are markdown, and
+ * `annotations_count` says how many annotations
+ * `GET .../check-runs/{id}/annotations` lists.
+ */
+export const ListedCheckRun = Schema.Struct({
+  id: Schema.Int,
+  name: Schema.String,
+  status: Schema.String,
+  conclusion: Schema.NullOr(Schema.String),
+  html_url: Schema.NullOr(Schema.String),
+  app: Schema.NullOr(Schema.Struct({ name: Schema.String, slug: Schema.String })),
+  output: Schema.Struct({
+    title: Schema.NullOr(Schema.String),
+    summary: Schema.NullOr(Schema.String),
+    text: Schema.NullOr(Schema.String),
+    annotations_count: Schema.Int,
+  }),
+});
+
+export type ListedCheckRun = Schema.Schema.Type<typeof ListedCheckRun>;
