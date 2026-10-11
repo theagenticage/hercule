@@ -141,6 +141,9 @@ function StartsOnText({
   readonly texts: ReadonlyArray<string>;
   readonly isCode: ReadonlyArray<boolean>;
 }): JSX.Element {
+  // Text split across several nodes is shaped differently at the joins, so
+  // text with no code in it stays one string, as the book draws it.
+  if (!isCode.includes(true)) return <span>{texts.join(" · ")}</span>;
   return (
     <span>
       {texts.map((text, index) => (
