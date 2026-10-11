@@ -201,13 +201,20 @@ const make = Effect.gen(function* () {
       }
       const fieldIssues =
         field === undefined ? [] : listFieldIssues(action, field, operation.input, path);
+      // The text of a typed reply comes only at the click. The input is
+      // checked as it will be then, with some text in the field, so a check
+      // that spans fields passes, such as pr.review's "a body is required
+      // unless the verdict is approve". Any problem with the field's own
+      // value is not counted, because the user has not typed it yet.
+      const inputAtClick =
+        field === undefined || typeof operation.input !== "object" || operation.input === null
+          ? operation.input
+          : { ...operation.input, [field.name]: "typed reply" };
       const decoded = yield* Effect.result(
         Schema.decodeUnknownEffect(action.input as Schema.Codec<unknown>, { errors: "all" })(
-          operation.input,
+          inputAtClick,
         ),
       );
-      // The text of a typed reply comes only at the click, so a missing or
-      // empty field is not a problem yet.
       const inputIssues =
         decoded._tag === "Success"
           ? []

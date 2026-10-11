@@ -19,7 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type { Notification, Signal } from "@hercule/contract";
+import type { Notification } from "@hercule/contract";
 import {
   HOST_API,
   PluginError,
@@ -31,7 +31,13 @@ import {
 } from "@hercule/plugin-host";
 import { get, post } from "../../../http/testing";
 import { IDLE_FEEDS, IDLE_INGEST_OPEN } from "../../../plugins/testing";
-import { waitUntil, WAIT_DEADLINE_MS } from "../../../sessions/testing";
+import { WAIT_DEADLINE_MS } from "../../../sessions/testing";
+import {
+  listOpenSignals,
+  readSignal,
+  waitForResolved,
+  waitForSignalFrom,
+} from "../../../signals/testing";
 import {
   createConnection,
   withSetUpController,
@@ -185,38 +191,6 @@ const emitDeskEvent = async (
   return ((await response.json()) as { readonly eventId: number }).eventId;
 };
 
-/** Returns the open signals as the user reads them. */
-const queryOpenSignals = async ({
-  base,
-  token,
-}: SetUpController): Promise<ReadonlyArray<Signal>> => {
-  const response = await get(base, `/api/v1/signals?kind=${ASKED_KIND}`, token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as ReadonlyArray<Signal>;
-};
-
-/** Reads one signal as the user. */
-const readSignal = async ({ base, token }: SetUpController, id: string): Promise<Signal> => {
-  const response = await get(base, `/api/v1/signals/${id}`, token);
-  expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as Signal;
-};
-
-/** Waits until the open signal raised from the event exists, and returns it. */
-const waitForSignalFrom = (controller: SetUpController, eventId: number): Promise<Signal> =>
-  waitUntil(`raised a signal from the event ${eventId}`, async () =>
-    (await queryOpenSignals(controller)).find(
-      (signal) => signal.origin.type === "event" && signal.origin.eventId === eventId,
-    ),
-  );
-
-/** Waits until the signal is resolved, and returns it. */
-const waitForResolved = (controller: SetUpController, id: string): Promise<Signal> =>
-  waitUntil(`resolved the signal ${id}`, async () => {
-    const signal = await readSignal(controller, id);
-    return signal.status === "open" ? undefined : signal;
-  });
-
 /** Returns every build-failed notification, newest first. */
 const queryBuildFailedNotifications = async ({
   base,
@@ -242,11 +216,13 @@ describe("raising a plugin's signals from its events", () => {
         toYou: true,
       });
 
-      const signal = await waitForSignalFrom(controller, asked);
+      const signal = await waitForSignalFrom(controller, ASKED_KIND, asked);
       await waitUntilRouted(controller.harness, asked);
 
       // The rule said `no` to the ignored event, so only one signal exists.
-      expect((await queryOpenSignals(controller)).map((open) => open.id)).toEqual([signal.id]);
+      expect((await listOpenSignals(controller, ASKED_KIND)).map((open) => open.id)).toEqual([
+        signal.id,
+      ]);
       expect(ignored).toBeLessThan(asked);
       expect(signal).toMatchObject({
         kind: ASKED_KIND,
@@ -290,7 +266,7 @@ describe("raising a plugin's signals from its events", () => {
         by: "marta",
         toYou: false,
       });
-      const older = await waitForSignalFrom(controller, first);
+      const older = await waitForSignalFrom(controller, ASKED_KIND, first);
       expect(older.origin).toMatchObject({ notScreened: { reason: "no-screener" } });
 
       const second = await emitDeskEvent(controller, connectionId, "desk.asked", {
@@ -298,7 +274,7 @@ describe("raising a plugin's signals from its events", () => {
         by: "marta",
         toYou: true,
       });
-      const newer = await waitForSignalFrom(controller, second);
+      const newer = await waitForSignalFrom(controller, ASKED_KIND, second);
 
       expect(newer.origin).not.toHaveProperty("notScreened");
       expect(await readSignal(controller, older.id)).toMatchObject({
@@ -324,7 +300,7 @@ describe("raising a plugin's signals from its events", () => {
         by: "marta",
         toYou: true,
       });
-      const signal = await waitForSignalFrom(controller, first);
+      const signal = await waitForSignalFrom(controller, ASKED_KIND, first);
 
       expect(signal).toMatchObject({
         title: "Question for you",
@@ -340,7 +316,7 @@ describe("raising a plugin's signals from its events", () => {
         by: "marta",
         toYou: true,
       });
-      await waitForSignalFrom(controller, second);
+      await waitForSignalFrom(controller, ASKED_KIND, second);
 
       const [failed, ...others] = await queryBuildFailedNotifications(controller);
       expect(others).toEqual([]);
@@ -360,7 +336,7 @@ describe("raising a plugin's signals from its events", () => {
         by: "marta",
         toYou: true,
       });
-      await waitForSignalFrom(controller, third);
+      await waitForSignalFrom(controller, ASKED_KIND, third);
 
       expect(await queryBuildFailedNotifications(controller)).toMatchObject([
         { id: failed!.id, status: "resolved", resolution: { kind: "withdrawn" } },
@@ -375,7 +351,7 @@ describe("raising a plugin's signals from its events", () => {
         by: "marta",
         toYou: true,
       });
-      const signal = await waitForSignalFrom(controller, asked);
+      const signal = await waitForSignalFrom(controller, ASKED_KIND, asked);
 
       expect(signal.title).toBe("Question for you");
       expect(signal.buildError?.message).toContain('The core adds its own "Done" action');
