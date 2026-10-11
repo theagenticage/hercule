@@ -9,7 +9,8 @@
  * - the lanes: the hour lines, the now line, the bars, and the fires still
  *   to come today.
  *
- * Every part takes values and callbacks and reads nothing. A place across
+ * Every part takes values and callbacks and reads nothing besides whether
+ * its bars are on screen. A place across
  * the day is drawn as a percentage of the lanes' width, so the axis and the
  * lanes line up, being as wide as the pane's content.
  */
@@ -29,6 +30,7 @@ import { isHourLabelCovered } from "@hercule/client-core/run-timeline";
 import { hasRunMark } from "@hercule/client-core/run-marks";
 import { useListTime } from "./list-time";
 import { useDurationText } from "../../app/age-clock";
+import { useIsOnScreen, useScreenWatcher, type ScreenWatcher } from "../../app/screen-watcher";
 import { ChevronLeftIcon } from "../../icons/chevron-left";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { Mark } from "../../marks";
@@ -212,6 +214,9 @@ export function TimelineAxis({
  * run, and a tick for each fire still to come. `label` names the day for
  * assistive technology, and a day with no runs shows `emptyText`. The times
  * in the bars' names read `timezone`.
+ *
+ * The bars share one IntersectionObserver, so each bar keeps its times
+ * current only while it is on screen.
  */
 export function TimelineLanes({
   label,
@@ -232,6 +237,7 @@ export function TimelineLanes({
   readonly emptyText: string;
   readonly timezone: string;
 }): JSX.Element {
+  const watchScreen = useScreenWatcher();
   return (
     <div
       className="lanes"
@@ -255,7 +261,13 @@ export function TimelineLanes({
       ))}
       {bars.length === 0 ? <p className="lanes-empty">{emptyText}</p> : null}
       {bars.map((bar) => (
-        <RunBar key={bar.row.id} bar={bar} now={now} timezone={timezone} />
+        <RunBar
+          key={bar.row.id}
+          bar={bar}
+          now={now}
+          timezone={timezone}
+          watchScreen={watchScreen}
+        />
       ))}
     </div>
   );
@@ -276,22 +288,29 @@ function BarMark({ state }: { readonly state: RunRow["state"] }): JSX.Element {
  * the run went on into; a bar cut at the end has no mark, because the run
  * had not ended there.
  *
- * Its name describes the run, with the times kept current by the age clock.
+ * Its name describes the run, with the times kept current by the age clock
+ * while the bar is on screen, as `watchScreen` reports it. Every bar is
+ * watched, because even an ended run's start time changes, from "10:31" to
+ * "Sun", once its day has passed.
  */
 function RunBar({
   bar,
   now,
   timezone,
+  watchScreen,
 }: {
   readonly bar: TimelineBar;
   readonly now: TimelineNow | null;
   readonly timezone: string;
+  readonly watchScreen: ScreenWatcher;
 }): JSX.Element {
   const { row } = bar;
-  const startedText = useListTime(row.createdAt, timezone, "past", true);
+  const barRef = useRef<HTMLSpanElement>(null);
+  const onScreen = useIsOnScreen(watchScreen, barRef, true);
+  const startedText = useListTime(row.createdAt, timezone, "past", onScreen);
   const tookText = useDurationText(
     row.startedAt ?? row.createdAt,
-    row.isLive && row.startedAt !== null,
+    row.isLive && row.startedAt !== null && onScreen,
     (nowMs) => formatRunDuration(row, nowMs),
   );
   const label = describeRunRow(row, startedText, tookText);
@@ -308,6 +327,7 @@ function RunBar({
     .join(" ");
   return (
     <span
+      ref={barRef}
       className={className}
       role="img"
       aria-label={label}

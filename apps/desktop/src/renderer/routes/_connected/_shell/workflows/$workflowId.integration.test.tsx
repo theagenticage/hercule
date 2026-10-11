@@ -25,15 +25,18 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   stubElementSize,
+  stubIntersectionObserver,
   holdAnswer,
   type Call,
   type Handler,
 } from "../../../../app/testing";
 
-// Every element measures as wide as a window that shows every column, and
-// the virtualized list draws the rows that fit its height.
+// Every element measures as wide as a window that shows every column, the
+// virtualized list draws the rows that fit its height, and every timeline
+// bar is on screen.
 beforeEach(() => {
   stubElementSize(1168, 800);
+  stubIntersectionObserver();
   // Sunday 11 October 2026, 10:00 in UTC, the time zone the settings name.
   vi.useFakeTimers({ now: new Date("2026-10-11T10:00:00.000Z"), toFake: ["Date"] });
 });
