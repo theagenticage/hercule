@@ -13,9 +13,14 @@
  * app draws. Then it makes these edits, each where the app draws something
  * else than the book, for the reason given:
  *
- * 1. removes the right-hand column, Memory and Reminders, and lays the
- *    record out as one column as wide as every other section's, 760px: the
- *    app does not draw that column (spec 17 §Settings, Assistants);
+ * 1. in the right-hand column, removes Reminders, which no operation reads
+ *    yet (spec 17 §Settings, Assistants), and edits Memory where the app
+ *    draws its records differently: the topics in name order, as the
+ *    controller lists them, and a size under 1,000 characters as its exact
+ *    count, as the app writes it, where the book writes "0.6k"; the core
+ *    note as the fixture's whole text, cut after four lines by the app's
+ *    rule, injected here, where the book cuts it by hand; and New topic
+ *    under the list, which the book does not draw;
  * 2. removes the role after each tab's name, which an assistant does not
  *    have, and puts the tabs in name order, Ada, Juno and Milo, as the app
  *    and the sidebar sort assistants;
@@ -57,17 +62,27 @@
  * 13. gives How Ada works a lead, which says when a saved change reaches
  *     the assistant's session: spec 12 §7 asks the Assistants settings
  *     screen to say so, and the book draws no lead there. The lead is
- *     styled by the app's rule, injected here.
+ *     styled by the app's rule, injected here;
+ * 14. draws the Name field and the time fields, 07:00, 23:00 and 04:00, as
+ *     text inputs, as the app does, styled by the app's rules, injected
+ *     here. The browser draws an input's text one screen pixel higher or
+ *     lower than the same text in a box at some fractional positions, so
+ *     the book's text would differ from the app's wherever the rows above
+ *     a field happen to put it at such a position.
  *
  * An edit that finds nothing to edit fails, because the book has changed and
  * the comparison would no longer compare what it claims to.
  */
-import { describeWhenAssistantChangesApply, formatAccessMode } from "@hercule/client-core";
+import {
+  describeWhenAssistantChangesApply,
+  formatAccessMode,
+  formatMemorySize,
+} from "@hercule/client-core";
 import { buildAssistantLook } from "../faces/look";
 import { ADA, JUNO, MILO } from "./assistant-states-fixture";
 import { findElement, findElementByText, findElements } from "./book-page";
 import { drawBookFace, markSheetReady, stillBookPage } from "./sheet-page";
-import { SETTINGS_ADA } from "./settings-assistants-fixture";
+import { ADA_CORE_NOTE, ADA_MEMORY, SETTINGS_ADA } from "./settings-assistants-fixture";
 
 /** Returns a new `tag` element with the class `className`, holding `children`. */
 function buildElement(
@@ -120,8 +135,9 @@ stillBookPage();
 
 // The app's rules for what the book does not draw: a row that stacks its
 // label over a text area, and the text area itself (settings.css), a
-// heartbeat's mark and the line under a lead (schedule.css), and How it
-// works' lead (assistants.css).
+// heartbeat's mark and the line under a lead (schedule.css), How it works'
+// lead and the core note cut after four lines (assistants.css), and a
+// field that is a text input (controls.css and schedule.css).
 const style = document.createElement("style");
 style.textContent = `
 .set-row.set-row--text { flex-direction: column; align-items: stretch; gap: 10px; }
@@ -130,6 +146,10 @@ style.textContent = `
 .heartbeat-day-beat[data-end] { transform: translateX(-100%); }
 .set-sec > p.schedule-note { margin-top: -9px; color: var(--faint); font-size: var(--t-12); line-height: 18px; }
 .set-sec > p.changes-lead { line-height: 19px; }
+.field > input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; }
+input.field { border: 0; }
+.inline > input.field { field-sizing: content; }
+.core-note { display: -webkit-box; white-space: pre-line; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
 `;
 document.head.append(style);
 
@@ -137,10 +157,30 @@ const ada = SETTINGS_ADA;
 const adaHue = `var(--hue-${buildAssistantLook(ADA.id).hue})`;
 const record = findElement(document, ".set-body > .rec") as HTMLElement;
 
-// 1. The right-hand column, and one column of 760px.
-findElement(record, ".rec-side").remove();
-record.style.gridTemplateColumns = "minmax(0, 1fr)";
-record.style.width = "min(760px, 100%)";
+// 1. The Memory column: no reminders, the topics in name order, the whole
+// core note, and New topic, drawn as the bindings' Bind a channel is.
+const side = findElement(record, ".rec-side") as HTMLElement;
+side.style.setProperty("--hue", adaHue);
+const [memory, reminders] = findElements(side, ":scope > .side-sec", 2) as [Element, Element];
+reminders.remove();
+findElement(memory, ".core-note").textContent = ADA_CORE_NOTE.body;
+const topics = findElements(memory, ".topic", 7).toSorted((a, b) =>
+  findElement(a, "b").textContent < findElement(b, "b").textContent ? -1 : 1,
+);
+for (const topic of topics) {
+  const size = findElement(topic, "small");
+  const entry = ADA_MEMORY.find(({ name }) => name === findElement(topic, "b").textContent);
+  if (entry === undefined) throw new Error("The book draws a topic the fixture does not hold.");
+  size.textContent = formatMemorySize(entry.size);
+}
+const topicsFoot = findElement(memory, ".topics-foot");
+topicsFoot.before(...topics);
+const newTopic = findElement(record, ".bind-add").cloneNode(true) as HTMLElement;
+newTopic.className = "btn btn--sm";
+newTopic.style.alignSelf = "flex-start";
+newTopic.style.marginTop = "12px";
+newTopic.replaceChildren(findElement(newTopic, "svg"), "New topic");
+topicsFoot.after(newTopic);
 
 // 2. The tabs' roles, and the tabs in name order.
 const people = findElement(record, ".people");
@@ -176,7 +216,7 @@ findElement(howItWorks, ":scope > h2").after(
 const provider = findRow(howItWorks, "Provider");
 // The book sets the gap under the heading on its first row; the lead's margin sets it in the app.
 provider.style.removeProperty("margin-top");
-const nameField = buildElement("span", "field", ada.name);
+const nameField = buildElement("span", "field", buildTextInput(ada.name));
 nameField.style.width = "214px";
 const nameRow = buildRow(
   "Name",
@@ -273,12 +313,31 @@ main.append(
   buildElement("section", "set-sec", buildElement("h2", "", `Delete ${ada.name}`), deleteRow),
 );
 
+// 14. The time fields as text inputs.
+const timeFields = findElements(main, ".inline > .field", 7).filter((field) =>
+  /^\d\d:\d\d$/.test(field.textContent),
+);
+if (timeFields.length !== 3) throw new Error("The book no longer draws three time fields.");
+for (const field of timeFields) {
+  const input = buildTextInput(field.textContent);
+  input.className = field.className;
+  field.replaceWith(input);
+}
+
 if (document.documentElement.dataset.state === "scrolled") {
   const body = findElement(document, ".set-body");
   body.scrollTop = body.scrollHeight;
 }
 
 await markSheetReady();
+
+/** Returns a text input holding `value`, as the app draws a field the user types in. */
+function buildTextInput(value: string): HTMLInputElement {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = value;
+  return input;
+}
 
 /**
  * Returns the face of the assistant with id `id`, drawn by crew.js in the

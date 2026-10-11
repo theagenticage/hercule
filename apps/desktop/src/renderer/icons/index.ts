@@ -36,6 +36,7 @@ export { IntakeIcon } from "./intake";
 export { KeyIcon } from "./key";
 export { LaptopIcon } from "./laptop";
 export { ListIcon } from "./list";
+export { MemoryIcon } from "./memory";
 export { MicIcon } from "./mic";
 export { MoonIcon } from "./moon";
 export { MoreIcon } from "./more";

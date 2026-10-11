@@ -1,0 +1,52 @@
+import { useRef, useState, type JSX } from "react";
+import { describeShrinkLoss } from "@hercule/client-core";
+import { ConfirmDialog } from "../../../../../../../screens/confirm-dialog";
+
+/**
+ * Renders the way past a save the controller refused because the new text
+ * cuts most of a large document: a button that asks for a confirmation in a
+ * dialog, which says how much the text loses. Confirming calls `onConfirm`,
+ * which saves the refused text again with the cut confirmed. `error` is the
+ * refusal, whose sizes the dialog gives.
+ */
+export function ShrinkOffer({
+  error,
+  onConfirm,
+}: {
+  readonly error: Error;
+  readonly onConfirm: () => void;
+}): JSX.Element {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <div className="memory-shrink">
+      <button
+        type="button"
+        className="btn btn--sm btn--danger"
+        onClick={() => {
+          setConfirming(true);
+        }}
+      >
+        Save the shorter text…
+      </button>
+      {confirming && (
+        <ConfirmDialog
+          dialogRef={dialogRef}
+          title="Save the shorter text?"
+          actionLabel="Save"
+          actionClass="danger"
+          onConfirm={() => {
+            dialogRef.current?.close();
+            onConfirm();
+          }}
+          onClose={() => setConfirming(false)}
+        >
+          <p>
+            {describeShrinkLoss(error) ??
+              "This cuts most of the document. What it cuts cannot be brought back."}
+          </p>
+        </ConfirmDialog>
+      )}
+    </div>
+  );
+}

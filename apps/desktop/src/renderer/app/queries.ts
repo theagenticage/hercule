@@ -256,6 +256,30 @@ export const profilesQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads the index of an assistant's memory: `core` first, then each topic's
+ * name, size and gist. Memory has no live topic, so a screen that shows it
+ * reads it with `readOnOpen`.
+ */
+export const memoryIndexQuery = (client: HerculeClient, assistantId: string) =>
+  queryOptions({
+    queryKey: queryKeys.memory(assistantId),
+    queryFn: () => client.memory.list({ params: { id: assistantId } }),
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
+ * Reads one document of an assistant's memory, `core` or a topic, with its
+ * body. Memory has no live topic, so a screen that shows it reads it with
+ * `readOnOpen`.
+ */
+export const memoryDocumentQuery = (client: HerculeClient, assistantId: string, name: string) =>
+  queryOptions({
+    queryKey: queryKeys.memory(assistantId, name),
+    queryFn: () => client.memory.read({ params: { id: assistantId, name } }),
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
  * Reads `options` once for this opening of a screen, and returns its data.
  *
  * The first time, there is nothing to show, so the screen waits for the

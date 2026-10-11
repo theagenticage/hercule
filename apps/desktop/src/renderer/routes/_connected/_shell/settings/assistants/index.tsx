@@ -1,12 +1,14 @@
 import type { JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { NEW_ASSISTANT_NAME, readErrorMessage } from "@hercule/client-core";
-import { isId } from "@hercule/contract";
+import { buildAssistantRows, NEW_ASSISTANT_NAME, readErrorMessage } from "@hercule/client-core";
+import { isId, MEMORY_CORE, type Assistant } from "@hercule/contract";
 import { useAssistantRows } from "../../../../../app/assistant-rows";
 import { rememberSettingsSection } from "../../../../../app/last-settings-section";
 import {
   assistantsQuery,
+  memoryDocumentQuery,
+  memoryIndexQuery,
   profilesQuery,
   providersQuery,
   readOnOpen,
@@ -28,21 +30,30 @@ import "../../../../../screens/settings/assistants/assistants.css";
  * that id, the first tab is picked.
  *
  * The assistants and the provider instances are the shell's reads, which the
- * live connection keeps current. The permission profiles and the settings
- * (whose time zone the heartbeat's day uses) have no live topic, so the
- * loader reads them each time the section opens.
+ * live connection keeps current. The permission profiles, the settings
+ * (whose time zone the heartbeat's day uses) and the picked assistant's
+ * memory (its index and its core note, which the Memory column shows) have
+ * no live topic, so the loader reads them each time the section opens or
+ * another assistant is picked.
  */
-export const Route = createFileRoute("/_connected/_shell/settings/assistants")({
+export const Route = createFileRoute("/_connected/_shell/settings/assistants/")({
   staticData: { title: "Assistants" },
   validateSearch: (search: Record<string, unknown>): { readonly assistant?: string } =>
     isId(search.assistant) ? { assistant: search.assistant } : {},
-  loader: async ({ context: { controller, queryClient } }) => {
+  loaderDeps: ({ search }) => ({ assistant: search.assistant }),
+  loader: async ({ context: { controller, queryClient }, deps }) => {
     const { client } = controller;
-    await Promise.all([
+    const [assistants] = await Promise.all([
       queryClient.ensureQueryData(assistantsQuery(client)),
       queryClient.ensureQueryData(providersQuery(client)),
       readOnOpen(queryClient, profilesQuery(client)),
       readOnOpen(queryClient, settingsQuery(client)),
+    ]);
+    const pickedId = findPickedAssistantId(assistants, deps.assistant);
+    if (pickedId === undefined) return;
+    await Promise.all([
+      readOnOpen(queryClient, memoryIndexQuery(client, pickedId)),
+      readOnOpen(queryClient, memoryDocumentQuery(client, pickedId, MEMORY_CORE)),
     ]);
   },
   onEnter: () => {
@@ -50,6 +61,19 @@ export const Route = createFileRoute("/_connected/_shell/settings/assistants")({
   },
   component: Assistants,
 });
+
+/**
+ * Returns the id of the assistant the section shows: `requestedId` when an
+ * assistant has it, else the first in the tabs' order, or `undefined` when
+ * there is no assistant. The component picks the same one from its rows.
+ */
+function findPickedAssistantId(
+  assistants: ReadonlyArray<Pick<Assistant, "id" | "name">>,
+  requestedId: string | undefined,
+): string | undefined {
+  if (assistants.some(({ id }) => id === requestedId)) return requestedId;
+  return buildAssistantRows(assistants, new Map(), [])[0]?.id;
+}
 
 function Assistants(): JSX.Element {
   const { client } = Route.useRouteContext().controller;

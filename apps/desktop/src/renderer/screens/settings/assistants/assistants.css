@@ -10,14 +10,24 @@
   padding-top: 22px;
 }
 
-/* The book lays the record out in two columns, 940px wide, with a column of
-   memory, topics and reminders on the right. The app does not draw that
-   column (spec 17 §Settings, Assistants), so the record is one column, as
-   wide as every other section's: 760px. The book's `.rec`. */
+/* The book lays the record out in two columns, 940px wide: the settings,
+   and on the right the Memory column. The book's `.rec`. The book's column
+   also lists reminders, which the app does not draw (spec 17 §Settings,
+   Assistants). */
+.set-col:has(> .assistant-settings) {
+  width: min(940px, 100%);
+}
 .assistant-settings {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 296px;
+  gap: 22px 44px;
+}
+/* Not in the book, which draws the page at one width. In a body too narrow
+   for both columns, the Memory column moves under the settings. */
+@container (width < 740px) {
+  .assistant-settings {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 /* The book's `.rec-main`. Not in the book: a name can be 128 characters
    with no space, in the headings, the leads and the hints, so text breaks
@@ -44,6 +54,7 @@
    the assistant's role, which an assistant does not have, so it is left out.
    The book's `.people` and `.person`. */
 .assistant-tabs {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -96,4 +107,149 @@
 }
 .empty-assistants span {
   max-width: 380px;
+}
+
+/* ---------- Memory ---------- */
+/* The Memory column: the core note against its cap, the start of the core
+   note, and the topics. The book's `.rec-side` and `.side-sec`. */
+.assistant-memory {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  min-width: 0;
+}
+/* The book draws the column's section with the sidebar's `.side-sec`
+   rule from its system.css, so it takes that rule's layout here. */
+.memory-side-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 8px;
+}
+.memory-side-sec h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.memory-side-sec h3 a {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+/* The book's `.core-top`. */
+.memory-core-top {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 7px;
+  font-size: var(--t-12);
+}
+.memory-core-top span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* The book's `.core-note`, which shows a few lines of the note. Not in the
+   book: the note is the whole text, so it is cut after four lines, and its
+   line breaks are kept. */
+.memory-core-note {
+  display: -webkit-box;
+  margin: 10px 0 14px;
+  padding-left: 11px;
+  border-left: 2px solid var(--who);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+/* The book's `.topic`. Not in the book: a topic is a link to its page, and
+   its name underlines under the pointer. A name is one word of up to 64
+   characters, so it breaks anywhere. */
+.memory-topic {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1px 8px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line-soft);
+  color: inherit;
+  font-size: var(--t-12);
+  text-decoration: none;
+}
+.memory-topic b {
+  font-weight: var(--w-medium);
+  overflow-wrap: anywhere;
+}
+.memory-topic:hover b {
+  text-decoration: underline;
+}
+.memory-topic small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.memory-topic span {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The book's `.topics-foot`. */
+.memory-topics-foot {
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* Not in the book, which draws no way to add a topic. The button sits under
+   the list as the book's Bind a channel sits under the channels. */
+.memory-new-topic {
+  align-self: flex-start;
+  margin-top: 12px;
+}
+/* Not in the book: the New topic dialog's name field. */
+.memory-topic-name + .fl-err {
+  margin: 8px 0 0;
+}
+
+/* Not in the book: the page of one memory document. Its sections are drawn
+   as the assistant's, with the size against the cap at the heading's end,
+   as a permission profile's page counts its grants. */
+.memory-document {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.memory-document h2 small {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.memory-document-name {
+  min-width: 0;
+}
+.memory-document .meter {
+  margin-bottom: 14px;
+}
+.memory-document .set-row {
+  min-height: 50px;
+}
+/* A gist is a sentence, so its field is wider than a name's. */
+.set-sec .set-row > span.field.memory-gist {
+  width: 320px;
+}
+/* The way past a refused cut, under the error it follows. */
+.memory-shrink {
+  margin-bottom: 10px;
 }

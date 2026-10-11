@@ -43,6 +43,7 @@ export type IconName =
   | "key"
   | "laptop"
   | "list"
+  | "memory"
   | "mic"
   | "moon"
   | "more"
@@ -123,13 +124,14 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["key", [14]],
   ["laptop", [13]],
   ["list", [14]],
+  ["memory", [15]],
   ["mic", []],
   ["moon", [14]],
   ["more", []],
   ["office", []],
   ["palette", []],
   ["pause", [12, 14]],
-  ["plus", [14]],
+  ["plus", [13, 14]],
   ["puzzle", []],
   ["question", [14]],
   ["search", [14]],
