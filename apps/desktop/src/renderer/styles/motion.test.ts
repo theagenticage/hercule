@@ -9,8 +9,9 @@ import { describe, expect, it } from "vitest";
  * - Keyframe animations change only `transform` and `opacity`.
  * - Transitions answer a user action, last at most `--dur-3`, and change only
  *   paint properties: color, background, border-color, box-shadow, opacity,
- *   transform. The one exception is the width of a split's sized column, as
- *   its side pane opens or closes.
+ *   transform. A layout property may transition only once a measurement
+ *   shows it is cheap; so far that is the width of a split's sized column,
+ *   as its side pane opens or closes.
  *
  * It also checks that:
  *
@@ -68,9 +69,10 @@ const ENDLESS_ANIMATIONS = [
 
 /**
  * The rules allowed to transition `width`: the sized column of a split, as
- * its side pane opens or closes. The rule makes this the one exception,
- * because the column's rows are one line cut with an ellipsis, so a frame of
- * the transition lays the column out without measuring text again.
+ * its side pane opens or closes. The rule allows it because spec 17 records a
+ * measurement showing it drops no frame: the column's rows are lines of a
+ * fixed count, each cut with an ellipsis, so a frame of the transition lays
+ * the column out without measuring text again.
  */
 const SPLIT_WIDTH_TRANSITIONS = [{ file: "screens/intake/intake.css", rule: ".asks-list" }];
 

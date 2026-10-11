@@ -5,11 +5,12 @@
  * on the sidebar.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Event, PluginDetail, Signal, SignalAction } from "@hercule/contract";
 import {
   buildErrorBody,
+  buildFixtureAssistant,
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
@@ -259,6 +260,45 @@ describe("Intake's list", () => {
     ).toEqual(["All3", "GitHub3"]);
   });
 
+  it("names the workflow or the assistant that raised a core signal", async () => {
+    const triage = { id: "01a06d02-7b00-7000-8000-000000000001", name: "Triage" };
+    const ada = buildFixtureAssistant({
+      id: "01a06d02-7700-7000-8000-000000000001",
+      name: "Ada",
+      mainConversationId: "01a06d02-7800-7000-8000-000000000001",
+    });
+    const raisedBy = (id: string, actor: string, ids: Record<string, string>): Signal =>
+      buildSignal(id, 0, "12:00", {
+        kind: "proposal",
+        title: `Proposal ${id.slice(-2)}`,
+        origin: { type: "api", actor, eventIds: [], reason: "Seen twice this week", ...ids },
+      });
+    const byWorkflow = raisedBy(
+      "01a06d02-7a00-7000-8000-000000000011",
+      "run:01a06d02-7c00-7000-8000-000000000001",
+      { runId: "01a06d02-7c00-7000-8000-000000000001", workflowId: triage.id },
+    );
+    const byAssistant = raisedBy(
+      "01a06d02-7a00-7000-8000-000000000012",
+      "session:01a06d02-7d00-7000-8000-000000000001",
+      { assistantId: ada.id },
+    );
+    await openIntake(`/intake?signal=${byWorkflow.id}`, {
+      ...buildSidebarHandlers({
+        ...SIDEBAR_FIXTURE,
+        assistants: [{ assistant: ada, session: null }],
+      }),
+      ...storeSignals([byWorkflow, byAssistant]).handlers,
+      "GET /api/v1/workflows": {
+        body: { items: [{ ...triage, enabled: true, updatedAt: "2026-10-01T09:00:00.000Z" }] },
+      },
+    });
+    expect(getRow(byWorkflow).querySelector(".ask-sub")!.textContent).toBe("Triage · proposal");
+    expect(getRow(byAssistant).querySelector(".ask-sub")!.textContent).toBe("Ada · proposal");
+    const pane = await findPane();
+    expect(pane.querySelector(".ad-kind .src")!.textContent).toBe("Triage · Proposal");
+  });
+
   it("says the list is empty when nothing is on To do", async () => {
     await openIntake("/intake", storeSignals([]).handlers);
     expect(screen.getByText("Nothing on your list.")).toBeTruthy();
@@ -464,6 +504,49 @@ describe("Intake's keys", () => {
     expect((box as HTMLTextAreaElement).value).toBe("jk");
     expect(readSelected(router.state.location.search)).toBe(MENTION.id);
   });
+
+  it("keep working after an answer given from the keyboard resolves the signal", async () => {
+    const { handlers, store } = storeSignals(SIGNALS);
+    const { router } = await openIntake("/intake", {
+      ...handlers,
+      [`POST /api/v1/signals/${REVIEW.id}/act`]: () => {
+        const acted = resolve(REVIEW, "user", "Approved #1294");
+        store(acted);
+        return { body: acted };
+      },
+    });
+    getRow(REVIEW).focus();
+    await userEvent.keyboard("{Enter}");
+    const pane = await findPane();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(within(pane).getByRole("button", { name: "Approve" }));
+    });
+    await userEvent.keyboard("{Enter}");
+    await within(pane).findByRole("status");
+    // The answers are gone, and the focus stays in the pane, where the keys act.
+    expect(pane.contains(document.activeElement)).toBe(true);
+    await userEvent.keyboard("j");
+    expect(readSelected(router.state.location.search)).toBe(MENTION.id);
+  });
+
+  it("keep working after the signal whose reply is being typed is resolved elsewhere", async () => {
+    const { handlers, store } = storeSignals(SIGNALS);
+    const { live } = await openIntake(`/intake?signal=${MENTION.id}`, handlers);
+    const pane = await findPane();
+    await userEvent.type(within(pane).getByRole("textbox", { name: "Reply" }), "Ledger first.");
+
+    store(resolve(MENTION, "plugin:github", "Replied on GitHub"));
+    live.pushInvalidation("signal", [MENTION.id]);
+    await within(pane).findByRole("status");
+
+    // The focus leaves the Reply box for the pane, not for the kept reply, which is a text box.
+    expect(pane.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(
+      within(pane).getByRole("textbox", { name: "Your reply, not sent" }),
+    );
+    await userEvent.keyboard("{Escape}");
+    expect(isPaneShown()).toBe(false);
+  });
 });
 
 describe("Intake's split", () => {
@@ -511,5 +594,48 @@ describe("Intake's split", () => {
     await waitFor(() => {
       expect(isPaneShown()).toBe(true);
     });
+  });
+
+  it("moves the split a frame after the click or key, and with it under Reduce motion", async () => {
+    await openIntake();
+    const split = getList().parentElement!;
+    // No frame passes until the test lets the held ones pass.
+    let frames: FrameRequestCallback[] = [];
+    const requestFrame = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => frames.push(callback));
+    const passFrames = (): void => {
+      act(() => {
+        while (frames.length > 0) {
+          const held = frames;
+          frames = [];
+          for (const callback of held) callback(performance.now());
+        }
+      });
+    };
+    await userEvent.click(getRow(REVIEW));
+    await findPane();
+    expect(split.classList.contains("has-pane")).toBe(false);
+    passFrames();
+    expect(split.classList.contains("has-pane")).toBe(true);
+
+    // Esc closes the pane at once, and the list widens a frame later.
+    await userEvent.keyboard("{Escape}");
+    expect(isPaneShown()).toBe(false);
+    expect(split.classList.contains("has-pane")).toBe(true);
+    passFrames();
+    expect(split.classList.contains("has-pane")).toBe(false);
+    requestFrame.mockRestore();
+
+    // Under Reduce motion the split opens with the click.
+    const matchMedia = vi
+      .spyOn(window, "matchMedia")
+      .mockImplementation(
+        (query) => ({ matches: query === "(prefers-reduced-motion: reduce)" }) as MediaQueryList,
+      );
+    await userEvent.click(screen.getByRole("button", { name: "Signal pane" }));
+    expect(isPaneShown()).toBe(true);
+    expect(split.classList.contains("has-pane")).toBe(true);
+    matchMedia.mockRestore();
   });
 });

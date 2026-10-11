@@ -10,9 +10,10 @@
  *   To do again;
  * - what a burst of 30 signals raised at once costs: the renderer's longest
  *   task and the reads of To do;
- * - what opening and closing the split costs: the renderer's longest task
- *   and the frames the page drew while the split's transition ran, with the
- *   250 rows the steps above leave in the list.
+ * - what opening and closing the split costs: the renderer's longest task,
+ *   how long after the click the transition starts, and the frames the page
+ *   drew while the transition ran, with the 250 rows the steps above leave
+ *   in the list.
  *
  * To do is sorted oldest first, so a raised signal lands below the rows on
  * screen. The per-push cost is then the read and the list's render, with no
@@ -147,17 +148,25 @@ interface BurstCost {
   readonly toDoReads: number;
 }
 
-/** What opening or closing the split cost the renderer while its transition ran. */
+/** What opening or closing the split cost the renderer, from the click to the transition's end. */
 interface SplitCost {
   /** The longest task the renderer's main thread ran, in milliseconds. */
   readonly longestTaskMs: number;
+  /**
+   * How long after the click's frame the transition's first frame began, in
+   * milliseconds. The split moves a frame after the frame that draws the
+   * click, so this is a few frames.
+   */
+  readonly startDelayMs: number;
+  /** The longest time between two frames before the transition began, in milliseconds. */
+  readonly longestGapBeforeMs: number;
   /** How long the transition runs, `--dur-3`, in milliseconds. */
   readonly transitionMs: number;
-  /** How many frames the page drew, from the click's frame to one past the transition. */
+  /** How many frames the page drew, from the transition's first frame to one past its end. */
   readonly frames: number;
-  /** The longest time between two frames, in milliseconds. */
+  /** The longest time between two of those frames, in milliseconds. */
   readonly longestFrameGapMs: number;
-  /** The usual time between two frames, the median, in milliseconds. */
+  /** The usual time between two of those frames, the median, in milliseconds. */
   readonly frameIntervalMs: number;
 }
 
@@ -186,7 +195,7 @@ export interface IntakeWork {
  *   the Hercule segment counts them all, plus 2 s;
  * - the split opened and then closed with the header's button: for each, a
  *   trace and the page's animation frames from the click until one frame
- *   after the transition's `--dur-3` is over.
+ *   after the transition's `--dur-3` is over (see `measureSplitToggle`).
  *
  * The reads of To do are counted from the page's resource timing entries.
  * One connection to the page serves the whole scenario. The window stays
@@ -326,16 +335,21 @@ async function traceRendererTasks(page: Inspector, work: () => Promise<void>): P
 
 /**
  * Clicks the split's toggle on `page`, which opens the pane when `opens` is
- * set and closes it otherwise, and returns what the transition cost: the
- * renderer's tasks from a trace, and the gaps between the frames the page
- * drew from the click until one frame after `--dur-3`, the transition's
- * length, is over. Fails when `--dur-3` is 0, as under Reduce motion, because
- * there is then no transition to measure, and when the pane is not in the
- * state `opens` asks for afterwards.
+ * set and closes it otherwise, and returns what that cost: the renderer's
+ * tasks from a trace, and the page's animation frames from the click's frame
+ * until one frame after `--dur-3`, the transition's length, is over from the
+ * transition's first frame. Fails when `--dur-3` is 0, as under Reduce
+ * motion, because there is then no transition to measure, and when the pane
+ * is not in the state `opens` asks for afterwards.
  *
  * The click runs inside an animation frame callback, so the first frame
- * recorded is the one that starts the transition, and the first gap holds
- * that frame's work.
+ * recorded is the click's. The gap after each frame holds that frame's work.
+ * The transition's first frame is the first one that, once its callback
+ * and the renders it caused have run, finds the split's `has-pane` class as
+ * `opens` asks for: that frame's style starts the transition. The class
+ * changes a frame after the frame that draws the click, so the gaps before
+ * the transition, which hold the click's render, are reported apart from the
+ * transition's own.
  */
 async function measureSplitToggle(page: Inspector, opens: boolean): Promise<SplitCost> {
   const evaluate = (expression: string) =>
@@ -353,20 +367,27 @@ async function measureSplitToggle(page: Inspector, opens: boolean): Promise<Spli
     await evaluate(`(() => {
       const frames = [];
       globalThis.splitFrames = frames;
+      globalThis.splitStart = undefined;
       let until;
       const record = (at) => {
         frames.push(at);
-        if (until === undefined) {
-          until = at + ${String(transitionMs)};
-          document.querySelector(${JSON.stringify(PANE_TOGGLE)}).click();
-        }
-        // One frame past the transition's end, so the gap into the frame
-        // that draws its last state is measured too.
-        if (at <= until) requestAnimationFrame(record);
+        if (frames.length === 1) document.querySelector(${JSON.stringify(PANE_TOGGLE)}).click();
+        // React applies the click's render in a microtask, so the class is
+        // read in one queued after it, still before this frame's style.
+        queueMicrotask(() => {
+          if (until === undefined && (document.querySelector(".asks.has-pane") !== null) === ${String(opens)}) {
+            globalThis.splitStart = frames.length - 1;
+            until = at + ${String(transitionMs)};
+          }
+          // One frame past the transition's end, so the gap into the frame
+          // that draws its last state is measured too. A transition that
+          // never starts stops the recording after a second.
+          if (until === undefined ? at - frames[0] < 1000 : at <= until) requestAnimationFrame(record);
+        });
       };
       requestAnimationFrame(record);
     })()`);
-    await sleep(transitionMs + 200);
+    await sleep(transitionMs + 400);
   });
   const shown = await evaluate(`document.querySelector(".asks.has-pane") !== null`);
   if (shown !== opens) {
@@ -375,21 +396,25 @@ async function measureSplitToggle(page: Inspector, opens: boolean): Promise<Spli
     );
   }
   const frames = (await evaluate("globalThis.splitFrames")) as number[];
+  const start = (await evaluate("globalThis.splitStart")) as number;
   const gaps = frames.slice(1).map((at, index) => at - frames[index]!);
-  const sorted = gaps.toSorted((a, b) => a - b);
+  const transitionGaps = gaps.slice(start).toSorted((a, b) => a - b);
   return {
     longestTaskMs: Math.max(...tasks),
+    startDelayMs: frames[start]! - frames[0]!,
+    longestGapBeforeMs: Math.max(0, ...gaps.slice(0, start)),
     transitionMs,
-    frames: frames.length,
-    longestFrameGapMs: sorted.at(-1) ?? 0,
-    frameIntervalMs: sorted[Math.floor(sorted.length / 2)] ?? 0,
+    frames: frames.length - start,
+    longestFrameGapMs: transitionGaps.at(-1) ?? 0,
+    frameIntervalMs: transitionGaps[Math.floor(transitionGaps.length / 2)] ?? 0,
   };
 }
 
 /**
- * Whether a split's frames dropped none: no gap between two frames is half
- * again as long as the usual one. A dropped frame makes a gap of two usual
- * ones.
+ * Whether the split's transition dropped no frame: no gap between two of
+ * its frames is half again as long as the usual one. A dropped frame makes a
+ * gap of two usual ones. The frames before the transition starts do not
+ * count, because nothing on screen moves in them.
  */
 const droppedNoFrame = (cost: SplitCost) => cost.longestFrameGapMs < 1.5 * cost.frameIntervalMs;
 
@@ -399,7 +424,9 @@ const formatPerPush = (totalMs: number) =>
 
 /** Formats a split's cost as one table cell. */
 const formatSplit = (cost: SplitCost) =>
-  `longest task ${cost.longestTaskMs.toFixed(1)} ms; ${String(cost.frames)} frames over the ` +
+  `longest task ${cost.longestTaskMs.toFixed(1)} ms; transition starts ${cost.startDelayMs.toFixed(1)} ms ` +
+  `after the click (longest gap before it ${cost.longestGapBeforeMs.toFixed(1)} ms); ` +
+  `${String(cost.frames)} frames over the ` +
   `${cost.transitionMs.toFixed(0)} ms transition, ` +
   `longest gap ${cost.longestFrameGapMs.toFixed(1)} ms against ${cost.frameIntervalMs.toFixed(1)} ms usual`;
 

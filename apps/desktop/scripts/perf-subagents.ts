@@ -59,11 +59,14 @@ import {
 import { pollUntil } from "./poll.ts";
 import type { ScriptStep } from "./scripted-runner.ts";
 
-/** The header's button that opens the side pane, by its label, as the web's thread header labels it. */
-const PANE_TOGGLE_SELECTOR = 'button[aria-label="Show the side pane"]';
+/**
+ * The header's button that opens and closes the side pane. It has the same
+ * label as the pane, so each selector names its element too.
+ */
+const PANE_TOGGLE_SELECTOR = 'button[aria-label="Side pane"]';
 
-/** The side pane, by its label. */
-const SIDE_PANE_SELECTOR = '[aria-label="Side pane"]';
+/** The side pane, by its element and its label. */
+const SIDE_PANE_SELECTOR = 'aside[aria-label="Side pane"]';
 
 /**
  * The link to one subagent's page in the side pane, whose `href` ends in its

@@ -128,6 +128,33 @@ export function IntakeScreen({
   }
   const paneDrawn = selectedId !== null && (paneShown || closingId === selectedId);
 
+  // Whether the list is narrowed for the pane. Changing it starts the
+  // split's transition, and it follows `paneShown` one frame late: the click
+  // or key is drawn in one frame, and the list starts to move in the next.
+  // The click's work then never shares a frame with the motion's start:
+  // - Opening renders the pane, which takes up to 12 ms.
+  // - After the screen has been still, the frame that draws a click starts
+  //   4 to 5 ms late, so even a small render can miss that frame's deadline
+  //   and delay the transition's first frame by a whole frame.
+  const [listNarrowed, setListNarrowed] = useState(paneShown);
+  // Under Reduce motion nothing moves, so the split changes in this frame.
+  if (listNarrowed !== paneShown && matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    setListNarrowed(paneShown);
+  }
+  useLayoutEffect(() => {
+    if (listNarrowed === paneShown) return;
+    // The first callback runs before the frame that draws the click, the
+    // second one in the frame after it.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        setListNarrowed(paneShown);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [paneShown, listNarrowed]);
+
   /** Selects `signalId` and shows the pane, as a click on its row does. */
   const openSignal = (signalId: string): void => {
     setDismissed(false);
@@ -324,7 +351,7 @@ export function IntakeScreen({
           and `inert` keeps the focus and screen readers out of it. */}
       <div
         ref={splitRef}
-        className={paneShown ? "asks has-pane" : "asks"}
+        className={listNarrowed ? "asks has-pane" : "asks"}
         style={{
           "--intake-list-width": `${String(width)}px`,
           // The same fit as `fitIntakeListWidth`, done by CSS against the
