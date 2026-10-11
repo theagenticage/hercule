@@ -15,22 +15,33 @@
  *   brings it back, `E` marks one done, `X` and `⇧J` check two rows whose
  *   Done the bulk bar sends, and Done lists all three.
  *
+ * With `HERCULE_INTAKE_EVIDENCE=<dir>` set, one more test walks through the
+ * moves for a reviewer, at a pace a person can follow, and records a video
+ * of itself at 1440 × 900 into `<dir>`. Without it, that test is skipped,
+ * because the test of the moves above already checks every step it shows.
+ *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
 import { spawnSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { Page } from "playwright";
-import { describe, expect, it } from "vitest";
-import { isWindowVisible } from "../../apps/desktop/scripts/packaged-app";
+import { describe, expect, it, onTestFinished } from "vitest";
+import { isWindowVisible, writeSettings } from "../../apps/desktop/scripts/packaged-app";
 import { buildCleanEnv, findCompiledBinary, runCli } from "../../scripts/controller-process";
 import {
   arrangeFleet,
   chooseMenuItem,
   clickWaitingNotification,
+  createUserDataDirForTest,
   hideWindow,
+  keepWindowOnTop,
+  launchForTest,
   openSignedIn,
   readMenuItems,
   readWaitingNotifications,
+  signInAndReadToken,
   type ArrangedFleet,
 } from "./harness";
 
@@ -163,6 +174,12 @@ async function selectRow(page: Page, title: string): Promise<void> {
 
 /** The pane of the open signal. */
 const openSignalPane = (page: Page) => page.getByRole("region", { name: "The open signal" });
+
+/** The folder the journey's video is written to, when one is asked for. */
+const evidence = process.env["HERCULE_INTAKE_EVIDENCE"];
+
+/** How long the journey waits after each step, so a reviewer can see what changed. */
+const PAUSE_MS = 1200;
 
 describe("Intake", () => {
   it("opens from the Hercule face's row and from Go › Intake, shows the Hercule face, and keeps Intake open while View changes the face", async () => {
@@ -378,4 +395,106 @@ describe("Intake", () => {
     expect(await openSignalPane(page).locator(".ad-title").textContent()).toBe("Checkout is down");
     expect(await page.locator(".asks-sec", { hasText: "Now" }).count()).toBe(1);
   });
+
+  it.skipIf(evidence === undefined)(
+    "walks through the moves for the evidence: snooze, Later, unsnooze, Done, the bulk bar and the Done view",
+    async () => {
+      mkdirSync(evidence!, { recursive: true });
+      const arranged = await arrangeFleet();
+      const titles = [
+        "Release 4.2 shipped",
+        "Docs moved to the wiki",
+        "Staging was rebuilt",
+        "Nightly backup finished",
+      ];
+      for (const title of titles) await raiseSignal(arranged, "fyi", title);
+      const userDataDir = createUserDataDirForTest();
+      writeSettings(userDataDir, {
+        controllerUrl: arranged.url,
+        window: { bounds: { x: 0, y: 0, width: 1440, height: 940 }, fullScreen: false },
+      });
+      const { app, page, close } = await launchForTest(
+        userDataDir,
+        async (application) => {
+          await application.evaluate(({ BrowserWindow }) => {
+            BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900);
+          });
+        },
+        { dir: evidence!, size: { width: 1440, height: 900 } },
+      );
+      onTestFinished(async () => {
+        await close();
+        const videoPath = page.video()?.path();
+        if (videoPath !== undefined) console.log("Intake journey recording:", await videoPath);
+      });
+      await signInAndReadToken(page, arranged.url);
+      await page.getByRole("navigation", { name: "Threads", exact: true }).waitFor();
+      // The video records only frames that are drawn, and macOS draws none
+      // for a window that another test's window covers.
+      await keepWindowOnTop(app);
+      const toast = page.locator(".asks-toast[role=status]");
+
+      await chooseMenuItem(app, "Go", "Intake");
+      await expect.poll(async () => (await readRowTitles(page)).length).toBe(titles.length);
+      await sleep(PAUSE_MS);
+
+      // A row shows its moves while the pointer is over it; its Snooze
+      // button opens the snooze menu, and a choice snoozes the row.
+      const snoozed = page.locator(".ask-item", { hasText: "Release 4.2 shipped" });
+      await snoozed.hover();
+      await sleep(PAUSE_MS);
+      await snoozed.getByRole("button", { name: "Snooze" }).click();
+      const menu = page.getByRole("menu", { name: "Snooze until" });
+      await menu.waitFor();
+      await sleep(PAUSE_MS);
+      await menu.getByRole("menuitem", { name: /^Tomorrow/ }).click();
+      await expect.poll(() => toast.textContent()).toBe("Snoozed until tomorrow 09:00");
+      await sleep(PAUSE_MS);
+
+      // Later lists the row with the time it comes back; U brings it back.
+      await showView(page, "Later");
+      await expect.poll(() => readRowTitles(page)).toEqual(["Release 4.2 shipped"]);
+      await sleep(PAUSE_MS);
+      await selectRow(page, "Release 4.2 shipped");
+      await page.keyboard.press("u");
+      await expect.poll(() => toast.textContent()).toBe("Back on To do");
+      await sleep(PAUSE_MS);
+      await showView(page, "To do");
+      await expect.poll(async () => (await readRowTitles(page)).length).toBe(titles.length);
+      await sleep(PAUSE_MS);
+
+      // E marks the selected row done.
+      await selectRow(page, "Docs moved to the wiki");
+      await sleep(PAUSE_MS / 2);
+      await page.keyboard.press("e");
+      await expect.poll(() => toast.textContent()).toBe("Done · Docs moved to the wiki");
+      await sleep(PAUSE_MS);
+
+      // X checks rows; the bulk bar previews what its Done does under the
+      // pointer, and a click sends it.
+      const [first] = await readRowTitles(page);
+      await selectRow(page, first!);
+      await page.keyboard.press("x");
+      await sleep(PAUSE_MS / 2);
+      await page.keyboard.press("Shift+J");
+      await sleep(PAUSE_MS / 2);
+      await page.keyboard.press("Shift+J");
+      const bar = page.getByRole("toolbar", { name: "Checked rows" });
+      await expect.poll(() => bar.locator(".asks-toast-text").textContent()).toBe("3 selected");
+      await sleep(PAUSE_MS);
+      const bulkDone = bar.getByRole("button", { name: /^Done/ });
+      await bulkDone.hover();
+      await expect.poll(() => bar.locator(".asks-bulk-preview").count()).toBe(1);
+      await sleep(PAUSE_MS * 1.5);
+      await bulkDone.click();
+      await expect.poll(() => readRowTitles(page)).toEqual([]);
+      await sleep(PAUSE_MS);
+
+      await showView(page, "Done");
+      await expect
+        .poll(async () => (await readRowTitles(page)).toSorted())
+        .toEqual(titles.toSorted());
+      await sleep(PAUSE_MS * 1.5);
+    },
+  );
 });

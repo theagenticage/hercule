@@ -2381,7 +2381,7 @@ The perf script's rows were measured 2026-10-11 on the reference machine, in one
 | Launch, spawn to Intake's signals | 800 ms | 397 ms | **337 ms**; window shown at 342 ms |
 
 - **The snooze timer adds no wakeup while idle.** It is one `setTimeout` an hour away, so in the 10-second samples the renderer wakes once a second, as it did for #524 with no snooze. The perf script does not count timers; that one timer is pending comes from the code, which keeps at most one.
-- **The summed footprint is 6 MB over its row, a budget miss.** The renderer grew by 7 MB, from 59.7 to 66.6 MB; the GPU process held 100.7 MB, against 101 MB then. Each side is one run on a shared machine, with a load average of 5.1 at this launch, so the growth is not yet separated from the noise between two runs.
+- **The summed footprint is 6 MB over its row, a budget miss.** The renderer grew by 7 MB, from 59.7 to 66.6 MB; the GPU process held 100.7 MB, against 101 MB then. Each side is one run on a shared machine, with a load average of 5.1 at this launch, so the growth is not yet separated from the noise between two runs. The miss is accepted for this change; a later measurement on a quiet machine settles it.
 - **Splitting the moves into their own chunk was not tried.** Intake's chunk grew by 8.7 kB, and the moves show on every row, so they load with Intake whatever the split.
 
 ## Slices
