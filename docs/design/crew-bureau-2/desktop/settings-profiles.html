@@ -10,10 +10,6 @@
       .set-body {
         padding-top: 22px;
       }
-      .set-col[hidden],
-      .note[hidden] {
-        display: none;
-      }
       .rec {
         display: flex;
         flex-direction: column;
@@ -286,16 +282,16 @@
       </main>
     </div>
     <div class="modal" data-confirm hidden>
-      <div class="pop dialog" role="dialog" aria-label="Change unrestricted?">
+      <div class="pop dialog" role="dialog" aria-modal="true" aria-label="Change unrestricted?">
         <div class="pop-h"><b>Change unrestricted?</b></div>
-        <div class="pop-sec">
+        <form class="pop-sec">
           <p>This takes Delete on Tasks away from unrestricted.</p>
           <p>Threads run on unrestricted unless you pick another profile, so the change reaches them on their next call.</p>
           <div class="acts">
-            <button class="btn btn--quiet">Cancel</button>
-            <button class="btn btn--accent">Change</button>
+            <button type="button" class="btn btn--quiet" data-close>Cancel</button>
+            <button type="submit" class="btn btn--accent">Change</button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
     <script>
@@ -348,6 +344,13 @@
       var state = document.documentElement.dataset.state;
       var key = state === "shipped" || state === "confirm" ? "unrestricted" : state === "reviewer" ? "reviewer" : null;
       document.querySelector("[data-confirm]").hidden = state !== "confirm";
+      // A grants change takes access away from what runs on the profile, so Cancel takes the focus, not Change.
+      // A page framed in the design book must not take focus: focusing inside an iframe scrolls the book.
+      if (state === "confirm" && window.top === window) document.querySelector("[data-confirm] [data-close]").focus();
+      // The book has no controller to save to, so the form does not submit.
+      document.querySelector("[data-confirm] form").addEventListener("submit", function (event) {
+        event.preventDefault();
+      });
 
       document.querySelector("[data-rows]").innerHTML = Object.keys(PROFILES).map(function (k) {
         var p = PROFILES[k];

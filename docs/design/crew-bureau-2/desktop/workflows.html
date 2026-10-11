@@ -7,14 +7,6 @@
     <meta charset="utf-8" />
     <title>Workflows · Hercule</title>
     <style>
-      [hidden] {
-        display: none !important;
-      }
-      /* A run started by a person has no clock or bolt; its name keeps the icon's room. */
-      .no-icon {
-        flex: none;
-        width: 12px;
-      }
       /* The source is the one thing on the page a user may want to copy. */
       .open-pane .codeblock {
         margin-top: 12px;
@@ -34,84 +26,84 @@
     <div class="app">
       <aside data-side="workflows" data-side-runs></aside>
       <main class="main">
-        <div class="docket-page" data-page>
+        <div class="workflows-page" data-page>
           <header class="top" data-top></header>
-          <section class="docket" data-list></section>
+          <section class="workflow-list" data-list></section>
           <div class="open-pane" data-open hidden>
             <div class="pill-room"></div>
             <div class="open-name">
               <h1>Ship release</h1>
-              <label class="open-switch">Enabled<button class="toggle" role="switch" aria-checked="true" aria-label="Ship release starts runs"></button></label>
+              <label class="open-switch">Enabled<button class="toggle" role="switch" aria-checked="true"></button></label>
             </div>
             <p class="open-gist">Prepares a release in parallel, opens the release PR, and announces it once the PR is merged.</p>
             <p class="open-hint">When on, its triggers start runs. Runs already going are not touched.</p>
-            <ul class="chip-row">
-              <li class="chip"><i data-i="bolt" data-size="12"></i>github.issue.labeled</li>
-              <li class="chip"><i data-i="clock" data-size="12"></i>Fridays at 14:00 · next Fri 14:00</li>
-              <li class="chip">6 agents · 2 actions · 1 signal</li>
+            <ul class="chip-row" aria-label="About this workflow">
+              <li class="chip" aria-label="Starts on github.issue.labeled"><i data-i="bolt" data-size="12"></i>github.issue.labeled</li>
+              <li class="chip" aria-label="Starts Fridays at 14:00, next on Fri 14:00"><i data-i="clock" data-size="12"></i>Fridays at 14:00 · next Fri 14:00</li>
+              <li class="chip" aria-label="6 agents, 2 actions, 1 signal">6 agents · 2 actions · 1 signal</li>
             </ul>
             <div data-graph></div>
             <div class="tab-band">
               <div class="tab-bar">
                 <nav class="tabs" role="tablist" aria-label="Workflow" data-tabs>
-                  <a class="tab" role="tab" data-tab="runs">Runs</a>
-                  <a class="tab" role="tab" data-tab="triggers">Triggers <small>3</small></a>
-                  <a class="tab" role="tab" data-tab="inputs">Inputs <small>1</small></a>
-                  <a class="tab" role="tab" data-tab="source">Source</a>
+                  <a class="tab" role="tab" id="tab-runs" aria-controls="panel-runs-list panel-runs-day" data-tab="runs">Runs</a>
+                  <a class="tab" role="tab" id="tab-triggers" aria-controls="panel-triggers" data-tab="triggers">Triggers <small>3</small></a>
+                  <a class="tab" role="tab" id="tab-inputs" aria-controls="panel-inputs" data-tab="inputs">Inputs <small>1</small></a>
+                  <a class="tab" role="tab" id="tab-source" aria-controls="panel-source" data-tab="source">Source</a>
                 </nav>
                 <span class="tab-tools" data-tools>
                   <span data-day-stepper hidden></span>
-                  <span class="seg" data-runs-view>
-                    <button data-runs="list">List</button>
-                    <button data-runs="timeline">Timeline</button>
+                  <span class="seg" role="group" aria-label="Show the runs as">
+                    <button type="button" data-runs="list">List</button>
+                    <button type="button" data-runs="timeline">Timeline</button>
                   </span>
                 </span>
               </div>
-              <div class="docket-cols tbl-runs" data-panel="runs">
-                <span></span><span>Status</span><span class="col-by">Started by</span><span class="docket-num">Took</span><span class="docket-num">Started</span>
+              <div class="table-heads tbl-runs" data-panel="runs" aria-hidden="true">
+                <span></span><span>Status</span><span class="col-by">Started by</span><span class="table-num">Took</span><span class="table-num">Started</span>
               </div>
-              <div class="docket-cols tbl-triggers" data-panel="triggers">
+              <div class="table-heads tbl-triggers" data-panel="triggers" aria-hidden="true">
                 <span></span><span>Trigger</span><span class="col-does">Does</span><span>Fires on</span><span>State</span><span></span>
               </div>
-              <div class="docket-cols tbl-inputs" data-panel="inputs"><span>Input</span><span>Type</span><span>Required</span><span>Default</span></div>
+              <div class="table-heads tbl-inputs" data-panel="inputs" aria-hidden="true"><span>Input</span><span>Type</span><span>Required</span><span>Default</span></div>
             </div>
-            <div class="docket-rows" data-panel="runs" data-runs-list></div>
-            <div data-panel="runs" data-run-day></div>
-            <div class="docket-rows" data-panel="triggers">
-              <div class="docket-row tbl-triggers">
-                <span class="docket-quiet"><i data-i="bolt" data-size="12"></i></span>
-                <span class="docket-name">release_issue</span>
-                <span class="docket-quiet col-does">Starts a run</span>
-                <span class="docket-quiet"><span>github.issue.labeled · any connection</span></span>
-                <span class="docket-quiet">On event</span>
+            <div class="table-rows" role="tabpanel" id="panel-runs-list" aria-labelledby="tab-runs" data-panel="runs" data-runs-list></div>
+            <div role="tabpanel" id="panel-runs-day" aria-labelledby="tab-runs" data-panel="runs" data-run-day></div>
+            <div class="table-rows" role="tabpanel" id="panel-triggers" aria-labelledby="tab-triggers" data-panel="triggers">
+              <div class="table-row tbl-triggers">
+                <span class="table-quiet"><i data-i="bolt" data-size="12"></i></span>
+                <span class="table-name">release_issue</span>
+                <span class="table-quiet col-does">Starts a run</span>
+                <span class="table-quiet"><span>github.issue.labeled · any connection</span></span>
+                <span class="table-quiet">On event</span>
                 <button class="toggle" role="switch" aria-checked="true" aria-label="release_issue starts runs"></button>
               </div>
-              <div class="docket-row tbl-triggers">
-                <span class="docket-quiet"><i data-i="clock" data-size="12"></i></span>
-                <span class="docket-name">release_train</span>
-                <span class="docket-quiet col-does">Starts a run</span>
-                <span class="docket-quiet"><span>Fridays at 14:00</span></span>
-                <span class="docket-quiet">Next Fri 14:00</span>
+              <div class="table-row tbl-triggers">
+                <span class="table-quiet"><i data-i="clock" data-size="12"></i></span>
+                <span class="table-name">release_train</span>
+                <span class="table-quiet col-does">Starts a run</span>
+                <span class="table-quiet"><span>Fridays at 14:00</span></span>
+                <span class="table-quiet">Next Fri 14:00</span>
                 <button class="toggle" role="switch" aria-checked="true" aria-label="release_train starts runs"></button>
               </div>
-              <div class="docket-row tbl-triggers">
-                <span class="docket-quiet"><i data-i="bolt" data-size="12"></i></span>
-                <span class="docket-name">pr_merged</span>
-                <span class="docket-quiet col-does">Resumes a run</span>
-                <span class="docket-quiet"><span>github.pr.merged · any connection</span></span>
+              <div class="table-row tbl-triggers">
+                <span class="table-quiet"><i data-i="bolt" data-size="12"></i></span>
+                <span class="table-name">pr_merged</span>
+                <span class="table-quiet col-does">Resumes a run</span>
+                <span class="table-quiet"><span>github.pr.merged · any connection</span></span>
                 <span></span>
                 <span></span>
               </div>
             </div>
-            <div class="docket-rows" data-panel="inputs">
-              <div class="docket-row tbl-inputs">
-                <span class="docket-name">version</span>
-                <span class="docket-quiet">string</span>
-                <span class="docket-quiet">Optional</span>
+            <div class="table-rows" role="tabpanel" id="panel-inputs" aria-labelledby="tab-inputs" data-panel="inputs">
+              <div class="table-row tbl-inputs">
+                <span class="table-name">version</span>
+                <span class="table-quiet">string</span>
+                <span class="table-quiet">Optional</span>
                 <span></span>
               </div>
             </div>
-            <pre class="codeblock" data-panel="source">
+            <pre class="codeblock" role="tabpanel" id="panel-source" aria-labelledby="tab-source" data-panel="source">
 name: Ship release
 description: Prepares a release in parallel, opens the release PR, and announces it once the PR is merged.
 inputs:
@@ -157,6 +149,12 @@ steps:
     kind: agent
     agent: 01a0ec64-6e80-7000-8000-a00000000004
     prompt: Review the release diff. Answer approved or changes.
+    outputSchema:
+      type: object
+      properties:
+        verdict:
+          enum: [approved, changes]
+      required: [verdict]
     entry: true
   - id: fix
     kind: agent
@@ -165,6 +163,11 @@ steps:
   - id: open_pr
     kind: action
     action: github/pr.create
+    params:
+      connection: any
+      title: Release {{ inputs.version }}
+      head: release/{{ inputs.version }}
+      base: main
     join: all
   - id: announce
     kind: agent
@@ -173,8 +176,16 @@ steps:
   - id: notify
     kind: action
     action: notification.create
+    params:
+      title: Released {{ inputs.version }}
     terminal: true
 edges:
+  - from: changelog
+    to: open_pr
+  - from: security
+    to: open_pr
+  - from: test
+    to: open_pr
   - from: review
     to: open_pr
     condition: steps.review.output.verdict == "approved"
@@ -185,7 +196,9 @@ edges:
     to: review
     maxTraversals: 3
   - from: pr_merged
-    to: announce</pre
+    to: announce
+  - from: announce
+    to: notify</pre
             >
           </div>
         </div>
@@ -198,134 +211,177 @@ edges:
         var tab = params.get("tab") || "runs";
         var runsView = params.get("runs") || "list";
 
-        // Each workflow: [group, name, starts on, last 20 runs, success, last run's status, its time, next].
-        // The strip's letters: d done, f failed, r working, w waiting, i idle. An off workflow's next is "Off".
+        // Each workflow, by group. Its strip is its last 20 runs, oldest first, one letter each: d done, f failed,
+        // r working, w waiting, c cancelled. An off workflow's next is "Off", or "Paused" when its triggers are.
         var WORKFLOWS = [
-          ["you", "Rotate prod keys", "Tuesdays at 08:00", "dddddddddddw", "100%", "rotate asks: Run aws iam delete-access-key --user-name deploy-bot --access-key-id AKIA4XQ7?", "08:00", "6 Oct"],
-          ["you", "Ship release", "github.issue.labeled · Fridays at 14:00", "ddddfdddddddfddddfrw", "83%", "security asks: Run npm audit fix --force?", "09:12", "Fri 14:00"],
-          ["fail", "Label new issues", "github.issue.opened", "dddddddddddd", "100%", "issue_opened: No such key: labels", "06:21", "On event"],
-          ["fail", "Nightly backup check", "Daily at 02:30", "ddddddddddddddddddff", "90%", "Failed at compare", "02:30", "Wed 02:30"],
-          ["fail", "Reload staging", "github.pr.merged", "dddddddfdddddddddfdf", "85%", "Failed at smoke", "09:18", "On event"],
-          ["fail", "Watch flaky tests", "run.failed", "dddddfdddf", "80%", "Failed at diagnose", "03:41", "On event"],
-          ["run", "Fix bug", "github.issue.labeled", "ddddfdddddddrdfdddr", "88%", "2 runs · at fix", "09:27", "On event"],
-          ["run", "Investigate", "github.issue.assigned", "dddddddr", "100%", "At investigate", "09:35", "On event"],
-          ["run", "Review dependabot", "github.pr.opened", "ddddddddddddddddddrr", "100%", "2 runs · at review", "09:37", "On event"],
-          ["run", "Translate docs", "github.pr.merged", "dddddddr", "100%", "At translate", "09:30", "On event"],
-          ["else", "Assign reviewers", "github.pr.opened", "ddddddddddddddddddd", "100%", "Done", "08:53", "On event"],
-          ["else", "Audit IAM roles", "Monthly on the 1st at 07:00", "dddddd", "100%", "Done", "1 Sep", "Thu 07:00"],
-          ["else", "Bump dependencies", "Mondays at 06:00", "ddddddddfddd", "92%", "Done", "Mon", "Mon 06:00"],
-          ["else", "Check closed issues", "github.issue.closed", "dddddddddddddddddddd", "100%", "Done", "08:26", "On event"],
-          ["else", "Check SSL expiry", "Daily at 08:00", "dddddddddddddddddddd", "100%", "Done", "08:00", "Wed 08:00"],
-          ["else", "Clean preview envs", "github.pr.closed", "dddddddddddidddddddd", "100%", "Done", "06:29", "On event"],
-          ["else", "Close stale PRs", "Mondays at 05:00", "dddddddd", "100%", "Done", "Mon", "Mon 05:00"],
-          ["else", "Close stale tasks", "Sundays at 04:00", "dddddddddd", "100%", "Done", "Sun", "Sun 04:00"],
-          ["else", "Compress screenshots", "github.pr.synchronized", "dddddddddddddddddddd", "100%", "Done", "09:07", "On event"],
-          ["else", "Copy edit blog", "github.pr.opened", "ddddddd", "100%", "Done", "Sat", "On event"],
-          ["else", "Draft changelog", "github.pr.merged", "dddddddddddddddddddd", "100%", "Done", "09:19", "On event"],
-          ["else", "Draft reply", "github.issue.commented", "dddddddddddddddddddd", "100%", "Done", "09:32", "On event"],
-          ["else", "Escalate stuck tasks", "task.updated", "ddddd", "100%", "Done", "Sun", "On event"],
-          ["else", "Explain failed runs", "run.failed", "ddddddddddddd", "100%", "Done", "03:39", "On event"],
-          ["else", "Lint docs", "github.pr.opened", "ddddfdddd", "89%", "Done", "Mon", "On event"],
-          ["else", "Merge approved PRs", "github.pr.labeled", "dddddddddddddddddddd", "100%", "Done", "08:50", "On event"],
-          ["else", "Nightly e2e", "Daily at 01:00", "dddddddddddddddfdddd", "95%", "Done", "01:00", "Wed 01:00"],
-          ["else", "Notify on-call", "run.failed", "ddddddddddddd", "100%", "Done", "03:38", "On event"],
-          ["else", "Payout report", "Monthly on the 1st at 07:00", "ddddd", "100%", "Done", "1 Sep", "Thu 07:00"],
-          ["else", "Plan sprint", "Mondays at 09:00", "ddddddd", "100%", "Done", "Mon", "Mon 09:00"],
-          ["else", "Post release notes", "run.completed", "dddddddddd", "100%", "Done", "Wed", "On event"],
-          ["else", "Prune branches", "Saturdays at 03:00", "", "", "No runs yet", "", "Off"],
-          ["else", "Rebase open PRs", "github.pr.merged", "dddddddddddddddddddd", "100%", "Done", "09:19", "On event"],
-          ["else", "Refresh demo data", "Mondays at 06:00", "ddfddd", "83%", "Done", "17 Aug", "Off"],
-          ["else", "Respond to reviews", "github.pr.commented", "dddddddddddddddddddd", "100%", "Done", "09:24", "On event"],
-          ["else", "Retry cancelled runs", "run.cancelled", "ddd", "100%", "Done", "20 Sep", "On event"],
-          ["else", "Rotate secrets", "0 7 1 */3 *", "dd", "100%", "Done", "1 Jul", "Off"],
-          ["else", "Scan for secrets", "github.pr.synchronized", "dddddddddddddddddddd", "100%", "Done", "09:07", "On event"],
-          ["else", "Summarize standup", "Weekdays at 09:00 (Europe/London)", "dddddddddddddddddddd", "100%", "Done", "08:00", "Wed 08:00"],
-          ["else", "Sync translations", "github.pr.labeled", "dddddddd", "100%", "Done", "Sun", "On event"],
-          ["else", "Triage", "github.issue.opened · github.issue.reopened", "dddddddddddddddddddd", "100%", "Done", "06:21", "On event"],
-          ["else", "Triage new tasks", "task.created", "dddddddddddddddddddd", "100%", "Done", "09:03", "On event"],
-          ["else", "Weekly metrics", "Mondays at 08:00", "dddddddd", "100%", "Done", "14 Sep", "Paused"],
-          ["else", "Welcome contributors", "github.pr.opened", "dfddddddddd", "91%", "Done", "Fri", "On event"],
+          { group: "you", name: "Rotate prod keys", startsOn: "Tuesdays at 08:00", strip: "dddddddddddw", success: "100%", lastRun: "rotate asks: Run aws iam delete-access-key --user-name deploy-bot --access-key-id AKIA4XQ7?", lastRunAt: "08:00", next: "6 Oct" },
+          { group: "you", name: "Ship release", startsOn: "github.issue.labeled · Fridays at 14:00", strip: "dddfdddddddfddddfcrw", success: "82%", lastRun: "security asks: Run npm audit fix --force?", lastRunAt: "09:12", next: "Fri 14:00" },
+          { group: "fail", name: "Label new issues", startsOn: "github.issue.opened", strip: "dddddddddddd", success: "100%", lastRun: "issue_opened: No such key: labels", lastRunAt: "06:21", next: "On event" },
+          { group: "fail", name: "Nightly backup check", startsOn: "Daily at 02:30", strip: "ddddddddddddddddddff", success: "90%", lastRun: "Failed at compare", lastRunAt: "02:30", next: "Wed 02:30" },
+          { group: "fail", name: "Reload staging", startsOn: "github.pr.merged", strip: "dddddddfdddddddddfdf", success: "85%", lastRun: "Failed at smoke", lastRunAt: "09:18", next: "On event" },
+          { group: "fail", name: "Watch flaky tests", startsOn: "run.failed", strip: "dddddfdddf", success: "80%", lastRun: "Failed at diagnose", lastRunAt: "03:41", next: "On event" },
+          { group: "run", name: "Fix bug", startsOn: "github.issue.labeled", strip: "ddddfdddddddrdfdddr", success: "88%", lastRun: "2 runs · at fix", lastRunAt: "09:27", next: "On event" },
+          { group: "run", name: "Investigate", startsOn: "github.issue.assigned", strip: "dddddddr", success: "100%", lastRun: "At investigate", lastRunAt: "09:35", next: "On event" },
+          { group: "run", name: "Review dependabot", startsOn: "github.pr.opened", strip: "ddddddddddddddddddrr", success: "100%", lastRun: "2 runs · at review", lastRunAt: "09:37", next: "On event" },
+          { group: "run", name: "Translate docs", startsOn: "github.pr.merged", strip: "dddddddr", success: "100%", lastRun: "At translate", lastRunAt: "09:30", next: "On event" },
+          { group: "else", name: "Assign reviewers", startsOn: "github.pr.opened", strip: "ddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "08:53", next: "On event" },
+          { group: "else", name: "Audit IAM roles", startsOn: "Monthly on the 1st at 07:00", strip: "dddddd", success: "100%", lastRun: "Done", lastRunAt: "1 Sep", next: "Thu 07:00" },
+          { group: "else", name: "Bump dependencies", startsOn: "Mondays at 06:00", strip: "ddddddddfddd", success: "92%", lastRun: "Done", lastRunAt: "Mon", next: "Mon 06:00" },
+          { group: "else", name: "Check closed issues", startsOn: "github.issue.closed", strip: "dddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "08:26", next: "On event" },
+          { group: "else", name: "Check SSL expiry", startsOn: "Daily at 08:00", strip: "dddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "08:00", next: "Wed 08:00" },
+          { group: "else", name: "Clean preview envs", startsOn: "github.pr.closed", strip: "dddddddddddcdddddddd", success: "100%", lastRun: "Done", lastRunAt: "06:29", next: "On event" },
+          { group: "else", name: "Close stale PRs", startsOn: "Mondays at 05:00", strip: "dddddddd", success: "100%", lastRun: "Done", lastRunAt: "Mon", next: "Mon 05:00" },
+          { group: "else", name: "Close stale tasks", startsOn: "Sundays at 04:00", strip: "dddddddddd", success: "100%", lastRun: "Done", lastRunAt: "Sun", next: "Sun 04:00" },
+          { group: "else", name: "Compress screenshots", startsOn: "github.pr.synchronized", strip: "dddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "09:07", next: "On event" },
+          { group: "else", name: "Copy edit blog", startsOn: "github.pr.opened", strip: "ddddddd", success: "100%", lastRun: "Done", lastRunAt: "Sat", next: "On event" },
+          { group: "else", name: "Draft changelog", startsOn: "github.pr.merged", strip: "dddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "09:19", next: "On event" },
+          { group: "else", name: "Draft reply", startsOn: "github.issue.commented", strip: "dddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "09:32", next: "On event" },
+          { group: "else", name: "Escalate stuck tasks", startsOn: "task.updated", strip: "ddddd", success: "100%", lastRun: "Done", lastRunAt: "Sun", next: "On event" },
+          { group: "else", name: "Explain failed runs", startsOn: "run.failed", strip: "ddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "03:39", next: "On event" },
+          { group: "else", name: "Lint docs", startsOn: "github.pr.opened", strip: "ddddfdddd", success: "89%", lastRun: "Done", lastRunAt: "Mon", next: "On event" },
+          { group: "else", name: "Merge approved PRs", startsOn: "github.pr.labeled", strip: "dddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "08:50", next: "On event" },
+          { group: "else", name: "Nightly e2e", startsOn: "Daily at 01:00", strip: "dddddddddddddddfdddd", success: "95%", lastRun: "Done", lastRunAt: "01:00", next: "Wed 01:00" },
+          { group: "else", name: "Notify on-call", startsOn: "run.failed", strip: "ddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "03:38", next: "On event" },
+          { group: "else", name: "Payout report", startsOn: "Monthly on the 1st at 07:00", strip: "ddddd", success: "100%", lastRun: "Done", lastRunAt: "1 Sep", next: "Thu 07:00" },
+          { group: "else", name: "Plan sprint", startsOn: "Mondays at 09:00", strip: "ddddddd", success: "100%", lastRun: "Done", lastRunAt: "Mon", next: "Mon 09:00" },
+          { group: "else", name: "Post release notes", startsOn: "run.completed", strip: "dddddddddd", success: "100%", lastRun: "Done", lastRunAt: "Wed", next: "On event" },
+          { group: "else", name: "Prune branches", startsOn: "Saturdays at 03:00", strip: "", success: "", lastRun: "No runs yet", lastRunAt: "", next: "Off" },
+          { group: "else", name: "Rebase open PRs", startsOn: "github.pr.merged", strip: "dddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "09:19", next: "On event" },
+          { group: "else", name: "Refresh demo data", startsOn: "Mondays at 06:00", strip: "ddfddd", success: "83%", lastRun: "Done", lastRunAt: "17 Aug", next: "Off" },
+          { group: "else", name: "Respond to reviews", startsOn: "github.pr.commented", strip: "dddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "09:24", next: "On event" },
+          { group: "else", name: "Retry cancelled runs", startsOn: "run.cancelled", strip: "ddd", success: "100%", lastRun: "Done", lastRunAt: "20 Sep", next: "On event" },
+          { group: "else", name: "Rotate secrets", startsOn: "0 7 1 */3 *", strip: "dd", success: "100%", lastRun: "Done", lastRunAt: "1 Jul", next: "Off" },
+          { group: "else", name: "Scan for secrets", startsOn: "github.pr.synchronized", strip: "dddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "09:07", next: "On event" },
+          { group: "else", name: "Summarize standup", startsOn: "Weekdays at 09:00 (Europe/London)", strip: "dddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "08:00", next: "Wed 08:00" },
+          { group: "else", name: "Sync translations", startsOn: "github.pr.labeled", strip: "dddddddd", success: "100%", lastRun: "Done", lastRunAt: "Sun", next: "On event" },
+          { group: "else", name: "Triage", startsOn: "github.issue.opened · github.issue.reopened", strip: "dddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "06:21", next: "On event" },
+          { group: "else", name: "Triage new tasks", startsOn: "task.created", strip: "dddddddddddddddddddd", success: "100%", lastRun: "Done", lastRunAt: "09:03", next: "On event" },
+          { group: "else", name: "Weekly metrics", startsOn: "Mondays at 08:00", strip: "dddddddd", success: "100%", lastRun: "Done", lastRunAt: "14 Sep", next: "Paused" },
+          { group: "else", name: "Welcome contributors", startsOn: "github.pr.opened", strip: "dfddddddddd", success: "91%", lastRun: "Done", lastRunAt: "Fri", next: "On event" },
         ];
         var GROUPS = [
-          ["you", "Needs you", "waiting", "you"],
-          ["fail", "Failing", "failed", "fail"],
-          ["run", "Running", "working", ""],
-          ["else", "Everything else", "idle", ""],
+          { key: "you", name: "Needs you", mark: "waiting" },
+          { key: "fail", name: "Failing", mark: "failed" },
+          { key: "run", name: "Running", mark: "working" },
+          { key: "else", name: "Everything else", mark: "idle" },
         ];
-        var STATE = { d: "done", f: "failed", r: "working", w: "waiting", i: "idle" };
-        // The Ship release's runs, newest first: [mark, status, tone, started by, its icon, took, started].
+        var STRIP_MARKS = { d: "done", f: "failed", r: "working", w: "waiting" };
+        // The Ship release's runs, newest first. mark is null for a cancelled run, which has none; state names the
+        // run page's ?state= for the runs the book draws a page of.
         var RUNS = [
-          ["waiting", "security asks: Run npm audit fix --force?", "you", "release_issue", "bolt", "29m 0s", "09:12"],
-          ["working", "Waiting for pr_merged", "", "You", "", "28h 0m", "Mon"],
-          ["failed", "Iteration limit at review", "fail", "release_train", "clock", "40m 0s", "Fri"],
-          ["done", "Completed", "", "release_issue", "bolt", "1h 23m", "22 Sep"],
-          ["done", "Completed", "", "release_issue", "bolt", "1h 23m", "19 Sep"],
-          ["done", "Completed", "", "release_issue", "bolt", "1h 23m", "16 Sep"],
-          ["done", "Completed", "", "release_issue", "bolt", "1h 23m", "13 Sep"],
-          ["failed", "Session failed at test", "fail", "release_issue", "bolt", "11m 0s", "10 Sep"],
-          ["done", "Completed", "", "release_issue", "bolt", "1h 23m", "7 Sep"],
-          ["done", "Completed", "", "release_issue", "bolt", "1h 23m", "4 Sep"],
-          ["done", "Completed", "", "release_issue", "bolt", "1h 23m", "1 Sep"],
-          ["done", "Completed", "", "release_issue", "bolt", "1h 23m", "29 Aug"],
+          { mark: "waiting", status: "security asks: Run npm audit fix --force?", tone: "you", by: "release_issue", icon: "bolt", took: "29m 0s", started: "09:12", state: "waiting" },
+          { mark: "working", status: "Waiting for pr_merged", by: "You", took: "28h 0m", started: "Mon", state: "listening" },
+          { mark: null, status: "Cancelled", by: "You", took: "3m 0s", started: "Sun", state: "cancelled" },
+          { mark: "failed", status: "Iteration limit at review", tone: "fail", by: "release_train", icon: "clock", took: "40m 0s", started: "Fri", state: "failed" },
+          { mark: "done", status: "Completed", by: "release_issue", icon: "bolt", took: "1h 23m", started: "22 Sep", state: "completed" },
+          { mark: "done", status: "Completed", by: "release_issue", icon: "bolt", took: "1h 23m", started: "19 Sep" },
+          { mark: "done", status: "Completed", by: "release_issue", icon: "bolt", took: "1h 23m", started: "16 Sep" },
+          { mark: "done", status: "Completed", by: "release_issue", icon: "bolt", took: "1h 23m", started: "13 Sep" },
+          { mark: "failed", status: "Session failed at test", tone: "fail", by: "release_issue", icon: "bolt", took: "11m 0s", started: "10 Sep", state: "step-failed" },
+          { mark: "done", status: "Completed", by: "release_issue", icon: "bolt", took: "1h 23m", started: "7 Sep" },
+          { mark: "done", status: "Completed", by: "release_issue", icon: "bolt", took: "1h 23m", started: "4 Sep" },
+          { mark: "done", status: "Completed", by: "release_issue", icon: "bolt", took: "1h 23m", started: "1 Sep" },
+          { mark: "done", status: "Completed", by: "release_issue", icon: "bolt", took: "1h 23m", started: "29 Aug" },
         ];
 
         /** Returns the icon a trigger is drawn with: a bolt for an event, a clock for a schedule. */
-        function triggerIcon(startsOn) {
+        function pickTriggerIcon(startsOn) {
           return /^[a-z_]+\.[a-z_.]+/.test(startsOn) ? "bolt" : "clock";
         }
 
-        /** Returns a group's heading, its count right after the name. */
-        function groupHeading(group, count) {
-          return '<h2 class="docket-h"><span>' + group[1] + '</span><b class="count' + (group[0] === "you" ? " count--you" : "") + '">' + count + "</b></h2>";
+        /** Checks whether a Starts on text is a cron with no words for it, which shows as code. */
+        function isCron(startsOn) {
+          return /^[\d*\/,-]+( [\d*\/,-]+){4}$/.test(startsOn);
+        }
+
+        /** Checks whether a workflow is off: its switch is off, or every start trigger is paused. */
+        function isOff(workflow) {
+          return workflow.next === "Off" || workflow.next === "Paused";
+        }
+
+        /** Returns the classes of a workflow's last run's status, in the tone of its group. */
+        function buildStatusClasses(workflow) {
+          return "status-text" + (workflow.group === "you" ? " status-text--you" : workflow.group === "fail" ? " status-text--fail" : "");
+        }
+
+        /** Returns a group's heading, its count right after the name, in marigold for Needs you. */
+        function buildGroupHeading(group, count) {
+          return '<h2 class="group-h"><span>' + group.name + '</span><b class="count' + (group.key === "you" ? " count--you" : "") + '">' + count + "</b></h2>";
+        }
+
+        /** Returns a strip's run: its mark, or for a cancelled run, which has none, a faint dot. */
+        function buildStripRun(letter) {
+          return letter === "c" ? '<span class="dot" role="img" aria-label="Cancelled"></span>' : '<i data-mark="' + STRIP_MARKS[letter] + '" data-size="10"></i>';
         }
 
         /** Returns a workflow's row in the table. */
-        function tableRow(w, tone) {
-          var off = w[7] === "Off" || w[7] === "Paused";
-          var stepped = w[1] === "Fix bug" ? " is-stepped" : "";
+        function buildTableRow(workflow, group) {
+          var off = isOff(workflow);
+          var stepped = workflow.name === "Fix bug" ? " is-stepped" : "";
+          var startsOn = isCron(workflow.startsOn) ? "<code>" + workflow.startsOn + "</code>" : workflow.startsOn;
           return (
-            '<a class="docket-row' + (off ? " is-off" : "") + (w[1] === "Ship release" && view !== "table" ? " is-on" : "") + '" href="?view=split">' +
-            '<span class="docket-mark"><i data-mark="' + (off ? "paused" : tone) + '"></i></span>' +
-            '<span class="docket-name">' + w[1] + "</span>" +
-            '<span class="docket-quiet col-starts"><i data-i="' + triggerIcon(w[2]) + '" data-size="12"></i><span>' + w[2] + "</span></span>" +
-            '<span class="strip col-strip' + stepped + '">' + w[3].split("").map(function (c) { return '<i data-mark="' + STATE[c] + '" data-size="10"></i>'; }).join("") + "</span>" +
-            '<span class="docket-num col-success">' + w[4] + "</span>" +
-            '<span class="docket-status' + (w[0] === "you" ? " docket-status--you" : w[0] === "fail" ? " docket-status--fail" : "") + '">' + w[5] + "</span>" +
-            '<span class="docket-num">' + w[6] + "</span>" +
-            '<span class="docket-num">' + w[7] + "</span></a>"
+            '<a class="table-row' + (off ? " is-off" : "") + (workflow.name === "Ship release" && view !== "table" ? " is-on" : "") + '" href="?view=split">' +
+            '<span class="table-mark"><i data-mark="' + (off ? "paused" : group.mark) + '"></i></span>' +
+            '<span class="table-name">' + workflow.name + "</span>" +
+            '<span class="table-quiet col-starts"><i data-i="' + pickTriggerIcon(workflow.startsOn) + '" data-size="12"></i><span>' + startsOn + "</span></span>" +
+            '<span class="strip col-strip' + stepped + '">' + workflow.strip.split("").map(buildStripRun).join("") + "</span>" +
+            '<span class="table-num col-success">' + workflow.success + "</span>" +
+            '<span class="' + buildStatusClasses(workflow) + '">' + workflow.lastRun + "</span>" +
+            '<span class="table-num">' + workflow.lastRunAt + "</span>" +
+            '<span class="table-num">' + workflow.next + "</span></a>"
           );
         }
 
         /** Returns a workflow's row in the column: the sidebar's two-line row, led by its state mark. */
-        function columnRow(w, tone) {
-          var off = w[7] === "Off" || w[7] === "Paused";
+        function buildColumnRow(workflow, group) {
           return (
-            '<a class="side-row' + (w[1] === "Ship release" ? " is-on" : "") + '" href="?view=split">' +
-            '<span class="side-lead"><i data-mark="' + (off ? "paused" : tone) + '"></i></span>' +
-            '<span class="side-text"><span class="side-name">' + w[1] + "</span>" +
-            '<span class="side-meta docket-status' + (w[0] === "you" ? " docket-status--you" : w[0] === "fail" ? " docket-status--fail" : "") + '">' + w[5] + "</span></span>" +
-            '<span class="side-end">' + w[6] + "</span></a>"
+            '<a class="side-row' + (workflow.name === "Ship release" ? " is-on" : "") + '" href="?view=split">' +
+            '<span class="side-lead"><i data-mark="' + (isOff(workflow) ? "paused" : group.mark) + '"></i></span>' +
+            '<span class="side-text"><span class="side-name">' + workflow.name + "</span>" +
+            '<span class="side-meta ' + buildStatusClasses(workflow) + '">' + workflow.lastRun + "</span></span>" +
+            '<span class="side-end">' + workflow.lastRunAt + "</span></a>"
+          );
+        }
+
+        /** Returns a run's row in the Runs list. A cancelled run has no mark, so its words stand in the mark's column. */
+        function buildRunRow(run) {
+          var classes = "status-text" + (run.tone ? " status-text--" + run.tone : "") + (run.mark ? "" : " status-text--no-mark");
+          return (
+            '<a class="table-row tbl-runs" href="' + (run.state ? "run.html" + (run.state === "waiting" ? "" : "?state=" + run.state) : "#") + '">' +
+            (run.mark ? '<span class="table-mark"><i data-mark="' + run.mark + '"></i></span>' : "") +
+            '<span class="' + classes + '">' + run.status + "</span>" +
+            '<span class="table-quiet col-by">' + (run.icon ? '<i data-i="' + run.icon + '" data-size="12"></i>' : '<span class="no-icon"></span>') + "<span>" + run.by + "</span></span>" +
+            '<span class="table-num">' + run.took + "</span>" +
+            '<span class="table-num">' + run.started + "</span></a>"
           );
         }
 
         var list = document.querySelector("[data-list]");
         var table = view === "table";
-        list.classList.add(table ? "docket--table" : "docket--column");
+        list.classList.add(table ? "workflow-list--table" : "workflow-list--column");
         list.hidden = view === "full";
         list.innerHTML =
           '<div class="pill-room">' +
           (table
-            ? '<div class="docket-cols"><span></span><span>Workflow</span><span class="col-starts">Starts on</span><span class="docket-num col-strip">Last 20 runs</span><span class="docket-num col-success">Success</span><span>Last run</span><span></span><span class="docket-num">Next</span></div>'
+            ? '<div class="table-heads"><span></span><span>Workflow</span><span class="col-starts">Starts on</span><span class="table-num col-strip">Last 20 runs</span><span class="table-num col-success">Success</span><span>Last run</span><span></span><span class="table-num">Next</span></div>'
             : '<label class="find find--box"><i data-i="search" data-size="14"></i><input type="search" placeholder="Search names, triggers" aria-label="Search workflows" /><kbd>⌘F</kbd></label>') +
           "</div>" +
-          GROUPS.map(function (g) {
-            var rows = WORKFLOWS.filter(function (w) { return w[0] === g[0]; });
-            return "<section>" + groupHeading(g, rows.length) + rows.map(function (w) { return (table ? tableRow : columnRow)(w, g[2]); }).join("") + "</section>";
+          GROUPS.map(function (group) {
+            var rows = WORKFLOWS.filter(function (workflow) {
+              return workflow.group === group.key;
+            });
+            return "<section>" + buildGroupHeading(group, rows.length) + rows.map(function (workflow) {
+              return (table ? buildTableRow : buildColumnRow)(workflow, group);
+            }).join("") + "</section>";
           }).join("");
 
         document.querySelector("[data-top]").innerHTML = table
-          ? '<nav class="pill" aria-label="Filter"><h1 class="pill-title">Workflows</h1>' +
-            '<a class="ptab is-on" href="#">All <small>44</small></a><a class="ptab" href="#">Needs you <small>2</small></a><a class="ptab" href="#">Failing <small>4</small></a><a class="ptab" href="#">Running <small>4</small></a><a class="ptab" href="#">Off <small>4</small></a></nav>' +
+          ? '<nav class="pill filters" aria-label="Filter workflows"><h1 class="pill-title">Workflows</h1>' +
+            '<button type="button" class="ptab is-on" aria-pressed="true">All <small>44</small></button>' +
+            '<button type="button" class="ptab" aria-pressed="false">Needs you <small>2</small></button>' +
+            '<button type="button" class="ptab" aria-pressed="false">Failing <small>4</small></button>' +
+            '<button type="button" class="ptab" aria-pressed="false">Running <small>4</small></button>' +
+            '<button type="button" class="ptab" aria-pressed="false">Off <small>4</small></button></nav>' +
             '<span class="spacer"></span>' +
             '<label class="pill find"><i data-i="search" data-size="14"></i><input type="search" placeholder="Search names, triggers" aria-label="Search workflows" /><kbd>⌘F</kbd></label>'
           : '<nav class="pill" aria-label="Workflows"><a class="icon-btn list-btn" href="?view=' + (view === "full" ? "split" : "full") + '" title="' + (view === "full" ? "Show the list" : "Hide the list") + '"><i data-i="sidebar"></i></a>' +
@@ -350,16 +406,7 @@ edges:
           b.setAttribute("aria-pressed", String(b.dataset.runs === runsView));
         });
         document.querySelector("[data-day-stepper]").hidden = runsView !== "timeline";
-        document.querySelector("[data-runs-list]").innerHTML = RUNS.map(function (r) {
-          return (
-            '<a class="docket-row tbl-runs" href="#">' +
-            '<span class="docket-mark"><i data-mark="' + r[0] + '"></i></span>' +
-            '<span class="docket-status' + (r[2] ? " docket-status--" + r[2] : "") + '">' + r[1] + "</span>" +
-            '<span class="docket-quiet col-by">' + (r[4] ? '<i data-i="' + r[4] + '" data-size="12"></i>' : '<span class="no-icon"></span>') + "<span>" + r[3] + "</span></span>" +
-            '<span class="docket-num">' + r[5] + "</span>" +
-            '<span class="docket-num">' + r[6] + "</span></a>"
-          );
-        }).join("");
+        document.querySelector("[data-runs-list]").innerHTML = RUNS.map(buildRunRow).join("");
       })();
     </script>
     <script src="../brands.js"></script>

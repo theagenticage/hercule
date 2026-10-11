@@ -111,6 +111,10 @@ strong {
   overflow: hidden;
   clip: rect(0 0 0 0);
 }
+/* The hidden attribute always hides, even an element whose class sets a display. */
+[hidden] {
+  display: none !important;
+}
 
 /* ---------- Characters ---------- */
 .cr,
@@ -1755,38 +1759,37 @@ html[data-motion="off"] .cr * {
 
 /* ---------- Workflow list ---------- */
 /* One list at three widths: a table when nothing is open, a 340px column beside the open workflow, hidden when that fills the pane. */
-.docket-page {
+.workflows-page {
   position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
-  container: docket-page / inline-size;
+  container: workflows-page / inline-size;
 }
 /* The scrolling list. --pad is its side padding, which the sticky bands reach across with negative margins. */
-.docket {
+.workflow-list {
   --pad: 20px;
   flex: 1;
   min-width: 0;
   overflow: auto;
   padding: 0 var(--pad) 24px;
-  container: docket / inline-size;
 }
 /* The column is divided from the open workflow by a hairline, as the sidebar is from the main pane. */
-.docket--column {
+.workflow-list--column {
   --pad: 8px;
   flex: none;
   width: 340px;
   border-right: 1px solid var(--line-soft);
 }
 /* Below 800px the column would leave the open workflow too little room, so the workflow fills the pane. */
-@container docket-page (width < 800px) {
-  .docket--column,
+@container workflows-page (width < 800px) {
+  .workflow-list--column,
   .list-btn {
     display: none;
   }
 }
 /* A group's heading is .side-h, with its count right after the name instead of at the far end of a wide row. */
-.docket-h {
+.group-h {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1800,28 +1803,27 @@ html[data-motion="off"] .cr * {
   text-transform: uppercase;
 }
 /* The first group sits closer to the column heads than groups sit to each other. */
-.pill-room + * > .docket-h {
+.pill-room + * > .group-h {
   margin-top: 14px;
 }
-/* In the column the heading is the sidebar's own: the count ends the row. */
-.docket--column .docket-h {
-  justify-content: space-between;
+/* In the column the heading takes the sidebar's spacing, and its count still follows the name. */
+.workflow-list--column .group-h {
   margin-top: 16px;
   padding: 0 4px 0 10px;
 }
-.docket--column .pill-room + * > .docket-h {
+.workflow-list--column .pill-room + * > .group-h {
   margin-top: 8px;
 }
-.docket--column .side-row {
+.workflow-list--column .side-row {
   min-height: 46px;
   margin-top: 1px;
 }
 /* One grid for the table's heads and rows: mark, name, Starts on, the strip, Success, Last run and its time, Next. */
-.docket--table :is(.docket-cols, .docket-row) {
+.workflow-list--table :is(.table-heads, .table-row) {
   grid-template-columns: 14px minmax(0, 1.4fr) minmax(0, 1fr) 219px 44px minmax(0, 1.4fr) 44px 72px;
 }
 /* The column heads are .tbl-h, 32px tall, with a hairline under them because rows scroll beneath. */
-.docket-cols {
+.table-heads {
   display: grid;
   align-items: center;
   gap: 14px;
@@ -1834,7 +1836,7 @@ html[data-motion="off"] .cr * {
   white-space: nowrap;
 }
 /* The dense row is .prof at 40px with one line; its hairline is drawn by ::before so it never curves with the corners. */
-.docket-row {
+.table-row {
   position: relative;
   display: grid;
   align-items: center;
@@ -1845,100 +1847,110 @@ html[data-motion="off"] .cr * {
   white-space: nowrap;
   transition: background var(--dur-1);
 }
-.docket-row::before {
+.table-row::before {
   content: "";
   position: absolute;
   inset: 0 0 auto;
   border-top: 1px solid var(--line-soft);
 }
-.docket-row > * {
+.table-row > * {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-a.docket-row:hover {
+a.table-row:hover {
   background: var(--hover);
 }
-.docket-row.is-on {
+.table-row.is-on {
   background: var(--selected);
 }
 /* A highlighted row hides the hairlines above and below it, so no line crosses its rounded corners. */
-a.docket-row:is(:hover, .is-on)::before,
-a.docket-row:is(:hover, .is-on) + .docket-row::before {
+a.table-row:is(:hover, .is-on)::before,
+a.table-row:is(:hover, .is-on) + .table-row::before {
   border-top-color: transparent;
 }
 /* Under the sticky column heads, whose hairline is already there, the first row draws none. */
-.docket-rows > .docket-row:first-child::before {
+.table-rows > .table-row:first-child::before {
   border-top-color: transparent;
 }
-.docket-mark {
+.table-mark {
   display: grid;
   place-items: center;
 }
-.docket-name {
+.table-name {
   font-weight: var(--w-medium);
 }
-.docket-row.is-off .docket-name {
+.table-row.is-off .table-name {
   color: var(--muted);
 }
 /* A quiet cell: what starts a workflow, who started a run, its icon in faint ink. */
-.docket-quiet {
+.table-quiet {
   display: flex;
   align-items: center;
   gap: 6px;
   color: var(--muted);
   font-size: var(--t-12);
 }
-.docket-quiet .ic {
+.table-quiet .ic {
   flex: none;
   color: var(--faint);
 }
-.docket-quiet > span {
+.table-quiet > span {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 /* Numbers and times sit right-aligned in the faint ink of a second line. */
-.docket-num {
+.table-num {
   color: var(--faint);
   font-size: var(--t-12);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
-.docket-cols .docket-num {
+.table-heads .table-num {
   font-size: inherit;
 }
 /* A run's status in one of three tones: muted, marigold when it waits on you, failure ink when it failed. */
-.docket-status {
+.status-text {
   color: var(--muted);
   font-size: var(--t-12);
 }
-.docket-status--you {
+.status-text--you {
   color: var(--you-ink);
 }
-.docket-status--fail {
+.status-text--fail {
   color: var(--fail-ink);
   font-weight: var(--w-medium);
+}
+/* A run with no mark, cancelled or starting, has its words in the mark's column too. */
+.status-text--no-mark {
+  grid-column: span 2;
 }
 /* The last 20 runs as 10px marks with 1px between, right-aligned so every latest run sits in one place. */
 .strip {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 1px;
 }
-/* A narrower pane drops columns while the names keep about 160px, as the profiles table drops Used by. */
-@container docket (width < 1000px) {
-  .docket--table :is(.docket-cols, .docket-row) {
+/* A cancelled run in the strip: a faint dot centred in a mark's 10px place. */
+.strip > .dot {
+  margin: 1.5px;
+}
+/* A narrower pane drops columns while the names keep about 160px, as the profiles table drops Used by.
+   The widths are the pane's, so the list's own padding does not shift them. */
+@container workflows-page (width < 1000px) {
+  .workflow-list--table :is(.table-heads, .table-row) {
     grid-template-columns: 14px minmax(0, 1.4fr) 219px 44px minmax(0, 1.4fr) 44px 72px;
   }
-  .docket--table .col-starts {
+  .workflow-list--table .col-starts {
     display: none;
   }
 }
-@container docket (width < 820px) {
-  .docket--table :is(.docket-cols, .docket-row) {
+@container workflows-page (width < 820px) {
+  .workflow-list--table :is(.table-heads, .table-row) {
     grid-template-columns: 14px minmax(0, 1fr) minmax(0, 1fr) 44px 72px;
   }
-  .docket--table :is(.col-strip, .col-success) {
+  .workflow-list--table :is(.col-strip, .col-success) {
     display: none;
   }
 }
@@ -1953,7 +1965,7 @@ a.docket-row:is(:hover, .is-on) + .docket-row::before {
   padding: 56px var(--pad) 0;
   background: var(--surface);
 }
-.docket--column .pill-room {
+.workflow-list--column .pill-room {
   padding-bottom: 8px;
 }
 /* Over the column, the page's name is a pill tab back to the table, in title ink. */
@@ -2000,6 +2012,37 @@ a.docket-row:is(:hover, .is-on) + .docket-row::before {
 /* The filter tabs never shrink: the search field gives up its width first. */
 .top > nav.pill {
   flex: none;
+}
+/* Below 780px the filter counts go, so the five tabs still fit beside the search. */
+@container workflows-page (width < 780px) {
+  .filters small {
+    display: none;
+  }
+}
+/* Below 640px the page's name stays only for the screen reader, and the search shrinks to its icon until it is focused. */
+@container workflows-page (width < 640px) {
+  .filters > .pill-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .pill.find {
+    padding: 0 11px;
+    overflow: hidden;
+  }
+  .pill.find > kbd {
+    display: none;
+  }
+  .pill.find:not(:focus-within) {
+    gap: 0;
+  }
+  .pill.find > input:not(:focus) {
+    flex: none;
+    width: 0;
+  }
 }
 /* The tab bar and the open tab's column heads stick under the pill room; the hairline above the tabs ends the graph. */
 .tab-band {
@@ -2084,21 +2127,21 @@ a.docket-row:is(:hover, .is-on) + .docket-row::before {
   list-style: none;
 }
 /* The open workflow's tables: Runs, Triggers and Inputs, each with its own columns. */
-:is(.docket-cols, .docket-row).tbl-runs {
+:is(.table-heads, .table-row).tbl-runs {
   grid-template-columns: 14px minmax(0, 2fr) minmax(0, 1fr) 64px 72px;
 }
-:is(.docket-cols, .docket-row).tbl-triggers {
+:is(.table-heads, .table-row).tbl-triggers {
   grid-template-columns: 14px minmax(0, 1fr) 104px minmax(0, 1.4fr) minmax(0, 1.2fr) 36px;
 }
-:is(.docket-cols, .docket-row).tbl-inputs {
+:is(.table-heads, .table-row).tbl-inputs {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px minmax(0, 1.4fr);
 }
 /* A narrow pane drops who started each run and what each trigger does. */
 @container open-pane (width < 560px) {
-  :is(.docket-cols, .docket-row).tbl-runs {
+  :is(.table-heads, .table-row).tbl-runs {
     grid-template-columns: 14px minmax(0, 1fr) 64px 72px;
   }
-  :is(.docket-cols, .docket-row).tbl-triggers {
+  :is(.table-heads, .table-row).tbl-triggers {
     grid-template-columns: 14px minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.2fr) 36px;
   }
   :is(.col-by, .col-does) {
@@ -2207,9 +2250,6 @@ button.line {
   align-items: flex-start;
   padding-top: 18vh;
   background: var(--scrim);
-}
-.modal[hidden] {
-  display: none;
 }
 /* A dialog that asks before something changes: a title, a few lines, then the closing button and the action. Its body is a form, so Enter in it presses the action, its submit button. */
 .dialog {
@@ -2363,7 +2403,7 @@ button.line {
 .graph-end {
   fill: var(--ink);
 }
-/* An edge's condition or limit, in the mono face, whose fixed glyph width lets the layout leave room for it. */
+/* An edge's condition, in the mono face because it is code. */
 .edge-label {
   position: absolute;
   padding: 0 4px;
@@ -2376,6 +2416,12 @@ button.line {
   line-height: 15px;
   white-space: nowrap;
   transform: translate(-50%, -50%);
+}
+/* The loop's iteration count is a number, not code, so it takes the UI face with even-width digits. */
+.edge-label--count {
+  font-family: var(--font-ui);
+  font-variation-settings: normal;
+  font-variant-numeric: tabular-nums;
 }
 .edge-label:is(.is-fired, .is-active) {
   color: var(--muted);
@@ -2485,7 +2531,7 @@ button.line {
   border-radius: 50%;
   background: var(--surface);
 }
-/* The tag "all" on a step that waits for every edge into it. */
+/* The tag "all" on a step that waits for every edge into it. Its rim is in faint ink, not a hairline, so the box reads on both the page and the card. */
 .node-join {
   position: absolute;
   top: -8px;
@@ -2493,7 +2539,7 @@ button.line {
   padding: 0 4px;
   border-radius: var(--r-xs);
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: inset 0 0 0 1px var(--faint);
   color: var(--muted);
   font-size: var(--t-11);
   font-weight: var(--w-bold);
@@ -2580,10 +2626,14 @@ button.line {
   font-size: var(--t-12);
   white-space: normal;
 }
-/* A state with no mark keeps the mark's room, so its words start where they would after one. */
-.no-mark {
+/* A state with no mark, or a run started by a person with no clock or bolt, keeps the mark's or the icon's room, so its words start where they would after one. */
+.no-mark,
+.no-icon {
   flex: none;
   width: 14px;
+}
+.no-icon {
+  width: 12px;
 }
 /* The facts: a label column, then the value, wrapped once and then cut short. Data and expressions are in mono. */
 .node-facts {
@@ -2673,9 +2723,9 @@ button.line {
   line-height: 32px;
   transform: translateX(-50%);
 }
-/* Below 900px of pane only every third hour is labelled, so no two labels touch. */
+/* Below 900px of pane the day's axis labels only every third hour, so no two labels touch. A run's step axis has few labels and keeps them all. */
 @container open-pane (width < 900px) {
-  .axis-tick:not(.is-major) {
+  .axis > .axis-tick:not(.is-major) {
     display: none;
   }
 }
@@ -2722,22 +2772,6 @@ button.line {
 }
 .now-line {
   background: var(--ink);
-}
-/* A fire still to come: a dashed tick on the top track in faint ink, its time beside it. */
-.fire {
-  position: absolute;
-  top: 13px;
-  left: var(--at);
-  height: 14px;
-  border-left: 1.5px dashed var(--faint);
-}
-.fire > span {
-  position: absolute;
-  left: 5px;
-  color: var(--faint);
-  font-size: var(--t-11);
-  font-variant-numeric: tabular-nums;
-  line-height: 14px;
 }
 /* A day with no runs says so over the hour lines. */
 .lanes-empty {
@@ -2790,20 +2824,27 @@ a.run-bar:hover::before {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
-/* The mark sits on the line's end on a disc of the colour behind it, so the hour lines pass behind it. A bar cut at the day's end keeps its mark inside. */
+/* The mark sits on the line's end on a disc of the colour behind it, so the hour lines pass behind it. A bar cut at the day's end has no mark, because the run has not ended there. */
 .run-bar > .mark {
   position: relative;
   margin-right: -7px;
   border-radius: 50%;
   background: var(--surface);
 }
+/* A cancelled or starting run has no mark: a faint dot in the mark's 14px place stands in for it. */
+.dot--mark {
+  width: 10px;
+  height: 10px;
+  margin: 2px;
+}
+.run-bar > .dot--mark {
+  position: relative;
+  margin-right: -5px;
+}
 /* Under the pointer, a disc takes the hover tint over the page's colour, as the row or bar it sits in does. */
 a.run-bar:hover > .mark,
-a.docket-row:hover :is(.run-bar > .mark, .track-note) {
+a.table-row:hover :is(.run-bar > .mark, .track-note) {
   background: linear-gradient(var(--hover), var(--hover)), var(--surface);
-}
-.run-bar.is-cut-end > .mark {
-  margin-right: 0;
 }
 /* The chevron of a bar cut at the day's edge, in the page's side padding, pointing to the day the run went on into. */
 .run-bar-cut {
@@ -2819,15 +2860,15 @@ a.docket-row:hover :is(.run-bar > .mark, .track-note) {
   right: -18px;
 }
 /* A run's steps as rows: the mark, the step, its track on the run's axis, and how long it took. */
-:is(.docket-cols, .docket-row).tbl-steps {
+:is(.table-heads, .table-row).tbl-steps {
   grid-template-columns: 14px minmax(0, 180px) minmax(0, 1fr) 64px;
 }
-.docket-row.tbl-steps {
+.table-row.tbl-steps {
   align-items: stretch;
   height: auto;
   min-height: 40px;
 }
-.docket-row.tbl-steps > :not(.track) {
+.table-row.tbl-steps > :not(.track) {
   align-self: center;
 }
 /* The step's id, its iteration, and why it failed under them. */
@@ -2862,18 +2903,17 @@ a.docket-row:hover :is(.run-bar > .mark, .track-note) {
   white-space: nowrap;
 }
 /* A track lets marks and the now pill reach past its edges. */
-:is(.docket-cols, .docket-row) > .track {
+:is(.table-heads, .table-row) > .track {
   position: relative;
   align-self: stretch;
   overflow: visible;
 }
-/* The run's axis is set in mono, whose fixed glyph width tells how close its ticks can sit. */
-.docket-cols > .track {
-  font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
+/* The run's axis labels are times, in the UI face with even-width digits. */
+.table-heads > .track {
   font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
 }
-.docket-cols > .track > .axis-now {
+.table-heads > .track > .axis-now {
   right: 0;
   left: auto;
   transform: translateX(50%);
@@ -2882,17 +2922,17 @@ a.docket-row:hover :is(.run-bar > .mark, .track-note) {
   top: 50%;
   margin-top: -8px;
 }
-/* What a step with no bar shows on its track, such as "not reached". It ends at its place by the same share of its width as its place is of the track, so it stays inside. */
+/* What a step with no bar shows at the start of its track, such as "Waiting to start". */
 .track-note {
   position: absolute;
   top: 50%;
-  left: var(--at);
-  padding: 0 6px;
+  left: 0;
+  padding-right: 6px;
   background: var(--surface);
   color: var(--faint);
   font-size: var(--t-12);
   white-space: nowrap;
-  transform: translate(calc(-1 * var(--at)), -50%);
+  transform: translateY(-50%);
 }
 
 /* ---------- A run's page ---------- */
@@ -3013,78 +3053,21 @@ a.docket-row:hover :is(.run-bar > .mark, .track-note) {
 /* ---------- Workflows' motion ---------- */
 /* Each motion says something changed: it plays once, on transform and opacity only, within --dur-3, and never loops. */
 @media (prefers-reduced-motion: no-preference) {
-  /* A mark whose state changed pops in, in a list row, a strip, on the graph and on the timeline. */
-  .mark.is-new {
-    animation: mark-in var(--dur-3) var(--ease-spring);
-  }
-  /* A card the run reaches brightens from half opacity, one it passes by dims back, and a ring fades in with its mark. */
-  .node.is-brightening {
-    animation: node-brighten var(--dur-3) var(--ease-out);
-  }
-  .node.is-dimming {
-    animation: node-dim var(--dur-3) var(--ease-out);
-  }
-  .node-ring.is-new {
-    animation: ring-in var(--dur-3) var(--ease-out);
-  }
-  /* When the run asks the user something or fails, a copy of the ring grows past the card's edge and fades, once. */
-  .node:is(.is-waiting, .is-failed) > .node-ring.is-new::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    box-shadow: 0 0 0 1.5px var(--node-ring);
-    opacity: 0;
-    animation: ring-ping var(--dur-3) var(--ease-out);
-  }
   /* Opening a timeline, or stepping to a day, brings its bars in 30ms apart: each line sweeps from its start, then its mark pops in. From the ninth on they arrive together, so it all takes 640ms at most. */
   .run-bar-line {
     transform-origin: left;
     animation: bar-sweep var(--dur-3) var(--ease-out) backwards;
     animation-delay: calc(min(var(--order), 8) * 30ms);
   }
-  .run-bar > .mark {
+  .run-bar > :is(.mark, .dot--mark) {
     animation: mark-in var(--dur-2) var(--ease-spring) backwards;
     animation-delay: calc(min(var(--order), 8) * 30ms + var(--dur-2));
-  }
-  /* A bar that arrives or changes later draws its line at once and only pops its mark. */
-  .run-bar.is-late > .run-bar-line {
-    animation: none;
-  }
-  .run-bar.is-late > .mark {
-    animation: mark-in var(--dur-3) var(--ease-spring);
   }
 }
 @keyframes mark-in {
   from {
     opacity: 0;
     transform: scale(0.6);
-  }
-}
-@keyframes node-brighten {
-  from {
-    opacity: 0.5;
-  }
-}
-@keyframes node-dim {
-  from {
-    opacity: 1;
-  }
-}
-@keyframes ring-in {
-  from {
-    opacity: 0;
-  }
-}
-/* The card is 176 by 48 pixels, so this scale grows the ring by about 3.5px on every side. */
-@keyframes ring-ping {
-  from {
-    opacity: 0.7;
-    transform: none;
-  }
-  to {
-    opacity: 0;
-    transform: scale(1.04, 1.15);
   }
 }
 @keyframes bar-sweep {

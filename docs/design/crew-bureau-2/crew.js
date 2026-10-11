@@ -596,6 +596,8 @@
     el.classList.add("side");
     el.dataset.tab = tab;
     var waitingName = { fix: "Fix 3-D Secure checkout for EU cards" }[selected];
+    // "From runs" in Waiting on you shows only where a page opts in with data-side-runs: the Workflows pages.
+    // session-active.html's sidebar is pixel-compared with the app's (pnpm compare:bureau), which has no such row, so it must stay without one.
     el.innerHTML =
       '<div class="side-top"><span class="tl"><i></i><i></i><i></i></span><button class="icon-btn" title="Hide the sidebar">' + icon("sidebar") + "</button></div>" +
       '<div class="seg seg--side" role="tablist">' +

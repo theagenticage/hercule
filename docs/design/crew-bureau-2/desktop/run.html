@@ -7,9 +7,6 @@
     <meta charset="utf-8" />
     <title>Run · Ship release · Hercule</title>
     <style>
-      [hidden] {
-        display: none !important;
-      }
       /* A run's page is opened, not slid in from the list, so the open pane does not settle in from the side. */
       .open-pane {
         animation: none;
@@ -36,6 +33,7 @@
     - failed: ended at the review loop's iteration limit;
     - step-failed: ended when the test step's session failed;
     - completed: ended well;
+    - cancelled: cancelled by the user while its first steps ran, so it has no mark;
     - earlier: ended well on an earlier version of the workflow, with the note that says so;
     - gone: the run was not found.
     &steps=timeline shows the steps on the run's timeline instead of the graph.
@@ -47,7 +45,7 @@
     <div class="app">
       <aside data-side="workflows" data-side-runs></aside>
       <main class="main">
-        <div class="docket-page">
+        <div class="workflows-page">
           <header class="top" data-top></header>
           <div class="gone" data-gone hidden>
             <p>This run was not found.</p>
@@ -73,10 +71,10 @@
                   </span>
                 </span>
               </div>
-              <div class="docket-cols tbl-steps" data-steps-head aria-hidden="true"></div>
+              <div class="table-heads tbl-steps" data-steps-head aria-hidden="true"></div>
             </div>
             <div data-graph></div>
-            <div class="docket-rows" data-steps-rows></div>
+            <div class="table-rows" data-steps-rows></div>
           </div>
         </div>
       </main>
@@ -86,7 +84,7 @@
       <div class="pop dialog" role="dialog" aria-modal="true" aria-labelledby="cancel-title">
         <div class="pop-h"><b id="cancel-title">Cancel this run?</b></div>
         <form class="pop-sec">
-          <p>Its running steps stop and their sessions end. You can re-run it afterwards.</p>
+          <p>Its running steps stop and their sessions end, and so do the runs it started. You can re-run it afterwards.</p>
           <div class="options">
             <label class="option">
               <span class="choice-box"><input type="checkbox" name="delete-workspace" checked /><i data-i="check" data-size="12"></i></span>
@@ -141,25 +139,29 @@
           return;
         }
 
+        // A cancelled or starting run has no mark, so its crumb and its state lead with none.
+        var mark = function (size) {
+          return run.mark ? Crew.mark(run.mark, size) : "";
+        };
         document.querySelector("[data-top]").innerHTML =
           '<nav class="pill run-crumbs" aria-label="The run\'s place in Workflows">' +
           '<span class="pill-crumb"><a href="workflows.html">Workflows</a></span>' +
           '<span class="pill-crumb"><a href="workflows.html?view=full">Ship release</a></span>' +
-          '<span class="ptab is-on" aria-current="page">' + Crew.mark(run.mark, 14) + "Run <small>" + run.time + "</small></span></nav>" +
+          '<span class="ptab is-on" aria-current="page">' + mark(14) + "Run <small>" + run.time + "</small></span></nav>" +
           '<span class="spacer"></span>' +
           '<span class="pill"><button type="button" class="pill-btn" data-open-dialog="' + (run.live ? "cancel" : "rerun") + '">' + (run.live ? "Cancel run…" : "Re-run…") + "</button></span>";
 
-        document.querySelector("[data-state-title]").innerHTML = Crew.mark(run.mark, 16) + run.title;
+        document.querySelector("[data-state-title]").innerHTML = mark(16) + run.title;
         document.querySelector("[data-took]").textContent = run.took;
         if (run.gist) {
           document.querySelector("[data-gist]").outerHTML =
-            '<div class="run-gist run-gist--' + run.gist[0] + '"' + (run.gist[0] === "fail" ? ' role="alert"' : "") + "><p>" + run.gist[1] + "</p>" +
-            (run.gist[2] ? '<a class="btn btn--sm" href="session-active.html">Open thread</a>' : "") + "</div>";
+            '<div class="run-gist run-gist--' + run.gist.tone + '"' + (run.gist.tone === "fail" ? ' role="alert"' : "") + "><p>" + run.gist.text + "</p>" +
+            (run.gist.opensThread ? '<a class="btn btn--sm" href="session-active.html">Open thread</a>' : "") + "</div>";
         }
-        document.querySelector("[data-by]").innerHTML = (run.by[0] ? Crew.icon(run.by[0], 12) : "") + run.by[1];
+        document.querySelector("[data-by]").innerHTML = (run.startedBy.icon ? Crew.icon(run.startedBy.icon, 12) : "") + run.startedBy.text;
         document.querySelector("[data-inputs]").innerHTML = run.inputs
           .map(function (input) {
-            return "<div><dt>" + input[0] + "</dt><dd>" + input[1] + "</dd></div>";
+            return "<div><dt>" + input.name + "</dt><dd>" + input.value + "</dd></div>";
           })
           .join("");
         if (run.note) {
@@ -167,7 +169,7 @@
           note.textContent = run.note;
           note.hidden = false;
         }
-        document.querySelector("[data-steps-count]").textContent = run.steps;
+        document.querySelector("[data-steps-count]").textContent = run.rows.length;
 
         // The steps show as Graph or Timeline. The graph is drawn when it first shows, because its zoom fits the pane's width.
         var graphEl = document.querySelector("[data-graph]");
