@@ -462,8 +462,13 @@ describe("a grant decided with outcome session", () => {
     await withPipeline(async (arranged) => {
       const { asker } = await spawnTwoWorkers(arranged);
       const taskId = await createTask(arranged, "Duplicate");
-      const { requestId } = await requestTaskDelete(arranged, asker, taskId);
+      const { requestId, subscriptionId } = await requestTaskDelete(arranged, asker, taskId);
       expect((await decide(arranged, requestId, "session")).status).toBe(200);
+      // The decision reaches the session as input on the router's next tick.
+      // Stored before the exit, it is cancelled by the exit. Stored after,
+      // it would resume the exited session at once, often before
+      // `exitSession` reads the session as `exited`.
+      await waitForMatchedInputRows(arranged.harness, subscriptionId, (found) => found.length > 0);
       await exitSession(arranged, asker, 2);
 
       const resumed = await post(
