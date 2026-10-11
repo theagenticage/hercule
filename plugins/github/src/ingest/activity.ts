@@ -91,9 +91,13 @@ const TIE_RANKS = new WeakMap<EmittedEvent, number>();
  * Within one second, a review request the pull request still holds comes
  * after the other events, and one it no longer holds before them
  * (`TIE_RANKS`); the rest keep the order they were found in.
- * The held events are emitted whether `read` succeeds or fails, as they
- * would have been without holding them; a failed read is read again by the
- * next poll, and the dedup keys keep its events from being written twice.
+ *
+ * When `read` fails, the held events are dropped. The caller keeps its
+ * stored state when `read` fails, so the next poll reads the same events
+ * again and emits them all, in order. Emitting part of them now would fix
+ * the wrong order for good: a review emitted before the read of its
+ * request failed would come before that request, and the next poll's copy
+ * of the review is dropped as a duplicate.
  *
  * A poll reads an item's comments, reviews and history one listing after
  * another, but the core routes events in the order they are written: when a
@@ -119,7 +123,6 @@ export const emitInTimeOrder = <A, E, R>(
   });
   return read({ ...poll, emit: (event) => Effect.sync(() => void held.push(event)) }).pipe(
     Effect.tap(() => emitHeld),
-    Effect.tapError(() => emitHeld),
   );
 };
 

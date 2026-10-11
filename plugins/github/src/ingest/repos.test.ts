@@ -884,38 +884,50 @@ describe("the repos feed", () => {
     ]);
   });
 
-  it("builds the same keys again after a poll that emitted its events but could not save them", async () => {
+  it("emits nothing from a poll that fails, and all of it, in order, at the next poll", async () => {
     const repository = buildRepository();
     const harness = await baseline(repository);
+    const second = "2026-10-01T11:00:00Z";
     repository.issues[0] = {
       ...repository.issues[0]!,
       assignees: [{ login: "hubot" }],
-      updated_at: "2026-10-01T11:00:00Z",
+      updated_at: second,
     };
-    repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T11:01:00Z" };
+    // In one second, the user reviews and mona asks for a review again.
+    repository.issues[1] = { ...repository.issues[1]!, updated_at: second };
+    repository.requestedReviewers[2] = [TEST_ACCOUNT];
+    repository.history[2] = [buildReviewRequest(1, second)];
+    repository.reviews[2] = [
+      { id: 200, user: TEST_ACCOUNT, state: "APPROVED", submitted_at: second },
+    ];
     repository.etag = '"v2"';
-    // The issue's events are emitted, then the pull request fails the poll, so nothing is saved.
-    const failing = (request: HttpClientRequest.HttpClientRequest): StubResponse =>
-      readStubRequestTarget(request).path === `/repos/${REPO}/pulls/2`
+    // The poll reads the pull request again, after its reviews and history,
+    // for who is asked now, and that read fails.
+    let pullReads = 0;
+    const failing = (request: HttpClientRequest.HttpClientRequest): StubResponse => {
+      if (readStubRequestTarget(request).path !== `/repos/${REPO}/pulls/2`) {
+        return answerFrom(repository)(request);
+      }
+      pullReads += 1;
+      return pullReads === 2
         ? { status: 500, body: { message: "Server Error" } }
         : answerFrom(repository)(request);
+    };
     const first = await poll(harness, failing);
     expect(Result.isFailure(first.result)).toBe(true);
-    // The issue changes again before the next poll.
-    repository.issues[0] = {
-      ...repository.issues[0],
-      title: "Renamed",
-      updated_at: "2026-10-01T11:30:00Z",
-    };
-    repository.etag = '"v3"';
+    expect(harness.events).toEqual([]);
 
     await poll(harness, answerFrom(repository));
 
-    const assigned = harness.events
-      .filter((event) => event.kind === "github.issue.assigned")
-      .map((event) => event.dedupKey);
-    expect(assigned).toHaveLength(2);
-    expect(assigned[1]).toBe(assigned[0]);
+    // The events of one poll go out together, ordered. Had the failed poll
+    // sent the events it read before failing, a review could go out before a
+    // request from its own second that it answered, and stay there, because
+    // the next poll's copy of it is dropped as a duplicate.
+    expect(listEvents(harness)).toEqual([
+      expect.stringMatching(/^github\.issue\.assigned /),
+      `github.pr.review-submitted pr.review-submitted:200`,
+      `github.pr.review-requested pr.review-requested:1`,
+    ]);
   });
 
   it("emits no comment or review from before the first poll, even one in the newest update's second", async () => {
