@@ -10,6 +10,7 @@ import {
 import {
   applyIntakeChange,
   buildIntakeOverrides,
+  queryKeys,
   readErrorMessage,
   type HerculeClient,
   type IntakeChange,
@@ -69,9 +70,13 @@ interface IntakeSave {
  * returns in the cache. Fails when the plugin is not in the cache, because
  * there is then nothing to build the write on.
  *
- * The controller's push on the `plugin` topic reads the plugin list and every
- * Connection's page again, because a write at the plugin's level changes what
- * each of them resolves to.
+ * A read of the plugin list that started before the write ended may hold the
+ * old settings, so it is cancelled before the returned settings go in the
+ * cache; otherwise it would land after them and the next save would be built
+ * on the old settings. Every Connection read is marked stale, because a write
+ * at the plugin's level changes what each Connection resolves to, and the
+ * controller's push that also reads them again may never arrive when the live
+ * connection is down.
  */
 const savePluginLevel = async (
   client: HerculeClient,
@@ -90,9 +95,11 @@ const savePluginLevel = async (
     params: { id: pluginId },
     payload: { intake: buildIntakeOverrides(plugin.intake, "plugin", change) },
   });
+  await queryClient.cancelQueries({ queryKey });
   queryClient.setQueryData(queryKey, (plugins) =>
     plugins?.map((each) => (each.id === pluginId ? { ...each, intake: saved } : each)),
   );
+  void queryClient.invalidateQueries({ queryKey: queryKeys.connection() });
 };
 
 /**
@@ -101,7 +108,9 @@ const savePluginLevel = async (
  * controller returns in the cache. Fails when the Connection is not in the
  * cache, because there is then nothing to build the write on.
  *
- * The controller's push on the `connection` topic reads the Connection again.
+ * A read of the Connection that started before the write ended may hold the
+ * old settings, so it is cancelled before the returned Connection goes in the
+ * cache, for the same reason as at the plugin's level.
  */
 const saveConnectionLevel = async (
   client: HerculeClient,
@@ -120,6 +129,7 @@ const saveConnectionLevel = async (
     params: { id: connectionId },
     payload: { intake: buildIntakeOverrides(connection.intake, "connection", change) },
   });
+  await queryClient.cancelQueries({ queryKey });
   queryClient.setQueryData(queryKey, saved);
 };
 

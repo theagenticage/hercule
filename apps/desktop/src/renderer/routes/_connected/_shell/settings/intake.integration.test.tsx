@@ -731,3 +731,73 @@ describe("Settings > Intake, opened from a signal", () => {
     ).toBe("true");
   });
 });
+
+describe("Settings > Intake, keeping saved choices", () => {
+  it("builds the next save on a finished save, not on a read that started before it", async () => {
+    const { handlers, records } = buildIntakeHandlers();
+    let holdReads = false;
+    let heldReads = 0;
+    const staleRead = buildGate();
+    const freshRead = buildGate();
+    const write = buildGate();
+    handlers["GET /api/v1/plugins"] = async () => {
+      const body = [buildGithub(records), ...records.others];
+      if (holdReads) {
+        heldReads++;
+        await (heldReads === 1 ? staleRead.promise : freshRead.promise);
+      }
+      return { body };
+    };
+    const calls = stubApi({ ...buildSidebarHandlers(SIDEBAR_FIXTURE), ...handlers });
+    const app = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+      { path: "/settings/intake" },
+    );
+    await screen.findByRole("heading", { level: 1, name: "Intake" });
+    await app.live.waitForFirstPushes();
+    records.holdNextWrite = write.promise;
+    await userEvent.click(getSwitch("Review requested"));
+    await waitFor(() => expect(listWrites(calls)).toHaveLength(1));
+    // A read starts while the write runs, so it holds the old settings.
+    holdReads = true;
+    app.live.pushInvalidation("plugin", ["github"]);
+    await waitFor(() => expect(heldReads).toBe(1));
+    write.open();
+    await waitFor(() =>
+      expect(readSource("Review requested")).toBe("Off · all GitHub connections"),
+    );
+    app.live.pushInvalidation("plugin", ["github"]);
+    staleRead.open();
+    await waitFor(() => expect(heldReads).toBe(2));
+    expect(getSwitch("Review requested").getAttribute("aria-checked")).toBe("false");
+    await userEvent.click(getSwitch("Mentioned"));
+    await waitFor(() => expect(listWrites(calls)).toHaveLength(2));
+    freshRead.open();
+    expect(listWrites(calls)[1]!.body).toMatchObject({
+      intake: { signalKinds: { [REVIEW]: false, [MENTIONED]: false } },
+    });
+  });
+
+  it("shows a Connection what it now takes from the plugin's level, with no push from the controller", async () => {
+    const { handlers, records } = buildIntakeHandlers();
+    stubApi({ ...buildSidebarHandlers(SIDEBAR_FIXTURE), ...handlers });
+    const app = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+      { path: "/settings/intake" },
+    );
+    await screen.findByRole("heading", { level: 1, name: "Intake" });
+    await app.live.waitForFirstPushes();
+    await app.context.controller!.live.stop();
+    await pickSegment("rogier");
+    await waitFor(() =>
+      expect(getSwitch("Review requested").getAttribute("aria-checked")).toBe("true"),
+    );
+    await pickSegment("All GitHub connections");
+    await userEvent.click(getSwitch("Review requested"));
+    await waitFor(() => expect(records.plugin.signalKinds[REVIEW]).toBe(false));
+    await pickSegment("rogier");
+    await waitFor(() =>
+      expect(getSwitch("Review requested").getAttribute("aria-checked")).toBe("false"),
+    );
+  });
+});
