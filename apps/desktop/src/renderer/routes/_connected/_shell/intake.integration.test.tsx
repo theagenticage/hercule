@@ -186,7 +186,7 @@ const resolve = (
     actionId: "approve",
     outcome,
     actor,
-    origin: actor === "user" ? "web" : "plugin:github",
+    origin: actor === "user" ? "web" : "core",
     at,
   },
 });
@@ -527,13 +527,13 @@ describe("Intake's pane", () => {
     const pane = await findPane();
     await userEvent.type(within(pane).getByRole("textbox", { name: "Reply" }), "Ledger first.");
 
-    store(resolve(MENTION, "plugin:github", "Replied on GitHub"));
+    store(resolve(MENTION, "system", "Replied on GitHub"));
     live.pushInvalidation("signal", [MENTION.id]);
 
     const outcome = await within(pane).findByRole("status");
     expect(outcome.querySelector(".b-work-label")!.textContent).toBe("Left on its own");
     expect(outcome.querySelector(".ad-outcome-desc")!.textContent).toBe(
-      "Resolved elsewhere: replied on GitHub, by GitHub",
+      "Resolved elsewhere: replied on GitHub, by you",
     );
     const kept = within(pane).getByRole("textbox", { name: "Your reply, not sent" });
     expect((kept as HTMLTextAreaElement).value).toBe("Ledger first.");
@@ -662,7 +662,7 @@ describe("Intake's keys", () => {
     const pane = await findPane();
     await userEvent.type(within(pane).getByRole("textbox", { name: "Reply" }), "Ledger first.");
 
-    store(resolve(MENTION, "plugin:github", "Replied on GitHub"));
+    store(resolve(MENTION, "system", "Replied on GitHub"));
     live.pushInvalidation("signal", [MENTION.id]);
     await within(pane).findByRole("status");
 

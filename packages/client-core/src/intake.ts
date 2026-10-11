@@ -538,6 +538,12 @@ export const describeSignalOutcomeMoment = (
  *
  * A signal the user decided reads "What you did"; one withdrawn, or decided
  * by someone else on the source, reads "Left on its own".
+ *
+ * The user may also answer on the source itself, such as a review submitted
+ * on GitHub. The core then resolves the signal as `decided`, stamped
+ * `system`, with the `actionId` of the action the answer matches. That is
+ * still the user's move, so it reads "What you did: Reviewed on GitHub, by
+ * you". The kind's outcome already names the source (spec 10 §9.6).
  */
 export const describeSignalOutcome = (
   signal: Signal,
@@ -545,11 +551,16 @@ export const describeSignalOutcome = (
 ): SignalOutcome | null => {
   const { resolution } = signal;
   if (signal.status === "open" || resolution === undefined) return null;
-  const byUser = resolution.kind === "decided" && resolution.actor === "user";
+  const answeredOnSource =
+    resolution.kind === "decided" &&
+    resolution.actor === "system" &&
+    resolution.actionId !== undefined &&
+    parseSignalPluginId(signal.kind) !== null;
+  const byUser = (resolution.kind === "decided" && resolution.actor === "user") || answeredOnSource;
   return {
     label: byUser ? "What you did" : "Left on its own",
     outcome: resolution.outcome,
-    by: `by ${nameResolver(signal, resolution.actor, plugins)}`,
+    by: answeredOnSource ? "by you" : `by ${nameResolver(signal, resolution.actor, plugins)}`,
     byUser,
   };
 };

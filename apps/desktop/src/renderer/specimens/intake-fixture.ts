@@ -728,9 +728,9 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
       resolution: {
         kind: "decided",
         actionId: "approve",
-        outcome: "Approved #1294",
-        actor: "plugin:github",
-        origin: "plugin:github",
+        outcome: "Approved on GitHub",
+        actor: "system",
+        origin: "core",
         at: minutesAgo(2),
       },
     },

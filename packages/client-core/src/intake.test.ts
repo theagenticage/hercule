@@ -611,6 +611,30 @@ describe("describeSignalOutcome and describeResolvedElsewhere", () => {
     expect(describeSignalOutcome(resolvedByCore, PLUGINS)?.by).toBe("by Hercule");
   });
 
+  it("counts an answer the user gave on the source as the user's own move", () => {
+    const reviewed = buildSignal("a", {
+      kind: "github/review-requested",
+      status: "resolved",
+      resolution: {
+        kind: "decided",
+        actionId: "approve",
+        outcome: "Approved on GitHub",
+        actor: "system",
+        origin: "core",
+        at: "2026-10-10T10:00:00.000Z",
+      },
+    });
+    expect(describeSignalOutcome(reviewed, PLUGINS)).toEqual({
+      label: "What you did",
+      outcome: "Approved on GitHub",
+      by: "by you",
+      byUser: true,
+    });
+    expect(describeResolvedElsewhere(reviewed, PLUGINS)).toBe(
+      "Resolved elsewhere: Approved on GitHub, by you",
+    );
+  });
+
   it("names the core for a plugin's signal a newer one replaced", () => {
     const replaced = buildSignal("a", {
       kind: "github/review-requested",
