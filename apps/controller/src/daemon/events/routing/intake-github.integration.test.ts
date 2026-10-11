@@ -285,6 +285,34 @@ describe("raising GitHub's signals", () => {
     });
   });
 
+  it("keeps a team review request open while another of the user's teams is still asked, and withdraws it when none is", async () => {
+    await withGithubConnection(async (controller) => {
+      const { arranged, reader } = controller;
+      const requested = await requestReviewFromTeam(controller, 93);
+      const signal = await waitForSignalFrom(reader, TEAM_REVIEW_REQUESTED, requested);
+      const removeTeam = (teamStillRequested: boolean) =>
+        emitGithubEvent(controller, "github.pr.review-request-removed", 93, {
+          reviewer: "team",
+          team: "o/a",
+          teamStillRequested,
+          byYou: false,
+        });
+
+      const stillAsked = await removeTeam(true);
+      await waitUntilRouted(arranged.harness, stillAsked);
+      await waitOutSeveralTicks();
+      expect(
+        (await listOpenSignals(reader, TEAM_REVIEW_REQUESTED)).map((open) => open.id),
+      ).toContain(signal.id);
+
+      await removeTeam(false);
+      expect(await waitForResolved(reader, signal.id)).toMatchObject({
+        status: "resolved",
+        resolution: { kind: "withdrawn", outcome: "Review request removed" },
+      });
+    });
+  });
+
   it("does not withdraw a review request when someone emits github.pr.merged by hand", async () => {
     await withGithubConnection(async (controller) => {
       const { arranged, reader, connectionId } = controller;
