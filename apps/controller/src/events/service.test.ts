@@ -369,7 +369,7 @@ describe("event.query handling filters", () => {
       }),
     );
     expect(found).toEqual(
-      [arranged.none, arranged.deletedTask, arranged.knownEnded].sort().reverse(),
+      [arranged.none, arranged.deletedTask, arranged.knownEnded].sort((a, b) => b - a),
     );
   });
 
@@ -759,7 +759,7 @@ describe("event.query security entries", () => {
         return [yield* queryIds(filter), arranged] as const;
       }),
     );
-    expect(found).toEqual([arranged.ordinary, arranged.entry].sort().reverse());
+    expect(found).toEqual([arranged.ordinary, arranged.entry].sort((a, b) => b - a));
   });
 
   it("shows them to a session with event.audit", async () => {
