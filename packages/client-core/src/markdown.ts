@@ -125,7 +125,7 @@ interface FootnoteDefinitionToken extends Tokens.Generic {
   content: Token[];
 }
 
-/** A footnote reference, `[^label]`, as the footnote extension lexes it. It does not check that a definition exists. */
+/** A footnote reference, `[^label]`, as the footnote extension lexes it. The message defines its label. */
 interface FootnoteReferenceToken extends Tokens.Generic {
   type: "footnoteReference";
   /** The label as written, such as `Note 1`. */
@@ -139,43 +139,165 @@ const isFootnoteReferenceToken = (token: Token): token is FootnoteReferenceToken
   token.type === "footnoteReference";
 
 /**
- * Matches a footnote definition at the start of a block: the label, then the
- * rest of the first line, then any lines indented by 4 spaces or a tab (blank
- * lines may come before them). The label is at most 999 characters, as in
- * marked's own link labels, so that a line of `[^[^[^` fails in constant time
- * at each `[` instead of scanning to the end of the line each time.
- *
- * Adapted from the definition pattern of the `marked-footnote` package (MIT).
+ * Matches the first line of a footnote definition: up to 3 spaces, the label,
+ * the colon, and the spaces after it. The label is at most 999 characters, as
+ * in marked's own link labels, so that a line of `[^[^[^` fails in constant
+ * time at each `[` instead of scanning to the end of the line each time.
  */
-const FOOTNOTE_DEFINITION =
-  /^\[\^([^\]\n]{1,999})\]:(?:[ \t]+|\n*?|$)([^\n]*?(?:\n|$)(?:\n*?[ ]{4,}[^\n]*)*)/;
+const FOOTNOTE_DEFINITION_START = /^ {0,3}\[\^([^\]\n]{1,999})\]:[ \t]*/;
 
 /** Matches a footnote reference at the start of the inline text. */
 const FOOTNOTE_REFERENCE = /^\[\^([^\]\n]{1,999})\]/;
 
+/** Matches the indentation that makes a line part of a footnote: 4 spaces or a tab. */
+const FOOTNOTE_INDENT = /^(?: {4}| {0,3}\t)/;
+
+/**
+ * Matches a line that starts a block other than a paragraph: up to 3 spaces,
+ * then a heading, a quote, a list marker, a code fence, a thematic break, a
+ * table row, HTML, or a footnote or link definition. Each alternative looks at
+ * a bounded prefix, except the thematic break, which reads the line once.
+ */
+const STARTS_ANOTHER_BLOCK =
+  /^ {0,3}(?:#|>|[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|```|~~~|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$|\||<|\[[^\]\n]{1,999}\]:)/;
+
+/** Returns whether `line` holds nothing but spaces and tabs. */
+const isBlankLine = (line: string): boolean => line.trim() === "";
+
+/**
+ * Returns where the first line after `from` in `source` ends: the index of its
+ * line break, or the length of `source` for the last line.
+ */
+const findLineEnd = (source: string, from: number): number => {
+  const end = source.indexOf("\n", from);
+  return end === -1 ? source.length : end;
+};
+
+/**
+ * Reads a footnote definition at the start of `source`. Returns its label, the
+ * text of its blocks, and the part of `source` it covers (`raw`), or
+ * `undefined` when `source` does not start with a definition.
+ *
+ * The definition is its first line, `[^label]: text`, and then, line by line:
+ * - A line indented by 4 spaces or a tab belongs to it. The indentation is
+ *   removed. Blank lines belong to it when an indented line follows them.
+ * - A line without indentation continues the paragraph it follows, when no
+ *   blank line comes between and the line does not start another block.
+ * - Any other line ends it.
+ *
+ * It reads one line at a time and never looks back, so it takes time linear in
+ * the lines it covers plus the one line that ends the definition.
+ */
+const readFootnoteDefinition = (
+  source: string,
+): { label: string; text: string; raw: string } | undefined => {
+  const header = FOOTNOTE_DEFINITION_START.exec(source);
+  if (header === null) return undefined;
+  const firstEnd = findLineEnd(source, header[0].length);
+  const firstLine = source.slice(header[0].length, firstEnd);
+  const lines = [firstLine];
+  // The end of the last line that belongs to the definition.
+  let end = firstEnd;
+  // The blank lines seen since then. They belong to the definition only if an indented line follows.
+  let pendingBlankLines = 0;
+  // Whether the previous line is paragraph text, so that a line without indentation may continue it.
+  let paragraphOpen = !isBlankLine(firstLine) && !STARTS_ANOTHER_BLOCK.test(firstLine);
+  let position = firstEnd + 1;
+  while (position <= source.length && end < source.length) {
+    const lineEnd = findLineEnd(source, position);
+    const line = source.slice(position, lineEnd);
+    const indent = FOOTNOTE_INDENT.exec(line);
+    if (isBlankLine(line)) {
+      pendingBlankLines++;
+      paragraphOpen = false;
+    } else if (indent !== null) {
+      const content = line.slice(indent[0].length);
+      for (; pendingBlankLines > 0; pendingBlankLines--) lines.push("");
+      lines.push(content);
+      end = lineEnd;
+      paragraphOpen = !STARTS_ANOTHER_BLOCK.test(content);
+    } else if (paragraphOpen && !STARTS_ANOTHER_BLOCK.test(line)) {
+      lines.push(line);
+      end = lineEnd;
+    } else {
+      break;
+    }
+    position = lineEnd + 1;
+  }
+  // The line break that ends the last line is part of the definition.
+  const raw = source.slice(0, end < source.length ? end + 1 : end);
+  return { label: header[1] ?? "", text: lines.join("\n"), raw };
+};
+
+/**
+ * Returns the index in `source` of the next line that starts a footnote
+ * definition, or `undefined` when none comes before the paragraph would end
+ * anyway. marked calls this to find where a paragraph must stop for a block
+ * extension. `source` is the paragraph without its first character, so a
+ * match must be a whole line, never the middle of the first line.
+ *
+ * The scan stops at a blank line or at a line that starts another block, as
+ * the paragraph ends there. That keeps the cost proportional to the paragraph
+ * and not to the rest of the message.
+ */
+const findFootnoteDefinitionStart = (source: string): number | undefined => {
+  let lineBreak = source.indexOf("\n");
+  while (lineBreak !== -1) {
+    const lineStart = lineBreak + 1;
+    const lineEnd = findLineEnd(source, lineStart);
+    const line = source.slice(lineStart, lineEnd);
+    if (FOOTNOTE_DEFINITION_START.test(line)) return lineStart;
+    if (isBlankLine(line) || STARTS_ANOTHER_BLOCK.test(line)) return undefined;
+    lineBreak = lineEnd === source.length ? -1 : lineEnd;
+  }
+  return undefined;
+};
+
+/**
+ * The normalized labels that the message defines, per lexer run. The key is
+ * the lexer's list of top-level tokens, which is a new array for every run, so
+ * nothing outlives a message.
+ */
+const definedLabelsByRun = new WeakMap<object, ReadonlySet<string>>();
+
+/**
+ * Returns the normalized labels of the footnote definitions among `tokens`.
+ * The first call of a run builds the set and later calls reuse it. That is
+ * safe because marked lexes every block before the first inline text, so the
+ * definitions are complete when a reference asks.
+ */
+const findDefinedLabels = (tokens: Token[]): ReadonlySet<string> => {
+  const known = definedLabelsByRun.get(tokens);
+  if (known !== undefined) return known;
+  const labels = new Set<string>();
+  for (const token of tokens) {
+    if (isFootnoteDefinitionToken(token)) labels.add(normalizeLabel(token.label));
+  }
+  definedLabelsByRun.set(tokens, labels);
+  return labels;
+};
+
 /**
  * Teaches marked to lex footnote definitions and references. The extension
- * keeps no state and does not know which definitions exist, so one parser can
- * serve every call. `mapDocument` decides which references have a definition.
+ * keeps no state of its own. A reference is lexed only when the message
+ * defines its label, so that `[^x](https://e.com)` or `[^a\*]` keep their
+ * ordinary meaning when there is no footnote `x` or `a*`. `mapDocument` still
+ * decides which defined footnotes the visible text references.
  */
 const footnoteExtension: MarkedExtension = {
   extensions: [
     {
       name: "footnoteDefinition",
       level: "block",
+      start: findFootnoteDefinitionStart,
       tokenizer(source) {
-        const match = FOOTNOTE_DEFINITION.exec(source);
-        if (match === null) return undefined;
-        const [raw, label = "", text = ""] = match;
-        const unindented = text
-          .split("\n")
-          .map((line) => line.replace(/^(?: {4}|\t)/, ""))
-          .join("\n");
+        const definition = readFootnoteDefinition(source);
+        if (definition === undefined) return undefined;
         const token: FootnoteDefinitionToken = {
           type: "footnoteDefinition",
-          raw,
-          label,
-          content: this.lexer.blockTokens(unindented),
+          raw: definition.raw,
+          label: definition.label,
+          content: this.lexer.blockTokens(definition.text),
         };
         return token;
       },
@@ -186,11 +308,9 @@ const footnoteExtension: MarkedExtension = {
       tokenizer(source) {
         const match = FOOTNOTE_REFERENCE.exec(source);
         if (match === null) return undefined;
-        const token: FootnoteReferenceToken = {
-          type: "footnoteReference",
-          raw: match[0],
-          label: match[1] ?? "",
-        };
+        const label = match[1] ?? "";
+        if (!findDefinedLabels(this.lexer.tokens).has(normalizeLabel(label))) return undefined;
+        const token: FootnoteReferenceToken = { type: "footnoteReference", raw: match[0], label };
         return token;
       },
     },

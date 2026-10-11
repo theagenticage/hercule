@@ -378,7 +378,7 @@ describe("parseMarkdown footnotes", () => {
   });
 
   it("keeps a reference to a missing footnote as text", () => {
-    expect(parseMarkdown("a[^nope]")).toEqual(blocks(paragraph(text("a"), text("[^nope]"))));
+    expect(parseMarkdown("a[^nope]")).toEqual(blocks(paragraph(text("a[^nope]"))));
   });
 
   it("matches a label without regard to case or spacing", () => {
@@ -484,9 +484,145 @@ describe("parseMarkdown footnotes", () => {
     expect(parseMarkdown("> [^1]: One.\n\na[^1]")).toEqual(
       blocks(
         { type: "blockquote", children: [paragraph(text("[^1]: One."))] },
-        paragraph(text("a"), text("[^1]")),
+        paragraph(text("a[^1]")),
       ),
     );
+  });
+
+  it("recognises a definition on the line right after a paragraph line", () => {
+    expect(parseMarkdown("a[^a]\n[^a]: Note")).toEqual({
+      blocks: [paragraph(text("a"), reference(1))],
+      footnotes: [{ number: 1, children: [paragraph(text("Note"), backReference(1))] }],
+    });
+  });
+
+  it("does not cut a paragraph at a bracket in the middle of a line", () => {
+    expect(parseMarkdown("a [^a]: not a definition")).toEqual(
+      blocks(paragraph(text("a [^a]: not a definition"))),
+    );
+  });
+
+  it("allows 1 to 3 spaces before a definition", () => {
+    const expected = {
+      blocks: [paragraph(reference(1))],
+      footnotes: [{ number: 1, children: [paragraph(text("Note"), backReference(1))] }],
+    };
+    expect(parseMarkdown("[^a]\n\n [^a]: Note")).toEqual(expected);
+    expect(parseMarkdown("[^a]\n\n   [^a]: Note")).toEqual(expected);
+  });
+
+  it("does not take a definition indented by 4 spaces, which is code", () => {
+    expect(parseMarkdown("[^a]\n\n    [^a]: Note")).toEqual(
+      blocks(paragraph(text("[^a]")), { type: "code", text: "[^a]: Note" }),
+    );
+  });
+
+  it("keeps a line indented by a tab in the footnote", () => {
+    expect(parseMarkdown("[^a]\n\n[^a]: first\n\tsecond\n\n\tthird")).toEqual({
+      blocks: [paragraph(reference(1))],
+      footnotes: [
+        {
+          number: 1,
+          children: [paragraph(text("first\nsecond")), paragraph(text("third"), backReference(1))],
+        },
+      ],
+    });
+  });
+
+  it("keeps a line without indentation in the footnote when it continues the first paragraph", () => {
+    expect(parseMarkdown("[^a]\n\n[^a]: first\nlazy continuation")).toEqual({
+      blocks: [paragraph(reference(1))],
+      footnotes: [
+        {
+          number: 1,
+          children: [paragraph(text("first\nlazy continuation"), backReference(1))],
+        },
+      ],
+    });
+  });
+
+  it("continues a paragraph that an indented line extended with a line without indentation", () => {
+    expect(parseMarkdown("[^a]\n\n[^a]: first\n    second\nthird")).toEqual({
+      blocks: [paragraph(reference(1))],
+      footnotes: [
+        { number: 1, children: [paragraph(text("first\nsecond\nthird"), backReference(1))] },
+      ],
+    });
+  });
+
+  it("ends the footnote at a blank line followed by a line without indentation", () => {
+    expect(parseMarkdown("[^a]\n\n[^a]: first\n\nafter")).toEqual({
+      blocks: [paragraph(reference(1)), paragraph(text("after"))],
+      footnotes: [{ number: 1, children: [paragraph(text("first"), backReference(1))] }],
+    });
+  });
+
+  it("ends the footnote at a heading, which is part of the body", () => {
+    expect(parseMarkdown("[^a]\n\n[^a]: note\n# Heading")).toEqual({
+      blocks: [paragraph(reference(1)), { type: "heading", depth: 1, children: [text("Heading")] }],
+      footnotes: [{ number: 1, children: [paragraph(text("note"), backReference(1))] }],
+    });
+  });
+
+  it("ends the footnote at a list, which is part of the body", () => {
+    expect(parseMarkdown("[^a]\n\n[^a]: note\n- item\n2) other")).toEqual({
+      blocks: [
+        paragraph(reference(1)),
+        {
+          type: "list",
+          start: undefined,
+          loose: false,
+          items: [{ children: [paragraph(text("item"))] }],
+        },
+        { type: "list", start: 2, loose: false, items: [{ children: [paragraph(text("other"))] }] },
+      ],
+      footnotes: [{ number: 1, children: [paragraph(text("note"), backReference(1))] }],
+    });
+  });
+
+  it("does not continue a footnote whose first line is empty with a line without indentation", () => {
+    expect(parseMarkdown("[^a]\n\n[^a]:\nbody")).toEqual({
+      blocks: [paragraph(reference(1)), paragraph(text("body"))],
+      footnotes: [{ number: 1, children: [paragraph(backReference(1))] }],
+    });
+  });
+
+  it("keeps a link whose text looks like an undefined footnote reference", () => {
+    expect(parseMarkdown("[^x](https://e.com)")).toEqual(
+      blocks(
+        paragraph({
+          type: "link",
+          href: "https://e.com",
+          title: undefined,
+          children: [text("^x")],
+        }),
+      ),
+    );
+  });
+
+  it("reads character references and escapes in an undefined footnote reference", () => {
+    expect(parseMarkdown("[^a&amp;b]")).toEqual(blocks(paragraph(text("[^a&b]"))));
+    expect(parseMarkdown("[^a\\*]")).toEqual(blocks(paragraph(text("[^a"), text("*"), text("]"))));
+  });
+
+  it("knows a definition that comes after a reference inside a footnote and a list", () => {
+    expect(parseMarkdown("- x[^a]\n\n[^a]: A with [^b].\n[^b]: B.")).toEqual({
+      blocks: [
+        {
+          type: "list",
+          start: undefined,
+          loose: false,
+          items: [{ children: [paragraph(text("x"), reference(1))] }],
+        },
+      ],
+      footnotes: [
+        {
+          number: 1,
+          children: [paragraph(text("A with "), reference(2), text("."), backReference(1))],
+        },
+        { number: 2, children: [paragraph(text("B."), backReference(2))] },
+      ],
+    });
   });
 });
 
@@ -737,6 +873,24 @@ describe("parseMarkdown worst-case input", () => {
   it("parses a long run of footnote-like brackets in linear time", () => {
     const started = performance.now();
     parseMarkdown("[^".repeat(100_000));
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it("parses many definitions and many references in linear time", () => {
+    const started = performance.now();
+    parseMarkdown("[^a]: x\n".repeat(20_000) + "[^a] ".repeat(20_000));
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it("parses a definition with many lazy continuation lines in linear time", () => {
+    const started = performance.now();
+    parseMarkdown(`[^a]: first\n${"lazy\n".repeat(200_000)}`);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it("parses many paragraphs cut by headings, with no definition, in linear time", () => {
+    const started = performance.now();
+    parseMarkdown("a\n# h\n".repeat(50_000));
     expect(performance.now() - started).toBeLessThan(1000);
   });
 });
