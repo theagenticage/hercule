@@ -93,6 +93,9 @@ importers:
       '@hercule/plugin-pi':
         specifier: workspace:*
         version: link:../../plugins/pi
+      '@hercule/plugin-sentry':
+        specifier: workspace:*
+        version: link:../../plugins/sentry
       '@hercule/process-log':
         specifier: workspace:*
         version: link:../../packages/process-log
@@ -493,6 +496,19 @@ importers:
       effect:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
+
+  plugins/sentry:
+    dependencies:
+      '@hercule/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+    devDependencies:
+      '@hercule/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
 
 packages:
 

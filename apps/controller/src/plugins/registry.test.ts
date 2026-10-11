@@ -141,8 +141,14 @@ describe("the shipped registry after a boot", () => {
     );
   });
 
-  it("holds the three provider plugins and the github connection type, in registry order", () => {
-    expect(details.map((detail) => detail.id)).toEqual(["claude-code", "codex", "pi", "github"]);
+  it("holds the three provider plugins and the github and sentry plugins, in registry order", () => {
+    expect(details.map((detail) => detail.id)).toEqual([
+      "claude-code",
+      "codex",
+      "pi",
+      "github",
+      "sentry",
+    ]);
   });
 
   it.each(SHIPPED)(

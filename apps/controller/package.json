@@ -17,6 +17,7 @@
     "@hercule/plugin-github": "workspace:*",
     "@hercule/plugin-host": "workspace:*",
     "@hercule/plugin-pi": "workspace:*",
+    "@hercule/plugin-sentry": "workspace:*",
     "@hercule/process-log": "workspace:*",
     "@hercule/protocol": "workspace:*",
     "@hercule/service": "workspace:*",
