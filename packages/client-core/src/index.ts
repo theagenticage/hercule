@@ -247,6 +247,7 @@ export {
   buildBoundActionRows,
   chooseNotificationMark,
   describeProducer,
+  describeFailedBuildCount,
   describeResolution,
   formatDescribeLine,
   formatUnseenCount,

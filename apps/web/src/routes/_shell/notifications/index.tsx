@@ -76,6 +76,8 @@ function Notifications(): JSX.Element | null {
   const notifications = listing.data.pages.flatMap((page) => page.items);
   if (notifications.length === 0) return <NoNotifications />;
 
+  const timezone = resolveDisplayTimezone(settings.user.timezone);
+
   const { fresh, seen } = splitBySince(notifications, since);
   const renderList = (items: ReadonlyArray<Notification>, receded: boolean): JSX.Element => (
     <ul
@@ -89,6 +91,7 @@ function Notifications(): JSX.Element | null {
           key={notification.id}
           notification={notification}
           now={now}
+          timezone={timezone}
           muted={isNotificationMuted(notification, muted)}
           isMuting={setMuted.isPending}
           onToggleMute={() => {
@@ -106,9 +109,7 @@ function Notifications(): JSX.Element | null {
     </ul>
   );
   const lastCheckedLabel =
-    since === undefined
-      ? undefined
-      : formatTimeContext(new Date(since), resolveDisplayTimezone(settings.user.timezone));
+    since === undefined ? undefined : formatTimeContext(new Date(since), timezone);
 
   return (
     <div className="flex max-w-[940px] flex-col gap-3">

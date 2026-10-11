@@ -1,7 +1,8 @@
 /**
  * The times the desktop thread shows, and the lines that hold them: the time
  * under each user bubble, each agent message's meta line, and the note that
- * the thread waits on the user.
+ * the thread waits on the user. The notification center shows the time in a
+ * failed-build count the same way.
  */
 import { formatPreciseStamp } from "../time-context";
 

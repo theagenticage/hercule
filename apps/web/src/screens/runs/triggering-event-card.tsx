@@ -7,9 +7,10 @@ import { JsonText } from "./json-text";
 /**
  * Renders the event that started a run, in a card framed like the inputs card:
  * the event's title and author when the plugin gave them, its kind, its
- * source, when it occurred and its position in the event log, with a link to the event in its own system when it has one. An
- * address that is not http or https is not linked, because a plugin or an
- * agent sets it and it could lead anywhere.
+ * source, when it occurred and its position in the event log, with a link to
+ * the event in its own system when it has one. An address that is not http or
+ * https is not linked, because a plugin or an agent sets it and it could lead
+ * anywhere.
  * Below them comes the event's payload as indented JSON, because the payload
  * is what the trigger's input mapping read to make the run's inputs.
  */

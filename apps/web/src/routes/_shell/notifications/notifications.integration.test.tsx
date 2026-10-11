@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { formatTimeContext } from "@hercule/client-core";
+import { formatMessageTime, formatTimeContext } from "@hercule/client-core";
 import type { Notification } from "@hercule/contract";
 import {
   buildErrorBody,
@@ -211,6 +211,26 @@ describe("Notifications > the list", () => {
     expect(getRow("Merge PR #94?").querySelector("[data-mark=done]")).not.toBeNull();
     expect(readPageText(getRow("Reconnect gmail?"))).toContain("withdrawn: token refreshed");
     expect(getRow("Reconnect gmail?").querySelector("[data-mark=cancelled]")).not.toBeNull();
+  });
+
+  it("counts a signal kind's failed builds since the notification, in the user's zone", async () => {
+    const createdAt = buildTimestampMinutesAgo(40);
+    const { api } = buildController({
+      notifications: [
+        {
+          ...buildRunFailed(1, 40, "github/mentioned signals fail to build"),
+          kind: "core.signal-build-failed",
+          createdAt,
+          failedBuildCount: 14,
+        },
+      ],
+    });
+    await renderApp({ path: "/notifications", api: api.fetch, token: "held" });
+
+    const since = formatMessageTime(new Date(createdAt), ZONE, new Date());
+    expect(readPageText(getRow("github/mentioned signals fail to build"))).toContain(
+      `Hercule · failed 14 times since ${since!}`,
+    );
   });
 
   it("pages through the list with Load more", async () => {
