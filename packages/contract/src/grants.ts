@@ -25,6 +25,7 @@ export const GRANT_FAMILIES = {
   session: ["read", "spawn", "steer"],
   subscription: ["read", "write"],
   notification: ["read", "write"],
+  signal: ["read", "write"],
   settings: ["read", "write"],
   // `audit` is the security entries of the event log, which `read` alone does
   // not return: an entry about a secret, a credential or the user's account is

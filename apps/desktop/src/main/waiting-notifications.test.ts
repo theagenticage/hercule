@@ -2,21 +2,13 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { WaitingRequest } from "../ipc/contract";
-import { type FakeMainWindow, makeFakeMainWindow } from "./testing";
 import {
-  makeWaitingNotificationsLayer,
-  type NativeNotification,
-  WaitingNotifications,
-} from "./waiting-notifications";
-
-/** A fake of Electron's `Notification` that records what is done to it. */
-interface FakeNotification extends NativeNotification {
-  readonly title: string;
-  readonly body: string;
-  state: "new" | "shown" | "closed";
-  /** Clicks the notification, as the user does. */
-  click(): void;
-}
+  type FakeMainWindow,
+  type FakeNotification,
+  makeFakeMainWindow,
+  makeFakeNotificationClass,
+} from "./testing";
+import { makeWaitingNotificationsLayer, WaitingNotifications } from "./waiting-notifications";
 
 /** What the fakes of the platform and the window saw. */
 interface Seen {
@@ -41,34 +33,8 @@ const runWithNotifications = async (
 ): Promise<Seen> => {
   const window = makeFakeMainWindow();
   window.focused = focused;
-  const seen: Seen = { notifications: [], badgeCounts: [], asks: 0, window };
-  class Notification implements FakeNotification {
-    readonly title: string;
-    readonly body: string;
-    state: "new" | "shown" | "closed" = "new";
-    private clickListener: (...args: never[]) => void = () => undefined;
-    constructor(options: { readonly title: string; readonly body: string }) {
-      this.title = options.title;
-      this.body = options.body;
-      seen.notifications.push(this);
-    }
-    show() {
-      this.state = "shown";
-    }
-    close() {
-      this.state = "closed";
-    }
-    // Takes a listener of either event's type. Only the click's is kept, and
-    // it is called with no argument, as the service's click listener takes
-    // none.
-    once(event: "click" | "failed", listener: (...args: never[]) => void): this {
-      if (event === "click") this.clickListener = listener;
-      return this;
-    }
-    click() {
-      this.clickListener();
-    }
-  }
+  const { Notification, notifications } = makeFakeNotificationClass();
+  const seen: Seen = { notifications, badgeCounts: [], asks: 0, window };
   const layer = makeWaitingNotificationsLayer({
     Notification,
     setBadgeCount: (count) => seen.badgeCounts.push(count),

@@ -7,7 +7,7 @@
  *
  * - The three shipped profiles hold the grants the controller seeds
  *   (`SHIPPED_PROFILES` in apps/controller/src/seed.ts, which the desktop app
- *   may not import): `assistant` 28, `worker` 9 and `unrestricted` all 42.
+ *   may not import): `assistant` 28, `worker` 9 and `unrestricted` all 44.
  * - Releaser, made by the user, holds 11 grants. The book gives only the
  *   count and never opens its page, so the grants are the ones a release
  *   needs.

@@ -28,9 +28,9 @@
  * - `permissions/`: deleting a permission profile;
  * - `connections/`: what the connections domain reads from the resources and
  *   workflows domains;
- * - `notifications/`: the notifications domain's Bindable Operations port,
- *   which runs the operation of the answer the user takes on a decision
- *   Notification, and writes the Describe Line of each answer;
+ * - `bound-actions/`: the Bound Operations port, which checks and runs the
+ *   operation of the answer the user takes on a decision Notification or a
+ *   Signal, and writes the Describe Line of each answer;
  * - `workflows/`: what the workflows domain reads from the runs domain, and
  *   the Scheduler, which fires cron triggers;
  * - `runs/`: the Run Executor, which gives each run's execution a fiber, and
@@ -67,7 +67,7 @@ export {
 export { AttachmentSweepInterval, runAttachmentSweepLoop } from "./attachments";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
 export { IngestExecutorLayer, IngestReconcileInterval, runIngestReconciler } from "./ingest";
-export { BindableOperationsLayer } from "./notifications";
+export { BoundOperationsLayer } from "./bound-actions";
 export {
   PermissionRequests,
   PermissionRequestsLayer,
@@ -110,5 +110,6 @@ export {
   SchedulerInterval,
   TriggeredRunsLayer,
   WorkflowRunsLayer,
+  WorkflowSignalsLayer,
 } from "./workflows";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./workspaces";

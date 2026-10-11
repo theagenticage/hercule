@@ -36,8 +36,9 @@ import { MainWindow } from "./main-window";
  *   ⌥⌘2, which calls `showOrchestrationFace`: they switch the sidebar's
  *   face. They take ⌥⌘ because ⌘1 to ⌘9 already pick an item in Go.
  *   `development` adds Reload and Toggle Developer Tools, under a separator.
- * - Go starts with Office, ⌘⇧O, which calls `openOffice`, because the
- *   Office is a place to go, as a thread is. Below a separator it lists
+ * - Go starts with Office, ⌘⇧O, which calls `openOffice`, then Intake, ⌘⇧I,
+ *   which calls `openIntake`, because both are places to go, as a thread
+ *   is. Below a separator it lists
  *   `goItems`, the first nine the page sends, with ⌘1 to ⌘9, each with its
  *   title. Choosing one calls `openDestination` with its destination. With
  *   no item, one dimmed "No Threads" stands in for them.
@@ -45,8 +46,8 @@ import { MainWindow } from "./main-window";
  *   cannot tell whether the page has anything to send, and with nothing to
  *   send the page does nothing, as ⏎ in an empty field does.
  * - Edit and Window are Electron's own.
- * - Settings…, Sign Out, New Thread, Threads, Hercule and Office are enabled
- *   only when `signedIn` is true. Only the shell carries them out, and the shell never
+ * - Settings…, Sign Out, New Thread, Threads, Hercule, Office and Intake are
+ *   enabled only when `signedIn` is true. Only the shell carries them out, and the shell never
  *   shows while signed out, so they are dimmed then rather than doing
  *   nothing. Main knows only whether a login token is stored, so from the
  *   first run's account step to its end they stay enabled and do nothing.
@@ -66,6 +67,7 @@ const buildMenuTemplate = (options: {
   readonly signOut: () => void;
   readonly newThread: () => void;
   readonly openOffice: () => void;
+  readonly openIntake: () => void;
   readonly showThreadsFace: () => void;
   readonly showOrchestrationFace: () => void;
   readonly openSettings: () => void;
@@ -150,6 +152,12 @@ const buildMenuTemplate = (options: {
           enabled: options.signedIn,
           click: options.openOffice,
         },
+        {
+          label: "Intake",
+          accelerator: "CmdOrCtrl+Shift+I",
+          enabled: options.signedIn,
+          click: options.openIntake,
+        },
         { type: "separator" },
         ...(options.goItems.length === 0
           ? [{ label: "No Threads", enabled: false }]
@@ -174,7 +182,7 @@ export class MainMenu extends Context.Service<
   {
     /**
      * Enables Settings…, Sign Out, New Thread, View's Threads and Hercule,
-     * and Office when `signedIn` is true. Otherwise disables them and removes
+     * Office and Intake when `signedIn` is true. Otherwise disables them and removes
      * the Go menu's items, which the app can no longer open.
      */
     readonly setSignedIn: (signedIn: boolean) => Effect.Effect<void>;
@@ -194,7 +202,8 @@ export class MainMenu extends Context.Service<
  * Sign Out, start enabled when a login token is stored, and Go lists no
  * item until the page sends its items.
  *
- * Choosing Settings…, Sign Out, New Thread, Threads, Hercule, Office or Send
+ * Choosing Settings…, Sign Out, New Thread, Threads, Hercule, Office, Intake
+ * or Send
  * shows the window and sends the page that menu command. Choosing an item in
  * Go shows the window and asks the page to open its destination.
  * `development` adds Reload and Toggle Developer Tools to the View menu.
@@ -237,6 +246,7 @@ export const makeMainMenuLayer = (
               signOut: () => sendMenuCommand("signOut"),
               newThread: () => sendMenuCommand("newThread"),
               openOffice: () => sendMenuCommand("openOffice"),
+              openIntake: () => sendMenuCommand("openIntake"),
               showThreadsFace: () => sendMenuCommand("showThreadsFace"),
               showOrchestrationFace: () => sendMenuCommand("showOrchestrationFace"),
               openSettings: () => sendMenuCommand("openSettings"),

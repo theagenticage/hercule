@@ -2,9 +2,9 @@
  * Tests the menu bar in the packaged app (spec 17, §Native behaviour):
  *
  * - the menus stand in the order macOS users expect; while signed out, View
- *   holds a dimmed Threads and Hercule, and Go a dimmed Office and "No
- *   Threads";
- * - Go lists the sidebar's threads under Office, top to bottom, with ⌘1 and
+ *   holds a dimmed Threads and Hercule, and Go a dimmed Office, Intake and
+ *   "No Threads";
+ * - Go lists the sidebar's threads under Office and Intake, top to bottom, with ⌘1 and
  *   on, and choosing one opens it;
  * - Thread > Send sends what the open thread's composer holds.
  *
@@ -51,11 +51,12 @@ describe("the menu bar", () => {
     ]);
     expect(await readMenuItems(app, "Go")).toEqual([
       { label: "Office", accelerator: "CmdOrCtrl+Shift+O", enabled: false },
+      { label: "Intake", accelerator: "CmdOrCtrl+Shift+I", enabled: false },
       { label: "No Threads", accelerator: null, enabled: false },
     ]);
   });
 
-  it("lists the sidebar's threads in Go under Office, top to bottom, and opens the one chosen", async () => {
+  it("lists the sidebar's threads in Go under Office and Intake, top to bottom, and opens the one chosen", async () => {
     const { url, fleet, waitForStatus } = await arrangeFleet();
     const runner = await fleet.enlistRunner("studio");
     const threads = await fleet.spawnThreads(2, { runner });
@@ -68,6 +69,7 @@ describe("the menu bar", () => {
       .poll(() => readMenuItems(app, "Go"))
       .toEqual([
         { label: "Office", accelerator: "CmdOrCtrl+Shift+O", enabled: true },
+        { label: "Intake", accelerator: "CmdOrCtrl+Shift+I", enabled: true },
         ...titles.map((label, index) => ({
           label,
           accelerator: `CmdOrCtrl+${String(index + 1)}`,

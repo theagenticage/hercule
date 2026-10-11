@@ -6,6 +6,7 @@
 import { useRef, type JSX } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
+import { stubResizeObserver } from "../../app/testing";
 import { useShowsClassicScrollbar } from "./classic-scrollbar";
 
 afterEach(() => {
@@ -26,34 +27,6 @@ function View(): JSX.Element {
 const setWidths = (element: Element, scrollbar: number): void => {
   Object.defineProperty(element, "offsetWidth", { configurable: true, value: 600 });
   Object.defineProperty(element, "clientWidth", { configurable: true, value: 600 - scrollbar });
-};
-
-/**
- * Replaces `ResizeObserver` with one whose callbacks the test calls, and
- * returns a function that calls them, as a resize of the observed element
- * would.
- */
-const stubResizeObserver = (): (() => void) => {
-  const callbacks = new Set<() => void>();
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      readonly callback: () => void;
-      constructor(callback: () => void) {
-        this.callback = callback;
-      }
-      observe(): void {
-        callbacks.add(this.callback);
-      }
-      unobserve(): void {}
-      disconnect(): void {
-        callbacks.delete(this.callback);
-      }
-    },
-  );
-  return () => {
-    for (const callback of callbacks) callback();
-  };
 };
 
 describe("useShowsClassicScrollbar", () => {

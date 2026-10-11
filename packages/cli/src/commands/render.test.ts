@@ -1358,6 +1358,158 @@ describe("hercule notification", () => {
   });
 });
 
+describe("hercule signal", () => {
+  const SIGNAL = "0199e0e7-1111-7000-8000-00000000beef";
+  const signal = {
+    id: SIGNAL,
+    kind: "offer",
+    origin: { type: "api", actor: "user", eventIds: [81234], reason: "The build failed twice" },
+    title: "Retry the release build",
+    asker: "Release workflow",
+    priority: "high",
+    blocks: [
+      { type: "text", markdown: "The **release** build failed.\nTwice." },
+      {
+        type: "checks",
+        rows: [{ name: "e2e", state: "failed", log: "timeout" }],
+        passed: 3,
+        omitted: 0,
+      },
+      { type: "when" },
+    ],
+    actions: [
+      {
+        id: "reply",
+        label: "Reply",
+        operation: { op: "session.input", input: { sessionId: SESSION, text: "" } },
+        field: { name: "text", placeholder: "Tell the agent what to do" },
+        describeLine: [{ kind: "text", text: "Reply to the session" }],
+      },
+      {
+        id: "dismiss",
+        label: "Dismiss",
+        operation: null,
+        describeLine: [{ kind: "text", text: "Does nothing" }],
+      },
+    ],
+    match: {},
+    status: "open",
+    createdAt: "2026-10-10T09:00:00.000Z",
+  };
+  const resolved = (kind: "decided" | "withdrawn", outcome: string) => ({
+    ...signal,
+    status: "resolved",
+    resolution: { kind, outcome, actor: "user", origin: "api", at: "2026-10-10T09:05:00.000Z" },
+  });
+
+  it("lists each signal on one line, with its priority and without its blocks or actions", () => {
+    const lines = renderHuman(
+      { kind: "value", value: [signal] },
+      lookUpCommand("signal", "list"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toHaveLength(2);
+    // A signal with no place keeps the column, so the header is the same on every call.
+    expect(lines[0]).toMatch(/^id +kind +priority +title +asker +place +age$/);
+    expect(lines[1]).toMatch(
+      new RegExp(
+        `^${SIGNAL.slice(-8)} +offer +high +Retry the release build +Release workflow +\\S+$`,
+      ),
+    );
+  });
+
+  it("prints no results for an empty To do list", () => {
+    expect(
+      renderHuman({ kind: "value", value: [] }, lookUpCommand("signal", "list"), CONTROLLER_URL),
+    ).toEqual(["no results"]);
+  });
+
+  it("prints a signal's fields, where it came from, its blocks as text, and its actions with what each does", () => {
+    const lines = renderHuman(
+      { kind: "value", value: signal },
+      lookUpCommand("signal", "read"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toContainEqual(expect.stringMatching(/^title +Retry the release build$/));
+    expect(lines).toContainEqual(expect.stringMatching(/^priority +high$/));
+    expect(lines).toContainEqual(expect.stringMatching(/^origin\.reason +The build failed twice$/));
+    expect(lines.slice(lines.indexOf("blocks"))).toEqual([
+      "blocks",
+      "The **release** build failed.",
+      "Twice.",
+      "",
+      "failed  e2e",
+      "    timeout",
+      "3 passed",
+      "",
+      "This part can't be shown here.",
+      "",
+      "actions",
+      "id       label    does                  reply",
+      "reply    Reply    Reply to the session  Tell the agent what to do",
+      "dismiss  Dismiss  Does nothing",
+    ]);
+    expect(lines.join("\n")).not.toContain("operation");
+  });
+
+  it("prints a resolved signal's outcome, and no blocks or actions heading when it has none", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: { ...resolved("decided", "Dismissed"), blocks: [], actions: [] },
+      },
+      lookUpCommand("signal", "read"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toContainEqual(expect.stringMatching(/^resolution\.outcome +Dismissed$/));
+    expect(lines).not.toContain("blocks");
+    expect(lines).not.toContain("actions");
+  });
+
+  it("prints the new signal's full id after raise", () => {
+    expect(
+      renderHuman(
+        { kind: "value", value: { signalId: SIGNAL } },
+        lookUpCommand("signal", "raise"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual([`signal ${SIGNAL} raised`]);
+  });
+
+  it("prints how the signal was resolved and its outcome after act and after withdraw", () => {
+    expect(
+      renderHuman(
+        { kind: "value", value: resolved("decided", "Retried the release build") },
+        lookUpCommand("signal", "act"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual([`signal ${SIGNAL.slice(-8)} decided: Retried the release build`]);
+    expect(
+      renderHuman(
+        { kind: "value", value: resolved("withdrawn", "the build passed on retry") },
+        lookUpCommand("signal", "withdraw"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual([`signal ${SIGNAL.slice(-8)} withdrawn: the build passed on retry`]);
+  });
+
+  it("removes escape sequences from a block a producer wrote", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: { ...signal, blocks: [{ type: "text", markdown: "Fine\u001b[2K\r really" }] },
+      },
+      lookUpCommand("signal", "read"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toContain("Fine[2K really");
+  });
+});
+
 describe("removeTerminalControls", () => {
   it("removes the C0 and C1 control characters but keeps tabs and line breaks", () => {
     expect(removeTerminalControls("a\u0000b\u0007c\u001bd\re\u007ff\u009bg\th\ni")).toBe(

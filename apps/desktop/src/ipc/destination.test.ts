@@ -14,6 +14,12 @@ describe("buildDestinationKey", () => {
     );
   });
 
+  it("builds different keys for a signal and a thread with the same id", () => {
+    expect(buildDestinationKey({ kind: "signal", signalId: "same-id" })).not.toBe(
+      buildDestinationKey({ kind: "thread", sessionId: "same-id" }),
+    );
+  });
+
   it("builds different keys for two destinations of one kind", () => {
     expect(buildDestinationKey({ kind: "assistant", assistantId: "assistant-1" })).not.toBe(
       buildDestinationKey({ kind: "assistant", assistantId: "assistant-2" }),

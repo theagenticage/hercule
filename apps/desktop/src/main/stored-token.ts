@@ -12,9 +12,10 @@
  *   app would send the token to a server of that program's choosing.
  * - Sign Out in the menu is enabled exactly while the renderer holds a token:
  *   every read and every write sets it. While the user is signed out, the Go
- *   menu, the dock badge and the waiting notifications are empty too: they
- *   are about threads and assistants the app can no longer open, after a
- *   sign-out or a switch to another controller.
+ *   menu, the dock badge, the waiting notifications and the urgent signals'
+ *   notifications are empty too: they are about threads, assistants and
+ *   signals the app can no longer open, after a sign-out or a switch to
+ *   another controller.
  *
  * This module imports no Electron, so it is unit tested with fakes of the
  * services it uses.
@@ -29,6 +30,7 @@ import { AppSettings, NoControllerSaved } from "./app-settings";
 import { MainWindow } from "./main-window";
 import { MainMenu } from "./menu";
 import { SafeStorage } from "./safe-storage";
+import { UrgentSignalNotifications } from "./urgent-signal-notifications";
 import { WaitingNotifications } from "./waiting-notifications";
 
 /** The text the sheet shows when the Keychain cannot encrypt the token. */
@@ -44,7 +46,7 @@ const decodeTokenForController = Schema.decodeUnknownOption(TokenForController);
 
 /**
  * Builds the token service on the settings file, the Keychain, the menu, the
- * window and the waiting notifications.
+ * window, the waiting notifications and the urgent signals' notifications.
  */
 const make = Effect.gen(function* () {
   const settings = yield* AppSettings;
@@ -52,15 +54,23 @@ const make = Effect.gen(function* () {
   const menu = yield* MainMenu;
   const window = yield* MainWindow;
   const notifications = yield* WaitingNotifications;
+  const urgentSignalNotifications = yield* UrgentSignalNotifications;
 
   /**
-   * Tells the menu and the waiting notifications whether the user is signed
-   * in. Signed in, Sign Out is enabled and the app may ask to notify.
-   * Signed out, Sign Out is disabled, and the Go menu, the dock badge and the
-   * waiting notifications are emptied.
+   * Tells the menu, the waiting notifications and the urgent signals'
+   * notifications whether the user is signed in. Signed in, Sign Out is
+   * enabled and the app may ask to notify. Signed out, Sign Out is disabled,
+   * and the Go menu, the dock badge and every notification are emptied.
    */
   const reflectSignedIn = (signedIn: boolean): Effect.Effect<void> =>
-    Effect.andThen(menu.setSignedIn(signedIn), notifications.setSignedIn(signedIn));
+    Effect.all(
+      [
+        menu.setSignedIn(signedIn),
+        notifications.setSignedIn(signedIn),
+        urgentSignalNotifications.setSignedIn(signedIn),
+      ],
+      { discard: true },
+    );
 
   /**
    * Logs that the stored token is removed and why, `reason`, removes it, and
@@ -178,5 +188,10 @@ export class StoredToken extends Context.Service<StoredToken, Effect.Success<typ
 export const StoredTokenLayer: Layer.Layer<
   StoredToken,
   never,
-  AppSettings | SafeStorage | MainMenu | MainWindow | WaitingNotifications
+  | AppSettings
+  | SafeStorage
+  | MainMenu
+  | MainWindow
+  | WaitingNotifications
+  | UrgentSignalNotifications
 > = Layer.effect(StoredToken)(make);

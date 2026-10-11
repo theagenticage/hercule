@@ -211,7 +211,7 @@ export const providersQuery = (client: HerculeClient) =>
 
 /**
  * The options of a read that no live topic covers: the settings, the
- * permission profiles and the controller's record. Such a read is fetched again each time a screen that
+ * permission profiles, the controller's record and the workflows. Such a read is fetched again each time a screen that
  * shows it opens, so a change made elsewhere, such as a default model set in
  * the web app, reaches the next Draft Thread and the next opening of
  * Settings > Profile. The screen's loader decides that, see `readOnOpen`.
@@ -402,6 +402,43 @@ export const assistantsQuery = (client: HerculeClient) =>
     queryKey: queryKeys.assistants(),
     queryFn: () => readEveryPage((page) => client.assistant.query({ query: page })),
     ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads Intake's To do list: every open signal that is not snoozed, read
+ * whole, because every client counts it. The Hercule segment's count and
+ * Intake's list both come from it, and a push on the `signal` topic reads it
+ * again.
+ */
+export const signalsToDoQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.signals({ view: "to-do" }),
+    queryFn: () => client.signal.query({ query: { view: "to-do" } }),
+    ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads every plugin, for the names Intake gives each signal's source. A push
+ * on the `plugin` topic reads it again.
+ */
+export const pluginsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.plugins(),
+    queryFn: () => client.plugin.query(),
+    ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads every workflow, for the name Intake gives a signal a workflow's run
+ * raised. The shell subscribes to no `workflow` topic, because the controller
+ * pushes on it at every cron fire, so Intake reads it each time it opens, see
+ * `readOnOpen`.
+ */
+export const workflowsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.workflows(),
+    queryFn: () => readEveryPage((page) => client.workflow.query({ query: page })),
+    ...READ_ON_OPEN_OPTIONS,
   });
 
 /**
@@ -701,6 +738,32 @@ export const sessionQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
+ * Reads one signal for Intake's pane. Unlike the To do list, `signal.read`
+ * carries the describe line of each action of an open signal. A push on the
+ * `signal` topic that names the signal reads it again. Fails with a
+ * `not_found` `ApiError` when no such signal exists.
+ */
+export const signalQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.signal(id),
+    queryFn: () => client.signal.read({ params: { id } }),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads one event, for the address Intake's pane opens a signal at on its
+ * source. The event log is append-only, so the read is made once and kept.
+ */
+export const eventQuery = (client: HerculeClient, id: number) =>
+  queryOptions({
+    queryKey: queryKeys.event(id),
+    queryFn: () => client.event.read({ params: { id } }),
+    retry: isWorthRetrying,
+    staleTime: Infinity,
+  });
+
+/**
  * Reads the session whose agent sent a message into a thread, or queued one
  * there, so the message can name its sender. Holds null when the sender
  * cannot be read, as `readSenderSession` says; the message then shows as from
@@ -803,7 +866,9 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
 /**
  * Reads everything the shell shows into `queryClient`: the sidebar's records,
  * the assistants and the current session of each one's main conversation,
- * the Connections and the signed-in user. Resolves once every read is cached,
+ * the Connections, the signed-in user, Intake's To do list, whose count the
+ * Hercule segment shows, and the plugins that name each signal's source.
+ * Resolves once every read is cached,
  * and fails with the first read that fails.
  *
  * The current sessions can only be read once the assistants are, because
@@ -833,6 +898,8 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(providersQuery(client)),
     queryClient.ensureQueryData(connectionsQuery(client)),
     queryClient.ensureQueryData(userQuery(client)),
+    queryClient.ensureQueryData(signalsToDoQuery(client)),
+    queryClient.ensureQueryData(pluginsQuery(client)),
     queryClient
       .ensureQueryData(assistantsQuery(client))
       .then((assistants) =>

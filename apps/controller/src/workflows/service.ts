@@ -84,6 +84,7 @@ import { Notifier } from "../notifications";
 import { PluginHost } from "../plugins";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
 import { WorkflowRuns } from "./runs";
+import { WorkflowSignals } from "./signals";
 import {
   listConnectionParams,
   listReferencedAgentIds,
@@ -299,6 +300,7 @@ const make = Effect.gen(function* () {
   const host = yield* PluginHost;
   const eventKinds = yield* EventKinds;
   const runs = yield* WorkflowRuns;
+  const signals = yield* WorkflowSignals;
 
   /**
    * Reads from the database and the plugin host what validating the definition
@@ -527,6 +529,23 @@ const make = Effect.gen(function* () {
                 path,
                 message:
                   "This Connection is disabled. Enable it, or give another Connection of the same type.",
+              });
+            }
+          } else if (input.signal !== undefined) {
+            const wanted = input.signal.kinds;
+            const kind =
+              typeof value === "string" && isId(value)
+                ? yield* signals.readKind(value)
+                : Option.none();
+            if (Option.isNone(kind)) {
+              issues.push({
+                path,
+                message: `No signal has this id. Give the id of a signal of one of these kinds: ${wanted.join(", ")}.`,
+              });
+            } else if (!wanted.includes(kind.value)) {
+              issues.push({
+                path,
+                message: `This signal is of kind ${kind.value}, but the input takes only these kinds: ${wanted.join(", ")}.`,
               });
             }
           }
@@ -781,5 +800,11 @@ export class WorkflowService extends Context.Service<
 export const WorkflowServiceLayer: Layer.Layer<
   WorkflowService,
   never,
-  SqlClient.SqlClient | AuditLog | Notifier | PluginHost | EventKinds | WorkflowRuns
+  | SqlClient.SqlClient
+  | AuditLog
+  | Notifier
+  | PluginHost
+  | EventKinds
+  | WorkflowRuns
+  | WorkflowSignals
 > = Layer.effect(WorkflowService)(make);

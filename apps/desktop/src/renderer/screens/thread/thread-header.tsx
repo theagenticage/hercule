@@ -97,14 +97,16 @@ export function SidePaneToggle({ sessionId }: { readonly sessionId: string }): J
   const hasSidePane = useHasSidePane();
   const { layout, changeLayout } = useSidePaneLayout(sessionId);
   if (!hasSidePane) return null;
-  const label = layout.open ? "Hide the side pane" : "Show the side pane";
+  // One name, with the pressed state telling whether the pane is open. A name
+  // that flipped as well would contradict the state: "Hide the side pane,
+  // pressed". The tooltip says what a press does.
   return (
     <span className="pill">
       <button
         type="button"
         className={layout.open ? "icon-btn is-on" : "icon-btn"}
-        aria-label={label}
-        title={label}
+        aria-label="Side pane"
+        title={layout.open ? "Hide the side pane" : "Show the side pane"}
         aria-pressed={layout.open}
         onClick={() => {
           changeLayout(toggleSidePane);

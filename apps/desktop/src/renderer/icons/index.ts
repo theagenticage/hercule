@@ -13,6 +13,8 @@
 // fills small dots (radius .4 to .6) at runtime; here the fill is written on
 // the dot itself.
 export { IconFrame, type IconProps } from "./icon-frame";
+export { AlarmIcon } from "./alarm";
+export { ArrowIcon } from "./arrow";
 export { BoundIcon } from "./bound";
 export { BranchIcon } from "./branch";
 export { ChatIcon } from "./chat";
@@ -24,6 +26,7 @@ export { ComposeIcon } from "./compose";
 export { ConnectionsIcon } from "./connections";
 export { CpuIcon } from "./cpu";
 export { CrewIcon } from "./crew";
+export { DiffIcon } from "./diff";
 export { EditorIcon } from "./editor";
 export { ExternalIcon } from "./external";
 export { EyeIcon } from "./eye";

@@ -1,7 +1,7 @@
 /**
  * Prose in a session's messages, rendered as markdown: an agent's message and
  * the user's bubble, in the thread's transcript and in an assistant's
- * Conversation.
+ * Conversation. Intake's open signal draws its text the same way.
  *
  * `react-markdown` builds React elements rather than an HTML string, so a
  * `<script>` from an agent shows as plain text. No plugin that parses raw
@@ -42,23 +42,50 @@ const components: Components = {
       {...(props.href?.startsWith("#") === true ? {} : { target: "_blank", rel: "noreferrer" })}
     />
   ),
-  // The window's content security policy loads no image from elsewhere, so
-  // an image would show as a broken icon. It shows as a link to the image
-  // instead, named by its alt text, or by its address when it has none.
-  img: ({ src, alt }) =>
-    typeof src === "string" && src !== "" ? (
-      <a href={src} target="_blank" rel="noreferrer">
-        {alt === undefined || alt === "" ? src : alt}
-      </a>
-    ) : (
-      <>{alt}</>
-    ),
+  // Loading an image tells its host that the user is reading the text, so
+  // only an open signal's blocks show images inline (see
+  // `INLINE_IMAGE_COMPONENTS`). Anywhere else an image shows as a link to
+  // it, named by its alt text, or by its address when it has none.
+  img: ({ src, alt }) => <ImageLink src={src} alt={alt} />,
   // A wide table scrolls on its own rather than widening the column.
   table: (props) => (
     <div className="table-scroll">
       <table {...dropSyntaxNode(props)} />
     </div>
   ),
+};
+
+/** Renders an image as a link to it, or its alt text alone when it has no address. */
+function ImageLink({
+  src,
+  alt,
+}: {
+  readonly src: string | undefined;
+  readonly alt: string | undefined;
+}): JSX.Element {
+  return typeof src === "string" && src !== "" ? (
+    <a href={src} target="_blank" rel="noreferrer">
+      {alt === undefined || alt === "" ? src : alt}
+    </a>
+  ) : (
+    <>{alt}</>
+  );
+}
+
+/**
+ * The components for text that shows its https images inline. The window's
+ * content security policy loads images over https only, so an image at any
+ * other address stays a link. The image is fetched with no referrer, as a
+ * link is opened with none.
+ */
+const INLINE_IMAGE_COMPONENTS: Components = {
+  ...components,
+  img: ({ src, alt }) =>
+    typeof src === "string" && src.startsWith("https://") ? (
+      <img src={src} alt={alt ?? ""} referrerPolicy="no-referrer" />
+    ) : (
+      <ImageLink src={src} alt={alt} />
+    ),
 };
 
 /**
@@ -111,6 +138,7 @@ class PlainTextOnError extends Component<
 export const Markdown = memo(function Markdown({
   text,
   breaks = false,
+  inlineImages = false,
 }: {
   readonly text: string;
   /**
@@ -120,12 +148,14 @@ export const Markdown = memo(function Markdown({
    * meant.
    */
   readonly breaks?: boolean;
+  /** Shows https images inline rather than as links, as an open signal's blocks do. */
+  readonly inlineImages?: boolean;
 }): JSX.Element {
   return (
     <PlainTextOnError text={text}>
       <ReactMarkdown
         remarkPlugins={breaks ? [remarkGfm, remarkBreaks] : [remarkGfm]}
-        components={components}
+        components={inlineImages ? INLINE_IMAGE_COMPONENTS : components}
       >
         {text}
       </ReactMarkdown>

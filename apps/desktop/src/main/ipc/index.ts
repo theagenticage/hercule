@@ -21,6 +21,7 @@ import { MainMenu } from "../menu";
 import { RunnerIdentity } from "../runner-identity";
 import { openInBrowser } from "../security";
 import { StoredToken } from "../stored-token";
+import { UrgentSignalNotifications } from "../urgent-signal-notifications";
 import { WaitingNotifications } from "../waiting-notifications";
 import { answerIpcMessage } from "./message";
 
@@ -36,6 +37,7 @@ type IpcHandlerServices =
   | RunnerIdentity
   | StoredToken
   | ThisMac
+  | UrgentSignalNotifications
   | WaitingNotifications;
 
 /**
@@ -63,6 +65,8 @@ const IPC_HANDLERS: {
   "goMenu.set": (items) => MainMenu.use((menu) => menu.setGoItems(items)),
   "waiting.set": (requests) =>
     WaitingNotifications.use((notifications) => notifications.setWaitingRequests(requests)),
+  "urgentSignals.set": (signals) =>
+    UrgentSignalNotifications.use((notifications) => notifications.setUrgentSignals(signals)),
   "localController.find": () => ThisMac.use((thisMac) => thisMac.findLocalController),
   "localController.start": () => ThisMac.use((thisMac) => thisMac.startLocalController),
   "logsFolder.show": () => ThisMac.use((thisMac) => thisMac.showLogsFolder),

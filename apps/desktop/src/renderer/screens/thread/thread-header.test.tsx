@@ -161,12 +161,13 @@ describe("the side pane's toggle", () => {
 
   it("shows and hides the thread's side pane, pressed while the pane is open", async () => {
     await openApp(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
-    const toggle = await screen.findByRole("button", { name: "Show the side pane" });
+    const toggle = await screen.findByRole("button", { name: "Side pane" });
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.title).toBe("Show the side pane");
 
     await userEvent.click(toggle);
 
-    expect(toggle.getAttribute("aria-label")).toBe("Hide the side pane");
+    expect(toggle.title).toBe("Hide the side pane");
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
     expect(toggle.classList.contains("is-on")).toBe(true);
     expect(await screen.findByRole("complementary", { name: "Side pane" })).toBeTruthy();
@@ -174,6 +175,6 @@ describe("the side pane's toggle", () => {
 
   it("is drawn on a subagent's page too", async () => {
     await openApp(`/threads/${FIXTURE_THREAD_IDS.flaky}/subagents/${FIXTURE_SUBAGENT.id}`);
-    expect(await screen.findByRole("button", { name: "Show the side pane" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Side pane" })).toBeTruthy();
   });
 });

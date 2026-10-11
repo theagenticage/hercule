@@ -8,7 +8,7 @@
  * domains below this service use too.
  *
  * An open decision is returned to the user with each answer's describe line,
- * written from the current names by the `BindableOperations` port. Taking an
+ * written from the current names by the `BoundOperations` port. Taking an
  * answer runs its operation through the same port, as the user, in the
  * transaction that resolves the decision.
  */
@@ -24,12 +24,12 @@ import {
   createForbiddenError,
   createInvalidStateError,
   createNotFoundError,
-  decodeBindableOperation,
+  decodeAnswerOperation,
   DEFAULT_PAGE_LIMIT,
   NOTIFICATION_SORT_FIELDS,
   NotificationFilter,
   NotificationWithdrawInput,
-  type BindableOperation,
+  type AnswerOperation,
   type BoundAction,
   type BoundOperation,
   type DescribeLine,
@@ -61,7 +61,7 @@ import {
   withTransaction,
 } from "../db";
 import { AuditLog } from "../events";
-import { BindableOperations, type BindableOperationError } from "./bindable-operations";
+import { BoundOperations, type BoundOperationError } from "../bound-actions";
 import { Notifier } from "./notifier";
 import { notificationRepository } from "./repository";
 
@@ -127,8 +127,8 @@ const isProducer = (actor: Actor, producer: NotificationProducer): actor is Sess
  * An answer's operation after the check at read time: decoded, or refused,
  * with a describe line that shows the user why the answer cannot be taken.
  */
-type CheckedOperation =
-  | { readonly _tag: "decoded"; readonly operation: BindableOperation }
+type StoredOperationCheck =
+  | { readonly _tag: "decoded"; readonly operation: AnswerOperation<"notification.answer"> }
   | { readonly _tag: "refused"; readonly describeLine: DescribeLine };
 
 const make = Effect.gen(function* () {
@@ -136,7 +136,7 @@ const make = Effect.gen(function* () {
   const notifications = yield* notificationRepository;
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
-  const operations = yield* BindableOperations;
+  const operations = yield* BoundOperations;
 
   /**
    * Checks an answer's stored operation again before it is described. A
@@ -144,10 +144,10 @@ const make = Effect.gen(function* () {
    * list of operations an answer may run or a schema changed since it was
    * created, cannot be taken, and its describe line shows the user why.
    */
-  const checkStoredOperation = (operation: BoundOperation): Effect.Effect<CheckedOperation> =>
-    decodeBindableOperation(operation, []).pipe(
+  const checkStoredOperation = (operation: BoundOperation): Effect.Effect<StoredOperationCheck> =>
+    decodeAnswerOperation("notification.answer", operation, []).pipe(
       Effect.match({
-        onFailure: (refused): CheckedOperation => ({
+        onFailure: (refused): StoredOperationCheck => ({
           _tag: "refused",
           describeLine: [
             {
@@ -156,7 +156,7 @@ const make = Effect.gen(function* () {
             },
           ],
         }),
-        onSuccess: (decoded): CheckedOperation => ({ _tag: "decoded", operation: decoded }),
+        onSuccess: (decoded): StoredOperationCheck => ({ _tag: "decoded", operation: decoded }),
       }),
     );
 
@@ -171,7 +171,7 @@ const make = Effect.gen(function* () {
       if (notification.status !== "open") return notification;
       const checked = yield* Effect.forEach(notification.actions, (action) =>
         action.operation === null
-          ? Effect.succeed<CheckedOperation>({
+          ? Effect.succeed<StoredOperationCheck>({
               _tag: "refused",
               describeLine: NO_OPERATION_DESCRIBE_LINE,
             })
@@ -368,7 +368,7 @@ const make = Effect.gen(function* () {
      *   run, or its input no longer fits; the decision stays open;
      * - the operation's own error when it fails; the decision stays open.
      */
-    act: (input: ActInput): Effect.Effect<Notification, BindableOperationError> =>
+    act: (input: ActInput): Effect.Effect<Notification, BoundOperationError> =>
       Effect.gen(function* () {
         yield* requireUserActor("notification.act", ONLY_THE_USER);
         yield* withTransaction(
@@ -391,7 +391,9 @@ const make = Effect.gen(function* () {
             }
             if (action.operation !== null) {
               yield* operations.run(
-                yield* decodeBindableOperation(action.operation, ["operation"]),
+                yield* decodeAnswerOperation("notification.answer", action.operation, [
+                  "operation",
+                ]),
               );
             }
             yield* decideOrFail(notification, action);
@@ -411,5 +413,5 @@ export class NotificationService extends Context.Service<
 export const NotificationServiceLayer: Layer.Layer<
   NotificationService,
   never,
-  SqlClient.SqlClient | AuditLog | Notifier | BindableOperations
+  SqlClient.SqlClient | AuditLog | Notifier | BoundOperations
 > = Layer.effect(NotificationService)(make);

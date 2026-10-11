@@ -21,6 +21,12 @@ import { migrations } from "./index";
 /** The migrations before the one under test. */
 const BEFORE = migrations.filter(([id]) => id < 43);
 
+/**
+ * The migrations up to and including the one under test. A later migration
+ * may change the same profiles, so the test stops here.
+ */
+const THROUGH = migrations.filter(([id]) => id <= 43);
+
 const at = "2026-10-01T00:00:00.000Z";
 
 interface Seeded {
@@ -48,7 +54,7 @@ const seedAndMigrate = (seeded: ReadonlyArray<Seeded>): Promise<ReadonlyMap<stri
                     ${profile.name}, ${JSON.stringify(profile.grants)},
                     ${profile.shipped ? 1 : 0}, ${at}, ${at})`,
       );
-      yield* runMigrations();
+      yield* runMigrations(THROUGH);
       const rows = yield* sql<{
         readonly name: string;
         readonly grants: string;

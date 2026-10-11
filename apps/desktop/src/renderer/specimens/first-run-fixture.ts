@@ -278,6 +278,7 @@ const createScriptedBridge = ({
     firstScreen: { report: done },
     goMenu: { set: done },
     waiting: { set: done },
+    urgentSignals: { set: done },
     localController: { find, start },
     logsFolder: { show: done },
     setupToken: { read: () => Promise.resolve(setupToken) },

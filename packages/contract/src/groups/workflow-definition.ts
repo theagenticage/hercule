@@ -37,6 +37,7 @@ import {
   SpawnCheckout,
   refuseInvalidCheckoutRevision,
 } from "./session";
+import { SignalKind } from "./signal";
 
 /**
  * Describes a value the author wrote, for an error message. Text is quoted
@@ -369,24 +370,57 @@ const SignalTrigger = closedStruct({
   outputs: Schema.optionalKey(SignalOutputs),
 });
 
+/** The most signal kinds one signal input accepts. */
+export const MAX_INPUT_SIGNAL_KINDS = 32;
+
 /**
- * A value a run starts with. Its type is either a JSON Schema (`schema`) or a
- * Connection type (`connection`). Both are fields of one object instead of a
- * union, so an error in either is reported at its own field and not at the
- * whole input.
+ * The signal kinds a `signal` input accepts. It lists at least one kind, and
+ * never `proposal`: a proposal is answered by Accept, which creates its Task,
+ * so it cannot be handed to an agent.
+ */
+const InputSignalKinds = atMost(SignalKind, MAX_INPUT_SIGNAL_KINDS).check(
+  Schema.isMinLength(1, { message: "A signal input lists at least one signal kind." }),
+  Schema.makeFilter((kinds: ReadonlyArray<string>) =>
+    kinds.flatMap((kind, index) =>
+      kind === "proposal"
+        ? [
+            {
+              path: [index],
+              issue:
+                "A signal input cannot accept proposal. A proposal is answered by Accept, which creates its Task, so it cannot be handed to an agent. Start the work from the Task instead.",
+            },
+          ]
+        : [],
+    ),
+  ),
+);
+
+/**
+ * A value a run starts with. Its type is one of three, set by exactly one
+ * field:
+ *
+ * - `schema`: a JSON Schema the value must fit.
+ * - `connection`: the value is the id of a Connection of this type.
+ * - `signal`: the value is the id of a Signal of one of these kinds. Such a
+ *   workflow is offered as Hand to an agent on each signal of those kinds.
+ *
+ * The three are fields of one object instead of a union, so an error in one
+ * is reported at its own field and not at the whole input.
  */
 const InputDeclaration = closedStruct({
   name: InputName,
   schema: Schema.optionalKey(JsonObject),
   /** The value is the id of a Connection of this qualified type, such as `github/github`. */
   connection: Schema.optionalKey(closedStruct({ type: Schema.String })),
+  /** The value is the id of a Signal of one of these kinds, such as `github/review-requested`. */
+  signal: Schema.optionalKey(closedStruct({ kinds: InputSignalKinds })),
   required: Schema.Boolean,
   default: Schema.optionalKey(Schema.Json.check(refuseDeepJson)),
 }).check(
   Schema.makeFilter((input) =>
-    (input.schema === undefined) === (input.connection === undefined)
-      ? "An input sets its type with either schema or connection. Set exactly one of the two."
-      : undefined,
+    [input.schema, input.connection, input.signal].filter((type) => type !== undefined).length === 1
+      ? undefined
+      : "An input sets its type with exactly one of schema, connection and signal.",
   ),
 );
 

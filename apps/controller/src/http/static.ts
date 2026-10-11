@@ -69,22 +69,29 @@ const IDENTITY_PORTS = Array.from(
  * The key protection is `script-src 'self'` with no inline scripts, because it
  * stops such a script from running. A policy cannot control where a page
  * navigates, so a script that did run could still send the token away in the
- * address bar. The other directives close every silent channel (a fetch, an
- * image, a font, a frame). The only addresses outside this origin left open
- * are the loopback ports above, where the app asks each runner whether it is
- * on the browser's machine.
+ * address bar. The other directives close every other silent channel (a
+ * fetch, a font, a frame). The addresses outside this origin left open are:
+ *
+ * - the loopback ports above, where the app asks each runner whether it is
+ *   on the browser's machine;
+ * - any HTTPS address for an image, because images that content names, such
+ *   as a markdown image in an agent's prose, render inline (spec 14). What
+ *   that costs is tracked in #503.
  */
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self'",
   `connect-src 'self' ${IDENTITY_PORTS}`,
-  "img-src 'self' data: blob:",
+  "img-src 'self' data: blob: https:",
   "font-src 'self'",
   // CodeMirror, the workflow YAML editor, adds its base styles in a `<style>`
   // element when it starts. `style-src 'self'` blocks that element, and the
-  // editor renders unstyled. Allowing inline styles is safe here: an inline
-  // style cannot load anything from another origin, because `img-src` and
-  // `font-src` allow only this origin. `script-src` still blocks inline scripts.
+  // editor renders unstyled. An inline style cannot load a style sheet or a
+  // font from another origin, because `style-src` and `font-src` allow only
+  // this origin. It can load an image from any HTTPS address, so a style rule
+  // could send a value it matches on the page out in an image's URL. The
+  // token is in `localStorage`, not on the page, so no rule can match it; the
+  // remaining cost is tracked in #503. `script-src` still blocks inline scripts.
   "style-src 'self' 'unsafe-inline'",
   "frame-ancestors 'none'",
   "base-uri 'self'",

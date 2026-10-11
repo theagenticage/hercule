@@ -42,13 +42,14 @@ import {
   createDecodeValidationError,
   createForbiddenError,
   createValidationError,
-  decodeBindableOperation,
+  decodeAnswerOperation,
   MAX_NOTIFICATION_BODY_LENGTH,
   MAX_NOTIFICATION_TITLE_LENGTH,
   NotificationCreateInput,
   OWN_SESSION_ALIAS,
   truncateText,
-  type BindableOperation,
+  type AnswerOperation,
+  type AnswerOperationId,
   type BoundAction,
   type BoundOperation,
   type CoreNotificationKind,
@@ -59,17 +60,15 @@ import {
   type NotificationCreateResult,
   type NotificationProducer,
   type NotificationSubject,
-  type ResolutionOrigin,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
 import {
-  buildSessionStamp,
+  buildResolutionOrigin,
   CurrentActor,
   currentStamp,
   requireGrant,
   SYSTEM_ACTOR,
-  type Actor,
   type RunActor,
   type SessionActor,
 } from "../actor";
@@ -85,7 +84,7 @@ export interface CoreAction {
   readonly label: string;
   /** What choosing this answer means, shown as fine print under the answer. */
   readonly description?: string;
-  readonly operation: BindableOperation | null;
+  readonly operation: AnswerOperation<"notification.answer"> | null;
   readonly primary?: boolean;
 }
 
@@ -143,7 +142,7 @@ const USER_CANNOT_CREATE =
  * own answers. A producer that could bind these operations could make the
  * user approve something other than what the answer shows.
  */
-const CORE_ONLY_OPERATIONS: Partial<Record<BindableOperation["op"], string>> = {
+const CORE_ONLY_OPERATIONS: Partial<Record<AnswerOperationId<"notification.answer">, string>> = {
   "session.respondToApprovalRequest":
     "An answer cannot run session.respondToApprovalRequest: the core raises the decision about each approval request itself, with the request's own answers. To ask the user a question, bind session.input instead.",
   "permission.decide":
@@ -228,7 +227,7 @@ const replaceOwnSessionAlias = (
  * A run's step may bind `session.input` to any session.
  */
 const checkProducerMayBind = (
-  operation: BindableOperation,
+  operation: AnswerOperation<"notification.answer">,
   caller: SessionActor | RunActor,
   path: ReadonlyArray<string>,
 ): Effect.Effect<void, Validation> => {
@@ -261,28 +260,11 @@ const checkActions = (
       if (action.operation === null) return action;
       const path = ["actions", String(index), "operation"];
       const replaced = yield* replaceOwnSessionAlias(action.operation, caller, path);
-      const operation = yield* decodeBindableOperation(replaced, path);
+      const operation = yield* decodeAnswerOperation("notification.answer", replaced, path);
       yield* checkProducerMayBind(operation, caller, path);
       return { ...action, operation };
     }),
   );
-
-/**
- * Returns where a decision was resolved, from the actor who resolved it: the
- * web app for a user signed in there, the API for a user with an API key, the
- * session for a session, and the core for anything the controller did itself.
- */
-const buildResolutionOrigin = (actor: Actor): ResolutionOrigin => {
-  switch (actor._tag) {
-    case "user":
-      return actor.credential.kind === "login" ? "web" : "api";
-    case "session":
-      return buildSessionStamp(actor.sessionId);
-    case "run":
-    case "none":
-      return "core";
-  }
-};
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

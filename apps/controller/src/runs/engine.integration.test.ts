@@ -648,7 +648,7 @@ describe("a run whose plugin is disabled while it runs", () => {
         const run = await waitForRunToFinish(base, token, runId);
 
         expect(run.status, JSON.stringify(run)).toBe("completed");
-        expect(held.contexts.map((context) => context.run.stepId)).toEqual(["first", "second"]);
+        expect(held.contexts.map((context) => context.run?.stepId)).toEqual(["first", "second"]);
         const issues = await readIssues(await requestRun(base, token, workflow.id));
         expect(issues.length).toBeGreaterThan(0);
         for (const issue of issues) expect(issue.path[0]).toBe("steps");

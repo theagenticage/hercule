@@ -7,4 +7,5 @@
  * - the Scheduler, the loop that fires cron triggers.
  */
 export { TriggeredRunsLayer, WorkflowRunsLayer } from "./runs";
+export { WorkflowSignalsLayer } from "./signals";
 export { checkSchedulerInterval, runScheduler, SchedulerInterval } from "./scheduler";

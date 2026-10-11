@@ -331,13 +331,13 @@ interface BoundOperation {             // the same shape `permission.request` ca
   - ~~`permission.decide`, for the Permission Request's answers (Section 7.6). [#86](https://github.com/theagenticage/hercule/issues/86) builds it. Its "add to profile" answer edits a permission profile, which the test above refuses, so #86 must decide how the core binds it ([./16-open-items.md](./16-open-items.md) A).~~ *(Amended 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86): on the list now, see below.)*
   - Plugin actions, such as `github/pr.merge` ([./16-open-items.md](./16-open-items.md) A).
 
-  *(Amended 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86).)* **`permission.decide` is on the list on purpose.** It needs `permission.write`, and its `profile` answer edits a permission profile, so the test above would refuse it. It is the one entry the test allows: the test names it, with the reason. The user answers a Permission Request with it, and each answer changes one grant, for one session or for that session's profile, so one click can make it an informed choice. The core keeps it safe the way it keeps `session.respondToApprovalRequest` safe: `permission.decide` is the core's alone, and `notification.create` refuses it from every other producer with `validation`. A session or a run that could bind it could put "Add to profile" for a grant of its own choosing in front of the user. The list it lands on is still `BINDABLE_OPERATIONS`, because `usableIn` ([#395](https://github.com/theagenticage/hercule/issues/395), below) is not built yet. Whoever builds `usableIn` gives `permission.decide` the `notification.answer` place, for core producers only.
+  *(Amended 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86).)* **`permission.decide` is on the list on purpose.** It needs `permission.write`, and its `profile` answer edits a permission profile, so the test above would refuse it. It is the one entry the test allows: the test names it, with the reason. The user answers a Permission Request with it, and each answer changes one grant, for one session or for that session's profile, so one click can make it an informed choice. The core keeps it safe the way it keeps `session.respondToApprovalRequest` safe: `permission.decide` is the core's alone, and `notification.create` refuses it from every other producer with `validation`. A session or a run that could bind it could put "Add to profile" for a grant of its own choosing in front of the user. The list it lands on is still `BINDABLE_OPERATIONS`, because `usableIn` ([#395](https://github.com/theagenticage/hercule/issues/395), below) is not built yet. Whoever builds `usableIn` gives `permission.decide` the `notification.answer` place, for core producers only. *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* Done: `permission.decide` lists `notification.answer` only, and the core still refuses it from every other producer.
 
   *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#391](https://github.com/theagenticage/hercule/issues/391).)* **`usableIn` replaces `BINDABLE_OPERATIONS`.** Each operation, and each plugin action, declares the places it may run from: `workflow.step`, `notification.answer` and `signal.answer`. An answer may bind only an operation that lists its record's place. The table of which core operation lists which place is in [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2 (`notification`), and plugin actions declare theirs in [./05-plugins.md](./05-plugins.md#44-workflow-action). In short:
   - `task.update` and `run.start` stay usable in both places.
-  - `session.input` and `session.respondToApprovalRequest` are usable on Notifications only, so the who-binds-what rules above stay a Notification matter.
+  - `session.input`, `session.respondToApprovalRequest` and `permission.decide` are usable on Notifications only, so the who-binds-what rules above stay a Notification matter.
   - `task.create` (a proposal's Accept, Section 9.3) and `ignoreRule.create` (the core's Ignore Rule offer, Section 9.9) are usable on Signals only.
-  - Plugin actions, such as `github/pr.merge`, are usable on Signals.
+  - Plugin actions, such as `github/pr.merge`, are usable on Signals. *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* Only on Signals: a plugin action may not list `notification.answer` ([./05-plugins.md](./05-plugins.md#44-workflow-action)).
 
   Any operation that lists an `*.answer` place must declare a pure `describe`, and the safety test above now checks every such operation instead of a list. Who binds what on a signal is in Section 9.4.
 - **Not bounded by the producer's profile.** Authoring is *not* checked against the producer's permission profile: a `worker` session that lacks ~~`workflow.run`~~ `run.start` may still propose "Start Bugfix"; only the click runs it, under the user's parity. The conservative reading (validate the operation against the producer's profile at creation) was rejected: the shipped Triage agent runs as `worker` and lacks ~~`workflow.run`~~ `run.start` and `github/pr.merge`, and proposing work it may not do itself is the one thing Intake exists for.
@@ -467,7 +467,7 @@ interface Signal {
   origin:
     | { type: "event"; eventId: number; connectionId: string; threadRef: string;
         screened?: { runId: string; reason: string } }     // raised from an event (Section 9.2)
-    | { type: "api"; actor: Actor; runId?: string; workflowId?: string;
+    | { type: "api"; actor: Actor; runId?: string; workflowId?: string; assistantId?: string;
         eventIds: number[]; reason: string };               // raised by signal.raise (Section 9.3)
   title: string;
   asker?: string;                // who waits on the user: "Marta"
@@ -505,6 +505,8 @@ interface Signal {
   - the assistant's name;
   - "You";
   - "Hercule", for the suggestions the core raises (Section 9.9).
+
+  *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* The `api` origin gains `assistantId`, set when a session of an assistant's conversation raised the signal. The actor stamp `session:<id>` does not say whose session it is, and a client cannot find out cheaply: it would read each raising session, one read per row. The core knows the assistant when it checks the caller, so it stamps it at raise time, as it stamps a run's `workflowId`. A client names the workflow from `workflowId` and the assistant from `assistantId`, and falls back to "A workflow" or "An agent" when that record is gone.
 - **A Signal keeps its events alive.** `origin.eventId`, `origin.eventIds` and `resolution.eventId` are referrers under the retention rule of [./04-state-store.md](./04-state-store.md#event-log-as-audit-log-and-retention), so "See the event" always lands.
 - **Read beside the record, never stored on it:** `snooze?` (Section 9.7), each action's describe line (Section 7.4), and the two parts the core draws outside the blocks (Section 9.5).
 - **Live updates.** The `signal` live topic carries the ids of changed signals ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#signal)).
@@ -555,10 +557,11 @@ Four kinds belong to the core and are not prefixed. Any actor may raise them thr
 
 - It raises core kinds only. A plugin's kind is raised only by the path of Section 9.2.
 - Any actor holding `signal.write` may call it: a run's session (Triage or any workflow), an assistant, a plugin through the public API, or the user. In v1 the `signal` grants bind sessions only ([./13-security.md](./13-security.md#61-grant-families)).
-- It carries `title`, `blocks`, `actions`, the `eventIds` the signal is about, a one-line `reason`, and any priority except `urgent`. The core fills in `origin` with the actor and, for a run, its `runId` and `workflowId`.
+- It carries `title`, `blocks`, `actions`, the `eventIds` the signal is about, a one-line `reason`, and any priority except `urgent`. The core fills in `origin` with the actor and, for a run, its `runId` and `workflowId`; *(amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524))* for a session of an assistant's conversation, the `assistantId` (Section 9.1).
 - A `proposal` requires `task`, the `task.create` input: title, description, priority, labels (including the topic label, Section 4) and provenance.
 - The caller may bind any operation usable as `signal.answer`, plugin actions included, and names the `connectionId` when the action declares a Connection (Section 9.4).
 - Only the actor that raised a signal may withdraw it, with `signal.withdraw`.
+- *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* One signal is at most 256 KB, written as JSON. Each block and each action has its own limit, but many blocks at their limits would together make one signal too large to list and draw, so `signal.raise` refuses a larger signal with `validation`. The caller shortens the blocks and links to the source for the rest. It also refuses an action whose id the core uses for its own actions: `accept`, `dismiss`, `done`, or one that starts with `hand-to-`. A proposal's `task` must fit the input limit of a bound action, because Accept binds it. The core checks the whole signal, its own actions included, before it stores it, so a signal that would not read back is never written.
 
 **A proposal is a signal first.**
 
@@ -584,11 +587,11 @@ A signal's actions are Bound Actions, with the shape and the rules of Section 7.
 **Taking an action.** `signal.act { signalId, actionId, text? }` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#signal)) runs the frozen operation as the user, as `notification.act` does (Section 7.4, Executed):
 
 - Only the user may act. A session or a run holding `signal.write` is refused.
-- Every answer resolves the signal at the click, as `decided` with the answer's `actionId`. The core writes the outcome from the answer's label and subject ("Approved #1293", "Handed to Review PR"), unless the plugin action declares its own `outcome` line ([./05-plugins.md](./05-plugins.md#44-workflow-action)), as Gmail's Reply does: "Replied to Marta Visser".
+- Every answer resolves the signal at the click, as `decided` with the answer's `actionId`. The core writes the outcome from the answer's label and subject ("Approved #1293", "Handed to Review PR"), unless the plugin action declares its own `outcome` line ([./05-plugins.md](./05-plugins.md#44-workflow-action)), as Gmail's Reply does: "Replied to Marta Visser". *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* An outcome line is at most 1024 characters. The core cuts a longer line from a plugin to that length, ending it with "…", so a plugin cannot store a record the schema refuses to read.
 - A failed operation leaves the signal open with the error shown, and the user may retry or pick another answer.
 - `signal.act` refuses `actionId: "done"`: Done goes through `signal.markDone`.
 
-**A typed reply.** An action may carry `field?: { name, placeholder }`. `name` is one top-level text field of the operation's input (`body` on `github/issue.comment`), empty until the click. `signal.act`'s `text` fills it in; the core decodes the input again and runs it. The describe line leaves the text out, and the text box beside it shows the text in full. `field` exists on Signals only: `notification.create` refuses it.
+**A typed reply.** An action may carry `field?: { name, placeholder }`. `name` is one top-level text field of the operation's input (`body` on `github/issue.comment`), empty until the click. `signal.act`'s `text` fills it in; the core decodes the input again and runs it. The describe line leaves the text out, and the text box beside it shows the text in full. `field` exists on Signals only: `notification.create` refuses it. *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* Only a plugin action takes a `field` in v1: a core operation usable as `signal.answer` (`task.create`, `task.update`, `run.start`) has no input a reply belongs in, so `signal.raise` refuses `field` on one with `validation`.
 
 **The suggested action.** A signal has at most one `primary` action. `build` or the `signal.raise` caller may mark one of its own. The actions the core adds are never primary, with two exceptions: Accept on a proposal and Ignore on the core's Ignore Rule offer. When nobody marks one, nothing is suggested.
 
@@ -603,6 +606,7 @@ A signal's actions are Bound Actions, with the shape and the rules of Section 7.
 
 - A workflow that declares an input of type `signal: { kinds: [...] }` ([./07-workflows.md](./07-workflows.md#3-inputs)) accepts signals of those kinds. `proposal` is refused as such a kind.
 - When a signal is written, every enabled workflow that accepts its kind is offered as an action binding `run.start { workflowId, inputs: { <input name>: <signal id> } }`. The actions are frozen with the signal, so a workflow created later is not offered on existing signals.
+- *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* A workflow with another required input that has no default is not offered. The action fills only the signal input, so `run.start` would refuse the click. Give the other inputs defaults to make the workflow a Hand to an agent target.
 - It resolves at the click, like every answer, with the outcome "Handed to *workflow name*". The run reads the signal and its events through `signal.read`. Done shows the run's state beside the line, read-only; a failed run never puts the signal back on To do, and its `core.run-failed` Notification goes to Check-in.
 
 **Build failure.**

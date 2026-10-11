@@ -37,11 +37,13 @@ import {
   type ModelOption,
   type MutableLiveTopic,
   type OpenRequest,
+  type PluginDetail,
   type Project,
   type ProviderInstance,
   type Resource,
   type Runner,
   type Session,
+  type Signal,
   type Subagent,
   type TapItem,
   type TranscriptRow,
@@ -81,6 +83,8 @@ export interface FakeBridge {
   readonly goMenus: readonly EncodedIpcRequest<"goMenu.set">[];
   /** Each list of Requests waiting on the user the app sent main, oldest first. */
   readonly waitingLists: readonly EncodedIpcRequest<"waiting.set">[];
+  /** Each list of Now signals the app sent main for its notifications, oldest first. */
+  readonly urgentSignalLists: readonly EncodedIpcRequest<"urgentSignals.set">[];
   /**
    * Asks the app to open a thread or an assistant, as main does for a Go
    * menu item and a notification's click.
@@ -155,6 +159,7 @@ export const createFakeBridge = ({
   const destinationListeners = new Set<(payload: EncodedIpcPayload<"destination.open">) => void>();
   const goMenus: EncodedIpcRequest<"goMenu.set">[] = [];
   const waitingLists: EncodedIpcRequest<"waiting.set">[] = [];
+  const urgentSignalLists: EncodedIpcRequest<"urgentSignals.set">[] = [];
   return {
     bridge: {
       controllerUrl: {
@@ -186,6 +191,12 @@ export const createFakeBridge = ({
       waiting: {
         set: (requests) => {
           waitingLists.push(requests);
+          return Promise.resolve(undefined);
+        },
+      },
+      urgentSignals: {
+        set: (signals) => {
+          urgentSignalLists.push(signals);
           return Promise.resolve(undefined);
         },
       },
@@ -251,6 +262,7 @@ export const createFakeBridge = ({
     savedUrls,
     goMenus,
     waitingLists,
+    urgentSignalLists,
     firstRunWrites,
     appearanceWrites,
     openedLinks,
@@ -322,6 +334,38 @@ export const setVisibility = (state: DocumentVisibilityState): void => {
 };
 
 /**
+ * Replaces `ResizeObserver` with one whose callbacks the test calls, and
+ * returns a function that calls them, as a resize would. Given an element,
+ * the function calls only the observers watching it, so an observer that
+ * reads sizes jsdom cannot give, such as a virtualized list's, is left out.
+ */
+export const stubResizeObserver = (): ((target?: Element) => void) => {
+  const observed = new Map<() => void, Set<Element>>();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      readonly callback: () => void;
+      constructor(callback: () => void) {
+        this.callback = callback;
+      }
+      observe(element: Element): void {
+        const elements = observed.get(this.callback) ?? new Set();
+        observed.set(this.callback, elements.add(element));
+      }
+      unobserve(): void {}
+      disconnect(): void {
+        observed.delete(this.callback);
+      }
+    },
+  );
+  return (target) => {
+    for (const [callback, elements] of observed) {
+      if (target === undefined || elements.has(target)) callback();
+    }
+  };
+};
+
+/**
  * Makes every element measure `width` by `height` CSS pixels, until
  * `vi.restoreAllMocks` runs. jsdom lays nothing out, so every element would
  * measure 0, and a virtualized list, which reads its own size to know how
@@ -344,6 +388,10 @@ export interface SidebarRecords {
   readonly username: string;
   /** The assistants, each with the current session of its main conversation. None when absent. */
   readonly assistants?: readonly AssistantRecords[];
+  /** The signals on To do. None when absent. */
+  readonly signals?: readonly Signal[];
+  /** The installed plugins. None when absent. */
+  readonly plugins?: readonly PluginDetail[];
 }
 
 /** An assistant as the stubbed controller holds it. */
@@ -408,6 +456,11 @@ export const buildSidebarHandlers = (
   "GET /api/v1/tasks": { body: { items: [] } },
   // The shell reads the Connections, for New project and the starter threads.
   "GET /api/v1/connections": { body: { items: [] } },
+  // The shell reads To do for Intake's count, and the plugins for its sources.
+  "GET /api/v1/signals": { body: records.signals ?? [] },
+  "GET /api/v1/plugins": { body: records.plugins ?? [] },
+  // Intake reads the workflows, whose names label the signals their runs raised.
+  "GET /api/v1/workflows": { body: { items: [] } },
   // Settings > Assistants reads the picked assistant's memory.
   ...Object.fromEntries(
     (records.assistants ?? []).flatMap(({ assistant }) =>

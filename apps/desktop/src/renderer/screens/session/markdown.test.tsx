@@ -55,7 +55,26 @@ describe("Markdown", () => {
     expect(link.getAttribute("rel")).toBeNull();
   });
 
-  it("shows an image as a link to it, as the window loads no image from elsewhere", () => {
+  it("shows https images inline only when asked, and any other image as a link", () => {
+    const { container } = render(
+      <div className="b-words">
+        <Markdown
+          text="![retries per hour](https://example.com/chart.png) ![local](http://example.com/a.png)"
+          inlineImages
+        />
+      </div>,
+    );
+    const image = container.querySelector("img");
+    expect(image?.getAttribute("src")).toBe("https://example.com/chart.png");
+    expect(image?.getAttribute("alt")).toBe("retries per hour");
+    expect(image?.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(container.querySelectorAll("img")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "local" }).getAttribute("href")).toBe(
+      "http://example.com/a.png",
+    );
+  });
+
+  it("shows an image as a link to it, so reading a message loads nothing from elsewhere", () => {
     const body = renderMarkdown(
       "The chart: ![retries per hour](https://example.com/chart.png) and ![](https://example.com/raw.png)",
     );

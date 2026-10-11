@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState, type JSX } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
+import { listUrgentSignals } from "@hercule/client-core";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
-import { ensureShellData } from "../../app/queries";
+import { ensureShellData, pluginsQuery, signalsToDoQuery } from "../../app/queries";
 import { useWaiting } from "../../app/waiting";
 import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
 import { Shell } from "../../shell";
@@ -87,11 +89,22 @@ function ShellLayout(): JSX.Element {
     "Could not update the dock badge and the notifications:",
   );
 
-  // Only a signed-in user can start a thread, open the Office or open
-  // Settings, so only the shell listens for File > New Thread, Go > Office and
-  // the app menu's Settings. The Office and Settings, like a thread opened
-  // from the menu, replace whatever the user was doing, the project picker
-  // included.
+  // Main notifies each new Now signal, but only the page holds the To do
+  // list. The shell sends it, not Intake, so a Now signal notifies while
+  // Intake is closed.
+  const signals = useSuspenseQuery(signalsToDoQuery(controller.client)).data;
+  const plugins = useSuspenseQuery(pluginsQuery(controller.client)).data;
+  useSendOnChange(
+    listUrgentSignals(signals, plugins),
+    bridge.urgentSignals.set,
+    "Could not update the urgent signal notifications:",
+  );
+
+  // Only a signed-in user can start a thread, open the Office, Intake or
+  // Settings, so only the shell listens for File > New Thread, Go > Office,
+  // Go > Intake and the app menu's Settings. The Office, Intake and Settings,
+  // like a thread opened from the menu, replace whatever the user was doing,
+  // the project picker included.
   useEffect(
     () =>
       bridge.menu.onCommand((command) => {
@@ -99,6 +112,10 @@ function ShellLayout(): JSX.Element {
         if (command === "openOffice") {
           setDialog(null);
           void navigate({ to: "/office" });
+        }
+        if (command === "openIntake") {
+          setDialog(null);
+          void navigate({ to: "/intake" });
         }
         if (command === "openSettings") {
           setDialog(null);

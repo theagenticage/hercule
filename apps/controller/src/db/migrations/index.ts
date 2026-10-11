@@ -71,6 +71,8 @@ import retiredIntakeSettings from "./0060-retired-intake-settings";
 import permissionRequests from "./0061-permission-requests";
 import assistantMemory from "./0062-assistant-memory";
 import transcriptSearch from "./0063-transcript-search";
+import signals from "./0064-signals";
+import signalGrants from "./0065-signal-grants";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -136,6 +138,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [61, "permission-requests", Effect.succeed(permissionRequests)],
   [62, "assistant-memory", Effect.succeed(assistantMemory)],
   [63, "transcript-search", Effect.succeed(transcriptSearch)],
+  [64, "signals", Effect.succeed(signals)],
+  [65, "signal-grants", Effect.succeed(signalGrants)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

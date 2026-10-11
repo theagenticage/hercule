@@ -43,6 +43,9 @@ export {
 export {
   ActionError,
   AuthError,
+  BINDING_PLACES,
+  BindingPlace,
+  DescribeLinePart,
   DeclaredCapabilities,
   EventSourceNames,
   FeedDeclaration,
@@ -51,6 +54,8 @@ export {
   ProviderDefinition,
   WorkflowActionNames,
   type ActionContext,
+  type AnswerAction,
+  type AnswerPlace,
   type IngestConnection,
   type ConnectionResources,
   type EmittedEvent,
@@ -61,6 +66,7 @@ export {
   type LinkedResource,
   type PollResult,
   type WorkflowActionContribution,
+  type WorkflowStepAction,
 } from "./contributions";
 
 export {

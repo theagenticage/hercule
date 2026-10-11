@@ -15,7 +15,11 @@
  * - `task`, for the open tasks a Draft Thread offers to start from;
  * - `connection`, for the GitHub Connection the New project form clones
  *   through, which may be made in the web app while this app runs;
- * - `assistant`, for the assistants the sidebar's Assistants section lists.
+ * - `assistant`, for the assistants the sidebar's Assistants section lists;
+ * - `signal`, for Intake's To do list, whose count the Hercule segment shows
+ *   and whose Now signals notify, so it stays subscribed while Intake is
+ *   closed;
+ * - `plugin`, for the plugins whose names label each signal's source.
  *
  * Each push invalidates the query keys it lists. The screens never deal with
  * the socket.
@@ -43,6 +47,8 @@ const SHELL_TOPICS: readonly MutableLiveTopic[] = [
   "task",
   "connection",
   "assistant",
+  "signal",
+  "plugin",
 ];
 
 /**

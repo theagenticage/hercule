@@ -28,6 +28,9 @@ import * as SchemaAST from "effect/SchemaAST";
 import type * as SchemaIssue from "effect/SchemaIssue";
 import {
   ANY_CONNECTION,
+  CORE_SIGNAL_KINDS,
+  isCoreSignalKind,
+  isQualifiedId,
   isSchedule,
   shortenLibraryMessage,
   isId,
@@ -213,20 +216,41 @@ const checkExpressionMap = (
   );
 
 /**
- * Validates a Connection input. Its type must be a Connection type of an
- * active plugin, and its default, if present, must be the id of an existing
- * Connection of that type. Returns no issues for any other kind of input.
+ * Validates a Connection input or a signal input, and returns no issues for a
+ * `schema` input.
  *
- * A plugin that is not active cannot act through its Connections, in the same
- * way that its event kinds and actions cannot be used.
+ * - A Connection input's type must be a Connection type of an active plugin,
+ *   and its default, if present, must be the id of an existing Connection of
+ *   that type. A plugin that is not active cannot act through its
+ *   Connections, in the same way that its event kinds and actions cannot be
+ *   used.
+ * - Each kind a signal input accepts must be a core kind or a plugin's
+ *   qualified kind. The schema lets any unqualified word through, because it
+ *   cannot know the core kinds; a word that is neither would make the
+ *   workflow wait for signals that never exist.
  */
 const listInputIssues = (
   input: Input,
   index: number,
   references: ResolvedReferences,
 ): ReadonlyArray<Issue> => {
-  if (input.connection === undefined) return [];
   const path = ["inputs", String(index)];
+  if (input.signal !== undefined) {
+    return input.signal.kinds.flatMap((kind, kindIndex) =>
+      isCoreSignalKind(kind) || isQualifiedId(kind)
+        ? []
+        : [
+            {
+              path: [...path, "signal", "kinds", String(kindIndex)],
+              message:
+                `${quoteAuthorText(kind)} is not a signal kind. ` +
+                `Write a core kind (${CORE_SIGNAL_KINDS.filter((core) => core !== "proposal").join(", ")}) ` +
+                "or a plugin's qualified kind, such as github/review-requested.",
+            },
+          ],
+    );
+  }
+  if (input.connection === undefined) return [];
   const wanted = input.connection.type;
   if (!references.connectionTypes.has(wanted)) {
     // The default can only be checked against a valid type. If the type is
@@ -922,6 +946,14 @@ const listActionIssues = (
           `${quoteAuthorText(step.action)} is not a known action. ` +
           "A step can use a built-in action or an action of an active plugin. " +
           `The known actions are: ${[...references.actions.keys()].join(", ")}.`,
+      },
+    ];
+  }
+  if (!action.usableIn.includes("workflow.step")) {
+    return [
+      {
+        path: [...path, "action"],
+        message: `The action ${action.id} cannot be called by a step: its plugin lists only ${action.usableIn.join(" and ")} in its usableIn, so only the user's answer may run it. Use another action.`,
       },
     ];
   }

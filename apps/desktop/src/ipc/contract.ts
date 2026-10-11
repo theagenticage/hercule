@@ -278,14 +278,16 @@ const HttpUrl = Schema.String.check(
 );
 
 /**
- * A menu item the page carries out: Sign Out, New Thread, Office, Settings,
- * Send, or one of View's two faces of the sidebar. `showOrchestrationFace` is
- * View > Hercule; the identifier leaves out the product name.
+ * A menu item the page carries out: Sign Out, New Thread, Office, Intake,
+ * Settings, Send, or one of View's two faces of the sidebar.
+ * `showOrchestrationFace` is View > Hercule; the identifier leaves out the
+ * product name.
  */
 export const MenuCommand = Schema.Literals([
   "signOut",
   "newThread",
   "openOffice",
+  "openIntake",
   "openSettings",
   "send",
   "showThreadsFace",
@@ -298,7 +300,8 @@ export type MenuCommand = typeof MenuCommand.Type;
  * such as a notification or a Go menu item:
  *
  * - `thread`: the thread of the session `sessionId`;
- * - `assistant`: the screen of the assistant `assistantId`.
+ * - `assistant`: the screen of the assistant `assistantId`;
+ * - `signal`: Intake, with the signal `signalId` selected.
  *
  * Main passes a destination back to the page as it was sent, and never acts
  * on its kind: only the page knows how to open each one.
@@ -306,6 +309,7 @@ export type MenuCommand = typeof MenuCommand.Type;
 export const Destination = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("thread"), sessionId: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("assistant"), assistantId: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("signal"), signalId: Schema.String }),
 ]);
 export type Destination = typeof Destination.Type;
 
@@ -332,6 +336,18 @@ export const WaitingRequest = Schema.Struct({
   body: Schema.String,
 });
 export type WaitingRequest = typeof WaitingRequest.Type;
+
+/**
+ * An open signal on To do whose priority is `urgent`, one Intake shows under
+ * Now, as its notification needs it: the signal's id, and the notification's
+ * text, ready to show.
+ */
+export const UrgentSignal = Schema.Struct({
+  signalId: Schema.String,
+  title: Schema.String,
+  body: Schema.String,
+});
+export type UrgentSignal = typeof UrgentSignal.Type;
 
 /**
  * The IPC channels from the renderer to main, keyed by name. A name is
@@ -422,6 +438,18 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
    */
   "waiting.set": {
     request: Schema.Array(WaitingRequest),
+    response: Schema.Void,
+  },
+  /**
+   * Sends every urgent signal open on To do, whenever the list changes. Main
+   * shows a native notification for each signal that was not in the last
+   * list, while the window is not focused, and removes the notification of a
+   * signal that left it. None of them counts on the dock badge: a signal is
+   * not an agent waiting. Main keeps what it has shown, so a list sent
+   * twice, as after a reload, shows nothing twice.
+   */
+  "urgentSignals.set": {
+    request: Schema.Array(UrgentSignal),
     response: Schema.Void,
   },
   /**

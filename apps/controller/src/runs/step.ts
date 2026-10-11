@@ -38,17 +38,14 @@ import {
   type TaskFilter,
   type TaskUpdateCall,
 } from "@hercule/contract";
-import {
-  ActionError,
-  type ActionContext,
-  type WorkflowActionContribution,
-} from "@hercule/plugin-host";
+import { ActionError, type ActionContext } from "@hercule/plugin-host";
 import { buildRunActor, CurrentActor } from "../actor";
 import { connectionRepository, ConnectionTypes } from "../connections";
 import { nowIso } from "../db";
 import { renderTemplates } from "../expressions";
 import {
   CONNECTION_PARAM,
+  executePluginAction,
   isBuiltInControllerActionId,
   PluginHost,
   separateConnectionParam,
@@ -190,42 +187,6 @@ const describeActionFailure = (failure: unknown): StepError | undefined => {
     message: issues.length === 0 ? message : `${message}: ${issues.map(formatIssue).join("; ")}`,
   };
 };
-
-/**
- * Calls a plugin's action with a signal that aborts when the run is
- * cancelled, and with the Connection it acts through, if any. Returns its
- * result encoded with the action's output schema.
- * Fails with the action's `ActionError`, or with an `ActionError` of code
- * `unexpected` when the result does not match the output schema: later steps
- * read the output, so a result of the wrong shape must not be stored as if
- * the step had succeeded.
- *
- * Cancelling a run interrupts the fiber that executes it, and the signal
- * passes that on to whatever the action waits on outside the controller.
- */
-const executePluginAction = (
-  action: RegisteredWorkflowAction,
-  execute: WorkflowActionContribution["execute"],
-  input: unknown,
-  context: Pick<ActionContext, "run" | "connection">,
-): Effect.Effect<unknown, ActionError> =>
-  Effect.suspend(() => {
-    const cancelled = new AbortController();
-    return Effect.flatMap(
-      Effect.onInterrupt(execute(input, { ...context, signal: cancelled.signal }), () =>
-        Effect.sync(() => cancelled.abort()),
-      ),
-      (output) =>
-        Effect.mapError(
-          Schema.encodeUnknownEffect(action.output as Schema.Codec<unknown>)(output),
-          (error) =>
-            new ActionError({
-              code: "unexpected",
-              message: `The action returned a value that does not match its output schema: ${listDecodeIssues(error).map(formatIssue).join("; ")}`,
-            }),
-        ),
-    );
-  });
 
 /**
  * Waits `seconds` from `startedAt`, and returns `{}`. A step that a restart

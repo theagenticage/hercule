@@ -37,7 +37,7 @@ const findMenuItem = (menuBar: MenuTemplate, name: string, label: string) =>
 /**
  * Returns whether each item only a signed-in user can choose is enabled in
  * `menuBar`: Settings…, Sign Out, New Thread, View's Threads and Hercule,
- * and Office, in that order.
+ * Office and Intake, in that order.
  */
 const readSignedInItemsEnabled = (menuBar: MenuTemplate): Array<boolean | undefined> =>
   [
@@ -47,6 +47,7 @@ const readSignedInItemsEnabled = (menuBar: MenuTemplate): Array<boolean | undefi
     findMenuItem(menuBar, "View", "Threads"),
     findMenuItem(menuBar, "View", "Hercule"),
     findMenuItem(menuBar, "Go", "Office"),
+    findMenuItem(menuBar, "Go", "Intake"),
   ].map((item) => item?.enabled);
 
 /** Chooses an item of the menu bar, as the user does, by its menu's name and its label. */
@@ -181,18 +182,18 @@ describe("MainMenu", () => {
     [
       "enabled when a login token is stored",
       { controllerUrl: CONTROLLER_URL, token: "AAEC" },
-      [true, true, true, true, true, true],
+      [true, true, true, true, true, true, true],
     ],
-    ["disabled when none is stored", null, [false, false, false, false, false, false]],
+    ["disabled when none is stored", null, [false, false, false, false, false, false, false]],
   ])(
-    "starts with Settings…, Sign Out, New Thread, Threads, Hercule and Office %s",
+    "starts with Settings…, Sign Out, New Thread, Threads, Hercule, Office and Intake %s",
     async (_case, settings, enabled) => {
       if (settings !== null) writeFileSync(settingsFile.path, JSON.stringify(settings));
       expect(readSignedInItemsEnabled(await readFirstMenuBar())).toEqual(enabled);
     },
   );
 
-  it("enables Settings…, Sign Out, New Thread, Threads, Hercule and Office when the user signs in, and disables them when the user signs out", async () => {
+  it("enables Settings…, Sign Out, New Thread, Threads, Hercule, Office and Intake when the user signs in, and disables them when the user signs out", async () => {
     const readEnabled = async (use: (menu: MainMenu["Service"]) => Effect.Effect<unknown>) =>
       readSignedInItemsEnabled((await runWithMenu(use)).menuBar);
     expect(await readEnabled((menu) => menu.setSignedIn(true))).toEqual([
@@ -202,10 +203,11 @@ describe("MainMenu", () => {
       true,
       true,
       true,
+      true,
     ]);
     expect(
       await readEnabled((menu) => Effect.all([menu.setSignedIn(true), menu.setSignedIn(false)])),
-    ).toEqual([false, false, false, false, false, false]);
+    ).toEqual([false, false, false, false, false, false, false]);
   });
 
   it("shows the window and sends the page signOut when Sign Out is chosen", async () => {
@@ -249,21 +251,28 @@ describe("MainMenu", () => {
     expect(window).toEqual([`showAndSend menu.command "${command}"`]);
   });
 
-  it("holds Office with ⌘⇧O, then a separator and one dimmed No Threads, in Go at start", async () => {
+  it("holds Office with ⌘⇧O, Intake with ⌘⇧I, then a separator and one dimmed No Threads, in Go at start", async () => {
     const items = listMenuItems(await readFirstMenuBar(), "Go");
     expect(items.map((item) => [item.label ?? item.type, item.accelerator, item.enabled])).toEqual([
       ["Office", "CmdOrCtrl+Shift+O", false],
+      ["Intake", "CmdOrCtrl+Shift+I", false],
       ["separator", undefined, undefined],
       ["No Threads", undefined, false],
     ]);
   });
 
-  it("shows the window and sends the page openOffice when Office is chosen", async () => {
-    const { window } = await runWithMenu((menu, choose) =>
-      Effect.all([menu.setSignedIn(true), choose("Go", "Office")]),
-    );
-    expect(window).toEqual(['showAndSend menu.command "openOffice"']);
-  });
+  it.each([
+    ["Office", "openOffice"],
+    ["Intake", "openIntake"],
+  ])(
+    "shows the window and sends the page its command when %s is chosen",
+    async (label, command) => {
+      const { window } = await runWithMenu((menu, choose) =>
+        Effect.all([menu.setSignedIn(true), choose("Go", label)]),
+      );
+      expect(window).toEqual([`showAndSend menu.command "${command}"`]);
+    },
+  );
 
   it("lists the items the page sends in Go, with ⌘1, ⌘2 and on, while the user is signed in", async () => {
     const { menuBar } = await runWithMenu((menu) =>
@@ -271,6 +280,7 @@ describe("MainMenu", () => {
     );
     expect(listMenuItems(menuBar, "Go").map((item) => [item.label, item.accelerator])).toEqual([
       ["Office", "CmdOrCtrl+Shift+O"],
+      ["Intake", "CmdOrCtrl+Shift+I"],
       [undefined, undefined],
       ["Fix the login bug", "CmdOrCtrl+1"],
       ["Write the release notes", "CmdOrCtrl+2"],
@@ -304,6 +314,7 @@ describe("MainMenu", () => {
     );
     expect(listMenuItems(menuBar, "Go").map((item) => item.label)).toEqual([
       "Office",
+      "Intake",
       undefined,
       "No Threads",
     ]);

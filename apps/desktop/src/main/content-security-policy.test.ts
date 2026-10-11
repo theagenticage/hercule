@@ -5,7 +5,7 @@ describe("buildContentSecurityPolicy", () => {
   it("lets the packaged app connect nowhere before a controller is saved", () => {
     // Spec 17's policy, word for word, with connect-src 'none'.
     expect(buildContentSecurityPolicy(null, null)).toBe(
-      "default-src 'self'; script-src 'self'; connect-src 'none'; img-src 'self' data: blob:; " +
+      "default-src 'self'; script-src 'self'; connect-src 'none'; img-src 'self' data: blob: https:; " +
         "font-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'; " +
         "base-uri 'self'; form-action 'none'",
     );
@@ -14,7 +14,7 @@ describe("buildContentSecurityPolicy", () => {
   it("lets the packaged app connect to the saved controller over HTTP and WebSocket only", () => {
     expect(buildContentSecurityPolicy("http://127.0.0.1:4937", null)).toBe(
       "default-src 'self'; script-src 'self'; " +
-        "connect-src http://127.0.0.1:4937 ws://127.0.0.1:4937; img-src 'self' data: blob:; " +
+        "connect-src http://127.0.0.1:4937 ws://127.0.0.1:4937; img-src 'self' data: blob: https:; " +
         "font-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'; " +
         "base-uri 'self'; form-action 'none'",
     );
@@ -39,7 +39,7 @@ describe("buildContentSecurityPolicy", () => {
     expect(buildContentSecurityPolicy("http://127.0.0.1:4937", "http://127.0.0.1:5199/")).toBe(
       "default-src 'self'; script-src 'self' 'unsafe-inline'; " +
         "connect-src http://127.0.0.1:4937 ws://127.0.0.1:4937 http://127.0.0.1:5199 ws://127.0.0.1:5199; " +
-        "img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: blob: https:; font-src 'self'; style-src 'self' 'unsafe-inline'; " +
         "object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
     );
   });

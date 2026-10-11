@@ -28,9 +28,14 @@ const buildConnectSources = (url: string): ReadonlyArray<string> => {
  * Both URLs must be http or https URLs. The settings only ever hold such a
  * URL, and the dev script always passes one.
  *
- * Images may also come from `blob:` URLs: the renderer reads an attached
- * image with the token in a header and shows its bytes through an object
- * URL, so the token never goes into an image's URL.
+ * Images may also come from:
+ *
+ * - `blob:` URLs: the renderer reads an attached image with the token in a
+ *   header and shows its bytes through an object URL, so the token never
+ *   goes into an image's URL;
+ * - any HTTPS address: a signal's blocks carry images from their source,
+ *   such as an author's avatar, and Intake draws them inline. What loading
+ *   them tells their host is tracked in #503.
  */
 export const buildContentSecurityPolicy = (
   controllerUrl: string | null,
@@ -45,7 +50,7 @@ export const buildContentSecurityPolicy = (
     "default-src 'self'",
     `script-src 'self'${inline}`,
     `connect-src ${connectSources.length === 0 ? "'none'" : connectSources.join(" ")}`,
-    "img-src 'self' data: blob:",
+    "img-src 'self' data: blob: https:",
     "font-src 'self'",
     `style-src 'self'${inline}`,
     "object-src 'none'",

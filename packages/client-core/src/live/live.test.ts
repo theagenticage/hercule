@@ -849,13 +849,15 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("runner", []), [["runners"], ["runner"]]);
   });
 
-  it("maps a workflow push to the workflow list, and the page and triggers of each workflow in it", () => {
+  it("maps a workflow push to the workflow list, the page and triggers of each workflow in it, and every signal", () => {
     assert.deepStrictEqual(buildQueryKeys("workflow", ["w1", "w2"]), [
       queryKeys.workflows(),
       queryKeys.workflow("w1"),
       queryKeys.workflow("w2"),
       queryKeys.triggers("w1"),
       queryKeys.triggers("w2"),
+      queryKeys.signals(),
+      queryKeys.signal(),
     ]);
 
     // A push with no ids means any workflow may have changed.
@@ -863,6 +865,8 @@ describe("buildQueryKeys", () => {
       ["workflows"],
       ["workflow"],
       ["triggers"],
+      ["signals"],
+      ["signal"],
     ]);
   });
 

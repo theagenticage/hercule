@@ -45,6 +45,8 @@ describe("the shipped permission profiles", () => {
         "subscription.write",
         "notification.read",
         "notification.write",
+        "signal.read",
+        "signal.write",
         "event.read",
         "event.emit",
         "memory.read",
@@ -76,6 +78,8 @@ describe("the shipped permission profiles", () => {
         // grant it could not read back the ones it creates.
         "notification.read",
         "notification.write",
+        "signal.read",
+        "signal.write",
         "subscription.read",
         "subscription.write",
         "run.read",

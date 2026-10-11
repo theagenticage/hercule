@@ -18,6 +18,7 @@
     "capture:assistant": "node scripts/capture-assistant.ts",
     "capture:room": "node scripts/capture-room.ts",
     "capture:first-run": "node scripts/capture-first-run.ts",
+    "capture:intake": "node scripts/capture-intake.ts",
     "demo:subagents": "node scripts/subagents-demo.ts"
   },
   "devDependencies": {

@@ -161,8 +161,10 @@ and "split view" are not used as names.
 - **Motion.** The pane slides by its own width while the other column changes width on the same
   curve, so the two edges meet at every frame. This holds only where that column keeps its height
   as its width changes (Intake's list); elsewhere the pane opens at once. With reduce motion on,
-  nothing moves. The desktop's performance rules name this as their one exception for a `width`
-  transition ([spec 17](./spec/17-desktop-app.md) §Performance, Rules).
+  nothing moves. The desktop's performance rules allow this `width` transition because it is
+  measured to be cheap ([spec 17](./spec/17-desktop-app.md) §Performance, Rules). *(Amended
+  2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524): it was named their one
+  exception.)*
 
 Each screen's own numbers and keys (its minimums, which column is sized, what Esc does after the
 pane closes) are written with the screen: the thread in [spec 14](./spec/14-web-app.md) §The

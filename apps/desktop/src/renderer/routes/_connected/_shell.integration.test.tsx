@@ -109,7 +109,7 @@ const WITH_ADA = {
 /**
  * Starts the app signed in, at `path`, with the sidebar fixture and
  * `handlers` on top, and waits until the live connection holds the shell's
- * seven subscriptions and every read has settled, including the reads the
+ * nine subscriptions and every read has settled, including the reads the
  * first connection makes.
  */
 const startShell = async ({
@@ -123,15 +123,17 @@ const startShell = async ({
   return { calls, fake, ...app };
 };
 
-/** Waits until the live connection holds the shell's seven subscriptions and no read is running. */
+/** Waits until the live connection holds the shell's nine subscriptions and no read is running. */
 const waitForShellLive = async (live: LiveStub, queryClient: QueryClient): Promise<void> => {
   await waitFor(() => {
     expect([...live.readTopics()].sort()).toEqual([
       "assistant",
       "connection",
+      "plugin",
       "provider",
       "runner",
       "session",
+      "signal",
       "task",
       "workspace",
     ]);
@@ -151,6 +153,8 @@ describe("the shell's loader", () => {
       "/api/v1/providers",
       "/api/v1/user",
       "/api/v1/assistants",
+      "/api/v1/signals",
+      "/api/v1/plugins",
     ]) {
       expect(countReads(calls, path), path).toBeGreaterThan(0);
     }
