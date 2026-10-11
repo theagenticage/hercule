@@ -35,9 +35,10 @@ import type { SubagentId } from "@hercule/protocol";
  * delta is never written to the database, so it is announced as soon as it is
  * reported, with no transaction involved.
  *
- * - A `record` change with `usageOnly` changed nothing about the record but
- *   its Token Usage. It comes with almost every event a working agent
- *   reports, so it is sent at a slower pace than other changes.
+ * - A `record` change with `countsOnly` changed nothing about the record but
+ *   its counts: its Token Usage and, for a session, its tool calls. One of
+ *   them changes with almost every event a working agent reports, so the
+ *   change is sent at a slower pace than other changes.
  * - A `record` change on the `session` topic names the conversation the
  *   session answers, or `null` for a session in none, so the push can tell a
  *   client which conversations it touches. A session's conversation is set
@@ -52,7 +53,7 @@ export type Change =
       readonly topic: Exclude<MutableLiveTopic, "session">;
       readonly id: string;
       readonly kind: InvalidateKind;
-      readonly usageOnly?: true;
+      readonly countsOnly?: true;
     }
   | {
       readonly _tag: "record";
@@ -60,7 +61,7 @@ export type Change =
       readonly id: string;
       readonly conversationId: string | null;
       readonly kind: InvalidateKind;
-      readonly usageOnly?: true;
+      readonly countsOnly?: true;
     }
   | { readonly _tag: "event" }
   | { readonly _tag: "transcript"; readonly sessionId: string; readonly subagentId?: SubagentId }

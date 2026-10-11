@@ -46,7 +46,7 @@ import { buildOpenPermissionRequestsColumn, parseOpenPermissionRequests } from "
 import { buildReadyClause } from "../workspaces";
 import type { SessionEndReason } from "./observer";
 import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
-import { attributeEvent, type StreamRow } from "./stream";
+import { attributeEvent, TOOL_CALL_KINDS, type StreamRow } from "./stream";
 import { StoredTokenUsage, type StoredUsage } from "./usage";
 
 /**
@@ -113,6 +113,8 @@ export interface StoredSession {
   readonly usage: StoredTokenUsage | undefined;
   /** The current process's last usage snapshot; see `addUsageSnapshot`. Never shown by the API. */
   readonly usageProcess: StoredTokenUsage | undefined;
+  /** How many tool calls the session's agents made; see `append`. */
+  readonly toolCalls: number;
   readonly createdAt: string;
   readonly startedAt: string | null;
   readonly exitedAt: string | null;
@@ -253,6 +255,7 @@ interface SessionRow {
   readonly open_permission_requests: string;
   readonly usage: string | null;
   readonly usage_process: string | null;
+  readonly tool_calls: number;
   readonly created_at: string;
   readonly started_at: string | null;
   readonly exited_at: string | null;
@@ -279,7 +282,7 @@ const buildColumnList = (): string =>
   "(SELECT provider_id FROM provider_instances WHERE id = sessions.instance_id) AS provider_id, " +
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
-  "open_requests, usage, usage_process, created_at, started_at, exited_at, exit_reason, " +
+  "open_requests, usage, usage_process, tool_calls, created_at, started_at, exited_at, exit_reason, " +
   "last_activity_at, crash_guard_armed, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
   "AND session_inputs.status = 'queued') AS input_waiting, " +
@@ -333,6 +336,7 @@ const toSession = (row: SessionRow): StoredSession => ({
   openPermissionRequests: parseOpenPermissionRequests(row.open_permission_requests),
   usage: parseUsage(row.usage),
   usageProcess: parseUsage(row.usage_process),
+  toolCalls: row.tool_calls,
   createdAt: row.created_at,
   startedAt: row.started_at,
   exitedAt: row.exited_at,
@@ -872,17 +876,32 @@ const make = Effect.gen(function* () {
      * Appends one row at the next position for this session, stored under the
      * agent `attributeEvent` names. A sequence number already written hits the
      * unique index and writes nothing, so a replayed frame is harmless.
+     *
+     * A row that starts a tool call (an `item.started` of a kind in
+     * `TOOL_CALL_KINDS`, from any of the session's agents) also adds one to
+     * the session's `tool_calls`. Only a row actually written counts, so a
+     * replayed frame does not count twice. Every caller runs this inside its
+     * own transaction, so the row and the count commit together. Returns
+     * whether the row was written and counted as a tool call, so the caller
+     * knows the session changed.
      */
-    append: (sessionId: string, row: StreamRow): Effect.Effect<void, SqlError> => {
-      const id = uuidFromString(sessionId);
-      return Effect.asVoid(sql`
-        INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
-        SELECT ${id}, COALESCE(MAX(position), 0) + 1, ${row.seq}, ${row.at},
-               ${JSON.stringify(row.event)}, ${attributeEvent(row.event) ?? null}
-        FROM session_stream WHERE session_id = ${id}
-        ON CONFLICT (session_id, runner_seq) DO NOTHING
-      `);
-    },
+    append: (sessionId: string, row: StreamRow): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        const id = uuidFromString(sessionId);
+        const written = yield* sql<{ readonly position: number }>`
+          INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
+          SELECT ${id}, COALESCE(MAX(position), 0) + 1, ${row.seq}, ${row.at},
+                 ${JSON.stringify(row.event)}, ${attributeEvent(row.event) ?? null}
+          FROM session_stream WHERE session_id = ${id}
+          ON CONFLICT (session_id, runner_seq) DO NOTHING
+          RETURNING position
+        `;
+        const startsToolCall =
+          row.event._tag === "item.started" && TOOL_CALL_KINDS.has(row.event.kind);
+        if (written.length === 0 || !startsToolCall) return false;
+        yield* sql`UPDATE sessions SET tool_calls = tool_calls + 1 WHERE id = ${id}`;
+        return true;
+      }),
 
     /**
      * Changes the session's status and updates its last activity time,

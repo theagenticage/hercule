@@ -1096,6 +1096,7 @@ describe("hercule session spawn --agent", () => {
     status: "starting",
     resumable: false,
     resumeHeld: false,
+    toolCalls: 0,
     permissionProfileId: AGENT.permissionProfileId,
     agentId: AGENT.id,
     conversationId: null,
@@ -1587,9 +1588,21 @@ describe("the run commands", () => {
     expect(io.stdout.join("\n")).toContain(`hercule subscription create run:${RUN_ID}`);
   });
 
-  it("prints run list as a table with the status, the workflow, who started it and its age", async () => {
+  it("prints run list as a table with the status, where a running run is, the workflow, who started it and its age", async () => {
     const fetch = stubFetch(() => ({
       items: [
+        buildSummary("bbbbbbb4", {
+          status: "running",
+          finishedAt: undefined,
+          activeStepIds: ["file_task"],
+          awaitedSignalIds: [],
+        }),
+        buildSummary("bbbbbbb3", {
+          status: "running",
+          finishedAt: undefined,
+          activeStepIds: [],
+          awaitedSignalIds: ["approved", "merged"],
+        }),
         buildSummary("bbbbbbb2", {
           origin: { kind: "api", actor: `session:${SESSION_ID}` },
           status: "failed",
@@ -1604,13 +1617,21 @@ describe("the run commands", () => {
     expect(await main(["--home", home, "run", "list"], io)).toBe(0);
 
     expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/runs" });
-    expect(io.stdout).toHaveLength(3);
-    const [header, failed, completed] = io.stdout as [string, string, string];
+    expect(io.stdout).toHaveLength(5);
+    const [header, atStep, waiting, failed, completed] = io.stdout as [
+      string,
+      string,
+      string,
+      string,
+      string,
+    ];
     expect(header).toMatch(/status/i);
     expect(header).toMatch(/workflow/i);
     expect(header).toMatch(/started/i);
     expect(header).toMatch(/age/i);
-    expect(failed).toContain("failed");
+    expect(atStep).toContain("running (at file_task)");
+    expect(waiting).toContain("running (waiting for approved, merged)");
+    expect(failed).toContain("failed (step-failed)");
     expect(failed).toContain("File a task");
     expect(failed).toContain(`session ${SESSION_ID.slice(-8)} through the API`);
     expect(completed).toContain("completed");
