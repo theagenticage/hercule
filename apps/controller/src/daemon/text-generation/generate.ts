@@ -52,9 +52,10 @@ import {
  * How long a call holds its slot, at most, after the request is sent. The
  * runner stops its harness at `TEXT_GENERATION_DEADLINE_MS`, waits for the
  * harness process to exit, and only then answers. The slowest harness to stop
- * is Claude Code: its SDK sends SIGTERM and escalates to SIGKILL after about
- * 7 seconds, so the answer can arrive about 67 seconds after the request. The
- * extra 10 seconds cover that and the answer travelling back. The limit also
+ * is Claude Code: its SDK waits about 2 seconds for the process to exit, and
+ * the runner then sends SIGTERM and, 2 seconds later, SIGKILL. So the answer
+ * can arrive about 64 seconds after the request. The extra 10 seconds cover
+ * that and the answer travelling back. The limit also
  * bounds the hold for a runner that breaks its promise to answer, so such a
  * runner cannot keep slots for good.
  */
