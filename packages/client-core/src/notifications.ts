@@ -2,8 +2,8 @@
  * How the notification center shows a notification: who produced it, which
  * mark it gets, what each answer of a decision does, how a resolved decision
  * was resolved, how often a signal's build has failed, and whether its
- * producer is muted. Spec 10 §7 owns the
- * record; spec 14 §Notification center owns the screen.
+ * producer is muted. Spec 10 §7 owns the record; spec 14 §Notification
+ * center owns the screen.
  */
 import type {
   CoreNotificationKind,
