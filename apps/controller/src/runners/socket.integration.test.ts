@@ -1498,6 +1498,10 @@ describe("refreshing a runner's facts on demand", () => {
           refreshFacts(harness.base, token, joined.runnerId),
           refreshFacts(harness.base, token, joined.runnerId),
         ];
+        // Each caller sends its own request after it starts waiting. Answering
+        // after both arrived makes sure both wait, however slowly the second
+        // call reaches the controller.
+        await expectFactsRequest(wire);
         await expectFactsRequest(wire);
         wire.send({ _tag: "factsReport", facts: GROWN });
 
