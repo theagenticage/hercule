@@ -14,6 +14,13 @@ import { Schema } from "effect";
 export const bounded = (minimum: number, maximum: number) =>
   Schema.String.check(Schema.isLengthBetween(minimum, maximum));
 
+/**
+ * Counts the characters of a text as a person counts them: one per Unicode
+ * code point, so an emoji is one character and not two UTF-16 units. Caps a
+ * person reads, such as the memory caps, are counted this way.
+ */
+export const countCharacters = (text: string): number => Array.from(text).length;
+
 /** A list of at most `maximum` items. */
 export const atMost = <S extends Schema.Top>(item: S, maximum: number) =>
   Schema.Array(item).check(Schema.isMaxLength(maximum));

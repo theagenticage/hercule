@@ -34,6 +34,7 @@ export interface ErrorEnvelope {
  * - `{ grant }` for `forbidden`;
  * - `{ issues }` for `validation`;
  * - a size or a count for `cap_exceeded`;
+ * - `{ previousSize, size }` for `shrink_rejected`;
  * - absent for every other code.
  */
 export class ApiError extends Error {

@@ -155,6 +155,21 @@ export const SessionSpec = Schema.Struct({
    */
   systemPrompt: Schema.optionalKey(Schema.String),
   /**
+   * An assistant's memory as the session starts with it: the `## Memory
+   * (core)` section and the `## Memory topics` index, already rendered. The
+   * adapter appends it after everything else in the system prompt, the
+   * Hercule skill included, because it is the part that changes most often
+   * (spec 12 section 6.3). Only an assistant's conversation session has one.
+   */
+  memory: Schema.optionalKey(Schema.String),
+  /**
+   * `false` turns off the harness's own automatic compaction. An assistant's
+   * session sets it, because the controller rotates that session to a fresh
+   * one instead, so the context is never summarized behind the assistant's
+   * back (spec 06 section 9.2). Absent leaves the harness's default.
+   */
+  autoCompaction: Schema.optionalKey(Schema.Literal(false)),
+  /**
    * The tool families to take away. A provider that declares it enforces none
    * of them still receives the list, and the record the caller reads reports
    * that the provider ignores the field.

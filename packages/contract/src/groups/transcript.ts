@@ -6,10 +6,12 @@
  * holds what it did. The transcript is append-only and keyed by a per-session
  * position, so reading it is a keyset walk over that position. Each agent of
  * a session has a transcript of its own: the session's own agent's, and one
- * per subagent. There is no other filter and no search; besides the agent,
- * the only choice a caller has is which end to start from.
- * `transcript.query`, the full-text search over every session, is a different
- * operation and is not built yet.
+ * per subagent. Reading one has no other filter; besides the agent, the only
+ * choice a caller has is which end to start from.
+ *
+ * `transcript.query` is the full-text search over every session's messages.
+ * It returns passages: the text of one message that matched, with where it
+ * came from. An assistant recalls its own conversations with `agentId: "me"`.
  *
  * A row carries the normalized `ProviderEvent` verbatim, which is the same
  * document the runner reported except for `content.delta`, where the controller
@@ -21,9 +23,11 @@ import { ProviderEvent, StructuredResult, SubagentId } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
-import { Id } from "../ids";
+import { Id, IdOrMe, OWN_AGENT_ALIAS, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
+import { bounded } from "../strings";
+import { MAX_SEARCH_TEXT_LENGTH } from "./task";
 
 /**
  * One row of a session's stream. `position` is the session's own monotonic
@@ -50,6 +54,36 @@ export { StructuredResult };
 /** The only order a transcript has. A cursor is only valid for the listing it came from. */
 export const TRANSCRIPT_SORT_FIELDS = ["position"] as const;
 
+/**
+ * One message that matched a transcript search. `excerpt` is a short window
+ * of the message's text around the hit. `subagentId` is present when the
+ * message is from one of the session's subagents.
+ */
+export const Passage = Schema.Struct({
+  sessionId: Id,
+  subagentId: Schema.optionalKey(SubagentId),
+  turnId: Schema.String,
+  at: Timestamp,
+  excerpt: Schema.String,
+});
+
+export type Passage = Schema.Schema.Type<typeof Passage>;
+
+/** The only order of a transcript search: when the message was written. */
+export const PASSAGE_SORT_FIELDS = ["at"] as const;
+
+/** The filters of `transcript.query`, beside the search text. All of them narrow the search. */
+export const PassageFilter = Schema.Struct({
+  text: bounded(1, MAX_SEARCH_TEXT_LENGTH),
+  sessionId: Schema.optionalKey(Id),
+  /** The Agent whose sessions to search. `me` is the Agent the calling session runs as. */
+  agentId: Schema.optionalKey(IdOrMe),
+  /** `me` keeps the sessions the calling session spawned. */
+  actor: Schema.optionalKey(Schema.Literal(OWN_AGENT_ALIAS)),
+  since: Schema.optionalKey(Timestamp),
+  until: Schema.optionalKey(Timestamp),
+});
+
 export const transcript = HttpApiGroup.make("transcript")
   .add(
     HttpApiEndpoint.get("read", "/sessions/:id/transcript", {
@@ -65,6 +99,14 @@ export const transcript = HttpApiGroup.make("transcript")
       }),
       success: page(TranscriptRow),
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    HttpApiEndpoint.get("query", "/transcripts", {
+      query: Schema.Struct({
+        ...PassageFilter.fields,
+        ...pageParams(PASSAGE_SORT_FIELDS).fields,
+      }),
+      success: page(Passage),
+      error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
   )
   .middleware(Authenticated);

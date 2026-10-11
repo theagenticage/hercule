@@ -1439,3 +1439,76 @@ describe("hercule controller promotion-token create", () => {
     }
   });
 });
+
+describe("memory output", () => {
+  const document = {
+    name: "decisions",
+    gist: "What we decided",
+    size: 1234,
+    body: "- deploys on Tuesdays\n- no Friday releases",
+    updatedAt: "2026-10-11T09:00:00.000Z",
+  };
+
+  it("prints a document's body as it is stored", () => {
+    expect(
+      renderHuman(
+        { kind: "value", value: document },
+        lookUpCommand("memory", "read"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual(["- deploys on Tuesdays\n- no Friday releases"]);
+  });
+
+  it("says that an empty document is empty", () => {
+    expect(
+      renderHuman(
+        { kind: "value", value: { ...document, name: "core", body: "", size: 0 } },
+        lookUpCommand("memory", "read"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual(["core is empty"]);
+  });
+
+  it("prints how full a document is after a write, against its own cap", () => {
+    expect(
+      renderHuman(
+        { kind: "value", value: document },
+        lookUpCommand("memory", "write"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual(["wrote decisions: 1,234 of 12,000 characters"]);
+    expect(
+      renderHuman(
+        { kind: "value", value: { ...document, name: "core", size: 80 } },
+        lookUpCommand("memory", "append"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual(["appended to core: 80 of 4,000 characters"]);
+  });
+
+  it("lists the index as a table", () => {
+    expect(
+      renderHuman(
+        {
+          kind: "value",
+          value: [
+            { name: "core", gist: "", size: 80 },
+            { name: "decisions", gist: "What we decided", size: 1234 },
+          ],
+        },
+        lookUpCommand("memory", "list"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual(["name       size  gist", "core       80", "decisions  1234  What we decided"]);
+  });
+
+  it("prints each match with its snippets indented under it", () => {
+    expect(
+      renderHuman(
+        { kind: "value", value: [{ name: "decisions", snippets: ["…deploys on Tuesdays…"] }] },
+        lookUpCommand("memory", "search"),
+        CONTROLLER_URL,
+      ),
+    ).toEqual(["decisions", "  …deploys on Tuesdays…"]);
+  });
+});

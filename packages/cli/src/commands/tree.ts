@@ -197,14 +197,26 @@ const UUID = "uuidv7";
 /**
  * Checks whether a field holds a Hercule id. The schema decides, not the field
  * name: a secret's `ownerId` holds a plugin's name. A tail can only stand for
- * a full UUID.
+ * a full UUID. A field that takes an id or a word in its place, such as `me`,
+ * holds an id too.
  */
-const holdsAnId = (input: Ast): boolean =>
-  (stripNull(input).checks ?? []).some((check) => check.annotations?.title === UUID);
+const holdsAnId = (input: Ast): boolean => {
+  const ast = stripNull(input);
+  if (ast._tag === "Union" && ast.types !== undefined) return ast.types.some(holdsAnId);
+  return (ast.checks ?? []).some((check) => check.annotations?.title === UUID);
+};
 
 const readScalarKind = (input: Ast): FieldKind => {
   const ast = stripNull(input);
   if (readStringLiterals(ast) !== undefined) return "string";
+  // An id or the word `me` in its place is text either way.
+  if (
+    ast._tag === "Union" &&
+    ast.types !== undefined &&
+    ast.types.every((member) => readScalarKind(member) === "string")
+  ) {
+    return "string";
+  }
   switch (ast._tag) {
     case "String":
       return "string";
