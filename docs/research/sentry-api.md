@@ -70,7 +70,7 @@ All recorded.
 
 Fields on each list item, recorded: `id`, `shortId` (`WEBSHOP-1A2`), `title`, `culprit`, `permalink`, `level` (`error`, `warning`, `info`, ...), `status`, `substatus`, `priority` (`high`, `medium`, `low`), `assignedTo` (`{type: "user" | "team", id, name}` or null), `project` (`{id, slug, name, platform}`), `firstSeen`, `lastSeen`, `count` (a string), `userCount`, `isUnhandled`, `issueCategory`, `issueType`, `metadata` (`type`, `value`, `filename`, `function`, ...), `statusDetails`, `stats`, `numComments`, `hasSeen`.
 
-`statusDetails` on an archived issue holds the archiving user as `actor`, with their email. `assignedTo` holds a user's or team's name. Fixtures must invent both whole.
+`statusDetails` may hold the user who resolved or archived the issue as `actor`, a full user object with `id`, `username`, `name` and `email`. Most issues have none: in a sample of 25 resolved issues, 5 had an `actor` (beside `inRelease`), 3 had only `inCommit` and 17 had an empty `statusDetails`; of 25 archived issues, 2 had an `actor` (beside the `ignore*` fields). Recorded. `assignedTo` holds a user's or team's name. Fixtures must invent both whole.
 
 ### Status and substatus
 
