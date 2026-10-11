@@ -10,5 +10,6 @@ import { claudeCode } from "@hercule/plugin-claude-code";
 import { codex } from "@hercule/plugin-codex";
 import { github } from "@hercule/plugin-github";
 import { pi } from "@hercule/plugin-pi";
+import { sentry } from "@hercule/plugin-sentry";
 
-export const registry: ReadonlyArray<Plugin> = [claudeCode, codex, pi, github];
+export const registry: ReadonlyArray<Plugin> = [claudeCode, codex, pi, github, sentry];

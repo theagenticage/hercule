@@ -1,0 +1,256 @@
+/**
+ * The objects Sentry's REST API returns, cut to the fields this plugin reads.
+ * Sentry sends many more, and decoding drops them. A field Sentry may leave
+ * out or send as null is optional here, so an older issue never fails a poll.
+ */
+import { Option, Schema } from "effect";
+import { MAX_STACK_FRAMES, type IssueBlock, type LatestEvent, type StackFrame } from "./kinds";
+
+/** An organization, as `GET /api/0/organizations/` lists it. */
+export const ApiOrganization = Schema.Struct({
+  id: Schema.String,
+  slug: Schema.String,
+  name: Schema.String,
+  links: Schema.Struct({
+    /** The host that serves the organization's data, such as `https://us.sentry.io`. */
+    regionUrl: Schema.String,
+  }),
+});
+
+/** A team. */
+export const ApiTeam = Schema.Struct({ id: Schema.String, slug: Schema.String });
+
+/** A project and the teams that own it. */
+export const ApiProject = Schema.Struct({
+  id: Schema.String,
+  slug: Schema.String,
+  name: Schema.String,
+  teams: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String }))),
+});
+
+/** An environment. */
+export const ApiEnvironment = Schema.Struct({ name: Schema.String });
+
+/**
+ * A member of the organization. `user` is the Sentry account behind the
+ * membership, and null for an invitation nobody accepted. An issue is
+ * assigned to `user.id`, never to the membership's own `id`.
+ */
+export const ApiMember = Schema.Struct({
+  email: Schema.optionalKey(Schema.String),
+  name: Schema.optionalKey(Schema.String),
+  user: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        id: Schema.String,
+        username: Schema.String,
+      }),
+    ),
+  ),
+});
+
+/** The issue's assignee. */
+const ApiAssignee = Schema.Struct({
+  type: Schema.Literals(["user", "team"]),
+  id: Schema.String,
+  name: Schema.String,
+});
+
+/** An issue, as the list and the detail endpoint return it. */
+export const ApiIssue = Schema.Struct({
+  id: Schema.String,
+  shortId: Schema.String,
+  title: Schema.String,
+  culprit: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  permalink: Schema.String,
+  level: Schema.String,
+  status: Schema.String,
+  substatus: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  priority: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  assignedTo: Schema.optionalKey(Schema.NullOr(ApiAssignee)),
+  project: Schema.Struct({ id: Schema.String, slug: Schema.String, name: Schema.String }),
+  firstSeen: Schema.String,
+  lastSeen: Schema.String,
+  count: Schema.String,
+  userCount: Schema.Number,
+  metadata: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ type: Schema.optionalKey(Schema.NullOr(Schema.String)) })),
+  ),
+  statusDetails: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        actor: Schema.optionalKey(Schema.NullOr(Schema.Struct({ id: Schema.String }))),
+      }),
+    ),
+  ),
+});
+
+export type ApiIssue = Schema.Schema.Type<typeof ApiIssue>;
+
+/** Converts an issue as Sentry returns it into the block the events carry. */
+export const buildIssueBlock = (issue: ApiIssue): IssueBlock => ({
+  id: issue.id,
+  shortId: issue.shortId,
+  title: issue.title,
+  culprit: issue.culprit ?? "",
+  type: issue.metadata?.type ?? null,
+  level: issue.level,
+  priority: issue.priority ?? null,
+  status: issue.status,
+  substatus: issue.substatus ?? null,
+  project: issue.project,
+  assignedTo: issue.assignedTo ?? null,
+  firstSeen: issue.firstSeen,
+  lastSeen: issue.lastSeen,
+  count: issue.count,
+  userCount: issue.userCount,
+  permalink: issue.permalink,
+});
+
+/** Returns the id of the user who changed the issue's status, or undefined when Sentry names nobody. */
+export const readStatusActorId = (issue: ApiIssue): string | undefined =>
+  issue.statusDetails?.actor?.id;
+
+/** One entry of an issue's activity, such as a regression. */
+const ApiActivity = Schema.Struct({
+  id: Schema.String,
+  type: Schema.String,
+  dateCreated: Schema.String,
+  data: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ version: Schema.optionalKey(Schema.NullOr(Schema.String)) })),
+  ),
+});
+
+/** An issue's detail, cut to its activity. */
+export const ApiIssueDetail = Schema.Struct({
+  activity: Schema.optionalKey(Schema.Array(ApiActivity)),
+});
+
+/** One time an issue came back after it was resolved. */
+export interface Regression {
+  readonly activityId: string;
+  readonly dateCreated: string;
+  /** The release it came back in, when Sentry knows it. */
+  readonly release?: string;
+}
+
+/** Compares two ids made of digits, as numbers, without a limit on their size. */
+export const compareNumericIds = (first: string, second: string): number =>
+  first.length === second.length
+    ? first < second
+      ? -1
+      : first > second
+        ? 1
+        : 0
+    : first.length - second.length;
+
+/** Returns the regressions in an issue's detail, oldest first. */
+export const listRegressions = (
+  detail: Schema.Schema.Type<typeof ApiIssueDetail>,
+): ReadonlyArray<Regression> =>
+  (detail.activity ?? [])
+    .filter((activity) => activity.type === "set_regression")
+    .map((activity) => ({
+      activityId: activity.id,
+      dateCreated: activity.dateCreated,
+      ...(activity.data?.version ? { release: activity.data.version } : {}),
+    }))
+    .sort((first, second) => compareNumericIds(first.activityId, second.activityId));
+
+/** One stack frame of an event's exception, as Sentry returns it. */
+const ApiStackFrame = Schema.Struct({
+  filename: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  function: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  lineNo: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  inApp: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+});
+
+const ApiException = Schema.Struct({
+  values: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Array(
+        Schema.Struct({
+          type: Schema.optionalKey(Schema.NullOr(Schema.String)),
+          value: Schema.optionalKey(Schema.NullOr(Schema.String)),
+          stacktrace: Schema.optionalKey(
+            Schema.NullOr(
+              Schema.Struct({
+                frames: Schema.optionalKey(Schema.NullOr(Schema.Array(ApiStackFrame))),
+              }),
+            ),
+          ),
+        }),
+      ),
+    ),
+  ),
+});
+
+/**
+ * The latest event of an issue, as Sentry returns it. Every field is
+ * optional, because the shape of an event depends on its platform and
+ * Sentry's documentation names few of them: a part that is not there is left
+ * out rather than failing the poll.
+ */
+export const ApiLatestEvent = Schema.Struct({
+  id: Schema.optionalKey(Schema.String),
+  eventID: Schema.optionalKey(Schema.String),
+  dateCreated: Schema.optionalKey(Schema.String),
+  release: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ version: Schema.optionalKey(Schema.String) })),
+  ),
+  tags: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.NullOr(Schema.String) })),
+  ),
+  entries: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ type: Schema.String, data: Schema.optionalKey(Schema.Unknown) })),
+  ),
+});
+
+const decodeException = Schema.decodeUnknownOption(ApiException);
+
+/** Converts one stack frame, keeping what Sentry knows of it. */
+const buildStackFrame = (frame: Schema.Schema.Type<typeof ApiStackFrame>): StackFrame => ({
+  filename: frame.filename ?? null,
+  function: frame.function ?? null,
+  lineNo: frame.lineNo ?? null,
+  inApp: frame.inApp ?? false,
+});
+
+/**
+ * Converts the latest event into the block the events carry. Returns
+ * undefined when the event has no id, which means it is not an event.
+ * `fallbackDate` stands in for a missing `dateCreated`. The exception is the
+ * last one the event lists (the one that was raised last, as Sentry shows
+ * it), with its last `MAX_STACK_FRAMES` frames: Sentry lists frames oldest
+ * call first, so the last ones are the innermost.
+ */
+export const buildLatestEvent = (
+  event: Schema.Schema.Type<typeof ApiLatestEvent>,
+  fallbackDate: string,
+): LatestEvent | undefined => {
+  const id = event.eventID ?? event.id;
+  if (id === undefined) return undefined;
+  const readTag = (key: string): string | undefined =>
+    event.tags?.find((tag) => tag.key === key)?.value ?? undefined;
+  const environment = readTag("environment");
+  const release = event.release?.version ?? readTag("release");
+  const exceptionEntry = event.entries?.find((entry) => entry.type === "exception");
+  const exception = Option.getOrUndefined(decodeException(exceptionEntry?.data))?.values?.at(-1);
+  return {
+    id,
+    dateCreated: event.dateCreated ?? fallbackDate,
+    ...(environment === undefined ? {} : { environment }),
+    ...(release === undefined ? {} : { release }),
+    ...(exception === undefined
+      ? {}
+      : {
+          exception: {
+            type: exception.type ?? null,
+            value: exception.value ?? null,
+            frames: (exception.stacktrace?.frames ?? [])
+              .slice(-MAX_STACK_FRAMES)
+              .map(buildStackFrame),
+          },
+        }),
+  };
+};
