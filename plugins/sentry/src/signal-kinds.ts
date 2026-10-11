@@ -25,6 +25,7 @@ import {
 } from "@hercule/plugin-host";
 import { readUsername, readUserId } from "./identity";
 import { IssueBlock, LatestEvent, ReturnedFrom } from "./kinds";
+import { isAssignedToUser } from "./sentry-objects";
 import { cutText } from "./text";
 
 /** The thread of every kind: the issue, by its External Ref. */
@@ -191,10 +192,6 @@ const buildStackTraceBlocks = (
   return [{ type: "text", markdown: buildCodeFence([heading, ...frames].join("\n")) }];
 };
 
-/** Returns true when the issue is assigned to the user themselves. */
-const isAssignedToUser = (issue: IssueBlock, userId: string): boolean =>
-  issue.assignedTo?.type === "user" && issue.assignedTo.id === userId;
-
 /**
  * Returns the answers: Resolve, Archive until the issue escalates, and Assign
  * to me, which is left out when the issue is already assigned to the user.
@@ -242,16 +239,9 @@ const buildHeadlineBlocks = (
     return [{ type: "text", markdown: `Escalating: ${buildCodeSpan(payload.issue.count)} events` }];
   }
   if (kind === "regressed") {
-    const after = payload.after ?? "resolved";
-    return [
-      {
-        type: "text",
-        markdown:
-          payload.release === undefined
-            ? `Came back after it was ${after}`
-            : `Came back in ${buildCodeSpan(payload.release)} after it was ${after}`,
-      },
-    ];
+    const place = payload.release === undefined ? "" : ` in ${buildCodeSpan(payload.release)}`;
+    const history = payload.after === undefined ? "" : ` after it was ${payload.after}`;
+    return [{ type: "text", markdown: `Came back${place}${history}` }];
   }
   return [];
 };

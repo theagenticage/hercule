@@ -221,7 +221,9 @@ describe("validating a Sentry token", () => {
   it("fails when the organization slug is not one the token reaches", async () => {
     const result = await validate({ token: TEST_TOKEN, organization: "elsewhere" });
 
-    expect(Result.isFailure(result) && result.failure.message).toContain("elsewhere");
+    const message = Result.isFailure(result) ? result.failure.message : "";
+    expect(message).toContain('Sentry has no organization "elsewhere"');
+    expect(message).toContain("reconnect the Connection with its new slug");
   });
 
   it("fails when Sentry refuses the token", async () => {
@@ -297,12 +299,32 @@ describe("the choices of the config form", () => {
     expect(Result.isSuccess(result) && result.success).toHaveLength(8);
   });
 
-  it("cuts a list at 1,000 choices", async () => {
+  it("returns every choice, even past the 1,000 the host accepts", async () => {
+    const result = await listChoices("assignees", (world) => {
+      world.teams = Array.from({ length: 500 }, (_, index) => ({
+        id: String(1000 + index),
+        slug: `team-${String(index)}`,
+      }));
+      world.members = Array.from({ length: 600 }, (_, index) => ({
+        id: String(2000 + index),
+        name: `Member ${String(index)}`,
+        email: `member-${String(index)}@acme.test`,
+        userId: String(3000 + index),
+        username: `member-${String(index)}`,
+      }));
+    });
+
+    expect(Result.isSuccess(result) && result.success).toHaveLength(4 + 500 + 600);
+  });
+
+  it("fails, saying the list is too long to read, instead of cutting it", async () => {
     const result = await listChoices("environments", (world) => {
       world.environments = Array.from({ length: 1200 }, (_, index) => `env-${String(index)}`);
     });
 
-    expect(Result.isSuccess(result) && result.success).toHaveLength(1000);
+    expect(Result.isFailure(result) && result.failure.message).toBe(
+      "The organization's environments list is too long to read: it has more than 10 pages.",
+    );
   });
 
   it("fails for a field it has no list for", async () => {

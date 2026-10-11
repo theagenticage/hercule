@@ -145,7 +145,7 @@ export const SENTRY_EVENT_KINDS: Record<string, EventKindDeclaration> = {
     false,
     {
       reason: LeftReason,
-      /** True when the issue has an assignee it did not have at the last poll. */
+      /** True when the issue has an assignee that differs from the one the last poll stored. */
       reassigned: Schema.Boolean,
       /** The Connection's window, so a reader can say "No events in 14 days". */
       lastSeenDays: Schema.Int,

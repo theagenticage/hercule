@@ -449,11 +449,11 @@ const applyIssueUpdate = (world: FakeWorld, issue: FakeIssue, body: unknown): vo
       const team = world.teams.find((candidate) => `team:${candidate.id}` === update.assignedTo);
       issue.assignedTo = team === undefined ? null : { type: "team", id: team.id, name: team.slug };
     } else {
-      const member = world.members.find((candidate) => candidate.userId === update.assignedTo);
+      const member = world.members.find(
+        (candidate) => `user:${candidate.userId ?? ""}` === update.assignedTo,
+      );
       issue.assignedTo =
-        member === undefined
-          ? null
-          : { type: "user", id: update.assignedTo, name: member.username };
+        member?.userId == null ? null : { type: "user", id: member.userId, name: member.username };
     }
   }
 };
@@ -614,7 +614,10 @@ export const buildFakeSentry = (world: FakeWorld): FakeSentry => {
 /** An ingest context for tests, and what was done through it. */
 export interface IngestHarness {
   readonly context: IngestContext;
-  /** Every event emitted, in order. */
+  /**
+   * Every event the host would have stored, in order. An event whose dedup key
+   * was emitted before is not here: the host drops it, permanently and silently.
+   */
   readonly events: Array<EmittedEvent>;
   /** The Connection's state, by key. */
   readonly state: Map<string, Schema.Json>;
@@ -668,7 +671,8 @@ const checkEmittedEvent = (event: EmittedEvent): Effect.Effect<void, PluginError
  * Builds an ingest context whose credentials hold `credentials`, whose state
  * lives in a `Map`, and whose `emit` records each event. Like the host's,
  * `emit` fails with a `PluginError` when the event fails the checks
- * `checkEmittedEvent` describes.
+ * `checkEmittedEvent` describes, and drops an event whose dedup key it has
+ * recorded before, so a test sees a key that two events share.
  */
 export const buildIngestHarness = (
   credentials: Readonly<Record<string, string>> = { token: TEST_TOKEN },
@@ -682,10 +686,15 @@ export const buildIngestHarness = (
     delete: (key) => Effect.sync(() => void state.delete(key)),
     list: () => Effect.sync(() => [...state.keys()]),
   };
+  const seenDedupKeys = new Set<string>();
   const emit = (event: EmittedEvent): Effect.Effect<void, PluginError> =>
     Effect.andThen(
       checkEmittedEvent(event),
-      Effect.sync(() => void events.push(event)),
+      Effect.sync(() => {
+        if (seenDedupKeys.has(event.dedupKey)) return;
+        seenDedupKeys.add(event.dedupKey);
+        events.push(event);
+      }),
     );
   return {
     context: {

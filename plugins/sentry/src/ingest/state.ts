@@ -22,22 +22,58 @@ const STATE_KEY = "watched";
  * `regressionActivityId` is the id of the newest `set_regression` activity
  * the plugin has seen on the issue. It is absent until the plugin reads the
  * issue's detail.
+ *
+ * `since` is the ISO time of the poll that added the issue to the set. It
+ * stays the same while the issue stays in the set, and the events that end the
+ * issue's signals are keyed by it: one key per stay.
+ *
+ * `recheck` is true when the read budget deferred the issue's regression
+ * check. The entry then keeps its old `lastSeen`, and the next poll reads the
+ * issue's detail whatever its substatus has become since, so a regression is
+ * not lost when Sentry has moved the issue on to `ongoing`.
  */
 export const WatchedIssue = Schema.Struct({
   issue: IssueBlock,
   regressionActivityId: Schema.optionalKey(Schema.String),
+  since: Schema.String,
+  recheck: Schema.optionalKey(Schema.Boolean),
 });
 
 export type WatchedIssue = Schema.Schema.Type<typeof WatchedIssue>;
 
-/** An issue that left the watched set as resolved or archived, and when. */
+/**
+ * An issue that left the watched set as resolved or archived, and when.
+ * `lastSeen` and `regressionActivityId` are what the last poll stored for the
+ * issue before it left. They tell a later regression from an older one.
+ */
 export const LeftIssue = Schema.Struct({
   as: Schema.Literals(["resolved", "archived"]),
   /** An ISO timestamp: the poll that saw the issue leave. */
   leftAt: Schema.String,
+  lastSeen: Schema.String,
+  regressionActivityId: Schema.optionalKey(Schema.String),
 });
 
 export type LeftIssue = Schema.Schema.Type<typeof LeftIssue>;
+
+/**
+ * An event as it is stored in the outbox: the same fields as the
+ * `EmittedEvent` the poll passes to `emit`, all of them JSON.
+ */
+export const OutboxEvent = Schema.Struct({
+  kind: Schema.String,
+  dedupKey: Schema.String,
+  occurredAt: Schema.String,
+  payload: Schema.Json,
+  refs: Schema.Array(Schema.String),
+  url: Schema.optionalKey(Schema.String),
+  system: Schema.optionalKey(Schema.String),
+  raw: Schema.optionalKey(Schema.JsonObject),
+  title: Schema.String,
+  author: Schema.NullOr(Schema.String),
+});
+
+export type OutboxEvent = Schema.Schema.Type<typeof OutboxEvent>;
 
 /** The whole state of the feed. */
 export const WatchState = Schema.Struct({
@@ -47,6 +83,13 @@ export const WatchState = Schema.Struct({
   issues: Schema.Record(Schema.String, WatchedIssue),
   /** The issues that left as resolved or archived in the last 90 days, by issue id. */
   left: Schema.Record(Schema.String, LeftIssue),
+  /**
+   * The events the last poll computed and has not finished emitting. A poll
+   * writes them here together with the new set, then emits them, then empties
+   * this list. The next poll emits whatever is still here first, and the
+   * dedup keys absorb the ones that were already emitted.
+   */
+  outbox: Schema.Array(OutboxEvent),
 });
 
 export type WatchState = Schema.Schema.Type<typeof WatchState>;

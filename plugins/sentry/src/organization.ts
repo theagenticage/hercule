@@ -7,14 +7,7 @@
 import { Effect, type Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import { PluginError } from "@hercule/plugin-host";
-import {
-  callSentry,
-  decodeSentryBody,
-  readPages,
-  SENTRY_API_URL,
-  type PagedItems,
-  type SentryFailure,
-} from "./api";
+import { callSentry, decodeSentryBody, readPages, SENTRY_API_URL, type SentryFailure } from "./api";
 import { ApiMember, ApiOrganization } from "./sentry-objects";
 
 /** The organization a Connection watches. */
@@ -36,27 +29,36 @@ export interface OrganizationAccess {
 export const MAX_LIST_PAGES = 10;
 
 /**
- * Reads every page of a list of the organization, such as its teams, up to
- * `MAX_LIST_PAGES`. `subpath` is the list below the organization, such as
- * `/teams/`. Fails as `readPages` does.
+ * Reads every page of a list of the organization, such as its teams, and
+ * returns its items. `subpath` is the list below the organization, such as
+ * `/teams/`. Fails with a `PluginError` when the list has more than
+ * `MAX_LIST_PAGES` pages: a partial list would make a value that is on a later
+ * page look as if Sentry no longer had it. Otherwise fails as `readPages` does.
  */
 export const readOrganizationList = <S extends Schema.Decoder<unknown>>(
   access: OrganizationAccess,
   subpath: string,
   item: S,
-  query: ReadonlyArray<readonly [string, string]> = [],
-): Effect.Effect<PagedItems<S["Type"]>, SentryFailure, HttpClient.HttpClient> =>
-  readPages(
-    {
-      method: "GET",
-      baseUrl: access.organization.regionUrl,
-      path: `/api/0/organizations/${access.organization.slug}${subpath}`,
-      token: access.token,
-      query,
-    },
-    item,
-    MAX_LIST_PAGES,
-  );
+): Effect.Effect<ReadonlyArray<S["Type"]>, SentryFailure, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const listed = yield* readPages(
+      {
+        method: "GET",
+        baseUrl: access.organization.regionUrl,
+        path: `/api/0/organizations/${access.organization.slug}${subpath}`,
+        token: access.token,
+      },
+      item,
+      MAX_LIST_PAGES,
+    );
+    if (listed.hasMore) {
+      const list = subpath.replaceAll("/", "");
+      return yield* new PluginError({
+        message: `The organization's ${list} list is too long to read: it has more than ${String(MAX_LIST_PAGES)} pages.`,
+      });
+    }
+    return listed.items;
+  });
 
 /**
  * Finds the organization the credentials reach. The pasted token comes with
@@ -87,7 +89,7 @@ export const findOrganization = (
       const found = organizations.find((candidate) => candidate.slug.toLowerCase() === wanted);
       if (found === undefined) {
         return yield* new PluginError({
-          message: `The token does not reach an organization with the slug "${wanted}". Check the slug, and that the token belongs to that organization.`,
+          message: `Sentry has no organization "${wanted}" that the token reaches. If the organization was renamed, reconnect the Connection with its new slug. Otherwise check the slug, and that the token belongs to that organization.`,
         });
       }
       return { id: found.id, slug: found.slug, name: found.name, regionUrl: found.links.regionUrl };

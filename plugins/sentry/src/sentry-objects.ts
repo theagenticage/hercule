@@ -107,6 +107,10 @@ export const buildIssueBlock = (issue: ApiIssue): IssueBlock => ({
   permalink: issue.permalink,
 });
 
+/** Returns true when the issue is assigned to the user themselves, not to one of their teams. */
+export const isAssignedToUser = (issue: IssueBlock, userId: string): boolean =>
+  issue.assignedTo?.type === "user" && issue.assignedTo.id === userId;
+
 /** Returns the id of the user who changed the issue's status, or undefined when Sentry names nobody. */
 export const readStatusActorId = (issue: ApiIssue): string | undefined =>
   issue.statusDetails?.actor?.id;

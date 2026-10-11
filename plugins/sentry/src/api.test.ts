@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Result, Schema } from "effect";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import { AuthError, PluginError } from "@hercule/plugin-host";
 import {
   callSentry,
@@ -28,6 +29,21 @@ const REQUEST = {
 const link = (previous: boolean, next: boolean, cursor: string): string =>
   `<https://us.sentry.io/x?cursor=0>; rel="previous"; results="${String(previous)}"; cursor="0", ` +
   `<https://us.sentry.io/x?cursor=${cursor}>; rel="next"; results="${String(next)}"; cursor="${cursor}"`;
+
+/** Builds a client that answers every request with a proxy's HTML page and `status`. */
+const buildHtmlStub = (status: number, rateLimitResetAt?: string) =>
+  stubHttpClient((request) =>
+    Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        new Response("<html>a proxy</html>", {
+          status,
+          headers:
+            rateLimitResetAt === undefined ? {} : { "x-sentry-rate-limit-reset": rateLimitResetAt },
+        }),
+      ),
+    ),
+  );
 
 describe("requestSentry", () => {
   it("sends the token as a bearer token with a user agent, and returns the status and body", async () => {
@@ -103,6 +119,22 @@ describe("requestSentry", () => {
     expect(stub.requests).toHaveLength(0);
   });
 
+  it("fails when the body of a successful response is not JSON", async () => {
+    const result = await runAgainstStub(requestSentry(REQUEST), buildHtmlStub(200));
+
+    expect(Result.isFailure(result) && result.failure.message).toContain("not JSON");
+  });
+
+  it("returns the status of a response that is not JSON, so the caller can classify it", async () => {
+    const result = await runAgainstStub(requestSentry(REQUEST), buildHtmlStub(429, "1790000000"));
+
+    expect(Result.isSuccess(result) && result.success).toMatchObject({
+      status: 429,
+      body: null,
+      rateLimitResetAt: 1790000000,
+    });
+  });
+
   it("fails with a PluginError when Sentry cannot be reached", async () => {
     const stub = stubHttpClient((request) =>
       Effect.fail(
@@ -136,6 +168,24 @@ describe("callSentry", () => {
     const reset = String(Math.floor(Date.now() / 1000) + 25);
 
     const result = await call(429, { "x-sentry-rate-limit-reset": reset });
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(SentryRateLimited);
+    if (Result.isFailure(result) && result.failure instanceof SentryRateLimited) {
+      expect(result.failure.retryAfterSeconds).toBeGreaterThanOrEqual(24);
+      expect(result.failure.retryAfterSeconds).toBeLessThanOrEqual(25);
+    }
+  });
+
+  it("fails with an AuthError on a 401 whose body is not JSON", async () => {
+    const result = await runAgainstStub(callSentry(REQUEST), buildHtmlStub(401));
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(AuthError);
+  });
+
+  it("fails with the wait Sentry asked for on a 429 whose body is not JSON", async () => {
+    const reset = String(Math.floor(Date.now() / 1000) + 25);
+
+    const result = await runAgainstStub(callSentry(REQUEST), buildHtmlStub(429, reset));
 
     expect(Result.isFailure(result) && result.failure).toBeInstanceOf(SentryRateLimited);
     if (Result.isFailure(result) && result.failure instanceof SentryRateLimited) {

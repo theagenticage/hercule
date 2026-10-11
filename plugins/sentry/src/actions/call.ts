@@ -10,9 +10,10 @@
  * - `forbidden`: the account may not change this issue (403).
  * - `not_found`: the issue does not exist, or the account cannot see it (404).
  * - `unavailable`: Sentry could not be reached, did not answer in time, or
- *   failed (5xx).
- * - `unexpected`: Sentry answered with any other status, or with a body of an
- *   unexpected shape.
+ *   failed (5xx). Trying again later may work.
+ * - `unexpected`: Sentry answered with any other status, with a body that is
+ *   not JSON or has an unexpected shape, or the request was refused before it
+ *   was sent. Trying again changes nothing.
  *
  * The codes are spelled like the public API's error codes, which a step
  * record stores for a built-in action.
@@ -137,7 +138,13 @@ export const updateIssue = (
       token,
       body: changes,
     }).pipe(
-      Effect.mapError((error) => new ActionError({ code: "unavailable", message: error.message })),
+      Effect.mapError(
+        (error) =>
+          new ActionError({
+            code: error._tag === "SentryUnreachable" ? "unavailable" : "unexpected",
+            message: error.message,
+          }),
+      ),
     );
     const { status } = response;
     const fail = (code: string, message: string) => Effect.fail(new ActionError({ code, message }));

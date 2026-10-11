@@ -45,9 +45,6 @@ const SCOPES = [
 /** How many days back the `issues` feed looks when a Connection does not set its own window. */
 export const DEFAULT_LAST_SEEN_DAYS = 14;
 
-/** The most choices a config field lists. */
-const MAX_CHOICES = 1000;
-
 /**
  * The values the `assignees` field offers before any team or member. Sentry's
  * search knows them by name.
@@ -150,8 +147,8 @@ const buildMemberLabel = (member: Schema.Schema.Type<typeof ApiMember>): string 
 
 /** Lists the teams as `team:<id>` choices, with `label` building each label from the team's slug. */
 const listTeamChoices = (access: OrganizationAccess, buildLabel: (slug: string) => string) =>
-  Effect.map(readOrganizationList(access, "/teams/", ApiTeam), (listed) =>
-    listed.items.map((team) => ({ value: `team:${team.id}`, label: buildLabel(team.slug) })),
+  Effect.map(readOrganizationList(access, "/teams/", ApiTeam), (teams) =>
+    teams.map((team) => ({ value: `team:${team.id}`, label: buildLabel(team.slug) })),
   );
 
 /**
@@ -164,9 +161,10 @@ const listTeamChoices = (access: OrganizationAccess, buildLabel: (slug: string) 
  * - `projects`: the teams ("All projects of #slug"), then the projects.
  * - `environments`: the environment names.
  *
- * A list over 1,000 choices is cut; the fixed values and the teams come first,
- * so they are the last to go. Fails with a `PluginError` for another field,
- * for credentials without a token, and when Sentry cannot be read.
+ * Returns the whole list. The host refuses a list of more than 1,000 choices
+ * with its own error, so this function never cuts one. Fails with a
+ * `PluginError` for another field, for credentials without a token, when an
+ * organization list is too long to read, and when Sentry cannot be read.
  */
 const listChoices: NonNullable<ConnectionTypeContribution["listChoices"]> = (field, connection) =>
   Effect.gen(function* () {
@@ -183,29 +181,30 @@ const listChoices: NonNullable<ConnectionTypeContribution["listChoices"]> = (fie
         return [
           ...FIXED_ASSIGNEE_CHOICES,
           ...teams,
-          ...members.items.flatMap((member) =>
+          ...members.flatMap((member) =>
             member.user == null
               ? []
               : [{ value: `user:${member.user.id}`, label: buildMemberLabel(member) }],
           ),
-        ].slice(0, MAX_CHOICES);
+        ];
       }
       case "projects": {
         const teams = yield* listTeamChoices(access, (slug) => `All projects of #${slug}`);
         const projects = yield* readOrganizationList(access, "/projects/", ApiProject);
         return [
           ...teams,
-          ...projects.items.map((project) => ({
+          ...projects.map((project) => ({
             value: `project:${project.id}`,
             label: project.slug,
           })),
-        ].slice(0, MAX_CHOICES);
+        ];
       }
       case "environments": {
         const environments = yield* readOrganizationList(access, "/environments/", ApiEnvironment);
-        return environments.items
-          .map((environment) => ({ value: environment.name, label: environment.name }))
-          .slice(0, MAX_CHOICES);
+        return environments.map((environment) => ({
+          value: environment.name,
+          label: environment.name,
+        }));
       }
       default:
         return yield* new PluginError({

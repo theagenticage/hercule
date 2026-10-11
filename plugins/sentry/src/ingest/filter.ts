@@ -31,7 +31,9 @@ export interface ResolvedFilter {
   /**
    * A string that is the same for the same filter. When it differs from the
    * one stored, the filter changed, and the set the poll lists is not
-   * comparable with the stored one.
+   * comparable with the stored one. It is built from ids and settings only,
+   * never from team slugs or usernames, so renaming a team or a user in
+   * Sentry does not change it.
    */
   readonly fingerprint: string;
 }
@@ -58,23 +60,32 @@ const sortText = (values: Iterable<string>): Array<string> =>
   [...new Set(values)].sort((first, second) => (first < second ? -1 : first > second ? 1 : 0));
 
 /**
- * Returns the `assigned:` values for the configured assignees, or undefined
- * for no `assigned:` filter at all (`anyone`). Reads the teams and the
- * members only when a team or a user is configured.
+ * Returns the assignees the config asks for, sorted: the configured values,
+ * the default pair when none is configured, and just `anyone` when `anyone`
+ * is among them, because it overrides the rest.
+ */
+const listWantedAssignees = (configured: ReadonlyArray<string> | undefined): Array<string> => {
+  const wanted =
+    configured === undefined || configured.length === 0 ? DEFAULT_ASSIGNEES : configured;
+  return wanted.includes("anyone") ? ["anyone"] : sortText(wanted);
+};
+
+/**
+ * Returns the `assigned:` values for the wanted assignees, or undefined for no
+ * `assigned:` filter at all (`anyone`). Reads the teams and the members only
+ * when a team or a user is wanted.
  */
 const resolveAssignees = (
   access: OrganizationAccess,
-  configured: ReadonlyArray<string> | undefined,
+  wanted: ReadonlyArray<string>,
 ): Effect.Effect<ReadonlyArray<string> | undefined, SentryFailure, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const wanted =
-      configured === undefined || configured.length === 0 ? DEFAULT_ASSIGNEES : configured;
     if (wanted.includes("anyone")) return undefined;
     const teams = wanted.some((value) => value.startsWith("team:"))
-      ? (yield* readOrganizationList(access, "/teams/", ApiTeam)).items
+      ? yield* readOrganizationList(access, "/teams/", ApiTeam)
       : [];
     const members = wanted.some((value) => value.startsWith("user:"))
-      ? (yield* readOrganizationList(access, "/members/", ApiMember)).items
+      ? yield* readOrganizationList(access, "/members/", ApiMember)
       : [];
     const values: Array<string> = [];
     for (const value of wanted) {
@@ -107,7 +118,7 @@ const resolveProjects = (
 ): Effect.Effect<ReadonlyArray<string>, SentryFailure, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     if (configured === undefined || configured.length === 0) return [];
-    const projects = (yield* readOrganizationList(access, "/projects/", ApiProject)).items;
+    const projects = yield* readOrganizationList(access, "/projects/", ApiProject);
     const ids = new Set<string>();
     for (const value of configured) {
       if (value.startsWith("project:")) {
@@ -119,7 +130,9 @@ const resolveProjects = (
           (candidate.teams ?? []).some((team) => `team:${team.id}` === value),
         );
         if (owned.length === 0) {
-          return yield* failMissing(`The team ${value}, or a project it owns,`);
+          return yield* new PluginError({
+            message: `The team ${value} owns no projects; an empty project list would watch every project. Remove it in the Connection's settings, or add a project to the team in Sentry.`,
+          });
         }
         for (const project of owned) ids.add(project.id);
       } else {
@@ -136,8 +149,7 @@ const resolveEnvironments = (
 ): Effect.Effect<ReadonlyArray<string>, SentryFailure, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     if (configured === undefined || configured.length === 0) return [];
-    const environments = (yield* readOrganizationList(access, "/environments/", ApiEnvironment))
-      .items;
+    const environments = yield* readOrganizationList(access, "/environments/", ApiEnvironment);
     for (const name of configured) {
       if (!environments.some((candidate) => candidate.name === name)) {
         return yield* failMissing(`The environment "${name}"`);
@@ -158,7 +170,8 @@ export const resolveFilter = (
 ): Effect.Effect<ResolvedFilter, SentryFailure, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const lastSeenDays = config.lastSeenDays ?? DEFAULT_LAST_SEEN_DAYS;
-    const assignees = yield* resolveAssignees(access, config.assignees);
+    const wantedAssignees = listWantedAssignees(config.assignees);
+    const assignees = yield* resolveAssignees(access, wantedAssignees);
     const projectIds = yield* resolveProjects(access, config.projects);
     const environments = yield* resolveEnvironments(access, config.environments);
     const query = [
@@ -171,6 +184,11 @@ export const resolveFilter = (
       projectIds,
       environments,
       lastSeenDays,
-      fingerprint: JSON.stringify({ query, projects: projectIds, environments }),
+      fingerprint: JSON.stringify({
+        assignees: wantedAssignees,
+        lastSeenDays,
+        projects: projectIds,
+        environments,
+      }),
     };
   });

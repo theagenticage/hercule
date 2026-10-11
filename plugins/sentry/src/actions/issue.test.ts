@@ -4,14 +4,17 @@
  * `ActionError`, and the describe lines and outcomes a Signal's answer shows.
  */
 import { describe, expect, it } from "vitest";
-import { Result, type Effect } from "effect";
+import { Effect, Result } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import { ActionError, type ActionContext } from "@hercule/plugin-host";
 import {
   buildFakeIssue,
   buildFakeSentry,
   buildFakeWorld,
   runAgainstStub,
+  stubHttpClient,
   TEST_TOKEN,
 } from "../testing";
 import { issueArchive, issueAssign, issueResolve } from "./issue";
@@ -133,7 +136,7 @@ describe("issue.assign", () => {
       assignee: { type: "user", id: "88", name: "ada" },
     });
 
-    expect(readUpdate(fake).body).toEqual({ assignedTo: "88" });
+    expect(readUpdate(fake).body).toEqual({ assignedTo: "user:88" });
     expect(Result.isSuccess(result)).toBe(true);
     expect(fake.world.issues[0]?.assignedTo).toEqual({ type: "user", id: "88", name: "ada" });
   });
@@ -218,6 +221,57 @@ describe("the failures every action shares", () => {
     });
 
     expect(error.code).toBe("unavailable");
+  });
+
+  it("fails as unavailable when Sentry cannot be reached, because trying again may work", async () => {
+    const stub = stubHttpClient((request) =>
+      Effect.fail(
+        new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({ request }),
+        }),
+      ),
+    );
+
+    const result = await runAgainstStub(issueResolve.perform(ADDRESS, buildActionContext()), stub);
+
+    expect(Result.isFailure(result) && result.failure.code).toBe("unavailable");
+  });
+
+  it("fails as unexpected, not unavailable, when the reply is not JSON", async () => {
+    const stub = stubHttpClient((request) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(request, new Response("<html>a proxy</html>", { status: 200 })),
+      ),
+    );
+
+    const result = await runAgainstStub(issueResolve.perform(ADDRESS, buildActionContext()), stub);
+
+    expect(Result.isFailure(result) && result.failure.code).toBe("unexpected");
+    if (Result.isFailure(result)) expect(result.failure.message).toContain("not JSON");
+  });
+
+  it("fails as unauthenticated on a 401 whose body is not JSON", async () => {
+    const stub = stubHttpClient((request) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(request, new Response("<html>a proxy</html>", { status: 401 })),
+      ),
+    );
+
+    const result = await runAgainstStub(issueResolve.perform(ADDRESS, buildActionContext()), stub);
+
+    expect(Result.isFailure(result) && result.failure.code).toBe("unauthenticated");
+  });
+
+  it("fails as rate_limited on a 429 whose body is not JSON", async () => {
+    const stub = stubHttpClient((request) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(request, new Response("<html>a proxy</html>", { status: 429 })),
+      ),
+    );
+
+    const result = await runAgainstStub(issueResolve.perform(ADDRESS, buildActionContext()), stub);
+
+    expect(Result.isFailure(result) && result.failure.code).toBe("rate_limited");
   });
 
   it("never sends the token anywhere but sentry.io", async () => {

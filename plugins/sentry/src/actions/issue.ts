@@ -100,8 +100,7 @@ export const issueAssign = defineSentryAction({
   perform: (input, context) =>
     Effect.gen(function* () {
       const token = yield* readConnectionToken(context);
-      const assignedTo =
-        input.assignee.type === "team" ? `team:${input.assignee.id}` : input.assignee.id;
+      const assignedTo = `${input.assignee.type}:${input.assignee.id}`;
       return yield* updateIssue(input, { assignedTo }, token);
     }),
 });

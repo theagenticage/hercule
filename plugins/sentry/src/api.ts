@@ -70,6 +70,17 @@ export class SentryRateLimited extends Schema.TaggedError<SentryRateLimited>()(
   { message: Schema.String, retryAfterSeconds: Schema.Number },
 ) {}
 
+/**
+ * No answer from Sentry arrived: it could not be reached, its response could
+ * not be read, or it took too long. Unlike every other failure of a request,
+ * trying again later may work. `callSentry` turns it into a `PluginError`;
+ * an action reads it to report the failure as `unavailable`.
+ */
+export class SentryUnreachable extends Schema.TaggedError<SentryUnreachable>()(
+  "SentryUnreachable",
+  { message: Schema.String },
+) {}
+
 /** Everything a call to Sentry can fail with. */
 export type SentryFailure = AuthError | PluginError | SentryRateLimited;
 
@@ -106,13 +117,14 @@ const parseWholeNumber = (value: string | undefined): number | undefined =>
 /**
  * Sends one request to Sentry's REST API and returns its status, body, next
  * page cursor and rate-limit reset. Any status is returned as it is: the
- * caller decides what a 403 or a 404 means for it. Fails with a `PluginError`
- * when:
+ * caller decides what a 403 or a 404 means for it. Fails with:
  *
- * - the host is not on `sentry.io`, so the request is not sent at all;
- * - no response arrived, or the whole response did not arrive within
- *   `SENTRY_REQUEST_TIMEOUT`;
- * - the response body was not JSON.
+ * - `SentryUnreachable` when no response arrived, or the whole response did
+ *   not arrive within `SENTRY_REQUEST_TIMEOUT`;
+ * - a `PluginError` when the host is not on `sentry.io`, so the request is not
+ *   sent at all, or when the body of a 2xx response was not JSON. The body of
+ *   any other status is returned as null when it is not JSON, so the caller
+ *   can still tell a 401 or a 429 from the status alone.
  *
  * The `HttpClient` stays a requirement: the plugin provides the fetch client
  * only where the host calls in, so a test can drive any function below that
@@ -120,7 +132,7 @@ const parseWholeNumber = (value: string | undefined): number | undefined =>
  */
 export const requestSentry = (
   request: SentryRequest,
-): Effect.Effect<SentryResponse, PluginError, HttpClient.HttpClient> =>
+): Effect.Effect<SentryResponse, PluginError | SentryUnreachable, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     if (!isSentryOrigin(request.baseUrl)) {
       return yield* new PluginError({
@@ -148,13 +160,16 @@ export const requestSentry = (
     const { response, text } = yield* Effect.gen(function* () {
       const response = yield* HttpClient.execute(outgoing).pipe(
         Effect.mapError(
-          (error) => new PluginError({ message: `Sentry could not be reached: ${error.message}` }),
+          (error) =>
+            new SentryUnreachable({ message: `Sentry could not be reached: ${error.message}` }),
         ),
       );
       const text = yield* response.text.pipe(
         Effect.mapError(
           (error) =>
-            new PluginError({ message: `Sentry's response could not be read: ${error.message}` }),
+            new SentryUnreachable({
+              message: `Sentry's response could not be read: ${error.message}`,
+            }),
         ),
       );
       return { response, text };
@@ -163,16 +178,24 @@ export const requestSentry = (
         duration: SENTRY_REQUEST_TIMEOUT,
         orElse: () =>
           Effect.fail(
-            new PluginError({
+            new SentryUnreachable({
               message: `Sentry did not answer ${request.method} ${url.pathname} within ${String(Duration.toSeconds(SENTRY_REQUEST_TIMEOUT))} seconds.`,
             }),
           ),
       }),
     );
+    const isSuccess = response.status >= 200 && response.status < 300;
     const body = yield* Effect.try({
       try: (): Schema.Json => (text.length === 0 ? null : (JSON.parse(text) as Schema.Json)),
+      // The status decides first. A proxy's HTML page in front of a 401 or a
+      // 429 is still a refused token or a rate limit, so only the body of a
+      // successful response has to be JSON; any other body becomes null.
       catch: () => new PluginError({ message: "Sentry answered with a body that is not JSON." }),
-    });
+    }).pipe(
+      Effect.catchTag("PluginError", (error) =>
+        isSuccess ? Effect.fail(error) : Effect.succeed<Schema.Json>(null),
+      ),
+    );
     const nextCursor = parseNextCursor(response.headers["link"]);
     const rateLimitResetAt = parseWholeNumber(response.headers["x-sentry-rate-limit-reset"]);
     return {
@@ -220,7 +243,11 @@ export const callSentry = (
   tolerate: ReadonlyArray<number> = [],
 ): Effect.Effect<SentryResponse, SentryFailure, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const response = yield* requestSentry(request);
+    const response = yield* requestSentry(request).pipe(
+      Effect.catchTag("SentryUnreachable", (error) =>
+        Effect.fail(new PluginError({ message: error.message })),
+      ),
+    );
     if ((response.status >= 200 && response.status < 300) || tolerate.includes(response.status)) {
       return response;
     }
