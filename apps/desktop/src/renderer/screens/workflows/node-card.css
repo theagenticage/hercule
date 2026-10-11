@@ -1,0 +1,69 @@
+/* A node's card on the workflow graph: the book's `.node-pop`, a 320px
+   popover beside its node, kept inside the window, that scrolls when it is
+   taller than the room. Its look is the book's `.pop`, `.pop-h`, `.pop-sec`
+   and `.q-h`, from `../thread/menus.css`. */
+.node-pop {
+  inset: auto;
+  width: 320px;
+  max-height: calc(100vh - 16px);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 0;
+  border-radius: var(--r-lg);
+  color: var(--ink);
+}
+/* The node's id is the title and its kind is on the right; a long id gives way first. */
+.node-pop .pop-h b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-pop .pop-h .ic {
+  flex: none;
+  color: var(--muted);
+}
+/* The rows: a label column, then the value, wrapped once and then cut short.
+   Data and expressions are in mono. */
+.node-facts {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+  padding: 6px;
+  font-size: var(--t-12);
+}
+.node-facts > div {
+  display: contents;
+}
+.node-facts dt {
+  color: var(--muted);
+}
+.node-facts dd {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.node-facts dd.is-code {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+  line-height: 18px;
+}
+/* An agent step's prompt as written: its first three lines. */
+.node-prompt {
+  display: -webkit-box;
+  margin: 0;
+  padding: 0 6px 6px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}

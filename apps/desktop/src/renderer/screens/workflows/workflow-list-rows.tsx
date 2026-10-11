@@ -1,7 +1,7 @@
 /**
- * The items of the workflow list's table: a group's heading and a
- * workflow's row, and the column heads above them (spec 17 §Workflows, "The
- * list").
+ * The items of the workflow list: a group's heading, and a workflow's row at
+ * each of the list's two widths, with the table's column heads (spec 17
+ * §Workflows, "The list").
  *
  * Each item draws itself at its fixed height, with the space above it as its
  * top margin, as the sidebar's items do. Every item's root carries
@@ -32,8 +32,14 @@ import { SELECTED_LINK_PROPS } from "../selected-link-props";
 /** The height of a group's heading, in CSS pixels, without the space above it. */
 export const GROUP_HEADING_HEIGHT = 24;
 
-/** The height of a workflow's row, in CSS pixels. */
+/** The height of a workflow's row in the table, in CSS pixels. */
 export const WORKFLOW_ROW_HEIGHT = 40;
+
+/** The height of a workflow's row in the column, in CSS pixels, without the 1px above it. */
+export const WORKFLOW_COLUMN_ROW_HEIGHT = 46;
+
+/** The space above each of the column's rows, in CSS pixels, as between the sidebar's rows. */
+export const WORKFLOW_COLUMN_ROW_LEADING = 1;
 
 /** The size of a run's mark in the strip, so twenty of them fit in the strip's column. */
 const STRIP_MARK_SIZE = 10;
@@ -191,8 +197,8 @@ const areArraysEqual = <Value,>(a: ReadonlyArray<Value>, b: ReadonlyArray<Value>
  * every other value by `Object.is`. A push builds every row's arrays anew, so
  * comparing them by identity would draw every row again.
  */
-const areWorkflowRowPropsEqual = (a: WorkflowTableRowProps, b: WorkflowTableRowProps): boolean =>
-  (Object.keys(a) as Array<keyof WorkflowTableRowProps>).every((key) => {
+const areWorkflowRowPropsEqual = <Props extends object>(a: Props, b: Props): boolean =>
+  (Object.keys(a) as Array<keyof Props>).every((key) => {
     const valueOfA = a[key];
     const valueOfB = b[key];
     return Array.isArray(valueOfA) && Array.isArray(valueOfB)
@@ -201,8 +207,7 @@ const areWorkflowRowPropsEqual = (a: WorkflowTableRowProps, b: WorkflowTableRowP
   });
 
 /**
- * Renders a workflow's row: a link to the workflow, which is selected while
- * the workflow is open. Its cells are the workflow's mark, its name, what
+ * Renders a workflow's row in the table: a link to the workflow. Its cells are the workflow's mark, its name, what
  * starts it, the strip of its newest runs, how many of them succeeded, its
  * last run's status and time, and when it next starts.
  */
@@ -265,6 +270,77 @@ export const WorkflowTableRow = memo(function WorkflowTableRow({
           nextText
         ) : (
           <ListTime at={nextFireAt} timezone={timezone} direction="future" onScreen={onScreen} />
+        )}
+      </span>
+    </Link>
+  );
+}, areWorkflowRowPropsEqual);
+
+/** The values a workflow's row in the column draws. */
+interface WorkflowColumnRowProps {
+  readonly itemKey: string;
+  readonly workflowId: string;
+  readonly name: string;
+  readonly mark: WorkflowRowMark;
+  readonly isOff: boolean;
+  readonly statusText: string;
+  readonly statusTone: WorkflowStatusTone;
+  readonly lastRunAt: string | null;
+  /** The time zone the time is shown in. */
+  readonly timezone: string;
+  /** Whether the row is in the visible part of the list, which keeps its time current. */
+  readonly onScreen: boolean;
+}
+
+/**
+ * Renders a workflow's row in the column beside the open workflow: a link
+ * to the workflow, which is selected while the workflow is open, drawn as
+ * the sidebar's two-line row. Its parts are the workflow's mark, its name
+ * over its last run's status, and when that run started.
+ */
+export const WorkflowColumnRow = memo(function WorkflowColumnRow({
+  itemKey,
+  workflowId,
+  name,
+  mark,
+  isOff,
+  statusText,
+  statusTone,
+  lastRunAt,
+  timezone,
+  onScreen,
+}: WorkflowColumnRowProps): JSX.Element {
+  const statusId = useId();
+  return (
+    <Link
+      to="/workflows/$workflowId"
+      params={{ workflowId }}
+      className={isOff ? "column-row is-off" : "column-row"}
+      activeProps={SELECTED_LINK_PROPS}
+      data-key={itemKey}
+      style={{ marginTop: WORKFLOW_COLUMN_ROW_LEADING, height: WORKFLOW_COLUMN_ROW_HEIGHT }}
+      aria-label={name}
+      aria-describedby={statusId}
+    >
+      <span className="column-mark">
+        <Mark state={mark} />
+      </span>
+      <span className="column-text">
+        <span className="column-name">{name}</span>
+        <span
+          className={
+            statusTone === "muted"
+              ? "column-status status-text"
+              : `column-status status-text status-text--${statusTone}`
+          }
+          id={statusId}
+        >
+          {statusText}
+        </span>
+      </span>
+      <span className="column-time">
+        {lastRunAt === null ? null : (
+          <ListTime at={lastRunAt} timezone={timezone} direction="past" onScreen={onScreen} />
         )}
       </span>
     </Link>

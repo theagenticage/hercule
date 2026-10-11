@@ -1,6 +1,6 @@
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Outlet, createFileRoute } from "@tanstack/react-router";
+import { Outlet, createFileRoute, useMatch, useNavigate } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
 import {
   buildWorkflowListItems,
@@ -19,13 +19,23 @@ import {
 } from "../../../../app/queries";
 import { useWaitingRunSessions } from "../../../../app/waiting";
 import { WorkflowList } from "../../../../screens/workflows/workflow-list";
-import { WorkflowListHeader } from "../../../../screens/workflows/workflow-list-header";
+import {
+  WorkflowColumnHeader,
+  WorkflowListHeader,
+  WorkflowSearchField,
+} from "../../../../screens/workflows/workflow-list-header";
+import { WorkflowTableHeads } from "../../../../screens/workflows/workflow-list-rows";
 
 /**
- * Workflows: the workflow list, as a table with its filters and search in
- * the floating header (spec 17 §Workflows). It is the layout route of the
- * workflow pages, so the list stays mounted, with its filter and search,
- * while a workflow opens under it (`$workflowId.tsx`).
+ * Workflows: the workflow list and the open workflow (spec 17 §Workflows).
+ * It is the layout route of the workflow pages, so the list keeps its filter
+ * and search while workflows open and close under it (`$workflowId.tsx`).
+ * The list is one list at three widths:
+ *
+ * - the table, while no workflow is open, with the filters and the search in
+ *   the floating header;
+ * - a column beside the open workflow, with the search at its top;
+ * - hidden, while the open workflow fills the pane (`full`).
  *
  * The route is split into a chunk of its own, so the list's code loads the
  * first time it opens. Its loader reads everything the list draws before it
@@ -61,9 +71,28 @@ export const Route = createFileRoute("/_connected/_shell/workflows")({
   component: WorkflowsLayout,
 });
 
+/** The open workflow's route, whose search holds `full`. */
+const OPEN_WORKFLOW_ROUTE = "/_connected/_shell/workflows/$workflowId";
+
+/** Returns true when `target`, the keyboard's focus, is a field, where keys edit text. */
+const isTextField = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+
 /**
  * Keeps the workflow pages' reads current while the page is open, builds
- * the list's rows from them, and holds the filter and the search.
+ * the list's rows from them, and holds the filter and the search. It draws
+ * the list at the width the route asks for, and the open workflow beside
+ * it.
+ *
+ * While a workflow is open, Esc closes it, back to the table, unless
+ * something else takes Esc first:
+ *
+ * - a step's card, or anything else that handles Esc and calls
+ *   `preventDefault()`;
+ * - an open popover or dialog, which the browser closes on Esc without
+ *   calling `preventDefault()`;
+ * - a focused text field, where Esc belongs to the field.
  */
 function WorkflowsLayout(): JSX.Element {
   const { controller, queryClient } = Route.useRouteContext();
@@ -71,6 +100,23 @@ function WorkflowsLayout(): JSX.Element {
   useWorkflowsLive(controller.live, queryClient);
   const [filter, setFilter] = useState<WorkflowListFilter>("all");
   const [search, setSearch] = useState("");
+  const navigate = useNavigate();
+  const openWorkflow = useMatch({ from: OPEN_WORKFLOW_ROUTE, shouldThrow: false });
+  const width =
+    openWorkflow === undefined ? "table" : openWorkflow.search.full === true ? "full" : "column";
+  const isOpen = openWorkflow !== undefined;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const closeWorkflow = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (isTextField(event.target)) return;
+      if (document.querySelector("dialog[open], :popover-open") !== null) return;
+      void navigate({ to: "/workflows" });
+    };
+    window.addEventListener("keydown", closeWorkflow);
+    return () => window.removeEventListener("keydown", closeWorkflow);
+  }, [isOpen, navigate]);
 
   const { data: workflows } = useSuspenseQuery(workflowsQuery(client));
   const { data: triggers } = useSuspenseQuery(triggersQuery(client));
@@ -86,21 +132,58 @@ function WorkflowsLayout(): JSX.Element {
     liveRuns: [...running, ...pending],
     waitingRunSessions,
   });
+  const counts = countWorkflowsByFilter(rows);
+  const items = buildWorkflowListItems(rows, filter, search);
+  const timezone = resolveDisplayTimezone(settings.user.timezone);
 
   return (
     <div className="workflows-page">
-      <WorkflowListHeader
-        filter={filter}
-        counts={countWorkflowsByFilter(rows)}
-        search={search}
-        onFilterChange={setFilter}
-        onSearchChange={setSearch}
-      />
-      <WorkflowList
-        items={buildWorkflowListItems(rows, filter, search)}
-        hasWorkflows={workflows.length > 0}
-        timezone={resolveDisplayTimezone(settings.user.timezone)}
-      />
+      {openWorkflow === undefined ? (
+        <WorkflowListHeader
+          filter={filter}
+          counts={counts}
+          search={search}
+          onFilterChange={setFilter}
+          onSearchChange={setSearch}
+        />
+      ) : (
+        <WorkflowColumnHeader
+          filter={filter}
+          counts={counts}
+          isListShown={width === "column"}
+          // The spec does not say whether hiding the list replaces the
+          // history entry, so it pushes one, and Back shows the list again.
+          // `runsView` and `daysBack` are kept.
+          onToggleList={() =>
+            void navigate({
+              to: "/workflows/$workflowId",
+              params: openWorkflow.params,
+              search: (previous) => {
+                const kept = { ...previous };
+                delete kept.full;
+                return width === "column" ? { ...kept, full: true } : kept;
+              },
+            })
+          }
+        />
+      )}
+      {/* Keyed by the width, because every item's height changes with it. */}
+      {width === "full" ? null : (
+        <WorkflowList
+          key={width}
+          width={width}
+          items={items}
+          hasWorkflows={workflows.length > 0}
+          timezone={timezone}
+          head={
+            width === "table" ? (
+              <WorkflowTableHeads />
+            ) : (
+              <WorkflowSearchField search={search} onSearchChange={setSearch} isBoxed />
+            )
+          }
+        />
+      )}
       <Outlet />
     </div>
   );

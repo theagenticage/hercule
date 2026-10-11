@@ -1,7 +1,8 @@
 /**
  * A read-only drawing of a workflow graph: a card for each trigger and step,
- * and a curve for each edge with its condition and traversal limit. The
- * layout engine (dagre) positions the cards. React Flow draws them and
+ * and a curve for each edge with its condition and traversal limit.
+ * `computeGraphLayout` from `@hercule/client-core/graph-layout` positions the
+ * cards and routes the edges. React Flow draws them and
  * provides pan, zoom and "Fit to view". This folder is the only place that
  * imports React Flow, so the library can be replaced here alone.
  *
@@ -42,15 +43,18 @@ import {
 } from "@hercule/client-core";
 import { Button, cn, useElementWidth } from "@hercule/ui";
 import {
-  computeDrawingViewport,
+  buildCurve,
   computeGraphLayout,
+  formatCoordinate,
+  type EdgeRoute,
+  type Size,
+} from "@hercule/client-core/graph-layout";
+import {
+  computeDrawingViewport,
   computePaneHeight,
   LARGEST_PLACED_ZOOM,
   MIN_ZOOM,
-  type EdgeRoute,
   type PaneSizing,
-  type Point,
-  type Size,
 } from "./layout";
 
 /**
@@ -192,32 +196,6 @@ const measureLabel = (edge: WorkflowGraphEdge, badge: EdgeBadge | undefined): Si
       : measureMonoText(badge.text, LABEL_FONT_SIZE) + 2 * (BADGE_PADDING + BADGE_BORDER);
   const gap = conditionWidth > 0 && badgeWidth > 0 ? LABEL_GAP : 0;
   return { width: conditionWidth + gap + badgeWidth + 2 * LABEL_PADDING, height: LABEL_HEIGHT };
-};
-
-/** Formats a coordinate rounded to a tenth of a pixel, which is finer than a screen can show. */
-const formatCoordinate = (value: number): string => String(Math.round(value * 10) / 10);
-
-/** Formats a point for an SVG path. */
-const formatPoint = ({ x, y }: Point): string => `${formatCoordinate(x)},${formatCoordinate(y)}`;
-
-/**
- * Builds an SVG path for a smooth curve through an edge's points. The curve
- * is the same uniform B-spline that dagre's own renderer draws. A route always
- * has at least four points: the two ends, and one point straight out from
- * each card.
- */
-const buildCurve = (points: ReadonlyArray<Point>): string => {
-  const [first, second] = [points[0]!, points[1]!];
-  let path = `M${formatPoint(first)} L${formatPoint({ x: (5 * first.x + second.x) / 6, y: (5 * first.y + second.y) / 6 })}`;
-  let [a, b] = [first, second];
-  for (const next of [...points.slice(2), points.at(-1)!]) {
-    path +=
-      ` C${formatPoint({ x: (2 * a.x + b.x) / 3, y: (2 * a.y + b.y) / 3 })}` +
-      ` ${formatPoint({ x: (a.x + 2 * b.x) / 3, y: (a.y + 2 * b.y) / 3 })}` +
-      ` ${formatPoint({ x: (a.x + 4 * b.x + next.x) / 6, y: (a.y + 4 * b.y + next.y) / 6 })}`;
-    [a, b] = [b, next];
-  }
-  return `${path} L${formatPoint(b)}`;
 };
 
 /**

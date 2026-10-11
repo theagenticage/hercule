@@ -95,10 +95,10 @@ const buildImportCalls = (source, message) => [
 ];
 
 /**
- * Each library of the workflow editor sits behind a facade of the editor's
- * own, so that it can be replaced there without a change anywhere else. A
- * fence rejects an import of the library's packages everywhere but in its facade, in a
- * static import and in a dynamic `import()` alike.
+ * Each library that draws or edits a workflow sits behind a facade, so that
+ * it can be replaced there without a change anywhere else. A fence rejects an
+ * import of the library's packages everywhere but in its facade, in a static
+ * import and in a dynamic `import()` alike.
  */
 const fenceLibrary = (scopes, message) => ({
   pattern: { group: scopes.map((scope) => `${scope}/*`), message },
@@ -112,9 +112,11 @@ const reactFlowFence = fenceLibrary(
   ["@xyflow"],
   `The graph library is imported only in ${workflowEditor}/graph-view/, so that it can be replaced there alone. Use the GraphView of that folder.`,
 );
+/** The one file that imports the layout engine, which both apps draw workflow graphs with. */
+const graphLayout = "packages/client-core/src/graph-layout.ts";
 const dagreFence = fenceLibrary(
   ["@dagrejs"],
-  `The layout engine is imported only in ${workflowEditor}/graph-view/layout.ts, so that it can be replaced there alone. Use computeGraphLayout from that file.`,
+  `The layout engine is imported only in ${graphLayout}, so that it can be replaced there alone. Use computeGraphLayout from @hercule/client-core/graph-layout.`,
 );
 const editorLibraryFences = [codeMirrorFence, reactFlowFence, dagreFence];
 const editorLibraryPatterns = editorLibraryFences.map((fence) => fence.pattern);
@@ -400,10 +402,26 @@ export default tseslint.config(
     },
   },
   {
-    files: [`${workflowEditor}/graph-view/layout.ts`],
+    // The layout engine's facade. It keeps every ban of the base block above,
+    // because a rule's options here replace the ones there.
+    files: [graphLayout],
     rules: {
-      "no-restricted-imports": browserImports({ allowed: dagreFence }),
-      "no-restricted-syntax": browserSyntax({ allowed: dagreFence }),
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [...bannedEverywhere, ...bannedChildProcess],
+          patterns: editorLibraryFences
+            .filter((fence) => fence !== dagreFence)
+            .map((fence) => fence.pattern),
+        },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        ...bannedChildProcessCalls,
+        ...editorLibraryFences
+          .filter((fence) => fence !== dagreFence)
+          .flatMap((fence) => fence.calls),
+      ],
     },
   },
   {

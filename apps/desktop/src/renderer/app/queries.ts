@@ -606,6 +606,73 @@ export const liveRunsQuery = (client: HerculeClient, status: "running" | "pendin
   });
 
 /**
+ * Reads one workflow with its stored YAML source, for its page, which parses
+ * the source to draw the graph. A push on the `workflow` topic that names the
+ * workflow reads it again. A workflow that does not exist is not read again:
+ * the page shows that it was not found.
+ */
+export const workflowQuery = (client: HerculeClient, workflowId: string) =>
+  queryOptions({
+    queryKey: queryKeys.workflow(workflowId),
+    queryFn: () => client.workflow.read({ params: { id: workflowId } }),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads the workflow actions, whose names label a graph's action steps. No
+ * topic covers them: they change only when a plugin is turned on or off, so
+ * the open workflow reads them each time it opens, see `readOnOpen`.
+ */
+export const workflowActionsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.workflowActions(),
+    queryFn: () => client.workflowAction.query(),
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
+ * Reads a workflow's runs, newest first, a page at a time, for the open
+ * workflow's Runs list. A workflow can have thousands of runs, so the list
+ * reads the next page only when the user scrolls to the end of the last. Its
+ * key sits under the `runs` prefix, so a push on the `run` topic reads the
+ * pages read so far again.
+ */
+export const workflowRunsQuery = (client: HerculeClient, workflowId: string) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.runs({ workflowId }),
+    queryFn: ({ pageParam }) =>
+      client.run.query({
+        query: pageParam === undefined ? { workflowId } : { workflowId, cursor: pageParam },
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads every run of a workflow that was live at some moment from
+ * `activeSince` to `until`: one day of the Runs tab's timeline. A run created
+ * before the day that was still going in it is included, so a run that waits
+ * on the user for days shows on each of them. Its key sits under the `runs`
+ * prefix, so a push on the `run` topic reads it again.
+ */
+export const workflowDayRunsQuery = (
+  client: HerculeClient,
+  workflowId: string,
+  activeSince: string,
+  until: string,
+) =>
+  queryOptions({
+    queryKey: queryKeys.runs({ workflowId, activeSince, until }),
+    queryFn: () =>
+      readEveryPage((page) =>
+        client.run.query({ query: { workflowId, activeSince, until, ...page } }),
+      ),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
  * Checks whether a failed read, such as a thread's records or an assistant's
  * current session, is worth trying again. Returns `true` for the first three
  * failures that got no answer from the controller, such as a dropped

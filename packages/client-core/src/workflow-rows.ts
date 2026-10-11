@@ -57,10 +57,11 @@ const WORKFLOW_GROUPS: ReadonlyArray<{ readonly group: WorkflowGroup; readonly t
 export type WorkflowRowMark = Extract<Pose, "waiting" | "failed" | "working" | "idle" | "paused">;
 
 /**
- * One run in a row's strip. A run waiting on the user, a running run, a
- * completed run and a failed run each have a mark. A cancelled run and a
- * run that has not started yet have none: the strip draws a faint dot for
- * them, and names it with the state.
+ * One run's state, as a row's strip, the open workflow's run rows and its
+ * timeline draw it. A run waiting on the user, a running run, a completed
+ * run and a failed run each have a mark. A cancelled run and a run that has
+ * not started yet have none: a strip or the timeline draws a faint dot for
+ * them, and a run row shows its words in the mark's place.
  */
 export type StripRunState =
   Extract<Pose, "waiting" | "working" | "done" | "failed"> | "cancelled" | "starting";
@@ -180,7 +181,7 @@ const groupByKey = <Item, Key>(
  * Checks whether a run has not started any step yet: it is pending, or
  * running with nothing active or awaited.
  */
-const isRunStarting = (run: RunSummary): boolean =>
+export const isRunStarting = (run: RunSummary): boolean =>
   run.status === "pending" ||
   (run.status === "running" && run.activeStepIds.length === 0 && run.awaitedSignalIds.length === 0);
 
@@ -189,10 +190,11 @@ const pickNewerRun = (a: RunSummary | undefined, b: RunSummary): RunSummary =>
   a === undefined || Date.parse(b.createdAt) > Date.parse(a.createdAt) ? b : a;
 
 /**
- * Returns a run's state in a strip. `isWaiting` tells whether a session of
- * the run waits on the user.
+ * Returns a run's state as a strip, the open workflow's run rows and its
+ * timeline draw it. `isWaiting` tells whether a session of the run waits on
+ * the user.
  */
-const decideStripRunState = (run: RunSummary, isWaiting: boolean): StripRunState => {
+export const decideStripRunState = (run: RunSummary, isWaiting: boolean): StripRunState => {
   if (isWaiting) return "waiting";
   if (isRunStarting(run)) return "starting";
   if (run.status === "running") return "working";
@@ -207,7 +209,7 @@ const decideStripRunState = (run: RunSummary, isWaiting: boolean): StripRunState
  * the question of its oldest open Request. A session that is no step's
  * reads "Waiting on you".
  */
-const describeWaitingRunSession = (session: WaitingRunSession): string =>
+export const describeWaitingRunSession = (session: WaitingRunSession): string =>
   session.stepId === null ? "Waiting on you" : `${session.stepId} asks: ${session.question}`;
 
 /**
@@ -216,7 +218,7 @@ const describeWaitingRunSession = (session: WaitingRunSession): string =>
  * started a step. Several live runs are counted, and their places listed
  * once each: "2 runs · at fix, waiting for pr_merged".
  */
-const describeLiveRuns = (runs: ReadonlyArray<RunSummary>): string => {
+export const describeLiveRuns = (runs: ReadonlyArray<RunSummary>): string => {
   const places = new Set<string>();
   for (const run of runs) {
     if (isRunStarting(run)) places.add("starting");

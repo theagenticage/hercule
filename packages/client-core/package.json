@@ -6,13 +6,19 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
+    "./graph-layout": "./src/graph-layout.ts",
+    "./graph-model": "./src/graph-model.ts",
     "./list-time": "./src/list-time.ts",
+    "./node-details": "./src/node-details.ts",
+    "./run-timeline": "./src/run-timeline.ts",
+    "./workflow-detail-rows": "./src/workflow-detail-rows.ts",
     "./workflow-rows": "./src/workflow-rows.ts",
     "./testing": "./src/testing.ts",
     "./threads/testing": "./src/threads/workspaces.testing.ts",
     "./workflow-source/testing": "./src/workflow-source.testing.ts"
   },
   "dependencies": {
+    "@dagrejs/dagre": "3.1.1",
     "@hercule/contract": "workspace:*",
     "@tanstack/query-core": "5.102.8",
     "effect": "4.0.0-rc.112",
