@@ -68,7 +68,7 @@ import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
 import { truncateFact, truncateMessage } from "./text";
 import { buildUserMessage, ensureId } from "./events";
-import { buildHarnessPrompt } from "./prompt";
+import { buildHarnessPrompt, joinInstructions } from "./prompt";
 import {
   buildDenyResult,
   openPark,
@@ -567,15 +567,19 @@ const buildSessionOptions = (
   const disallowedTools = (spec.disallowedTools ?? []).flatMap(
     (family) => CLAUDE_TOOLS_BY_FAMILY[family],
   );
+  // The Hercule skill is not part of this text: the CLI loads it as a plugin
+  // (`plugins` below). So an assistant's memory, which comes after the skill on
+  // every harness, is simply the last thing appended.
+  const instructions = joinInstructions([spec.systemPrompt, spec.memory]);
   return {
     pathToClaudeCodeExecutable: binary,
     ...native,
     // Each of these three fields is set only when the session spec has it. An
     // empty list, or a preset with nothing appended, would add a setting nobody
     // asked for.
-    ...(spec.systemPrompt === undefined
+    ...(instructions === undefined
       ? {}
-      : { systemPrompt: { type: "preset", preset: "claude_code", append: spec.systemPrompt } }),
+      : { systemPrompt: { type: "preset", preset: "claude_code", append: instructions } }),
     ...(disallowedTools.length === 0 ? {} : { disallowedTools }),
     ...(spec.outputSchema === undefined
       ? {}
@@ -606,7 +610,15 @@ const buildSessionOptions = (
     ...(spec.accessMode === "full-access"
       ? { allowDangerouslySkipPermissions: true }
       : { canUseTool }),
-    env: { ...buildEnv(ctx), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+    env: {
+      ...buildEnv(ctx),
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+      // An assistant's session is rotated by the controller instead of being
+      // compacted by the CLI (spec 06 section 9.2). `DISABLE_AUTO_COMPACT`
+      // turns off only the automatic compaction. `DISABLE_COMPACT` would also
+      // turn off `/compact`, which the user can still send as a message.
+      ...(spec.autoCompaction === false ? { DISABLE_AUTO_COMPACT: "1" } : {}),
+    },
     plugins: buildPlugins(ctx),
   };
 };

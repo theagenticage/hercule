@@ -38,7 +38,7 @@ import type {
 } from "../index";
 import { readAttachmentBase64 } from "../attachments";
 import { buildUserMessage } from "../events";
-import { buildHarnessPrompt } from "../prompt";
+import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { buildFailedProbe } from "../probe";
 import { killProcessesHolding, runProcess, spawnPi, type Run } from "../process";
 import { truncateFact, truncateMessage } from "../text";
@@ -47,6 +47,7 @@ import {
   ACCESS_MODE_VARIABLE,
   AGENT_FILE_VARIABLE,
   EXTENSION_SOURCE,
+  NO_AUTO_COMPACTION_VARIABLE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
   SUBAGENT_TOOL,
@@ -460,6 +461,17 @@ const buildExtensionPath = (home: string, agentId: string): string =>
 const buildSystemPromptPath = (home: string, sessionId: string): string =>
   join(home, `system-prompt-${sessionId}.txt`);
 
+/**
+ * Builds the instructions pi appends to its own system prompt for a session:
+ * the Agent's system prompt, then an assistant's memory. Returns undefined when
+ * the session has neither, and then no instructions file is written.
+ *
+ * pi does not get the Hercule skill yet (#199). When it does, the skill goes
+ * between the two, because memory is always the last part.
+ */
+const buildSessionInstructions = (spec: SessionSpec): string | undefined =>
+  joinInstructions([spec.systemPrompt, spec.memory]);
+
 const getSessionThinkingLevel = (selection: ModelSelection): string => {
   const picked = selection.options["thinking"];
   return typeof picked === "string" && picked !== "" ? picked : DEFAULT_THINKING;
@@ -590,7 +602,7 @@ const buildArgv = (
     getSessionThinkingLevel(selection),
     // Added after pi's own system prompt, never replacing it, and passed as
     // the path `prepareHome` wrote it to, not as the text.
-    ...(spec.systemPrompt === undefined || session === undefined
+    ...(buildSessionInstructions(spec) === undefined || session === undefined
       ? []
       : ["--append-system-prompt", buildSystemPromptPath(ctx.home, session.sessionId)]),
     // A Thread on the controller's local runner is the exception to the
@@ -1236,8 +1248,9 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    */
   const prepareHome = (ctx: ProviderRunnerContext, sessionId: string, spec: SessionSpec): void => {
     mkdirSync(buildSessionsDir(ctx.home), { recursive: true, mode: 0o700 });
-    if (spec.systemPrompt !== undefined) {
-      writeFileAtomically(buildSystemPromptPath(ctx.home, sessionId), spec.systemPrompt);
+    const instructions = buildSessionInstructions(spec);
+    if (instructions !== undefined) {
+      writeFileAtomically(buildSystemPromptPath(ctx.home, sessionId), instructions);
     }
   };
 
@@ -1270,7 +1283,10 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * what the extension reads. Every agent gets the session's access mode, and
    * the `subagent` tool unless it runs at `MAX_SUBAGENT_DEPTH`. Only the
    * session's own agent gets the output schema, because only it answers with
-   * one. `extensionFile` is the agent's own copy of the extension.
+   * one. Only the session's own agent can have automatic compaction off: the
+   * controller rotates the session, not its subagents, so a subagent that could
+   * not compact would have no way to free its context. `extensionFile` is the
+   * agent's own copy of the extension.
    */
   const buildAgentEnv = (
     ctx: ProviderRunnerContext,
@@ -1281,7 +1297,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     buildEnv(ctx, {
       [ACCESS_MODE_VARIABLE]: spec.accessMode,
       [AGENT_FILE_VARIABLE]: extensionFile,
-      // Both variables are given even when they do not apply, as undefined,
+      // These variables are given even when they do not apply, as undefined,
       // so `buildEnv` removes them. A runner started from inside a pi session
       // would otherwise pass that session's values on.
       [SUBAGENTS_VARIABLE]: depth < MAX_SUBAGENT_DEPTH ? "1" : undefined,
@@ -1292,6 +1308,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         spec.outputSchema === undefined || depth > 0
           ? undefined
           : JSON.stringify(spec.outputSchema),
+      [NO_AUTO_COMPACTION_VARIABLE]: spec.autoCompaction === false && depth === 0 ? "1" : undefined,
     });
 
   const probe = makeProbe(seam.spawn, seam.run);
@@ -1370,7 +1387,9 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         // writes the file, and the file must be deleted whether the session
         // ends or never starts.
         const instructions =
-          spec.systemPrompt === undefined ? undefined : buildSystemPromptPath(ctx.home, sessionId);
+          buildSessionInstructions(spec) === undefined
+            ? undefined
+            : buildSystemPromptPath(ctx.home, sessionId);
         const extensionFile = buildExtensionPath(ctx.home, sessionId);
         const child = yield* Effect.try({
           try: () => {

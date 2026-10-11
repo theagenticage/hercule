@@ -17,6 +17,7 @@ import {
   ACCESS_MODE_VARIABLE,
   AGENT_FILE_VARIABLE,
   EXTENSION_SOURCE,
+  NO_AUTO_COMPACTION_VARIABLE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
   SUBAGENT_TOOL,
@@ -253,6 +254,41 @@ describe("the approval hook's dialog", () => {
       toolCallId: "call_1",
       toolName: "mcp__jira__create",
     });
+  });
+});
+
+describe("the compaction hook of a session with automatic compaction off", () => {
+  const NO_COMPACTION_ENV = { [NO_AUTO_COMPACTION_VARIABLE]: "1" };
+
+  it.each(["threshold", "overflow"])(
+    "cancels a compaction pi starts by itself (%s)",
+    async (reason) => {
+      const hook = loadExtension(NO_COMPACTION_ENV).handlers.get("session_before_compact");
+
+      expect(await hook?.({ type: "session_before_compact", reason }, {})).toEqual({
+        cancel: true,
+      });
+    },
+  );
+
+  it("lets a compaction the user asked for with /compact run", async () => {
+    const hook = loadExtension(NO_COMPACTION_ENV).handlers.get("session_before_compact");
+
+    expect(hook).toBeDefined();
+    expect(await hook!({ type: "session_before_compact", reason: "manual" }, {})).toBeUndefined();
+  });
+
+  it("is registered under full access too", () => {
+    const { handlers } = loadExtension({
+      ...NO_COMPACTION_ENV,
+      [ACCESS_MODE_VARIABLE]: "full-access",
+    });
+
+    expect(handlers.has("session_before_compact")).toBe(true);
+  });
+
+  it("is not registered for a session that keeps pi's own compaction", () => {
+    expect(loadExtension({}).handlers.has("session_before_compact")).toBe(false);
   });
 });
 

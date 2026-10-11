@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHarnessPrompt } from "./prompt";
+import { buildHarnessPrompt, joinInstructions } from "./prompt";
 import type { LocalAttachment } from "./index";
 
 const SENDER = "0199e0e7-0000-7000-8000-0000000000e1";
@@ -36,5 +36,15 @@ describe("the prompt a harness gets for an input", () => {
     expect(buildHarnessPrompt({ text: "", senderSessionId: SENDER, attachments: [IMAGE] })).toBe(
       `${HEADER}\n\n${IMAGE_LINE}`,
     );
+  });
+});
+
+describe("the instructions a session starts with", () => {
+  it("joins the parts in order with a blank line, leaving out missing and empty ones", () => {
+    expect(joinInstructions(["persona", undefined, "", "memory"])).toBe("persona\n\nmemory");
+  });
+
+  it("returns undefined when no part has text", () => {
+    expect(joinInstructions([undefined, ""])).toBeUndefined();
   });
 });
