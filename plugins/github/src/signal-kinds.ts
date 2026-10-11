@@ -7,15 +7,17 @@
  * Every kind's thread is the issue or pull request the event is about: an
  * item event's first ref is the item's own (`github:pr:acme/webshop#1293`).
  *
- * `build` reads GitHub to lay out the signal's body. The limits it cuts to
- * are the contract's (`MAX_MESSAGE_TEXT_LENGTH`, `MAX_BLOCK_NAME_LENGTH`,
- * `MAX_SIGNAL_TITLE_LENGTH`); a plugin cannot import the contract at
- * runtime, so the numbers are repeated here.
+ * `build` reads GitHub to lay out the signal's body, cut to the limits the
+ * core checks.
  */
 import { Effect, Schema } from "effect";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import {
+  MAX_BLOCK_NAME_LENGTH,
+  MAX_BLOCK_URL_LENGTH,
+  MAX_MESSAGE_TEXT_LENGTH,
+  MAX_SIGNAL_TITLE_LENGTH,
   PluginError,
   type SignalBuildContext,
   type SignalDraft,
@@ -30,31 +32,21 @@ import { ListedComment } from "./ingest/feed-objects";
 import {
   decodeGithubValue,
   fetchFeedResponse,
-  fetchListing,
+  fetchNewestItems,
   type FeedError,
 } from "./ingest/requests";
 import { buildItemPlace, parseItemRef, type GithubItem } from "./subject";
-
-/** The longest signal title the core accepts. */
-const MAX_SIGNAL_TITLE_LENGTH = 512;
-
-/** The longest text of one message in a `messages` block. */
-const MAX_MESSAGE_TEXT_LENGTH = 16 * 1024;
-
-/** The longest name in a block, such as a branch or a person's name. */
-const MAX_BLOCK_NAME_LENGTH = 256;
-
-/** The longest URL in a block. */
-const MAX_BLOCK_URL_LENGTH = 2048;
+import { cutText } from "./text";
 
 /** How many comments before the one that mentions the user a `mentioned` signal shows. */
 const COMMENTS_BEFORE_MENTION = 3;
 
 /**
- * The most pages of an item's comments `build` reads, 100 each, to find the
- * comment that mentions the user. Comments are listed oldest first, so on an
- * item with more than 1,000 comments a recent mention is not found, and the
- * core writes the signal from the event instead.
+ * The most requests `build` sends for an item's comments, 100 a page, to
+ * find the comment that mentions the user and the comments before it. The
+ * comments are read newest first, so only a mention with more than about
+ * 900 comments after it is not found, and the core writes the signal from
+ * the event instead.
  */
 const MAX_COMMENT_PAGES = 10;
 
@@ -155,10 +147,6 @@ const readBuildToken = (context: SignalBuildContext): Effect.Effect<string, Plug
         : Effect.succeed(token);
     },
   );
-
-/** Cuts text to `maximum` characters, ending it with an ellipsis when it was cut. */
-const cutText = (text: string, maximum: number): string =>
-  text.length <= maximum ? text : `${text.slice(0, maximum - 1)}…`;
 
 /**
  * Returns the person a block shows for a GitHub account. A deleted account,
@@ -316,10 +304,10 @@ const MentionPayload = Schema.Struct({
  * Builds the signal of a mention: the item's title, who mentioned the user,
  * a `messages` block with the comment that mentions the user and up to three
  * comments before it, and a Reply answer that comments on the item. Reads
- * the item's comments from GitHub. Fails with a `PluginError` when the event
- * names no item, the comment is not among the item's first 1,000 comments
- * (it was deleted, or the item has more), the Connection has no token, or
- * GitHub refuses or cannot be reached.
+ * the item's comments from GitHub, newest first. Fails with a `PluginError`
+ * when the event names no item, the comment is not among the comments read
+ * (it was deleted, or too many came after it), the Connection has no token,
+ * or GitHub refuses or cannot be reached.
  */
 export const buildMentionSignal = (
   event: StoredEvent,
@@ -336,7 +324,7 @@ export const buildMentionSignal = (
     );
     const token = yield* readBuildToken(context);
     const listing = yield* Effect.mapError(
-      fetchListing(
+      fetchNewestItems(
         {
           method: "GET",
           path: `/repos/${item.repo}/issues/${String(item.number)}/comments`,
@@ -344,6 +332,10 @@ export const buildMentionSignal = (
           query: { per_page: "100" },
         },
         MAX_COMMENT_PAGES,
+        // Older pages are needed until the mention and the comments shown before it are read.
+        (items) =>
+          items.findIndex((comment) => comment["id"] === payload.commentId) <
+          COMMENTS_BEFORE_MENTION,
       ),
       convertToBuildError,
     );
@@ -356,7 +348,7 @@ export const buildMentionSignal = (
     const place = buildItemPlace(item);
     if (at === -1) {
       return yield* new PluginError({
-        message: `The comment ${String(payload.commentId)} that mentions you is not among the first ${String(MAX_COMMENT_PAGES * 100)} comments on ${place}.`,
+        message: `The comment ${String(payload.commentId)} that mentions you is not among the newest comments on ${place}: it was deleted, or more than ${String((MAX_COMMENT_PAGES - 1) * 100)} comments came after it.`,
       });
     }
     const first = Math.max(0, at - COMMENTS_BEFORE_MENTION);
@@ -378,7 +370,7 @@ export const buildMentionSignal = (
                 first + index === at,
               ),
             ),
-          omitted: first,
+          omitted: listing.itemsBefore + first,
         },
       ],
       actions: [

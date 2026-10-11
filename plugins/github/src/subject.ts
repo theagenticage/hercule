@@ -8,9 +8,11 @@
  * one spelling everywhere: a filter on `subject.repo` and a `task.query` on a
  * ref both match whatever case GitHub reported.
  */
-import type { EmittedEvent } from "@hercule/plugin-host";
+import { MAX_EVENT_TITLE_LENGTH, type EmittedEvent } from "@hercule/plugin-host";
 import type { Schema } from "effect";
 import type { GithubSubject } from "./kinds";
+import { REPO_NAME_PATTERN } from "./repo-name";
+import { cutText } from "./text";
 
 /** The root of every web URL this plugin builds. */
 const GITHUB_WEB_URL = "https://github.com";
@@ -55,14 +57,19 @@ const buildItemRefs = (item: GithubItem): ReadonlyArray<string> => [
 export const buildItemRef = (item: Pick<GithubItem, "repo" | "kind" | "number">): string =>
   `github:${item.kind}:${item.repo.toLowerCase()}#${String(item.number)}`;
 
+/** The External Ref of an issue or a pull request, with the kind, the repository and the number captured. */
+const ITEM_REF_PATTERN = new RegExp(`^github:(issue|pr):(${REPO_NAME_PATTERN})#(\\d+)$`);
+
 /**
  * Parses the External Ref of an issue or a pull request, such as
- * `github:pr:owner/repo#87`. Returns undefined for any other string.
+ * `github:pr:owner/repo#87`. Returns undefined for any other string, and
+ * for a repository name GitHub would not allow, because the repository is
+ * put into a REST path as it is.
  */
 export const parseItemRef = (
   ref: string,
 ): Pick<GithubItem, "repo" | "kind" | "number"> | undefined => {
-  const match = /^github:(issue|pr):([^/#\s]+\/[^/#\s]+)#(\d+)$/.exec(ref);
+  const match = ITEM_REF_PATTERN.exec(ref);
   if (match === null) return undefined;
   return {
     kind: match[1] as "issue" | "pr",
@@ -98,17 +105,6 @@ export const buildRepoSubject = (repo: string, title?: string): GithubSubject =>
 export const buildItemPlace = (item: Pick<GithubItem, "repo" | "number">): string =>
   `${item.repo.toLowerCase()}#${String(item.number)}`;
 
-/**
- * The longest event title the host accepts. The contract's
- * `MAX_EVENT_TITLE_LENGTH` holds the same number; a plugin cannot import the
- * contract at runtime, so it is repeated here.
- */
-const MAX_TITLE_LENGTH = 512;
-
-/** Cuts a title to the length the host accepts, ending it with an ellipsis when it was cut. */
-const fitTitle = (title: string): string =>
-  title.length <= MAX_TITLE_LENGTH ? title : `${title.slice(0, MAX_TITLE_LENGTH - 1)}…`;
-
 /** What a feed knows about one event before the subject, refs and URL are added. */
 export interface EventFacts {
   readonly kind: string;
@@ -138,7 +134,7 @@ export const buildItemEvent = (item: GithubItem, facts: EventFacts): EmittedEven
     refs: buildItemRefs(item),
     url: subject.url,
     raw: facts.raw,
-    title: fitTitle(facts.title),
+    title: cutText(facts.title, MAX_EVENT_TITLE_LENGTH),
     author: facts.author,
   };
 };
@@ -159,7 +155,7 @@ export const buildRepoEvent = (repo: string, title: string, facts: EventFacts): 
     refs: [buildRepoRef(repo)],
     url: subject.url,
     raw: facts.raw,
-    title: fitTitle(facts.title),
+    title: cutText(facts.title, MAX_EVENT_TITLE_LENGTH),
     author: facts.author,
   };
 };

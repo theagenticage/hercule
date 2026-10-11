@@ -1,6 +1,6 @@
 /** Tests the subject block, refs and web URLs every GitHub event carries. */
 import { describe, expect, it } from "vitest";
-import { buildItemEvent, buildRepoRef, buildRepoSubject } from "./subject";
+import { buildItemEvent, buildRepoRef, buildRepoSubject, parseItemRef } from "./subject";
 
 describe("the subject, refs and url of an event", () => {
   it("point an issue event at the issue, and its repository", () => {
@@ -58,5 +58,30 @@ describe("the subject, refs and url of an event", () => {
       title: "v1.0",
       url: "https://github.com/octocat/hello-world",
     });
+  });
+});
+
+describe("parseItemRef", () => {
+  it("reads the kind, the lowercase repository and the number of an item's ref", () => {
+    expect(parseItemRef("github:pr:Acme/Web.Shop#87")).toEqual({
+      kind: "pr",
+      repo: "acme/web.shop",
+      number: 87,
+    });
+    expect(parseItemRef("github:issue:acme/.github#1")).toMatchObject({ repo: "acme/.github" });
+  });
+
+  it("refuses a repository GitHub would not allow, which a REST path could misread", () => {
+    for (const ref of [
+      "github:pr:acme/..#1",
+      "github:pr:acme/.#1",
+      "github:pr:../webshop#1",
+      "github:pr:acme/web?shop#1",
+      "github:pr:acme/web%2Fshop#1",
+      "github:pr:acme/webshop/x#1",
+      "github:repo:acme/webshop",
+    ]) {
+      expect(parseItemRef(ref), ref).toBeUndefined();
+    }
   });
 });

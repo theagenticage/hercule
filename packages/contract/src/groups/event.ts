@@ -93,12 +93,8 @@ export const MAX_EVENT_SYSTEM_LENGTH = 64;
 /** The longest source URL. It is where a person opens the event, not a document. */
 export const MAX_EVENT_URL_LENGTH = 2048;
 
-/**
- * The longest title a plugin's event may carry. It is one line, and a signal
- * written from the event alone takes it as its title, so it is the limit of a
- * signal's title too.
- */
-export const MAX_EVENT_TITLE_LENGTH = 512;
+/** Re-exported from the package plugins are written against, so a plugin cuts its titles to the limit this API checks. */
+export { MAX_EVENT_TITLE_LENGTH } from "@hercule/plugin-host";
 
 /**
  * The longest author a plugin's event may name. A signal written from the

@@ -34,15 +34,27 @@ export const buildTeamName = (organization: string, slug: string): string =>
   `${organization}/${slug}`.toLowerCase();
 
 /**
+ * The statuses GitHub answers `GET /user/teams` with when the token may not
+ * read teams, such as a classic token without `read:org`, or a fine-grained
+ * token. A rate limit's 403 is told apart before these are looked at.
+ */
+const TEAMS_REFUSED_STATUSES = [403, 404];
+
+/**
  * Returns the user's teams as lowercase `org/slug`, read from the state when
  * the stored list is less than an hour old, and from GitHub otherwise.
  *
- * A token that may not read teams, such as a classic token without
- * `read:org`, gets an error from GitHub other than a 401. That is not worth
- * stopping a feed for: the last list read stays in use, or no teams when
- * there never was one, a warning is logged, and the list is read again in an
- * hour. The Connection already warns the user about a token without
- * `read:org` (see `connection-type.ts`). Fails with an `AuthError` when
+ * - A read that succeeds is stored with the time it was read.
+ * - A token that may not read teams gets a 403 or a 404. That is not worth
+ *   stopping a feed for: the last list read stays in use, or no teams when
+ *   there never was one, and it is stored as read now, so the next try is in
+ *   an hour. The Connection already warns the user about a token without
+ *   `read:org` (see `connection-type.ts`).
+ * - Any other failure, such as GitHub answering 500, may pass by the next
+ *   poll. The last list read is used for this poll, or no teams, and nothing
+ *   is written, so the next poll tries again.
+ *
+ * Each case but a success logs a warning. Fails with an `AuthError` when
  * GitHub rejects the token, and with `GithubRateLimited` on a rate limit.
  */
 export const readUserTeams = (
@@ -55,11 +67,19 @@ export const readUserTeams = (
     if (Option.isSome(stored) && now - Date.parse(stored.value.fetchedAt) < TEAMS_REFRESH_MS) {
       return new Set(stored.value.teams);
     }
+    const storedTeams = Option.isSome(stored) ? stored.value.teams : [];
     const teams = yield* Effect.gen(function* () {
       const listing = yield* fetchListing(
         { method: "GET", path: "/user/teams", token, query: { per_page: "100" } },
         MAX_TEAM_PAGES,
+        { acceptedStatuses: TEAMS_REFUSED_STATUSES },
       );
+      if (listing.firstPage.status !== 200) {
+        yield* Effect.logWarning(
+          `GitHub answered ${String(listing.firstPage.status)} to reading the user's teams, so the token may not read them. The GitHub plugin keeps the last list it read and tries again in an hour.`,
+        );
+        return storedTeams;
+      }
       const listed = yield* decodeGithubValue(Schema.Array(ListedTeam), listing.items, "teams");
       return listed.map((team) => buildTeamName(team.organization.login, team.slug));
     }).pipe(
@@ -68,12 +88,13 @@ export const readUserTeams = (
         (error) =>
           Effect.as(
             Effect.logWarning(
-              `The GitHub plugin could not read the user's teams, so it keeps the last list it read for the next hour: ${error.message}`,
+              `The GitHub plugin could not read the user's teams, so it uses the last list it read and tries again at the next poll: ${error.message}`,
             ),
-            Option.isSome(stored) ? stored.value.teams : [],
+            undefined,
           ),
       ),
     );
+    if (teams === undefined) return new Set(storedTeams);
     yield* store.set(TEAMS_KEY, { fetchedAt: new Date(now).toISOString(), teams });
     return new Set(teams);
   });

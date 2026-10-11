@@ -17,10 +17,15 @@
  *
  * 1. `GET /repos/{o}/{r}/issues/{n}` with the last ETag. A 304 means nothing
  *    changed, costs no quota, and ends the read.
+ *    A 403, 404 or 410 means the item is gone for the token: the read ends,
+ *    and the hint that named it is used up.
  * 2. Otherwise, everything at or after the item's `since` is emitted: its
  *    comments (`.../issues/{n}/comments?since=`), and for a pull request its
  *    reviews and the review requests in its history, as the watched
- *    repositories emit them (`activity.ts`), and a close or merge.
+ *    repositories emit them (`activity.ts`), and a close or merge. Each
+ *    listing is read newest first and stops at a page limit; a listing that
+ *    has more since `since` than the limit allows logs a warning, because
+ *    what it did not read is never emitted.
  * 3. `since` moves to the item's `updated_at`.
  *
  * Where `since` starts on an item's first read depends on why it is
@@ -30,6 +35,7 @@
  * nothing, as a newly watched repository baselines.
  *
  * One poll reads at most `MAX_FOLLOWED_ITEMS_PER_POLL` items, in turn, and
+ * starts none once it has sent `MAX_FOLLOWED_REQUESTS_PER_POLL` requests. It
  * logs a warning naming how many it left for the next poll.
  */
 import { Effect, Option, Schema } from "effect";
@@ -45,17 +51,19 @@ import {
 } from "../subject";
 import {
   emitCommentEvents,
-  emitReviewEvent,
+  emitNewReviews,
   emitReviewRequestEvents,
+  emitInTimeOrder,
   isAtOrAfter,
   type ActivityPoll,
 } from "./activity";
-import { ListedComment, ListedIssue, ListedReview } from "./feed-objects";
+import { ListedComment, ListedIssue } from "./feed-objects";
 import { fetchOwnOpenPullRequests } from "./own-pulls";
 import {
+  countRequests,
   decodeGithubValue,
   fetchFeedResponse,
-  fetchListing,
+  fetchNewestItems,
   readGithubObject,
   truncateRaw,
   type FeedError,
@@ -74,14 +82,23 @@ const LAST_READ_KEY = "followed-last-read";
 /**
  * How many followed items one poll reads. An item that did not change costs
  * one free 304. A changed one costs about four requests: the item, its
- * comments, and for a pull request its reviews and its history, each one
- * page. So a poll sends about 80 requests here, and two more for the search
- * of the user's own pull requests and the teams, about 40 seconds.
+ * comments, and for a pull request its history and its reviews, each one
+ * page when nothing much happened.
  */
 export const MAX_FOLLOWED_ITEMS_PER_POLL = 20;
 
-/** The most pages of comments or reviews one read fetches for one item, 100 each. */
-const MAX_DETAIL_PAGES = 3;
+/**
+ * How many requests the followed items may send in one poll before no
+ * further item is started. The item being read when the count is reached
+ * still finishes, at most 17 more requests: the item, 3 pages of comments, 3
+ * of reviews and 10 of history. With the search for the user's own pull
+ * requests, a poll sends at most about 100 requests here, about 50 seconds.
+ * Exported for the tests.
+ */
+export const MAX_FOLLOWED_REQUESTS_PER_POLL = 80;
+
+/** The most requests one read of an item sends for its comments, 100 a page, read newest first. */
+const MAX_COMMENT_PAGES = 3;
 
 /** What is kept between polls for one followed item. */
 const FollowedItemState = Schema.Struct({
@@ -151,25 +168,43 @@ const addFollowedItem = (followed: Map<string, FollowedItem>, next: FollowedItem
 const addOneSecond = (time: string): string => new Date(Date.parse(time) + 1000).toISOString();
 
 /**
+ * The statuses that say a followed item is gone for the token: deleted, moved
+ * out of reach, or in a repository the token may no longer read. A rate
+ * limit's 403 is told apart before these are looked at.
+ */
+const GONE_STATUSES = [403, 404, 410];
+
+/**
  * Reads one followed item and emits what happened on it at or after
  * `stored.since`, as the header comment describes. Returns the item's new
- * state. Fails as `fetchFeedResponse` fails, and with a `PluginError` when
- * GitHub returns an object without the fields read.
+ * state, or `Option.none()` when GitHub answers that the item is gone
+ * (`GONE_STATUSES`), which is logged. Fails as `fetchFeedResponse` fails,
+ * and with a `PluginError` when GitHub returns an object without the fields
+ * read.
  */
 const readFollowedItem = (
   poll: ActivityPoll,
   number: number,
   stored: FollowedItemState,
-): Effect.Effect<FollowedItemState, FeedError, HttpClient.HttpClient> =>
+): Effect.Effect<Option.Option<FollowedItemState>, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const path = `/repos/${poll.repo}/issues/${String(number)}`;
-    const response = yield* fetchFeedResponse({
-      method: "GET",
-      path,
-      token: poll.token,
-      ...(stored.etag === undefined ? {} : { etag: stored.etag }),
-    });
-    if (response.status === 304) return stored;
+    const response = yield* fetchFeedResponse(
+      {
+        method: "GET",
+        path,
+        token: poll.token,
+        ...(stored.etag === undefined ? {} : { etag: stored.etag }),
+      },
+      GONE_STATUSES,
+    );
+    if (GONE_STATUSES.includes(response.status)) {
+      yield* Effect.logWarning(
+        `GitHub answered ${String(response.status)} for ${buildItemPlace({ repo: poll.repo, number })}, which the GitHub repos feed followed outside the watch list. The item is deleted or hidden from the Connection's account, so the feed stops reading it for the notification that named it.`,
+      );
+      return Option.none();
+    }
+    if (response.status === 304) return Option.some(stored);
     const body = yield* readGithubObject(response.body, "an issue");
     const issue = yield* decodeGithubValue(ListedIssue, body, "an issue");
     const item: GithubItem = {
@@ -182,15 +217,24 @@ const readFollowedItem = (
     };
     const since = stored.since;
 
-    const comments = yield* fetchListing(
+    const comments = yield* fetchNewestItems(
       {
         method: "GET",
         path: `${path}/comments`,
         token: poll.token,
         query: { since, per_page: "100" },
       },
-      MAX_DETAIL_PAGES,
+      MAX_COMMENT_PAGES,
+      (items) => {
+        const oldest = items[0]?.["created_at"];
+        return typeof oldest !== "string" || isAtOrAfter(oldest, since);
+      },
     );
+    if (comments.truncated) {
+      yield* Effect.logWarning(
+        `The GitHub plugin read only the newest comments of ${buildItemPlace(item)}: older ones since the last poll were not emitted.`,
+      );
+    }
     for (const raw of comments.items) {
       const comment = yield* decodeGithubValue(ListedComment, raw, "a comment");
       if (isAtOrAfter(comment.created_at, since)) {
@@ -200,19 +244,7 @@ const readFollowedItem = (
 
     if (item.kind === "pr") {
       yield* emitReviewRequestEvents(poll, item, since);
-      const reviews = yield* fetchListing(
-        {
-          method: "GET",
-          path: `/repos/${poll.repo}/pulls/${String(number)}/reviews`,
-          token: poll.token,
-          query: { per_page: "100" },
-        },
-        MAX_DETAIL_PAGES,
-      );
-      for (const raw of reviews.items) {
-        const review = yield* decodeGithubValue(ListedReview, raw, "a review");
-        yield* emitReviewEvent(poll, item, review, raw, since);
-      }
+      yield* emitNewReviews(poll, item, since);
     }
 
     if (
@@ -255,23 +287,61 @@ const readFollowedItem = (
       );
     }
 
-    return {
+    return Option.some({
       since: issue.updated_at,
       ...(response.etag === undefined ? {} : { etag: response.etag }),
-    };
+    });
   });
 
 /**
- * Reads the followed items, at most `MAX_FOLLOWED_ITEMS_PER_POLL` of them, in
- * turn, and emits what happened on them. The state of an item no longer
- * followed is deleted, and so are the hints of the items read.
+ * Removes the hints a poll used up from the stored hints. `hintsAtStart` are
+ * the hints the poll started with, and `used` the refs of those it used up.
+ * A hint the notifications feed recorded or moved to an earlier time while
+ * the poll ran is news the poll did not read, so it stays. Writes nothing
+ * when no hint was used up.
+ */
+const removeUsedHints = (
+  store: KeyValueStore,
+  hintsAtStart: Readonly<Record<string, string>>,
+  used: ReadonlySet<string>,
+): Effect.Effect<void, PluginError> =>
+  Effect.gen(function* () {
+    if (used.size === 0) return;
+    const stored = yield* readFeedState(store, HINTS_KEY, FollowedHints);
+    if (Option.isNone(stored)) return;
+    const remaining = Object.fromEntries(
+      Object.entries(stored.value).filter(
+        ([ref, since]) => !(used.has(ref) && hintsAtStart[ref] === since),
+      ),
+    );
+    if (Object.keys(remaining).length === 0) yield* store.delete(HINTS_KEY);
+    else yield* store.set(HINTS_KEY, remaining);
+  });
+
+/** Checks whether two states of a followed item are the same, so the stored one need not be written again. */
+const isSameItemState = (left: FollowedItemState, right: FollowedItemState): boolean =>
+  left.since === right.since && left.etag === right.etag;
+
+/**
+ * Reads the followed items in turn and emits what happened on them. One
+ * poll reads at most `MAX_FOLLOWED_ITEMS_PER_POLL` items, and starts no
+ * further item once it has sent `MAX_FOLLOWED_REQUESTS_PER_POLL` requests;
+ * the next poll starts with the item after the last one read. The events of
+ * one item are emitted oldest first (`emitInTimeOrder`). The state of an
+ * item no longer followed is deleted.
  *
- * One item failing with a `PluginError`, such as one deleted since or hidden
- * from the token, is logged as a warning and does not stop the others: an
- * item outside the watch list is not something the user set up, so it must
- * not set the Connection to `error`. Fails with an `AuthError` when GitHub
- * rejects the token, and with `GithubRateLimited` on a rate limit; the items
- * read before it keep their new state.
+ * A hint from the notifications feed is used up when its item is read, when
+ * GitHub answers that the item is gone, or when the item is not followed
+ * after all because its repository is watched. It stays for the next poll
+ * when the item was not reached, or its read failed with a `PluginError`
+ * such as GitHub answering 500.
+ *
+ * One item failing with a `PluginError` is logged as a warning and does not
+ * stop the others: an item outside the watch list is not something the user
+ * set up, so it must not set the Connection to `error`. Fails with an
+ * `AuthError` when GitHub rejects the token, and with `GithubRateLimited` on
+ * a rate limit. The items read before it keep their new state, and the turn
+ * and the used-up hints are saved all the same.
  */
 export const pollFollowedItems = (
   token: string,
@@ -280,87 +350,115 @@ export const pollFollowedItems = (
   identity: GithubIdentity,
   teams: ReadonlySet<string>,
 ): Effect.Effect<void, FeedError, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const store = context.state;
-    const followed = new Map<string, FollowedItem>();
-    for (const own of yield* fetchOwnOpenPullRequests(token, identity.login)) {
-      addFollowedItem(followed, {
-        item: { repo: own.repo, kind: "pr", number: own.number },
-        start: addOneSecond(own.updatedAt),
-        baseline: true,
+  countRequests((sent) =>
+    Effect.gen(function* () {
+      const store = context.state;
+      const followed = new Map<string, FollowedItem>();
+      for (const own of yield* fetchOwnOpenPullRequests(token)) {
+        addFollowedItem(followed, {
+          item: { repo: own.repo, kind: "pr", number: own.number },
+          start: addOneSecond(own.updatedAt),
+          baseline: true,
+        });
+      }
+      for (const signal of yield* context.openSignals()) {
+        const item = parseItemRef(signal.threadRef);
+        if (item !== undefined)
+          addFollowedItem(followed, { item, start: signal.raisedAt, baseline: false });
+      }
+      const hints = Option.getOrElse(
+        yield* readFeedState(store, HINTS_KEY, FollowedHints),
+        () => ({}),
+      );
+      const watched = new Set(watchList);
+      // The refs of the hints used up. A hint is used up only by what this
+      // poll did with it, so a poll stopped by a rate limit keeps the rest.
+      const usedHints = new Set<string>();
+      for (const [ref, since] of Object.entries(hints)) {
+        const item = parseItemRef(ref);
+        // A hint the plugin cannot parse, or one in a repository the watch list's poll covers, is not read here.
+        if (item === undefined || watched.has(item.repo)) usedHints.add(ref);
+        else addFollowedItem(followed, { item, start: since, baseline: false });
+      }
+      for (const [ref, { item }] of followed) {
+        if (watched.has(item.repo)) followed.delete(ref);
+      }
+
+      const keys = yield* store.list();
+      for (const key of keys) {
+        if (key.startsWith(ITEM_PREFIX) && !followed.has(key.slice(ITEM_PREFIX.length))) {
+          yield* store.delete(key);
+        }
+      }
+
+      let lastRead: string | undefined;
+      // Saved after the loop even when a rate limit stops it, so the turn
+      // moves on and the hints used so far are not read again. The hints
+      // key decoded when the poll started, so reading it again here fails
+      // only by a defect.
+      const saveProgress = Effect.gen(function* () {
+        if (lastRead !== undefined) yield* store.set(LAST_READ_KEY, lastRead);
+        yield* removeUsedHints(store, hints, usedHints);
       });
-    }
-    for (const signal of yield* context.openSignals()) {
-      const item = parseItemRef(signal.threadRef);
-      if (item !== undefined)
-        addFollowedItem(followed, { item, start: signal.raisedAt, baseline: false });
-    }
-    const hints = Option.getOrElse(
-      yield* readFeedState(store, HINTS_KEY, FollowedHints),
-      () => ({}),
-    );
-    for (const [ref, since] of Object.entries(hints)) {
-      const item = parseItemRef(ref);
-      if (item !== undefined) addFollowedItem(followed, { item, start: since, baseline: false });
-    }
-    const watched = new Set(watchList);
-    for (const [ref, { item }] of followed) {
-      if (watched.has(item.repo)) followed.delete(ref);
-    }
 
-    const keys = yield* store.list();
-    for (const key of keys) {
-      if (key.startsWith(ITEM_PREFIX) && !followed.has(key.slice(ITEM_PREFIX.length))) {
-        yield* store.delete(key);
-      }
-    }
-
-    const lastRead = Option.getOrUndefined(
-      yield* readFeedState(store, LAST_READ_KEY, Schema.String),
-    );
-    const leftForNextPoll: Array<string> = [];
-    let read = 0;
-    for (const ref of orderFromLastPolled([...followed.keys()], lastRead)) {
-      const { item, start, baseline } = followed.get(ref)!;
-      const key = `${ITEM_PREFIX}${ref}`;
-      const stored = yield* readFeedState(store, key, FollowedItemState);
-      if (Option.isNone(stored) && baseline) {
-        yield* store.set(key, { since: start });
-        continue;
-      }
-      if (read === MAX_FOLLOWED_ITEMS_PER_POLL) {
-        leftForNextPoll.push(ref);
-        continue;
-      }
-      read += 1;
-      const poll: ActivityPoll = { repo: item.repo, token, emit: context.emit, identity, teams };
-      const state = Option.getOrElse(stored, () => ({ since: start }));
-      const next = yield* readFollowedItem(poll, item.number, state).pipe(
-        Effect.catchIf(
-          (error): error is PluginError => error instanceof PluginError,
-          (error) =>
-            Effect.as(
-              Effect.logWarning(
-                `The GitHub repos feed could not read ${buildItemPlace(item)}, which it follows outside the watch list: ${error.message}`,
-              ),
-              state,
+      const order = orderFromLastPolled(
+        [...followed.keys()],
+        Option.getOrUndefined(yield* readFeedState(store, LAST_READ_KEY, Schema.String)),
+      );
+      let read = 0;
+      let waiting = 0;
+      yield* Effect.gen(function* () {
+        for (const ref of order) {
+          const { item, start, baseline } = followed.get(ref)!;
+          const key = `${ITEM_PREFIX}${ref}`;
+          const stored = yield* readFeedState(store, key, FollowedItemState);
+          if (Option.isNone(stored) && baseline) {
+            yield* store.set(key, { since: start });
+            continue;
+          }
+          const spent = read > 0 && sent() >= MAX_FOLLOWED_REQUESTS_PER_POLL;
+          if (read === MAX_FOLLOWED_ITEMS_PER_POLL || spent) {
+            waiting += 1;
+            continue;
+          }
+          read += 1;
+          const state = Option.getOrElse(stored, () => ({ since: start }));
+          const poll: ActivityPoll = {
+            repo: item.repo,
+            token,
+            emit: context.emit,
+            identity,
+            teams,
+          };
+          const next = yield* emitInTimeOrder(poll, (held) =>
+            readFollowedItem(held, item.number, state),
+          ).pipe(
+            Effect.catchIf(
+              (error): error is PluginError => error instanceof PluginError,
+              (error) =>
+                Effect.as(
+                  Effect.logWarning(
+                    `The GitHub repos feed could not read ${buildItemPlace(item)}, which it follows outside the watch list, and tries again at the next poll: ${error.message}`,
+                  ),
+                  undefined,
+                ),
             ),
-        ),
-      );
-      yield* store.set(key, next);
-      yield* store.set(LAST_READ_KEY, ref);
-    }
+          );
+          lastRead = ref;
+          // A read that failed keeps its hint, so the next poll tries again.
+          if (next === undefined) continue;
+          usedHints.add(ref);
+          const unchanged =
+            Option.isNone(next) ||
+            (Option.isSome(stored) && isSameItemState(stored.value, next.value));
+          if (!unchanged) yield* store.set(key, next.value);
+        }
+      }).pipe(Effect.ensuring(Effect.orDie(saveProgress)));
 
-    // A hint stays only for an item left for the next poll.
-    const keptHints = Object.fromEntries(
-      Object.entries(hints).filter(([ref]) => leftForNextPoll.includes(ref)),
-    );
-    if (Object.keys(keptHints).length > 0) yield* store.set(HINTS_KEY, keptHints);
-    else yield* store.delete(HINTS_KEY);
-
-    if (leftForNextPoll.length > 0) {
-      yield* Effect.logWarning(
-        `The GitHub repos feed follows ${String(followed.size)} issues and pull requests outside the watch list and reads at most ${String(MAX_FOLLOWED_ITEMS_PER_POLL)} per poll, so ${String(leftForNextPoll.length)} wait for the next poll. Their events arrive late, not never.`,
-      );
-    }
-  });
+      if (waiting > 0) {
+        yield* Effect.logWarning(
+          `The GitHub repos feed follows ${String(followed.size)} issues and pull requests outside the watch list and reads at most ${String(MAX_FOLLOWED_ITEMS_PER_POLL)}, or ${String(MAX_FOLLOWED_REQUESTS_PER_POLL)} requests' worth, per poll, so ${String(waiting)} wait for the next poll. Their events arrive late, not never.`,
+        );
+      }
+    }),
+  );

@@ -364,6 +364,14 @@ const OwnChecksState = Schema.Struct({
 
 type OwnChecksState = Schema.Schema.Type<typeof OwnChecksState>;
 
+/**
+ * How many of the user's own open pull requests outside the watch list one
+ * poll checks. Each costs a request for the pull request, free when it did
+ * not change, and up to three for its check suites, so this bounds the
+ * poll at about 80 requests however many pull requests the user has open.
+ */
+const MAX_OWN_PULL_REQUESTS_PER_POLL = 20;
+
 /** The key of `OwnChecksState`. It is outside `checks/`, where each watched repository's state is. */
 const OWN_CHECKS_KEY = "checks-own";
 
@@ -386,13 +394,32 @@ const checkOwnPullRequests = (
   Effect.gen(function* () {
     const oldest = (yield* Clock.currentTimeMillis) - windowDays * DAY_MS;
     const watched = new Set(watchList);
-    const own = (yield* fetchOwnOpenPullRequests(token, identity.login)).filter(
+    const own = (yield* fetchOwnOpenPullRequests(token)).filter(
       (pullRequest) =>
         !watched.has(pullRequest.repo) && Date.parse(pullRequest.updatedAt) >= oldest,
     );
     const pullRequests: Array<Schema.Schema.Type<typeof OwnPullRequestSnapshot>> = [];
     const heads: Record<string, HeadState> = {};
-    for (const found of own) {
+    const checked = own.slice(0, MAX_OWN_PULL_REQUESTS_PER_POLL);
+    // The search lists the most recently updated first, so the ones left
+    // over are the quietest. They keep their state, so their checks are not
+    // treated as new when they are checked again.
+    for (const found of own.slice(MAX_OWN_PULL_REQUESTS_PER_POLL)) {
+      const previous = stored.pullRequests.find(
+        (snapshot) => snapshot.repo === found.repo && snapshot.number === found.number,
+      );
+      if (previous === undefined) continue;
+      pullRequests.push(previous);
+      const headKey = `${previous.repo}@${previous.headSha}`;
+      const head = stored.heads[headKey];
+      if (head !== undefined) heads[headKey] = head;
+    }
+    if (own.length > checked.length) {
+      yield* Effect.logWarning(
+        `The GitHub checks feed found ${String(own.length)} of the user's own open pull requests outside the watch list and checks the ${String(MAX_OWN_PULL_REQUESTS_PER_POLL)} most recently updated each poll. The others are checked once they are updated again.`,
+      );
+    }
+    for (const found of checked) {
       const previous = stored.pullRequests.find(
         (snapshot) => snapshot.repo === found.repo && snapshot.number === found.number,
       );

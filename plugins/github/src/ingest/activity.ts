@@ -8,12 +8,12 @@
  */
 import { Effect, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
-import type { IngestContext } from "@hercule/plugin-host";
+import type { EmittedEvent, IngestContext, PluginError } from "@hercule/plugin-host";
 import { readReviewVerdict, type ReviewVerdict } from "../github-objects";
 import { findMention, isUserAccount, type GithubIdentity } from "../identity";
 import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
-import { IssueEvent, type ListedComment, type ListedReview } from "./feed-objects";
-import { decodeGithubValue, fetchListing, truncateRaw, type FeedError } from "./requests";
+import { IssueEvent, ListedReview, type ListedComment } from "./feed-objects";
+import { decodeGithubValue, fetchNewestItems, truncateRaw, type FeedError } from "./requests";
 import { buildTeamName } from "./teams";
 
 /** What the activity emitters need besides the item: where events go, and who the user is. */
@@ -28,11 +28,18 @@ export interface ActivityPoll {
 }
 
 /**
- * The most pages of an item's history one poll reads, 100 entries each. The
- * history is listed oldest first, so an item with more than 1,000 entries
- * has its newest review requests left unread.
+ * The most requests one poll sends for an item's history, 100 entries a
+ * page. The history is read newest first (`fetchNewestItems`), so only an
+ * item with more than about 900 entries since the last poll has entries
+ * left unread, and a warning says so.
  */
 const MAX_HISTORY_PAGES = 10;
+
+/**
+ * The most requests one poll sends for a pull request's reviews, 100 a page,
+ * read newest first. A pull request rarely has more than 100 reviews in all.
+ */
+const MAX_REVIEW_PAGES = 3;
 
 /** The longest excerpt of a mentioning comment, in characters. */
 const MAX_EXCERPT_LENGTH = 280;
@@ -43,6 +50,60 @@ const EXCERPT_LEAD = 80;
 /** Checks whether ISO 8601 timestamp `time` is at or after `start`. An absent start is before everything. */
 export const isAtOrAfter = (time: string, start: string | undefined): boolean =>
   start === undefined || Date.parse(time) >= Date.parse(start);
+
+/**
+ * Returns a test for `fetchNewestItems`: older items are needed while the
+ * oldest item read that has `field` as a string is at or after `start`, and
+ * always when `start` is absent. An item without that field, such as a
+ * pending review without `submitted_at`, says nothing either way.
+ */
+const isNewerThanStart =
+  (field: string, start: string | undefined) =>
+  (items: ReadonlyArray<Schema.JsonObject>): boolean => {
+    const oldest = items.map((item) => item[field]).find((time) => typeof time === "string");
+    return typeof oldest !== "string" || isAtOrAfter(oldest, start);
+  };
+
+/**
+ * Runs `read` with a copy of `poll` whose `emit` holds events back, then
+ * emits the held events through `poll.emit`, oldest `occurredAt` first.
+ * The held events are emitted whether `read` succeeds or fails, as they
+ * would have been without holding them; a failed read is read again by the
+ * next poll, and the dedup keys keep its events from being written twice.
+ *
+ * A poll reads an item's comments, reviews and history one listing after
+ * another, but the core routes events in the order they are written: when a
+ * review and a later request for another review arrive in one poll, the
+ * request must come after the review, or the review would end the new
+ * request's signal.
+ */
+export const emitInTimeOrder = <A, E, R>(
+  poll: ActivityPoll,
+  read: (held: ActivityPoll) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | PluginError, R> => {
+  const held: Array<EmittedEvent> = [];
+  const emitHeld = Effect.suspend(() => {
+    // Array.prototype.sort is stable, so events of one second keep the order they were found in.
+    const ordered = held
+      .splice(0)
+      .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
+    return Effect.forEach(ordered, poll.emit, { discard: true });
+  });
+  return read({ ...poll, emit: (event) => Effect.sync(() => void held.push(event)) }).pipe(
+    Effect.tap(() => emitHeld),
+    Effect.tapError(() => emitHeld),
+  );
+};
+
+/**
+ * Logs that a listing read newest first stopped at its page limit, so
+ * activity older than what was read, but newer than the last poll, was not
+ * emitted.
+ */
+const logTruncatedListing = (what: string, item: GithubItem): Effect.Effect<void> =>
+  Effect.logWarning(
+    `The GitHub plugin read only the newest ${what} of ${buildItemPlace(item)}: older ones since the last poll were not emitted.`,
+  );
 
 /**
  * Removes the quoted lines of a comment, those starting with `>`. A reply
@@ -126,11 +187,39 @@ const buildReviewTitle = (reviewer: string, verdict: ReviewVerdict, place: strin
 };
 
 /**
+ * Fetches a pull request's reviews, newest first, and emits one
+ * `github.pr.review-submitted` per review submitted at or after `start`, as
+ * `emitReviewEvent` decides.
+ */
+export const emitNewReviews = (
+  poll: ActivityPoll,
+  item: GithubItem,
+  start: string | undefined,
+): Effect.Effect<void, FeedError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const listing = yield* fetchNewestItems(
+      {
+        method: "GET",
+        path: `/repos/${poll.repo}/pulls/${String(item.number)}/reviews`,
+        token: poll.token,
+        query: { per_page: "100" },
+      },
+      MAX_REVIEW_PAGES,
+      isNewerThanStart("submitted_at", start),
+    );
+    if (listing.truncated) yield* logTruncatedListing("reviews", item);
+    for (const raw of listing.items) {
+      const review = yield* decodeGithubValue(ListedReview, raw, "a review");
+      yield* emitReviewEvent(poll, item, review, raw, start);
+    }
+  });
+
+/**
  * Emits `github.pr.review-submitted` for one review submitted at or after
  * `start`. A pending review is not submitted yet, and a dismissed one is no
  * longer a verdict, so neither emits.
  */
-export const emitReviewEvent = (
+const emitReviewEvent = (
   poll: ActivityPoll,
   item: GithubItem,
   review: ListedReview,
@@ -181,7 +270,7 @@ const readRequestedReviewer = (
 };
 
 /**
- * Fetches a pull request's history and emits `github.pr.review-requested`
+ * Fetches a pull request's history, newest first, and emits `github.pr.review-requested`
  * and `github.pr.review-request-removed` for each request to the user or one
  * of their teams made or taken back at or after `start`. Each one's dedup
  * key is the history entry's id.
@@ -196,7 +285,7 @@ export const emitReviewRequestEvents = (
   start: string | undefined,
 ): Effect.Effect<void, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const listing = yield* fetchListing(
+    const listing = yield* fetchNewestItems(
       {
         method: "GET",
         path: `/repos/${poll.repo}/issues/${String(item.number)}/events`,
@@ -204,7 +293,9 @@ export const emitReviewRequestEvents = (
         query: { per_page: "100" },
       },
       MAX_HISTORY_PAGES,
+      isNewerThanStart("created_at", start),
     );
+    if (listing.truncated) yield* logTruncatedListing("history entries", item);
     const place = buildItemPlace(item);
     for (const raw of listing.items) {
       const entry = yield* decodeGithubValue(

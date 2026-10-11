@@ -70,7 +70,11 @@ const deleteDepartedRepoState = (
  * with them.
  */
 export interface RepoPollBudget {
-  /** Checks whether the poll has spent its budget. Asked before each repository but the first. */
+  /**
+   * Checks whether the poll has spent its budget. Asked before each
+   * repository but the first, and by a feed that can stop inside a
+   * repository, between its items.
+   */
   readonly isSpent: () => boolean;
 }
 
@@ -94,8 +98,9 @@ export const orderFromLastPolled = (
  * Polls the repositories on the watch list in turn for one per-repository
  * feed, keeping each repository's state under `<feed>/<owner>/<repo>`.
  * `pollRepo` receives the stored state, or `Option.none()` for a repository
- * polled for the first time, and returns the state to store. The state of a
- * repository that left the watch list is deleted first.
+ * polled for the first time, and returns the state to store. When it returns
+ * the stored value itself, nothing changed and nothing is written. The state
+ * of a repository that left the watch list is deleted first.
  *
  * Without a `budget`, every repository is polled, in the watch list's order.
  * With one, the poll starts with the repository after the one the last poll
@@ -137,7 +142,7 @@ export const pollWatchedRepos = <A extends Schema.Json, E, R>(
       yield* Effect.gen(function* () {
         const stored = yield* readFeedState(store, key, schema);
         const next = yield* pollRepo(repo, stored);
-        yield* store.set(key, next);
+        if (Option.isNone(stored) || next !== stored.value) yield* store.set(key, next);
       }).pipe(
         Effect.catchIf(
           (error): error is PluginError => error instanceof PluginError,

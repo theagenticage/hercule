@@ -14,6 +14,7 @@ import {
   stubGithub,
   type IngestHarness,
   type StubResponse,
+  TEST_ACCOUNT,
   TEST_IDENTITY,
   answerUserRequests,
   isUserRequest,
@@ -59,6 +60,10 @@ interface StubRepository {
     Array<{ id: number; user: { login: string }; state: string; submitted_at: string | null }>
   >;
   comments: Array<StubComment>;
+  /** The accounts each pull request asks for a review now. */
+  requestedReviewers: Record<number, Array<{ login: string; id: number }>>;
+  /** Each item's history, oldest first, as `GET .../issues/{n}/events` lists it. */
+  history: Record<number, Array<object>>;
   /** How many items one page of an issue listing of all or open issues holds; GitHub's is 100. */
   issuesPerPage: number;
   /** How many comments one page of the comment listing holds; GitHub's is 100. */
@@ -95,6 +100,8 @@ const buildRepository = (): StubRepository => ({
   heads: { 2: "sha-a" },
   reviews: {},
   comments: [],
+  requestedReviewers: {},
+  history: {},
   issuesPerPage: 100,
   commentsPerPage: 100,
   etag: '"v1"',
@@ -182,6 +189,8 @@ const answerFrom =
       const issue = repository.issues.find((item) => item.number === number)!;
       return { status: 200, body: buildPullBody(repository, issue) };
     }
+    const history = /\/issues\/(\d+)\/events$/.exec(path);
+    if (history) return { status: 200, body: repository.history[Number(history[1])] ?? [] };
     if (path === `${base}/issues/comments`) {
       const since = Date.parse(query["since"] ?? "1970-01-01T00:00:00Z");
       const listed = repository.comments
@@ -199,6 +208,7 @@ const buildPullBody = (repository: StubRepository, issue: StubIssue) => ({
   state: issue.state,
   user: issue.user,
   head: { sha: repository.heads[issue.number] },
+  requested_reviewers: repository.requestedReviewers[issue.number] ?? [],
   updated_at: issue.updated_at,
 });
 
@@ -233,6 +243,15 @@ const baseline = async (repository: StubRepository): Promise<IngestHarness> => {
   await poll(harness, answerFrom(repository));
   return harness;
 };
+
+/** Returns a history entry in which mona asks the user for a review at `time`. */
+const buildReviewRequest = (id: number, time: string) => ({
+  id,
+  event: "review_requested",
+  created_at: time,
+  actor: { login: "mona", id: 1 },
+  requested_reviewer: TEST_ACCOUNT,
+});
 
 /** Returns each recorded event as `kind dedupKey`, for a compact comparison. */
 const listEvents = (harness: IngestHarness) =>
@@ -491,11 +510,12 @@ describe("the repos feed", () => {
 
     const { requests } = await poll(harness, answerFrom(repository));
 
+    // Oldest first: the review at 10:30, then the push the pull request's 11:00 update records.
     expect(listEvents(harness)).toEqual([
-      `github.pr.synchronized pr.synchronized:${REPO}#2:sha-b`,
       `github.pr.review-submitted pr.review-submitted:101`,
+      `github.pr.synchronized pr.synchronized:${REPO}#2:sha-b`,
     ]);
-    expect(harness.events[1]!.payload).toMatchObject({
+    expect(harness.events[0]!.payload).toMatchObject({
       reviewer: "hubot",
       verdict: "changes-requested",
     });
@@ -506,6 +526,29 @@ describe("the repos feed", () => {
       `/repos/${REPO}/pulls/2`,
       `/repos/${REPO}/pulls/2/reviews`,
       `/repos/${REPO}/issues/comments`,
+    ]);
+  });
+
+  it("emits a review request made again after a review between two polls", async () => {
+    const repository = buildRepository();
+    const askedAt = "2026-10-01T09:30:00Z";
+    repository.requestedReviewers[2] = [TEST_ACCOUNT];
+    repository.history[2] = [buildReviewRequest(1, askedAt)];
+    const harness = await baseline(repository);
+    // The user reviews, so GitHub drops the request, and mona asks again.
+    // Both polls see the user asked, so the requested set looks unchanged.
+    repository.reviews[2] = [
+      { id: 200, user: TEST_ACCOUNT, state: "COMMENTED", submitted_at: "2026-10-01T10:00:00Z" },
+    ];
+    repository.history[2].push(buildReviewRequest(2, "2026-10-01T10:05:00Z"));
+    repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T10:05:00Z" };
+    repository.etag = '"v2"';
+
+    await poll(harness, answerFrom(repository));
+
+    expect(listEvents(harness)).toEqual([
+      `github.pr.review-submitted pr.review-submitted:200`,
+      `github.pr.review-requested pr.review-requested:2`,
     ]);
   });
 
@@ -669,7 +712,7 @@ describe("the repos feed", () => {
     expect(Result.isFailure(result)).toBe(true);
     if (!Result.isFailure(result)) return;
     expect(result.failure.message).toContain(
-      `${REPO}: Reading the next page of GET /repos/${REPO}/issues failed. ` +
+      `${REPO}: Reading another page of GET /repos/${REPO}/issues failed. ` +
         "The request to https://example.com was not sent",
     );
   });
@@ -1107,17 +1150,25 @@ describe("the repos feed", () => {
         polled.push(listPolledRepos(requests));
       }
 
-      // Every page counts, so the first poll stops once its baselines have
-      // sent the budget.
-      expect(polled[0]).toHaveLength(Math.ceil(MAX_REQUESTS_PER_POLL / BASELINE_REQUESTS));
-      // Each poll goes on where the last one stopped, and no repository is polled twice.
-      expect(polled.flat()).toEqual(watchList);
+      // Every page counts, and so does the read of the user's teams before
+      // them, so the first poll stops once those have sent the budget.
+      expect(polled[0]).toHaveLength(Math.ceil((MAX_REQUESTS_PER_POLL - 1) / BASELINE_REQUESTS));
+      // Each poll goes on where the last one stopped, and no repository is
+      // polled twice before every one had its turn. The last poll has budget
+      // left after the last baseline, so it goes on around the list.
+      expect(polled.flat().slice(0, watchList.length)).toEqual(watchList);
       expect(harness.events).toEqual([]);
 
-      // After the last repository, the turn wraps around to the first.
+      // The next poll starts after the last repository polled and wraps
+      // around the list, so with nothing left to baseline it reaches all.
+      const lastPolled = polled.flat().at(-1)!;
+      const next = watchList.indexOf(lastPolled) + 1;
       const { requests } = await poll(harness, route, watchList);
 
-      expect(listPolledRepos(requests)).toEqual(watchList);
+      expect(listPolledRepos(requests)).toEqual([
+        ...watchList.slice(next),
+        ...watchList.slice(0, next),
+      ]);
     });
 
     it("keeps its turn when the repository it polled last leaves the watch list", async () => {
