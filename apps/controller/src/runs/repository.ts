@@ -1172,6 +1172,16 @@ const make = Effect.gen(function* () {
         `;
         yield* announceChange(id, "updated");
       }),
+
+    /**
+     * Checks whether a running workflow's signal trigger received the event
+     * `eventId` as a step, whatever became of the step since.
+     */
+    hasStepForEvent: (eventId: number): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql`SELECT 1 FROM run_steps WHERE event_id = ${eventId} LIMIT 1`,
+        (rows) => rows.length > 0,
+      ),
   };
 });
 

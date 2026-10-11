@@ -146,7 +146,7 @@ const MAX_PASSES_PER_TICK = 10;
  * normalized fields only, because one that read the raw payload would break
  * as soon as the source system changed its format.
  */
-const buildEvaluationContext = (event: Event): EvaluationContext => ({
+export const buildEvaluationContext = (event: Event): EvaluationContext => ({
   event: Struct.omit(event, ["raw"]),
 });
 

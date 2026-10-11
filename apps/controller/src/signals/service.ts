@@ -98,6 +98,7 @@ import {
 } from "../bound-actions";
 import { mintUuid, nowIso, refuseCursor, uuidToString, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import { PluginHost } from "../plugins";
 import { runRepository } from "../runs";
 import { sessionRepository } from "../sessions";
 import { workflowRepository } from "../workflows";
@@ -123,6 +124,15 @@ const NO_OPERATION_DESCRIBE_LINE: DescribeLine = [{ kind: "text", text: "Does no
  * which source is not told; a core kind has no source to tell.
  */
 const DONE_DESCRIBE_LINE: DescribeLine = [{ kind: "text", text: "Takes it off your list" }];
+
+/**
+ * Returns the describe line of the core's Done on a plugin's signal. Done
+ * resolves the signal in the controller only, so the line says that the
+ * source, such as a pull request's review request, stays as it is.
+ */
+const buildPluginDoneDescribeLine = (pluginDisplayName: string): DescribeLine => [
+  { kind: "text", text: `Takes it off your list. ${pluginDisplayName} is not told` },
+];
 
 /**
  * The refusal for a caller who is not the user taking an action. A session
@@ -220,7 +230,7 @@ const buildCoreActions = (input: SignalRaiseInput): ReadonlyArray<BoundAction> =
  * The action fills only the signal input, so `run.start` would refuse its
  * click.
  */
-const buildHandToActions = (
+export const buildHandToActions = (
   signalId: string,
   kind: string,
   workflows: ReadonlyArray<{ readonly id: string; readonly definition: WorkflowDefinition }>,
@@ -250,7 +260,7 @@ const buildHandToActions = (
  * ambiguous: one with the id or the label of a core action. The user picks an
  * action by its label, so two "Dismiss" buttons would be one too many.
  */
-const listCollisionIssues = (
+export const listCollisionIssues = (
   own: ReadonlyArray<BoundAction>,
   core: ReadonlyArray<BoundAction>,
 ): ReadonlyArray<Issue> =>
@@ -330,6 +340,7 @@ const make = Effect.gen(function* () {
   const workflows = yield* workflowRepository;
   const audit = yield* AuditLog;
   const operations = yield* BoundOperations;
+  const host = yield* PluginHost;
 
   // The signals an action or a withdrawal is running on. A plugin action runs
   // outside any transaction, so this set is what stops a second click, or a
@@ -501,13 +512,19 @@ const make = Effect.gen(function* () {
    */
   const checkForDescribeLine = (
     action: SignalAction,
+    kind: string,
   ): Effect.Effect<PendingDescribeLine, SqlError> => {
     if (action.operation === null) {
-      return Effect.succeed({
+      if (action.id !== DONE_ACTION_ID) {
+        return Effect.succeed({ _tag: "written", describeLine: NO_OPERATION_DESCRIBE_LINE });
+      }
+      return Effect.map(host.findSignalKind(kind), (registered): PendingDescribeLine => ({
         _tag: "written",
-        describeLine:
-          action.id === DONE_ACTION_ID ? DONE_DESCRIBE_LINE : NO_OPERATION_DESCRIBE_LINE,
-      });
+        describeLine: Option.match(registered, {
+          onNone: () => DONE_DESCRIBE_LINE,
+          onSome: (pluginKind) => buildPluginDoneDescribeLine(pluginKind.pluginDisplayName),
+        }),
+      }));
     }
     return Effect.map(
       checkOperation(action.operation, action.field, []),
@@ -538,7 +555,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const pending = yield* Effect.forEach(list, (signal) =>
         signal.status === "open"
-          ? Effect.forEach(signal.actions, checkForDescribeLine)
+          ? Effect.forEach(signal.actions, (action) => checkForDescribeLine(action, signal.kind))
           : Effect.succeed([]),
       );
       const lines = yield* operations.describe(
@@ -1132,5 +1149,5 @@ export class SignalService extends Context.Service<SignalService, Effect.Success
 export const SignalServiceLayer: Layer.Layer<
   SignalService,
   never,
-  SqlClient.SqlClient | AuditLog | BoundOperations
+  SqlClient.SqlClient | AuditLog | BoundOperations | PluginHost
 > = Layer.effect(SignalService)(make);

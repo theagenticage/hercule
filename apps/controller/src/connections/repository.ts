@@ -41,6 +41,11 @@ export interface StoredConnection {
   readonly accountId: string;
   readonly status: ConnectionStatus;
   readonly statusDetail: string | undefined;
+  /**
+   * The sentence the Connection type's `validate` returned with the account,
+   * when the credentials work but cost the user something.
+   */
+  readonly warning: string | undefined;
   readonly labels: ReadonlyArray<string>;
   readonly config: Record<string, Schema.Json>;
   /**
@@ -59,6 +64,8 @@ export interface NewConnection {
   readonly label: string;
   readonly displayName: string;
   readonly accountId: string;
+  /** Absent when the account came back without a warning. */
+  readonly warning?: string;
   readonly labels: ReadonlyArray<string>;
   readonly config: Record<string, Schema.Json>;
   readonly at: string;
@@ -74,6 +81,8 @@ export interface ConnectionEdit {
   readonly status?: ConnectionStatus;
   /** `null` clears the detail, as when the status goes back to `connected`. */
   readonly statusDetail?: string | null;
+  /** `null` clears the warning, as when new credentials come back without one. */
+  readonly warning?: string | null;
 }
 
 /** A field a connection listing can be sorted by. */
@@ -101,6 +110,7 @@ interface ConnectionRow {
   readonly account_id: string;
   readonly status: ConnectionStatus;
   readonly status_detail: string | null;
+  readonly warning: string | null;
   readonly labels: string;
   readonly config: string;
   readonly feed_intervals: string;
@@ -109,8 +119,8 @@ interface ConnectionRow {
 }
 
 const COLUMNS =
-  "id, plugin_id, type, label, display_name, account_id, status, status_detail, labels, config, " +
-  "feed_intervals, created_at, updated_at";
+  "id, plugin_id, type, label, display_name, account_id, status, status_detail, warning, labels, " +
+  "config, feed_intervals, created_at, updated_at";
 
 /** How a connection listing sorts by each of its sortable fields. */
 const CONNECTION_SORT_COLUMNS: Record<ConnectionSortField, SortColumn<StoredConnection>> = {
@@ -138,6 +148,7 @@ const toConnection = (row: ConnectionRow): StoredConnection => ({
   accountId: row.account_id,
   status: row.status,
   statusDetail: row.status_detail ?? undefined,
+  warning: row.warning ?? undefined,
   labels: parseJson<ReadonlyArray<string>>(row.labels),
   config: parseJson<Record<string, Schema.Json>>(row.config),
   feedIntervals: parseJson<Record<string, number>>(row.feed_intervals),
@@ -179,12 +190,12 @@ const make = Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
           INSERT INTO connections
-            (id, plugin_id, type, label, display_name, account_id, status, status_detail, labels,
-             config, created_at, updated_at)
+            (id, plugin_id, type, label, display_name, account_id, status, status_detail, warning,
+             labels, config, created_at, updated_at)
           VALUES
             (${id}, ${connection.pluginId}, ${connection.type}, ${connection.label},
              ${connection.displayName}, ${connection.accountId}, 'connected', ${null},
-             ${JSON.stringify(connection.labels)}, ${JSON.stringify(connection.config)},
+             ${connection.warning ?? null}, ${JSON.stringify(connection.labels)}, ${JSON.stringify(connection.config)},
              ${connection.at}, ${connection.at})
         `;
         return {
@@ -196,6 +207,7 @@ const make = Effect.gen(function* () {
           accountId: connection.accountId,
           status: "connected",
           statusDetail: undefined,
+          warning: connection.warning,
           labels: connection.labels,
           config: connection.config,
           feedIntervals: {},
@@ -216,6 +228,7 @@ const make = Effect.gen(function* () {
       if (edit.displayName !== undefined) sets.push(sql`display_name = ${edit.displayName}`);
       if (edit.status !== undefined) sets.push(sql`status = ${edit.status}`);
       if (edit.statusDetail !== undefined) sets.push(sql`status_detail = ${edit.statusDetail}`);
+      if (edit.warning !== undefined) sets.push(sql`warning = ${edit.warning}`);
       return Effect.asVoid(
         sql`UPDATE connections SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,
       );

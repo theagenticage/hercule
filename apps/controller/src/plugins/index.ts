@@ -12,7 +12,10 @@ export {
   type RunningIngest,
 } from "./ingest";
 export { IngestExecutor } from "./ingest-executor";
+export { OpenSignals } from "./open-signals";
 export type { RegisteredEventSource } from "./event-sources";
+export { signalBuilds, type SignalDraftContent } from "./signal-build";
+export type { RegisteredSignalKind } from "./signal-kinds";
 export { registry } from "./registry";
 export { Plugins, PluginsLayer } from "./service";
 export {

@@ -124,8 +124,10 @@ export const CORE_KIND_PREFIX = "core.";
  * specially, such as marking a failed run, name it from here. `core.approval`
  * is the decision raised while a session waits for approval to run a command,
  * change or read files, or use a tool. `core.permission-request` is the
- * decision raised when a session asks for a grant its profile lacks. Spec 10
- * §7.2 owns the list.
+ * decision raised when a session asks for a grant its profile lacks.
+ * `core.signal-build-failed` is raised once for a plugin's signal kind whose
+ * `build` failed, and stays open until a later `build` of the kind succeeds.
+ * Spec 10 §7.2 owns the list.
  */
 export const CORE_NOTIFICATION_KINDS = [
   "core.approval",
@@ -136,6 +138,7 @@ export const CORE_NOTIFICATION_KINDS = [
   "core.runner-unreachable",
   "core.subscription-condition-error",
   "core.trigger-error",
+  "core.signal-build-failed",
 ] as const;
 
 export type CoreNotificationKind = (typeof CORE_NOTIFICATION_KINDS)[number];
@@ -184,7 +187,8 @@ const buildIdSubject = <const Kind extends string, Value extends Schema.Top>(
  * the approval a session waits on, named by its session and its own id, so
  * the core can resolve the decision about one request without touching other
  * decisions about the same session. A Permission Request has its own kind,
- * so its id is never read as an approval's.
+ * so its id is never read as an approval's. A signal kind is named by its
+ * qualified name, such as `github/review-requested`.
  */
 export const NotificationSubject = Schema.Union([
   buildIdSubject("task", Id),
@@ -197,6 +201,7 @@ export const NotificationSubject = Schema.Union([
   buildIdSubject("plugin", PluginId),
   buildIdSubject("event", EventId),
   buildIdSubject("permissionRequest", Id),
+  buildIdSubject("signalKind", Schema.String),
   Schema.Struct({ kind: Schema.Literal("trigger"), workflowId: Id, triggerId: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("request"), sessionId: Id, requestId: Fact }),
 ]);
@@ -371,6 +376,13 @@ export const Notification = Schema.Struct({
   /** Set once a decision is resolved. An informational notification never has one. */
   resolution: Schema.optionalKey(Resolution),
   createdAt: Timestamp,
+  /**
+   * On a `core.signal-build-failed` notification only: how many signals of
+   * its kind were written from their event because `build` failed, from the
+   * notification's event on. It is counted when the notification is read,
+   * so the stored notification never changes.
+   */
+  failedBuildCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 });
 
 export type Notification = Schema.Schema.Type<typeof Notification>;

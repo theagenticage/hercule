@@ -527,6 +527,14 @@ A plugin declares its signal kinds in the `signalKinds` facet of its event sourc
 3. **`yes`:** the Signal is written from the draft.
 4. **`undecided`:** the core writes a Screening row (status `pending`, holding the draft) and emits the core event `signal.screening-requested` in the same transaction (Section 9.8).
 
+*(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* How the controller builds the order above:
+
+- **Step 1 runs in the event router's transaction**, not the ingest transaction. The router is what reads every event once, after the trigger and subscription tables. The intake table is last in the router's list, so the known-work check (step 2.1) reads the subscription rows the earlier tables wrote for the same event in the same transaction, and runs there too.
+- **The ends run before the rules**, so an event that both ends a signal and raises a new one on the same thread leaves the new one open. An end also drops the raises of its thread that are still waiting (below), so a raise written before the end cannot bring back a question already answered.
+- **A `signal_raises` outbox carries the decision past the commit.** For `yes` or `undecided`, the router writes one row `(event_id, kind, decision, connection_id, thread_ref)`. After the commit, the signal raise step reads the rows in event order, calls `build` outside any transaction, and then in one transaction replaces the older signal on the thread (step 2.3), writes the signal, records the build's failure or recovery (Section 9.4) and deletes the row. A row whose signal already exists is deleted without a second write, so a step that runs twice writes nothing twice.
+- **No Screener exists yet.** Until one does, `undecided` writes the signal like `yes`, with `origin.notScreened: { reason: "no-screener" }`, because a missed question costs more than one the user marks Done. Step 4 replaces this once the Screener ships.
+- **Ignore Rules (step 2.2) and Not urgent carrying over to a replacement are not built yet.**
+
 Why the steps sit where they do:
 
 - **Raising runs after the commit.** `build` is plugin code and may call the source, and a transaction never waits on anything outside the database ([ADR 0004](../adr/0004-controller-state-lives-in-one-sqlite-database.md)). Raising is a step after the matcher, like run spawning.
@@ -614,7 +622,9 @@ A signal's actions are Bound Actions, with the shape and the rules of Section 7.
 - When `build` throws, or returns something the schema refuses (Section 9.5), the signal is still written, from the envelope: the event's title, its author, and its Connection. Its `buildError` holds `{ message, at }`.
 - It gets only Done and the Hand to an agent actions: without `build`, the core cannot fill a plugin action's input. Opening the item on the source is the event's `url`, not an action.
 - The signal shows a quiet line: "GitHub couldn't draw this signal. Showing the event as it came in." with the plugin's name in place of GitHub.
-- Check-in gets one `core.signal-build-failed` Notification per plugin and signal kind, open at most once. Later failures raise no other. The count beside it ("failed 14 times since 09:12") is worked out on read from the signals of that kind that carry `buildError` since the Notification was created, so the Notification itself never changes (Section 7.1), and the core withdraws it when a later `build` of that kind succeeds. `core.plugin-error` keeps its own meaning, a failed activation.
+- Check-in gets one `core.signal-build-failed` Notification per plugin and signal kind, open at most once. Later failures raise no other. The count beside it ("failed 14 times since 09:12") is worked out on read from the signals of that kind that carry `buildError` ~~since the Notification was created~~ from the Notification's event on *(amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526), below)*, so the Notification itself never changes (Section 7.1), and the core withdraws it when a later `build` of that kind succeeds. `core.plugin-error` keeps its own meaning, a failed activation.
+  - *(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* The count is returned as `failedBuildCount` on the Notification. It counts the signals of the kind with a `buildError` raised from the Notification's `eventId` on, rather than by time: raises are written in event order, and the first failed signal and its Notification are stamped a few milliseconds apart. The Notification's subject names the plugin (`plugin`) and the kind (`signalKind`, a new subject kind), and its one answer is Dismiss.
+  - *(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* A draft whose action takes the id of a core action (`done`, or a Hand to an agent action), or whose action's input `signal.answer` refuses, is refused like a draft the schema refuses.
 - The controller log keeps the full error.
 
 ### 9.5 Blocks

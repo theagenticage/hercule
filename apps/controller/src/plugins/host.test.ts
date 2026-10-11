@@ -860,6 +860,7 @@ const buildEventSourcePlugin = (
         [kind]: {
           description: `Something happened: ${kind}`,
           schema: Schema.Struct({ url: Schema.String }),
+          availableToTriage: true,
         },
       },
     }),
@@ -1004,6 +1005,7 @@ describe("the event source catalog", () => {
                 [`acme.${word}.done`]: {
                   description: `Something happened: ${word}`,
                   schema: Schema.Struct({ url: Schema.String }),
+                  availableToTriage: true,
                 },
               },
             }),

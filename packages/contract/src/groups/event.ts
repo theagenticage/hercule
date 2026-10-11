@@ -93,6 +93,20 @@ export const MAX_EVENT_SYSTEM_LENGTH = 64;
 /** The longest source URL. It is where a person opens the event, not a document. */
 export const MAX_EVENT_URL_LENGTH = 2048;
 
+/**
+ * The longest title a plugin's event may carry. It is one line, and a signal
+ * written from the event alone takes it as its title, so it is the limit of a
+ * signal's title too.
+ */
+export const MAX_EVENT_TITLE_LENGTH = 512;
+
+/**
+ * The longest author a plugin's event may name. A signal written from the
+ * event alone takes it as its asker, so it is the limit of a signal's asker
+ * too.
+ */
+export const MAX_EVENT_AUTHOR_LENGTH = 256;
+
 /** The payload of a manual emit. The core fills in every other field of the event. */
 export const EventEmitInput = Schema.Struct({
   kind: EventKind,

@@ -17,7 +17,11 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { BoundOperations } from "../../bound-actions";
+import type { ConnectionTypes } from "../../connections";
+import type { AuditLog } from "../../events";
 import type { Notifier } from "../../notifications";
+import type { PluginHost } from "../../plugins";
 import type { RunService } from "../../runs";
 import type { SessionService } from "../../sessions";
 import type { TriggerEffects, TriggerHealth } from "../../workflows";
@@ -87,4 +91,8 @@ export const PipelineLayer: Layer.Layer<
   | Live
   | PromotionState
   | SqlClient.SqlClient
+  | PluginHost
+  | ConnectionTypes
+  | BoundOperations
+  | AuditLog
 > = Layer.effect(Pipeline)(make);

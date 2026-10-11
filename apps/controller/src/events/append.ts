@@ -22,6 +22,10 @@ export interface EventToAppend {
   readonly refs: ReadonlyArray<string>;
   /** Where a person opens the event in its own system, or null when there is no such page. */
   readonly url: string | null;
+  /** The event's one-line title, or null for an event that has none, such as a core event. */
+  readonly title: string | null;
+  /** Who caused the event in its own system, or null when the source does not know. */
+  readonly author: string | null;
   readonly payload: unknown;
   /** The external system's own body, kept for debugging, or null. */
   readonly raw: Readonly<Record<string, unknown>> | null;
@@ -46,11 +50,12 @@ export const appendEvent = (
     const written = yield* sql<{ readonly id: number }>`
       INSERT INTO events
         (source, connection_id, system, kind, occurred_at, received_at,
-         dedup_key, refs, url, payload, raw, actor)
+         dedup_key, refs, url, title, author, payload, raw, actor)
       VALUES
         (${event.source}, ${event.connectionId}, ${event.system}, ${event.kind},
          ${event.occurredAt}, ${event.receivedAt}, ${event.dedupKey},
-         ${JSON.stringify(event.refs)}, ${event.url}, ${JSON.stringify(event.payload)},
+         ${JSON.stringify(event.refs)}, ${event.url}, ${event.title}, ${event.author},
+         ${JSON.stringify(event.payload)},
          ${event.raw === null ? null : JSON.stringify(event.raw)}, ${event.actor})
       ON CONFLICT (source, ifnull(connection_id, x''), dedup_key) DO NOTHING
       RETURNING id

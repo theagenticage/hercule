@@ -408,15 +408,32 @@ const make = Effect.gen(function* () {
      * once each time it occurs rather than on every check. `about` names
      * fewer subjects when each notification also names something of its own,
      * such as the run in a failed run's notification.
+     *
+     * With `unlessOpenAbout`, it creates nothing while an open decision of
+     * the same kind lists any of those subjects. A condition reported this
+     * way is reported once until its decision is resolved, however long it
+     * lasts, and again once it comes back after that.
      */
     createCoreNotification: (
       notification: CoreNotification,
-      options?: { readonly unlessRaised?: UnlessRaised | undefined },
+      options?: {
+        readonly unlessRaised?: UnlessRaised | undefined;
+        readonly unlessOpenAbout?: ReadonlyArray<NotificationSubject> | undefined;
+      },
     ): Effect.Effect<void, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
           const now = yield* nowIso;
+          const unlessOpenAbout = options?.unlessOpenAbout;
+          if (
+            unlessOpenAbout !== undefined &&
+            (yield* notifications.listOpenDecisionsAbout(unlessOpenAbout)).some(
+              (open) => open.kind === notification.kind,
+            )
+          ) {
+            return;
+          }
           const unlessRaised = options?.unlessRaised;
           if (
             unlessRaised !== undefined &&

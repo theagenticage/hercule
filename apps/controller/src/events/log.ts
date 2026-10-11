@@ -21,7 +21,7 @@ import { AUDIT_KINDS } from "./audit-log";
 
 export const EVENT_COLUMNS =
   "id, source, connection_id, system, kind, occurred_at, received_at, " +
-  "dedup_key, refs, url, payload, raw, actor";
+  "dedup_key, refs, url, title, author, payload, raw, actor";
 
 export interface EventRow {
   readonly id: number;
@@ -34,6 +34,8 @@ export interface EventRow {
   readonly dedup_key: string;
   readonly refs: string;
   readonly url: string | null;
+  readonly title: string | null;
+  readonly author: string | null;
   readonly payload: string;
   readonly raw: string | null;
   readonly actor: string | null;
@@ -54,6 +56,8 @@ export const parseEventRow = (row: EventRow): Event => ({
   dedupKey: row.dedup_key,
   refs: JSON.parse(row.refs) as ReadonlyArray<string>,
   url: row.url,
+  title: row.title,
+  author: row.author,
   payload: parseJsonObject(row.payload),
   raw: row.raw === null ? null : parseJsonObject(row.raw),
   actor: row.actor,

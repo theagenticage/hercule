@@ -16,6 +16,9 @@ import { migrations } from "./index";
 
 /** The migrations before the one under test. */
 const BEFORE = migrations.filter(([id]) => id < 47);
+// Later migrations may add indexes of their own to the table, so the index
+// test stops at this one.
+const THROUGH = migrations.filter(([id]) => id <= 47);
 
 const at = "2026-10-05T00:00:00.000Z";
 
@@ -137,7 +140,7 @@ describe("the input sent status migration", () => {
           ORDER BY name`;
         yield* runMigrations(BEFORE);
         const before = yield* listIndexes;
-        yield* runMigrations();
+        yield* runMigrations(THROUGH);
         return { before, after: yield* listIndexes };
       }),
     );
