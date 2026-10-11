@@ -191,7 +191,7 @@ describe("Settings > Plugins", () => {
 
   it("says why the plugin's mark was left out", async () => {
     const markError =
-      "The plugin's mark was left out because one of its paths is larger than 4 KB.";
+      "The plugin's mark was left out because its paths together are larger than 4 KB.";
     await openApp([{ ...ACTIVE, markError }, ERRORED]);
 
     expect(readPageText(await findPluginCard(ACTIVE))).toContain(markError);

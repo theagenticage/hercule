@@ -55,8 +55,9 @@ export const PluginId = Schema.String.check(
 /**
  * The plugin's mark: SVG path `d` strings drawn on a fixed 16x16 viewBox, in
  * the theme's colour. It holds path data only, so a mark can carry no script,
- * style or colour. The host checks the strings when it loads the plugin, and
- * drops a mark that fails the check rather than the plugin.
+ * style or colour. The host checks the strings when it loads the plugin: at
+ * most 16 paths, and at most 4 KB of them together. It drops a mark that
+ * fails the check rather than the plugin.
  */
 export const PluginMark = Schema.Struct({ paths: Schema.Array(Schema.String) });
 

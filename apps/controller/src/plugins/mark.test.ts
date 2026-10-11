@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkPluginMark, MAX_MARK_PATH_BYTES } from "./mark";
+import { checkPluginMark, MAX_MARK_BYTES, MAX_MARK_PATHS } from "./mark";
 
 describe("checkPluginMark", () => {
   it("returns nothing for a plugin with no mark", () => {
@@ -21,11 +21,32 @@ describe("checkPluginMark", () => {
     });
   });
 
-  it("drops a mark with a path larger than 4 KB", () => {
-    const checked = checkPluginMark({ paths: ["M0 0", "L1 1 ".repeat(MAX_MARK_PATH_BYTES / 4)] });
+  it("drops a mark whose paths together are larger than 4 KB, even when each path is small", () => {
+    // Ten paths of 500 bytes each: 5,000 bytes together.
+    const checked = checkPluginMark({
+      paths: Array.from({ length: 10 }, () => "L1 1 ".repeat(100)),
+    });
 
     expect(checked).toEqual({
-      markError: "The plugin's mark was left out because one of its paths is larger than 4 KB.",
+      markError: "The plugin's mark was left out because its paths together are larger than 4 KB.",
+    });
+  });
+
+  it("keeps a mark whose paths together hold exactly 4 KB", () => {
+    const mark = {
+      paths: ["M0 0".padEnd(MAX_MARK_BYTES / 2, " "), "L1 1".padEnd(MAX_MARK_BYTES / 2, " ")],
+    };
+
+    expect(checkPluginMark(mark)).toEqual({ mark });
+  });
+
+  it("keeps a mark with as many paths as allowed, and drops one with more", () => {
+    const allowed = { paths: Array.from({ length: MAX_MARK_PATHS }, () => "M0 0h1") };
+
+    expect(checkPluginMark(allowed)).toEqual({ mark: allowed });
+    expect(checkPluginMark({ paths: [...allowed.paths, "M0 0h1"] })).toEqual({
+      markError:
+        "The plugin's mark was left out because it has 17 paths, and a mark may have at most 16.",
     });
   });
 
