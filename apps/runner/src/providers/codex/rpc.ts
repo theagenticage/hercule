@@ -10,6 +10,7 @@
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import type { StopSignal } from "../process";
 
 /**
  * The app-server's stdio, split into lines. Each `stdout` item is one whole
@@ -23,7 +24,8 @@ export interface RpcChild {
 /** The app-server child process: the part the codec uses, plus what only the adapter uses. */
 export interface AppServerChild extends RpcChild {
   readonly stderr: AsyncIterable<string>;
-  readonly kill: () => void;
+  /** Sends a signal to this app-server only. Without an argument it sends SIGTERM. */
+  readonly kill: (signal?: StopSignal) => void;
   readonly exited: Promise<number>;
 }
 

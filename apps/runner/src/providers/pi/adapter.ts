@@ -44,7 +44,7 @@ import { readAttachmentBase64 } from "../attachments";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { buildFailedProbe } from "../probe";
-import { killProcessesHolding, runProcess, spawnPi, type Run } from "../process";
+import { killProcessesHolding, runProcess, spawnPi, stopChild, type Run } from "../process";
 import { truncateFact, truncateMessage } from "../text";
 import { now } from "../../report";
 import {
@@ -687,8 +687,9 @@ const findTextGenerationViolation = (frame: unknown): string | undefined => {
   if (typeof frame !== "object" || frame === null) return undefined;
   const event = frame as Record<string, unknown>;
   if (event["type"] === "tool_execution_start" && event["toolName"] !== SUBMIT_RESULT_TOOL) {
-    const name = typeof event["toolName"] === "string" ? truncateFact(event["toolName"]) : "(none)";
-    return `the model tried to use the tool ${name}, and a text generation allows only ${SUBMIT_RESULT_TOOL}`;
+    // The tool name is chosen by the model, and a failure message is stored
+    // and shown to the user, so the name must not appear in it.
+    return `the model tried to use a tool other than ${SUBMIT_RESULT_TOOL}, and a text generation allows only ${SUBMIT_RESULT_TOOL}`;
   }
   return parseDialog(frame) === undefined
     ? undefined
@@ -1450,7 +1451,8 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * returns how it ended. Fails with a message when pi cannot be started or
    * refuses the prompt. The pi gets the instructions as its system prompt and
    * the input as its one prompt, and this waits for the turn to end. The pi is
-   * killed when this finishes or is interrupted.
+   * stopped when this finishes or is interrupted, and this returns only after
+   * it has exited (see `stopChild`).
    *
    * The call fails at once when the model uses a tool other than
    * `submit_result` or pi asks for an approval (see
@@ -1471,7 +1473,8 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           const extensionFile = join(ctx.cwd, "extension.ts");
           const instructionsFile = join(ctx.cwd, "instructions.txt");
           writeFileSync(instructionsFile, spec.instructions, { mode: 0o600 });
-          return spawnAgent(
+          const released = Promise.withResolvers<void>();
+          const child = spawnAgent(
             [ctx.binary, ...buildTextGenerationArgv(spec, extensionFile, instructionsFile)],
             buildEnv(ctx, {
               // pi writes bookkeeping files into its agent directory even with
@@ -1497,11 +1500,13 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
             // workspace, so a call can neither see nor change the user's files.
             ctx.cwd,
             extensionFile,
+            released.resolve,
           );
+          return { child, released: released.promise };
         },
         catch: describeError,
       }),
-      (child) =>
+      ({ child }) =>
         Effect.gen(function* () {
           const settled = Deferred.makeUnsafe<TextGenerationOutcome>();
           const complaints: Array<string> = [];
@@ -1576,8 +1581,13 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           return yield* Deferred.await(settled);
         }),
       // A pi left running would keep the instance's key and go on with its
-      // model call.
-      (child) => Effect.sync(() => attempt(() => child.kill())),
+      // model call. The runner removes the scratch directory and frees the
+      // call's slot after this, so it waits until pi has really exited and
+      // `spawnAgent` has deleted the extension copy in that directory. A
+      // removal of the directory that runs beside that deletion can leave the
+      // directory behind.
+      ({ child, released }) =>
+        stopChild(child).pipe(Effect.andThen(Effect.promise(() => released))),
     );
 
   return {

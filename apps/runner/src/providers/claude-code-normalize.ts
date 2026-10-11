@@ -877,7 +877,8 @@ const TURN_LIMIT_REACHED = "error_max_turns";
  * - `ok` when the structured output matches `schema`;
  * - `invalid-output` when the harness answered but gave no output, an output
  *   that does not match `schema`, or ran out of retries trying;
- * - `failed` for everything else, such as a login error or an API error.
+ * - `failed` for everything else, such as a login error or an API error. Its
+ *   message holds only what the harness reported, never text the model wrote.
  *
  * The usage is null when the result lists no model, because then the harness
  * reported no token counts.
@@ -890,7 +891,18 @@ export const decideTextGenerationOutcome = (
     sdk.subtype === TURN_LIMIT_REACHED
       ? { missing: "the harness did not produce an output that matches the schema" }
       : readHarnessAnswer(sdk, readTurnState(sdk));
-  if (answer === undefined) return { outcome: "failed", message: describeFailure(sdk) };
+  if (answer === undefined) {
+    // An interrupted turn's result text is what the model had written so far.
+    // A failure message is stored and shown to the user, and model output must
+    // never reach it, so that text is left out.
+    return {
+      outcome: "failed",
+      message:
+        readTurnState(sdk) === "interrupted"
+          ? "the harness stopped the turn before it answered"
+          : describeFailure(sdk),
+    };
+  }
   const judged = judgeAnswer(schema, answer);
   if (judged.outcome !== "ok") return { outcome: "invalid-output", reason: judged.reason };
   return {

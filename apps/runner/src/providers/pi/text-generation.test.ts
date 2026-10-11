@@ -245,9 +245,27 @@ describe("a text generation on pi", () => {
 
     await expect(outcome).resolves.toEqual({
       outcome: "failed",
-      message: `the model tried to use the tool bash, and a text generation allows only ${SUBMIT_RESULT_TOOL}`,
+      message: `the model tried to use a tool other than ${SUBMIT_RESULT_TOOL}, and a text generation allows only ${SUBMIT_RESULT_TOOL}`,
     });
     expect(child.kills()).toBe(1);
+  });
+
+  it("keeps the name of a tool the model chose out of the failure message", async () => {
+    const { outcome, child } = await startGeneration();
+    const modelChosenName = "PRIVATE_CUSTOMER_KEY_73dbfa";
+
+    // pi reports the start of a call to a tool that does not exist before it
+    // finds out that the tool does not exist, so the name is the model's text.
+    child.push({
+      type: "tool_execution_start",
+      toolCallId: "call-made-up-1",
+      toolName: modelChosenName,
+      args: {},
+    });
+
+    const settled = await outcome;
+    expect(settled.outcome).toBe("failed");
+    expect(JSON.stringify(settled)).not.toContain(modelChosenName);
   });
 
   it("fails, and does not judge a later answer, when pi asks for an approval", async () => {
@@ -364,5 +382,24 @@ describe("launching pi for a text generation", () => {
     await settle();
 
     expect(spawns[0]!.kills()).toBe(1);
+  });
+
+  it("returns only after a pi that shuts down slowly has exited", async () => {
+    const exit = Promise.withResolvers<void>();
+    const { seam, spawns } = buildFakePiSeam({ exitsAfterKill: exit.promise });
+    const outcome = Effect.runPromise(generate(makePiAdapter(seam)));
+    await waitUntil("launched a pi", () => spawns.length === 1);
+    answerWith(spawns[0]!, ANSWER);
+    await waitUntil("asked pi to stop", () => spawns[0]!.kills() === 1);
+
+    let returned = false;
+    void outcome.then(() => {
+      returned = true;
+    });
+    await settle();
+    expect(returned).toBe(false);
+
+    exit.resolve();
+    await expect(outcome).resolves.toMatchObject({ outcome: "ok" });
   });
 });

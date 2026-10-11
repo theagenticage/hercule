@@ -123,8 +123,14 @@ export interface ClaudeStream extends AsyncIterable<SDKMessage> {
    * subagent's task as stopped, and the subagent cannot be continued.
    */
   readonly stopTask: (taskId: string) => Promise<void>;
-  /** Ends the query. The CLI is a child process, and it does not exit on its own. */
-  readonly close: () => void;
+  /**
+   * Ends the query. The CLI is a child process, and it does not exit on its
+   * own. Returns a promise that settles when the SDK has finished closing the
+   * query and waited for the CLI to exit, which the SDK bounds at about 2
+   * seconds. The promise never rejects. A caller that does not wait for the
+   * exit, such as a session that is stopping, ignores it.
+   */
+  readonly close: () => void | Promise<void>;
 }
 
 export interface ClaudeSeam {
@@ -1258,7 +1264,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // pump's `finally` ends the parks on every exit.
         held.uploads.abort();
         held.input.end();
-        held.stream.close();
+        void held.stream.close();
       }),
 
     respondToApprovalRequest: (
@@ -1288,8 +1294,10 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),
     // The config is empty for every shipped provider, so it is not read.
     generateText: (ctx, _config, spec) =>
-      // The harness is closed before the runner removes its working
-      // directory, so nothing is still writing into the directory.
+      // The harness is closed, and its exit awaited, before the runner
+      // removes its working directory and frees the call's slot, so nothing is
+      // still writing into the directory. The SDK ends its CLI itself and
+      // bounds its wait for the exit.
       Effect.acquireUseRelease(
         Effect.try({
           try: () =>
@@ -1307,7 +1315,10 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
                 ? { outcome: "failed", message: "the harness ended without an answer" }
                 : decideTextGenerationOutcome(spec.outputSchema, result),
           ),
-        (stream) => Effect.sync(() => stream.close()),
+        (stream) =>
+          Effect.promise(async () => {
+            await stream.close();
+          }),
       ),
 
     // Every shipped provider's config schema is empty, so the Claude adapter
@@ -1369,11 +1380,13 @@ export const claudeCode: ProviderAdapter = makeClaudeCodeAdapter({
       interrupt: () => running.interrupt().then(() => undefined),
       setModel: (model) => running.setModel(model),
       stopTask: (taskId) => running.stopTask(taskId),
-      close: () => {
+      close: () =>
         // The child may already be gone, and an unhandled rejection would take
         // the whole daemon down just because one session ended.
-        running.return(undefined).catch(() => undefined);
-      },
+        running.return(undefined).then(
+          () => undefined,
+          () => undefined,
+        ),
     };
   },
   query: ({ options }) => {
