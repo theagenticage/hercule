@@ -562,7 +562,7 @@ interface ConnectionTypeContribution {
   type: string                                 // the bare word: "github", "gmail", "discord", "slack"; the host qualifies it to `<pluginId>/<word>`. No `/` in the word
   displayName: string
   setup: SetupStep[]
-  validate(credentials: Record<string, string>): Effect<{ accountId: string; displayName: string; detail?: string; warning?: string }, ConnectionValidationFailed, HttpClient>  // the pasted fields, or { accessToken } from a redirect or device flow
+  validate(credentials: Record<string, string>): Effect<{ accountId: string; displayName: string; warning?: string }, ConnectionValidationFailed, HttpClient>  // the pasted fields, or { accessToken } from a redirect or device flow
   oauth?: OAuthDeclaration                     // required iff an oauth step appears
   device?: DeviceDeclaration                   // required iff a device step appears
 }
