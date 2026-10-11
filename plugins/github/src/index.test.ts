@@ -182,7 +182,7 @@ describe("what the github plugin registers", () => {
     ]);
   });
 
-  it("declares the three signal kinds, reading only the source's own event kinds", async () => {
+  it("declares the six signal kinds, reading only the source's own event kinds", async () => {
     const source = (await collectContributions(github)).sources[0]!;
     const signalKinds = source.signalKinds ?? [];
 
@@ -190,6 +190,9 @@ describe("what the github plugin registers", () => {
       "review-requested",
       "team-review-requested",
       "mentioned",
+      "assigned",
+      "changes-requested",
+      "checks-failed",
     ]);
     for (const kind of signalKinds) {
       for (const eventKind of [...kind.from, ...kind.ends.map((end) => end.eventKind)]) {
