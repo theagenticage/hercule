@@ -912,7 +912,7 @@ The set is worked out on read against today's settings, never stored. An event t
 | 3 | **→ ignored** · rule *text* | an Ignore Rule's catch row for the event |
 | 4 | **→ proposal / offer / FYI / unsure** · *title* | a core Signal listing the event in `origin.eventIds` |
 | 5 | **→** *task title* | a Task's provenance carries the event |
-| 6 | **known** · *task or run* | a live Subscription received the event |
+| 6 | ~~**known** · *task or run*~~ **known to** *Thread or run title*, or "a Thread" or "a run" when the title is not readable *(amended 2026-10-11, [#529](https://github.com/theagenticage/hercule/issues/529))* | a live Subscription received the event |
 | 7 | **pending triage** | the event is newer than the `until` of the last run of the workflow `intake.triageWorkflowId` names; hidden when none is named |
 | 8 | **no action** | none of the above |
 

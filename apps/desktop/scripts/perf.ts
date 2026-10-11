@@ -76,6 +76,14 @@
  *
  *        pnpm --filter @hercule/desktop perf -- --workflows-only
  *
+ * Between steps 6 and 7, the fixture writes 1,000 events of Intake, and one
+ * more plain launch, which opens Intake again, measures Everything: opening
+ * the view, scrolling its list to the end, and the memory after (see
+ * `measureEverythingWork`). Pass `--everything-only` to run only that, on 40
+ * threads and the signals of step 5:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --everything-only
+ *
  * The first thread screen's JavaScript is not measured here: `pnpm
  * build:desktop` checks it, and prints it as "the first screen", because the
  * thread's route is among the routes its check counts.
@@ -205,11 +213,14 @@ import {
 } from "./perf-measures.ts";
 import {
   INTAKE_SIGNALS,
+  measureEverythingWork,
   measureIntakeWork,
   openIntakeOnce,
   raiseSignals,
   raiseSnoozedSignal,
+  reportEverythingWork,
   reportIntakeWork,
+  seedEvents,
 } from "./perf-intake.ts";
 import { measureSubagentLaunch, reportSubagentLaunch } from "./perf-subagents.ts";
 import {
@@ -1128,6 +1139,25 @@ function reportLaunch(measured: MeasuredLaunch): void {
 const WORKFLOWS_ONLY = process.argv.includes("--workflows-only");
 
 /**
+ * Whether the run measures only Everything (see `perf-intake.ts`), on 40
+ * threads, and skips every other launch and the workflow list.
+ */
+const EVERYTHING_ONLY = process.argv.includes("--everything-only");
+
+/**
+ * Writes the events of Intake, and measures Everything in a plain launch that
+ * opens Intake again. The fixture gives the events their titles and arrival
+ * times in `prepareLaunch`.
+ */
+async function measureEverything(fixture: ThreadFixture, userDataDir: string): Promise<void> {
+  await seedEvents(fixture);
+  await fixture.prepareLaunch({ twoMinuteRow: false });
+  await openIntakeOnce(userDataDir);
+  await warmUpApp(userDataDir);
+  reportEverythingWork(await measureEverythingWork(userDataDir));
+}
+
+/**
  * Measures every launch but the workflow list's, and reports each launch as
  * it is measured. Returns the readings that are reported once the
  * controller has stopped.
@@ -1199,11 +1229,9 @@ async function measureLaunches(fixture: ThreadFixture, userDataDir: string) {
   });
   // The app opens Intake again, as the launch above left it.
   reportIntakeWork(await measureIntakeWork(userDataDir, fixture));
-  return {
-    streaming,
-    longThread: thread,
-    subagents: await measureSubagentLaunch(userDataDir, fixture, thread.id),
-  };
+  const subagents = await measureSubagentLaunch(userDataDir, fixture, thread.id);
+  await measureEverything(fixture, userDataDir);
+  return { streaming, longThread: thread, subagents };
 }
 
 const launches = await runWithThreadFixture(async (fixture) => {
@@ -1212,6 +1240,12 @@ const launches = await runWithThreadFixture(async (fixture) => {
     await fixture.growTo(40);
     writeSettings(userDataDir, { controllerUrl: fixture.url });
     await signInOnce(userDataDir);
+    if (EVERYTHING_ONLY) {
+      await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
+      await raiseSnoozedSignal(fixture);
+      await measureEverything(fixture, userDataDir);
+      return null;
+    }
     const measured = WORKFLOWS_ONLY ? null : await measureLaunches(fixture, userDataDir);
     // The workflow list comes last, because its 50 runs stay live, and a
     // later `prepareLaunch` would restart the controller under them.
