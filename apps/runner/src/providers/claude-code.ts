@@ -7,6 +7,9 @@
  * page. The adapter uses only the instance's own config directory, never the
  * user's `~/.claude`.
  */
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -40,8 +43,11 @@ import {
   type SessionBinding,
   type SessionSpec,
   type SubagentId,
+  type TextGenerationOutcome,
+  type TextGenerationSpec,
 } from "@hercule/protocol";
 import {
+  decideTextGenerationOutcome,
   normalize,
   buildNormalizingState,
   openTurn,
@@ -478,6 +484,80 @@ const EFFORTS: ReadonlyArray<EffortLevel> = ["low", "medium", "high", "xhigh", "
 const readEffort = (options: SessionSpec["modelSelection"]["options"]): EffortLevel | undefined => {
   const chosen = options["effort"];
   return EFFORTS.find((level) => level === chosen);
+};
+
+/**
+ * The most turns a text generation may take. The first turn is the model's
+ * answer. With no tools, a second turn happens only when the harness rejected
+ * that answer because it did not match the schema and asked the model to try
+ * again. One retry fixes the common slip, and a model that fails twice is not
+ * worth a third call.
+ */
+const TEXT_GENERATION_MAX_TURNS = 2;
+
+/**
+ * Returns the SDK options for a text generation. It is one model call, so the
+ * harness gets nothing a session has:
+ *
+ * - no tools (the harness adds its own structured-output tool, which is what
+ *   answers in the schema);
+ * - no setting source, no MCP server and no plugin, so no file on this
+ *   machine reaches the prompt;
+ * - no saved transcript;
+ * - the instructions as the whole system prompt, in place of Claude Code's own;
+ * - the cheapest reasoning. Some models still think a little with thinking
+ *   disabled, so the lowest effort is set as well.
+ *
+ * `scratch` is the empty directory the harness runs in.
+ */
+const buildTextGenerationOptions = (
+  ctx: ProviderRunnerContext,
+  spec: TextGenerationSpec,
+  binary: string,
+  scratch: string,
+): Options => ({
+  pathToClaudeCodeExecutable: binary,
+  cwd: scratch,
+  tools: [],
+  systemPrompt: spec.instructions,
+  outputFormat: { type: "json_schema", schema: spec.outputSchema },
+  persistSession: false,
+  settingSources: [],
+  strictMcpConfig: true,
+  model: spec.model.model,
+  thinking: { type: "disabled" },
+  effort: "low",
+  maxTurns: TEXT_GENERATION_MAX_TURNS,
+  env: { ...buildEnv(ctx), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+});
+
+/**
+ * Returns the input of a text generation's harness query: one user message,
+ * then the end of the input. The harness answers that message and exits.
+ */
+const buildTextGenerationInput = (input: string): AsyncIterable<SDKUserMessage> => {
+  const messages = createPushable<SDKUserMessage>();
+  messages.push({
+    type: "user",
+    message: { role: "user", content: input },
+    parent_tool_use_id: null,
+  });
+  messages.end();
+  return messages;
+};
+
+/**
+ * Reads the harness's messages until its `result`. Returns undefined when the
+ * harness ended without one. Rejects when the harness fails to run, for
+ * example when the binary cannot start.
+ */
+const readQueryResult = async (
+  messages: AsyncIterable<SDKMessage>,
+): Promise<Extract<SDKMessage, { type: "result" }> | undefined> => {
+  for await (const message of messages) {
+    if (message.type === "result") return message;
+  }
+  return undefined;
 };
 
 /**
@@ -1206,9 +1286,53 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),
-    // Built by the provider's own slice of #282.
-    generateText: () =>
-      Effect.succeed({ outcome: "failed" as const, message: "text generation is not built yet" }),
+    // The config is empty for every shipped provider, so it is not read.
+    generateText: (
+      ctx: ProviderRunnerContext,
+      _config: unknown,
+      spec: TextGenerationSpec,
+    ): Effect.Effect<TextGenerationOutcome> => {
+      const binary = ctx.binary;
+      if (binary === undefined) {
+        return Effect.succeed({
+          outcome: "failed",
+          message: `no ${CLAUDE_BINARY} on this machine`,
+        });
+      }
+      // The harness is closed before its working directory is removed, so
+      // nothing is still writing into the directory.
+      const generate = Effect.acquireUseRelease(
+        Effect.tryPromise({
+          try: () => mkdtemp(join(tmpdir(), "hercule-text-generation-")),
+          catch: describeError,
+        }),
+        (scratch) =>
+          Effect.acquireUseRelease(
+            Effect.try({
+              try: () =>
+                seam.stream({
+                  options: buildTextGenerationOptions(ctx, spec, binary, scratch),
+                  input: buildTextGenerationInput(spec.input),
+                }),
+              catch: describeError,
+            }),
+            (stream) =>
+              Effect.map(
+                Effect.tryPromise({ try: () => readQueryResult(stream), catch: describeError }),
+                (result): TextGenerationOutcome =>
+                  result === undefined
+                    ? { outcome: "failed", message: "the harness ended without an answer" }
+                    : decideTextGenerationOutcome(spec.outputSchema, result),
+              ),
+            (stream) => Effect.sync(() => stream.close()),
+          ),
+        (scratch) => Effect.promise(() => rm(scratch, { recursive: true, force: true })),
+      );
+      return Effect.match(generate, {
+        onFailure: (message): TextGenerationOutcome => ({ outcome: "failed", message }),
+        onSuccess: (outcome) => outcome,
+      });
+    },
 
     // Every shipped provider's config schema is empty, so the Claude adapter
     // does not read the config and leaves out that parameter.

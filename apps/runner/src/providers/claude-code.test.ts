@@ -1,9 +1,9 @@
 /**
- * Tests the Claude Code adapter's probe and sessions, with the vendor SDK
+ * Tests the Claude Code adapter's probe, sessions and text generation, with the vendor SDK
  * stubbed. The fixtures were captured from the real CLI, version 2.1.263; they
  * are not invented.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ import type {
   Options,
   PermissionResult,
   PermissionUpdate,
+  SDKMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
@@ -25,6 +26,8 @@ import {
   type ProviderEvent,
   type QuestionAnswers,
   type SessionSpec,
+  type TextGenerationOutcome,
+  type TextGenerationSpec,
 } from "@hercule/protocol";
 import { makeClaudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
@@ -3124,5 +3127,264 @@ describe("an image a tool returns", () => {
     expect(uploaded.map((upload) => ({ ...upload, bytes: Buffer.from(upload.bytes) }))).toEqual([
       { sessionId: SESSION, bytes: testing.PNG_BYTES },
     ]);
+  });
+});
+
+describe("a text generation", () => {
+  const TITLE_SCHEMA: OutputSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["title", "needsRefinement"],
+    properties: { title: { type: "string" }, needsRefinement: { type: "boolean" } },
+  };
+
+  const TITLE = { title: "Fix flaky login test", needsRefinement: false };
+
+  const GENERATION: TextGenerationSpec = {
+    model: { model: "haiku", options: {} },
+    instructions: "Write a short title for the user's message.",
+    input: "fix the flaky login test",
+    outputSchema: TITLE_SCHEMA,
+  };
+
+  /** What one fake query did: the options it got, the messages it read, and how often it was closed. */
+  interface Query {
+    readonly options: Options;
+    readonly messages: Array<SDKUserMessage>;
+    readonly scratchExistedDuringQuery: () => boolean;
+    readonly closes: () => number;
+  }
+
+  /**
+   * Builds an adapter whose harness answers a text generation with `answer`:
+   * the messages it yields, or an error it throws instead.
+   */
+  const createGenerating = (
+    answer: ReadonlyArray<unknown> | Error,
+  ): { readonly adapter: ProviderAdapter; readonly queries: Array<Query> } => {
+    const queries: Array<Query> = [];
+    const seam: ClaudeSeam = {
+      query: () => {
+        throw new Error("a text generation must not use the probe query");
+      },
+      stream: ({ options, input }) => {
+        let closes = 0;
+        const messages: Array<SDKUserMessage> = [];
+        let scratchExisted = false;
+        queries.push({
+          options,
+          messages,
+          scratchExistedDuringQuery: () => scratchExisted,
+          closes: () => closes,
+        });
+        return {
+          async *[Symbol.asyncIterator]() {
+            for await (const message of input) messages.push(message);
+            scratchExisted = options.cwd !== undefined && existsSync(options.cwd);
+            if (answer instanceof Error) throw answer;
+            for (const message of answer) yield message as SDKMessage;
+          },
+          interrupt: () => Promise.resolve(),
+          setModel: () => Promise.resolve(),
+          stopTask: () => Promise.resolve(),
+          close: () => {
+            closes += 1;
+          },
+        };
+      },
+      run: () => Effect.die("a text generation must not run a process"),
+    };
+    return { adapter: makeClaudeCodeAdapter(seam), queries };
+  };
+
+  const generate = (
+    adapter: ProviderAdapter,
+    context: ProviderRunnerContext = CONTEXT,
+  ): Promise<TextGenerationOutcome> =>
+    Effect.runPromise(adapter.generateText(context, {}, GENERATION));
+
+  it("returns the structured output with the usage when it matches the schema", async () => {
+    const { adapter } = createGenerating([{ ...RESULT, structured_output: TITLE }]);
+
+    expect(await generate(adapter)).toEqual({
+      outcome: "ok",
+      value: TITLE,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 3,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 0.01,
+      },
+    });
+  });
+
+  it("reports no usage when the harness listed no model", async () => {
+    const { adapter } = createGenerating([{ ...RESULT, structured_output: TITLE, modelUsage: {} }]);
+
+    expect(await generate(adapter)).toMatchObject({ outcome: "ok", usage: null });
+  });
+
+  it("ignores the messages before the result", async () => {
+    const { adapter } = createGenerating([
+      { type: "system", subtype: "init" },
+      { type: "assistant", message: { role: "assistant", content: [] } },
+      { ...RESULT, structured_output: TITLE },
+    ]);
+
+    expect(await generate(adapter)).toMatchObject({ outcome: "ok", value: TITLE });
+  });
+
+  describe("when the harness answers but not with a matching value", () => {
+    it("is invalid output when the answer does not match the schema, and names the field", async () => {
+      const { adapter } = createGenerating([
+        { ...RESULT, structured_output: { title: 7, needsRefinement: false } },
+      ]);
+
+      expect(await generate(adapter)).toEqual({
+        outcome: "invalid-output",
+        reason: expect.stringContaining("title") as string,
+      });
+    });
+
+    it("is invalid output when the harness produced no structured output", async () => {
+      const { adapter } = createGenerating([RESULT]);
+
+      expect(await generate(adapter)).toEqual({
+        outcome: "invalid-output",
+        reason: expect.stringMatching(/\S/) as string,
+      });
+    });
+
+    it.each(["error_max_structured_output_retries", "error_max_turns"])(
+      "is invalid output when the harness stopped with %s",
+      async (subtype) => {
+        const { adapter } = createGenerating([{ ...RESULT, subtype, is_error: true, errors: [] }]);
+
+        expect(await generate(adapter)).toEqual({
+          outcome: "invalid-output",
+          reason: expect.stringMatching(/\S/) as string,
+        });
+      },
+    );
+  });
+
+  describe("when the call does not produce an answer", () => {
+    it("fails with the harness's own message when the result is an error", async () => {
+      const { adapter } = createGenerating([
+        { ...RESULT, is_error: true, result: "Not logged in · Please run /login" },
+      ]);
+
+      expect(await generate(adapter)).toEqual({
+        outcome: "failed",
+        message: "Not logged in · Please run /login",
+      });
+    });
+
+    it("fails with the error's message when the harness cannot run", async () => {
+      const { adapter } = createGenerating(new Error("spawn claude ENOENT"));
+
+      expect(await generate(adapter)).toEqual({
+        outcome: "failed",
+        message: "spawn claude ENOENT",
+      });
+    });
+
+    it("fails when the harness ends without a result", async () => {
+      const { adapter } = createGenerating([{ type: "system", subtype: "init" }]);
+
+      expect(await generate(adapter)).toEqual({
+        outcome: "failed",
+        message: expect.stringMatching(/\S/) as string,
+      });
+    });
+
+    it("fails without starting a harness when the machine has no claude", async () => {
+      const { adapter, queries } = createGenerating([]);
+
+      const outcome = await generate(adapter, { ...CONTEXT, binary: undefined });
+
+      expect(outcome.outcome).toBe("failed");
+      expect(queries).toHaveLength(0);
+    });
+  });
+
+  describe("the harness it starts", () => {
+    it("gets no tools, no saved transcript, no setting source and no MCP server", async () => {
+      const { adapter, queries } = createGenerating([{ ...RESULT, structured_output: TITLE }]);
+      await generate(adapter);
+
+      const options = queries[0]!.options;
+      expect(options.tools).toEqual([]);
+      expect(options.persistSession).toBe(false);
+      expect(options.settingSources).toEqual([]);
+      expect(options.strictMcpConfig).toBe(true);
+      expect(options.mcpServers).toBeUndefined();
+      expect(options.plugins).toBeUndefined();
+    });
+
+    it("gets the schema, the model, the instructions and the cheapest reasoning", async () => {
+      const { adapter, queries } = createGenerating([{ ...RESULT, structured_output: TITLE }]);
+      await generate(adapter);
+
+      expect(queries[0]!.options).toMatchObject({
+        pathToClaudeCodeExecutable: "/usr/local/bin/claude",
+        outputFormat: { type: "json_schema", schema: TITLE_SCHEMA },
+        model: "haiku",
+        systemPrompt: GENERATION.instructions,
+        thinking: { type: "disabled" },
+        effort: "low",
+      });
+    });
+
+    it("reads one user message, the input", async () => {
+      const { adapter, queries } = createGenerating([{ ...RESULT, structured_output: TITLE }]);
+      await generate(adapter);
+
+      expect(queries[0]!.messages.map((message) => message.message)).toEqual([
+        { role: "user", content: GENERATION.input },
+      ]);
+    });
+
+    it("gets the instance's config directory and credentials as a session does", async () => {
+      const { adapter, queries } = createGenerating([{ ...RESULT, structured_output: TITLE }]);
+      await generate(adapter, { ...CONTEXT, env: { PATH: "/usr/bin", ANTHROPIC_API_KEY: "key" } });
+
+      expect(queries[0]!.options.env).toMatchObject({
+        PATH: "/usr/bin",
+        ANTHROPIC_API_KEY: "key",
+        CLAUDE_CONFIG_DIR: CONTEXT.home,
+      });
+    });
+
+    it("runs in an empty scratch directory that is removed afterwards", async () => {
+      const { adapter, queries } = createGenerating([{ ...RESULT, structured_output: TITLE }]);
+      await generate(adapter);
+
+      const query = queries[0]!;
+      const cwd = query.options.cwd!;
+      expect(cwd).not.toBe(CONTEXT.cwd);
+      expect(query.scratchExistedDuringQuery()).toBe(true);
+      expect(existsSync(cwd)).toBe(false);
+    });
+
+    it("gets a different scratch directory for each call", async () => {
+      const { adapter, queries } = createGenerating([{ ...RESULT, structured_output: TITLE }]);
+      await generate(adapter);
+      await generate(adapter);
+
+      expect(queries[0]!.options.cwd).not.toBe(queries[1]!.options.cwd);
+    });
+
+    it.each([
+      ["answers", [{ ...RESULT, structured_output: TITLE }]],
+      ["fails", new Error("boom")],
+    ])("is closed, and the scratch directory removed, when it %s", async (_, answer) => {
+      const { adapter, queries } = createGenerating(answer);
+      await generate(adapter);
+
+      expect(queries[0]!.closes()).toBe(1);
+      expect(existsSync(queries[0]!.options.cwd!)).toBe(false);
+    });
   });
 });

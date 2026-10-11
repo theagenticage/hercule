@@ -32,6 +32,8 @@ const definition: ProviderDefinition = {
     disallowedTools: "native",
     structuredOutput: "supported",
   },
+  // The CLI's model list reports this alias, and it follows the newest Haiku.
+  suggestedTextGenerationModel: "haiku",
 };
 
 export const claudeCode: Plugin = {
