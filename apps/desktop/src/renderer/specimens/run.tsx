@@ -77,13 +77,20 @@ async function openDialog(dialog: string): Promise<void> {
   }
 }
 
+/** Returns how many times the app's age clock has fired its timer so far. */
+const countAgeClockFires = (): number => performance.getEntriesByName("age-clock-fire").length;
+
 /**
- * Waits until the app's age clock has fired its timer once, checking once a
- * frame. Fails after five seconds when it never does.
+ * Waits until the app's age clock has fired its timer more than `firesBefore`
+ * times, checking once a frame, then waits one frame more so the labels the
+ * fire moved are drawn. Fails after five seconds when it never fires.
+ *
+ * The run's durations are on screen before `firesBefore` is counted, so the
+ * awaited fire is one that sees them. An earlier fire may have moved nothing.
  */
-async function waitForAgeClockFire(): Promise<void> {
+async function waitForAgeClockFire(firesBefore: number): Promise<void> {
   const deadline = performance.now() + 5000;
-  while (performance.getEntriesByName("age-clock-fire").length === 0) {
+  while (countAgeClockFires() <= firesBefore) {
     if (performance.now() > deadline) {
       throw new Error(
         "The age clock never fired, so the run's durations may still change after the page is ready.",
@@ -91,6 +98,7 @@ async function waitForAgeClockFire(): Promise<void> {
     }
     await waitForFrame();
   }
+  await waitForFrame();
 }
 
 stillGraphPane();
@@ -116,9 +124,10 @@ await mountRunSpecimen(
   { records, workflows: WORKFLOWS_RECORDS },
   search.get("steps") === "timeline" ? "timeline" : "graph",
 );
+const firesAfterMount = countAgeClockFires();
 const card = search.get("card");
 if (card !== null) await openCard(card);
 const dialog = search.get("dialog");
 if (dialog !== null) await openDialog(dialog);
-if (state === "waiting") await waitForAgeClockFire();
+if (state === "waiting") await waitForAgeClockFire(firesAfterMount);
 await markSheetReady();
