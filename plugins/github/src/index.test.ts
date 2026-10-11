@@ -119,6 +119,7 @@ const ACTIONS = [
   "pr.update",
   "pr.merge",
   "pr.create",
+  "checks.rerun",
 ];
 
 describe("what the github plugin registers", () => {
@@ -197,16 +198,22 @@ describe("what the github plugin registers", () => {
     }
   });
 
-  it("lets a Signal's answer run the four actions spec 05 lists, and no other", async () => {
+  it("lets a Signal's answer run the five actions spec 05 lists, and no other", async () => {
     const actions = (await collectContributions(github)).actions;
 
     const answers = actions
       .filter((action) => action.usableIn?.some((place) => place === "signal.answer") === true)
       .map((action) => action.id);
-    expect(answers).toEqual(["issue.comment", "pr.comment", "pr.review", "pr.merge"]);
+    expect(answers).toEqual([
+      "issue.comment",
+      "pr.comment",
+      "pr.review",
+      "pr.merge",
+      "checks.rerun",
+    ]);
   });
 
-  it("contributes the nine actions, each acting through a GitHub Connection", async () => {
+  it("contributes the ten actions, each acting through a GitHub Connection", async () => {
     const actions = (await collectContributions(github)).actions;
 
     expect(actions.map((action) => action.id)).toEqual(ACTIONS);

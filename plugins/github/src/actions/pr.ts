@@ -39,7 +39,7 @@ import {
 } from "./describe";
 
 /** The fields that name one pull request. */
-const PULL_REQUEST_ADDRESS = {
+export const PULL_REQUEST_ADDRESS = {
   repo: RepoName,
   number: ItemNumber.annotate({ description: "The pull request's number in the repository." }),
 };
@@ -54,11 +54,11 @@ const buildPullRequestPath = (address: PullRequestAddress): string =>
   `/repos/${address.repo}/pulls/${String(address.number)}`;
 
 /** Names one pull request for the message of an error. */
-const describePullRequest = (address: PullRequestAddress): string =>
+export const describePullRequest = (address: PullRequestAddress): string =>
   `The pull request ${address.repo}#${String(address.number)}`;
 
 /** Reads one pull request as GitHub returns it. */
-const fetchPullRequest = (
+export const fetchPullRequest = (
   address: PullRequestAddress,
   token: string,
 ): Effect.Effect<GithubPullRequest, ActionError, HttpClient.HttpClient> =>
