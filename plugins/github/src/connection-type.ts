@@ -79,14 +79,42 @@ export const FINE_GRAINED_TOKEN_WARNING =
 const isFineGrainedToken = (token: string): boolean => token.startsWith("github_pat_");
 
 /**
+ * The warning a Connection shows when its token may not read the user's
+ * teams. Without them, a review requested from one of the user's teams
+ * cannot be told apart from any other team's, so it raises no signal.
+ */
+export const NO_READ_ORG_WARNING =
+  "This token has no read:org scope, so review requests to your teams raise no signal: add read:org to the token or sign in with GitHub to get them.";
+
+/** The scopes that include reading the user's teams. */
+const TEAM_READING_SCOPES: ReadonlySet<string> = new Set(["read:org", "write:org", "admin:org"]);
+
+/**
+ * Returns the warning for a token, or `undefined` when it can read everything
+ * the feeds read. A fine-grained token is known by its prefix. A classic
+ * token is known by the scopes GitHub lists for it, which GitHub sends only
+ * for classic and OAuth tokens.
+ */
+const decideTokenWarning = (
+  token: string,
+  scopes: ReadonlyArray<string> | undefined,
+): string | undefined => {
+  if (isFineGrainedToken(token)) return FINE_GRAINED_TOKEN_WARNING;
+  if (scopes !== undefined && !scopes.some((scope) => TEAM_READING_SCOPES.has(scope))) {
+    return NO_READ_ORG_WARNING;
+  }
+  return undefined;
+};
+
+/**
  * Asks GitHub who the token belongs to. The login is the account name the
  * Connections screen shows. The user id is the account id the host compares
  * on a reconnect, so that a reconnect cannot switch the connection to
  * another account.
  *
  * The host passes the pasted `pat` field, or the `accessToken` the device
- * flow obtained. A fine-grained token works, with a warning saying what it
- * cannot read.
+ * flow obtained. A fine-grained token, or a classic token without
+ * `read:org`, works with a warning saying what it cannot read.
  */
 const validate: ConnectionTypeContribution["validate"] = (credentials) =>
   Effect.gen(function* () {
@@ -102,10 +130,11 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
         failValidation("GitHub's response did not include the account's login and user id."),
       ),
     );
+    const warning = decideTokenWarning(token, response.oauthScopes);
     return {
       displayName: account.login,
       accountId: String(account.id),
-      ...(isFineGrainedToken(token) ? { warning: FINE_GRAINED_TOKEN_WARNING } : {}),
+      ...(warning === undefined ? {} : { warning }),
     };
   }).pipe(Effect.catchTag("GithubUnreachable", (error) => failValidation(error.message)));
 

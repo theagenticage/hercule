@@ -65,6 +65,11 @@ export interface GithubResponse {
   readonly rateLimitResetAt?: number;
   /** `Link: <...>; rel="next"`: the URL of the next page, when there is one. */
   readonly nextPageUrl?: string;
+  /**
+   * `X-OAuth-Scopes`: the scopes a classic token or an OAuth token was
+   * granted. GitHub sends no such header for a fine-grained token.
+   */
+  readonly oauthScopes?: ReadonlyArray<string>;
 }
 
 /** GitHub could not be reached, or its response could not be read. */
@@ -185,6 +190,7 @@ export const requestGithub = (
     const rateLimitRemaining = parseWholeNumber(header("x-ratelimit-remaining"));
     const rateLimitResetAt = parseWholeNumber(header("x-ratelimit-reset"));
     const nextPageUrl = parseNextPageUrl(header("link"));
+    const scopesHeader = header("x-oauth-scopes");
     return {
       status: response.status,
       body,
@@ -195,6 +201,9 @@ export const requestGithub = (
       ...(rateLimitRemaining === undefined ? {} : { rateLimitRemaining }),
       ...(rateLimitResetAt === undefined ? {} : { rateLimitResetAt }),
       ...(nextPageUrl === undefined ? {} : { nextPageUrl }),
+      ...(scopesHeader === undefined
+        ? {}
+        : { oauthScopes: scopesHeader.split(",").map((scope) => scope.trim()) }),
     };
   });
 

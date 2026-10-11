@@ -18,9 +18,9 @@ import type {
   RegistrationHost,
   WorkflowActionContribution,
 } from "@hercule/plugin-host";
-import { FINE_GRAINED_TOKEN_WARNING } from "./connection-type";
+import { FINE_GRAINED_TOKEN_WARNING, NO_READ_ORG_WARNING } from "./connection-type";
 import { github } from "./index";
-import { runAgainstStub, stubAnswer, stubHttpClient, type GithubStub } from "./testing";
+import { runAgainstStub, stubAnswer, stubGithub, stubHttpClient, type GithubStub } from "./testing";
 
 /** Runs `register` and returns everything the plugin contributed. */
 const collectContributions = async (
@@ -297,6 +297,21 @@ describe("how the github plugin handles GitHub's response", () => {
     expect(outcome).toMatchObject({ success: { warning: FINE_GRAINED_TOKEN_WARNING } });
     const classic = await runValidate(stub);
     expect(Result.isSuccess(classic) && "warning" in classic.success).toBe(false);
+  });
+
+  it("warns when a classic token may not read the user's teams", async () => {
+    const answerWithScopes = (scopes: string) =>
+      stubGithub(() => ({
+        status: 200,
+        body: { login: "octocat", id: 583231 },
+        headers: { "x-oauth-scopes": scopes },
+      }));
+
+    const withoutOrg = await runValidate(answerWithScopes("repo, notifications"));
+    const withOrg = await runValidate(answerWithScopes("repo, read:org, notifications"));
+
+    expect(withoutOrg).toMatchObject({ success: { warning: NO_READ_ORG_WARNING } });
+    expect(Result.isSuccess(withOrg) && "warning" in withOrg.success).toBe(false);
   });
 
   it("sends the access token the device flow obtained when no token was pasted", async () => {

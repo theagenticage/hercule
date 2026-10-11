@@ -39,10 +39,11 @@ export const buildTeamName = (organization: string, slug: string): string =>
  *
  * A token that may not read teams, such as a classic token without
  * `read:org`, gets an error from GitHub other than a 401. That is not worth
- * stopping a feed for: the teams count as none, which means team review
- * requests emit nothing, a warning is logged, and the list is read again in
- * an hour. Fails with an `AuthError` when GitHub rejects the token, and with
- * `GithubRateLimited` on a rate limit.
+ * stopping a feed for: the last list read stays in use, or no teams when
+ * there never was one, a warning is logged, and the list is read again in an
+ * hour. The Connection already warns the user about a token without
+ * `read:org` (see `connection-type.ts`). Fails with an `AuthError` when
+ * GitHub rejects the token, and with `GithubRateLimited` on a rate limit.
  */
 export const readUserTeams = (
   token: string,
@@ -67,9 +68,9 @@ export const readUserTeams = (
         (error) =>
           Effect.as(
             Effect.logWarning(
-              `The GitHub plugin could not read the user's teams, so review requests to a team raise nothing for the next hour: ${error.message}`,
+              `The GitHub plugin could not read the user's teams, so it keeps the last list it read for the next hour: ${error.message}`,
             ),
-            [],
+            Option.isSome(stored) ? stored.value.teams : [],
           ),
       ),
     );
