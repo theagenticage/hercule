@@ -342,15 +342,14 @@ export const readAllReviewRequests = (poll: ActivityPoll, pull: ListedPull): Arr
 };
 
 /**
- * Fetches a pull request and returns the reviews it asks of the user and
- * their teams now, as `readReviewRequests` returns them. Fails as
- * `fetchFeedResponse` fails, and with a `PluginError` when GitHub returns an
- * object without the fields read.
+ * Fetches a pull request as it is now. Fails as `fetchFeedResponse` fails,
+ * and with a `PluginError` when GitHub returns an object without the fields
+ * read.
  */
-export const fetchReviewRequests = (
+export const fetchPull = (
   poll: ActivityPoll,
   number: number,
-): Effect.Effect<ReadonlyArray<string>, FeedError, HttpClient.HttpClient> =>
+): Effect.Effect<ListedPull, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const response = yield* fetchFeedResponse({
       method: "GET",
@@ -358,8 +357,7 @@ export const fetchReviewRequests = (
       token: poll.token,
     });
     const body = yield* readGithubObject(response.body, "a pull request");
-    const pull = yield* decodeGithubValue(ListedPull, body, "a pull request");
-    return readReviewRequests(poll, pull);
+    return yield* decodeGithubValue(ListedPull, body, "a pull request");
   });
 
 /**
@@ -405,29 +403,37 @@ const emitAssignmentEvent = (
  * history entry in which the user asked someone who is neither the user nor
  * one of their teams. A request that two other people made between
  * themselves is none of the user's business, so the caller does not pass it.
+ *
+ * `pullNow` is the pull request as it is now: whether it still asks the
+ * reviewer decides where the request goes among the events of its own second
+ * (`TIE_RANKS`), as for a request to the user.
  */
 const emitReviewRequestToOther = (
   poll: ActivityPoll,
   item: GithubItem,
   entry: IssueEvent,
   raw: Schema.JsonObject,
+  pullNow: ListedPull,
 ): Effect.Effect<void, FeedError> => {
-  const requested =
-    entry.requested_reviewer?.login ??
-    (entry.requested_team == null
-      ? "someone"
-      : buildTeamName(poll.repo.split("/")[0]!, entry.requested_team.slug));
-  return poll.emit(
-    buildItemEvent(item, {
-      kind: "github.pr.review-requested",
-      dedupKey: `pr.review-requested:${String(entry.id)}`,
-      occurredAt: entry.created_at,
-      title: `${poll.identity.login} requested a review from ${requested} on ${buildItemPlace(item)}`,
-      author: poll.identity.login,
-      fields: { reviewer: "other", requestedBy: poll.identity.login, byYou: true, toYou: false },
-      raw: truncateRaw(raw),
-    }),
-  );
+  const team =
+    entry.requested_team == null
+      ? undefined
+      : buildTeamName(poll.repo.split("/")[0]!, entry.requested_team.slug);
+  const requested = entry.requested_reviewer?.login ?? team ?? "someone";
+  // The same spelling `readAllReviewRequests` uses for each request.
+  const key = entry.requested_reviewer?.login ?? (team === undefined ? undefined : `team:${team}`);
+  const stillAsked = key !== undefined && readAllReviewRequests(poll, pullNow).includes(key);
+  const event = buildItemEvent(item, {
+    kind: "github.pr.review-requested",
+    dedupKey: `pr.review-requested:${String(entry.id)}`,
+    occurredAt: entry.created_at,
+    title: `${poll.identity.login} requested a review from ${requested} on ${buildItemPlace(item)}`,
+    author: poll.identity.login,
+    fields: { reviewer: "other", requestedBy: poll.identity.login, byYou: true, toYou: false },
+    raw: truncateRaw(raw),
+  });
+  TIE_RANKS.set(event, stillAsked ? 1 : -1);
+  return poll.emit(event);
 };
 
 /**
@@ -446,10 +452,9 @@ const emitReviewRequestToOther = (
  * list of requested reviewers says only who is asked now, and GitHub also
  * drops a reviewer from it when they review, which is not a removal.
  *
- * `readRequestsNow` returns the reviews the pull request asks of the user
- * and their teams now, as `readReviewRequests` returns them. It runs at most
- * once, and only when the history holds a request to the user or a team, or a
- * removal of one, to emit. Its answer decides two things:
+ * `readPullNow` returns the pull request as it is now. It runs at most once,
+ * and only when the history holds a review request or a removal to emit. The
+ * reviews the pull request asks now decide two things:
  *
  * - where a request goes among the events of its own second
  *   (`TIE_RANKS`);
@@ -457,9 +462,9 @@ const emitReviewRequestToOther = (
  *   still asks another of the user's teams, so the team's signal stays open.
  *
  * So the answer must be read after the reviews and the history, which is why
- * callers emit the reviews first and pass a fresh read such as
- * `fetchReviewRequests`. A list read earlier can be stale: a review
- * submitted after it clears the user's request, and a removal made after it
+ * callers emit the reviews first and pass a fresh read such as `fetchPull`.
+ * A list read earlier can be stale: a review submitted after it clears a
+ * request, and a removal made after it
  * still shows the removed team as asked. Either would keep a signal open
  * that should end, and the next poll cannot correct it, because the events
  * it emits again have the same dedup keys.
@@ -468,10 +473,10 @@ export const emitHistoryEvents = (
   poll: ActivityPoll,
   item: GithubItem,
   start: string | undefined,
-  readRequestsNow: Effect.Effect<ReadonlyArray<string>, FeedError, HttpClient.HttpClient>,
+  readPullNow: Effect.Effect<ListedPull, FeedError, HttpClient.HttpClient>,
 ): Effect.Effect<void, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    let requestsNow: ReadonlyArray<string> | undefined;
+    let pullNow: ListedPull | undefined;
     const listing = yield* fetchNewestItems(
       {
         method: "GET",
@@ -497,11 +502,13 @@ export const emitHistoryEvents = (
       const target = readRequestedReviewer(poll, entry);
       if (target === undefined) {
         if (requested && isUserAccount(poll.identity, asker)) {
-          yield* emitReviewRequestToOther(poll, item, entry, raw);
+          pullNow ??= yield* readPullNow;
+          yield* emitReviewRequestToOther(poll, item, entry, raw, pullNow);
         }
         continue;
       }
-      requestsNow ??= yield* readRequestsNow;
+      pullNow ??= yield* readPullNow;
+      const requestsNow = readReviewRequests(poll, pullNow);
       const askerLogin = asker?.login ?? null;
       const whom = target.reviewer === "you" ? "you" : target.team;
       const team = target.reviewer === "team" ? { team: target.team } : {};

@@ -57,7 +57,7 @@ import {
   emitNewReviews,
   emitHistoryEvents,
   emitInTimeOrder,
-  fetchReviewRequests,
+  fetchPull,
   isAtOrAfter,
   type ActivityPoll,
 } from "./activity";
@@ -251,7 +251,7 @@ const readFollowedItem = (
     }
     // An issue's history is read too, for an assignment or an unassignment:
     // an open `github/assigned` signal on an issue ends with one.
-    yield* emitHistoryEvents(poll, item, since, fetchReviewRequests(poll, number));
+    yield* emitHistoryEvents(poll, item, since, fetchPull(poll, number));
 
     if (
       issue.state === "closed" &&

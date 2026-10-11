@@ -25,8 +25,10 @@
  *      next poll, so the list alone looks unchanged, and the update time may
  *      not have moved either when both happened in the snapshot's own
  *      second;
- *    - the user wrote the pull request and the reviewers it asks, anyone,
- *      changed. This finds the user asking someone else for another review.
+ *    - the user wrote the pull request, and it asks anyone for a review or
+ *      the reviewers it asks changed. This finds the user asking someone
+ *      else for another review, the same reviewer again after a review
+ *      between two polls included.
  *
  *    When the history holds a request or a removal to emit,
  *    `GET .../pulls/{n}` once more, after the reviews and the history, for
@@ -115,7 +117,7 @@ import {
   emitNewReviews,
   emitHistoryEvents,
   emitInTimeOrder,
-  fetchReviewRequests,
+  fetchPull,
   isAtOrAfter,
   readAllReviewRequests,
   readReviewRequests,
@@ -782,12 +784,15 @@ const pollRepo = (
           // Only the pull requests the user wrote are watched for a request
           // to someone else, so a busy repository does not cost a history
           // read for every reviewer change on other people's pull requests.
+          // As above, a reviewer still asked may have been asked again after
+          // their review, so the list alone cannot rule a request out.
           const everyoneNow = readAllReviewRequests(poll, pull);
           const everyoneBefore = previous === undefined ? [] : previous.allReviewRequests;
           if (
             wroteIt &&
-            everyoneBefore !== undefined &&
-            haveReviewRequestsChanged(everyoneBefore, everyoneNow)
+            (everyoneNow.length > 0 ||
+              (everyoneBefore !== undefined &&
+                haveReviewRequestsChanged(everyoneBefore, everyoneNow)))
           ) {
             readsHistory = true;
           }
@@ -795,7 +800,7 @@ const pollRepo = (
         }
       }
       if (readsHistory) {
-        yield* emitHistoryEvents(poll, item, start, fetchReviewRequests(poll, item.number));
+        yield* emitHistoryEvents(poll, item, start, fetchPull(poll, item.number));
       }
       // Every diffed item arms the comment listing, not only one whose comment
       // count went up: a comment deleted and another added leave the count

@@ -25,6 +25,21 @@ import {
 const REPO = "acme/webshop";
 const PULL = { repo: REPO, kind: "pr" as const, number: 1293, title: "Faster checkout" };
 
+/** Builds pull request 1293 as GitHub returns it, asking `reviewers` and `teams` for a review. */
+const buildPullNow = (
+  reviewers: Array<{ readonly login: string; readonly id: number }> = [],
+  teams: Array<string> = [],
+) => ({
+  number: 1293,
+  title: "Faster checkout",
+  state: "open",
+  user: TEST_ACCOUNT,
+  head: { sha: "sha-a" },
+  updated_at: "2026-10-11T10:00:00Z",
+  requested_reviewers: reviewers,
+  requested_teams: teams.map((slug) => ({ slug })),
+});
+
 /** Builds the poll the emitters read, with the user on the team `acme/payments`. */
 const buildPoll = () => {
   const harness = buildIngestHarness();
@@ -125,7 +140,7 @@ describe("emitHistoryEvents", () => {
     const stub = stubGithub(() => ({ status: 200, body: history }));
 
     const result = await runAgainstStub(
-      emitHistoryEvents(poll, PULL, undefined, Effect.succeed([])),
+      emitHistoryEvents(poll, PULL, undefined, Effect.succeed(buildPullNow())),
       stub,
     );
 
@@ -163,7 +178,7 @@ describe("emitHistoryEvents", () => {
     const stub = stubGithub(() => ({ status: 200, body: history }));
 
     await runAgainstStub(
-      emitHistoryEvents(poll, PULL, "2026-10-11T11:00:00Z", Effect.succeed([])),
+      emitHistoryEvents(poll, PULL, "2026-10-11T11:00:00Z", Effect.succeed(buildPullNow())),
       stub,
     );
 
@@ -178,20 +193,22 @@ describe("emitHistoryEvents", () => {
     });
     const stub = stubGithub(() => ({ status: 200, body: [removal] }));
 
-    const readRemoval = async (requestsNow: ReadonlyArray<string>) => {
+    const readRemoval = async (pullNow: ReturnType<typeof buildPullNow>) => {
       harness.events.length = 0;
       await runAgainstStub(
-        emitHistoryEvents({ ...poll, teams }, PULL, undefined, Effect.succeed(requestsNow)),
+        emitHistoryEvents({ ...poll, teams }, PULL, undefined, Effect.succeed(pullNow)),
         stub,
       );
       return harness.events[0]!.payload;
     };
 
-    expect(await readRemoval(["team:acme/design"])).toMatchObject({
+    expect(await readRemoval(buildPullNow([], ["design"]))).toMatchObject({
       team: "acme/payments",
       teamStillRequested: true,
     });
-    expect(await readRemoval(["you"])).toMatchObject({ teamStillRequested: false });
+    expect(await readRemoval(buildPullNow([TEST_ACCOUNT]))).toMatchObject({
+      teamStillRequested: false,
+    });
   });
 
   it("emits a request the user made to someone else as reviewer other, with no team", async () => {
@@ -211,7 +228,10 @@ describe("emitHistoryEvents", () => {
       ],
     }));
 
-    await runAgainstStub(emitHistoryEvents(poll, PULL, undefined, Effect.succeed([])), stub);
+    await runAgainstStub(
+      emitHistoryEvents(poll, PULL, undefined, Effect.succeed(buildPullNow())),
+      stub,
+    );
 
     expect(harness.events).toMatchObject([
       {
@@ -243,7 +263,10 @@ describe("emitHistoryEvents", () => {
       ],
     }));
 
-    await runAgainstStub(emitHistoryEvents(poll, PULL, undefined, Effect.succeed([])), stub);
+    await runAgainstStub(
+      emitHistoryEvents(poll, PULL, undefined, Effect.succeed(buildPullNow())),
+      stub,
+    );
 
     expect(harness.events).toEqual([]);
   });
@@ -260,7 +283,10 @@ describe("emitHistoryEvents, for assignments", () => {
   ) => {
     const { harness, poll } = buildPoll();
     const stub = stubGithub(() => ({ status: 200, body: history }));
-    await runAgainstStub(emitHistoryEvents(poll, item, start, Effect.succeed([])), stub);
+    await runAgainstStub(
+      emitHistoryEvents(poll, item, start, Effect.succeed(buildPullNow())),
+      stub,
+    );
     return harness.events;
   };
 

@@ -731,19 +731,66 @@ describe("the repos feed", () => {
       );
     });
 
-    it("reads no history when the reviewers asked did not change", async () => {
+    it("emits a request made again after the reviewer's review between two polls", async () => {
       const { repository, harness } = await baselineWithPullBy(TEST_ACCOUNT);
       askAtTen(repository);
       await poll(harness, answerFrom(repository));
-      repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T11:00:00Z" };
+      // Hubot requests changes, so GitHub drops the request, and the user
+      // asks hubot again. Both polls see hubot asked.
+      repository.reviews[2] = [
+        {
+          id: 300,
+          user: OUTSIDE_REVIEWER,
+          state: "CHANGES_REQUESTED",
+          submitted_at: "2026-10-01T10:30:00Z",
+        },
+      ];
+      repository.history[2]!.push(buildRequestToOutsider(6, "2026-10-01T10:40:00Z"));
+      repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T10:40:00Z" };
       repository.etag = '"v3"';
+
+      await poll(harness, answerFrom(repository));
+
+      expect(listWrittenEvents(harness).slice(1)).toEqual([
+        `github.pr.review-submitted pr.review-submitted:300`,
+        `github.pr.review-requested pr.review-requested:6`,
+      ]);
+    });
+
+    it("emits a request made again and the review that answers it in the same second, in that order", async () => {
+      const { repository, harness } = await baselineWithPullBy(TEST_ACCOUNT);
+      askAtTen(repository);
+      await poll(harness, answerFrom(repository));
+      // In one second, the user asks hubot again and hubot requests changes,
+      // which drops the request. Only the pull request no longer asking
+      // hubot tells the request came first.
+      const second = "2026-10-01T10:40:00Z";
+      repository.history[2]!.push(buildRequestToOutsider(6, second));
+      repository.reviews[2] = [
+        { id: 300, user: OUTSIDE_REVIEWER, state: "CHANGES_REQUESTED", submitted_at: second },
+      ];
+      repository.requestedReviewers[2] = [];
+      repository.issues[1] = { ...repository.issues[1]!, updated_at: second };
+      repository.etag = '"v3"';
+
+      await poll(harness, answerFrom(repository));
+
+      expect(listWrittenEvents(harness).slice(1)).toEqual([
+        `github.pr.review-requested pr.review-requested:6`,
+        `github.pr.review-submitted pr.review-submitted:300`,
+      ]);
+    });
+
+    it("reads no history when nobody is asked and the reviewers asked did not change", async () => {
+      const { repository, harness } = await baselineWithPullBy(TEST_ACCOUNT);
+      repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T11:00:00Z" };
+      repository.etag = '"v2"';
 
       const { requests } = await poll(harness, answerFrom(repository));
 
       expect(requests.filter((request) => request.path.endsWith("/issues/2/events"))).toHaveLength(
         0,
       );
-      expect(listEvents(harness)).toHaveLength(1);
     });
 
     it("emits nothing for a pull request someone else wrote, and reads no history", async () => {
@@ -768,6 +815,8 @@ describe("the repos feed", () => {
         items: Record<string, Record<string, unknown>>;
       };
       delete stored.items["2"]!["allReviewRequests"];
+      // Hubot reviews, so the pull request asks nobody now.
+      repository.requestedReviewers[2] = [];
       repository.issues[1] = {
         ...repository.issues[1],
         labels: [{ name: "ready" }],
@@ -782,7 +831,7 @@ describe("the repos feed", () => {
         0,
       );
       expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
-        items: { "2": { allReviewRequests: [OUTSIDE_REVIEWER.login] } },
+        items: { "2": { allReviewRequests: [] } },
       });
     });
   });
