@@ -173,9 +173,7 @@ describe("Settings > System: the access-mode fallback policy", () => {
       name: "The rest of the controller's settings are not editable yet.",
     });
     const empty = readPageText(headline.parentElement);
-    expect(empty).toContain(
-      "Retention windows, the daily backup and HTTPS will be set here once they can be edited.",
-    );
+    expect(empty).toContain("Retention windows, the daily backup and HTTPS will appear here.");
     // The empty state does not claim the fallback policy is set here, because
     // the screen describes the policy above as read-only text.
     expect(empty).not.toMatch(/fallback/i);

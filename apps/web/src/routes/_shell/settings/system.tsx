@@ -91,7 +91,7 @@ function System(): JSX.Element {
       </FormCard>
       <EmptyState
         headline="The rest of the controller's settings are not editable yet."
-        lead="Retention windows, the daily backup and HTTPS will be set here once they can be edited."
+        lead="Retention windows, the daily backup and HTTPS will appear here."
       />
     </div>
   );
