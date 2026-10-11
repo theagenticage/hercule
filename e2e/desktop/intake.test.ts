@@ -484,7 +484,7 @@ describe("Intake", () => {
       await sleep(PAUSE_MS);
       const bulkDone = bar.getByRole("button", { name: /^Done/ });
       await bulkDone.hover();
-      await expect.poll(() => bar.locator(".asks-bulk-preview").count()).toBe(1);
+      await expect.poll(() => bar.locator(".asks-toast-text").textContent()).toMatch(/^Done 3/);
       await sleep(PAUSE_MS * 1.5);
       await bulkDone.click();
       await expect.poll(() => readRowTitles(page)).toEqual([]);
