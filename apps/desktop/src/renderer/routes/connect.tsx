@@ -13,8 +13,14 @@ import {
 const CONTROLLER_URL_SAVE_KEY = ["controllerUrl.save"];
 
 export const Route = createFileRoute("/connect")({
-  validateSearch: (search: Record<string, unknown>): { readonly problem?: ConnectProblem } =>
-    search.problem === "unreachable" ? { problem: search.problem } : {},
+  // An invalid param is returned as `undefined` rather than left out: the
+  // router lays the returned params over the URL's, so a param left out would
+  // keep the URL's value.
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { readonly problem?: ConnectProblem | undefined } => ({
+    problem: search.problem === "unreachable" ? search.problem : undefined,
+  }),
   // The app can start on this route, so it is not split into a chunk of its
   // own: a split route costs two more requests (its script and its
   // stylesheet) before the first render.

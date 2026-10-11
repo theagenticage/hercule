@@ -463,6 +463,8 @@ const WORKFLOW_DELETED = {
  * - `sessions` are the sessions its agent steps started, which the session
  *   list returns for `runId`. By default there are none.
  * - `overrides` replaces the handler of a route, or adds a route.
+ * - `search` is the page URL's search string, such as `?steps=timeline`. By
+ *   default there is none.
  *
  * Returns the app, the stubbed API, and `hold`, which replaces the run the
  * controller holds from now on, `holdReruns`, which replaces its re-runs, and
@@ -474,10 +476,12 @@ const openRunPage = async (
     reruns = [],
     sessions = [],
     overrides = {},
+    search = "",
   }: {
     readonly reruns?: readonly RunSummary[];
     readonly sessions?: readonly Session[];
     readonly overrides?: Readonly<Record<string, Handler>>;
+    readonly search?: string;
   } = {},
 ) => {
   let held = run;
@@ -512,7 +516,7 @@ const openRunPage = async (
     }),
     ...overrides,
   });
-  const app = await renderApp({ path: `/runs/${run.id}`, api: api.fetch, token: "held" });
+  const app = await renderApp({ path: `/runs/${run.id}${search}`, api: api.fetch, token: "held" });
   return {
     ...app,
     api,
@@ -1927,5 +1931,13 @@ describe("A run's page > the runs on either side of a re-run", () => {
     await waitFor(() => {
       expect(readPageText(queryRerunLine(header))).toBe(`re-run as run ${toIdTail(RERUN.id)}`);
     });
+  });
+});
+
+describe("the run page's search params", () => {
+  it("drops a steps view it does not know", async () => {
+    const { router } = await openRunPage(COMPLETED_RUN, { search: "?steps=gantt" });
+
+    expect(router.state.matches.at(-1)!.search).toEqual({});
   });
 });

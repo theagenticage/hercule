@@ -19,8 +19,8 @@ import { ThreadChrome } from "../../../screens/thread/thread-chrome";
 
 /** The search params of a draft: the project it belongs to, and the workspace it joins. */
 interface DraftSearch {
-  readonly project?: string;
-  readonly workspace?: string;
+  readonly project?: string | undefined;
+  readonly workspace?: string | undefined;
 }
 
 /**
@@ -38,9 +38,12 @@ interface DraftSearch {
  */
 export const Route = createFileRoute("/_shell/threads/new")({
   staticData: { title: "New thread", ownsTopBar: true },
+  // An invalid param is returned as `undefined` rather than left out: the
+  // router lays the returned params over the URL's, so a param left out would
+  // keep the URL's value.
   validateSearch: (search: Record<string, unknown>): DraftSearch => ({
-    ...(typeof search.project === "string" ? { project: search.project } : {}),
-    ...(typeof search.workspace === "string" ? { workspace: search.workspace } : {}),
+    project: typeof search.project === "string" ? search.project : undefined,
+    workspace: typeof search.workspace === "string" ? search.workspace : undefined,
   }),
   loader: async ({ context }) => {
     const [runners] = await Promise.all([

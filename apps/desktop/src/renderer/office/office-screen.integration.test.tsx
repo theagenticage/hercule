@@ -417,3 +417,13 @@ describe("an assistant in the Office", () => {
     ).toBeNull();
   });
 });
+
+describe("the Office's search params", () => {
+  it("drops a thread that is not an id, and keeps the assistant beside it", async () => {
+    const { router } = await openOfficeWithAssistants(
+      `/office?session=not-an-id&assistant=${MILO.id}`,
+    );
+
+    expect(router.state.matches.at(-1)!.search).toEqual({ assistant: MILO.id });
+  });
+});

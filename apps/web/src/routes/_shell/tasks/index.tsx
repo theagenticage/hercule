@@ -14,8 +14,12 @@ export const Route = createFileRoute("/_shell/tasks/")({
   staticData: { title: "Tasks" },
   // Task detail is a drawer over this screen, never a page of its own, so the
   // open task is a search parameter of the list's URL.
-  validateSearch: (search: Record<string, unknown>): { readonly task?: string } =>
-    typeof search["task"] === "string" ? { task: search["task"] } : {},
+  // An invalid param is returned as `undefined` rather than left out: the
+  // router lays the returned params over the URL's, so a param left out would
+  // keep the URL's value.
+  validateSearch: (search: Record<string, unknown>): { readonly task?: string | undefined } => ({
+    task: typeof search["task"] === "string" ? search["task"] : undefined,
+  }),
   // Load the first page of tasks and the projects before the screen shows, so
   // it never renders empty and then fills in a moment later.
   loader: async ({ context }) => {

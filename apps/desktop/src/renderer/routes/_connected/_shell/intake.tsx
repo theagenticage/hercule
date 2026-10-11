@@ -17,17 +17,21 @@ import { IntakeScreen } from "../../../screens/intake/intake-screen";
  * selected signal, whose pane is open. With no `view`, Intake shows To do.
  */
 export interface IntakeSearch {
-  readonly view?: "later" | "done";
-  readonly signal?: string;
+  readonly view?: "later" | "done" | undefined;
+  readonly signal?: string | undefined;
 }
 
 /**
  * Returns Intake's search params from the URL's. A `view` that is not Later
  * or Done, and a `signal` that is not an id, are dropped.
+ *
+ * A dropped param is returned as `undefined` rather than left out, because
+ * the router lays the returned params over the URL's: a param left out
+ * would keep the URL's value.
  */
 const validateIntakeSearch = (search: Record<string, unknown>): IntakeSearch => ({
-  ...(search.view === "later" || search.view === "done" ? { view: search.view } : {}),
-  ...(isId(search.signal) ? { signal: search.signal } : {}),
+  view: search.view === "later" || search.view === "done" ? search.view : undefined,
+  signal: isId(search.signal) ? search.signal : undefined,
 });
 
 /**

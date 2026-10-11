@@ -588,3 +588,22 @@ describe("the sidebar's notifications count", () => {
     expect(screen.queryByText(/^new above/)).toBeNull();
   });
 });
+
+describe("Notifications' search params", () => {
+  it("drops a since pin that is not an instant, and pins the last visit instead", async () => {
+    const marker = buildTimestampMinutesAgo(60);
+    const { api } = buildController({
+      notifications: [buildNotification(1, 120)],
+      user: { "lastChecked.notifications": marker },
+    });
+    const { router } = await renderApp({
+      path: "/notifications?since=yesterday",
+      api: api.fetch,
+      token: "held",
+    });
+
+    await waitFor(() => {
+      expect(router.state.matches.at(-1)!.search).toEqual({ since: marker });
+    });
+  });
+});

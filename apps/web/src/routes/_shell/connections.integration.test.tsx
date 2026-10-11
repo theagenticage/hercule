@@ -1455,3 +1455,12 @@ describe("Connections > a device flow", () => {
     await pumpUntil(() => screen.queryByText(START.userCode) === null);
   });
 });
+
+describe("Connections' search params", () => {
+  it("drops an oauth outcome that is not a string, so no notice shows", async () => {
+    await openApp([PAPER], {}, "/connections?oauth=42");
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+});
