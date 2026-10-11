@@ -3,11 +3,11 @@
  * Codex code runs. The notification shapes are copied from a live run of
  * codex 0.154.0 (`items`, `thread/tokenUsage/updated`, `turn/completed`).
  */
-import { existsSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import type { TextGenerationOutcome, TextGenerationSpec } from "@hercule/protocol";
 import { makeCodexAdapter } from "./adapter";
+import { buildTextGenerationContext } from "../testing";
 import {
   buildContext,
   buildScriptedSeam,
@@ -16,6 +16,7 @@ import {
   listSentParams,
   THREAD,
   TURN,
+  settle,
   waitUntil,
   type Answers,
   type Spawn,
@@ -31,7 +32,7 @@ const OUTPUT_SCHEMA = {
 } as const;
 
 const SPEC = {
-  model: { model: "gpt-5.6-luna", options: {} },
+  model: "gpt-5.6-luna",
   instructions: "Write a short title for the message.",
   input: "Why does the nightly backup fail?",
   outputSchema: OUTPUT_SCHEMA,
@@ -110,9 +111,20 @@ interface Generation {
   readonly spawns: Array<Spawn>;
   readonly requests: ReturnType<typeof buildScriptedSeam>["requests"];
   readonly answered: ReturnType<typeof buildScriptedSeam>["answered"];
-  /** The scratch directory the thread ran in, and whether it existed while it ran. */
-  readonly scratch: { readonly dir: string | undefined; readonly existedWhileRunning: boolean };
+  /** The scratch directory the call ran in, which the runner made and the adapter never removes. */
+  readonly scratch: string;
+  /** The directory the thread was started in. */
+  readonly threadCwd: () => string | undefined;
 }
+
+/** Runs a text generation; an error message the adapter fails with becomes a `failed` outcome, as the runner does. */
+const runGeneration = (
+  adapter: ReturnType<typeof makeCodexAdapter>,
+  ctx: ReturnType<typeof buildTextGenerationContext>,
+): Effect.Effect<TextGenerationOutcome> =>
+  Effect.catch(adapter.generateText(ctx, {}, SPEC), (message) =>
+    Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
+  );
 
 /**
  * Runs one text generation on a scripted app-server that sends `frames` as
@@ -122,15 +134,11 @@ const generate = async (
   frames: ReadonlyArray<unknown>,
   options: { readonly answers?: Answers; readonly dies?: boolean } = {},
 ): Promise<Generation> => {
-  const scratch: { dir: string | undefined; existedWhileRunning: boolean } = {
-    dir: undefined,
-    existedWhileRunning: false,
-  };
+  let threadCwd: string | undefined;
   const scripted = buildScriptedSeam(
     {
       "thread/start": (params) => {
-        scratch.dir = (params as { cwd: string }).cwd;
-        scratch.existedWhileRunning = existsSync(scratch.dir);
+        threadCwd = (params as { cwd: string }).cwd;
         return { thread: { id: THREAD } };
       },
       "turn/start": () => {
@@ -142,14 +150,15 @@ const generate = async (
     { dies: options.dies === true },
   );
   const adapter = makeCodexAdapter(scripted.seam);
-  const ctx = buildContext(createCodexHome());
-  const outcome = await Effect.runPromise(adapter.generateText(ctx, {}, SPEC));
+  const ctx = buildTextGenerationContext(buildContext(createCodexHome()));
+  const outcome = await Effect.runPromise(runGeneration(adapter, ctx));
   return {
     outcome,
     spawns: scripted.spawns,
     requests: scripted.requests,
     answered: scripted.answered,
-    scratch,
+    scratch: ctx.cwd,
+    threadCwd: () => threadCwd,
   };
 };
 
@@ -218,7 +227,7 @@ describe("codex generateText: failed", () => {
     const scripted = buildScriptedSeam();
     const adapter = makeCodexAdapter(scripted.seam);
     const pending = Effect.runPromise(
-      adapter.generateText(buildContext(createCodexHome()), {}, SPEC),
+      runGeneration(adapter, buildTextGenerationContext(buildContext(createCodexHome()))),
     );
     await waitUntil("sent turn/start", () =>
       scripted.requests.some((request) => request.method === "turn/start"),
@@ -283,16 +292,6 @@ describe("codex generateText: failed", () => {
     await waitUntil("answered the server request", () => run.answered.length > 0);
     expect(run.answered[0]).toMatchObject({ id: 77, error: { code: -32601 } });
   });
-
-  it("fails when the runner has no codex binary", async () => {
-    const scripted = buildScriptedSeam();
-    const adapter = makeCodexAdapter(scripted.seam);
-    const outcome = await Effect.runPromise(
-      adapter.generateText({ ...buildContext(createCodexHome()), binary: undefined }, {}, SPEC),
-    );
-    expect(outcome.outcome).toBe("failed");
-    expect(scripted.spawns).toHaveLength(0);
-  });
 });
 
 describe("codex generateText: what is asked of Codex", () => {
@@ -342,22 +341,37 @@ describe("codex generateText: what is asked of Codex", () => {
     }
   });
 
-  it("runs in a scratch directory made for the call and removes it afterwards", async () => {
+  it("starts the thread in the scratch directory of the call", async () => {
     const run = await generate(answering(ANSWER));
-    expect(run.scratch.dir).toBeDefined();
-    expect(run.scratch.existedWhileRunning).toBe(true);
-    expect(existsSync(run.scratch.dir!)).toBe(false);
+    expect(run.threadCwd()).toBe(run.scratch);
   });
 
-  it("stops its app-server and removes the scratch directory when the call fails", async () => {
+  it("stops its app-server when the call fails", async () => {
     const run = await generate([turnCompleted("failed", "boom")]);
     expect(run.spawns[0]!.kills()).toBe(1);
-    expect(existsSync(run.scratch.dir!)).toBe(false);
   });
 
   it("stops its app-server when the call succeeds", async () => {
     const run = await generate(answering(ANSWER));
     expect(run.spawns).toHaveLength(1);
     expect(run.spawns[0]!.kills()).toBe(1);
+  });
+
+  it("stops its app-server when the caller gives up", async () => {
+    const scripted = buildScriptedSeam();
+    const adapter = makeCodexAdapter(scripted.seam);
+    const call = Effect.runPromise(
+      adapter
+        .generateText(buildTextGenerationContext(buildContext(createCodexHome())), {}, SPEC)
+        .pipe(Effect.timeoutOption("50 millis")),
+    );
+    await waitUntil("sent turn/start", () =>
+      scripted.requests.some((request) => request.method === "turn/start"),
+    );
+
+    expect(Option.isNone(await call)).toBe(true);
+    await settle();
+
+    expect(scripted.spawns[0]!.kills()).toBe(1);
   });
 });

@@ -8,6 +8,8 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
 import type { OutputSchema, TextGenerationOutcome, TextGenerationSpec } from "@hercule/protocol";
+import { buildTextGenerationContext } from "../testing";
+import type { ProviderAdapter } from "../index";
 import { makePiAdapter } from "./adapter";
 import {
   ACCESS_MODE_VARIABLE,
@@ -38,7 +40,7 @@ const OUTPUT_SCHEMA: OutputSchema = {
 const INSTRUCTIONS = "Write a short title for the conversation.";
 
 const SPEC: TextGenerationSpec = {
-  model: { model: "glm-5.3-flash", options: {} },
+  model: "glm-5.3-flash",
   instructions: INSTRUCTIONS,
   input: "can you help me fix the flaky login test?",
   outputSchema: OUTPUT_SCHEMA,
@@ -50,6 +52,20 @@ const SUBMIT_CALL = "call-submit-1";
 
 const USAGE = { input: 261, output: 27, cacheRead: 0, cacheWrite: 0, cost: { total: 0.0000263 } };
 
+/**
+ * Makes a text generation on `adapter` in a new scratch directory, which the
+ * runner makes and removes in production. An error message the adapter fails
+ * with becomes a `failed` outcome, as the runner does.
+ */
+const generate = (
+  adapter: ProviderAdapter,
+  home: string = createPiHome(),
+): Effect.Effect<TextGenerationOutcome> =>
+  Effect.catch(
+    adapter.generateText(buildTextGenerationContext(buildContext(home)), {}, SPEC),
+    (message) => Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
+  );
+
 /** Starts a text generation on a fake pi and waits until the adapter has launched pi. */
 const startGeneration = async (
   behaviour: FakePiBehaviour = {},
@@ -59,8 +75,7 @@ const startGeneration = async (
   readonly spawns: ReadonlyArray<Spawn>;
 }> => {
   const { seam, spawns } = buildFakePiSeam(behaviour);
-  const adapter = makePiAdapter(seam);
-  const outcome = Effect.runPromise(adapter.generateText(buildContext(createPiHome()), {}, SPEC));
+  const outcome = Effect.runPromise(generate(makePiAdapter(seam)));
   await waitUntil("launched a pi", () => spawns.length === 1);
   return { outcome, child: spawns[0]!, spawns };
 };
@@ -200,11 +215,8 @@ describe("a text generation on pi", () => {
 
   it("reports a failure when pi will not start", async () => {
     const { seam } = buildFakePiSeam({ dies: true });
-    const adapter = makePiAdapter(seam);
 
-    const outcome = await Effect.runPromise(
-      adapter.generateText(buildContext(createPiHome()), {}, SPEC),
-    );
+    const outcome = await Effect.runPromise(generate(makePiAdapter(seam)));
 
     expect(outcome).toEqual({ outcome: "failed", message: "pi: could not start" });
   });
@@ -220,15 +232,51 @@ describe("a text generation on pi", () => {
     });
   });
 
-  it("reports a failure when the machine has no pi", async () => {
-    const { seam, spawns } = buildFakePiSeam();
-    const adapter = makePiAdapter(seam);
-    const ctx = { ...buildContext(createPiHome()), binary: undefined };
+  it("fails at once, without waiting for the turn, when the model calls another tool", async () => {
+    const { outcome, child } = await startGeneration();
 
-    const outcome = await Effect.runPromise(adapter.generateText(ctx, {}, SPEC));
+    child.push({ type: "agent_start" });
+    child.push({
+      type: "tool_execution_start",
+      toolCallId: "call-bash-1",
+      toolName: "bash",
+      args: { command: "ls" },
+    });
 
-    expect(outcome).toEqual({ outcome: "failed", message: "no pi on this machine" });
-    expect(spawns).toHaveLength(0);
+    await expect(outcome).resolves.toEqual({
+      outcome: "failed",
+      message: `the model tried to use the tool bash, and a text generation allows only ${SUBMIT_RESULT_TOOL}`,
+    });
+    expect(child.kills()).toBe(1);
+  });
+
+  it("fails, and does not judge a later answer, when pi asks for an approval", async () => {
+    const { outcome, child } = await startGeneration();
+
+    child.push({
+      type: "extension_ui_request",
+      id: "ui-1",
+      method: "confirm",
+      title: "Approve write?",
+      message: JSON.stringify({ toolCallId: "call-write-1", command: "", path: "/etc/hosts" }),
+    });
+    // A valid answer after the request must not count.
+    answerWith(child, ANSWER);
+
+    await expect(outcome).resolves.toEqual({
+      outcome: "failed",
+      message: `pi asked for approval, and a text generation allows only ${SUBMIT_RESULT_TOOL} and has nobody to ask`,
+    });
+    expect(child.kills()).toBe(1);
+  });
+
+  it("does not fail the call for pi's notifications, which need no answer", async () => {
+    const { outcome, child } = await startGeneration();
+
+    child.push({ type: "extension_ui_request", id: "ui-2", method: "notify", message: "hello" });
+    answerWith(child, ANSWER);
+
+    await expect(outcome).resolves.toMatchObject({ outcome: "ok", value: ANSWER });
   });
 });
 
@@ -251,11 +299,12 @@ describe("launching pi for a text generation", () => {
     await outcome;
   });
 
-  it("gives pi the schema and no approval hook, and none of a session's other settings", async () => {
+  it("gives pi the schema and the approval hook, and none of a session's other settings", async () => {
     const { outcome, child } = await startGeneration();
 
     expect(child.env[OUTPUT_SCHEMA_VARIABLE]).toBe(JSON.stringify(OUTPUT_SCHEMA));
-    expect(child.env[ACCESS_MODE_VARIABLE]).toBe("full-access");
+    // Never full access: a tool pi kept by mistake would then run unasked.
+    expect(child.env[ACCESS_MODE_VARIABLE]).toBe("approval-required");
     expect(child.env[SUBAGENTS_VARIABLE]).toBeUndefined();
 
     answerWith(child, ANSWER);
@@ -273,11 +322,11 @@ describe("launching pi for a text generation", () => {
     await outcome;
   });
 
-  it("runs pi in a scratch directory, and removes it with pi's files once the call ends", async () => {
+  it("runs pi in the scratch directory of the call, and keeps pi's files in it", async () => {
     const { outcome, child } = await startGeneration();
     const scratch = child.cwd!;
     // pi's agent directory is the scratch directory too, so the files pi
-    // writes there go when the call ends.
+    // writes there go when the runner removes it.
     expect(child.env["PI_CODING_AGENT_DIR"]).toBe(scratch);
     expect(existsSync(join(scratch, "extension.ts"))).toBe(true);
     expect(readFlagValue(child.command, "--system-prompt")!.startsWith(scratch)).toBe(true);
@@ -286,15 +335,13 @@ describe("launching pi for a text generation", () => {
     answerWith(child, ANSWER);
     await outcome;
 
-    expect(existsSync(scratch)).toBe(false);
     expect(child.kills()).toBe(1);
   });
 
   it("writes nothing into the instance's home", async () => {
     const { seam, spawns } = buildFakePiSeam();
     const home = createPiHome();
-    const adapter = makePiAdapter(seam);
-    const outcome = Effect.runPromise(adapter.generateText(buildContext(home), {}, SPEC));
+    const outcome = Effect.runPromise(generate(makePiAdapter(seam), home));
     await waitUntil("launched a pi", () => spawns.length === 1);
 
     answerWith(spawns[0]!, ANSWER);
@@ -303,21 +350,19 @@ describe("launching pi for a text generation", () => {
     expect(readdirSync(home)).toEqual([]);
   });
 
-  it("kills pi and removes the scratch directory when the caller gives up", async () => {
+  it("kills pi when the caller gives up", async () => {
     const { seam, spawns } = buildFakePiSeam();
     const adapter = makePiAdapter(seam);
     const call = Effect.runPromise(
       adapter
-        .generateText(buildContext(createPiHome()), {}, SPEC)
+        .generateText(buildTextGenerationContext(buildContext(createPiHome())), {}, SPEC)
         .pipe(Effect.timeoutOption("50 millis")),
     );
     await waitUntil("launched a pi", () => spawns.length === 1);
-    const scratch = spawns[0]!.cwd!;
 
     expect(Option.isNone(await call)).toBe(true);
     await settle();
 
     expect(spawns[0]!.kills()).toBe(1);
-    expect(existsSync(scratch)).toBe(false);
   });
 });

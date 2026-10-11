@@ -73,6 +73,7 @@ import {
   type ProviderRunnerContext,
 } from "./providers";
 import type { LoginAnswer, Logins } from "./providers/login";
+import { makeTextGenerator } from "./text-generation";
 import type { Supervising } from "./sessions";
 import { reportWatermark } from "./watermark";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
@@ -474,41 +475,23 @@ export const connect = (
       );
     };
 
-    /**
-     * Makes one text generation and sends its outcome. A missing adapter, a
-     * defect, and a call that runs past its deadline each end as a `failed`
-     * outcome, so the controller always gets an answer it can report.
-     */
+    // One generator for the whole connection, because its limit on calls
+    // running at once covers all of them.
+    const generateText = makeTextGenerator({
+      scratchDir: options.scratchDir,
+      findAdapter,
+      buildContext,
+      deadline: Duration.millis(TEXT_GENERATION_DEADLINE_MS),
+    });
+
+    /** Makes one text generation and sends its outcome. */
     const answerTextGeneration = (request: TextGenerationRequest) => {
       const sendReport = (outcome: TextGenerationOutcome) =>
         write(
           encodeFrameText({ _tag: "textGenerationReport", requestId: request.requestId, outcome }),
         );
-      return Effect.gen(function* () {
-        const adapter = findAdapter(request.providerId);
-        if (adapter === undefined) {
-          return yield* sendReport({
-            outcome: "failed",
-            message: describeMissingAdapter(request.providerId),
-          });
-        }
-        const outcome = yield* adapter
-          .generateText(
-            buildContext(adapter, request.instanceId, request.secrets),
-            request.config,
-            request.spec,
-          )
-          .pipe(
-            Effect.timeoutOption(Duration.millis(TEXT_GENERATION_DEADLINE_MS)),
-            Effect.map(
-              Option.getOrElse((): TextGenerationOutcome => ({
-                outcome: "failed",
-                message: `the harness did not answer within ${String(TEXT_GENERATION_DEADLINE_MS / 1000)} seconds`,
-              })),
-            ),
-          );
-        return yield* sendReport(outcome);
-      }).pipe(
+      return generateText(request).pipe(
+        Effect.flatMap(sendReport),
         // The encoding happens inside the catch, so an outcome that cannot be
         // encoded reaches the controller as a failure, not as silence.
         Effect.catchCause((cause) =>

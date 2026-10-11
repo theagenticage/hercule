@@ -3,7 +3,7 @@
  * no tools, no workspace and nothing saved (spec 06 section 14). This file
  * builds the thread and turn requests, watches the app-server's notifications
  * until the turn ends, and turns what happened into a `TextGenerationOutcome`.
- * The adapter owns the process; this file owns what is said to it and what is
+ * The adapter owns the process; this file owns what is sent to it and what is
  * made of its answer.
  */
 import * as Deferred from "effect/Deferred";
@@ -105,7 +105,7 @@ export const buildTextGenerationThread = (
   scratchDir: string,
 ): ThreadStartParams => ({
   cwd: scratchDir,
-  model: spec.model.model,
+  model: spec.model,
   baseInstructions: spec.instructions,
   ephemeral: true,
   approvalPolicy: "never",
@@ -173,7 +173,7 @@ export interface TextGenerationWatch {
  *   instructions;
  * - the turn fails or is interrupted, or the app-server exits.
  *
- * The first end wins; later frames change nothing. `buildOutcome` turns the
+ * The first end wins; later frames change nothing. `decideTextGenerationOutcome` turns the
  * end into the call's outcome.
  */
 export const watchTextGeneration = (): TextGenerationWatch => {
@@ -241,7 +241,7 @@ export const watchTextGeneration = (): TextGenerationWatch => {
  *   `invalid-output`, with a short reason.
  * - A call that did not end in an answer is `failed`.
  */
-export const buildOutcome = (
+export const decideTextGenerationOutcome = (
   spec: TextGenerationSpec,
   end: TextGenerationEnd,
 ): TextGenerationOutcome => {

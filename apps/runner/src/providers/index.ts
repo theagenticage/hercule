@@ -29,8 +29,10 @@ import { spawnLogin } from "./process";
 export interface ProviderRunnerContext {
   /**
    * Where a session runs: the workspace path, or the scratch directory the
-   * runner made for a session with no workspace. `null` only for operations
-   * that run no session: a probe, an install or a login (spec 06 section 4).
+   * runner made for a session with no workspace. For a text generation, the
+   * scratch directory the runner made for that one call. `null` only for
+   * operations that run no session and no text generation: a probe, an
+   * install or a login (spec 06 section 4).
    */
   readonly cwd: string | null;
   /**
@@ -92,6 +94,15 @@ export interface ProviderRunnerContext {
 }
 
 /**
+ * The context of a text generation. The runner has already found the harness
+ * binary and made the call's scratch directory, so both are present here.
+ */
+export type TextGenerationContext = ProviderRunnerContext & {
+  readonly binary: string;
+  readonly cwd: string;
+};
+
+/**
  * One image of an input, as an adapter receives it: the reference the frame
  * carried, and the path of the copy the runner fetched and checked. An
  * adapter reads the file at `path` and never talks to the controller.
@@ -150,18 +161,25 @@ export interface ProviderAdapter {
    * instructions as the system prompt and its input as the one user message,
    * answered with a value that matches the spec's output schema (spec 06
    * section 14). The harness runs with no tools, no workspace and nothing
-   * persisted, in its own process, which exits before this returns.
+   * persisted, in its own process, which has exited before this returns.
    *
-   * Never fails: every way the call can go wrong is a `failed` or an
-   * `invalid-output` outcome, so the runner always has an answer to send.
-   * `ctx.cwd` is null; the adapter runs the harness in a scratch directory of
-   * its own. The runner stops the call at `TEXT_GENERATION_DEADLINE_MS`.
+   * Returns an `ok`, `invalid-output` or `failed` outcome for every way the
+   * harness can end. Fails with a message when the call cannot run at all,
+   * for example when the harness will not start. The runner turns that
+   * message into a `failed` outcome.
+   *
+   * `ctx.cwd` is the scratch directory the runner made for this call, empty
+   * and readable by this user only. The adapter runs the harness there and
+   * may write files there. The runner removes the directory after this
+   * returns or is interrupted, so the adapter must stop the harness first.
+   * The runner also finds the binary and stops the call at
+   * `TEXT_GENERATION_DEADLINE_MS`.
    */
   readonly generateText: (
-    ctx: ProviderRunnerContext,
+    ctx: TextGenerationContext,
     config: Schema.Json,
     spec: TextGenerationSpec,
-  ) => Effect.Effect<TextGenerationOutcome>;
+  ) => Effect.Effect<TextGenerationOutcome, string>;
 
   /**
    * The adapter's single output: the normalized events of every session it

@@ -6,8 +6,7 @@
  * runner is the one session that sees the user's own skills and instructions,
  * and even then nothing is written into the instance's Codex directory.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -36,6 +35,7 @@ import type {
   AdapterTurnInput,
   ProviderAdapter,
   ProviderRunnerContext,
+  TextGenerationContext,
   UserMaterial,
 } from "../index";
 import { buildFailedProbe } from "../probe";
@@ -63,7 +63,7 @@ import {
   type AppServer,
 } from "./probe";
 import {
-  buildOutcome,
+  decideTextGenerationOutcome,
   buildTextGenerationThread,
   buildTextGenerationTurn,
   TEXT_GENERATION_PROCESS_OVERRIDES,
@@ -922,43 +922,28 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   /**
    * Makes one text generation on an app-server of its own and returns its
-   * outcome. Never fails: a start, a login or a protocol problem is a `failed`
-   * outcome. The app-server is killed and the scratch directory removed when
-   * the call ends, including when the runner stops the call at its deadline.
+   * outcome. Fails with a message when the app-server cannot start or a
+   * request to it fails. The app-server is killed when the call ends,
+   * including when the runner stops the call at its deadline.
    *
    * It uses the instance's Codex directory for the login, like a session. The
-   * thread is ephemeral, so nothing of the call is saved there.
+   * thread is ephemeral, so nothing of the call is saved there. The thread
+   * runs in the call's scratch directory, `ctx.cwd`.
    */
   const generateText = (
-    ctx: ProviderRunnerContext,
+    ctx: TextGenerationContext,
     spec: TextGenerationSpec,
-  ): Effect.Effect<TextGenerationOutcome> => {
-    const binary = ctx.binary;
-    if (binary === undefined) {
-      return Effect.succeed({ outcome: "failed", message: `no ${CODEX_BINARY} on this machine` });
-    }
+  ): Effect.Effect<TextGenerationOutcome, string> => {
     const watch = watchTextGeneration();
-    const run = Effect.acquireUseRelease(
-      Effect.flatMap(
-        Effect.try({
-          try: () => mkdtempSync(join(tmpdir(), "hercule-text-generation-")),
-          catch: (error) => (error instanceof Error ? error.message : String(error)),
-        }),
-        (scratchDir) =>
-          openHost(ctx, binary, undefined, TEXT_GENERATION_PROCESS_OVERRIDES, watch).pipe(
-            Effect.map((host) => ({ host, scratchDir })),
-            Effect.tapError(() =>
-              Effect.sync(() => rmSync(scratchDir, { recursive: true, force: true })),
-            ),
-          ),
-      ),
-      ({ host, scratchDir }) =>
+    return Effect.acquireUseRelease(
+      openHost(ctx, ctx.binary, undefined, TEXT_GENERATION_PROCESS_OVERRIDES, watch),
+      (host) =>
         Effect.gen(function* () {
           yield* Effect.mapError(initializeAppServer(host), (error) =>
             describeRpcError(host, error),
           );
           const opened = yield* Effect.mapError(
-            host.rpc.request("thread/start", buildTextGenerationThread(spec, scratchDir)),
+            host.rpc.request("thread/start", buildTextGenerationThread(spec, ctx.cwd)),
             (error) => describeRpcError(host, error),
           );
           yield* Effect.mapError(
@@ -968,27 +953,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
             ),
             (error) => describeRpcError(host, error),
           );
-          return buildOutcome(spec, yield* watch.ended);
+          return decideTextGenerationOutcome(spec, yield* watch.ended);
         }),
-      ({ host, scratchDir }) =>
-        Effect.sync(() => {
-          host.kill();
-          rmSync(scratchDir, { recursive: true, force: true });
-        }),
-    );
-    return run.pipe(
-      Effect.catch((message: string) =>
-        Effect.succeed<TextGenerationOutcome>({
-          outcome: "failed",
-          message: truncateMessage(message),
-        }),
-      ),
-      Effect.catchDefect((defect) =>
-        Effect.succeed<TextGenerationOutcome>({
-          outcome: "failed",
-          message: truncateMessage(defect instanceof Error ? defect.message : String(defect)),
-        }),
-      ),
+      (host) => Effect.sync(() => host.kill()),
     );
   };
 
