@@ -261,21 +261,21 @@ export interface ForgePlugin {
  * `reviewHeldUntil` is given, every review records its call and then waits
  * for that promise before it returns, so a test can act while one runs.
  * `reviewOutcome` replaces the review's outcome line, which is
- * "Reviewed: <verdict>" by default. `describeThrows` makes the review's
- * `describe` throw.
+ * "Reviewed: <verdict>" by default. `describeFailure` makes the review's
+ * `describe` throw, or return only blank text.
  */
 export const buildForgePlugin = (
   options: {
     readonly tokenUrl?: string;
     readonly reviewHeldUntil?: Promise<void>;
     readonly reviewOutcome?: string;
-    /** Makes the review action's `describe` throw, as a plugin bug would. */
-    readonly describeThrows?: boolean;
+    /** Makes the review action's `describe` throw, or return only blank text, as a plugin bug would. */
+    readonly describeFailure?: "throws" | "blank";
   } = {},
 ): ForgePlugin => {
   const contexts: Array<ActionContext> = [];
   const inputs: Array<unknown> = [];
-  const { tokenUrl, reviewHeldUntil, reviewOutcome, describeThrows } = options;
+  const { tokenUrl, reviewHeldUntil, reviewOutcome, describeFailure } = options;
   const plugin: Plugin = {
     manifest: {
       id: "forge",
@@ -310,7 +310,8 @@ export const buildForgePlugin = (
           output: Schema.Struct({ reviewed: Schema.Boolean }),
           usableIn: ["workflow.step", "signal.answer"],
           describe: (input) => {
-            if (describeThrows === true) throw new Error("describe failed");
+            if (describeFailure === "throws") throw new Error("describe failed");
+            if (describeFailure === "blank") return [{ kind: "text", text: " " }];
             return [
               { kind: "text", text: "Submit a " },
               { kind: "marked", text: String((input as { verdict?: unknown }).verdict) },

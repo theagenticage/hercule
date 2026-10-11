@@ -307,37 +307,40 @@ describe("a plugin action as a typed reply", () => {
     );
   });
 
-  it("writes the whole input when the action's describe throws, so the click stays informed", async () => {
-    const forge = buildForgePlugin({ describeThrows: true });
-    await withServer(
-      async ({ base }) => {
-        const token = await completeSetup(base);
-        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
-          token: "a-forge-token",
-        });
-        const id = await raiseOrFail(base, token, {
-          ...OFFER,
-          actions: [
-            {
-              id: "review",
-              label: "Approve",
-              operation: {
-                op: FORGE_REVIEW_ACTION_ID,
-                connectionId,
-                input: { verdict: "approve", body: "Ship it" },
+  it.each(["throws", "blank"] as const)(
+    "writes the whole input when the action's describe %s, so the click stays informed",
+    async (describeFailure) => {
+      const forge = buildForgePlugin({ describeFailure });
+      await withServer(
+        async ({ base }) => {
+          const token = await completeSetup(base);
+          const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+            token: "a-forge-token",
+          });
+          const id = await raiseOrFail(base, token, {
+            ...OFFER,
+            actions: [
+              {
+                id: "review",
+                label: "Approve",
+                operation: {
+                  op: FORGE_REVIEW_ACTION_ID,
+                  connectionId,
+                  input: { verdict: "approve", body: "Ship it" },
+                },
               },
-            },
-          ],
-        });
+            ],
+          });
 
-        const open = await readSignalOrFail(base, token, id);
-        expect(joinLine(open, "review")).toContain(
-          `Run ${FORGE_REVIEW_ACTION_ID} with {"verdict":"approve","body":"Ship it"} · Forge`,
-        );
-      },
-      { plugins: [forge.plugin] },
-    );
-  });
+          const open = await readSignalOrFail(base, token, id);
+          expect(joinLine(open, "review")).toContain(
+            `Run ${FORGE_REVIEW_ACTION_ID} with {"verdict":"approve","body":"Ship it"} · Forge`,
+          );
+        },
+        { plugins: [forge.plugin] },
+      );
+    },
+  );
 
   it("cuts an outcome line that is longer than a signal's outcome may be", async () => {
     const forge = buildForgePlugin({ reviewOutcome: "x".repeat(MAX_SIGNAL_OUTCOME_LENGTH + 100) });

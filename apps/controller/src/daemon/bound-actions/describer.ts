@@ -487,7 +487,7 @@ export const buildDescribe: Effect.Effect<
      * Returns the line a plugin action's own `describe` writes for its stored
      * input, followed by the plugin's name and the label of the Connection it
      * acts through. When the action is gone, or its `describe` throws or
-     * returns nothing, the line names the action by its id and writes the
+     * returns no visible text, only blanks, the line names the action by its id and writes the
      * whole input as JSON. The click still runs that input, so the line must
      * show all of it.
      */
@@ -506,7 +506,7 @@ export const buildDescribe: Effect.Effect<
                 () => operation.connectionId!,
               );
         return [
-          ...(own === undefined || own.length === 0
+          ...(own === undefined || own.every((part) => part.text.trim() === "")
             ? [
                 buildTextPart("Run "),
                 buildMarkedPart(operation.op),
