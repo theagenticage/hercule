@@ -57,6 +57,7 @@ import {
   type Forbidden,
   type Id,
   type InvalidState,
+  type Issue,
   type NotFound,
   type SignalAction,
   type SignalActInput,

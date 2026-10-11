@@ -3,7 +3,7 @@
  * API, and wait for the event pipeline to raise or end one.
  */
 import { expect } from "vitest";
-import type { Signal } from "@hercule/contract";
+import type { Signal, SignalPage } from "@hercule/contract";
 import { get } from "../http/testing";
 import { waitUntil } from "../sessions/testing";
 
@@ -20,7 +20,7 @@ export const listOpenSignals = async (
 ): Promise<ReadonlyArray<Signal>> => {
   const response = await get(base, `/api/v1/signals?kind=${encodeURIComponent(kind)}`, token);
   expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as ReadonlyArray<Signal>;
+  return ((await response.json()) as SignalPage).items;
 };
 
 /** Reads one signal, or fails the test when the controller does not return it. */

@@ -2652,7 +2652,7 @@ The perf script's rows were measured 2026-10-11 on the reference machine, in one
 |---|---|---|---|
 | The first screen's JavaScript, gzipped | none new | 343.4 kB across 21 chunks; first-screen chunk 263.6 kB | 343.4 kB across 21 chunks; first-screen chunk 263.6 kB (+73 bytes: client-core's Screening line and the plugin named for an end on the source) |
 | Intake's chunk, gzipped | none | 11.4 kB (11,475 bytes) | 11.3 kB (11,416 bytes): the app's fallback to its own GitHub mark is gone |
-| A plugin's mark in its `plugin.query` record | none | - | GitHub: 730 bytes of JSON, one path of 707 characters; a plugin with no mark: 0 |
+| A plugin's mark in its `plugin.query` record | none | - | GitHub: 835 bytes of JSON, one path of 812 characters; a plugin with no mark: 0 |
 | Main's startup file, minified | 160 kB | not measured; this change touches no code in main | 150.1 kB |
 
 - **The app's copy of GitHub's mark stays.** Intake now draws only the mark the plugin returns, but first run, the Office, New project and the new-thread start cards still draw `GitHubMark` from `logos/brand-mark.tsx`, which lives in the first-screen chunk. Removing it is left to the change that moves those screens to the plugin's mark.

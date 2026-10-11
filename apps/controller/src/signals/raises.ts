@@ -305,7 +305,14 @@ const make = Effect.gen(function* () {
           raise.kind,
         );
         if (open.some((other) => other.eventId > raise.eventId)) return;
-        yield* signals.insert(signal, [raise.eventId]);
+        // The replacement keeps Not urgent, so a new event on the thread
+        // does not bring it back to Now (spec 10 §9.7).
+        const lowered = (yield* Effect.forEach(open, (old) =>
+          signals.isPriorityLowered(old.id),
+        )).includes(true);
+        const written: Signal =
+          lowered && signal.priority === "urgent" ? { ...signal, priority: "high" } : signal;
+        yield* signals.insert(written, [raise.eventId], { priorityLowered: lowered });
         yield* audit.append({
           kind: "signal.raised",
           actor: SYSTEM_ACTOR,

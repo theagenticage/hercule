@@ -71,11 +71,13 @@ type BuildMode = "draft" | "fail" | "throw" | "collide" | "twice";
 
 /**
  * What a test sets to steer the `desk` plugin's `build`. `beforeBuild`, when
- * set, runs first, and `build` waits for the promise it returns.
+ * set, runs first, and `build` waits for the promise it returns. `urgent`,
+ * when set, makes the draft `urgent` in place of the kind's `high`.
  */
 interface DeskMode {
   build: BuildMode;
   beforeBuild?: (() => Promise<void>) | undefined;
+  urgent?: boolean;
 }
 
 /**
@@ -179,6 +181,7 @@ const buildDeskPlugin = (mode: DeskMode): Plugin => ({
                 title: `${payload.by} asks on ${payload.thread}`,
                 asker: payload.by,
                 place: payload.thread,
+                ...(mode.urgent === true && { priority: "urgent" as const }),
                 blocks: [{ type: "text", markdown: "Can you look?" }],
                 actions: [
                   { id: mode.build === "collide" ? "done" : "answer", primary: true, ...answer },
@@ -343,6 +346,41 @@ describe("raising a plugin's signals from its events", () => {
         status: "resolved",
         resolution: { kind: "withdrawn", outcome: "Closed" },
       });
+    });
+  });
+
+  it("keeps Not urgent on the signal that replaces a lowered one", async () => {
+    await withDeskController({ build: "draft", urgent: true }, async (controller, connectionId) => {
+      const first = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-3",
+        by: "marta",
+        toYou: true,
+      });
+      const older = await waitForSignalFrom(controller, ASKED_KIND, first);
+      expect(older.priority).toBe("urgent");
+      const lowered = await post(
+        controller.base,
+        "/api/v1/signals/lower-priority",
+        { signalIds: [older.id] },
+        controller.token,
+      );
+      expect(lowered.ok, await lowered.clone().text()).toBe(true);
+
+      const second = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-3",
+        by: "marta",
+        toYou: true,
+      });
+      const newer = await waitForSignalFrom(controller, ASKED_KIND, second);
+      expect(newer.priority).toBe("high");
+
+      // The mark passes on, so a third event on the thread stays out of Now too.
+      const third = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-3",
+        by: "marta",
+        toYou: true,
+      });
+      expect((await waitForSignalFrom(controller, ASKED_KIND, third)).priority).toBe("high");
     });
   });
 

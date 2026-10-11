@@ -531,9 +531,9 @@ describe("Intake's pane", () => {
     live.pushInvalidation("signal", [MENTION.id]);
 
     const outcome = await within(pane).findByRole("status");
-    expect(outcome.querySelector(".b-work-label")!.textContent).toBe("Left on its own");
+    expect(outcome.querySelector(".b-work-label")!.textContent).toBe("What you did");
     expect(outcome.querySelector(".ad-outcome-desc")!.textContent).toBe(
-      "Resolved elsewhere: replied on GitHub, by you",
+      "Resolved elsewhere: Replied on GitHub, by you",
     );
     const kept = within(pane).getByRole("textbox", { name: "Your reply, not sent" });
     expect((kept as HTMLTextAreaElement).value).toBe("Ledger first.");
