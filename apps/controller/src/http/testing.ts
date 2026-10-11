@@ -54,6 +54,8 @@ import {
   SchedulerInterval,
   AttachmentSweepInterval,
   SessionInputDeadline,
+  TextGeneration,
+  TextGenerationDeadline,
   RunServiceReferenceLayer,
   SessionObserverLayer,
   WorkspaceSweepInterval,
@@ -91,7 +93,7 @@ import {
   ProviderServiceLayer,
 } from "../providers";
 import { SessionServiceLayer } from "../sessions";
-import { TextGeneration, type TextGenerationShape } from "../daemon/text-generation";
+import type { TextGenerationShape } from "../daemon/text-generation";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
@@ -293,11 +295,12 @@ const makeRepeatable = <A, E, R>(
 
 /**
  * Runs an effect as the user against the running controller's live session
- * operations and its database, and returns the effect's `Exit`. Tests use it
- * for a `Live` method that no route calls.
+ * operations, its text generation and its database, and returns the effect's
+ * `Exit`. Tests use it for a `Live` or `TextGeneration` method that no route
+ * calls.
  */
 export type LiveSessionsRunner = <A, E>(
-  effect: Effect.Effect<A, E, Live | SqlClient.SqlClient>,
+  effect: Effect.Effect<A, E, Live | TextGeneration | SqlClient.SqlClient>,
 ) => Promise<Exit.Exit<A, E>>;
 
 /** The user that `LiveSessionsRunner` runs an effect as. */
@@ -377,6 +380,8 @@ export interface ServerOptions {
   readonly schedulerInterval?: Duration.Duration;
   /** How often the Ingest Reconciler opens and closes ingest handles. The default is two seconds. */
   readonly ingestReconcileInterval?: Duration.Duration;
+  /** How long a text generation may wait for a slot and an answer. The default is over a minute. */
+  readonly textGenerationDeadline?: Duration.Duration;
   /**
    * How long one evaluation of a condition may run before it is reported as
    * over budget. A test that wants every evaluation reported sets a budget no
@@ -498,7 +503,7 @@ export const withServer = (
               }),
             ),
           );
-        const liveSessions = yield* Effect.context<Live | SqlClient.SqlClient>();
+        const liveSessions = yield* Effect.context<Live | TextGeneration | SqlClient.SqlClient>();
         const runWithLiveSessions: LiveSessionsRunner = (effect) =>
           Effect.runPromiseExit(
             Effect.provideService(
@@ -583,6 +588,7 @@ const provideTimings =
     provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
     provideIfSet(SchedulerInterval, options.schedulerInterval);
     provideIfSet(IngestReconcileInterval, options.ingestReconcileInterval);
+    provideIfSet(TextGenerationDeadline, options.textGenerationDeadline);
     provideIfSet(ExpressionBudget, options.expressionBudget);
     return provided;
   };

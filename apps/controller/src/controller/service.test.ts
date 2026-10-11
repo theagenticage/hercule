@@ -1,17 +1,19 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { VERSION } from "@hercule/home/version";
 import { CurrentActor, type Actor } from "../actor";
-import { buildHomePaths, HerculeHome } from "../config";
-import { TestDatabase } from "../db/testing";
-import { AuditLogLayer } from "../events";
+import { nowIso } from "../db";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
+import { buildPluginStack } from "../plugins/testing";
+import { providerRepository } from "../providers";
 import { LocalRunnerId } from "../runners";
-import { masterKeyLayer, secretsLayer } from "../secrets";
-import { SettingsLayer } from "../settings";
+import { Settings, SettingsLayer } from "../settings";
+import {
+  LastTextGenerationFailure,
+  LastTextGenerationFailureLayer,
+  TextGenerationModelsLayer,
+} from "../text-generation";
 import { Controller, ControllerLayer } from "./service";
 
 const USER: Actor = {
@@ -20,23 +22,12 @@ const USER: Actor = {
   credential: { kind: "login", id: "0199f0b7-0001-7000-8000-000000000000", tokenHash: "x" },
 };
 
-let homes: Array<string> = [];
-
-afterEach(() => {
-  for (const home of homes) rmSync(home, { recursive: true, force: true });
-  homes = [];
-});
-
-const buildStack = () => {
-  const home = mkdtempSync(join(tmpdir(), "hercule-controller-read-"));
-  homes.push(home);
-  return ControllerLayer.pipe(
-    Layer.provideMerge(Layer.mergeAll(controllerIdentityLayer, SettingsLayer, AuditLogLayer)),
-    Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
-    Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
+const buildStack = () =>
+  ControllerLayer.pipe(
+    Layer.provideMerge(Layer.mergeAll(TextGenerationModelsLayer, LastTextGenerationFailureLayer)),
+    Layer.provideMerge(Layer.mergeAll(controllerIdentityLayer, SettingsLayer)),
+    Layer.provideMerge(buildPluginStack()),
   );
-};
 
 /**
  * Creates the identity, as the boot does, then runs `body` as `actor`. The
@@ -44,7 +35,11 @@ const buildStack = () => {
  * service is built, as `hercule serve` provides it.
  */
 const withIdentity = <A, E>(
-  body: Effect.Effect<A, E, Controller | ControllerIdentity>,
+  body: Effect.Effect<
+    A,
+    E,
+    Controller | ControllerIdentity | Settings | LastTextGenerationFailure | SqlClient.SqlClient
+  >,
   actor: Actor | null = USER,
   localRunner: { readonly read: () => string | undefined } = { read: () => undefined },
 ) =>
@@ -122,6 +117,67 @@ describe("controller.read", () => {
     expect(result).toMatchObject({
       error: { code: "forbidden", details: { grant: "infra.read" } },
     });
+  });
+});
+
+describe("controller.read text generation", () => {
+  it("shows no model and no failure when nothing is set up", async () => {
+    const { result } = await withIdentity(
+      Effect.flatMap(Controller, (controller) => controller.read()),
+    );
+
+    expect(result.textGeneration).toEqual({ model: null, lastFailure: null });
+  });
+
+  it("shows the chosen model, and the last failure while there is one", async () => {
+    const { result } = await withIdentity(
+      Effect.gen(function* () {
+        const controller = yield* Controller;
+        const settings = yield* Settings;
+        const failures = yield* LastTextGenerationFailure;
+        const instances = yield* providerRepository;
+        const instance = yield* instances.insert({
+          providerId: "codex",
+          name: "Codex",
+          config: {},
+          at: yield* nowIso,
+        });
+        yield* settings.set("textGeneration.model", { instanceId: instance.id, model: "mini" });
+        const before = yield* controller.read();
+        yield* failures.record({
+          reason: "timeout",
+          message: "the text generation did not finish in time",
+          at: "2026-10-11T10:00:00.000Z",
+        });
+        const failed = yield* controller.read();
+        yield* failures.clear();
+        const cleared = yield* controller.read();
+        return { instanceId: instance.id, before, failed, cleared };
+      }),
+    );
+
+    expect(result.before.textGeneration).toEqual({
+      model: { instanceId: result.instanceId, model: "mini" },
+      lastFailure: null,
+    });
+    expect(result.failed.textGeneration.lastFailure).toEqual({
+      reason: "timeout",
+      message: "the text generation did not finish in time",
+      at: "2026-10-11T10:00:00.000Z",
+    });
+    expect(result.cleared.textGeneration.lastFailure).toBeNull();
+  });
+
+  it("shows no model when text generation is off", async () => {
+    const { result } = await withIdentity(
+      Effect.gen(function* () {
+        const settings = yield* Settings;
+        yield* settings.set("textGeneration.model", "off");
+        return yield* Effect.flatMap(Controller, (controller) => controller.read());
+      }),
+    );
+
+    expect(result.textGeneration.model).toBeNull();
   });
 });
 

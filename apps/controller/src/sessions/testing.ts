@@ -21,6 +21,7 @@ import {
   buildWorkspaceActionCapability,
   ControllerToRunner,
   PROTOCOL_VERSION,
+  TEXT_GENERATION_CAPABILITY,
   type ControllerToRunner as ControllerMessage,
   type Delivery,
   type FrameCarryingInput,
@@ -31,6 +32,8 @@ import {
   type RunnerToController as RunnerMessage,
   type ProviderEvent,
   type SessionStart,
+  type TextGenerationOutcome,
+  type TextGenerationRequest,
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
 import type { Grant, Input, Notification, Profile, Runner, Session } from "@hercule/contract";
@@ -49,13 +52,15 @@ import { buildRunnerSocketUrl } from "../runners/testing";
 
 /**
  * The capabilities a runner of this build lists at hello: every workspace
- * action the controller's catalog knows, agent steps, and images in inputs.
+ * action the controller's catalog knows, agent steps, images in inputs, and
+ * text generation.
  */
 const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
   AGENT_STEPS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
+  TEXT_GENERATION_CAPABILITY,
 ];
 
 /**
@@ -110,6 +115,14 @@ export interface Wire {
    * delivery or with a refusal.
    */
   readonly release: (answer: Answer) => void;
+  /**
+   * Sets how this runner answers a text generation request: with the outcome
+   * to report, or with `undefined` to leave it unanswered, like a harness that
+   * hangs. Until it is set, every request is left unanswered.
+   */
+  readonly answeringTextGeneration: (
+    decide: (request: TextGenerationRequest) => TextGenerationOutcome | undefined,
+  ) => void;
 }
 
 export const listFrames = <T extends ControllerMessage>(
@@ -158,6 +171,9 @@ const dial = (
     });
     const frames: Array<ControllerMessage> = [];
     let decideDelivery: (frame: FrameCarryingInput) => Answered = () => "opened";
+    let decideTextGeneration: (
+      request: TextGenerationRequest,
+    ) => TextGenerationOutcome | undefined = () => undefined;
     const withheld: Array<FrameCarryingInput> = [];
     const writeMessage = (message: RunnerMessage): void => socket.send(JSON.stringify(message));
     const writeAnswer = (frame: FrameCarryingInput, answer: Answer): void =>
@@ -174,6 +190,12 @@ const dial = (
         const answer = decideDelivery(frame);
         if (answer === undefined) withheld.push(frame);
         else writeAnswer(frame, answer);
+      }
+      if (frame._tag === "textGenerationRequest") {
+        const outcome = decideTextGeneration(frame);
+        if (outcome !== undefined) {
+          writeMessage({ _tag: "textGenerationReport", requestId: frame.requestId, outcome });
+        }
       }
       if (frame._tag === "probeRequest") {
         const request = frame satisfies ProbeRequest;
@@ -203,6 +225,9 @@ const dial = (
         },
         release: (answer) => {
           for (const held of withheld.splice(0)) writeAnswer(held, answer);
+        },
+        answeringTextGeneration: (decide) => {
+          decideTextGeneration = decide;
         },
       });
     };
@@ -277,6 +302,11 @@ export type FleetOptions = Omit<ServerOptions, "plugins" | "readLocalRunnerId"> 
    * the local one.
    */
   readonly firstRunnerIsLocal?: true;
+  /**
+   * The capabilities the fleet's first runner lists at hello. Without it the
+   * runner lists those of a runner of this build.
+   */
+  readonly capabilities?: ReadonlyArray<string>;
 };
 
 /**
@@ -289,7 +319,7 @@ export type FleetOptions = Omit<ServerOptions, "plugins" | "readLocalRunnerId"> 
  */
 export const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
-  { facts, models, firstRunnerIsLocal, ...server }: FleetOptions,
+  { facts, models, firstRunnerIsLocal, capabilities, ...server }: FleetOptions,
 ): Promise<void> => {
   // The runner's id is known only once it joins, after the server is up.
   let localRunnerId: string | undefined;
@@ -305,7 +335,7 @@ export const withFleet = (
     // Set before the runner connects, so every dispatch to it sees it as the
     // local runner.
     if (firstRunnerIsLocal === true) localRunnerId = answer.runnerId;
-    const wire = await dial(harness.base, answer.credential, facts, models);
+    const wire = await dial(harness.base, answer.credential, facts, models, capabilities);
     // A real runner reports its sessions right after its hello (none, on a
     // fresh connection). Most tests want dispatch working from their first
     // line, so this sends that report for them. A test that needs the gap

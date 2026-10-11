@@ -12,6 +12,7 @@ export {
   type RunningIngest,
 } from "./ingest";
 export { IngestExecutor } from "./ingest-executor";
+export { deriveCatalogJsonSchema } from "./json-schema";
 export type { RegisteredEventSource } from "./event-sources";
 export { registry } from "./registry";
 export { Plugins, PluginsLayer } from "./service";

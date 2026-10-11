@@ -64,6 +64,8 @@ import {
   ProfileRemovalLayer,
   Provisioning,
   ProvisioningLayer,
+  TextGeneration,
+  TextGenerationLayer,
   Retirement,
   RetirementLayer,
   RunExecutorLayer,
@@ -74,7 +76,6 @@ import {
   WorkflowSignalsLayer,
   WorkspaceStepsLayer,
 } from "../daemon";
-import { TextGeneration, TextGenerationError } from "../daemon/text-generation";
 import { NotificationService, NotificationServiceLayer } from "../notifications";
 import { SignalService, SignalServiceLayer } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
@@ -83,6 +84,7 @@ import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
+import { LastTextGenerationFailureLayer, TextGenerationModelsLayer } from "../text-generation";
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ResourceService, ResourceServiceLayer } from "../resources";
 import { WorkspaceService } from "../workspaces";
@@ -730,6 +732,18 @@ const PermissionRequestsDomainLayer = PermissionRequestsLayer.pipe(
 );
 
 /**
+ * What text generation resolves and remembers: which model the setting means
+ * now, and the last failure. The controller service shows both in
+ * `ControllerInfo`, and the `TextGeneration` service in the controller daemon
+ * writes the failure, so both are provided this one layer. A layer is built
+ * once however many times it is provided, so they share one last failure.
+ */
+const TextGenerationStatusLayer = Layer.mergeAll(
+  TextGenerationModelsLayer,
+  LastTextGenerationFailureLayer,
+);
+
+/**
  * Every service an operation uses, together with the controller daemon. The
  * listener starts the controller daemon's drivers, so they are built here
  * rather than a second time elsewhere. It is one list because otherwise a
@@ -744,7 +758,9 @@ const PermissionRequestsDomainLayer = PermissionRequestsLayer.pipe(
  * write over the same rows the drivers use. The handlers get them from the boot.
  *
  * The list leaves `TextGeneration` for its caller to provide (`buildOperationLayers`),
- * so a test can put a fake in its place.
+ * so a test can put a fake in its place. The text generation status is provided
+ * once, around the whole list, so `controller.read` reads the last failure the
+ * text generation service writes.
  */
 const operationServices = Layer.mergeAll(
   AuthLayer,
@@ -863,21 +879,13 @@ const operationServices = Layer.mergeAll(
  * fake, so no test needs a runner with a model to see a generated title.
  */
 export const buildOperationLayers = <E, R>(textGeneration: Layer.Layer<TextGeneration, E, R>) =>
-  operationServices.pipe(Layer.provideMerge(textGeneration));
-
-// MERGE(#282): replace with TextGenerationLayer
-const UnavailableTextGenerationLayer = Layer.succeed(TextGeneration, {
-  generate: () =>
-    Effect.fail(
-      new TextGenerationError({
-        reason: "unavailable",
-        message: "text generation is not set up on this controller",
-      }),
-    ),
-});
+  operationServices.pipe(
+    Layer.provideMerge(textGeneration),
+    Layer.provide(TextGenerationStatusLayer),
+  );
 
 /** Every service an operation uses, with text generation as the controller runs it. */
-export const operationLayers = buildOperationLayers(UnavailableTextGenerationLayer);
+export const operationLayers = buildOperationLayers(TextGenerationLayer);
 
 /** The handlers of every group, which `HttpApiBuilder.layer(api)` needs to build routes. */
 export const handlerLayers = Layer.mergeAll(
