@@ -23,7 +23,7 @@ import { TextGenerationFailureReason } from "@hercule/contract";
 export type TextGenerationCaller = `core:${string}` | `plugin:${string}`;
 
 /** One text generation, as its caller describes it. */
-export interface TextGenerationRequest<A> {
+export interface TextGenerationCall<A> {
   readonly caller: TextGenerationCaller;
   /**
    * What the call is for, such as `thread.title`. The record holds it
@@ -48,13 +48,14 @@ export interface TextGenerationRequest<A> {
  * - `unavailable`: no runner can take the call. Text generation is off, the
  *   chosen instance is logged in on no placeable runner, or no runner with
  *   it is connected.
- * - `timeout`: no answer came in time, including time spent waiting for a
- *   free slot on the runner.
+ * - `timeout`: no answer came in time. The caller's wait is at most 60
+ *   seconds in all, including the wait for a free slot on the runner, and the
+ *   runner reporting that its own deadline passed ends the same way.
  * - `invalid-output`: the model answered, but not with a value that matches
  *   the output schema.
  *
- * `message` says what happened in words a user can act on. It never holds the
- * prompt or the output.
+ * `message` explains what happened in words a user can act on. It never holds
+ * the prompt or the output.
  */
 export class TextGenerationError extends Schema.TaggedError<TextGenerationError>()(
   "TextGenerationError",
@@ -66,14 +67,18 @@ export class TextGenerationError extends Schema.TaggedError<TextGenerationError>
 
 export interface TextGenerationShape {
   /**
-   * Makes one text generation and waits for it, up to the text generation
-   * timeout. Returns the decoded value, or fails with a `TextGenerationError`.
+   * Makes one text generation and waits for it. Returns the decoded value, or
+   * fails with a `TextGenerationError`. Every call writes one audit entry.
+   *
+   * The call may wait: for a free slot on the runner and for the runner's
+   * answer, up to 60 seconds in all, and while a promotion freezes the
+   * controller, until it thaws. So never call it inside a transaction, which
+   * must not span a wait on anything outside the database.
+   *
    * The caller decides its own fallback; nothing is retried and nothing is
-   * queued.
+   * queued beyond the wait for a slot.
    */
-  readonly generate: <A>(
-    request: TextGenerationRequest<A>,
-  ) => Effect.Effect<A, TextGenerationError>;
+  readonly generate: <A>(call: TextGenerationCall<A>) => Effect.Effect<A, TextGenerationError>;
 }
 
 export class TextGeneration extends Context.Service<TextGeneration, TextGenerationShape>()(

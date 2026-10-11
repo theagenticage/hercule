@@ -121,6 +121,5 @@ export {
   TextGenerationError,
   TextGenerationLayer,
   type TextGenerationCaller,
-  type TextGenerationRequest,
-  type TextGenerationShape,
+  type TextGenerationCall,
 } from "./text-generation";

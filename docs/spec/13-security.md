@@ -402,6 +402,8 @@ The event log ([./04-state-store.md](./04-state-store.md)) is the audit log; the
   - on `textGeneration.failed`, the `reason` (`unavailable`, `timeout` or `invalid-output`) and the `message`.
 
   An entry never holds the prompt, the instructions or the output. They can carry the user's private text, and the audit log is kept far longer than any of them is useful.
+
+  **What leaves the controller.** With `automatic`, up to 4000 characters of a Thread's first message go to the provider that `automatic` resolves to, to generate the Thread's title. That provider may differ from the Thread's own. Setting `textGeneration.model` to `off` stops it.
 - **Retention.** Security events and actor-stamped mutations are kept at least 90 days; the full retention statement (event log TTL, per-session streams, domain rows) is in [./04-state-store.md](./04-state-store.md).
 
 ## 12. What v1 does not defend against

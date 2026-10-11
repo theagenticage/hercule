@@ -324,7 +324,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     config: {},
     secrets: {},
     spec: {
-      model: { model: "haiku", options: {} },
+      model: "haiku",
       instructions: "Write a short title for this message.",
       input: "fix the login bug",
       outputSchema: {

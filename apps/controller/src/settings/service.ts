@@ -26,7 +26,7 @@ import {
 } from "@hercule/contract";
 import { requireUserActor, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
-import { uuidFromString, withTransaction } from "../db";
+import { withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError, type TypedScope } from "./repository";
 import { validateTimezone } from "./timezone";
@@ -78,10 +78,6 @@ const make = Effect.gen(function* () {
    * Checks that `textGeneration.model`, when the patch chooses an instance, names
    * an existing provider instance. Fails with a validation error otherwise,
    * because a text generation set to a missing instance could never run.
-   *
-   * It reads the `provider_instances` table directly. The providers domain
-   * imports the runners domain, which imports settings, so settings cannot
-   * import the provider repository without a cycle.
    */
   const validateTextGenerationInstance = (
     patch: SettingsPatch,
@@ -89,9 +85,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const chosen = patch.controller?.[TEXT_GENERATION_MODEL];
       if (chosen === undefined || typeof chosen === "string") return;
-      const rows = yield* sql<{ readonly one: number }>`
-        SELECT 1 AS one FROM provider_instances WHERE id = ${uuidFromString(chosen.instanceId)}`;
-      if (rows.length === 0) {
+      if (!(yield* settings.hasProviderInstance(chosen.instanceId))) {
         return yield* Effect.fail(
           createValidationError([
             {

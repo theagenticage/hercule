@@ -26,11 +26,7 @@ import {
   type Arranged,
   type FleetOptions,
 } from "../../sessions/testing";
-import {
-  TextGeneration,
-  TextGenerationError,
-  type TextGenerationRequest as Request,
-} from "./service";
+import { TextGeneration, TextGenerationError, type TextGenerationCall } from "./service";
 
 const SECRET_INSTRUCTIONS = "Name the thread in four words";
 const SECRET_INPUT = "the user pasted a private key here";
@@ -94,7 +90,9 @@ const TitleSchema = Schema.Struct({ title: Schema.String });
 
 type Title = Schema.Schema.Type<typeof TitleSchema>;
 
-const buildRequest = (overrides: Partial<Request<Title>> = {}): Request<Title> => ({
+const buildCall = (
+  overrides: Partial<TextGenerationCall<Title>> = {},
+): TextGenerationCall<Title> => ({
   caller: "core:sessions",
   purpose: "thread.title",
   instructions: SECRET_INSTRUCTIONS,
@@ -110,11 +108,11 @@ type Generated =
 /** Makes one text generation as the controller's own code would, and returns what it ended in. */
 const generate = async (
   arranged: Arranged,
-  request: Request<Title> = buildRequest(),
+  call: TextGenerationCall<Title> = buildCall(),
 ): Promise<Generated> => {
   const exit = await arranged.harness.runWithLiveSessions(
     Effect.flatMap(TextGeneration, (service) =>
-      Effect.match(service.generate(request), {
+      Effect.match(service.generate(call), {
         onSuccess: (value): Generated => ({ ok: true, value }),
         onFailure: (error): Generated => ({ ok: false, error }),
       }),
@@ -130,7 +128,7 @@ const OK: TextGenerationOutcome = {
   usage: { inputTokens: 12, outputTokens: 3, costUsd: 0.002 },
 };
 
-const answerOk = (arranged: Arranged): void => arranged.wire.answeringTextGeneration(() => OK);
+const answerOk = (arranged: Arranged): void => arranged.wire.setTextGenerationAnswer(() => OK);
 
 const setModel = async (arranged: Arranged, model: unknown): Promise<Response> =>
   send("PATCH", arranged.harness.base, "/api/v1/settings", {
@@ -182,7 +180,7 @@ describe("a text generation that succeeds", () => {
         providerId: "codex",
         secrets: {},
         spec: {
-          model: { model: "codex-mini", options: {} },
+          model: "codex-mini",
           instructions: SECRET_INSTRUCTIONS,
           input: SECRET_INPUT,
           outputSchema: {
@@ -212,7 +210,6 @@ describe("a text generation that succeeds", () => {
         model: "codex-mini",
         runnerId: arranged.runnerId,
         durationMs: expect.any(Number) as unknown,
-        outcome: "completed",
         usage: { inputTokens: 12, outputTokens: 3 },
         costUsd: 0.002,
       });
@@ -226,7 +223,7 @@ describe("a text generation that succeeds", () => {
 
   it("clears the last failure", async () => {
     await withFleet(async (arranged) => {
-      arranged.wire.answeringTextGeneration(() => ({
+      arranged.wire.setTextGenerationAnswer(() => ({
         outcome: "failed",
         message: "not logged in",
       }));
@@ -241,10 +238,50 @@ describe("a text generation that succeeds", () => {
   });
 });
 
+describe("the last failure after the model setting changes", () => {
+  it("is not shown for another model", async () => {
+    await withFleet(async (arranged) => {
+      arranged.wire.setTextGenerationAnswer(() => ({
+        outcome: "failed",
+        message: "not logged in",
+      }));
+      await generate(arranged);
+      expect((await readStatus(arranged)).lastFailure).toMatchObject({ reason: "unavailable" });
+
+      const pi = findInstanceId(arranged, "pi");
+      expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
+
+      expect((await readStatus(arranged)).lastFailure).toBeNull();
+    });
+  });
+
+  it("is not shown when a call that started before the change fails after it", async () => {
+    await withFleet(async (arranged) => {
+      const call = generate(arranged);
+      const [request] = await waitForFrames<TextGenerationRequest>(
+        arranged.wire,
+        "textGenerationRequest",
+        1,
+      );
+      const pi = findInstanceId(arranged, "pi");
+      expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
+
+      arranged.wire.send({
+        _tag: "textGenerationReport",
+        requestId: request!.requestId,
+        outcome: { outcome: "failed", message: "not logged in" },
+      });
+      await call;
+
+      expect((await readStatus(arranged)).lastFailure).toBeNull();
+    });
+  });
+});
+
 describe("a text generation that fails", () => {
   it("reports unavailable with the runner's message when the harness could not answer", async () => {
     await withFleet(async (arranged) => {
-      arranged.wire.answeringTextGeneration(() => ({
+      arranged.wire.setTextGenerationAnswer(() => ({
         outcome: "failed",
         message: "codex is not logged in",
       }));
@@ -257,7 +294,7 @@ describe("a text generation that fails", () => {
       });
       const [entry] = await arranged.harness.audit("textGeneration.failed");
       expect(entry!.payload).toMatchObject({
-        outcome: "unavailable",
+        reason: "unavailable",
         message: "codex is not logged in",
         runnerId: arranged.runnerId,
       });
@@ -269,7 +306,7 @@ describe("a text generation that fails", () => {
 
   it("reports invalid-output when the runner says the answer did not match, without quoting it", async () => {
     await withFleet(async (arranged) => {
-      arranged.wire.answeringTextGeneration(() => ({
+      arranged.wire.setTextGenerationAnswer(() => ({
         outcome: "invalid-output",
         reason: `the model said ${SECRET_INPUT}`,
       }));
@@ -285,7 +322,7 @@ describe("a text generation that fails", () => {
 
   it("reports invalid-output when the runner's value does not decode with the caller's schema", async () => {
     await withFleet(async (arranged) => {
-      arranged.wire.answeringTextGeneration(() => ({
+      arranged.wire.setTextGenerationAnswer(() => ({
         outcome: "ok",
         value: { title: 42 },
         usage: null,
@@ -306,7 +343,7 @@ describe("a text generation that fails", () => {
 
         expect(result).toMatchObject({ ok: false, error: { reason: "timeout" } });
         const [entry] = await arranged.harness.audit("textGeneration.failed");
-        expect(entry!.payload).toMatchObject({ outcome: "timeout", runnerId: arranged.runnerId });
+        expect(entry!.payload).toMatchObject({ reason: "timeout", runnerId: arranged.runnerId });
         expect(await readStatus(arranged)).toMatchObject({ lastFailure: { reason: "timeout" } });
       },
       { textGenerationDeadline: Duration.millis(300) },
@@ -379,10 +416,51 @@ describe("the model automatic chooses", () => {
       expect(result).toEqual({ ok: true, value: { title: TITLE } });
       expect(requestsOn(arranged)[0]).toMatchObject({
         providerId: "pi",
-        spec: { model: { model: "pi-small" } },
+        spec: { model: "pi-small" },
       });
     });
   });
+
+  for (const kind of ["offline", "without the capability"] as const) {
+    it(`skips an instance that only a runner ${kind} has, and runs on one that can take the call`, async () => {
+      await withFleet(
+        async (arranged) => {
+          const other = await arranged.enlist();
+          other.wire.setTextGenerationAnswer(() => OK);
+          // Codex is logged in on the first runner only. That runner cannot
+          // take the call, so `automatic` must go on to pi, which the other
+          // runner has.
+          await Effect.runPromise(
+            Effect.gen(function* () {
+              const sql = arranged.harness.sql;
+              yield* sql`DELETE FROM capability_snapshots
+                WHERE instance_id = ${uuidFromString(findInstanceId(arranged, "codex"))}
+                  AND runner_id = ${uuidFromString(other.runnerId)}`;
+              if (kind === "offline") {
+                yield* sql`UPDATE runners SET connectivity = 'offline'
+                  WHERE id = ${uuidFromString(arranged.runnerId)}`;
+              }
+            }).pipe(Effect.orDie),
+          );
+
+          expect((await readStatus(arranged)).model).toEqual({
+            instanceId: findInstanceId(arranged, "pi"),
+            model: "pi-small",
+          });
+          const result = await generate(arranged);
+
+          expect(result).toEqual({ ok: true, value: { title: TITLE } });
+          expect(requestsOn(arranged)).toEqual([]);
+          const [entry] = await arranged.harness.audit("textGeneration.completed");
+          expect(entry!.payload).toMatchObject({
+            runnerId: other.runnerId,
+            instanceId: findInstanceId(arranged, "pi"),
+          });
+        },
+        kind === "offline" ? {} : { capabilities: [] },
+      );
+    });
+  }
 
   it("fails with unavailable, and records it, when no provider offers its suggested model", async () => {
     await withFleet(
@@ -395,7 +473,7 @@ describe("the model automatic chooses", () => {
         expect(requestsOn(arranged)).toEqual([]);
         const [entry] = await arranged.harness.audit("textGeneration.failed");
         expect(entry!.payload).toMatchObject({
-          outcome: "unavailable",
+          reason: "unavailable",
           instanceId: null,
           model: null,
           runnerId: null,
@@ -422,7 +500,7 @@ describe("a model the user chose", () => {
       expect(requestsOn(arranged)[0]).toMatchObject({
         instanceId: pi,
         providerId: "pi",
-        spec: { model: { model: "haiku" } },
+        spec: { model: "haiku" },
       });
       expect(await readStatus(arranged)).toMatchObject({
         model: { instanceId: pi, model: "haiku" },
@@ -454,7 +532,7 @@ describe("which runner makes the call", () => {
       async (arranged) => {
         const other = await arranged.enlist();
         answerOk(arranged);
-        other.wire.answeringTextGeneration(() => OK);
+        other.wire.setTextGenerationAnswer(() => OK);
 
         await generate(arranged);
 
@@ -471,7 +549,7 @@ describe("which runner makes the call", () => {
     await withFleet(
       async (arranged) => {
         const other = await arranged.enlist();
-        other.wire.answeringTextGeneration(() => OK);
+        other.wire.setTextGenerationAnswer(() => OK);
         await logOut(arranged, arranged.runnerId);
 
         const result = await generate(arranged);
@@ -489,7 +567,7 @@ describe("which runner makes the call", () => {
     await withFleet(
       async (arranged) => {
         const other = await arranged.enlist();
-        other.wire.answeringTextGeneration(() => OK);
+        other.wire.setTextGenerationAnswer(() => OK);
 
         const result = await generate(arranged);
 
@@ -500,10 +578,56 @@ describe("which runner makes the call", () => {
     );
   });
 
+  it("skips a runner whose model list lacks the chosen model", async () => {
+    await withFleet(
+      async (arranged) => {
+        const other = await arranged.enlist();
+        other.wire.setTextGenerationAnswer(() => OK);
+        const pi = findInstanceId(arranged, "pi");
+        expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
+        // The local runner no longer lists any model for pi.
+        await Effect.runPromise(
+          arranged.harness.sql`UPDATE capability_snapshots SET models = '[]'
+            WHERE instance_id = ${uuidFromString(pi)}
+              AND runner_id = ${uuidFromString(arranged.runnerId)}`.pipe(Effect.orDie),
+        );
+
+        const result = await generate(arranged);
+
+        expect(result).toEqual({ ok: true, value: { title: TITLE } });
+        expect(requestsOn(arranged)).toEqual([]);
+        const [entry] = await arranged.harness.audit("textGeneration.completed");
+        expect(entry!.payload).toMatchObject({ runnerId: other.runnerId, model: "haiku" });
+      },
+      { firstRunnerIsLocal: true },
+    );
+  });
+
+  it("fails with unavailable when no runner lists the chosen model", async () => {
+    await withFleet(async (arranged) => {
+      answerOk(arranged);
+      const pi = findInstanceId(arranged, "pi");
+      expect((await setModel(arranged, { instanceId: pi, model: "not-in-any-list" })).status).toBe(
+        200,
+      );
+
+      const result = await generate(arranged);
+
+      expect(result).toMatchObject({ ok: false, error: { reason: "unavailable" } });
+      expect(requestsOn(arranged)).toEqual([]);
+      const [entry] = await arranged.harness.audit("textGeneration.failed");
+      expect(entry!.payload).toMatchObject({
+        instanceId: pi,
+        model: "not-in-any-list",
+        runnerId: null,
+      });
+    });
+  });
+
   it("uses the other runner when there is no local runner", async () => {
     await withFleet(async (arranged) => {
       const other = await arranged.enlist();
-      other.wire.answeringTextGeneration(() => OK);
+      other.wire.setTextGenerationAnswer(() => OK);
       await logOut(arranged, arranged.runnerId);
 
       const result = await generate(arranged);
@@ -515,7 +639,7 @@ describe("which runner makes the call", () => {
   it("never uses a reserved runner", async () => {
     await withFleet(async (arranged) => {
       const other = await arranged.enlist();
-      other.wire.answeringTextGeneration(() => OK);
+      other.wire.setTextGenerationAnswer(() => OK);
       await logOut(arranged, arranged.runnerId);
       await reserve(arranged, other.runnerId);
 
@@ -535,7 +659,7 @@ describe("which runner makes the call", () => {
           ok: false,
           error: {
             reason: "unavailable",
-            message: expect.stringContaining("update the runner") as unknown,
+            message: expect.stringContaining("update a runner") as unknown,
           },
         });
       },
@@ -608,6 +732,181 @@ describe("the limit per runner", () => {
       { textGenerationDeadline: Duration.millis(600) },
     );
   });
+
+  it("keeps a slot until the runner answers, even after its caller gave up", async () => {
+    await withFleet(
+      async (arranged) => {
+        const answerTimers: Array<ReturnType<typeof setTimeout>> = [];
+        const outstanding = new Set<string>();
+        let received = 0;
+        let mostOutstanding = 0;
+        // The first ten answer in time. The eleventh starts after they end, and
+        // its answer comes after its caller's deadline.
+        arranged.wire.setTextGenerationAnswer((request) => {
+          received += 1;
+          outstanding.add(request.requestId);
+          mostOutstanding = Math.max(mostOutstanding, outstanding.size);
+          answerTimers.push(
+            setTimeout(
+              () => {
+                outstanding.delete(request.requestId);
+                arranged.wire.send({
+                  _tag: "textGenerationReport",
+                  requestId: request.requestId,
+                  outcome: OK,
+                });
+              },
+              received <= PERMITS ? 300 : 900,
+            ),
+          );
+          return undefined;
+        });
+        try {
+          const first = await Promise.all(Array.from({ length: CALLS }, () => generate(arranged)));
+          expect(first.filter((one) => one.ok)).toHaveLength(PERMITS);
+          expect(first[PERMITS]).toMatchObject({ ok: false, error: { reason: "timeout" } });
+
+          // The eleventh call's runner is still working, so its slot is taken.
+          await Promise.all(Array.from({ length: PERMITS }, () => generate(arranged)));
+
+          expect(mostOutstanding).toBeLessThanOrEqual(PERMITS);
+        } finally {
+          for (const timer of answerTimers) clearTimeout(timer);
+        }
+      },
+      { textGenerationDeadline: Duration.millis(700) },
+    );
+  });
+
+  it("counts the wait for a slot inside the caller's deadline", async () => {
+    const DEADLINE_MS = 1000;
+    await withFleet(
+      async (arranged) => {
+        const answerTimers: Array<ReturnType<typeof setTimeout>> = [];
+        let received = 0;
+        // The first ten answer after 600 ms, which is most of the deadline. The
+        // eleventh is sent only then, and is never answered.
+        arranged.wire.setTextGenerationAnswer((request) => {
+          received += 1;
+          if (received > PERMITS) return undefined;
+          answerTimers.push(
+            setTimeout(
+              () =>
+                arranged.wire.send({
+                  _tag: "textGenerationReport",
+                  requestId: request.requestId,
+                  outcome: OK,
+                }),
+              600,
+            ),
+          );
+          return undefined;
+        });
+        try {
+          const started = Date.now();
+          const results = await Promise.all(
+            Array.from({ length: CALLS }, async () => ({
+              result: await generate(arranged),
+              waitedMs: Date.now() - started,
+            })),
+          );
+
+          const eleventh = results.find(({ result }) => !result.ok);
+          expect(eleventh?.result).toMatchObject({ ok: false, error: { reason: "timeout" } });
+          // The deadline is for the whole wait. If it restarted once the slot
+          // came free, this call would take about 1600 ms.
+          expect(eleventh!.waitedMs).toBeLessThan(DEADLINE_MS + 400);
+          // It was sent, after the wait for the slot.
+          expect(requestsOn(arranged)).toHaveLength(CALLS);
+        } finally {
+          for (const timer of answerTimers) clearTimeout(timer);
+        }
+      },
+      { textGenerationDeadline: Duration.millis(DEADLINE_MS) },
+    );
+  });
+});
+
+describe("a call that the runner cannot finish", () => {
+  it("reports timeout when the runner reports that its harness ran too long", async () => {
+    await withFleet(async (arranged) => {
+      arranged.wire.setTextGenerationAnswer(() => ({ outcome: "timeout" }));
+
+      const result = await generate(arranged);
+
+      expect(result).toMatchObject({ ok: false, error: { reason: "timeout" } });
+      const [entry] = await arranged.harness.audit("textGeneration.failed");
+      expect(entry!.payload).toMatchObject({ reason: "timeout", runnerId: arranged.runnerId });
+      expect(await readStatus(arranged)).toMatchObject({
+        lastFailure: { reason: "timeout", message: expect.stringMatching(/.+/) as unknown },
+      });
+    });
+  });
+
+  it("reports unavailable, with one record, when the runner disconnects mid-call", async () => {
+    await withFleet(async (arranged) => {
+      const call = generate(arranged);
+      await waitForFrames<TextGenerationRequest>(arranged.wire, "textGenerationRequest", 1);
+
+      arranged.wire.close();
+
+      expect(await call).toMatchObject({
+        ok: false,
+        error: {
+          reason: "unavailable",
+          message: expect.stringContaining("connection ended") as unknown,
+        },
+      });
+      expect(await arranged.harness.audit("textGeneration.failed")).toHaveLength(1);
+      expect(await arranged.harness.audit("textGeneration.completed")).toEqual([]);
+      expect(await readStatus(arranged)).toMatchObject({ lastFailure: { reason: "unavailable" } });
+    });
+  });
+
+  it("keeps controller.read working when a runner reports a failure with an empty message", async () => {
+    await withFleet(
+      async (arranged) => {
+        arranged.wire.setTextGenerationAnswer(() => ({ outcome: "failed", message: "" }));
+
+        const result = await generate(arranged);
+
+        expect(result.ok).toBe(false);
+        const status = await readStatus(arranged);
+        expect(status.lastFailure?.message).toMatch(/.+/);
+      },
+      { textGenerationDeadline: Duration.millis(500) },
+    );
+  });
+});
+
+describe("an error nobody expected", () => {
+  it("is recorded as unavailable, with one audit entry and a last failure, and then reaches the caller", async () => {
+    await withFleet(async (arranged) => {
+      answerOk(arranged);
+      // The call reads the instance's secrets before it sends anything. With
+      // the table gone, that read fails in a way no caller can act on.
+      await Effect.runPromise(
+        arranged.harness.sql`ALTER TABLE secrets RENAME TO secrets_gone`.pipe(Effect.orDie),
+      );
+
+      const exit = await arranged.harness.runWithLiveSessions(
+        Effect.flatMap(TextGeneration, (service) => service.generate(buildCall())),
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(requestsOn(arranged)).toEqual([]);
+      const entries = await arranged.harness.audit("textGeneration.failed");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.payload).toMatchObject({
+        reason: "unavailable",
+        message: expect.stringMatching(/.+/) as unknown,
+      });
+      expect(await arranged.harness.audit("textGeneration.completed")).toEqual([]);
+      expect(await readStatus(arranged)).toMatchObject({
+        lastFailure: { reason: "unavailable", message: expect.stringMatching(/.+/) as unknown },
+      });
+    });
+  });
 });
 
 describe("a caller that gives a schema no provider accepts", () => {
@@ -618,7 +917,7 @@ describe("a caller that gives a schema no provider accepts", () => {
       const exit = await arranged.harness.runWithLiveSessions(
         Effect.flatMap(TextGeneration, (service) =>
           service.generate({
-            ...buildRequest(),
+            ...buildCall(),
             output: Schema.Struct({ title: Schema.NullOr(Schema.String) }),
           }),
         ),

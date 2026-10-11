@@ -1,6 +1,7 @@
 /**
  * Works out which provider instance and model text generations run on now,
- * from the `textGeneration.model` setting.
+ * from the `textGeneration.model` setting, and which runners could make the
+ * call there.
  *
  * - `off`: nothing runs.
  * - A chosen instance and model: exactly that. It is never replaced by
@@ -8,9 +9,15 @@
  *   to Claude.
  * - `automatic` (the default when the setting is unset): the first provider in
  *   `AUTOMATIC_PROVIDER_ORDER` that has an instance logged in on a runner
- *   whose catalog holds the provider's suggested text generation model.
- *   Choosing the model is visible, not hidden: Settings shows what
- *   `automatic` resolves to.
+ *   that could make the call, whose model list there holds the provider's
+ *   suggested text generation model. Choosing the model is visible, not
+ *   hidden: Settings shows what `automatic` resolves to.
+ *
+ * A runner could make the call when it is placeable (online, active, not
+ * reserved), has negotiated the text generation capability, has the instance
+ * logged in, and lists the model for that instance. Resolution and the
+ * runner choice share this one rule, so `automatic` never picks a model that
+ * no runner can run.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -18,9 +25,15 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { TEXT_GENERATION_CAPABILITY } from "@hercule/protocol";
 import { PluginHost } from "../plugins";
-import { isLoggedIn, providerRepository, type StoredSnapshot } from "../providers";
-import { runnerRepository } from "../runners";
+import {
+  isLoggedIn,
+  providerRepository,
+  type StoredInstance,
+  type StoredSnapshot,
+} from "../providers";
+import { runnerRepository, type PlacementCandidate } from "../runners";
 import { Settings } from "../settings";
 
 /**
@@ -28,31 +41,68 @@ import { Settings } from "../settings";
  * controller, not of a provider, so a plugin cannot move itself to the front.
  * Each provider names its own suggested model on its definition.
  */
-export const AUTOMATIC_PROVIDER_ORDER: ReadonlyArray<string> = ["codex", "pi", "claude-code"];
+const AUTOMATIC_PROVIDER_ORDER: ReadonlyArray<string> = ["codex", "pi", "claude-code"];
 
 /**
  * What the setting resolves to:
  *
  * - `off`: text generation is switched off.
- * - `resolved`: calls run on this instance and model.
- * - `unresolved`: no model can be used, and `message` says why in words a
+ * - `resolved`: calls run on this instance and model. `runnerIds` lists the
+ *   runners that could make the call, in no particular order. It is empty
+ *   when a chosen model is offered by no such runner.
+ * - `unresolved`: no model can be used, and `message` explains why in words a
  *   user can act on. For example `automatic` found no match.
+ *
+ * Every variant carries `setting`, the value of `textGeneration.model` it was
+ * resolved from, written as JSON. The last failure is stored with it, so a
+ * failure of one model is never shown as the failure of another.
  */
-export type TextGenerationChoice =
+export type TextGenerationTarget = { readonly setting: string } & TextGenerationChoice;
+
+/** What a value of the setting resolves to, before it is tied to that value. */
+type TextGenerationChoice =
   | { readonly _tag: "off" }
   | {
       readonly _tag: "resolved";
-      readonly instanceId: string;
-      readonly providerId: string;
+      readonly instance: StoredInstance;
       readonly model: string;
+      readonly runnerIds: ReadonlyArray<string>;
     }
   | { readonly _tag: "unresolved"; readonly message: string };
 
 const NO_AUTOMATIC_MATCH =
-  "no provider instance is logged in to a model that text generation suggests; log one in, or choose a model in Settings";
+  "no runner that can make text generations is logged in to a model that text generation suggests; log one in, update a runner that is too old, or choose a model in Settings";
 
 const CHOSEN_INSTANCE_GONE =
   "the provider instance chosen for text generation no longer exists; choose another in Settings";
+
+/**
+ * Checks whether a runner can be asked for a text generation at all: it is
+ * placeable (online, active, not reserved) and negotiated the text generation
+ * capability at its last hello.
+ */
+const canTakeTextGeneration = (candidate: PlacementCandidate): boolean =>
+  candidate.placeable && candidate.capabilities.includes(TEXT_GENERATION_CAPABILITY);
+
+/**
+ * Lists the runners among `capable` whose stored snapshot of the instance
+ * shows it logged in and listing `model`. Never probes a runner.
+ */
+const listRunnersOffering = (
+  capable: ReadonlySet<string>,
+  snapshots: ReadonlyArray<StoredSnapshot>,
+  instanceId: string,
+  model: string,
+): ReadonlyArray<string> =>
+  snapshots
+    .filter(
+      (snapshot) =>
+        snapshot.instanceId === instanceId &&
+        capable.has(snapshot.runnerId) &&
+        isLoggedIn(snapshot) &&
+        snapshot.models.some((one) => one.slug === model),
+    )
+    .map((snapshot) => snapshot.runnerId);
 
 const make = Effect.gen(function* () {
   const settings = yield* Settings;
@@ -60,30 +110,27 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const host = yield* PluginHost;
 
+  /** Reads the ids of the runners that can be asked for a text generation. */
+  const readCapableRunnerIds = Effect.map(
+    runners.listPlacementCandidates(),
+    (candidates) => new Set(candidates.filter(canTakeTextGeneration).map((one) => one.id)),
+  );
+
   /**
-   * Finds the first instance, in provider order, that is logged in on a
-   * runner (a reserved or retired runner does not count) and whose catalog
-   * there holds its provider's suggested model.
+   * Finds the first instance, in provider order, that a runner able to make
+   * the call has logged in with its provider's suggested model.
    */
   const resolveAutomatic: Effect.Effect<TextGenerationChoice, SqlError> = Effect.gen(function* () {
-    const usable = new Set((yield* runners.listPlacementCandidates()).map((one) => one.id));
+    const capable = yield* readCapableRunnerIds;
     const definitions = yield* host.providers();
     const all = yield* instances.list();
     const snapshots = yield* instances.snapshots();
-    const offers = (instanceId: string, model: string): boolean =>
-      snapshots.some(
-        (snapshot: StoredSnapshot) =>
-          snapshot.instanceId === instanceId &&
-          usable.has(snapshot.runnerId) &&
-          isLoggedIn(snapshot) &&
-          snapshot.models.some((one) => one.slug === model),
-      );
     for (const providerId of AUTOMATIC_PROVIDER_ORDER) {
       const model = definitions.find((one) => one.id === providerId)?.suggestedTextGenerationModel;
       if (model === undefined) continue;
-      const instance = all.find((one) => one.providerId === providerId && offers(one.id, model));
-      if (instance !== undefined) {
-        return { _tag: "resolved", instanceId: instance.id, providerId, model } as const;
+      for (const instance of all.filter((one) => one.providerId === providerId)) {
+        const runnerIds = listRunnersOffering(capable, snapshots, instance.id, model);
+        if (runnerIds.length > 0) return { _tag: "resolved", instance, model, runnerIds } as const;
       }
     }
     return { _tag: "unresolved", message: NO_AUTOMATIC_MATCH } as const;
@@ -95,29 +142,41 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Resolves the setting to what text generations run on now. Reads the
-     * stored snapshots and never probes a runner, so a login that expired
-     * since the last probe still resolves; the call then fails and says so.
+     * Resolves the setting to what text generations run on now. A resolved
+     * target carries the instance row and the runners that could make the
+     * call, so the caller does not read them again. Reads the stored
+     * snapshots and never probes a runner, so a login that expired since the
+     * last probe still resolves; the call then fails with an explanation.
      * Fails only when the database cannot be read.
      */
-    resolve: (): Effect.Effect<TextGenerationChoice, SqlError> =>
+    resolve: (): Effect.Effect<TextGenerationTarget, SqlError> =>
       Effect.gen(function* () {
         const setting = (yield* settings.all())["textGeneration.model"] ?? "automatic";
-        if (setting === "off") return { _tag: "off" } as const;
-        if (setting === "automatic") return yield* resolveAutomatic;
-        const found = yield* Effect.catchTag(
-          instances.one(setting.instanceId),
-          "SchemaError",
-          Effect.die,
-        );
-        return Option.isNone(found)
-          ? ({ _tag: "unresolved", message: CHOSEN_INSTANCE_GONE } as const)
-          : ({
-              _tag: "resolved",
-              instanceId: found.value.id,
-              providerId: found.value.providerId,
-              model: setting.model,
-            } as const);
+        const choice: TextGenerationChoice = yield* Effect.gen(function* () {
+          if (setting === "off") return { _tag: "off" } as const;
+          if (setting === "automatic") return yield* resolveAutomatic;
+          const found = yield* Effect.catchTag(
+            instances.one(setting.instanceId),
+            "SchemaError",
+            Effect.die,
+          );
+          if (Option.isNone(found)) {
+            return { _tag: "unresolved", message: CHOSEN_INSTANCE_GONE } as const;
+          }
+          const capable = yield* readCapableRunnerIds;
+          const snapshots = yield* Effect.catchTag(
+            instances.listSnapshots(found.value.id),
+            "SchemaError",
+            Effect.die,
+          );
+          return {
+            _tag: "resolved",
+            instance: found.value,
+            model: setting.model,
+            runnerIds: listRunnersOffering(capable, snapshots, found.value.id, setting.model),
+          } as const;
+        });
+        return { ...choice, setting: JSON.stringify(setting) };
       }),
   };
 });

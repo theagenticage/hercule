@@ -21,7 +21,7 @@
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import { AccessMode } from "@hercule/protocol";
+import { AccessMode, MAX_FACT_LENGTH } from "@hercule/protocol";
 import { closedStruct, optional } from "../closed";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
@@ -80,6 +80,18 @@ export const ThreadRows = Schema.Literals(["meta", "plain"]);
 export type ThreadRows = Schema.Schema.Type<typeof ThreadRows>;
 
 /**
+ * A model on a provider instance: the instance and the model's slug in that
+ * instance's model list. The slug is at most as long as the protocol allows a
+ * model name to be, so a name that fits here can always be sent to a runner.
+ */
+export const InstanceModel = closedStruct({
+  instanceId: Id,
+  model: Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH)),
+});
+
+export type InstanceModel = Schema.Schema.Type<typeof InstanceModel>;
+
+/**
  * Which model makes text generations: small model calls such as naming a
  * Thread (spec 06 section 14).
  *
@@ -94,7 +106,7 @@ export type ThreadRows = Schema.Schema.Type<typeof ThreadRows>;
  */
 export const TextGenerationModel = Schema.Union([
   Schema.Literals(["automatic", "off"]),
-  closedStruct({ instanceId: Id, model: Schema.NonEmptyString }),
+  InstanceModel,
 ]);
 
 export type TextGenerationModel = Schema.Schema.Type<typeof TextGenerationModel>;
