@@ -6,12 +6,53 @@
 import { Option, Schema } from "effect";
 import { MAX_BLOCK_URL_LENGTH } from "@hercule/plugin-host";
 import { MAX_STACK_FRAMES, type IssueBlock, type LatestEvent, type StackFrame } from "./kinds";
+import { ISO_TIMESTAMP_PATTERN } from "./limits";
 import { cutName, cutText, MAX_EXCEPTION_VALUE_LENGTH, MAX_TITLE_LENGTH } from "./text";
+
+/**
+ * The most characters of an id. Sentry's ids are numbers of up to about 20
+ * digits. The limit is generous but finite, because an id goes into dedup
+ * keys and refs, which the host bounds.
+ */
+const MAX_ID_LENGTH = 32;
+
+/** The most characters of a slug or a short id, such as `acme` or `WEBSHOP-1A`. */
+const MAX_SLUG_LENGTH = 128;
+
+/** The most characters of an event id. Sentry's are 32 hexadecimal digits. */
+const MAX_EVENT_ID_LENGTH = 64;
+
+/** The most characters of a time. Sentry sends at most microseconds and a zone. */
+const MAX_TIME_LENGTH = 64;
+
+/** An id of an organization, project, issue, user, team or activity: digits. */
+const SentryId = Schema.String.check(Schema.isPattern(/^\d+$/), Schema.isMaxLength(MAX_ID_LENGTH));
+
+/** A slug or short id: letters, digits, dash, underscore and dot. A slug is part of a URL path, so nothing else may pass. */
+const SentrySlug = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/),
+  Schema.isMaxLength(MAX_SLUG_LENGTH),
+);
+
+/** The id of an event: hexadecimal digits. */
+const SentryEventId = Schema.String.check(
+  Schema.isPattern(/^[0-9a-fA-F]+$/),
+  Schema.isMaxLength(MAX_EVENT_ID_LENGTH),
+);
+
+/** A time as an ISO 8601 date and time with a zone, such as `2026-10-12T09:00:00.123456Z`. */
+const SentryTime = Schema.String.check(
+  Schema.isMaxLength(MAX_TIME_LENGTH),
+  Schema.isPattern(ISO_TIMESTAMP_PATTERN),
+  Schema.makeFilter((time) =>
+    Number.isNaN(Date.parse(time)) ? "Expected a real date" : undefined,
+  ),
+);
 
 /** An organization, as `GET /api/0/organizations/` lists it. */
 export const ApiOrganization = Schema.Struct({
-  id: Schema.String,
-  slug: Schema.String,
+  id: SentryId,
+  slug: SentrySlug,
   name: Schema.String,
   links: Schema.Struct({
     /** The host that serves the organization's data, such as `https://us.sentry.io`. */
@@ -54,14 +95,14 @@ export const ApiMember = Schema.Struct({
 /** The issue's assignee. */
 const ApiAssignee = Schema.Struct({
   type: Schema.Literals(["user", "team"]),
-  id: Schema.String,
+  id: SentryId,
   name: Schema.String,
 });
 
 /** An issue, as the list and the detail endpoint return it. */
 export const ApiIssue = Schema.Struct({
-  id: Schema.String,
-  shortId: Schema.String,
+  id: SentryId,
+  shortId: SentrySlug,
   title: Schema.String,
   culprit: Schema.optionalKey(Schema.NullOr(Schema.String)),
   permalink: Schema.String,
@@ -70,9 +111,9 @@ export const ApiIssue = Schema.Struct({
   substatus: Schema.optionalKey(Schema.NullOr(Schema.String)),
   priority: Schema.optionalKey(Schema.NullOr(Schema.String)),
   assignedTo: Schema.optionalKey(Schema.NullOr(ApiAssignee)),
-  project: Schema.Struct({ id: Schema.String, slug: Schema.String, name: Schema.String }),
-  firstSeen: Schema.String,
-  lastSeen: Schema.String,
+  project: Schema.Struct({ id: SentryId, slug: SentrySlug, name: Schema.String }),
+  firstSeen: SentryTime,
+  lastSeen: SentryTime,
   count: Schema.String,
   userCount: Schema.Number,
   metadata: Schema.optionalKey(
@@ -81,7 +122,7 @@ export const ApiIssue = Schema.Struct({
   statusDetails: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({
-        actor: Schema.optionalKey(Schema.NullOr(Schema.Struct({ id: Schema.String }))),
+        actor: Schema.optionalKey(Schema.NullOr(Schema.Struct({ id: SentryId }))),
       }),
     ),
   ),
@@ -136,9 +177,9 @@ export const readStatusActorId = (issue: ApiIssue): string | undefined =>
 
 /** One entry of an issue's activity, such as a regression. */
 const ApiActivity = Schema.Struct({
-  id: Schema.String,
+  id: SentryId,
   type: Schema.String,
-  dateCreated: Schema.String,
+  dateCreated: SentryTime,
   data: Schema.optionalKey(
     Schema.NullOr(Schema.Struct({ version: Schema.optionalKey(Schema.NullOr(Schema.String)) })),
   ),
@@ -215,9 +256,9 @@ const ApiException = Schema.Struct({
  * out rather than failing the poll.
  */
 export const ApiLatestEvent = Schema.Struct({
-  id: Schema.optionalKey(Schema.String),
-  eventID: Schema.optionalKey(Schema.String),
-  dateCreated: Schema.optionalKey(Schema.String),
+  id: Schema.optionalKey(SentryEventId),
+  eventID: Schema.optionalKey(SentryEventId),
+  dateCreated: Schema.optionalKey(SentryTime),
   release: Schema.optionalKey(
     Schema.NullOr(Schema.Struct({ version: Schema.optionalKey(Schema.String) })),
   ),

@@ -3,7 +3,9 @@
  * how a response's headers are read, and how failures are told apart.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Result, Schema } from "effect";
+import { Duration, Effect, Fiber, type Layer, Result, Schema } from "effect";
+import { TestClock } from "effect/testing";
+import type * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientError from "effect/unstable/http/HttpClientError";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import { AuthError, PluginError } from "@hercule/plugin-host";
@@ -44,6 +46,34 @@ const buildBrokenBodyStub = (status: number, headers: Record<string, string> = {
         ),
       ),
     ),
+  );
+
+/** Builds a client that answers with `status` and headers, and a body that never ends. */
+const buildStalledBodyStub = (status: number, headers: Record<string, string> = {}) =>
+  stubHttpClient((request) =>
+    Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        new Response(new ReadableStream({ start: () => undefined }), { status, headers }),
+      ),
+    ),
+  );
+
+/**
+ * Runs `effect` against `stub` on a test clock and moves the clock past the
+ * request timeout, so a request that waits on a stalled body fails with the
+ * timeout instead of hanging the test.
+ */
+const runPastTimeout = <A, E>(
+  effect: Effect.Effect<A, E, HttpClient.HttpClient>,
+  stub: { readonly layer: Layer.Layer<HttpClient.HttpClient> },
+): Promise<Result.Result<A, E>> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const fiber = yield* Effect.forkChild(Effect.result(effect));
+      yield* TestClock.adjust(Duration.seconds(31));
+      return yield* Fiber.join(fiber);
+    }).pipe(Effect.provide(stub.layer), Effect.provide(TestClock.layer())),
   );
 
 /** Builds a client that answers every request with a proxy's HTML page and `status`. */
@@ -225,6 +255,30 @@ describe("callSentry", () => {
     );
 
     expect(Result.isFailure(result) && result.failure).toBeInstanceOf(SentryRateLimited);
+  });
+
+  it("fails with an AuthError on a 401 whose body never ends, without waiting for the timeout", async () => {
+    const result = await runPastTimeout(callSentry(REQUEST), buildStalledBodyStub(401));
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(AuthError);
+  });
+
+  it("fails with the wait Sentry asked for on a 429 whose body never ends", async () => {
+    const result = await runPastTimeout(
+      callSentry(REQUEST),
+      buildStalledBodyStub(429, { "x-sentry-rate-limit-reset": "1000" }),
+    );
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(SentryRateLimited);
+    if (Result.isFailure(result) && result.failure instanceof SentryRateLimited) {
+      expect(result.failure.retryAfterSeconds).toBeGreaterThan(900);
+    }
+  });
+
+  it("fails as unreachable when the body of a 200 never ends", async () => {
+    const result = await runPastTimeout(callSentry(REQUEST), buildStalledBodyStub(200));
+
+    expect(Result.isFailure(result) && result.failure.message).toContain("within 30 seconds");
   });
 
   it("fails as unreachable, not as a success, when the body of a 200 cannot be read", async () => {

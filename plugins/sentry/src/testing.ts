@@ -18,23 +18,13 @@ import type * as HttpClientError from "effect/unstable/http/HttpClientError";
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import {
-  MAX_EMITTED_FIELD_BYTES,
   PluginError,
   type EmittedEvent,
   type IngestContext,
   type KeyValueStore,
   type OpenSignal,
 } from "@hercule/plugin-host";
-import {
-  bounded,
-  ExternalRef,
-  MAX_DEDUP_KEY_LENGTH,
-  MAX_EVENT_AUTHOR_LENGTH,
-  MAX_EVENT_SYSTEM_LENGTH,
-  MAX_EVENT_TITLE_LENGTH,
-  MAX_EVENT_URL_LENGTH,
-} from "@hercule/contract";
-import { SENTRY_EVENT_KINDS } from "./kinds";
+import { checkEmittedEvent } from "./ingest/check-event";
 import type { SentryOrganization } from "./organization";
 
 /** The token every test's Connection holds. */
@@ -625,57 +615,6 @@ export interface IngestHarness {
   /** The open signals `openSignals` returns; a test may change them between polls. */
   readonly openSignals: Array<OpenSignal>;
 }
-
-/**
- * The fields of an emitted event that are the same for every kind, with the
- * limits the host enforces. The host decodes the same schema in
- * `apps/controller/src/plugins/ingest-context.ts`, which a plugin cannot
- * import, so it is rebuilt here from the limits in `@hercule/contract`.
- */
-const EventEnvelope = Schema.Struct({
-  dedupKey: bounded(1, MAX_DEDUP_KEY_LENGTH),
-  // The host's own check: an ISO 8601 date and time with an explicit time zone.
-  occurredAt: Schema.String.check(
-    Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/),
-  ),
-  refs: Schema.Array(ExternalRef),
-  url: Schema.optionalKey(bounded(1, MAX_EVENT_URL_LENGTH)),
-  system: Schema.optionalKey(bounded(1, MAX_EVENT_SYSTEM_LENGTH)),
-  raw: Schema.optionalKey(Schema.JsonObject),
-  title: bounded(1, MAX_EVENT_TITLE_LENGTH),
-  author: Schema.NullOr(bounded(1, MAX_EVENT_AUTHOR_LENGTH)),
-});
-
-/**
- * Checks one emitted event the way the host does before it writes it. Fails
- * with a `PluginError` when the kind is not one the plugin declares, when a
- * common field breaks the host's limits, when the payload is over
- * `MAX_EMITTED_FIELD_BYTES`, or when the payload does not match
- * the kind's schema exactly.
- */
-const checkEmittedEvent = (event: EmittedEvent): Effect.Effect<void, PluginError> => {
-  const declaration = SENTRY_EVENT_KINDS[event.kind];
-  if (declaration === undefined) {
-    return Effect.fail(new PluginError({ message: `Undeclared kind ${event.kind}` }));
-  }
-  const payloadBytes = new TextEncoder().encode(JSON.stringify(event.payload)).length;
-  if (payloadBytes > MAX_EMITTED_FIELD_BYTES) {
-    return Effect.fail(
-      new PluginError({
-        message: `${event.kind}: the payload is ${String(payloadBytes)} bytes, over the limit of ${String(MAX_EMITTED_FIELD_BYTES)}`,
-      }),
-    );
-  }
-  return Effect.andThen(
-    Schema.decodeUnknownEffect(EventEnvelope)(event),
-    Schema.decodeUnknownEffect(declaration.schema as Schema.Codec<unknown>, {
-      onExcessProperty: "error",
-    })(event.payload),
-  ).pipe(
-    Effect.asVoid,
-    Effect.mapError((error) => new PluginError({ message: `${event.kind}: ${error.message}` })),
-  );
-};
 
 /**
  * Builds an ingest context whose credentials hold `credentials`, whose state

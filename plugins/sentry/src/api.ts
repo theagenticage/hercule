@@ -8,6 +8,7 @@ import { Clock, Duration, Effect, Option, Schema } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import { AuthError, PluginError } from "@hercule/plugin-host";
+import { cutText } from "./text";
 
 /**
  * The host the actions call. It answers every organization endpoint, so they
@@ -31,6 +32,9 @@ export const SENTRY_REQUEST_TIMEOUT = Duration.seconds(30);
  * window ends.
  */
 const DEFAULT_RATE_LIMIT_WAIT_SECONDS = 60;
+
+/** The most characters of Sentry's response that an error message quotes. */
+const MAX_FAILURE_DETAIL_LENGTH = 1000;
 
 /** The message of every failure that means the token is no longer accepted. */
 export const TOKEN_REFUSED_MESSAGE = "Sentry refused the token; reconnect the Connection";
@@ -114,6 +118,9 @@ const parseNextCursor = (link: string | undefined): string | undefined => {
 const parseWholeNumber = (value: string | undefined): number | undefined =>
   value === undefined || !/^\d+$/.test(value.trim()) ? undefined : Number(value.trim());
 
+/** Returns true for the statuses `callSentry` classifies without looking at the body: a refused token and a rate limit. */
+const isBodyIgnored = (status: number): boolean => status === 401 || status === 429;
+
 /**
  * Sends one request to Sentry's REST API and returns its status, body, next
  * page cursor and rate-limit reset. Any status is returned as it is: the
@@ -124,9 +131,9 @@ const parseWholeNumber = (value: string | undefined): number | undefined =>
  *   `SENTRY_REQUEST_TIMEOUT`;
  * - a `PluginError` when the host is not on `sentry.io`, so the request is not
  *   sent at all, or when the body of a 2xx response was not JSON. The body of
- *   any other status is returned as null when it is not JSON or cannot be
- *   read, so the caller can still tell a 401 or a 429 from the status and
- *   headers alone.
+ *   a 401 or a 429 is never read, and is returned as null, so a body that
+ *   stalls or fails changes nothing. The body of any other status is returned
+ *   as null when it is not JSON or cannot be read.
  *
  * The `HttpClient` stays a requirement: the plugin provides the fetch client
  * only where the host calls in, so a test can drive any function below that
@@ -166,9 +173,11 @@ export const requestSentry = (
             new SentryUnreachable({ message: `Sentry could not be reached: ${error.message}` }),
         ),
       );
-      // A response that is not a success is classified from its status and
-      // headers alone, so a body that cannot be read is no body: a 401 is
-      // still a refused token and a 429 still a rate limit.
+      // A 401 and a 429 are classified from the status and headers alone, so
+      // their body is never read: a body that stalls or fails changes nothing.
+      if (isBodyIgnored(response.status)) return { response, text: "" };
+      // The body of any other failure is optional too, so one that cannot be
+      // read is no body. Only a successful response needs its body.
       const isSuccess = response.status >= 200 && response.status < 300;
       const text = yield* response.text.pipe(
         Effect.catch((error) =>
@@ -295,7 +304,8 @@ export const decodeSentryBody = <S extends Schema.Decoder<unknown>>(
     Schema.decodeUnknownEffect(schema)(body),
     (error) =>
       new PluginError({
-        message: `Sentry's answer to ${path} did not have the expected shape: ${error.message}`,
+        // The message quotes the value that failed, which can be as long as the response.
+        message: `Sentry's answer to ${path} did not have the expected shape: ${cutText(error.message, MAX_FAILURE_DETAIL_LENGTH)}`,
       }),
   );
 

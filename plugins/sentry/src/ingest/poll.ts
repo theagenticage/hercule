@@ -11,10 +11,11 @@
  * - `left`: an issue left the list for another reason.
  *
  * A poll first emits the events an earlier poll left in the state's `outbox`.
- * It then reads everything and computes its events, writes the new list and
- * those events as the new `outbox` in one write, emits them, and empties the
- * `outbox`. A poll that fails before the write leaves the state as it was and
- * has emitted nothing. A poll that fails after it loses no event, because the
+ * It then reads everything and computes its events, checks each against the
+ * host's limits, writes the new list and those events as the new `outbox` in
+ * one write, emits them, and empties the `outbox`. A poll that fails before
+ * the write, an event that fails its check included, leaves the state as it
+ * was and has emitted nothing. A poll that fails after it loses no event, because the
  * next poll emits the `outbox` again, and the dedup keys make the host drop
  * the ones it already has. So an issue announced by an `entered` event is
  * always in the stored list, and its departure is seen.
@@ -41,6 +42,7 @@ import {
   type ApiIssue,
   type Regression,
 } from "../sentry-objects";
+import { checkEmittedEvent } from "./check-event";
 import { buildIssueEvent } from "./events";
 import { resolveFilter, type ResolvedFilter } from "./filter";
 import { listWatchedIssues, lookUpIssues } from "./list";
@@ -167,15 +169,17 @@ const findEntered = (
  * Returns true when a regression is newer than what the plugin has seen on the
  * issue. With a remembered activity id the ids decide, so the clocks of Sentry
  * and Hercule never have to agree. Without one (the plugin never read the
- * issue's detail) the activity must be newer than the last event the plugin
- * saw; both are Sentry's times.
+ * issue's detail), the regression is new when Sentry created it after
+ * `startedAt`: when the poll added the issue to the set, or saw it leave. A
+ * regression from before then is the one the issue came with. This is the one
+ * place a time of Sentry is compared with a time of Hercule.
  */
 const isNewRegression = (
   regression: Regression,
-  seen: { readonly regressionActivityId?: string | undefined; readonly lastSeen: string },
+  seen: { readonly regressionActivityId?: string | undefined; readonly startedAt: string },
 ): boolean =>
   seen.regressionActivityId === undefined
-    ? Date.parse(regression.dateCreated) > Date.parse(seen.lastSeen)
+    ? Date.parse(regression.dateCreated) > Date.parse(seen.startedAt)
     : compareNumericIds(regression.activityId, seen.regressionActivityId) > 0;
 
 /**
@@ -198,7 +202,14 @@ const findReturned = (
     budget.latestEvents -= 1;
     const regressions = yield* readRegressions(scope.access, issue.id);
     const latestEvent = yield* readLatestEvent(scope.access, issue.id, issue.lastSeen);
-    const newest = regressions.filter((regression) => isNewRegression(regression, left)).at(-1);
+    const newest = regressions
+      .filter((regression) =>
+        isNewRegression(regression, {
+          regressionActivityId: left.regressionActivityId,
+          startedAt: left.leftAt,
+        }),
+      )
+      .at(-1);
     const release = newest?.release ?? latestEvent?.release;
     const block = buildIssueBlock(issue);
     return {
@@ -239,11 +250,12 @@ const findReturned = (
  *   seen, oldest first, when the issue had a new event;
  * - then an `escalating` event when the issue's substatus turned `escalating`.
  *
- * Builds none when the new event was not a new regression, and none for the
- * regressions of an issue that was already regressed when the plugin first
- * stored it: the newest activity becomes the one the plugin remembers. The `regressed`
- * events say the issue came back after it was resolved, because an issue that
- * stayed on the list was never seen leaving it.
+ * Builds none when the new event was not a new regression. An issue that was
+ * already regressed when the plugin stored it has a regression from before
+ * `since`, which is not new. The newest activity becomes the one the plugin
+ * remembers either way. The `regressed` events say the issue came back after
+ * it was resolved, because an issue that stayed on the list was never seen
+ * leaving it.
  */
 const findStayed = (
   scope: PollScope,
@@ -258,21 +270,12 @@ const findStayed = (
       budget.details -= 1;
       regressions = yield* readRegressions(scope.access, issue.id);
     }
-    // With no remembered activity id, an issue that was already regressed or
-    // escalating when it was stored (it joined the set that way) has its
-    // existing regressions remembered without an event. Only the activity id
-    // stored below changes then.
-    const wasRegressed =
-      previous.issue.substatus === "regressed" || previous.issue.substatus === "escalating";
-    const fresh =
-      previous.regressionActivityId === undefined && wasRegressed
-        ? []
-        : regressions.filter((regression) =>
-            isNewRegression(regression, {
-              regressionActivityId: previous.regressionActivityId,
-              lastSeen: previous.issue.lastSeen,
-            }),
-          );
+    const fresh = regressions.filter((regression) =>
+      isNewRegression(regression, {
+        regressionActivityId: previous.regressionActivityId,
+        startedAt: previous.since,
+      }),
+    );
     const block = buildIssueBlock(issue);
     const watched: WatchedIssue = {
       issue: block,
@@ -498,8 +501,10 @@ const buildDeparture = (
  * - a team, member, project or environment in the config no longer exists;
  * - a list of the organization is too long to read;
  * - the filters match more than 1,000 issues;
- * - Sentry fails or answers in a shape the plugin does not know;
- * - the stored state cannot be read, or an event cannot be emitted.
+ * - Sentry fails or answers in a shape the plugin does not know, such as an id
+ *   that is not made of digits;
+ * - the stored state cannot be read, an event fails the host's limits, or an
+ *   event cannot be emitted.
  */
 export const pollSentryIssues = (
   access: OrganizationAccess,
@@ -605,13 +610,16 @@ export const pollSentryIssues = (
       if (departure.remembered !== undefined) left[id] = departure.remembered;
     }
 
-    // Store the new state together with the events, then emit them, then
-    // empty the outbox. The events are plain JSON, so storing and emitting
-    // them as they are loses nothing; writing fails if one is not.
+    // Check the events, store the new state together with them, then emit
+    // them, then empty the outbox. The events are plain JSON, so storing and
+    // emitting them as they are loses nothing; writing fails if one is not.
     const events = [
       ...[...findings.values()].flatMap((finding) => finding.events),
       ...departures.map(({ departure }) => departure.event),
     ];
+    // An event the host would refuse must never reach the outbox, where it
+    // would fail every later poll. So nothing is written when one fails.
+    yield* Effect.forEach(events, checkEmittedEvent, { discard: true });
     const next = { filter: filter.fingerprint, issues, left };
     yield* writeWatchState(context.state, {
       ...next,
