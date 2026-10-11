@@ -94,6 +94,8 @@ function MemoryDocumentRecord({
   const title = isCore ? "Core note" : name;
   const cap = chooseMemoryCap(name);
   const { failure } = saved;
+  // Saves refused together can hold both fields; their error and offer then
+  // sit under the text, the last row.
   const failedField = failure === null ? null : failure.edit.body === undefined ? "gist" : "body";
   const failureText =
     failure === null ? null : `Could not save: ${readErrorMessage(failure.error)}`;
@@ -103,14 +105,12 @@ function MemoryDocumentRecord({
   // save. This button, under the row that failed, writes it over that version.
   const staleSaveOffer = failure !== null && isConflict(failure.error) && (
     <div className="memory-retry">
-      <button
-        type="button"
-        className="btn btn--sm"
-        onClick={() => {
-          saved.save(failure.edit);
-        }}
-      >
-        {failedField === "gist" ? "Save my gist anyway" : "Save my text anyway"}
+      <button type="button" className="btn btn--sm" onClick={saved.saveAnyway}>
+        {failure.edit.gist === undefined
+          ? "Save my text anyway"
+          : failure.edit.body === undefined
+            ? "Save my gist anyway"
+            : "Save my gist and text anyway"}
       </button>
     </div>
   );
@@ -144,7 +144,10 @@ function MemoryDocumentRecord({
               gist={saved.gist}
               error={failedField === "gist" ? failureText : null}
               onCommit={(gist) => {
-                saved.save({ gist });
+                saved.save("gist", gist);
+              }}
+              onEditStart={() => {
+                saved.startEdit("gist");
               }}
             />
           )}
@@ -155,16 +158,14 @@ function MemoryDocumentRecord({
             value={saved.body}
             error={failedField === "body" ? failureText : null}
             onCommit={(body) => {
-              saved.save({ body });
+              saved.save("body", body);
+            }}
+            onEditStart={() => {
+              saved.startEdit("body");
             }}
           />
           {failure !== null && shrinkLoss !== undefined && (
-            <ShrinkOffer
-              loss={shrinkLoss}
-              onConfirm={() => {
-                saved.save(failure.edit, true);
-              }}
-            />
+            <ShrinkOffer loss={shrinkLoss} onConfirm={saved.confirmShrink} />
           )}
           {failedField === "body" && staleSaveOffer}
         </section>
@@ -180,17 +181,22 @@ const describeTextHint = (document: MemoryDocument): string =>
     ? `Up to ${MEMORY_CORE_CAP.toLocaleString("en-US")} characters. Empty it to clear the core note; it cannot be deleted.`
     : `Up to ${MEMORY_TOPIC_CAP.toLocaleString("en-US")} characters.`;
 
-/** Renders a topic's gist as a one-line field that saves through `onCommit`. */
+/**
+ * Renders a topic's gist as a one-line field that saves through `onCommit`.
+ * `onEditStart` runs when the user begins typing over the shown gist.
+ */
 function GistRow({
   gist,
   error,
   onCommit,
+  onEditStart,
 }: {
   readonly gist: string;
   readonly error: string | null;
   readonly onCommit: (gist: string) => void;
+  readonly onEditStart: () => void;
 }): JSX.Element {
-  const input = useTextDraft(gist, onCommit);
+  const input = useTextDraft(gist, onCommit, onEditStart);
   return (
     <SettingRow
       label="Gist"

@@ -3,6 +3,7 @@ import type { MemoryDocument } from "@hercule/contract";
 import { ApiError } from "../errors";
 import {
   buildMemoryWrite,
+  chooseMemoryBaseVersion,
   computeMemoryFill,
   describeShrinkLoss,
   describeTopicCount,
@@ -147,6 +148,21 @@ describe("mergeMemoryEdit", () => {
         true,
       ),
     ).toEqual({ body: "Use SQLite.", baseVersion: 3 });
+  });
+});
+
+describe("chooseMemoryBaseVersion", () => {
+  const start = { field: "body", shown: "Use SQLite.", version: 3 } as const;
+
+  it("is the cached version when the field still holds the text shown when typing began", () => {
+    // The user's own save, or another writer's change to the gist, moved the version on.
+    expect(chooseMemoryBaseVersion({ ...DECISIONS, gist: "choices", version: 5 }, start)).toBe(5);
+  });
+
+  it("is the version typing began on when the field holds other text now", () => {
+    expect(
+      chooseMemoryBaseVersion({ ...DECISIONS, body: "Use Postgres.", version: 5 }, start),
+    ).toBe(3);
   });
 });
 

@@ -9,6 +9,7 @@ import { useTextDraft } from "./use-text-draft";
  *
  * The text saves through `onCommit` as `useTextDraft` describes: when the
  * textarea loses focus or on Cmd+Enter, and only when it changed.
+ * `onEditStart` runs when the user begins typing over the shown text.
  */
 export function SettingTextRow({
   label,
@@ -16,15 +17,17 @@ export function SettingTextRow({
   value,
   error,
   onCommit,
+  onEditStart,
 }: {
   readonly label: string;
   readonly hint: string;
   readonly value: string;
   readonly error: string | null;
   readonly onCommit: (text: string) => void;
+  readonly onEditStart?: () => void;
 }): JSX.Element {
   const id = useId();
-  const draft = useTextDraft(value, onCommit);
+  const draft = useTextDraft(value, onCommit, onEditStart);
   return (
     <>
       <div className="set-row set-row--text">

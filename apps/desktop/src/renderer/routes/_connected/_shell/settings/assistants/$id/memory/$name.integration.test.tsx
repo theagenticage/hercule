@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MEMORY_CORE, type MemoryWriteInput } from "@hercule/contract";
+import { MEMORY_CORE, type MemoryDocument, type MemoryWriteInput } from "@hercule/contract";
 import { forgetLastSettingsSection } from "../../../../../../../app/last-settings-section";
 import {
   buildFixtureAssistant,
@@ -22,6 +22,7 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   storeMemory,
+  type Answer,
   type Call,
   type Handler,
 } from "../../../../../../../app/testing";
@@ -62,6 +63,56 @@ const listWrites = (calls: readonly Call[], name: string): unknown[] =>
   calls
     .filter((call) => call.method === "PUT" && call.path === `${MEMORY_PATH}/${name}`)
     .map((call) => call.body);
+
+/** Returns a promise and the function that resolves it, for holding a stubbed request. */
+const createGate = () => {
+  let open = (): void => {};
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { opened, open };
+};
+
+const CONFLICT_MESSAGE = "webshop is at version 2, not 1; read it again";
+
+/**
+ * Returns handlers that keep Ada's webshop topic the way the controller does:
+ * a write whose `expectedVersion` is not the stored version is refused with
+ * `conflict`. A test writes `topic.stored` as an agent would, and holds the
+ * reads, or the writes, until it resolves `topic.readsWait` or
+ * `topic.writesWait`. `topic.refuse` answers the next write with
+ * another error.
+ */
+const keepWebshop = () => {
+  const topic: {
+    stored: MemoryDocument;
+    readsWait: Promise<void> | null;
+    writesWait: Promise<void> | null;
+    refuse: Answer | null;
+  } = { stored: WEBSHOP, readsWait: null, writesWait: null, refuse: null };
+  const handlers: Record<string, Handler> = {
+    [`GET ${MEMORY_PATH}/webshop`]: async () => {
+      await topic.readsWait;
+      return { body: topic.stored };
+    },
+    [`PUT ${MEMORY_PATH}/webshop`]: async (call) => {
+      const { body, gist, expectedVersion } = call.body as MemoryWriteInput;
+      await topic.writesWait;
+      if (topic.refuse !== null) {
+        const answer = topic.refuse;
+        topic.refuse = null;
+        return answer;
+      }
+      if (expectedVersion !== topic.stored.version) {
+        return { status: 409, body: { error: { code: "conflict", message: CONFLICT_MESSAGE } } };
+      }
+      const { stored } = topic;
+      topic.stored = buildMemoryDocument("webshop", body, gist ?? stored.gist, stored.version + 1);
+      return { body: topic.stored };
+    },
+  };
+  return { topic, handlers };
+};
 
 describe("Settings > Assistants, a memory document's page", () => {
   it("names the document in the header, with Assistants linked back to the assistant", async () => {
@@ -133,25 +184,11 @@ describe("Settings > Assistants, a memory document's page", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("refuses a save queued behind one that an agent's write refused, instead of writing over it", async () => {
-    const message = "webshop is at version 2, not 1; read it again";
-    let stored = WEBSHOP;
-    let answerGistSave = (): void => {};
-    const gistSaveAnswered = new Promise<void>((resolve) => {
-      answerGistSave = resolve;
-    });
-    const { calls } = await openDocument("webshop", {
-      [`GET ${MEMORY_PATH}/webshop`]: () => ({ body: stored }),
-      [`PUT ${MEMORY_PATH}/webshop`]: async (call) => {
-        const { body, gist, expectedVersion } = call.body as MemoryWriteInput;
-        if (gist !== undefined) await gistSaveAnswered;
-        if (expectedVersion !== stored.version) {
-          return { status: 409, body: { error: { code: "conflict", message } } };
-        }
-        stored = buildMemoryDocument("webshop", body, gist ?? stored.gist, stored.version + 1);
-        return { body: stored };
-      },
-    });
+  it("refuses the saves queued behind one an agent's write refused, and saves all of them over it", async () => {
+    const { topic, handlers } = keepWebshop();
+    const held = createGate();
+    topic.writesWait = held.opened;
+    const { calls } = await openDocument("webshop", handlers);
     const gist = await screen.findByRole("textbox", { name: "Gist" });
     const text = screen.getByRole("textbox", { name: "Text" });
 
@@ -159,22 +196,135 @@ describe("Settings > Assistants, a memory document's page", () => {
     await userEvent.type(gist, "Payments, EU{Enter}");
     await userEvent.type(text, " Mollie for NL.");
     await userEvent.tab();
-    // An agent writes the topic while the gist save is held, then the
-    // controller answers it.
-    stored = buildMemoryDocument("webshop", "Stripe only.", WEBSHOP.gist, 2);
-    answerGistSave();
+    // An agent writes the topic while the gist save is held.
+    topic.stored = buildMemoryDocument("webshop", "Stripe only.", WEBSHOP.gist, 2);
+    held.open();
 
     await waitFor(() => {
-      expect(listWrites(calls, "webshop")).toHaveLength(2);
+      expect(text).toHaveProperty("value", "Stripe only.");
     });
     expect(listWrites(calls, "webshop")).toEqual([
       { body: WEBSHOP.body, gist: "Payments, EU", expectedVersion: 1 },
       { body: "Stripe checkout. Mollie for NL.", expectedVersion: 1 },
     ]);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Save my gist and text anyway" }),
+    );
+
     await waitFor(() => {
-      expect(text).toHaveProperty("value", "Stripe only.");
+      expect(topic.stored.version).toBe(3);
     });
-    expect(stored.body).toBe("Stripe only.");
+    expect(listWrites(calls, "webshop").at(-1)).toEqual({
+      body: "Stripe checkout. Mollie for NL.",
+      gist: "Payments, EU",
+      expectedVersion: 2,
+    });
+    await waitFor(() => {
+      expect(text).toHaveProperty("value", "Stripe checkout. Mollie for NL.");
+    });
+    expect(gist).toHaveProperty("value", "Payments, EU");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("refuses a save begun before a read brought an agent's text, and saves it over that text when asked", async () => {
+    const { topic, handlers } = keepWebshop();
+    const { calls, router } = await openDocument("webshop", handlers);
+    await screen.findByRole("textbox", { name: "Text" });
+    await router.navigate({ to: "/settings/assistants", search: { assistant: ADA.id } });
+    // The agent writes while the page is closed, and the read the page makes
+    // when it opens again is held, so the page shows the cached text first.
+    topic.stored = buildMemoryDocument("webshop", "Stripe only.", WEBSHOP.gist, 2);
+    const read = createGate();
+    topic.readsWait = read.opened;
+    await router.navigate({
+      to: "/settings/assistants/$id/memory/$name",
+      params: { id: ADA.id, name: "webshop" },
+    });
+    const text = await screen.findByRole("textbox", { name: "Text" });
+    expect(text).toHaveProperty("value", WEBSHOP.body);
+
+    await userEvent.type(text, " Mollie for NL.");
+    read.open();
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "webshop 12 of 12,000" }),
+    ).toBeTruthy();
+    await userEvent.tab();
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      `Could not save: ${CONFLICT_MESSAGE}`,
+    );
+    expect(topic.stored.body).toBe("Stripe only.");
+    await userEvent.click(screen.getByRole("button", { name: "Save my text anyway" }));
+
+    await waitFor(() => {
+      expect(topic.stored.body).toBe("Stripe checkout. Mollie for NL.");
+    });
+    expect(listWrites(calls, "webshop")).toEqual([
+      { body: "Stripe checkout. Mollie for NL.", expectedVersion: 1 },
+      { body: "Stripe checkout. Mollie for NL.", expectedVersion: 2 },
+    ]);
+  });
+
+  it("saves an edit made on a page opened again while an earlier save of it ran", async () => {
+    const { topic, handlers } = keepWebshop();
+    const held = createGate();
+    topic.writesWait = held.opened;
+    const { calls, router } = await openDocument("webshop", handlers);
+    const gist = await screen.findByRole("textbox", { name: "Gist" });
+
+    await userEvent.clear(gist);
+    await userEvent.type(gist, "Payments, EU{Enter}");
+    await router.navigate({ to: "/settings/assistants", search: { assistant: ADA.id } });
+    await router.navigate({
+      to: "/settings/assistants/$id/memory/$name",
+      params: { id: ADA.id, name: "webshop" },
+    });
+    const text = await screen.findByRole("textbox", { name: "Text" });
+    await userEvent.type(text, " Mollie for NL.");
+    await userEvent.tab();
+    held.open();
+
+    await waitFor(() => {
+      expect(listWrites(calls, "webshop")).toHaveLength(2);
+    });
+    await waitFor(() => {
+      expect(topic.stored.version).toBe(3);
+    });
+    expect(listWrites(calls, "webshop")).toEqual([
+      { body: WEBSHOP.body, gist: "Payments, EU", expectedVersion: 1 },
+      { body: "Stripe checkout. Mollie for NL.", expectedVersion: 2 },
+    ]);
+    expect(topic.stored.gist).toBe("Payments, EU");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("saves text typed while an earlier save of it ran, after the controller refused that one", async () => {
+    const { topic, handlers } = keepWebshop();
+    const message = 'topic "webshop" is 12,009 chars; cap is 12,000.';
+    topic.refuse = {
+      status: 422,
+      body: { error: { code: "cap_exceeded", message, details: { size: 12009, cap: 12000 } } },
+    };
+    const held = createGate();
+    topic.writesWait = held.opened;
+    const { calls } = await openDocument("webshop", handlers);
+    const text = await screen.findByRole("textbox", { name: "Text" });
+
+    await userEvent.type(text, " Mollie for NL.");
+    await userEvent.tab();
+    // The field shows the text being saved, and the user types on from it.
+    await userEvent.type(text, " Adyen too.");
+    await userEvent.tab();
+    held.open();
+
+    await waitFor(() => {
+      expect(topic.stored.version).toBe(2);
+    });
+    expect(listWrites(calls, "webshop")).toEqual([
+      { body: "Stripe checkout. Mollie for NL.", expectedVersion: 1 },
+      { body: "Stripe checkout. Mollie for NL. Adyen too.", expectedVersion: 1 },
+    ]);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("shows a refused save under its row, as the controller words it, and puts the text back", async () => {

@@ -62,6 +62,7 @@ export {
 } from "./assistants/rotation";
 export {
   buildMemoryWrite,
+  chooseMemoryBaseVersion,
   computeMemoryFill,
   describeShrinkLoss,
   describeTopicCount,
@@ -80,6 +81,7 @@ export {
   updateMemoryEntry,
   type MemoryEdit,
   type MemoryEdits,
+  type MemoryFieldEditStart,
   type NewTopicDraft,
 } from "./assistants/memory";
 // Re-exported so the screens that show how full an unsaved memory text is

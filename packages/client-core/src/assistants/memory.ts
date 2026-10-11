@@ -138,6 +138,36 @@ export const mergeMemoryEdit = (
 };
 
 /**
+ * Where the user began editing one field of a memory document: the text the
+ * field showed when typing began, and the version of the document then.
+ */
+export interface MemoryFieldEditStart {
+  readonly field: "gist" | "body";
+  readonly shown: string;
+  readonly version: number;
+}
+
+/**
+ * Returns the version a save of one field, begun at `start`, is made against,
+ * given `cached`, the document as it is cached when the save runs. A save
+ * sends it as `expectedVersion`.
+ *
+ * - When the cached field still holds the text it showed when typing began,
+ *   nobody changed that field since, so the save is made against `cached`.
+ *   The user's own saves stored in between move the version on this way,
+ *   and a write to another field is kept, because the save sends the cached
+ *   value of every field it does not edit.
+ * - Otherwise the save is made against `start.version`, and the controller
+ *   refuses it when anyone wrote the document since. A read that brings
+ *   another writer's text never moves the version on, so the save cannot
+ *   replace text the user did not see.
+ */
+export const chooseMemoryBaseVersion = (
+  cached: MemoryDocument,
+  start: MemoryFieldEditStart,
+): number => (cached[start.field] === start.shown ? cached.version : start.version);
+
+/**
  * Builds the `memory.write` input that stores the edited document.
  *
  * - The body is always sent, because a write replaces the whole body.
