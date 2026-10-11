@@ -4,12 +4,17 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
 import { signalsToDoQuery } from "../app/queries";
 import { IntakeIcon } from "../icons/intake";
+import { WorkflowsIcon } from "../icons/workflows";
 import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
 
 /**
- * Renders the Hercule face's Work section: the Intake row, selected while
- * Intake is open, ending in its To do count in marigold. The count is hidden
- * at 0.
+ * Renders the Hercule face's Work section, each row selected while its
+ * screen is open:
+ *
+ * - Intake, ending in its To do count in marigold. The count is hidden at 0.
+ * - Workflows, with no count: a total of the user's workflows gives the user
+ *   nothing to act on. What a run waits on the user for shows in Waiting on
+ *   you instead.
  *
  * The shell's loader reads the To do list and keeps it cached for the life
  * of the window, so nothing here waits in practice.
@@ -36,6 +41,10 @@ export function WorkSection(): JSX.Element {
         <IntakeIcon />
         <span>Intake</span>
         {toDoCount > 0 && <b className="count count--you">{toDoCount}</b>}
+      </Link>
+      <Link to="/workflows" className="nav-row" activeProps={SELECTED_LINK_PROPS}>
+        <WorkflowsIcon />
+        <span>Workflows</span>
       </Link>
     </section>
   );

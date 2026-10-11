@@ -37,19 +37,20 @@ import { MainWindow } from "./main-window";
  *   face. They take ⌥⌘ because ⌘1 to ⌘9 already pick an item in Go.
  *   `development` adds Reload and Toggle Developer Tools, under a separator.
  * - Go starts with Office, ⌘⇧O, which calls `openOffice`, then Intake, ⌘⇧I,
- *   which calls `openIntake`, because both are places to go, as a thread
- *   is. Below a separator it lists
- *   `goItems`, the first nine the page sends, with ⌘1 to ⌘9, each with its
- *   title. Choosing one calls `openDestination` with its destination. With
- *   no item, one dimmed "No Threads" stands in for them.
+ *   which calls `openIntake`, then Workflows, ⌘⇧W, which calls
+ *   `openWorkflows`, because all three are places to go, as a thread is.
+ *   Below a separator it lists `goItems`, the first nine the page sends,
+ *   with ⌘1 to ⌘9, each with its title. Choosing one calls
+ *   `openDestination` with its destination. With no item, one dimmed
+ *   "No Threads" stands in for them.
  * - Thread holds Send, ⌘↵, which calls `send`. It is always enabled: main
  *   cannot tell whether the page has anything to send, and with nothing to
  *   send the page does nothing, as ⏎ in an empty field does.
  * - Edit and Window are Electron's own.
- * - Settings…, Sign Out, New Thread, Threads, Hercule, Office and Intake are
- *   enabled only when `signedIn` is true. Only the shell carries them out, and the shell never
- *   shows while signed out, so they are dimmed then rather than doing
- *   nothing. Main knows only whether a login token is stored, so from the
+ * - Settings…, Sign Out, New Thread, Threads, Hercule, Office, Intake and
+ *   Workflows are enabled only when `signedIn` is true. Only the shell
+ *   carries them out, and the shell never shows while signed out, so they
+ *   are dimmed then rather than doing nothing. Main knows only whether a login token is stored, so from the
  *   first run's account step to its end they stay enabled and do nothing.
  *
  * The app menu lists its items itself, because Electron's own app menu takes
@@ -68,6 +69,7 @@ const buildMenuTemplate = (options: {
   readonly newThread: () => void;
   readonly openOffice: () => void;
   readonly openIntake: () => void;
+  readonly openWorkflows: () => void;
   readonly showThreadsFace: () => void;
   readonly showOrchestrationFace: () => void;
   readonly openSettings: () => void;
@@ -158,6 +160,12 @@ const buildMenuTemplate = (options: {
           enabled: options.signedIn,
           click: options.openIntake,
         },
+        {
+          label: "Workflows",
+          accelerator: "CmdOrCtrl+Shift+W",
+          enabled: options.signedIn,
+          click: options.openWorkflows,
+        },
         { type: "separator" },
         ...(options.goItems.length === 0
           ? [{ label: "No Threads", enabled: false }]
@@ -182,8 +190,9 @@ export class MainMenu extends Context.Service<
   {
     /**
      * Enables Settings…, Sign Out, New Thread, View's Threads and Hercule,
-     * Office and Intake when `signedIn` is true. Otherwise disables them and removes
-     * the Go menu's items, which the app can no longer open.
+     * Office, Intake and Workflows when `signedIn` is true. Otherwise
+     * disables them and removes the Go menu's items, which the app can no
+     * longer open.
      */
     readonly setSignedIn: (signedIn: boolean) => Effect.Effect<void>;
 
@@ -202,9 +211,9 @@ export class MainMenu extends Context.Service<
  * Sign Out, start enabled when a login token is stored, and Go lists no
  * item until the page sends its items.
  *
- * Choosing Settings…, Sign Out, New Thread, Threads, Hercule, Office, Intake
- * or Send
- * shows the window and sends the page that menu command. Choosing an item in
+ * Choosing Settings…, Sign Out, New Thread, Threads, Hercule, Office,
+ * Intake, Workflows or Send shows the window and sends the page that menu
+ * command. Choosing an item in
  * Go shows the window and asks the page to open its destination.
  * `development` adds Reload and Toggle Developer Tools to the View menu.
  *
@@ -247,6 +256,7 @@ export const makeMainMenuLayer = (
               newThread: () => sendMenuCommand("newThread"),
               openOffice: () => sendMenuCommand("openOffice"),
               openIntake: () => sendMenuCommand("openIntake"),
+              openWorkflows: () => sendMenuCommand("openWorkflows"),
               showThreadsFace: () => sendMenuCommand("showThreadsFace"),
               showOrchestrationFace: () => sendMenuCommand("showOrchestrationFace"),
               openSettings: () => sendMenuCommand("openSettings"),

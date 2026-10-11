@@ -71,6 +71,7 @@ import {
   ThreadsIcon,
   UndoIcon,
   UserIcon,
+  WorkflowsIcon,
   WorkspaceIcon,
   type IconProps,
 } from "../icons";
@@ -132,6 +133,7 @@ const ICONS: { readonly [Name in IconName]: (props: IconProps) => JSX.Element } 
   threads: ThreadsIcon,
   undo: UndoIcon,
   user: UserIcon,
+  workflows: WorkflowsIcon,
   workspace: WorkspaceIcon,
 };
 

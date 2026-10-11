@@ -1,8 +1,9 @@
 /**
  * Tests the shell route's data and wiring: the loader's reads, the live
- * connection that keeps them current, File > New Thread, Go > Office, and
- * what the shell sends main for the dock badge, the notifications and the Go
- * menu, and opens when main asks for a thread or an assistant.
+ * connection that keeps them current, File > New Thread, Go > Office and
+ * Go > Workflows, what the shell sends main for the dock badge, the
+ * notifications and the Go menu, and what it opens when main asks for a
+ * thread or an assistant.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
@@ -51,6 +52,15 @@ afterEach(() => {
 /** Counts the reads of one path, such as `/api/v1/sessions`, among `calls`. */
 const countReads = (calls: readonly Call[], path: string): number =>
   calls.filter((call) => call.method === "GET" && call.path === path).length;
+
+/** Checks whether `call` reads the thread list, not another listing of sessions. */
+const readsThreads = (call: Call): boolean =>
+  call.method === "GET" &&
+  call.path === "/api/v1/sessions" &&
+  new URLSearchParams(call.search).get("thread") === "true";
+
+/** Counts the reads of the thread list among `calls`. */
+const countThreadReads = (calls: readonly Call[]): number => calls.filter(readsThreads).length;
 
 /** Ada, an assistant whose current session waits on the user's approval of `make deploy`. */
 const ADA = buildFixtureAssistant({
@@ -180,12 +190,24 @@ describe("the shell's loader", () => {
     expect(context.queryClient.getQueryData(threadsQuery(client).queryKey)).toEqual(
       SIDEBAR_FIXTURE.threads,
     );
-    const reads = calls.filter((call) => call.path === "/api/v1/sessions");
+    const reads = calls.filter(readsThreads);
     expect(
       reads.slice(0, 2).map((call) => Object.fromEntries(new URLSearchParams(call.search))),
     ).toEqual([
       { thread: "true", limit: "500" },
       { thread: "true", limit: "500", cursor: "page-2" },
+    ]);
+    // The shell also reads the live sessions that are not threads, for "From runs".
+    const agentRead = calls.find(
+      (call) =>
+        call.path === "/api/v1/sessions" &&
+        new URLSearchParams(call.search).get("thread") === "false",
+    );
+    expect(new URLSearchParams(agentRead?.search).getAll("status")).toEqual([
+      "queued",
+      "starting",
+      "idle",
+      "busy",
     ]);
   });
 
@@ -232,26 +254,26 @@ describe("the shell's loader", () => {
 describe("the shell's live connection", () => {
   it("reads the thread list again when a session push arrives", async () => {
     const { calls, live } = await startShell();
-    const before = countReads(calls, "/api/v1/sessions");
+    const before = countThreadReads(calls);
 
     act(() => {
       live.pushInvalidation("session", [FIXTURE_THREAD_IDS.flaky]);
     });
     await waitFor(() => {
-      expect(countReads(calls, "/api/v1/sessions")).toBe(before + 1);
+      expect(countThreadReads(calls)).toBe(before + 1);
     });
   });
 
   it("reads the thread list again on a push while Chromium reports the Mac offline", async () => {
     const { calls, live } = await startShell();
-    const before = countReads(calls, "/api/v1/sessions");
+    const before = countThreadReads(calls);
 
     onlineManager.setOnline(false);
     act(() => {
       live.pushInvalidation("session", [FIXTURE_THREAD_IDS.flaky]);
     });
     await waitFor(() => {
-      expect(countReads(calls, "/api/v1/sessions")).toBe(before + 1);
+      expect(countThreadReads(calls)).toBe(before + 1);
     });
   });
 
@@ -267,7 +289,9 @@ describe("the shell's live connection", () => {
     const buildThreads = (at: number): readonly Session[] => [
       { ...SIDEBAR_FIXTURE.threads[0]!, title: `version ${String(at)}` },
     ];
-    const answerThreads: Handler = () => {
+    const answerThreads: Handler = (call) => {
+      // The read of the live sessions that are not threads returns none, and is never held.
+      if (!readsThreads(call)) return { body: { items: [] } };
       const listed = { body: { items: buildThreads(version) } };
       if (!holdReads) return listed;
       running += 1;
@@ -285,7 +309,7 @@ describe("the shell's live connection", () => {
     const queryClient = context.queryClient;
     const threadsKey = threadsQuery(context.controller!.client).queryKey;
     holdReads = true;
-    const before = countReads(calls, "/api/v1/sessions");
+    const before = countThreadReads(calls);
 
     // Counts the pushes the app has handled: each invalidates the `sessions`
     // prefix once.
@@ -306,7 +330,7 @@ describe("the shell's live connection", () => {
       expect(countHandledPushes()).toBe(PUSHES);
     });
     // The first push started a read, and every later one joined it.
-    expect(countReads(calls, "/api/v1/sessions")).toBe(before + 1);
+    expect(countThreadReads(calls)).toBe(before + 1);
     expect(held).toHaveLength(1);
 
     // That read saw version 1. Once it is answered, one more read starts,
@@ -328,7 +352,7 @@ describe("the shell's live connection", () => {
     await waitFor(() => {
       expect(queryClient.isFetching()).toBe(0);
     });
-    expect(countReads(calls, "/api/v1/sessions")).toBe(before + 2);
+    expect(countThreadReads(calls)).toBe(before + 2);
     expect(mostRunning).toBe(1);
   });
 
@@ -497,6 +521,21 @@ describe("Go > Office", () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.backupsKey}`);
     });
+  });
+});
+
+describe("Go > Workflows", () => {
+  it("opens Workflows, and closes the project picker", async () => {
+    const { fake, router } = await startShell({ path: `/threads/${FIXTURE_THREAD_IDS.runbook}` });
+    fake.sendMenuCommand("newThread");
+    await screen.findByRole("dialog", { name: "New thread in" });
+
+    fake.sendMenuCommand("openWorkflows");
+
+    await waitFor(() => {
+      expect(router.state.location.href).toBe("/workflows");
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 
@@ -791,17 +830,14 @@ describe("the assistants", () => {
       ids?: readonly string[],
       conversationIds?: Readonly<Record<string, string | null>>,
     ) => {
-      const threadReads =
-        countReads(calls, "/api/v1/sessions") - calls.filter(readsConversation).length;
+      const threadReads = countThreadReads(calls);
       act(() => {
         live.pushInvalidation("session", ids, conversationIds);
       });
       // The thread list is read again on every push, so its read marks the
       // push as handled.
       await waitFor(() => {
-        expect(countReads(calls, "/api/v1/sessions") - calls.filter(readsConversation).length).toBe(
-          threadReads + 1,
-        );
+        expect(countThreadReads(calls)).toBe(threadReads + 1);
         expect(context.queryClient.isFetching()).toBe(0);
       });
     };

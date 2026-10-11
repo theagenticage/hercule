@@ -100,11 +100,11 @@ function ShellLayout(): JSX.Element {
     "Could not update the urgent signal notifications:",
   );
 
-  // Only a signed-in user can start a thread, open the Office, Intake or
-  // Settings, so only the shell listens for File > New Thread, Go > Office,
-  // Go > Intake and the app menu's Settings. The Office, Intake and Settings,
-  // like a thread opened from the menu, replace whatever the user was doing,
-  // the project picker included.
+  // Only a signed-in user can start a thread, open the Office, Intake,
+  // Workflows or Settings, so only the shell listens for File > New Thread,
+  // Go > Office, Go > Intake, Go > Workflows and the app menu's Settings. The
+  // Office, Intake, Workflows and Settings, like a thread opened from the
+  // menu, replace whatever the user was doing, the project picker included.
   useEffect(
     () =>
       bridge.menu.onCommand((command) => {
@@ -116,6 +116,10 @@ function ShellLayout(): JSX.Element {
         if (command === "openIntake") {
           setDialog(null);
           void navigate({ to: "/intake" });
+        }
+        if (command === "openWorkflows") {
+          setDialog(null);
+          void navigate({ to: "/workflows" });
         }
         if (command === "openSettings") {
           setDialog(null);

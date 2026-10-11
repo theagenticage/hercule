@@ -64,4 +64,5 @@ export { TerminalIcon } from "./terminal";
 export { ThreadsIcon } from "./threads";
 export { UndoIcon } from "./undo";
 export { UserIcon } from "./user";
+export { WorkflowsIcon } from "./workflows";
 export { WorkspaceIcon } from "./workspace";

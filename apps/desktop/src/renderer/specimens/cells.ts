@@ -71,6 +71,7 @@ export type IconName =
   | "threads"
   | "undo"
   | "user"
+  | "workflows"
   | "workspace";
 
 /** What one cell draws. */
@@ -155,6 +156,7 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["threads", []],
   ["undo", [15]],
   ["user", []],
+  ["workflows", []],
   ["workspace", [13, 14, 18, 20]],
 ];
 

@@ -928,7 +928,7 @@ A row for Intake above the threads, on the Threads face, was considered and drop
 
 **The face follows the screen:**
 
-- Intake shows the Hercule face.
+- Intake ~~shows~~ and Workflows show the Hercule face *(amended 2026-10-11, [Desktop Workflows: the workflow list (#550)](https://github.com/theagenticage/hercule/issues/550): Workflows' row is on that face, as Intake's is, and the book draws the Workflows page with it)*.
 - A thread, the new-thread screen and an assistant's Conversation show the Threads face.
 - The Office and Settings keep the face that was showing, because their ways in sit on both faces: the Office in the shared row, Settings at the foot. So nothing on the sidebar moves when Settings opens, as [The frame](#the-frame) requires.
 - The switch changes the face without leaving the open screen. The next screen that has a face of its own sets it again.
