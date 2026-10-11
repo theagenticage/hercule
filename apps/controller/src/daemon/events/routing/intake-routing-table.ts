@@ -3,17 +3,23 @@
  * declares signal kinds. It raises a plugin's signals from the source's
  * events and ends them, as spec 10 §9.2 describes.
  *
- * For each event from one of the source's Connections, in the router's
- * transaction, the route:
+ * The route takes only an event the source's plugin ingested through one of
+ * its Connections. An event emitted by hand with the same kind neither
+ * raises nor ends a signal, because nothing vouches that it happened at the
+ * source.
+ *
+ * For each such event, in the router's transaction, the route:
  *
  * 1. checks the event against the `ends` of each signal kind. An end whose
  *    event kind and condition match resolves the kind's open signals on the
- *    event's thread, and drops the raises of that thread still waiting for
- *    the step after the commit;
+ *    event's thread, drops the raises of that thread still waiting for the
+ *    step after the commit, and records the end, so the same raises are not
+ *    written again when their events are routed again;
  * 2. runs the `rule` of each signal kind that lists the event's kind in
- *    `from`. A `yes` or an `undecided` writes a pending raise, which the
- *    signal raise delivery turns into a signal after the commit, because the
- *    plugin's `build` may call the source.
+ *    `from`. A `yes` or an `undecided` writes a pending raise, unless a later
+ *    event already ended the kind on the thread. The signal raise delivery
+ *    turns the raise into a signal after the commit, because the plugin's
+ *    `build` may call the source.
  *
  * The ends run before the rules, so an event that both ends a signal and
  * raises a new one on the same thread leaves the new one open.
@@ -25,12 +31,13 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { MAX_SIGNAL_OUTCOME_LENGTH, type Event, type SignalResolution } from "@hercule/contract";
+import type { Event, SignalResolution } from "@hercule/contract";
 import { SYSTEM_ACTOR } from "../../../actor";
 import { nowIso } from "../../../db";
 import { AuditLog } from "../../../events";
 import {
   evaluateExpression,
+  formatExpressionValue,
   parseExpression,
   ExpressionError,
   type CompiledExpression,
@@ -43,17 +50,8 @@ import {
 } from "../../../plugins";
 import { runRepository } from "../../../runs";
 import { inputRepository } from "../../../sessions";
-import { signalRepository } from "../../../signals";
+import { signalRepository, truncateOutcome } from "../../../signals";
 import type { Route, RoutingTable } from "../event-router";
-
-/**
- * Cuts an end's outcome line to the length a resolution stores, ending it
- * with "…" when it was longer.
- */
-export const cutOutcome = (outcome: string): string =>
-  outcome.length <= MAX_SIGNAL_OUTCOME_LENGTH
-    ? outcome
-    : `${outcome.slice(0, MAX_SIGNAL_OUTCOME_LENGTH - 1)}…`;
 
 /** One route per active event source that declares signal kinds. */
 export const intakeRoutingTable: Effect.Effect<
@@ -82,29 +80,29 @@ export const intakeRoutingTable: Effect.Effect<
 
       /** Evaluates one of a kind's expressions against the event. */
       const evaluate = (
-        source: string,
+        expression: string,
         context: EvaluationContext,
       ): Effect.Effect<unknown, ExpressionError> =>
         Effect.gen(function* () {
-          let program = compiled.get(source);
+          let program = compiled.get(expression);
           if (program === undefined) {
-            program = yield* parseExpression(source);
-            compiled.set(source, program);
+            program = yield* parseExpression(expression);
+            compiled.set(expression, program);
           }
           return yield* evaluateExpression(program, context);
         });
 
       /** Evaluates an expression that must return a string, such as a thread or an outcome. */
       const evaluateText = (
-        source: string,
+        expression: string,
         context: EvaluationContext,
       ): Effect.Effect<string, ExpressionError> =>
-        Effect.flatMap(evaluate(source, context), (value) =>
+        Effect.flatMap(evaluate(expression, context), (value) =>
           typeof value === "string" && value !== ""
             ? Effect.succeed(value)
             : Effect.fail(
                 new ExpressionError({
-                  message: `it returned ${JSON.stringify(value)} where a non-empty string was expected`,
+                  message: `it returned ${formatExpressionValue(value)} where a non-empty string was expected`,
                 }),
               ),
         );
@@ -116,7 +114,7 @@ export const intakeRoutingTable: Effect.Effect<
        * loaded, so a failure here comes from an event the plugin's author
        * did not foresee, and the plugin's author is the one to read it.
        */
-      const logFailure = (
+      const absorbExpressionError = (
         kind: RegisteredSignalKind,
         step: string,
         effect: Effect.Effect<void, ExpressionError | SqlError>,
@@ -136,7 +134,7 @@ export const intakeRoutingTable: Effect.Effect<
        * ends: rerouting an event must not end the signal the same event, or
        * a later one, raised.
        */
-      const checkEnds = (
+      const endSignalsOnThread = (
         kind: RegisteredSignalKind,
         event: Event & { readonly connectionId: string },
         context: EvaluationContext,
@@ -153,13 +151,14 @@ export const intakeRoutingTable: Effect.Effect<
           }
           if (matched === undefined) return;
           const threadRef = yield* evaluateText(kind.threadRef, context);
-          const outcome = cutOutcome(yield* evaluateText(matched.outcome, context));
+          const outcome = truncateOutcome(yield* evaluateText(matched.outcome, context));
           yield* signals.deleteRaisesOnThreadBefore(
             event.connectionId,
             threadRef,
             kind.kind,
             event.id,
           );
+          yield* signals.recordThreadEnd(event.connectionId, threadRef, kind.kind, event.id);
           const open = yield* signals.listOpenOnThread(event.connectionId, threadRef, kind.kind);
           for (const signal of open.filter((candidate) => candidate.eventId < event.id)) {
             const resolution: SignalResolution = {
@@ -184,9 +183,13 @@ export const intakeRoutingTable: Effect.Effect<
 
       /**
        * Runs the kind's rule on the event, and writes a pending raise for a
-       * `yes` or an `undecided`. A kind that does not name the user is not
-       * raised when a Subscription already received the event, because a
-       * session or a run is handling it.
+       * `yes` or an `undecided`. No raise is written when:
+       *
+       * - the kind does not name the user and a Subscription already
+       *   received the event, because a session or a run is handling it;
+       * - a later event already ended the kind on the event's thread, so
+       *   the question was answered. This happens when the event is routed
+       *   again, such as after enrichment.
        */
       const runRule = (
         kind: RegisteredSignalKind,
@@ -199,7 +202,7 @@ export const intakeRoutingTable: Effect.Effect<
           if (decision !== "yes" && decision !== "undecided") {
             return yield* Effect.fail(
               new ExpressionError({
-                message: `the rule returned ${JSON.stringify(decision)}, where "yes", "no" or "undecided" was expected`,
+                message: `the rule returned ${formatExpressionValue(decision)}, where "yes", "no" or "undecided" was expected`,
               }),
             );
           }
@@ -210,18 +213,25 @@ export const intakeRoutingTable: Effect.Effect<
             return;
           }
           const threadRef = yield* evaluateText(kind.threadRef, context);
+          if (
+            yield* signals.hasThreadEndAfter(event.connectionId, threadRef, kind.kind, event.id)
+          ) {
+            return;
+          }
           yield* signals.insertRaise({
             eventId: event.id,
             kind: kind.kind,
             decision,
             connectionId: event.connectionId,
             threadRef,
-            createdAt: yield* nowIso,
           });
         });
 
       const buildRoute = (source: RegisteredEventSource): Route => ({
-        admits: (event) => event.connectionId !== null && source.kinds.has(event.kind),
+        admits: (event) =>
+          event.source === source.pluginId &&
+          event.connectionId !== null &&
+          source.kinds.has(event.kind),
         condition: undefined,
         // A route here has no health of its own. Each failure belongs to one
         // signal kind, not to the route, and is logged as it happens, so the
@@ -232,11 +242,15 @@ export const intakeRoutingTable: Effect.Effect<
             // `admits` lets through only an event with a Connection.
             const fromConnection = event as Event & { readonly connectionId: string };
             for (const kind of source.signalKinds) {
-              yield* logFailure(kind, "end check", checkEnds(kind, fromConnection, context));
+              yield* absorbExpressionError(
+                kind,
+                "end check",
+                endSignalsOnThread(kind, fromConnection, context),
+              );
             }
             for (const kind of source.signalKinds) {
               if (!kind.from.includes(event.kind)) continue;
-              yield* logFailure(kind, "rule", runRule(kind, fromConnection, context));
+              yield* absorbExpressionError(kind, "rule", runRule(kind, fromConnection, context));
             }
           }),
         recordEvaluationFailure: () => Effect.void,

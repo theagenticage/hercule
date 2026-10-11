@@ -14,7 +14,8 @@ export {
 export { IngestExecutor } from "./ingest-executor";
 export { OpenSignals } from "./open-signals";
 export type { RegisteredEventSource } from "./event-sources";
-export { signalBuilds, type SignalDraftContent } from "./signal-build";
+export { summarizeCause, truncateMessage } from "./errors";
+export { BUILD_TIMEOUT_SECONDS, signalBuilds } from "./signal-build";
 export type { RegisteredSignalKind } from "./signal-kinds";
 export { registry } from "./registry";
 export { Plugins, PluginsLayer } from "./service";

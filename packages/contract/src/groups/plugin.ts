@@ -84,7 +84,8 @@ export type PluginContribution = Schema.Schema.Type<typeof PluginContribution>;
  *
  * `mark` is absent for a plugin that declares no mark, or whose mark failed
  * the core's check; the apps then draw the plugin's initial. `markError`
- * says why the core dropped the plugin's mark, for Settings > Plugins.
+ * holds the reason the core dropped the plugin's mark, which Settings >
+ * Plugins shows.
  */
 export const PluginDetail = Schema.Struct({
   id: PluginId,

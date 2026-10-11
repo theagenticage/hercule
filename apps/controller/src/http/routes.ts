@@ -76,7 +76,7 @@ import {
   WorkspaceStepsLayer,
 } from "../daemon";
 import { NotificationService, NotificationServiceLayer } from "../notifications";
-import { SignalService, SignalServiceLayer } from "../signals";
+import { SignalRaisesLayer, SignalService, SignalServiceLayer } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
@@ -738,9 +738,9 @@ const PermissionRequestsDomainLayer = PermissionRequestsLayer.pipe(
  * operation of a chosen answer. The operation can be a task, run, live
  * session or Permission Request operation, so the port gets the run layers,
  * which include the task service, and the Permission Request use case. The
- * notification and signal services run answers through it, and the signal
- * raise delivery checks a plugin's answers with it. Both are provided this
- * one layer, so it is built once.
+ * notification and signal services run answers through it, and
+ * `SignalRaises` checks a plugin's answers with it. All three are provided
+ * this one layer, so it is built once.
  */
 const BoundOperationsDomainLayer = BoundOperationsLayer.pipe(
   Layer.provide(RunDomainLayer),
@@ -829,8 +829,9 @@ export const operationLayers = Layer.mergeAll(
     // effect, and its failed filter on its health. The pipeline also starts
     // the runs of the matches, and the trigger effects start them through
     // the run service (`TriggeredRunsLayer`), so the trigger effects are
-    // provided above the run domain. The signal raise delivery checks a
-    // plugin's answers through `BoundOperations`.
+    // provided above the run domain. The pipeline raises Intake's signals
+    // through `SignalRaises`, which checks a plugin's answers through
+    // `BoundOperations`.
     Layer.mergeAll(
       PipelineLayer,
       EnrichmentLayer.pipe(
@@ -839,8 +840,8 @@ export const operationLayers = Layer.mergeAll(
     ).pipe(
       Layer.provideMerge(EventRouterLayer),
       Layer.provide(TriggerEffectsLayer.pipe(Layer.provide(TriggeredRunsLayer))),
+      Layer.provide(SignalRaisesLayer.pipe(Layer.provide(BoundOperationsDomainLayer))),
       Layer.provide(RunDomainLayer),
-      Layer.provide(BoundOperationsDomainLayer),
     ),
   ).pipe(
     Layer.provideMerge(AssistantServiceLayer),

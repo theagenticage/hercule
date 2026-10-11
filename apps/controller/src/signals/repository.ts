@@ -128,17 +128,17 @@ const parseRow = (row: SignalRow): Signal => ({
 });
 
 /** An open signal raised from an event, as the lookups by Connection and thread return it. */
-export interface OpenSignalOnThread {
+interface OpenEventSignal {
   readonly id: string;
   /** The qualified kind, such as `github/review-requested`. */
   readonly kind: string;
   readonly threadRef: string;
   /** The id of the event the signal was raised from. */
   readonly eventId: number;
-  readonly createdAt: string;
+  readonly raisedAt: string;
 }
 
-interface OpenSignalOnThreadRow {
+interface OpenEventSignalRow {
   readonly id: Uint8Array;
   readonly kind: string;
   readonly thread_ref: string;
@@ -158,7 +158,6 @@ export interface PendingRaise {
   readonly decision: "yes" | "undecided";
   readonly connectionId: string;
   readonly threadRef: string;
-  readonly createdAt: string;
 }
 
 interface PendingRaiseRow {
@@ -167,7 +166,6 @@ interface PendingRaiseRow {
   readonly decision: "yes" | "undecided";
   readonly connection_id: Uint8Array;
   readonly thread_ref: string;
-  readonly created_at: string;
 }
 
 /**
@@ -175,14 +173,14 @@ interface PendingRaiseRow {
  * from an event has a Connection and a thread, so its origin is always the
  * `event` origin.
  */
-const parseOpenSignalOnThreadRow = (row: OpenSignalOnThreadRow): OpenSignalOnThread => {
+const parseOpenEventSignalRow = (row: OpenEventSignalRow): OpenEventSignal => {
   const origin = JSON.parse(row.origin) as Extract<SignalOrigin, { readonly type: "event" }>;
   return {
     id: uuidToString(row.id),
     kind: row.kind,
     threadRef: row.thread_ref,
     eventId: origin.eventId,
-    createdAt: row.created_at,
+    raisedAt: row.created_at,
   };
 };
 
@@ -505,17 +503,17 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the open signals raised from the events of one Connection,
-     * oldest first: each one's kind, thread and creation time. An event
+     * oldest first: each one's kind, thread and the time it was raised. An event
      * source reads them to know which threads still wait on the user.
      */
     listOpenOnConnection: (
       connectionId: string,
-    ): Effect.Effect<ReadonlyArray<OpenSignalOnThread>, SqlError> =>
-      sql<OpenSignalOnThreadRow>`
+    ): Effect.Effect<ReadonlyArray<OpenEventSignal>, SqlError> =>
+      sql<OpenEventSignalRow>`
         SELECT id, kind, thread_ref, origin, created_at FROM signals
         WHERE status = 'open' AND connection_id = ${uuidFromString(connectionId)}
         ORDER BY created_at, id
-      `.pipe(Effect.map((rows) => rows.map(parseOpenSignalOnThreadRow))),
+      `.pipe(Effect.map((rows) => rows.map(parseOpenEventSignalRow))),
 
     /**
      * Returns the open signals of one kind on one thread of a Connection,
@@ -526,13 +524,13 @@ const make = Effect.gen(function* () {
       connectionId: string,
       threadRef: string,
       kind: string,
-    ): Effect.Effect<ReadonlyArray<OpenSignalOnThread>, SqlError> =>
-      sql<OpenSignalOnThreadRow>`
+    ): Effect.Effect<ReadonlyArray<OpenEventSignal>, SqlError> =>
+      sql<OpenEventSignalRow>`
         SELECT id, kind, thread_ref, origin, created_at FROM signals
         WHERE status = 'open' AND connection_id = ${uuidFromString(connectionId)}
           AND thread_ref = ${threadRef} AND kind = ${kind}
         ORDER BY created_at, id
-      `.pipe(Effect.map((rows) => rows.map(parseOpenSignalOnThreadRow))),
+      `.pipe(Effect.map((rows) => rows.map(parseOpenEventSignalRow))),
 
     /** Records that the signal `newId` replaced the resolved signal `oldId`. */
     recordReplacement: (oldId: string, newId: string): Effect.Effect<void, SqlError> =>
@@ -545,7 +543,7 @@ const make = Effect.gen(function* () {
      * `eventId`, open or resolved. The step that raises a signal from an event
      * asks it, so a raise it runs a second time writes nothing.
      */
-    hasSignalForEvent: (kind: string, eventId: number): Effect.Effect<boolean, SqlError> =>
+    hasSignalForEvent: (eventId: number, kind: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly found: number }>`
           SELECT 1 AS found FROM signal_events
@@ -584,17 +582,17 @@ const make = Effect.gen(function* () {
     insertRaise: (raise: PendingRaise): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         INSERT OR IGNORE INTO signal_raises
-          (event_id, kind, decision, connection_id, thread_ref, created_at)
+          (event_id, kind, decision, connection_id, thread_ref)
         VALUES
           (${raise.eventId}, ${raise.kind}, ${raise.decision},
-           ${uuidFromString(raise.connectionId)}, ${raise.threadRef}, ${raise.createdAt})
+           ${uuidFromString(raise.connectionId)}, ${raise.threadRef})
       `),
 
     /** Returns every pending raise, oldest event first. */
     listPendingRaises: (): Effect.Effect<ReadonlyArray<PendingRaise>, SqlError> =>
       Effect.map(
         sql<PendingRaiseRow>`
-          SELECT event_id, kind, decision, connection_id, thread_ref, created_at
+          SELECT event_id, kind, decision, connection_id, thread_ref
           FROM signal_raises ORDER BY event_id, kind
         `,
         (rows) =>
@@ -604,13 +602,22 @@ const make = Effect.gen(function* () {
             decision: row.decision,
             connectionId: uuidToString(row.connection_id),
             threadRef: row.thread_ref,
-            createdAt: row.created_at,
           })),
       ),
 
-    /** Deletes one pending raise, once its signal is written or it is skipped. */
-    deleteRaise: (eventId: number, kind: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`DELETE FROM signal_raises WHERE event_id = ${eventId} AND kind = ${kind}`),
+    /**
+     * Deletes one pending raise, once its signal is written or it is skipped.
+     * Returns false when the raise was already gone, because an end on its
+     * thread dropped it, or another pass handled it.
+     */
+    deleteRaise: (eventId: number, kind: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly event_id: number }>`
+          DELETE FROM signal_raises WHERE event_id = ${eventId} AND kind = ${kind}
+          RETURNING event_id
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Deletes the pending raises of `kind` on one thread of a Connection
@@ -629,6 +636,44 @@ const make = Effect.gen(function* () {
         WHERE connection_id = ${uuidFromString(connectionId)} AND thread_ref = ${threadRef}
           AND kind = ${kind} AND event_id < ${beforeEventId}
       `),
+
+    /**
+     * Records that the event `eventId` ended `kind` on one thread of a
+     * Connection. Keeps the latest such event when one is already recorded,
+     * because an older event routed again may record an older end.
+     */
+    recordThreadEnd: (
+      connectionId: string,
+      threadRef: string,
+      kind: string,
+      eventId: number,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        INSERT INTO signal_thread_ends (connection_id, thread_ref, kind, event_id)
+        VALUES (${uuidFromString(connectionId)}, ${threadRef}, ${kind}, ${eventId})
+        ON CONFLICT (connection_id, thread_ref, kind)
+        DO UPDATE SET event_id = MAX(event_id, excluded.event_id)
+      `),
+
+    /**
+     * Checks whether an event later than `eventId` ended `kind` on one thread
+     * of a Connection. A raise from `eventId` would then ask a question that
+     * was already answered.
+     */
+    hasThreadEndAfter: (
+      connectionId: string,
+      threadRef: string,
+      kind: string,
+      eventId: number,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT 1 AS found FROM signal_thread_ends
+          WHERE connection_id = ${uuidFromString(connectionId)} AND thread_ref = ${threadRef}
+            AND kind = ${kind} AND event_id > ${eventId}
+        `,
+        (rows) => rows.length > 0,
+      ),
   };
 });
 

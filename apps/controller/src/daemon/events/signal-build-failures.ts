@@ -10,6 +10,11 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SignalBuildFailures } from "../../notifications";
 import { signalRepository } from "../../signals";
 
+/**
+ * Provides `SignalBuildFailures`: `countSince(kind, sinceEventId)` returns how
+ * many signals of `kind` were raised with a failed `build` from event
+ * `sinceEventId` or a later one. Fails only on a database error.
+ */
 export const SignalBuildFailuresLayer: Layer.Layer<
   SignalBuildFailures,
   never,

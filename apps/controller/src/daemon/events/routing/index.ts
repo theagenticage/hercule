@@ -11,14 +11,15 @@
  *   route per active event source that declares signal kinds. Intake's is
  *   last, because it reads what the others wrote for the same event to tell
  *   whether a session or a run already handles it;
- * - three deliveries: one for queued inputs, whoever wrote them (a routing
- *   table or a person typing), one that starts the runs of the start
- *   triggers that matched, and one that turns Intake's raises into signals.
+ * - two deliveries that run on each tick: one for queued inputs, whoever
+ *   wrote them (a routing table or a person typing), and one that starts the
+ *   runs of the start triggers that matched;
+ * - the signal raise delivery, which turns Intake's raises into signals. The
+ *   pipeline runs it on a loop of its own, because it waits on each
+ *   plugin's `build`, and a slow `build` must not hold back the tick.
  */
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { BoundOperations } from "../../../bound-actions";
-import type { ConnectionTypes } from "../../../connections";
 import type { AuditLog } from "../../../events";
 import type { Notifier } from "../../../notifications";
 import type { PluginHost } from "../../../plugins";
@@ -30,7 +31,6 @@ import { Live } from "../../sessions";
 import { intakeRoutingTable } from "./intake-routing-table";
 import { queuedInputDelivery } from "./queued-input-delivery";
 import { sessionRoutingTable } from "./session-routing-table";
-import { signalRaiseDelivery } from "./signal-raise-delivery";
 import { signalRoutingTable } from "./signal-routing-table";
 import { triggerEffectDelivery } from "./trigger-effect-delivery";
 import { triggerRoutingTable } from "./trigger-routing-table";
@@ -53,16 +53,11 @@ export const buildRoutingTables: Effect.Effect<
   | AuditLog
 > = Effect.all([sessionRoutingTable, signalRoutingTable, triggerRoutingTable, intakeRoutingTable]);
 
-/** Builds every delivery that sends the rows waiting to go out, whoever wrote them. */
-export const buildDeliveries: Effect.Effect<
+/** Builds the deliveries each tick runs after the routing pass. */
+export const buildTickDeliveries: Effect.Effect<
   ReadonlyArray<Delivery>,
   never,
-  | SqlClient.SqlClient
-  | Live
-  | TriggerEffects
-  | PluginHost
-  | ConnectionTypes
-  | BoundOperations
-  | Notifier
-  | AuditLog
-> = Effect.all([queuedInputDelivery, triggerEffectDelivery, signalRaiseDelivery]);
+  SqlClient.SqlClient | Live | TriggerEffects
+> = Effect.all([queuedInputDelivery, triggerEffectDelivery]);
+
+export { signalRaiseDelivery } from "./signal-raise-delivery";

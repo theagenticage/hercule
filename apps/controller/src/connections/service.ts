@@ -285,10 +285,6 @@ const describeIntervalPastExpiry = (interval: number): string =>
 const ACCOUNT_CHECK_RETRY = { schedule: Schedule.exponential("1 second"), times: 2 };
 
 /**
- * Checks whether new credentials belong to another account than the one the
- * connection signs in as.
- */
-/**
  * Returns the warning a Connection type's `validate` returned with the
  * account, cut to the length of a plugin message, or null when it returned
  * none. Null clears the warning a reconnect's earlier credentials left.
@@ -304,6 +300,10 @@ const buildWarningField = (account: ExternalAccount): { readonly warning?: strin
   return warning === null ? {} : { warning };
 };
 
+/**
+ * Checks whether new credentials belong to another account than the one the
+ * connection signs in as.
+ */
 const isOtherAccount = (account: ExternalAccount, connection: StoredConnection): boolean =>
   connection.accountId !== account.accountId;
 

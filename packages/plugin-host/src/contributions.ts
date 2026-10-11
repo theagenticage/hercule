@@ -2,6 +2,7 @@ import { type Effect, Schema } from "effect";
 import { AccessMode } from "@hercule/protocol";
 import type { ConnectionUnavailable } from "./connections";
 import { SchemaValue } from "./manifest";
+import { TaskPriority } from "./limits";
 import type { KeyValueStore, PluginError } from "./plugin";
 
 const Support = Schema.Literals(["native", "unsupported"]);
@@ -348,12 +349,6 @@ export interface EventSourceContribution {
 }
 
 /**
- * The priorities a signal may have, highest first. `urgent` shows as Now.
- * They are a Task's priorities, so a signal and the Task made from it agree.
- */
-export type SignalPriority = "urgent" | "high" | "normal" | "low";
-
-/**
  * One kind of Signal an event source can raise, such as a review request.
  * Everything but `build` is data that the core evaluates: the plugin never
  * writes a Signal itself. Each expression is CEL over `event`, the stored
@@ -389,7 +384,7 @@ export interface SignalKindDeclaration {
   readonly guidance: string;
   readonly threadRef: string;
   readonly namesYou: boolean;
-  readonly priority: SignalPriority;
+  readonly priority: TaskPriority;
   readonly matchFields: ReadonlyArray<SignalMatchField>;
   readonly ends: ReadonlyArray<SignalEndDeclaration>;
   readonly build: (
@@ -452,27 +447,6 @@ export interface SignalBuildContext {
 }
 
 /**
- * The content `build` returns for one signal. The core checks it against the
- * signal's schema. When the check fails, the core writes the signal from the
- * event instead, as it does when `build` fails.
- *
- * - `asker` is who waits on the user ("marta"), and `place` is where the
- *   question is asked ("acme/webshop#1296").
- * - `blocks` are the signal's body. Their types and limits are the
- *   contract's `Block`.
- * - `actions` are the plugin's own answers. The core adds Done and the
- *   workflows that can take the signal, so `build` never declares them.
- */
-export interface SignalDraft {
-  readonly title: string;
-  readonly asker?: string;
-  readonly place?: string;
-  readonly priority?: SignalPriority;
-  readonly blocks: ReadonlyArray<{ readonly type: string }>;
-  readonly actions: ReadonlyArray<SignalDraftAction>;
-}
-
-/**
  * One answer `build` lays out. It binds one of the plugin's own workflow
  * actions, named by its unqualified id (`pr.review`), so a plugin can bind no
  * other plugin's action. The core qualifies the id and binds the signal's own
@@ -484,15 +458,46 @@ export interface SignalDraft {
  *   field of `input` that the user's text fills in, and `placeholder` is the
  *   grey text of the empty box.
  */
-export interface SignalDraftAction {
-  readonly id: string;
-  readonly label: string;
-  readonly description?: string;
-  readonly action: string;
-  readonly input: Readonly<Record<string, unknown>>;
-  readonly primary?: boolean;
-  readonly field?: { readonly name: string; readonly placeholder: string };
-}
+export const SignalDraftAction = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  description: Schema.optionalKey(Schema.String),
+  action: Schema.String,
+  input: Schema.Record(Schema.String, Schema.Unknown),
+  primary: Schema.optionalKey(Schema.Boolean),
+  field: Schema.optionalKey(Schema.Struct({ name: Schema.String, placeholder: Schema.String })),
+});
+
+export type SignalDraftAction = Schema.Schema.Type<typeof SignalDraftAction>;
+
+/**
+ * The content `build` returns for one signal. The core decodes it with this
+ * schema, which checks only its shape, and then checks the whole signal
+ * against the contract. When either check fails, the core writes the signal
+ * from the event instead, as it does when `build` fails.
+ *
+ * - `asker` is who waits on the user ("marta"), and `place` is where the
+ *   question is asked ("acme/webshop#1296").
+ * - `blocks` are the signal's body. Their types and limits are the
+ *   contract's `Block`. Here a block needs only its `type`, and its other
+ *   fields are kept as they are, for the contract's check to read.
+ * - `actions` are the plugin's own answers. The core adds Done and the
+ *   workflows that can take the signal, so `build` never declares them.
+ */
+export const SignalDraft = Schema.Struct({
+  title: Schema.String,
+  asker: Schema.optionalKey(Schema.String),
+  place: Schema.optionalKey(Schema.String),
+  priority: Schema.optionalKey(TaskPriority),
+  blocks: Schema.Array(
+    Schema.StructWithRest(Schema.Struct({ type: Schema.String }), [
+      Schema.Record(Schema.String, Schema.Unknown),
+    ]),
+  ),
+  actions: Schema.Array(SignalDraftAction),
+});
+
+export type SignalDraft = Schema.Schema.Type<typeof SignalDraft>;
 
 /**
  * The id and display name of a workflow action. Both are stored in a column

@@ -8,110 +8,91 @@
  * contract, because only the caller knows the core's own actions.
  */
 import * as Cause from "effect/Cause";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import type { SqlError } from "effect/unstable/sql/SqlError";
-import { TaskPriority, type Event } from "@hercule/contract";
-import { decodeAgainst, PluginError } from "@hercule/plugin-host";
-import { connectionRepository, ConnectionTypes } from "../connections";
+import type { Event } from "@hercule/contract";
+import { decodeAgainst, PluginError, SignalDraft } from "@hercule/plugin-host";
+import { ConnectionTypes, type StoredConnection } from "../connections";
 import { describeFieldIssues, summarizeCause } from "./errors";
 import type { RegisteredSignalKind } from "./signal-kinds";
 
 /**
- * The shape a draft must have before the core reads it. The values are
- * checked later, against the `Signal` schema, once the core has added its
- * own actions.
+ * How long one `build` may run, in seconds. The signal raise step waits for
+ * each `build` before it moves on to the next raise, so a `build` that hangs
+ * would otherwise hold back every signal behind it.
  */
-const SignalDraftShape = Schema.Struct({
-  title: Schema.String,
-  asker: Schema.optionalKey(Schema.String),
-  place: Schema.optionalKey(Schema.String),
-  priority: Schema.optionalKey(TaskPriority),
-  blocks: Schema.Array(Schema.Unknown),
-  actions: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      label: Schema.String,
-      description: Schema.optionalKey(Schema.String),
-      action: Schema.String,
-      input: Schema.Record(Schema.String, Schema.Unknown),
-      primary: Schema.optionalKey(Schema.Boolean),
-      field: Schema.optionalKey(Schema.Struct({ name: Schema.String, placeholder: Schema.String })),
-    }),
-  ),
-});
+export const BUILD_TIMEOUT_SECONDS = 30;
 
-/** A draft `build` returned, with the shape the core reads. */
-export type SignalDraftContent = Schema.Schema.Type<typeof SignalDraftShape>;
-
-const decodeSignalDraft = Schema.decodeUnknownEffect(SignalDraftShape, { errors: "all" });
+const decodeSignalDraft = Schema.decodeUnknownEffect(SignalDraft, { errors: "all" });
 
 export const signalBuilds = Effect.gen(function* () {
-  const connections = yield* connectionRepository;
   const connectionTypes = yield* ConnectionTypes;
 
   return {
     /**
-     * Runs `kind`'s `build` on `event`, which arrived through the Connection
-     * `connectionId`, and returns the draft. Fails with a `PluginError`
-     * whose message says why when:
+     * Runs `kind`'s `build` on `event`, which arrived through `connection`,
+     * and returns the draft. Fails with a `PluginError` whose message names
+     * the problem when:
      *
-     * - the Connection no longer exists, or its config no longer fits its
-     *   type's schema;
-     * - `build` fails, or throws;
+     * - the Connection's config no longer fits its type's schema;
+     * - `build` fails, throws, or runs longer than `BUILD_TIMEOUT_SECONDS`;
      * - the draft does not have the shape of a `SignalDraft`.
      */
     run: (
       kind: RegisteredSignalKind,
       event: Event,
-      connectionId: string,
-    ): Effect.Effect<SignalDraftContent, PluginError | SqlError> =>
+      connection: StoredConnection,
+    ): Effect.Effect<SignalDraft, PluginError> =>
       Effect.gen(function* () {
-        const connection = yield* connections.one(connectionId);
-        if (Option.isNone(connection)) {
-          return yield* Effect.fail(
-            new PluginError({ message: `the Connection ${connectionId} no longer exists` }),
-          );
-        }
-        const stored = connection.value;
-        const type = yield* connectionTypes.named(stored.type);
+        const type = yield* connectionTypes.named(connection.type);
         const configSchema = Option.getOrUndefined(type)?.contribution.configSchema;
         const config =
           configSchema === undefined
-            ? stored.config
+            ? connection.config
             : yield* Effect.mapError(
-                decodeAgainst(configSchema, stored.config),
+                decodeAgainst(configSchema, connection.config),
                 (error) =>
                   new PluginError({
                     message: `the Connection's config does not fit its type: ${describeFieldIssues(error)}`,
                   }),
               );
-        const built = yield* Effect.exit(
-          Effect.suspend(() =>
-            kind.build(
-              {
-                id: event.id,
-                kind: event.kind,
-                occurredAt: event.occurredAt,
-                payload: event.payload,
-                refs: event.refs,
-                url: event.url,
-                title: event.title,
-                author: event.author,
+        const build = Effect.suspend(() =>
+          kind.build(
+            {
+              id: event.id,
+              kind: event.kind,
+              occurredAt: event.occurredAt,
+              payload: event.payload,
+              refs: event.refs,
+              url: event.url,
+              title: event.title,
+              author: event.author,
+            },
+            {
+              connection: {
+                id: connection.id,
+                config,
+                accountId: connection.accountId,
+                displayName: connection.displayName,
               },
-              {
-                connection: {
-                  id: stored.id,
-                  config,
-                  accountId: stored.accountId,
-                  displayName: stored.displayName,
-                },
-                credentials: () => connectionTypes.runtimeFor(kind.pluginId).credentials(stored.id),
-              },
-            ),
+              credentials: () =>
+                connectionTypes.runtimeFor(kind.pluginId).credentials(connection.id),
+            },
           ),
+        );
+        const built = yield* Effect.exit(
+          Effect.timeoutOrElse(Effect.interruptible(build), {
+            duration: Duration.seconds(BUILD_TIMEOUT_SECONDS),
+            orElse: () =>
+              Effect.fail(
+                new PluginError({
+                  message: `build did not return within ${BUILD_TIMEOUT_SECONDS} seconds`,
+                }),
+              ),
+          }),
         );
         if (Exit.isFailure(built)) {
           // The controller is stopping: the raise stays pending for the next start.

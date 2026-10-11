@@ -1,10 +1,11 @@
 /**
  * Tests how a plugin's signals are raised from its events and ended, through
  * the whole event pipeline of a running controller (spec 10 §9.2). An event
- * is emitted over HTTP through a Connection of the `desk` plugin below, the
- * intake routing table runs the signal kind's rule and ends, and the signal
- * raise delivery calls the plugin's `build` and writes the signal. Every
- * assertion reads what the API returns: the signals and the notifications.
+ * is written to the log as the `desk` plugin below ingests it through its
+ * Connection, the intake routing table runs the signal kind's rule and ends,
+ * and the signal raise delivery calls the plugin's `build` and writes the
+ * signal. The assertions read what the API returns: the signals and the
+ * notifications.
  *
  * The `desk` plugin declares one signal kind, `desk/asked`. Its rule returns:
  *
@@ -13,7 +14,8 @@
  * - `undecided` for any other question.
  *
  * An answer on the thread ends the signal as decided, and a closed thread
- * withdraws it. What `build` returns is set per test with `desk.build`.
+ * withdraws it. What `build` does is set per test with `mode.build`, and a
+ * test can hold `build` until it releases it with `mode.beforeBuild`.
  */
 import { describe, expect, it, vi } from "vitest";
 import * as Duration from "effect/Duration";
@@ -31,7 +33,7 @@ import {
 } from "@hercule/plugin-host";
 import { get, post } from "../../../http/testing";
 import { IDLE_FEEDS, IDLE_INGEST_OPEN } from "../../../plugins/testing";
-import { WAIT_DEADLINE_MS } from "../../../sessions/testing";
+import { WAIT_DEADLINE_MS, waitUntil } from "../../../sessions/testing";
 import {
   listOpenSignals,
   readSignal,
@@ -43,20 +45,37 @@ import {
   withSetUpController,
   type SetUpController,
 } from "../../../workflows/testing";
-import { waitUntilRouted } from "../../testing";
+import { ingestEvent, runEffect, waitOutSeveralTicks, waitUntilRouted } from "../../testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
 
 const ASKED_KIND = "desk/asked";
 
-/** What the `desk` plugin's `build` does: return a draft, fail, or return one with a core action's id. */
-type BuildMode = "draft" | "fail" | "collide";
+/**
+ * What the `desk` plugin's `build` does:
+ *
+ * - `draft`: returns a draft with one answer;
+ * - `fail`: fails with a `PluginError`;
+ * - `throw`: throws, which is a defect rather than a failure;
+ * - `collide`: returns an answer with the id of the core's Done;
+ * - `twice`: returns two answers with the same label.
+ */
+type BuildMode = "draft" | "fail" | "throw" | "collide" | "twice";
 
 /**
- * Builds the `desk` plugin. `mode.build` decides what each `build` call
- * does, and a test may change it between events.
+ * What a test sets to steer the `desk` plugin's `build`. `beforeBuild`, when
+ * set, runs first, and `build` waits for the promise it returns.
  */
-const buildDeskPlugin = (mode: { build: BuildMode }): Plugin => ({
+interface DeskMode {
+  build: BuildMode;
+  beforeBuild?: (() => Promise<void>) | undefined;
+}
+
+/**
+ * Builds the `desk` plugin. `mode` decides what each `build` call does, and
+ * a test may change it between events.
+ */
+const buildDeskPlugin = (mode: DeskMode): Plugin => ({
   manifest: {
     id: "desk",
     displayName: "Desk",
@@ -132,23 +151,31 @@ const buildDeskPlugin = (mode: { build: BuildMode }): Plugin => ({
             ],
             build: (event): Effect.Effect<SignalDraft, PluginError> => {
               const payload = event.payload as { readonly thread: string; readonly by: string };
+              const before = mode.beforeBuild;
+              const waited = before === undefined ? Effect.void : Effect.promise(() => before());
               if (mode.build === "fail") {
-                return Effect.fail(new PluginError({ message: "Desk is down" }));
+                return Effect.andThen(
+                  waited,
+                  Effect.fail(new PluginError({ message: "Desk is down" })),
+                );
               }
-              return Effect.succeed({
+              if (mode.build === "throw") {
+                throw new Error("Desk's build has a bug");
+              }
+              const answer = {
+                label: "Answer",
+                action: "answer",
+                input: { thread: payload.thread },
+                field: { name: "text", placeholder: "Your answer" },
+              };
+              return Effect.as(waited, {
                 title: `${payload.by} asks on ${payload.thread}`,
                 asker: payload.by,
                 place: payload.thread,
                 blocks: [{ type: "text", markdown: "Can you look?" }],
                 actions: [
-                  {
-                    id: mode.build === "collide" ? "done" : "answer",
-                    label: "Answer",
-                    action: "answer",
-                    input: { thread: payload.thread },
-                    primary: true,
-                    field: { name: "text", placeholder: "Your answer" },
-                  },
+                  { id: mode.build === "collide" ? "done" : "answer", primary: true, ...answer },
+                  ...(mode.build === "twice" ? [{ id: "answer-again", ...answer }] : []),
                 ],
               });
             },
@@ -165,7 +192,7 @@ const buildDeskPlugin = (mode: { build: BuildMode }): Plugin => ({
  * Connection, and an event pipeline that ticks every 10 ms.
  */
 const withDeskController = (
-  mode: { build: BuildMode },
+  mode: DeskMode,
   body: (controller: SetUpController, connectionId: string) => Promise<void>,
 ) =>
   withSetUpController(
@@ -179,8 +206,20 @@ const withDeskController = (
     { eventRoutingInterval: Duration.millis(10) },
   );
 
-/** Emits one Desk event through the Connection, and returns its id. */
-const emitDeskEvent = async (
+/** The title every Desk event in these tests has. */
+const DESK_TITLE = "A Desk thread";
+
+/** Writes one Desk event to the log as the plugin ingests it through the Connection, and returns its id. */
+const emitDeskEvent = (
+  { harness }: SetUpController,
+  connectionId: string,
+  kind: string,
+  payload: Record<string, unknown>,
+): Promise<number> =>
+  ingestEvent(harness, { pluginId: "desk", connectionId, kind, title: DESK_TITLE, payload });
+
+/** Emits one Desk event over HTTP, as a manual event, and returns its id. */
+const emitManualDeskEvent = async (
   { base, token }: SetUpController,
   connectionId: string,
   kind: string,
@@ -190,6 +229,14 @@ const emitDeskEvent = async (
   expect(response.ok, await response.clone().text()).toBe(true);
   return ((await response.json()) as { readonly eventId: number }).eventId;
 };
+
+/** Returns the pending raises left in the database, as event id and kind. */
+const listPendingRaises = ({ harness }: SetUpController) =>
+  runEffect(
+    harness.sql<{ readonly event_id: number; readonly kind: string }>`
+      SELECT event_id, kind FROM signal_raises
+    `,
+  );
 
 /** Returns every build-failed notification, newest first. */
 const queryBuildFailedNotifications = async ({
@@ -293,7 +340,7 @@ describe("raising a plugin's signals from its events", () => {
   });
 
   it("writes the signal from its event when build fails, tells the user once, and withdraws that once a build works", async () => {
-    const mode: { build: BuildMode } = { build: "fail" };
+    const mode: DeskMode = { build: "fail" };
     await withDeskController(mode, async (controller, connectionId) => {
       const first = await emitDeskEvent(controller, connectionId, "desk.asked", {
         thread: "t-3",
@@ -303,7 +350,7 @@ describe("raising a plugin's signals from its events", () => {
       const signal = await waitForSignalFrom(controller, ASKED_KIND, first);
 
       expect(signal).toMatchObject({
-        title: "Question for you",
+        title: DESK_TITLE,
         priority: "high",
         blocks: [],
         match: { by: "marta" },
@@ -353,9 +400,159 @@ describe("raising a plugin's signals from its events", () => {
       });
       const signal = await waitForSignalFrom(controller, ASKED_KIND, asked);
 
-      expect(signal.title).toBe("Question for you");
+      expect(signal.title).toBe(DESK_TITLE);
       expect(signal.buildError?.message).toContain('The core adds its own "Done" action');
       expect(signal.actions.map((action) => action.id)).toEqual(["done"]);
+    });
+  });
+
+  it("writes the signal from its event when build throws", async () => {
+    await withDeskController({ build: "throw" }, async (controller, connectionId) => {
+      const asked = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-7",
+        by: "marta",
+        toYou: true,
+      });
+      const signal = await waitForSignalFrom(controller, ASKED_KIND, asked);
+
+      expect(signal.buildError?.message).toBe("build failed: Desk's build has a bug");
+      expect(signal.actions.map((action) => action.id)).toEqual(["done"]);
+    });
+  });
+
+  it("writes the signal from its event when the draft gives two answers the same label", async () => {
+    await withDeskController({ build: "twice" }, async (controller, connectionId) => {
+      const asked = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-8",
+        by: "marta",
+        toYou: true,
+      });
+      const signal = await waitForSignalFrom(controller, ASKED_KIND, asked);
+
+      expect(signal.buildError?.message).toContain('the label "Answer"');
+      expect(signal.actions.map((action) => action.id)).toEqual(["done"]);
+    });
+  });
+
+  it("leaves out a match value that is too long, so the signal still fits", async () => {
+    await withDeskController({ build: "fail" }, async (controller, connectionId) => {
+      const asked = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-9",
+        by: "m".repeat(150_000),
+        toYou: true,
+      });
+      const signal = await waitForSignalFrom(controller, ASKED_KIND, asked);
+
+      expect(signal.match).toEqual({});
+      expect(signal.buildError?.message).toBe("build failed: Desk is down");
+    });
+  });
+
+  it("neither ends nor raises a signal from a manual event of the plugin's kinds", async () => {
+    await withDeskController({ build: "draft" }, async (controller, connectionId) => {
+      const asked = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-10",
+        by: "marta",
+        toYou: true,
+      });
+      const signal = await waitForSignalFrom(controller, ASKED_KIND, asked);
+
+      const answered = await emitManualDeskEvent(controller, connectionId, "desk.answered", {
+        thread: "t-10",
+        by: "me",
+      });
+      const manualAsk = await emitManualDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-11",
+        by: "marta",
+        toYou: true,
+      });
+      await waitUntilRouted(controller.harness, Math.max(answered, manualAsk));
+      await waitOutSeveralTicks();
+
+      expect((await readSignal(controller, signal.id)).status).toBe("open");
+      expect((await listOpenSignals(controller, ASKED_KIND)).map((open) => open.id)).toEqual([
+        signal.id,
+      ]);
+    });
+  });
+
+  it("drops a raise for an older event when a newer signal is open on the thread", async () => {
+    await withDeskController({ build: "draft" }, async (controller, connectionId) => {
+      // The rule says `no` to this event, so it raises nothing by itself.
+      const older = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-12",
+        by: "marta",
+        toYou: true,
+        state: "ignored",
+      });
+      const newer = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-12",
+        by: "marta",
+        toYou: true,
+      });
+      const signal = await waitForSignalFrom(controller, ASKED_KIND, newer);
+
+      // A raise for the older event, as one left over from before a restart
+      // would be.
+      await runEffect(controller.harness.sql`
+        INSERT INTO signal_raises (event_id, kind, decision, connection_id, thread_ref)
+        SELECT id, ${ASKED_KIND}, 'yes', connection_id, 't-12' FROM events WHERE id = ${older}
+      `);
+      await waitUntil("dropped the raise of the older event", async () =>
+        (await listPendingRaises(controller)).length === 0 ? true : undefined,
+      );
+
+      expect((await readSignal(controller, signal.id)).status).toBe("open");
+      expect((await listOpenSignals(controller, ASKED_KIND)).map((open) => open.id)).toEqual([
+        signal.id,
+      ]);
+    });
+  });
+
+  it("does not raise a signal for a question answered while its build ran, even when the question is enriched later", async () => {
+    let releaseBuild!: () => void;
+    const buildReleased = new Promise<void>((resolve) => (releaseBuild = resolve));
+    let markBuildStarted!: () => void;
+    const buildStarted = new Promise<void>((resolve) => (markBuildStarted = resolve));
+    const mode: DeskMode = {
+      build: "draft",
+      beforeBuild: () => {
+        markBuildStarted();
+        return buildReleased;
+      },
+    };
+    await withDeskController(mode, async (controller, connectionId) => {
+      const asked = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-13",
+        by: "marta",
+        toYou: true,
+      });
+      await buildStarted;
+
+      // The build is held, and the answer is still routed: the raises run on
+      // a loop of their own.
+      const answered = await emitDeskEvent(controller, connectionId, "desk.answered", {
+        thread: "t-13",
+        by: "me",
+      });
+      await waitUntilRouted(controller.harness, answered);
+      mode.beforeBuild = undefined;
+      releaseBuild();
+      await waitUntil("finished the held raise", async () =>
+        (await listPendingRaises(controller)).length === 0 ? true : undefined,
+      );
+
+      const enriched = await post(
+        controller.base,
+        `/api/v1/events/${String(asked)}/enrich`,
+        { refs: ["desk:thread:t-13"] },
+        controller.token,
+      );
+      expect(enriched.status, await enriched.clone().text()).toBe(200);
+      await waitOutSeveralTicks();
+
+      expect(await listPendingRaises(controller)).toEqual([]);
+      expect(await listOpenSignals(controller, ASKED_KIND)).toEqual([]);
     });
   });
 });

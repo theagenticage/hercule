@@ -1,7 +1,9 @@
 /**
  * Tests the pending raises of the signal repository against a migrated
  * in-memory database: the outbox between the event router, which records a
- * raise, and the step after the commit, which writes the signal.
+ * raise, and the step after the commit, which writes the signal. Also tests
+ * the record of the latest end on a thread, which keeps an older event routed
+ * again from raising its signal once more.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -20,7 +22,6 @@ const buildRaise = (eventId: number, changes: Partial<PendingRaise> = {}): Pendi
   decision: "yes",
   connectionId: CONNECTION_ID,
   threadRef: "t-1",
-  createdAt: "2026-10-11T12:00:00.000Z",
   ...changes,
 });
 
@@ -54,7 +55,7 @@ describe("pending raises", () => {
   });
 
   it("deletes one raise, and the raises of a kind on a thread before an event", async () => {
-    const { afterOne, afterThread } = await run(
+    const { deleted, deletedAgain, afterOne, afterThread } = await run(
       Effect.gen(function* () {
         const signals = yield* signalRepository;
         for (const raise of [
@@ -68,13 +69,15 @@ describe("pending raises", () => {
         ]) {
           yield* signals.insertRaise(raise);
         }
-        yield* signals.deleteRaise(1, KIND);
+        const deleted = yield* signals.deleteRaise(1, KIND);
+        const deletedAgain = yield* signals.deleteRaise(1, KIND);
         const afterOne = yield* listRaiseKeys;
         yield* signals.deleteRaisesOnThreadBefore(CONNECTION_ID, "t-1", KIND, 4);
-        return { afterOne, afterThread: yield* listRaiseKeys };
+        return { deleted, deletedAgain, afterOne, afterThread: yield* listRaiseKeys };
       }),
     );
 
+    expect([deleted, deletedAgain]).toEqual([true, false]);
     expect(afterOne).toEqual([
       "2 acme/asked",
       "2 acme/mentioned",
@@ -90,5 +93,27 @@ describe("pending raises", () => {
       "5 acme/asked",
       "6 acme/asked",
     ]);
+  });
+});
+
+describe("thread ends", () => {
+  it("keeps the latest end of a kind on a thread, and reports only an end after an event", async () => {
+    const found = await run(
+      Effect.gen(function* () {
+        const signals = yield* signalRepository;
+        yield* signals.recordThreadEnd(CONNECTION_ID, "t-1", KIND, 8);
+        // An older event routed again records an older end, which changes nothing.
+        yield* signals.recordThreadEnd(CONNECTION_ID, "t-1", KIND, 5);
+        return yield* Effect.all([
+          signals.hasThreadEndAfter(CONNECTION_ID, "t-1", KIND, 6),
+          signals.hasThreadEndAfter(CONNECTION_ID, "t-1", KIND, 8),
+          signals.hasThreadEndAfter(CONNECTION_ID, "t-2", KIND, 6),
+          signals.hasThreadEndAfter(CONNECTION_ID, "t-1", "acme/mentioned", 6),
+          signals.hasThreadEndAfter(OTHER_CONNECTION_ID, "t-1", KIND, 6),
+        ]);
+      }),
+    );
+
+    expect(found).toEqual([true, false, false, false, false]);
   });
 });

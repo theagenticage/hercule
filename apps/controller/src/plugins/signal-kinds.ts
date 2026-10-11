@@ -22,7 +22,12 @@ import {
   type PluginManifest,
   type SignalKindDeclaration,
 } from "@hercule/plugin-host";
-import { validateCondition, validateExpression, type ExpressionError } from "../expressions";
+import {
+  validateCondition,
+  validateExpression,
+  validateTextExpression,
+  type ExpressionError,
+} from "../expressions";
 import { describeFieldIssues } from "./errors";
 
 /**
@@ -68,7 +73,9 @@ const decodeSignalKind = Schema.decodeUnknownEffect(SignalKind, { errors: "all" 
  *   declares. The core only reads this source's events for the kind;
  * - an expression (the rule, the thread, a match field's path, an end's
  *   condition or outcome) does not parse, or reads a variable other than
- *   `event`.
+ *   `event`;
+ * - the rule, the thread or an end's outcome has a known type other than a
+ *   string, or an end's condition a known type other than true or false.
  */
 export const decodeSignalKinds = (
   manifest: PluginManifest,
@@ -109,8 +116,8 @@ export const decodeSignalKinds = (
         );
       }
       const expressions: ReadonlyArray<readonly [string, Effect.Effect<void, ExpressionError>]> = [
-        ["rule", validateExpression(declaration.rule, "event")],
-        ["threadRef", validateExpression(declaration.threadRef, "event")],
+        ["rule", validateTextExpression(declaration.rule, "event")],
+        ["threadRef", validateTextExpression(declaration.threadRef, "event")],
         ...declaration.matchFields.map(
           (field) =>
             [
@@ -129,7 +136,7 @@ export const decodeSignalKinds = (
               ]),
           [
             `the outcome of the end on ${end.eventKind}`,
-            validateExpression(end.outcome, "event"),
+            validateTextExpression(end.outcome, "event"),
           ] as const,
         ]),
       ];

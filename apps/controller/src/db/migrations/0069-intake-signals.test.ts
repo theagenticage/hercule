@@ -5,9 +5,11 @@
  *   title, author or warning;
  * - the raise outbox refuses a decision other than `yes` or `undecided`, and
  *   holds one row per event and kind;
- * - the lookups the raise path makes on every routed event each read an
- *   index: the open signals on a thread, the pending raises on a thread, and
- *   the known-work check on the inputs and the steps an event reached.
+ * - the lookups the raise path makes on every routed event or written signal
+ *   each read an index: the open signals on a thread, the pending raises on
+ *   a thread, the known-work check on the inputs and the steps an event
+ *   reached, the count of a kind's failed builds, and the open decisions of
+ *   one kind about a subject.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -43,8 +45,8 @@ const insertRaise = (eventId: number, kind: string, decision: string) =>
     const sql = yield* SqlClient.SqlClient;
     return yield* Effect.match(
       sql`
-        INSERT INTO signal_raises (event_id, kind, decision, connection_id, thread_ref, created_at)
-        VALUES (${eventId}, ${kind}, ${decision}, x'01', 'acme/web#1', ${at})`,
+        INSERT INTO signal_raises (event_id, kind, decision, connection_id, thread_ref)
+        VALUES (${eventId}, ${kind}, ${decision}, x'01', 'acme/web#1')`,
       {
         // The SQL error wraps a constraint error, which wraps SQLite's own
         // error, and only SQLite's message names the constraint.
@@ -130,6 +132,30 @@ describe("the intake signals migration", () => {
     );
 
     expect(plan).toContain("signal_raises_thread");
+  });
+
+  it("counts a kind's failed builds since an event from an index", async () => {
+    const plan = await run(
+      explainQueryPlan(
+        `SELECT COUNT(*) FROM signals WHERE kind = 'k' AND build_error IS NOT NULL AND json_extract(origin, '$.eventId') >= 7`,
+      ),
+    );
+
+    expect(plan).toBe("SEARCH signals USING INDEX signals_build_failed (kind=? AND <expr>>?)");
+  });
+
+  it("finds the open decisions of one kind from an index", async () => {
+    const plan = await run(
+      explainQueryPlan(
+        `SELECT id FROM notifications WHERE status = 'open' AND kind = 'core.signal-build-failed'
+           AND EXISTS (SELECT 1 FROM json_each(notifications.subject) AS subject
+                       WHERE subject.value ->> 'kind' = 'signalKind' AND subject.value ->> 'id' = 'k')
+         ORDER BY created_at, id`,
+      ),
+    );
+
+    expect(plan).toContain("SEARCH notifications USING INDEX notifications_open_kind (kind=?)");
+    expect(plan).not.toContain("TEMP B-TREE");
   });
 
   it("finds the inputs and the steps an event reached from an index", async () => {

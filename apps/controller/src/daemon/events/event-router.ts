@@ -17,7 +17,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
-import * as Struct from "effect/Struct";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Event } from "@hercule/contract";
@@ -30,6 +29,7 @@ import {
   readPipelineEventsAfter,
 } from "../../events";
 import {
+  buildEvaluationContext,
   evaluateExpression,
   parseExpression,
   type CompiledExpression,
@@ -139,16 +139,6 @@ const EVENTS_PER_PASS = 100;
  * reached only when an emitter writes faster than the router reads.
  */
 const MAX_PASSES_PER_TICK = 10;
-
-/**
- * Builds the context an expression over `event` is evaluated against: the
- * event without its raw payload. Expressions are written against the
- * normalized fields only, because one that read the raw payload would break
- * as soon as the source system changed its format.
- */
-export const buildEvaluationContext = (event: Event): EvaluationContext => ({
-  event: Struct.omit(event, ["raw"]),
-});
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

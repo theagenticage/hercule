@@ -10,18 +10,17 @@ const make = Effect.gen(function* () {
     listForConnection: (connectionId) =>
       Effect.orDie(
         Effect.map(signals.listOpenOnConnection(connectionId), (rows) =>
-          rows.map((row) => ({
-            kind: row.kind,
-            threadRef: row.threadRef,
-            raisedAt: row.createdAt,
-          })),
+          rows.map(({ kind, threadRef, raisedAt }) => ({ kind, threadRef, raisedAt })),
         ),
       ),
   });
 });
 
 /**
- * Implements the plugins domain's Open Signals port from the signal rows.
+ * Implements the plugins domain's `OpenSignals` port from the signal rows: an
+ * event source reads through it which threads of its Connection still wait
+ * on the user. The plugins domain cannot import the signals domain without
+ * making the domain graph a cycle, so the controller daemon joins the two.
  */
 export const OpenSignalsLayer: Layer.Layer<OpenSignals, never, SqlClient.SqlClient> =
   Layer.effect(OpenSignals)(make);

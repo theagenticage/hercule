@@ -25,6 +25,7 @@ import type {
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
 import { github } from "@hercule/plugin-github";
+import { appendIngestedEvent } from "../events";
 import { get, post, type ServerHarness } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
@@ -139,6 +140,52 @@ export const withPipeline = (
 /** Runs one effect against the harness's database, failing the test if it fails. */
 export const runEffect = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(Effect.orDie(effect));
+
+/**
+ * Appends one event to the log as the event source of the plugin `pluginId`
+ * ingests it through the Connection `connectionId`, and returns its id.
+ *
+ * A test uses it in place of `event.emit` when the route under test takes
+ * only a plugin's own events: an event emitted over HTTP is a manual event,
+ * whose source is not the plugin. The payload is not checked against the
+ * kind, so the test must give one that fits.
+ */
+export const ingestEvent = async (
+  harness: ServerHarness,
+  event: {
+    readonly pluginId: string;
+    readonly connectionId: string;
+    readonly kind: string;
+    readonly title: string;
+    readonly payload: unknown;
+    readonly refs?: ReadonlyArray<string>;
+    readonly author?: string;
+  },
+): Promise<number> => {
+  const dedupKey = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await runEffect(
+    appendIngestedEvent(harness.sql, {
+      source: event.pluginId,
+      connectionId: event.connectionId,
+      system: event.pluginId,
+      kind: event.kind,
+      occurredAt: now,
+      receivedAt: now,
+      dedupKey,
+      refs: event.refs ?? [],
+      url: null,
+      title: event.title,
+      author: event.author ?? null,
+      payload: event.payload,
+      raw: null,
+    }),
+  );
+  const [row] = await runEffect(
+    harness.sql<{ readonly id: number }>`SELECT id FROM events WHERE dedup_key = ${dedupKey}`,
+  );
+  return row!.id;
+};
 
 /** Spawns a Thread on a profile that may create and read subscriptions. */
 export const spawnSubscriber = (arranged: Arranged, name: string): Promise<SpawnedThread> =>

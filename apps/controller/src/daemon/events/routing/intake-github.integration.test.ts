@@ -2,15 +2,17 @@
  * Tests the GitHub plugin's signal kinds through the whole event pipeline of
  * a running controller (spec 08 §5.1, spec 10 §9.2). The controller loads the
  * shipped GitHub plugin, and a GitHub Connection is created through the API.
- * Each event is emitted through that Connection with the payload the
- * plugin's feeds build, the intake routing table runs the kinds' rules and
- * ends, and the plugin's real `build` reads GitHub to lay out the signal.
+ * Each event is written to the log as the plugin ingests it through that
+ * Connection, with the payload the plugin's feeds build. The intake routing
+ * table runs the kinds' rules and ends, and the plugin's real `build` reads
+ * GitHub to lay out the signal.
  *
- * The events are emitted rather than polled, because a feed polls at most
- * once every 30 seconds, and each end needs an event after the signal
- * exists. The feeds' own tests, in the plugin, check how GitHub's responses
- * become these events. An emitted event has no author, so the tests do not
- * check what a signal or an outcome takes from it, such as the asker.
+ * The events are written directly rather than polled, because a feed polls
+ * at most once every 30 seconds, and each end needs an event after the
+ * signal exists. The feeds' own tests, in the plugin, check how GitHub's
+ * responses become these events. The events here have no author, so the
+ * tests do not check what a signal or an outcome takes from it, such as the
+ * asker.
  *
  * No request reaches GitHub. `fetch` is replaced for the whole file by one
  * that answers requests to api.github.com from the recorded-shaped responses
@@ -26,8 +28,11 @@ import { WAIT_DEADLINE_MS } from "../../../sessions/testing";
 import { listOpenSignals, waitForResolved, waitForSignalFrom } from "../../../signals/testing";
 import { createConnection } from "../../../workflows/testing";
 import {
+  ingestEvent,
   readMatchedInputRows,
   runEffect,
+  waitOutSeveralTicks,
+  waitUntilRouted,
   spawnSubscriber,
   subscribeThread,
   waitForMatchedInputRows,
@@ -142,29 +147,24 @@ const withGithubConnection = (body: (controller: GithubController) => Promise<vo
   });
 
 /**
- * Emits one GitHub event about pull request `number` through the Connection,
- * with the refs the plugin's feeds give it, and returns its id.
+ * Writes one GitHub event about pull request `number` to the log as the
+ * plugin ingests it through the Connection, with the refs the plugin's feeds
+ * give it, and returns its id.
  */
-const emitGithubEvent = async (
-  { reader, connectionId }: GithubController,
+const emitGithubEvent = (
+  { arranged, connectionId }: GithubController,
   kind: string,
   number: number,
   fields: Record<string, unknown>,
-): Promise<number> => {
-  const response = await post(
-    reader.base,
-    "/api/v1/events/emit",
-    {
-      kind,
-      connectionId,
-      refs: [prRef(number), "github:repo:o/r"],
-      payload: { subject: buildSubject(number), ...fields },
-    },
-    reader.token,
-  );
-  expect(response.ok, await response.clone().text()).toBe(true);
-  return ((await response.json()) as { readonly eventId: number }).eventId;
-};
+): Promise<number> =>
+  ingestEvent(arranged.harness, {
+    pluginId: "github",
+    connectionId,
+    kind,
+    title: PR_TITLE,
+    refs: [prRef(number), "github:repo:o/r"],
+    payload: { subject: buildSubject(number), ...fields },
+  });
 
 /** Emits a review request on pull request `number` to the user by name. */
 const requestReviewFromYou = (controller: GithubController, number: number) =>
@@ -282,6 +282,34 @@ describe("raising GitHub's signals", () => {
         status: "resolved",
         resolution: { kind: "withdrawn", outcome: "Review request removed" },
       });
+    });
+  });
+
+  it("does not withdraw a review request when someone emits github.pr.merged by hand", async () => {
+    await withGithubConnection(async (controller) => {
+      const { arranged, reader, connectionId } = controller;
+      const requested = await requestReviewFromYou(controller, 90);
+      const signal = await waitForSignalFrom(reader, REVIEW_REQUESTED, requested);
+
+      const response = await post(
+        reader.base,
+        "/api/v1/events/emit",
+        {
+          kind: "github.pr.merged",
+          connectionId,
+          refs: [prRef(90), "github:repo:o/r"],
+          payload: { subject: buildSubject(90) },
+        },
+        reader.token,
+      );
+      expect(response.ok, await response.clone().text()).toBe(true);
+      const { eventId } = (await response.json()) as { readonly eventId: number };
+      await waitUntilRouted(arranged.harness, eventId);
+      await waitOutSeveralTicks();
+
+      expect((await listOpenSignals(reader, REVIEW_REQUESTED)).map((open) => open.id)).toContain(
+        signal.id,
+      );
     });
   });
 

@@ -19,15 +19,26 @@
  *   call the source, so it can never run inside the router's transaction.
  *   The row keeps the Connection and the thread too, so an end the router
  *   sees before the step has run can drop the raise it makes pointless.
- * - an index on the signals whose `build` failed, by kind, so the count the
- *   build-failed Notification shows reads only those few rows.
+ * - `signal_thread_ends`: the latest event that ended a kind on a thread of
+ *   a Connection, one row per Connection, thread and kind. An event routed
+ *   again, after enrichment, runs the kind's rule again, and its raise must
+ *   not come back once a later event ended the thread. The raise row and
+ *   the signal are both gone by then, so this row is what remembers.
+ * - an index on the signals whose `build` failed, by kind and by the event
+ *   each was raised from, so the count the build-failed Notification shows
+ *   reads only the rows it counts.
+ * - an index on the open notifications by kind, so the check for an open
+ *   build-failed decision, made on every signal written, reads only the open
+ *   decisions of that kind.
  * - an index on the event id of `session_inputs` and of `run_steps`, so the
  *   known-work check (a live Subscription received this event) is a lookup
  *   rather than a scan of every input and step.
  *
  * `signal_raises.event_id` is not a foreign key, like `signal_events.event_id`:
  * a row lives for one tick of the pipeline, and the event log's retention
- * never removes an event that young.
+ * never removes an event that young. `signal_thread_ends.event_id` is not one
+ * either: the row is needed only while an older event of the thread can be
+ * routed again, and a prune of the event log removes the older events first.
  *
  * Every change adds a table, a column or an index, so no existing row is
  * rewritten.
@@ -50,7 +61,17 @@ export default Effect.gen(function* () {
     WHERE status = 'open'
   `;
 
-  yield* sql`CREATE INDEX signals_build_failed ON signals (kind) WHERE build_error IS NOT NULL`;
+  // The second column must be written exactly as the count's query writes
+  // it, or SQLite does not use the index for it.
+  yield* sql`
+    CREATE INDEX signals_build_failed ON signals (kind, json_extract(origin, '$.eventId'))
+    WHERE build_error IS NOT NULL
+  `;
+
+  yield* sql`
+    CREATE INDEX notifications_open_kind ON notifications (kind, created_at, id)
+    WHERE status = 'open'
+  `;
 
   yield* sql`
     CREATE TABLE signal_raises (
@@ -59,12 +80,21 @@ export default Effect.gen(function* () {
       decision TEXT NOT NULL CHECK (decision IN ('yes', 'undecided')),
       connection_id BLOB NOT NULL,
       thread_ref TEXT NOT NULL,
-      created_at TEXT NOT NULL,
       PRIMARY KEY (event_id, kind)
     ) WITHOUT ROWID
   `;
   yield* sql`
     CREATE INDEX signal_raises_thread ON signal_raises (connection_id, thread_ref, kind)
+  `;
+
+  yield* sql`
+    CREATE TABLE signal_thread_ends (
+      connection_id BLOB NOT NULL,
+      thread_ref TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      event_id INTEGER NOT NULL,
+      PRIMARY KEY (connection_id, thread_ref, kind)
+    ) WITHOUT ROWID
   `;
 
   yield* sql`

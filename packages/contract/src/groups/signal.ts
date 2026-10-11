@@ -16,7 +16,13 @@
  * Spec 10 §9 owns the record and its rules; spec 11 §2 (`signal`) owns the
  * operations.
  */
-import { PluginId } from "@hercule/plugin-host";
+import {
+  MAX_BLOCK_NAME_LENGTH,
+  MAX_BLOCK_URL_LENGTH,
+  MAX_MESSAGE_TEXT_LENGTH,
+  MAX_SIGNAL_TITLE_LENGTH,
+  PluginId,
+} from "@hercule/plugin-host";
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
@@ -47,11 +53,19 @@ import {
 } from "./notification";
 import { TaskCreateInput, TaskPriority } from "./task";
 
+/**
+ * Re-exported from the package plugins are written against, so a plugin cuts
+ * its text to the same limits this API checks.
+ */
+export {
+  MAX_BLOCK_NAME_LENGTH,
+  MAX_BLOCK_URL_LENGTH,
+  MAX_MESSAGE_TEXT_LENGTH,
+  MAX_SIGNAL_TITLE_LENGTH,
+} from "@hercule/plugin-host";
+
 /** The longest kind: a core kind, or a plugin's qualified kind such as `github/review-requested`. */
 export const MAX_SIGNAL_KIND_LENGTH = 128;
-
-/** The longest title. A title is a line, not a paragraph. */
-export const MAX_SIGNAL_TITLE_LENGTH = 512;
 
 /** The longest `asker`, the name of who waits on the user. */
 export const MAX_SIGNAL_ASKER_LENGTH = 256;
@@ -74,9 +88,6 @@ export const MAX_TEXT_BLOCK_LENGTH = 32 * 1024;
 /** The most messages a messages block holds. The producer records the rest in `omitted`. */
 export const MAX_BLOCK_MESSAGES = 20;
 
-/** The longest text of one message, in characters. The producer sets `truncated` when it cuts. */
-export const MAX_MESSAGE_TEXT_LENGTH = 16 * 1024;
-
 /** The most people one message lists as recipients, in `to` and in `cc` each. */
 export const MAX_MESSAGE_RECIPIENTS = 50;
 
@@ -91,12 +102,6 @@ export const MAX_CHECK_LOG_LINES = 40;
 
 /** The longest log of a check, in characters, so 40 very long lines are still refused. */
 export const MAX_CHECK_LOG_LENGTH = 8 * 1024;
-
-/** The longest name a block shows: a person, a branch, a file path, a check. */
-export const MAX_BLOCK_NAME_LENGTH = 256;
-
-/** The longest link a block carries. */
-export const MAX_BLOCK_URL_LENGTH = 2048;
 
 /**
  * The longest typed reply, in characters. The reply fills a field of the

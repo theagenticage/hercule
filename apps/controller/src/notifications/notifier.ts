@@ -428,9 +428,8 @@ const make = Effect.gen(function* () {
           const unlessOpenAbout = options?.unlessOpenAbout;
           if (
             unlessOpenAbout !== undefined &&
-            (yield* notifications.listOpenDecisionsAbout(unlessOpenAbout)).some(
-              (open) => open.kind === notification.kind,
-            )
+            (yield* notifications.listOpenDecisionsAbout(unlessOpenAbout, notification.kind))
+              .length > 0
           ) {
             return;
           }
@@ -521,15 +520,20 @@ const make = Effect.gen(function* () {
      * went with it. It runs in the caller's transaction, the one that removes
      * the subject, and is stamped as the core. There is no grant check: only
      * the controller calls it.
+     *
+     * `kind` withdraws only the decisions of that kind. A caller that knows
+     * the kind passes it, so the lookup reads the open decisions of that kind
+     * by index instead of the subject of every open decision.
      */
     withdrawDecisionsAbout: (
       subjects: ReadonlyArray<NotificationSubject>,
       reason: string,
+      kind?: string,
     ): Effect.Effect<void, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const open = yield* notifications.listOpenDecisionsAbout(subjects);
+          const open = yield* notifications.listOpenDecisionsAbout(subjects, kind);
           if (open.length === 0) return;
           const at = yield* nowIso;
           const resolution = {
