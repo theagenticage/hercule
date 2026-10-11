@@ -177,7 +177,7 @@ export const EverythingList = memo(function EverythingList({
   }
 
   return (
-    <div ref={scrollRef} className="asks-scroll">
+    <div ref={scrollRef} className="asks-scroll asks-scroll--faded">
       {items.length === 0 ? (
         empty
       ) : (

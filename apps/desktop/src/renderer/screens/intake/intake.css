@@ -74,7 +74,11 @@
   min-height: 0;
   overflow-y: auto;
   padding: 0 10px 16px;
-  /* Rows fade in under the header instead of being cut by its edge. */
+}
+/* Everything's rows fade in under the horizon line instead of being cut by its
+   edge. Only this list has the mask, because a mask changes how the browser
+   rasterizes the rows, and the To do list must stay pixel-equal to the drawing. */
+.asks-scroll--faded {
   mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
 }
 /* The handle between the list and the pane: an 8px strip centred on the

@@ -1029,7 +1029,7 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
   buildEverythingScene("everything-end", { events: EVENTS }, async () => {
     const scroll = (await waitForElement(".asks-scroll")) as HTMLElement;
     scroll.scrollTop = scroll.scrollHeight;
-    await waitForElement(".asks-end");
+    await waitForElement(".asks-scroll > .asks-note");
   }),
   buildEverythingScene("everything-pane", { events: EVENTS, selectedEventId: 32 }),
   buildEverythingScene("everything-search", { events: searchEvents("pieter"), text: "pieter" }),
