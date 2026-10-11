@@ -184,7 +184,7 @@ describe("Settings > Assistants, a memory document's page", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("refuses the saves queued behind one an agent's write refused, and saves all of them over it", async () => {
+  it("refuses a save queued behind one an agent's write refused, and offers each field's text again", async () => {
     const { topic, handlers } = keepWebshop();
     const held = createGate();
     topic.writesWait = held.opened;
@@ -201,28 +201,26 @@ describe("Settings > Assistants, a memory document's page", () => {
     held.open();
 
     await waitFor(() => {
-      expect(text).toHaveProperty("value", "Stripe only.");
+      expect(screen.getAllByRole("alert")).toHaveLength(2);
     });
+    expect(text).toHaveProperty("value", "Stripe only.");
     expect(listWrites(calls, "webshop")).toEqual([
       { body: WEBSHOP.body, gist: "Payments, EU", expectedVersion: 1 },
       { body: "Stripe checkout. Mollie for NL.", expectedVersion: 1 },
     ]);
-    await userEvent.click(
-      await screen.findByRole("button", { name: "Save my gist and text anyway" }),
-    );
-
+    await userEvent.click(screen.getByRole("button", { name: "Save my gist anyway" }));
     await waitFor(() => {
-      expect(topic.stored.version).toBe(3);
+      expect(gist).toHaveProperty("value", "Payments, EU");
     });
-    expect(listWrites(calls, "webshop").at(-1)).toEqual({
-      body: "Stripe checkout. Mollie for NL.",
-      gist: "Payments, EU",
-      expectedVersion: 2,
-    });
+    await userEvent.click(screen.getByRole("button", { name: "Save my text anyway" }));
+
     await waitFor(() => {
       expect(text).toHaveProperty("value", "Stripe checkout. Mollie for NL.");
     });
-    expect(gist).toHaveProperty("value", "Payments, EU");
+    expect(listWrites(calls, "webshop").slice(2)).toEqual([
+      { body: "Stripe only.", gist: "Payments, EU", expectedVersion: 2 },
+      { body: "Stripe checkout. Mollie for NL.", expectedVersion: 3 },
+    ]);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -298,33 +296,77 @@ describe("Settings > Assistants, a memory document's page", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("saves text typed while an earlier save of it ran, after the controller refused that one", async () => {
+  it("takes no typing in a field while its save runs, so no edit begins on text not stored yet", async () => {
     const { topic, handlers } = keepWebshop();
-    const message = 'topic "webshop" is 12,009 chars; cap is 12,000.';
-    topic.refuse = {
-      status: 422,
-      body: { error: { code: "cap_exceeded", message, details: { size: 12009, cap: 12000 } } },
-    };
     const held = createGate();
     topic.writesWait = held.opened;
-    const { calls } = await openDocument("webshop", handlers);
+    await openDocument("webshop", handlers);
     const text = await screen.findByRole("textbox", { name: "Text" });
 
     await userEvent.type(text, " Mollie for NL.");
     await userEvent.tab();
-    // The field shows the text being saved, and the user types on from it.
+    expect(text).toHaveProperty("readOnly", true);
     await userEvent.type(text, " Adyen too.");
-    await userEvent.tab();
+    expect(text).toHaveProperty("value", "Stripe checkout. Mollie for NL.");
     held.open();
 
     await waitFor(() => {
-      expect(topic.stored.version).toBe(2);
+      expect(text).toHaveProperty("readOnly", false);
     });
-    expect(listWrites(calls, "webshop")).toEqual([
-      { body: "Stripe checkout. Mollie for NL.", expectedVersion: 1 },
-      { body: "Stripe checkout. Mollie for NL. Adyen too.", expectedVersion: 1 },
-    ]);
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(topic.stored.body).toBe("Stripe checkout. Mollie for NL.");
+  });
+
+  it("keeps a field's refused save on offer while the other field saves", async () => {
+    const { topic, handlers } = keepWebshop();
+    const { calls } = await openDocument("webshop", handlers);
+    const gist = await screen.findByRole("textbox", { name: "Gist" });
+    const text = screen.getByRole("textbox", { name: "Text" });
+    // An agent writes the topic after the page read it.
+    topic.stored = buildMemoryDocument("webshop", WEBSHOP.body, "Card payments", 2);
+
+    await userEvent.clear(gist);
+    await userEvent.type(gist, "Payments, EU{Enter}");
+    await screen.findByRole("button", { name: "Save my gist anyway" });
+    await userEvent.type(text, " Mollie for NL.");
+    await userEvent.tab();
+
+    await waitFor(() => {
+      expect(topic.stored.version).toBe(3);
+    });
+    expect(screen.getByRole("button", { name: "Save my gist anyway" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Save my gist anyway" }));
+    await waitFor(() => {
+      expect(topic.stored.gist).toBe("Payments, EU");
+    });
+    expect(listWrites(calls, "webshop").at(-1)).toEqual({
+      body: "Stripe checkout. Mollie for NL.",
+      gist: "Payments, EU",
+      expectedVersion: 3,
+    });
+  });
+
+  it("shows a save's refusal on the page opened again while the save ran", async () => {
+    const { topic, handlers } = keepWebshop();
+    const held = createGate();
+    topic.writesWait = held.opened;
+    const { router } = await openDocument("webshop", handlers);
+    const text = await screen.findByRole("textbox", { name: "Text" });
+
+    await userEvent.type(text, " Mollie for NL.");
+    await userEvent.tab();
+    await router.navigate({ to: "/settings/assistants", search: { assistant: ADA.id } });
+    await router.navigate({
+      to: "/settings/assistants/$id/memory/$name",
+      params: { id: ADA.id, name: "webshop" },
+    });
+    await screen.findByRole("textbox", { name: "Text" });
+    topic.stored = buildMemoryDocument("webshop", "Stripe only.", WEBSHOP.gist, 2);
+    held.open();
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      `Could not save: ${CONFLICT_MESSAGE}`,
+    );
+    expect(screen.getByRole("button", { name: "Save my text anyway" })).toBeTruthy();
   });
 
   it("shows a refused save under its row, as the controller words it, and puts the text back", async () => {

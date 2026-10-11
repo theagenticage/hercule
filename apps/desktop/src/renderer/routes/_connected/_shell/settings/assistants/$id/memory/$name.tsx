@@ -29,7 +29,11 @@ import { SettingsHeaderTitle } from "../../../../../../../screens/settings/setti
 import { useTextDraft } from "../../../../../../../screens/settings/use-text-draft";
 import { DeleteTopicSection } from "./-delete-topic-section";
 import { ShrinkOffer } from "./-shrink-offer";
-import { useSavedMemoryDocument } from "./-saved-memory-document";
+import {
+  useSavedMemoryDocument,
+  type MemoryField,
+  type SavedMemoryDocument,
+} from "./-saved-memory-document";
 import "../../../../../../../screens/settings/assistants/assistants.css";
 
 /**
@@ -93,27 +97,6 @@ function MemoryDocumentRecord({
   const isCore = name === MEMORY_CORE;
   const title = isCore ? "Core note" : name;
   const cap = chooseMemoryCap(name);
-  const { failure } = saved;
-  // Saves refused together can hold both fields; their error and offer then
-  // sit under the text, the last row.
-  const failedField = failure === null ? null : failure.edit.body === undefined ? "gist" : "body";
-  const failureText =
-    failure === null ? null : `Could not save: ${readErrorMessage(failure.error)}`;
-  const shrinkLoss = failure === null ? undefined : describeShrinkLoss(failure.error);
-  // After a save refused because an agent wrote the document since, the page
-  // shows what the agent wrote, and the user's text is kept in the failed
-  // save. This button, under the row that failed, writes it over that version.
-  const staleSaveOffer = failure !== null && isConflict(failure.error) && (
-    <div className="memory-retry">
-      <button type="button" className="btn btn--sm" onClick={saved.saveAnyway}>
-        {failure.edit.gist === undefined
-          ? "Save my text anyway"
-          : failure.edit.body === undefined
-            ? "Save my gist anyway"
-            : "Save my gist and text anyway"}
-      </button>
-    </div>
-  );
   return (
     <>
       <SettingsHeaderTitle
@@ -140,23 +123,27 @@ function MemoryDocumentRecord({
             <i style={{ width: `${String(computeMemoryFill(document.size, cap) * 100)}%` }} />
           </div>
           {!isCore && (
-            <GistRow
-              gist={saved.gist}
-              error={failedField === "gist" ? failureText : null}
-              onCommit={(gist) => {
-                saved.save("gist", gist);
-              }}
-              onEditStart={() => {
-                saved.startEdit("gist");
-              }}
-            />
+            <>
+              <GistRow
+                gist={saved.gist.text}
+                readOnly={saved.gist.saving}
+                error={describeSaveError(saved.gist.error)}
+                onCommit={(gist) => {
+                  saved.save("gist", gist);
+                }}
+                onEditStart={() => {
+                  saved.startEdit("gist");
+                }}
+              />
+              <SaveFailureOffer field="gist" error={saved.gist.error} saved={saved} />
+            </>
           )}
-          {failedField === "gist" && staleSaveOffer}
           <SettingTextRow
             label="Text"
             hint={describeTextHint(document)}
-            value={saved.body}
-            error={failedField === "body" ? failureText : null}
+            value={saved.body.text}
+            readOnly={saved.body.saving}
+            error={describeSaveError(saved.body.error)}
             onCommit={(body) => {
               saved.save("body", body);
             }}
@@ -164,14 +151,62 @@ function MemoryDocumentRecord({
               saved.startEdit("body");
             }}
           />
-          {failure !== null && shrinkLoss !== undefined && (
-            <ShrinkOffer loss={shrinkLoss} onConfirm={saved.confirmShrink} />
-          )}
-          {failedField === "body" && staleSaveOffer}
+          <SaveFailureOffer field="body" error={saved.body.error} saved={saved} />
         </section>
         {!isCore && <DeleteTopicSection assistant={assistant} name={name} />}
       </div>
     </>
+  );
+}
+
+/** Returns the message shown under a field whose last save failed with `error`, or `null`. */
+const describeSaveError = (error: Error | null): string | null =>
+  error === null ? null : `Could not save: ${readErrorMessage(error)}`;
+
+/**
+ * Renders what the user can do about a field's failed save, under its row:
+ *
+ * - after a `conflict`, the page shows what the agent wrote, and a button
+ *   writes the user's text over that version;
+ * - after `shrink_rejected`, a button saves the shorter text once a dialog
+ *   confirms it.
+ *
+ * Renders nothing for any other error.
+ */
+function SaveFailureOffer({
+  field,
+  error,
+  saved,
+}: {
+  readonly field: MemoryField;
+  readonly error: Error | null;
+  readonly saved: SavedMemoryDocument;
+}): JSX.Element | null {
+  if (error === null) return null;
+  const shrinkLoss = describeShrinkLoss(error);
+  if (shrinkLoss !== undefined) {
+    return (
+      <ShrinkOffer
+        loss={shrinkLoss}
+        onConfirm={() => {
+          saved.confirmShrink(field);
+        }}
+      />
+    );
+  }
+  if (!isConflict(error)) return null;
+  return (
+    <div className="memory-retry">
+      <button
+        type="button"
+        className="btn btn--sm"
+        onClick={() => {
+          saved.saveAnyway(field);
+        }}
+      >
+        {field === "gist" ? "Save my gist anyway" : "Save my text anyway"}
+      </button>
+    </div>
   );
 }
 
@@ -183,15 +218,18 @@ const describeTextHint = (document: MemoryDocument): string =>
 
 /**
  * Renders a topic's gist as a one-line field that saves through `onCommit`.
- * `onEditStart` runs when the user begins typing over the shown gist.
+ * `onEditStart` runs when the user begins typing over the shown gist. The
+ * field is read-only while its save runs.
  */
 function GistRow({
   gist,
+  readOnly,
   error,
   onCommit,
   onEditStart,
 }: {
   readonly gist: string;
+  readonly readOnly: boolean;
   readonly error: string | null;
   readonly onCommit: (gist: string) => void;
   readonly onEditStart: () => void;
@@ -204,7 +242,13 @@ function GistRow({
       error={error}
       control={(labels) => (
         <span className="field memory-gist">
-          <input type="text" maxLength={MAX_MEMORY_GIST_LENGTH} {...labels} {...input} />
+          <input
+            type="text"
+            maxLength={MAX_MEMORY_GIST_LENGTH}
+            readOnly={readOnly}
+            {...labels}
+            {...input}
+          />
         </span>
       )}
     />

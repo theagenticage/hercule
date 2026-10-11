@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import {
   buildMemoryWrite,
@@ -6,47 +6,48 @@ import {
   isConflict,
   updateMemoryEntry,
   type HerculeClient,
-  type MemoryEdit,
   type MemoryFieldEditStart,
 } from "@hercule/client-core";
 import type { MemoryDocument } from "@hercule/contract";
 import { memoryDocumentQuery, memoryIndexQuery } from "../../../../../../../app/queries";
 
 /** A field of a memory document that the page edits. */
-type MemoryField = MemoryFieldEditStart["field"];
+export type MemoryField = MemoryFieldEditStart["field"];
 
 /**
- * One save of a memory document: the edited fields, where the edit began,
- * and whether a large cut is confirmed. A save with no `start` is written
- * over the cached document.
+ * One save of one field of a memory document: its new text, where the edit
+ * began, and whether a large cut is confirmed. A save with no `start` is
+ * written over the cached document.
  */
 interface MemorySave {
-  readonly edit: MemoryEdit;
+  readonly field: MemoryField;
+  readonly text: string;
   readonly start: MemoryFieldEditStart | undefined;
   readonly confirmShrink: boolean;
 }
 
-/** A save that failed, and its error. */
-interface FailedSave extends MemorySave {
-  readonly error: Error;
+/** What the page shows of one field. */
+export interface SavedMemoryField {
+  /** The stored text, or the text being saved. */
+  readonly text: string;
+  /** True while a save of the field runs or waits for an earlier one. */
+  readonly saving: boolean;
+  /** The error of the field's last save, or `null` when it did not fail. */
+  readonly error: Error | null;
 }
 
 /** A memory document whose gist and text save as they are committed. */
 export interface SavedMemoryDocument {
-  /** The gist to show: the stored one, or the one being saved. */
-  readonly gist: string;
-  /** The text to show: the stored one, or the one being saved. */
-  readonly body: string;
-  /** The last save that failed and its error, or `null` when the last save did not fail. */
-  readonly failure: { readonly edit: MemoryEdit; readonly error: Error } | null;
+  readonly gist: SavedMemoryField;
+  readonly body: SavedMemoryField;
   /** Notes what an edit of `field` begins on. Call it when the user begins typing. */
   readonly startEdit: (field: MemoryField) => void;
   /** Saves `text` as `field`, against what the edit began on. */
   readonly save: (field: MemoryField, text: string) => void;
-  /** Saves the failed edit again, over the document as it is cached now. */
-  readonly saveAnyway: () => void;
-  /** Saves the failed edit again, with the large cut it makes confirmed. */
-  readonly confirmShrink: () => void;
+  /** Saves the failed text of `field` again, over the document as it is cached now. */
+  readonly saveAnyway: (field: MemoryField) => void;
+  /** Saves the failed text of `field` again, with the large cut it makes confirmed. */
+  readonly confirmShrink: (field: MemoryField) => void;
 }
 
 /**
@@ -54,24 +55,24 @@ export interface SavedMemoryDocument {
  * functions that save a changed gist or text (spec 17 §Settings, The frame,
  * Saving).
  *
- * - While a save runs, the saved fields show the value being saved.
+ * - While a save of a field runs, the field shows the text being saved and
+ *   is `saving`; the page makes it read-only then, so no edit begins on
+ *   text that is not stored yet. The other field can be edited and saved;
+ *   its save waits for the running one.
  * - A write replaces the whole text, so a save must not replace text the
  *   user did not see. The page calls `startEdit` when typing begins, which
  *   notes the text the field showed and the document's version. A save is
  *   then made against the version `chooseMemoryBaseVersion` picks: the
- *   cached one while nobody changed the field since, which includes the
- *   user's own earlier saves, and otherwise the version typing began on, so
- *   the controller refuses it with `conflict`. A read that brings an agent's
- *   text never moves the version on.
- * - A failed save shows the stored value again, and `failure` holds the
- *   edit and the error until the next save, or until a save queued behind
- *   it stores the same fields. After a `conflict` the document
- *   and the index are read again first, so the page shows what the agent
- *   wrote, and `saveAnyway` writes the user's edit over that version. When
- *   saves queued together are all refused with `conflict`, `failure` holds
- *   all their fields, so none is lost.
- * - The saves of one document run one after another, in the order they
- *   were made, even when the page is left and opened again between them.
+ *   cached one while nobody changed the field since, and otherwise the one
+ *   typing began on, so the controller refuses it with `conflict`.
+ * - A field's `error` is the error of its last save, until the field is
+ *   saved again. After a `conflict` the document and the index are read
+ *   again first, so the page shows what the agent wrote, and `saveAnyway`
+ *   writes the refused text over that version.
+ * - Saves and their errors are kept in the query client, not the page, so
+ *   they hold when the page is left and opened again while a save runs. The
+ *   last finished save of each field is kept until the field is saved again,
+ *   so at most two are held per document.
  * - A successful save puts the stored document in the cache, and its size
  *   and gist in the cached index, so the Memory column shows them.
  */
@@ -85,91 +86,102 @@ export function useSavedMemoryDocument(
   const mutationKey = ["saved-memory-document", assistantId, name];
   const documentKey = memoryDocumentQuery(client, assistantId, name).queryKey;
   const indexKey = memoryIndexQuery(client, assistantId).queryKey;
-  const pending = useMutationState({
-    filters: { mutationKey, status: "pending" },
-    select: (each) => (each.state.variables as MemorySave).edit,
+  // Every save of this document still in the query client, oldest first.
+  const saves = useMutationState({
+    filters: { mutationKey, exact: true },
+    select: (each) => ({
+      save: each.state.variables as MemorySave | undefined,
+      status: each.state.status,
+      error: each.state.error,
+    }),
   });
-  const [failure, setFailure] = useState<FailedSave | null>(null);
   // What the open edit of each field began on, from the first key typed.
   const starts = useRef<Partial<Record<MemoryField, MemoryFieldEditStart>>>({});
   const mutation = useMutation({
     mutationKey,
+    // The app removes a finished mutation nothing observes at once, and the
+    // page observes only its latest save. A field's failed save must outlive
+    // a later save of the other field, so finished saves are kept here and
+    // removed by `dropFinishedSaves` instead.
+    gcTime: Infinity,
     scope: { id: `memory:${assistantId}:${name}` },
-    mutationFn: ({ edit, start, confirmShrink }: MemorySave) => {
+    mutationFn: ({ field, text, start, confirmShrink }: MemorySave) => {
       // Read when the save runs, after the saves queued before it, so their
       // stored versions are in the cache.
       const cached = queryClient.getQueryData(documentKey) ?? document;
       const baseVersion =
         start === undefined ? cached.version : chooseMemoryBaseVersion(cached, start);
-      const write = buildMemoryWrite(cached, { ...edit, baseVersion });
+      const write = buildMemoryWrite(cached, { [field]: text, baseVersion });
       return client.memory.write({
         params: { id: assistantId, name },
         payload: confirmShrink ? { ...write, confirmShrink: true } : write,
       });
     },
-    onError: async (error, save) => {
-      if (isConflict(error)) {
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: documentKey, exact: true }),
-          queryClient.invalidateQueries({ queryKey: indexKey, exact: true }),
-        ]);
-      }
-      setFailure((previous) =>
-        // The saves queued together all failed the same way, so the fields
-        // of each are kept for `saveAnyway`.
-        previous !== null && isConflict(previous.error) && isConflict(error)
-          ? {
-              edit: { ...previous.edit, ...save.edit },
-              start: undefined,
-              confirmShrink: false,
-              error,
-            }
-          : { ...save, error },
-      );
+    onError: async (error) => {
+      if (!isConflict(error)) return;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: documentKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: indexKey, exact: true }),
+      ]);
     },
-    onSuccess: (stored, save) => {
-      // A save queued behind one that failed stores the fields it saves, so
-      // the failure of those fields is over; the failure of another stays.
-      setFailure((previous) =>
-        previous !== null && Object.keys(previous.edit).every((field) => field in save.edit)
-          ? null
-          : previous,
-      );
+    onSuccess: (stored) => {
       queryClient.setQueryData(documentKey, stored);
       queryClient.setQueryData(indexKey, (entries) =>
         entries === undefined ? undefined : updateMemoryEntry(entries, stored),
       );
     },
   });
-  const shown = pending.reduce<MemoryEdit>((edits, edit) => ({ ...edits, ...edit }), {});
-  const gist = shown.gist ?? document.gist;
-  const body = shown.body ?? document.body;
-  const recordStart = (field: MemoryField): MemoryFieldEditStart => ({
+  const findLastSave = (field: MemoryField) => saves.findLast((each) => each.save?.field === field);
+  const readField = (field: MemoryField): SavedMemoryField => {
+    const last = findLastSave(field);
+    const saving = last?.status === "pending";
+    return {
+      text: saving && last.save !== undefined ? last.save.text : document[field],
+      saving,
+      error: last?.status === "error" ? last.error : null,
+    };
+  };
+  const gist = readField("gist");
+  const body = readField("body");
+  const noteStart = (field: MemoryField): MemoryFieldEditStart => ({
     field,
-    shown: field === "gist" ? gist : body,
+    shown: field === "gist" ? gist.text : body.text,
     version: document.version,
   });
-  const run = (save: MemorySave): void => {
-    setFailure(null);
+  const dropFinishedSaves = (field: MemoryField): void => {
+    const cache = queryClient.getMutationCache();
+    for (const each of cache.findAll({ mutationKey, exact: true })) {
+      const save = each.state.variables as MemorySave | undefined;
+      if (save?.field === field && each.state.status !== "pending") cache.remove(each);
+    }
+  };
+  const saveField = (save: MemorySave): void => {
+    dropFinishedSaves(save.field);
     mutation.mutate(save);
+  };
+  const retry = (
+    field: MemoryField,
+    how: Partial<Pick<MemorySave, "start" | "confirmShrink">>,
+  ): void => {
+    const failed = findLastSave(field)?.save;
+    if (failed !== undefined) saveField({ ...failed, ...how });
   };
   return {
     gist,
     body,
-    failure,
     startEdit: (field) => {
-      starts.current[field] = recordStart(field);
+      starts.current[field] = noteStart(field);
     },
     save: (field, text) => {
-      const start = starts.current[field] ?? recordStart(field);
+      const start = starts.current[field] ?? noteStart(field);
       delete starts.current[field];
-      run({ edit: { [field]: text }, start, confirmShrink: false });
+      saveField({ field, text, start, confirmShrink: false });
     },
-    saveAnyway: () => {
-      if (failure !== null) run({ edit: failure.edit, start: undefined, confirmShrink: false });
+    saveAnyway: (field) => {
+      retry(field, { start: undefined, confirmShrink: false });
     },
-    confirmShrink: () => {
-      if (failure !== null) run({ edit: failure.edit, start: failure.start, confirmShrink: true });
+    confirmShrink: (field) => {
+      retry(field, { confirmShrink: true });
     },
   };
 }
