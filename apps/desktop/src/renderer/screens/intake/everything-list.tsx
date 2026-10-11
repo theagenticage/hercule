@@ -123,7 +123,6 @@ export const EverythingList = memo(function EverythingList({
   const getItemKey = useCallback((index: number) => items[index]!.key, [items]);
   const estimateSize = useCallback((index: number) => estimateItemHeight(items[index]!), [items]);
 
-  // eslint-disable-next-line react-hooks/incompatible-library -- The virtualizer returns an object that changes inside while its identity stays the same, which the React Compiler cannot memoize, so the compiler leaves this component alone. The callbacks above and the memoized rows keep the renders cheap instead.
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,

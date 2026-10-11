@@ -185,10 +185,10 @@ export function IntakeSplit({
   readonly pane: ReactNode;
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
 }): JSX.Element {
-  const { available, width } = split;
+  const { available, width, splitRef, listRef } = split;
   return (
     <div
-      ref={split.splitRef}
+      ref={splitRef}
       className={split.listNarrowed ? "asks has-pane" : "asks"}
       style={{
         "--intake-list-width": `${String(width)}px`,
@@ -199,7 +199,7 @@ export function IntakeSplit({
       onKeyDown={onKeyDown}
     >
       <section
-        ref={split.listRef}
+        ref={listRef}
         className="asks-list"
         aria-label={listLabel}
         tabIndex={-1}

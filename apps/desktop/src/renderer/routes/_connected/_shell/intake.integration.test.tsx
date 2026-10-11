@@ -1375,7 +1375,7 @@ describe("Intake's Everything view", () => {
     const events = Array.from({ length: 45 }, (_, index) => buildListedEvent(index + 1));
     const { calls } = await openEverything(events);
     await waitFor(() => {
-      expect(getEventRow(events.at(-1)!!)).not.toBeNull();
+      expect(getEventRow(events.at(-1)!)).not.toBeNull();
     });
     expect(screen.queryByText("No older events.")).toBeNull();
 
