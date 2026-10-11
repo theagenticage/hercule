@@ -9,12 +9,16 @@
  */
 import {
   DONE_ACTION_ID,
+  EVENT_HANDLINGS,
   HAND_TO_ACTION_PREFIX,
   isCoreSignalKind,
+  type EventHandling,
+  type EventWithFacts,
   type PluginMark,
   type Signal,
   type SignalAction,
   type SignalOrigin,
+  type SignalView,
 } from "@hercule/contract";
 import { countCalendarDaysBetween, formatRelativeDay, formatRelativeMoment } from "./time-context";
 
@@ -203,7 +207,7 @@ export const describeOrchestrationSegment = (toDoCount: number): string =>
   `Hercule, ${String(toDoCount)} to do`;
 
 /** One tab of Intake's bar: All, or one plugin's signals. */
-interface IntakeTab {
+export interface IntakeTab {
   /** The plugin whose signals the tab shows, or `null` for All. */
   readonly pluginId: string | null;
   readonly label: string;
@@ -704,3 +708,271 @@ export const fitsIntakePane = (available: number): boolean =>
  */
 export const fitIntakeListWidth = (width: number, available: number): number =>
   Math.max(MIN_INTAKE_LIST_WIDTH, Math.min(width, available - MIN_INTAKE_PANE_WIDTH));
+
+/** The views of Intake's list: the three over signals, and Everything over the events behind them. */
+export type IntakeView = SignalView | "everything";
+
+/** The facts an event row's handlings are worked out from: what `event.query` reads beside the event. */
+export type EventFacts = Pick<EventWithFacts, "signals" | "resolvedSignals" | "tasks" | "knownBy">;
+
+/**
+ * The record a handling's label links to. A client opens the ones it has a
+ * screen for and draws the rest as plain text.
+ */
+export type EventHandlingTarget =
+  | { readonly kind: "signal"; readonly signalId: string; readonly view: SignalView }
+  | { readonly kind: "task"; readonly taskId: string }
+  | { readonly kind: "session"; readonly sessionId: string }
+  | { readonly kind: "run"; readonly runId: string };
+
+/** One handling of an event, as a row or the pane shows it. */
+export interface EventHandlingLabel {
+  /** The handling this label is for. */
+  readonly handling: EventHandling;
+  /** Tells the labels of one event apart: an event can have several of one handling. */
+  readonly key: string;
+  /** The label's first part, which a client draws with more weight: "→ signal", "known", "no action". */
+  readonly lead: string;
+  /** What follows the lead, after " · ": the state, the title or the outcome. `null` when there is none. */
+  readonly detail: string | null;
+  /** The record the label links to, or `null` when it names none. */
+  readonly target: EventHandlingTarget | null;
+}
+
+/**
+ * Names where a signal stands, for the label of the event that raised it:
+ * "on your To do list", "Later · back Monday" or "Done · Replied in Gmail".
+ * A snooze whose time has passed no longer holds the signal back, so that
+ * signal reads as on To do. Returns the view the signal is on beside the
+ * words.
+ */
+const describeSignalStanding = (
+  fact: EventFacts["signals"][number],
+  now: Date,
+  timezone: string,
+): { readonly view: SignalView; readonly words: string } => {
+  if (fact.status === "resolved") {
+    return {
+      view: "done",
+      words: fact.outcome === undefined ? "Done" : `Done · ${fact.outcome}`,
+    };
+  }
+  const until = fact.snoozedUntil === undefined ? undefined : new Date(fact.snoozedUntil);
+  if (until !== undefined && until > now) {
+    const day = formatRelativeDay(until, now, timezone);
+    return { view: "later", words: day === undefined ? "Later" : `Later · back ${day}` };
+  }
+  return { view: "to-do", words: "on your To do list" };
+};
+
+/**
+ * Builds the labels of what came of an event, in the order spec 10 §9.10
+ * fixes, whatever order the facts come in:
+ *
+ * 1. a plugin's signal the event raised: "→ signal · on your To do list";
+ * 2. a signal the event ended: "ended Review this PR · Approved on GitHub";
+ * 4. a core signal that lists the event: "→ proposal · Fix the flaky test";
+ * 5. a Task whose provenance carries the event: "→ Fix the flaky test";
+ * 6. a live Subscription that received it: "known · Release thread";
+ * 8. "no action", only when none of the others applies.
+ *
+ * Handlings 3 and 7 and the Screener's wait for the features that produce
+ * them, so no label is built for them. A signal's state is read as of `now`
+ * in `timezone`, which names the day a snoozed signal comes back.
+ */
+export const buildHandlingLabels = (
+  facts: EventFacts,
+  now: Date,
+  timezone: string,
+): ReadonlyArray<EventHandlingLabel> => {
+  const raised = facts.signals.filter((fact) => !isCoreSignalKind(fact.kind));
+  const evidence = facts.signals.filter((fact) => isCoreSignalKind(fact.kind));
+  const labels: EventHandlingLabel[] = [
+    ...raised.map((fact): EventHandlingLabel => {
+      const standing = describeSignalStanding(fact, now, timezone);
+      return {
+        handling: "raised-signal",
+        key: `raised-signal:${fact.signalId}`,
+        lead: "→ signal",
+        detail: standing.words,
+        target: { kind: "signal", signalId: fact.signalId, view: standing.view },
+      };
+    }),
+    ...facts.resolvedSignals.map((fact): EventHandlingLabel => ({
+      handling: "ended-signal",
+      key: `ended-signal:${fact.signalId}`,
+      lead: `ended ${fact.title}`,
+      detail: fact.outcome,
+      target: { kind: "signal", signalId: fact.signalId, view: "done" },
+    })),
+    ...evidence.map((fact): EventHandlingLabel => ({
+      handling: "evidence",
+      key: `evidence:${fact.signalId}`,
+      lead: `→ ${lowerFirst(nameSignalKind(fact.kind))}`,
+      detail: fact.title,
+      target: {
+        kind: "signal",
+        signalId: fact.signalId,
+        view: describeSignalStanding(fact, now, timezone).view,
+      },
+    })),
+    ...facts.tasks.map((fact): EventHandlingLabel => ({
+      handling: "on-task",
+      key: `on-task:${fact.taskId}`,
+      lead: `→ ${fact.title}`,
+      detail: null,
+      target: { kind: "task", taskId: fact.taskId },
+    })),
+    ...facts.knownBy.map((fact): EventHandlingLabel => ({
+      handling: "known-work",
+      key: `known-work:${fact.subscriptionId}`,
+      lead: "known",
+      detail: fact.title ?? (fact.holder.kind === "session" ? "a session" : "a run"),
+      target:
+        fact.holder.kind === "session"
+          ? { kind: "session", sessionId: fact.holder.id }
+          : { kind: "run", runId: fact.holder.id },
+    })),
+  ];
+  if (labels.length > 0) return labels;
+  return [
+    { handling: "no-action", key: "no-action", lead: "no action", detail: null, target: null },
+  ];
+};
+
+/** How many handlings an event's row shows before it counts the rest. */
+const ROW_HANDLING_COUNT = 2;
+
+/**
+ * Cuts the labels of an event's row to the first two, which are the most
+ * telling ones because the order is fixed, and counts the rest as the row's
+ * "+N". The pane shows every label and does not cut.
+ */
+export const cutHandlingLabels = (
+  labels: ReadonlyArray<EventHandlingLabel>,
+): { readonly shown: ReadonlyArray<EventHandlingLabel>; readonly more: number } => ({
+  shown: labels.slice(0, ROW_HANDLING_COUNT),
+  more: Math.max(0, labels.length - ROW_HANDLING_COUNT),
+});
+
+/** One option of Everything's filter menu: the handling it keeps, or `null` for every event. */
+export interface EventHandlingOption {
+  readonly handling: EventHandling | null;
+  readonly caption: string;
+}
+
+/** The captions of the filter menu, one per handling. The word "handling" is never shown. */
+const EVENT_HANDLING_CAPTIONS: Readonly<Record<EventHandling, string>> = {
+  "raised-signal": "Raised a signal",
+  "ended-signal": "Ended a signal",
+  evidence: "Evidence for a signal",
+  "on-task": "Added to a Task",
+  "known-work": "Known to running work",
+  "no-action": "No action",
+};
+
+/**
+ * Returns the caption of `handling`, the words the filter menu offers it by,
+ * which the event pane also puts over the block of each handling.
+ */
+export const describeHandlingCaption = (handling: EventHandling): string =>
+  EVENT_HANDLING_CAPTIONS[handling];
+
+/** The options of Everything's filter menu in the order it draws them: every event, then one per handling. */
+export const EVENT_HANDLING_OPTIONS: ReadonlyArray<EventHandlingOption> = [
+  { handling: null, caption: "All events" },
+  ...EVENT_HANDLINGS.map((handling) => ({ handling, caption: EVENT_HANDLING_CAPTIONS[handling] })),
+];
+
+/** How many days the controller keeps events when the `retention.events` setting is not set. */
+const DEFAULT_EVENT_RETENTION_DAYS = 90;
+
+/**
+ * Describes how far back Everything reaches, from the `retention.events`
+ * setting: "Events from the last 90 days", or "Events from the last day"
+ * for one. A setting that is not set reads as the default of 90 days.
+ */
+export const describeEventHorizon = (retentionDays: number | undefined): string => {
+  const days = retentionDays ?? DEFAULT_EVENT_RETENTION_DAYS;
+  return days === 1 ? "Events from the last day" : `Events from the last ${String(days)} days`;
+};
+
+/** One day of Everything's list: its heading and the events received that day. */
+export interface EventDaySection {
+  /** Identifies the day: `day:` and the number of days from today, such as `day:-1`. */
+  readonly key: string;
+  /** The heading: "Today", "Yesterday", "Friday", "4 Nov". */
+  readonly label: string;
+  /** The day's events, in the order given. Never empty. */
+  readonly events: ReadonlyArray<EventWithFacts>;
+}
+
+/**
+ * Groups events into one section per calendar date in `timezone`, by when
+ * each was received, in the order `events` holds them, which the controller
+ * sorts newest first. The dates are named relative to `now`, as
+ * `formatRelativeDay` names them.
+ */
+export const groupEventsByDay = (
+  events: ReadonlyArray<EventWithFacts>,
+  now: Date,
+  timezone: string,
+): ReadonlyArray<EventDaySection> => {
+  const sections: Array<{ key: string; label: string; events: EventWithFacts[] }> = [];
+  for (const event of events) {
+    const at = new Date(event.receivedAt);
+    const key = `day:${String(countCalendarDaysBetween(now, at, timezone))}`;
+    const last = sections.at(-1);
+    if (last?.key === key) {
+      last.events.push(event);
+      continue;
+    }
+    // Only a zone this runtime cannot read leaves a date unnamed; the
+    // heading is then left empty rather than wrong.
+    sections.push({
+      key,
+      label: upperFirst(formatRelativeDay(at, now, timezone) ?? ""),
+      events: [event],
+    });
+  }
+  return sections;
+};
+
+/**
+ * Returns the title an event's row and pane show: the one-line title its
+ * source set, or the event's kind for an event that has none.
+ */
+export const describeEventTitle = (event: Pick<EventWithFacts, "title" | "kind">): string =>
+  event.title ?? event.kind;
+
+/**
+ * Names the system an event came from, for its mark and its "Open in" link.
+ * A source that is a listed plugin gives the plugin's id and display name.
+ * Any other source is a core emitter, such as `cron` or `manual`, which gives
+ * no plugin id, so the caller draws the core's mark, and the core's name.
+ */
+export const describeEventSystem = (
+  source: string,
+  plugins: ReadonlyArray<PluginName>,
+): { readonly pluginId: string | null; readonly name: string } =>
+  plugins.some((plugin) => plugin.id === source)
+    ? { pluginId: source, name: namePlugin(source, plugins) }
+    : { pluginId: null, name: CORE_SOURCE_NAME };
+
+/**
+ * Returns the id of the event `step` rows away from `selectedId` in
+ * `events`, for `J`, `K` and the arrow keys on Everything. With no
+ * selection, or a selected event that has left the list, `J` selects the
+ * first row and `K` the last. At either end the selection stays where it is.
+ * Returns `null` when the list is empty.
+ */
+export const moveEventSelection = (
+  events: ReadonlyArray<Pick<EventWithFacts, "id">>,
+  selectedId: number | null,
+  step: 1 | -1,
+): number | null => {
+  if (events.length === 0) return null;
+  const index = selectedId === null ? -1 : events.findIndex((event) => event.id === selectedId);
+  if (index < 0) return step === 1 ? events[0]!.id : events.at(-1)!.id;
+  return events[Math.min(events.length - 1, Math.max(0, index + step))]!.id;
+};

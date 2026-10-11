@@ -57,6 +57,8 @@ import type {
   Connection,
   ConversationMessage,
   Event,
+  EventHandling,
+  EventWithFacts,
   Input,
   MemoryDocument,
   MemoryEntry,
@@ -89,6 +91,7 @@ import {
   conversationMessagesQuery,
   currentConversationSessionQuery,
   eventQuery,
+  eventsEverythingQuery,
   liveAgentSessionsQuery,
   liveRunsQuery,
   localRunnerQuery,
@@ -263,7 +266,18 @@ export interface IntakeRecords {
   /** The event the selected signal was raised from, or `null` for none. */
   readonly event: Event | null;
   /** The view Intake opens on. To do when left out. */
-  readonly view?: "later" | "done";
+  readonly view?: "later" | "done" | "everything";
+  /**
+   * What the Everything view reads: the events its one page holds, newest
+   * first, under the search text and the handling filter it opens with, and
+   * the event whose pane is open. Used only when `view` is "everything".
+   */
+  readonly everything?: {
+    readonly events: ReadonlyArray<EventWithFacts>;
+    readonly text?: string;
+    readonly handling?: EventHandling;
+    readonly selectedEventId?: number;
+  };
   /**
    * Answers the requests that move signals, such as `signal.markDone`, for a
    * scene that makes a move. Every other request is refused, as on every
@@ -486,6 +500,16 @@ const seedQueryCache = (
   if (intake !== undefined) {
     // The drawings' signals come from plugins, so no workflow names any of them.
     queryClient.setQueryData(workflowsQuery(client).queryKey, []);
+  }
+  if (intake?.everything !== undefined) {
+    const { events, text, handling } = intake.everything;
+    queryClient.setQueryData(
+      eventsEverythingQuery(client, {
+        ...(text === undefined ? {} : { text }),
+        ...(handling === undefined ? {} : { handling }),
+      }).queryKey,
+      { pages: [{ items: events }], pageParams: [undefined] },
+    );
   }
   if (intake?.signal != null) {
     queryClient.setQueryData(signalQuery(client, intake.signal.id).queryKey, intake.signal);
@@ -936,7 +960,8 @@ export async function mountAppearanceSettingsSpecimen(
  * Applies the URL's theme and draws the shell into `#root` from `records`,
  * with Intake open: the main pane shows the app's real Intake screen, on
  * `intake.view` or To do, with the signals from `records`, and the pane of
- * `intake.signal` when it is not `null`. Returns once the list's rows, or its empty line, are in
+ * `intake.signal` when it is not `null`. On Everything, it shows the events
+ * of `intake.everything`. Returns once the list's rows, or its empty line, are in
  * the document. Fails when the page has no `#root`, draws no sidebar row, no
  * list row and no empty line, or tries to read a record the cache does not
  * hold.
@@ -948,6 +973,12 @@ export async function mountIntakeSpecimen(
   const search = new URLSearchParams();
   if (intake.view !== undefined) search.set("view", intake.view);
   if (intake.signal !== null) search.set("signal", intake.signal.id);
+  const everything = intake.everything;
+  if (everything?.selectedEventId !== undefined) {
+    search.set("event", String(everything.selectedEventId));
+  }
+  if (everything?.text !== undefined) search.set("text", everything.text);
+  if (everything?.handling !== undefined) search.set("handling", everything.handling);
   const path = search.size === 0 ? "/intake" : `/intake?${search.toString()}`;
   await mountShellSpecimen(records, path, { intake });
 }
