@@ -22,12 +22,15 @@ export function applySheetTheme(): void {
 
 /**
  * Sets `data-ready` on `<html>` once the sheet can be captured: every CSS
- * transition has ended, its fonts have loaded, and a frame that holds the
- * whole sheet has been presented (see `waitForPresentedFrame`). Call it
- * after the sheet's cells are in the document.
+ * transition and every animation that ends has ended, its fonts have loaded,
+ * and a frame that holds the whole sheet has been presented (see
+ * `waitForPresentedFrame`). Call it after the sheet's cells are in the
+ * document.
  *
- * A transition that still runs, such as the composer's shrink, would be
- * captured halfway. The capture copies the latest frame the page has sent to
+ * A transition or an entrance animation that still runs, such as the
+ * composer's shrink or an open workflow sliding in, would be captured
+ * halfway. An animation that repeats forever, such as a working face, never
+ * ends, so it is not waited for. The capture copies the latest frame the page has sent to
  * the GPU process, and a presented frame has been sent there; after two
  * animation frames, the sheet's frame may still be on its way.
  */
@@ -35,9 +38,9 @@ export async function markSheetReady(): Promise<void> {
   await Promise.all(
     document
       .getAnimations()
-      .filter((animation) => animation instanceof CSSTransition)
+      .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity)
       // A transition that another one replaces rejects `finished`, and has
-      // ended all the same.
+      // ended all the same; so does an animation its element dropped.
       .map((animation) => animation.finished.catch(() => undefined)),
   );
   await waitForPresentedFrame();
@@ -118,5 +121,20 @@ export function drawBookFace(name: string, look: Look, pose: string, size: numbe
 export function stillBookPage(): void {
   const style = document.createElement("style");
   style.textContent = "* { animation: none !important; } .tl { visibility: hidden; }";
+  document.head.append(style);
+}
+
+/**
+ * Stops a workflow graph from fading out at a cut edge, on the book's page
+ * and on the app's alike. The fade is a CSS mask, and Chromium draws a
+ * masked pane a little differently from one capture to the next: the same
+ * page failed by 30 to 380 pixels at random, on the book's side as often as
+ * on the app's. The compared parts still check that both pages cut the
+ * graph on the same side, through the pane's `is-cut-left` and
+ * `is-cut-right` classes.
+ */
+export function stillGraphFade(): void {
+  const style = document.createElement("style");
+  style.textContent = ".graph-pane { mask-image: none !important; }";
   document.head.append(style);
 }

@@ -118,6 +118,10 @@ import {
   transcriptQuery,
   triggersQuery,
   userQuery,
+  workflowActionsQuery,
+  workflowDayRunsQuery,
+  workflowQuery,
+  workflowRunsQuery,
   workflowsQuery,
   workspacesQuery,
 } from "../app/queries";
@@ -138,6 +142,7 @@ import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
 import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
 import { Route as WorkflowsRoute } from "../routes/_connected/_shell/workflows/route";
+import { Route as OpenWorkflowRoute } from "../routes/_connected/_shell/workflows/$workflowId";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
 import type { WorkflowsRecords } from "./workflows-fixture";
@@ -499,6 +504,18 @@ const seedQueryCache = (
     queryClient.setQueryData(newestRunsQuery(client).queryKey, workflows.newestRuns);
     queryClient.setQueryData(liveRunsQuery(client, "running").queryKey, workflows.runningRuns);
     queryClient.setQueryData(liveRunsQuery(client, "pending").queryKey, []);
+    const { workflow, runs, todayRuns, agents, workflowActions } = workflows.openWorkflow;
+    queryClient.setQueryData(workflowQuery(client, workflow.id).queryKey, workflow);
+    queryClient.setQueryData(workflowRunsQuery(client, workflow.id).queryKey, {
+      pages: [{ items: runs }],
+      pageParams: [undefined],
+    });
+    queryClient.setQueryData(
+      workflowDayRunsQuery(client, workflow.id, todayRuns.activeSince, todayRuns.until).queryKey,
+      todayRuns.runs,
+    );
+    queryClient.setQueryData(agentsQuery(client).queryKey, agents);
+    queryClient.setQueryData(workflowActionsQuery(client).queryKey, workflowActions);
     // The book's times are UTC, and so is the specimen's clock.
     queryClient.setQueryData(settingsQuery(client).queryKey, {
       controller: {},
@@ -652,6 +669,12 @@ const buildRouter = (
     getParentRoute: () => shellRoute,
     loader: undefined,
   } as never);
+  const openWorkflowRoute = OpenWorkflowRoute.update({
+    id: "/$workflowId",
+    path: "/$workflowId",
+    getParentRoute: () => workflowsRoute,
+    loader: undefined,
+  } as never);
   const routeTree = rootRoute.addChildren([
     connectedRoute.addChildren([
       shellRoute.addChildren([
@@ -670,7 +693,7 @@ const buildRouter = (
           component: AssistantRoute,
         }),
         intakeRoute,
-        workflowsRoute,
+        workflowsRoute.addChildren([openWorkflowRoute]),
         settingsRoute.addChildren([
           appearanceSettingsRoute,
           assistantsSettingsRoute,
@@ -699,6 +722,21 @@ const waitForElement = async (selector: string): Promise<void> => {
 };
 
 /**
+ * Returns the selector of what Workflows draws last at `path`, the app's
+ * address: the list's rows, or its empty line, at `/workflows`; and with a
+ * workflow open, the Runs tab's rows or the timeline's bars, or their empty
+ * line. The list and the Runs tab each draw their rows once they have
+ * measured their height, after the first render, and the open workflow's
+ * runs are measured after the list.
+ */
+const findWorkflowsDrawnSelector = (path: string): string => {
+  if (!path.startsWith("/workflows/")) return ".table-row, .workflow-list-empty";
+  return path.includes("runsView=timeline")
+    ? ".open-pane .run-bar, .open-pane .lanes-empty"
+    : ".open-pane .table-row, .open-pane .table-empty";
+};
+
+/**
  * Checks that the page drew the sidebar's thread rows, the transcript when
  * `screens` opens a thread, an assistant's settings when it opens Settings >
  * Assistants, the theme cards when it opens Settings > Appearance, the
@@ -706,7 +744,7 @@ const waitForElement = async (selector: string): Promise<void> => {
  * it opens a draft, and started no read. Fails with the keys of the
  * reads it started, or with what it did not draw, otherwise.
  */
-const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void => {
+const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: string): void => {
   const reads = queryClient.getQueryCache().findAll({ fetchStatus: "fetching" });
   if (reads.length > 0) {
     throw new Error(
@@ -748,7 +786,7 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
   }
   if (
     screens.workflows !== undefined &&
-    document.querySelector(".table-row, .workflow-list-empty") === null
+    document.querySelector(findWorkflowsDrawnSelector(path)) === null
   ) {
     throw new Error(
       "Workflows drew no row and no empty line. Check the page's console for the error.",
@@ -826,9 +864,9 @@ async function mountShellSpecimen(
   // The list draws its rows once it has measured its height, after the first render.
   if (screens.intake !== undefined) await waitForElement(".ask-row, .asks-empty");
   if (screens.workflows !== undefined) {
-    await waitForElement(".table-row, .workflow-list-empty");
+    await waitForElement(findWorkflowsDrawnSelector(path));
   }
-  assertShellDrawn(queryClient, screens);
+  assertShellDrawn(queryClient, screens, path);
 }
 
 /**
@@ -955,14 +993,32 @@ export async function mountIntakeSpecimen(
 /**
  * Applies the URL's theme and draws the shell into `#root` from `records`,
  * with Workflows open: the main pane shows the app's real workflow list,
- * built from `workflows`. Returns once the list's rows, or its empty line,
- * are in the document. Fails when the page has no `#root`, draws no sidebar
- * row, no list row and no empty line, or tries to read a record the cache
+ * built from `workflows`, at the width `view` names, as the book's `?view=`
+ * names it:
+ *
+ * - `table`: no workflow is open, and the list fills the pane;
+ * - `split`: Ship release is open beside the list, drawn as a column;
+ * - `full`: Ship release fills the pane, and the list is hidden.
+ *
+ * An open workflow shows its Runs tab as a list, or as a timeline of today
+ * when `runsView` is `timeline`. Returns once the list's rows, or the Runs
+ * tab's, are in the document. Fails when the page has no `#root`, draws no
+ * sidebar row and none of those rows, or tries to read a record the cache
  * does not hold.
  */
 export async function mountWorkflowsSpecimen(
   records: SidebarRecords,
   workflows: WorkflowsRecords,
+  view: "table" | "split" | "full",
+  runsView: "list" | "timeline",
 ): Promise<void> {
-  await mountShellSpecimen(records, "/workflows", { workflows });
+  const search = new URLSearchParams();
+  if (view === "full") search.set("full", "true");
+  if (runsView === "timeline") search.set("runsView", "timeline");
+  const path =
+    view === "table"
+      ? "/workflows"
+      : `/workflows/${workflows.openWorkflow.workflow.id}` +
+        (search.size === 0 ? "" : `?${search.toString()}`);
+  await mountShellSpecimen(records, path, { workflows });
 }

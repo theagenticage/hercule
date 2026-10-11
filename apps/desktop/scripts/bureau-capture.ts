@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares nineteen pairs of
+ * For each theme, Whitehaven and Orient Express, it compares twenty-two pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -57,7 +57,13 @@
  * - the workflow list (the main pane) of workflows.html, in its table view:
  *   the book's page stilled by specimens/workflows-reference.ts, and the
  *   Workflows specimen (workflows.html). The app draws only the rows near
- *   the window, so the items of this pair are only those inside the window.
+ *   the window, so the items of this pair are only those inside the window;
+ * - Ship release open on the same pages, with its runs as a list: beside
+ *   the list drawn as a column (`?view=split`), and across the whole pane
+ *   (`?view=full`). Again only the items inside the window count;
+ * - Ship release open across the whole pane with today's runs on the
+ *   timeline (`?view=full&runs=timeline`). The reference module moves the
+ *   book's hour axis into the tab band, where spec 17 puts it.
  *
  * Each reference module edits the book's page to show its fixture's data.
  * For each region pair, the capture:
@@ -127,6 +133,11 @@ interface RegionPair {
   readonly specimenPage: string;
   /** The book's `?state=`, which the specimen page is opened with too, or none. */
   readonly state?: string;
+  /**
+   * The book's own parameters besides `?state=`, such as workflows.html's
+   * `{ view: "split" }`, which the specimen page is opened with too.
+   */
+  readonly search?: Readonly<Record<string, string>>;
   /**
    * Whether both pages are opened with `?scrolled=1`, which makes each scroll
    * its section's body to the end. A page that needs `?state=` for something
@@ -614,6 +625,104 @@ const WORKFLOWS_PARTS = [
   ".table-num",
 ];
 
+// Every part of the header and the list's column beside an open workflow,
+// as a selector inside `main.main`. The app names the column's row parts
+// after the column, where the book borrows the sidebar's row, so each of
+// those selectors names both.
+const WORKFLOW_COLUMN_PARTS = [
+  ".top > .pill",
+  ".list-btn",
+  ".list-btn > svg",
+  ".pill-back",
+  ".pill-back > small",
+  ".find--box",
+  ".find > svg",
+  ".find > input",
+  ".find > kbd",
+  ".workflow-list",
+  ".group-h",
+  ".group-h > span",
+  ".group-h > .count",
+  ".side-row, .column-row",
+  ".side-lead, .column-mark",
+  ".side-lead > svg, .column-mark > svg",
+  ".side-name, .column-name",
+  ".side-meta, .column-status",
+  ".side-end, .column-time",
+];
+
+// Every part of the open workflow above its tab's panel, as a selector
+// inside `main.main`: the lead with its switch and chips, the graph with its
+// cards and edge labels, and the tab band. The scaled drawing's box carries
+// the graph's zoom, and the pane's cut classes say on which side the graph
+// fades out, which the capture does not draw (see `stillGraphFade`).
+const OPEN_WORKFLOW_PARTS = [
+  ".open-pane",
+  ".open-name",
+  ".open-name > h1",
+  ".open-switch",
+  ".open-switch > .toggle",
+  ".open-gist",
+  ".open-hint",
+  ".chip-row",
+  ".chip",
+  ".chip > svg",
+  ".graph",
+  ".graph-pane",
+  ".graph-pane.is-cut-left",
+  ".graph-pane.is-cut-right",
+  ".graph-room",
+  ".graph-draw",
+  ".node",
+  ".node-lead",
+  ".node-lead > svg",
+  ".node-title",
+  ".node-detail",
+  ".edge-label",
+  ".pill.zoom",
+  ".zoom > *",
+  ".tab-band",
+  ".tab-bar",
+  ".tab",
+  ".tab > small",
+  ".tab-tools",
+  ".seg",
+  ".seg > button",
+];
+
+// Every part of the Runs tab's list, as a selector inside `main.main`: its
+// column heads and each run's cells.
+const RUN_LIST_PARTS = [
+  ".tbl-runs.table-heads",
+  ".tbl-runs.table-heads > span",
+  ".tbl-runs.table-row",
+  ".tbl-runs > .table-mark",
+  ".tbl-runs > .table-mark > svg",
+  ".tbl-runs > .status-text",
+  ".tbl-runs > .col-by",
+  ".col-by > svg",
+  ".col-by > .no-icon",
+  ".tbl-runs > .table-num",
+];
+
+// Every part of the Runs tab's timeline of one day, as a selector inside
+// `main.main`: the day stepper, the hour axis, and the lanes with their
+// hour lines, the now line and a bar per run.
+const RUN_TIMELINE_PARTS = [
+  ".stepper",
+  ".stepper > *",
+  ".axis",
+  ".axis-tick",
+  ".axis-now",
+  ".lanes",
+  ".hour-line",
+  ".now-line",
+  ".run-bar",
+  ".run-bar-cut",
+  ".run-bar-line",
+  ".run-bar > svg",
+];
+
 /** Returns the pair that compares one state of Settings > Permission profiles, `view` being the book's `?state=` and whether the page is scrolled. */
 const buildProfilesPair = (
   name: string,
@@ -749,6 +858,44 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
     scope: "main.main",
     parts: WORKFLOWS_PARTS,
     itemsInWindowOnly: true,
+  },
+  {
+    name: "workflows-split",
+    bookPage: "crew-bureau-2/desktop/workflows.html",
+    referenceModule: "workflows-reference.ts",
+    specimenPage: "workflows.html",
+    search: { view: "split" },
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: [...WORKFLOW_COLUMN_PARTS, ...OPEN_WORKFLOW_PARTS, ...RUN_LIST_PARTS],
+    itemsInWindowOnly: true,
+  },
+  {
+    name: "workflows-full",
+    bookPage: "crew-bureau-2/desktop/workflows.html",
+    referenceModule: "workflows-reference.ts",
+    specimenPage: "workflows.html",
+    search: { view: "full" },
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: [".top > .pill", ".list-btn", ".pill-back", ...OPEN_WORKFLOW_PARTS, ...RUN_LIST_PARTS],
+    itemsInWindowOnly: true,
+  },
+  {
+    name: "workflows-timeline",
+    bookPage: "crew-bureau-2/desktop/workflows.html",
+    referenceModule: "workflows-reference.ts",
+    specimenPage: "workflows.html",
+    search: { view: "full", runs: "timeline" },
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: [
+      ".top > .pill",
+      ".list-btn",
+      ".pill-back",
+      ...OPEN_WORKFLOW_PARTS,
+      ...RUN_TIMELINE_PARTS,
+    ],
   },
 ];
 
@@ -922,13 +1069,14 @@ async function compareRegion(
     referenceModule,
     specimenPage,
     state,
+    search,
     scrolled,
     region,
     scope,
     parts,
     itemsInWindowOnly = false,
   } = pair;
-  const query = buildPageQuery({ theme, state, scrolled });
+  const query = buildPageQuery({ theme, state, search, scrolled });
   const [reference, specimen] = await Promise.all([
     openSheet(
       new URL(`/design/${bookPage}${query}`, sheetsUrl).href,
@@ -1042,11 +1190,13 @@ async function compareTheme(sheetsUrl: string, theme: string): Promise<ThemeResu
 function buildPageQuery(page: {
   readonly theme?: string | undefined;
   readonly state?: string | undefined;
+  readonly search?: Readonly<Record<string, string>> | undefined;
   readonly scrolled?: true | undefined;
 }): string {
   const params = new URLSearchParams();
   if (page.theme !== undefined) params.set("theme", page.theme);
   if (page.state !== undefined) params.set("state", page.state);
+  for (const [key, value] of Object.entries(page.search ?? {})) params.set(key, value);
   if (page.scrolled !== undefined) params.set("scrolled", "1");
   const query = params.toString();
   return query === "" ? "" : `?${query}`;
@@ -1085,12 +1235,12 @@ function buildReport(results: ReadonlyArray<ThemeResult>): string {
     lines.push(`${theme.padEnd(17)}${String(differingCells)} of ${String(cells)} cells differ`);
     if (differences.length > 0) lines.push(...buildDifferenceTable("cell", differences));
   }
-  REGION_PAIRS.forEach(({ name, bookPage, state, scrolled, region }, index) => {
+  REGION_PAIRS.forEach(({ name, bookPage, state, search, scrolled, region }, index) => {
     const words = name.replaceAll("-", " ");
     lines.push(
       `${words.slice(0, 1).toUpperCase()}${words.slice(1)} comparison: ${String(first.regions[index]!.items)} items, ` +
         `x ${String(region.x)}-${String(region.x + region.width)} of ${bookPage}` +
-        buildPageQuery({ state, scrolled }),
+        buildPageQuery({ state, search, scrolled }),
     );
     for (const { theme, regions } of results) {
       const { differences } = regions[index]!;

@@ -151,6 +151,13 @@
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
 }
+/* Under the sticky column heads, whose hairline is already there, the first
+   row draws none. The first row is the tab panel list's first item, or sits
+   inside that item. */
+.open-pane [role="tabpanel"] > [role="list"] > .table-row:first-child::before,
+.open-pane [role="tabpanel"] > [role="list"] > :first-child > .table-row::before {
+  border-top-color: transparent;
+}
 /* Not in the book, whose tables are never empty. An empty tab says so in
    muted ink, where its first row would be. */
 .table-empty {
