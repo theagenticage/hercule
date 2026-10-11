@@ -545,6 +545,31 @@ describe("Settings > Assistants, a memory document's page", () => {
     });
   });
 
+  it("deletes a topic only after the save made before it, and keeps neither", async () => {
+    const { topic, handlers } = keepWebshop();
+    const held = createGate();
+    topic.writesWait = held.opened;
+    const { calls, context } = await openDocument("webshop", handlers);
+    const text = await screen.findByRole("textbox", { name: "Text" });
+
+    await userEvent.type(text, " Mollie for NL.");
+    await userEvent.click(screen.getByRole("button", { name: "Delete topic" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete webshop?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    expect(calls.filter((call) => call.method === "DELETE")).toEqual([]);
+    held.open();
+
+    await screen.findByRole("complementary", { name: "Memory" });
+    expect(
+      calls
+        .filter((call) => call.path === `${MEMORY_PATH}/webshop` && call.method !== "GET")
+        .map((call) => call.method),
+    ).toEqual(["PUT", "DELETE"]);
+    expect(
+      context.queryClient.getMutationCache().findAll({ mutationKey: ["saved-memory-document"] }),
+    ).toEqual([]);
+  });
+
   it("has no gist and no Delete on the core note", async () => {
     await openDocument(MEMORY_CORE);
 

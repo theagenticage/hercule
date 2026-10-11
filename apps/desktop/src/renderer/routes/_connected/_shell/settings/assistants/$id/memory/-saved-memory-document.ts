@@ -38,6 +38,15 @@ const buildMemorySavesKey = (assistantId: string, name: string) => [
 ];
 
 /**
+ * Builds the mutation scope of the memory document `name`. Its saves and its
+ * deletion share it, so they run one after another in the order they were
+ * made, and a deletion never runs while a save of the document does.
+ */
+export const buildMemoryDocumentScope = (assistantId: string, name: string) => ({
+  id: `memory:${assistantId}:${name}`,
+});
+
+/**
  * Removes the finished saves of the memory document `name` from the query
  * client: those of `field`, or of both fields when `field` is not given.
  * Saves still running stay. The saves are kept past the app's mutation
@@ -118,7 +127,8 @@ export interface SavedMemoryDocument {
  * - Saves and their errors are kept in the query client, not the page, so
  *   they hold when the page is left and opened again while a save runs. The
  *   last finished save of each field is kept until the field is saved again
- *   or the document is deleted, so at most two are held per document.
+ *   or the document is deleted, so at most two are held per document. A
+ *   deletion waits for the saves made before it.
  * - A successful save puts the stored document in the cache, and its size
  *   and gist in the cached index, so the Memory column shows them.
  */
@@ -150,7 +160,7 @@ export function useSavedMemoryDocument(
     // a later save of the other field, so finished saves are kept here and
     // removed by `dropFinishedMemorySaves` instead.
     gcTime: Infinity,
-    scope: { id: `memory:${assistantId}:${name}` },
+    scope: buildMemoryDocumentScope(assistantId, name),
     mutationFn: ({ field, text, start, confirmShrink }: MemorySave) => {
       // Read when the save runs, after the saves queued before it, so their
       // stored versions are in the cache.

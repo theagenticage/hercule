@@ -6,7 +6,7 @@ import type { Assistant } from "@hercule/contract";
 import { memoryDocumentQuery, memoryIndexQuery } from "../../../../../../../app/queries";
 import { ConfirmDialog } from "../../../../../../../screens/confirm-dialog";
 import { SettingRow } from "../../../../../../../screens/settings/setting-row";
-import { dropFinishedMemorySaves } from "./-saved-memory-document";
+import { buildMemoryDocumentScope, dropFinishedMemorySaves } from "./-saved-memory-document";
 
 /**
  * Renders the Delete section of a memory topic: a row whose button asks for a
@@ -27,6 +27,9 @@ export function DeleteTopicSection({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [confirming, setConfirming] = useState(false);
   const remove = useMutation({
+    // Runs after the saves made before it, so none of them lands on the
+    // deleted topic, and all of them are finished when they are dropped below.
+    scope: buildMemoryDocumentScope(assistant.id, name),
     mutationFn: () => client.memory.delete({ params: { id: assistant.id, name } }),
     onSuccess: async () => {
       dialogRef.current?.close();
