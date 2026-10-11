@@ -1,8 +1,13 @@
 /**
  * Builds what Settings > System shows about text generation: the choices for
  * the `textGeneration.model` setting, and the line about the last failure.
- * Both are written here once, so the screen holds no rule of its own about
- * what Automatic means or when a failure is worth showing.
+ * The web app and the desktop app both read them from here, so neither screen
+ * holds a rule of its own about what Automatic means or when a failure is
+ * worth showing. The desktop's first run names the model with
+ * `describeTextGenerationModel`.
+ *
+ * The controller decides which model Automatic resolves to and reports it in
+ * `controller.read`. Nothing here repeats that rule.
  */
 import type {
   ProviderInstance,
@@ -26,11 +31,30 @@ export interface TextGenerationField {
   readonly selectedKey: string;
 }
 
+/** A model that text generation runs on: the instance and the model's slug. */
+type ResolvedModel = NonNullable<TextGenerationStatus["model"]>;
+
+/**
+ * Returns the name of the model text generation runs on, such as
+ * `Codex · GPT-6 Luna`. Falls back to the slug alone when the instance is
+ * gone, as `describeAgent` does.
+ */
+export const describeTextGenerationModel = (
+  instances: readonly ProviderInstance[],
+  model: ResolvedModel,
+): string =>
+  describeAgent(
+    instances.find((instance) => instance.id === model.instanceId),
+    model.model,
+  );
+
 const buildModelKey = (instanceId: string, model: string): string => `${instanceId}/${model}`;
 
 /**
  * Returns the model select: Automatic first, then one entry per provider
- * instance and model that is logged in on some runner, then Off.
+ * instance and model that is logged in on some runner, then Off. A model that
+ * a harness keeps only for old sessions (`isLegacy`) is not offered, and a
+ * model several runners list appears once.
  *
  * Automatic names the model it resolves to only while it is the stored
  * setting. With any other setting, `status.model` is that setting's own model,
@@ -51,15 +75,16 @@ export const buildTextGenerationField = (
   const describeAutomatic = (): string => {
     if (setting !== "automatic") return "Automatic";
     if (status.model === null) return "Automatic - no model available";
-    const instance = instances.find((each) => each.id === status.model?.instanceId);
-    return `Automatic - currently ${describeAgent(instance, status.model.model)}`;
+    return `Automatic - currently ${describeTextGenerationModel(instances, status.model)}`;
   };
 
   const offered: TextGenerationChoice[] = instances.flatMap((instance) => {
     const slugs = new Set(
       instance.snapshots
         .filter((snapshot) => snapshot.auth.status === "ok")
-        .flatMap((snapshot) => snapshot.models.map((model) => model.slug)),
+        .flatMap((snapshot) => snapshot.models)
+        .filter((model) => model.isLegacy !== true)
+        .map((model) => model.slug),
     );
     return [...slugs].map((slug) => ({
       key: buildModelKey(instance.id, slug),
@@ -72,10 +97,9 @@ export const buildTextGenerationField = (
     typeof setting === "string" ? setting : buildModelKey(setting.instanceId, setting.model);
 
   if (typeof setting === "object" && !offered.some((choice) => choice.key === selectedKey)) {
-    const instance = instances.find((each) => each.id === setting.instanceId);
     offered.push({
       key: selectedKey,
-      label: `${describeAgent(instance, setting.model)} (not offered)`,
+      label: `${describeTextGenerationModel(instances, setting)} (not offered)`,
       setting,
     });
   }

@@ -5,13 +5,18 @@
 import { describe, expect, it } from "vitest";
 import type { TextGenerationStatus } from "@hercule/contract";
 import { buildInstance, buildSnapshot } from "./providers.testing";
-import { buildTextGenerationField, describeTextGenerationFailure } from "./text-generation";
+import {
+  buildTextGenerationField,
+  describeTextGenerationFailure,
+  describeTextGenerationModel,
+} from "./text-generation";
 
-const model = (slug: string, name: string) => ({
+const model = (slug: string, name: string, extra: { isLegacy?: boolean } = {}) => ({
   slug,
   name,
   imageInput: { maxBytes: null },
   options: [],
+  ...extra,
 });
 
 const CODEX = buildInstance("codex", "Codex", [
@@ -150,5 +155,33 @@ describe("describeTextGenerationFailure", () => {
 
   it("returns null while text generation is off", () => {
     expect(describeTextGenerationFailure("off", failed("timeout"), NOW)).toBeNull();
+  });
+});
+
+describe("buildTextGenerationField, with models several runners list", () => {
+  it("offers each model once, and no model kept only for old sessions", () => {
+    const twoRunners = buildInstance("codex", "Codex", [
+      buildSnapshot({ models: [model("gpt-6-luna", "GPT-6 Luna")] }),
+      buildSnapshot({
+        runnerId: "other",
+        models: [model("gpt-6-luna", "GPT-6 Luna"), model("gpt-5", "GPT-5", { isLegacy: true })],
+      }),
+    ]);
+
+    const field = buildTextGenerationField("off", [twoRunners], NOTHING);
+
+    expect(field.choices.map((choice) => choice.label)).toEqual([
+      "Automatic",
+      "Codex · GPT-6 Luna",
+      "Off",
+    ]);
+  });
+});
+
+describe("describeTextGenerationModel", () => {
+  it("falls back to the slug when the instance is gone", () => {
+    expect(describeTextGenerationModel([], { instanceId: CODEX.id, model: "gpt-6-luna" })).toBe(
+      "gpt-6-luna",
+    );
   });
 });

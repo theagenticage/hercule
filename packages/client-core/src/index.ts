@@ -438,6 +438,7 @@ export { resolveThreadRowsMode } from "./thread-rows";
 export {
   buildTextGenerationField,
   describeTextGenerationFailure,
+  describeTextGenerationModel,
   type TextGenerationChoice,
   type TextGenerationField,
 } from "./text-generation";
