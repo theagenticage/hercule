@@ -1,5 +1,6 @@
 import { assert, describe, it } from "vitest";
 import { MUTABLE_LIVE_TOPICS } from "@hercule/contract";
+import { LIVE_SESSION_STATUSES } from "../threads/status";
 import { buildQueryKeys, queryKeys, type LiveQueryKey } from "./keys";
 
 describe("workspace pushes", () => {
@@ -140,5 +141,25 @@ describe("a sender's key", () => {
         assert.deepStrictEqual(reached, [], `a ${topic} push naming ${ids.join() || "no ids"}`);
       }
     }
+  });
+});
+
+describe("the desktop workflow list's keys", () => {
+  it("reaches every trigger, the list of all of them too, on a workflow push", () => {
+    const keys = buildQueryKeys("workflow", ["w1"]);
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.triggers())));
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.triggers("w2"))));
+  });
+
+  it("puts a workflow's strip under the runs prefix, apart from its run list", () => {
+    const strip = queryKeys.runStrip("w1");
+    assert.isTrue(buildQueryKeys("run", ["r1"]).some((key) => isPrefixOf(key, strip)));
+    assert.isFalse(isPrefixOf(queryKeys.runs({ workflowId: "w1" }), strip));
+    assert.isFalse(isPrefixOf(strip, queryKeys.runs({ workflowId: "w1" })));
+  });
+
+  it("reaches the live sessions of runs on a session push", () => {
+    const live = queryKeys.sessions({ thread: false, status: LIVE_SESSION_STATUSES });
+    assert.isTrue(buildQueryKeys("session", ["s1"]).some((key) => isPrefixOf(key, live)));
   });
 });

@@ -173,8 +173,31 @@ export {
 } from "./errors";
 export { toIdTail } from "./id-tail";
 export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
+export {
+  buildWorkflowListItems,
+  buildWorkflowRows,
+  countWorkflowsByFilter,
+  pickWorkflowFocusFallback,
+  WORKFLOW_LIST_FILTERS,
+  type StripRunState,
+  type WorkflowGroup,
+  type WorkflowListFilter,
+  type WorkflowListItem,
+  type WorkflowListReads,
+  type WorkflowRow,
+  type WorkflowRowMark,
+  type WorkflowStatusTone,
+} from "./workflow-rows";
+export { LIVE_SESSION_STATUSES } from "./threads/status";
 export { isWebLink } from "./web-link";
-export { listWaiting, type Waiting, type WaitingAssistant, type WaitingThread } from "./waiting";
+export {
+  listWaiting,
+  listWaitingRunSessions,
+  type Waiting,
+  type WaitingAssistant,
+  type WaitingRunSession,
+  type WaitingThread,
+} from "./waiting";
 export { buildIdOptions } from "./id-options";
 export { readJsonObject, readStringList } from "./json-shape";
 export { listJsonLines } from "./json-lines";
@@ -385,7 +408,9 @@ export {
 } from "./onboarding";
 export {
   chooseStamps,
+  findNextListTimeChange,
   formatDayStamp,
+  formatListTime,
   formatPreciseStamp,
   formatSince,
   formatStamp,

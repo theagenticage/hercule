@@ -15,6 +15,7 @@ import type {
   NotificationFilter,
   RunFilter,
   Runner,
+  SessionFilter,
   SignalFilter,
   TaskFilter,
 } from "@hercule/contract";
@@ -65,19 +66,20 @@ export const queryKeys = {
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
   /**
-   * A filtered listing is keyed on its filter:
+   * A filtered listing is keyed on its filter, such as:
    *
    * - one runner's sessions, for its page;
    * - one run's sessions, the ones its agent steps started, for the run's page;
    * - `{ thread: true }`, every Thread and no Agent's session, for the
-   *   desktop app's sidebar.
+   *   desktop app's sidebar;
+   * - `{ thread: false, status: LIVE_SESSION_STATUSES }`, the live sessions
+   *   an Agent spawned, which the desktop app's "From runs" reads.
    *
    * Every variant keeps the `sessions` prefix, so a `session` push
    * invalidates them all.
    */
-  sessions: (
-    filter?: { readonly runnerId: string } | { readonly runId: string } | { readonly thread: true },
-  ): LiveQueryKey => (filter === undefined ? ["sessions"] : ["sessions", filter]),
+  sessions: (filter?: typeof SessionFilter.Type): LiveQueryKey =>
+    filter === undefined ? ["sessions"] : ["sessions", filter],
   /** Not a live topic: profiles change only through this browser's own writes. */
   profiles: (): LiveQueryKey => ["profiles"],
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
@@ -149,9 +151,11 @@ export const queryKeys = {
   workflows: (): LiveQueryKey => ["workflows"],
   workflow: (id?: string): LiveQueryKey => (id === undefined ? ["workflow"] : ["workflow", id]),
   /**
-   * The triggers of one workflow, keyed on its id; without it, the prefix of
-   * every trigger list. Triggers have no topic of their own: a trigger is
-   * part of its workflow, so a change to one is pushed on `workflow`.
+   * The triggers of one workflow, keyed on its id. Without the id, it is both
+   * the key of the desktop app's workflow list, which reads every trigger,
+   * and the prefix of every trigger list. Triggers have no topic of their own: a
+   * trigger is part of its workflow, so a change to one is pushed on
+   * `workflow`.
    */
   triggers: (workflowId?: string): LiveQueryKey =>
     workflowId === undefined ? ["triggers"] : ["triggers", workflowId],
@@ -187,6 +191,14 @@ export const queryKeys = {
       ? ["conversation-messages"]
       : ["conversation-messages", conversationId],
   runs: (filter?: RunFilter): LiveQueryKey => (filter === undefined ? ["runs"] : ["runs", filter]),
+  /**
+   * A workflow's strip in the desktop app's workflow list: its newest runs,
+   * one page of `run.query({ workflowId, limit })`. Its key differs from
+   * `runs({ workflowId })`, the Runs tab's paged read of the same workflow,
+   * because the two hold different pages. It shares the `runs` prefix, so a
+   * `run` push reaches both.
+   */
+  runStrip: (workflowId: string): LiveQueryKey => ["runs", "strip", workflowId],
   run: (id?: string): LiveQueryKey => (id === undefined ? ["run"] : ["run", id]),
   /** The notification center's pages, keyed on the filter. */
   notifications: (filter?: NotificationFilter): LiveQueryKey =>
@@ -299,18 +311,20 @@ export const buildQueryKeys = (
           ...SIGNAL_DESCRIBE_KEYS,
         ];
   }
-  // Any workflow change refetches the listing. A workflow's own page and its
-  // triggers are refetched only when the push lists its id, or when the push
-  // lists no ids. A trigger's change, such as a pause or a failing filter, is
-  // pushed with its workflow's id. Every signal read is refetched too, see
-  // `SIGNAL_DESCRIBE_KEYS`.
+  // Any workflow change refetches the listing and every trigger list. A
+  // trigger's change, such as a pause or a failing filter, is pushed with its
+  // workflow's id, and the read of every trigger holds that workflow's
+  // triggers too, so the `triggers` prefix covers both it and the one
+  // workflow's list. A workflow's own page is refetched only when the push
+  // lists its id, or when the push lists no ids. Every signal read is
+  // refetched too, see `SIGNAL_DESCRIBE_KEYS`.
   if (topic === "workflow") {
     return ids.length === 0
       ? [queryKeys.workflows(), queryKeys.workflow(), queryKeys.triggers(), ...SIGNAL_DESCRIBE_KEYS]
       : [
           queryKeys.workflows(),
           ...ids.map((id) => queryKeys.workflow(id)),
-          ...ids.map((id) => queryKeys.triggers(id)),
+          queryKeys.triggers(),
           ...SIGNAL_DESCRIBE_KEYS,
         ];
   }
