@@ -1,41 +1,41 @@
 import type { JSX } from "react";
+import type { IntakeSegment } from "@hercule/client-core";
 import "./intake-settings.css";
-
-/** One button of the control: its text, and the key that tells it from the others. */
-export interface IntakeSegmentChoice {
-  readonly key: string;
-  readonly label: string;
-}
 
 /**
  * Renders the segmented control above a plugin's lists: one button for
  * all the plugin's Connections, and one for each Connection. The pressed
  * button is the level the lists show and edit. `name` names the group for
- * assistive technology, and `onSelect` receives the key of the button pressed.
+ * assistive technology, and `onSelect` receives the `connectionId` of the
+ * button pressed, which is `undefined` for all Connections.
+ *
+ * A label too long for the window is cut with an ellipsis, and the button's
+ * `title` holds it whole.
  */
 export function IntakeSegments({
   name,
-  choices,
-  selectedKey,
+  segments,
+  selectedConnectionId,
   onSelect,
 }: {
   readonly name: string;
-  readonly choices: ReadonlyArray<IntakeSegmentChoice>;
-  readonly selectedKey: string;
-  readonly onSelect: (key: string) => void;
+  readonly segments: ReadonlyArray<IntakeSegment>;
+  readonly selectedConnectionId: string | undefined;
+  readonly onSelect: (connectionId: string | undefined) => void;
 }): JSX.Element {
   return (
     <div className="seg intake-segments" role="group" aria-label={name}>
-      {choices.map(({ key, label }) => (
+      {segments.map(({ connectionId, label }) => (
         <button
-          key={key}
+          key={connectionId ?? ""}
           type="button"
-          aria-pressed={key === selectedKey}
+          title={label}
+          aria-pressed={connectionId === selectedConnectionId}
           onClick={() => {
-            onSelect(key);
+            onSelect(connectionId);
           }}
         >
-          {label}
+          <span>{label}</span>
         </button>
       ))}
     </div>

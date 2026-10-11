@@ -14,12 +14,14 @@ const POINTED_HOLD_MS = 1000;
  * `set-row`. `error` is why the row's last save failed, shown under the row,
  * or `null`.
  *
- * - The switch is named after the label and described by the hint. Pressing
- *   it calls `onToggle` with the value it asks for.
+ * - The switch is named after the label and described by the hint and, when
+ *   there is one, the source line. Pressing it calls `onToggle` with the value
+ *   it asks for.
  * - `source` is the line under the hint that names the level the value comes
  *   from, or `null` for a value the plugin sets by default.
  * - A row with `canReset` has a Reset button beside the switch, which calls
- *   `onReset`.
+ *   `onReset`. While `resetting`, the button is dimmed and does nothing, so
+ *   the reset is not sent twice.
  * - A `pointed` row is the one a link asks for. When it first appears it
  *   scrolls into view and is drawn with the selected tint, which then fades
  *   once. The tint is a transition of the background, so it ends on its own.
@@ -31,6 +33,7 @@ export function IntakeKindRow({
   on,
   source,
   canReset,
+  resetting,
   pointed,
   error,
   onToggle,
@@ -43,6 +46,7 @@ export function IntakeKindRow({
   readonly on: boolean;
   readonly source: string | null;
   readonly canReset: boolean;
+  readonly resetting: boolean;
   readonly pointed: boolean;
   readonly error: string | null;
   readonly onToggle: (on: boolean) => void;
@@ -51,6 +55,7 @@ export function IntakeKindRow({
   const id = useId();
   const labelId = `${id}-label`;
   const hintId = `${id}-hint`;
+  const sourceId = `${id}-source`;
   const rowRef = useRef<HTMLDivElement>(null);
   const [tinted, setTinted] = useState(pointed);
 
@@ -73,7 +78,11 @@ export function IntakeKindRow({
           <span id={hintId} className={hintIsCode ? "mono" : undefined}>
             {hint}
           </span>
-          {source !== null && <span className="intake-source">{source}</span>}
+          {source !== null && (
+            <span id={sourceId} className="intake-source">
+              {source}
+            </span>
+          )}
         </div>
         <div className="intake-controls">
           {canReset && (
@@ -81,7 +90,9 @@ export function IntakeKindRow({
               type="button"
               className="btn btn--quiet btn--sm"
               aria-label={`Reset ${label}`}
-              onClick={onReset}
+              aria-disabled={resetting || undefined}
+              data-unready={resetting ? "" : undefined}
+              onClick={resetting ? undefined : onReset}
             >
               Reset
             </button>
@@ -92,7 +103,7 @@ export function IntakeKindRow({
             role="switch"
             aria-checked={on}
             aria-labelledby={labelId}
-            aria-describedby={hintId}
+            aria-describedby={source === null ? hintId : `${hintId} ${sourceId}`}
             onClick={() => {
               onToggle(!on);
             }}

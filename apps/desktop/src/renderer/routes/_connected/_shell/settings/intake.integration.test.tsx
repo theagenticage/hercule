@@ -119,6 +119,8 @@ interface IntakeRecords {
   connectionList: Connection[];
   /** When set, the next write fails with this message. */
   failNextWrite: string | null;
+  /** When set, the next write answers only after this promise settles. */
+  holdNextWrite: Promise<void> | null;
 }
 
 const readLevel = (
@@ -171,7 +173,7 @@ const buildGithub = (records: IntakeRecords): PluginDetail => ({
  * stores the choices it sends and answers with the settings in effect.
  */
 const buildIntakeHandlers = (
-  initial: Partial<Omit<IntakeRecords, "failNextWrite">> = {},
+  initial: Partial<Omit<IntakeRecords, "failNextWrite" | "holdNextWrite">> = {},
 ): { readonly records: IntakeRecords; readonly handlers: Record<string, Handler> } => {
   const records: IntakeRecords = {
     plugin: NO_CHOICES,
@@ -179,13 +181,17 @@ const buildIntakeHandlers = (
     others: [LINEAR, QUIET],
     connectionList: [CONNECTION_A, CONNECTION_B],
     failNextWrite: null,
+    holdNextWrite: null,
     ...initial,
   };
-  const failure = (): { status: number; body: unknown } | null => {
-    if (records.failNextWrite === null) return null;
-    const message = records.failNextWrite;
+  // Takes the failure and the hold meant for this write when it arrives, so a
+  // write that comes later is not affected by them.
+  const settleWrite = async (): Promise<{ status: number; body: unknown } | null> => {
+    const { failNextWrite: message, holdNextWrite: hold } = records;
     records.failNextWrite = null;
-    return { status: 500, body: buildErrorBody("internal", message) };
+    records.holdNextWrite = null;
+    await hold;
+    return message === null ? null : { status: 500, body: buildErrorBody("internal", message) };
   };
   const readDetail = (connection: Connection): ConnectionDetail => ({
     ...connection,
@@ -194,8 +200,8 @@ const buildIntakeHandlers = (
   const handlers: Record<string, Handler> = {
     "GET /api/v1/plugins": () => ({ body: [buildGithub(records), ...records.others] }),
     "GET /api/v1/connections": () => ({ body: { items: records.connectionList } }),
-    "PUT /api/v1/plugins/github/intake": (call) => {
-      const failed = failure();
+    "PUT /api/v1/plugins/github/intake": async (call) => {
+      const failed = await settleWrite();
       if (failed !== null) return failed;
       records.plugin = (call.body as { intake: IntakeOverrides }).intake;
       return { body: resolveSettings(records.plugin) };
@@ -203,8 +209,8 @@ const buildIntakeHandlers = (
   };
   for (const connection of records.connectionList) {
     handlers[`GET /api/v1/connections/${connection.id}`] = () => ({ body: readDetail(connection) });
-    handlers[`PATCH /api/v1/connections/${connection.id}`] = (call) => {
-      const failed = failure();
+    handlers[`PATCH /api/v1/connections/${connection.id}`] = async (call) => {
+      const failed = await settleWrite();
       if (failed !== null) return failed;
       records.connections[connection.id] = (call.body as { intake: IntakeOverrides }).intake;
       return { body: readDetail(connection) };
@@ -248,6 +254,15 @@ const listWrites = (calls: readonly Call[]): readonly Call[] =>
 
 const pickSegment = (name: string): Promise<void> =>
   userEvent.click(within(getSection("GitHub")).getByRole("button", { name }));
+
+/** Builds a promise that stays pending until `open` is called, to hold a write while the test acts. */
+const buildGate = (): { readonly promise: Promise<void>; readonly open: () => void } => {
+  let open: () => void = () => undefined;
+  const promise = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { promise, open };
+};
 
 describe("Settings > Intake", () => {
   it("is the row after Threads in the Settings list, and opens the section", async () => {
@@ -339,6 +354,17 @@ describe("Settings > Intake", () => {
 
     await pickSegment("All GitHub connections");
     expect(getSwitch("Checks failed").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("names a Connection's whole label in its segment's title, for a label the control cuts short", async () => {
+    const label = "x".repeat(128);
+    const { handlers } = buildIntakeHandlers({
+      connectionList: [{ ...CONNECTION_A, label }, CONNECTION_B],
+    });
+    await openIntake("/settings/intake", handlers);
+
+    const segment = within(getSection("GitHub")).getByRole("button", { name: label });
+    expect(segment.getAttribute("title")).toBe(label);
   });
 
   it("keeps each plugin's own segment", async () => {
@@ -471,6 +497,69 @@ describe("Settings > Intake, saving", () => {
   });
 });
 
+describe("Settings > Intake, a save that fails", () => {
+  it("still shows its error when the section is left while the save runs and opened again", async () => {
+    const { handlers, records } = buildIntakeHandlers();
+    const gate = buildGate();
+    records.holdNextWrite = gate.promise;
+    records.failNextWrite = "The database is locked.";
+    await openIntake("/settings/intake", handlers);
+
+    await userEvent.click(getSwitch("Review requested"));
+    await pickSegment("rogier");
+    gate.open();
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+    await pickSegment("All GitHub connections");
+
+    // The failed save is the plugin level's, so it shows there and nowhere else.
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Could not save: The database is locked.");
+    expect(getRow("Review requested").nextElementSibling).toBe(alert);
+    expect(getSwitch("Review requested").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("shows no error for a row whose later save went through", async () => {
+    const { handlers, records } = buildIntakeHandlers();
+    const calls = await openIntake("/settings/intake", handlers);
+    const gate = buildGate();
+    records.holdNextWrite = gate.promise;
+    records.failNextWrite = "The database is locked.";
+
+    // The second save waits for the first, which fails after it was queued.
+    await userEvent.click(getSwitch("Review requested"));
+    await userEvent.click(getSwitch("Review requested"));
+    gate.open();
+
+    await waitFor(() => {
+      expect(listWrites(calls)).toHaveLength(2);
+    });
+    expect(listWrites(calls)[1]!.body).toEqual({
+      intake: { eventKinds: {}, signalKinds: { [REVIEW]: true } },
+    });
+    await waitFor(() => {
+      expect(readSource("Review requested")).toBe("On · all GitHub connections");
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps one row's error while another row is saved", async () => {
+    const { handlers, records } = buildIntakeHandlers();
+    records.failNextWrite = "The database is locked.";
+    await openIntake("/settings/intake", handlers);
+    await userEvent.click(getSwitch("Review requested"));
+    await screen.findByRole("alert");
+
+    await userEvent.click(getSwitch("Mentioned"));
+
+    await waitFor(() => {
+      expect(readSource("Mentioned")).toBe("Off · all GitHub connections");
+    });
+    expect(getRow("Review requested").nextElementSibling).toBe(screen.getByRole("alert"));
+  });
+});
+
 describe("Settings > Intake, where a value comes from", () => {
   it("says nothing under a value that is the plugin's default", async () => {
     await openIntake("/settings/intake", buildIntakeHandlers().handlers);
@@ -512,6 +601,45 @@ describe("Settings > Intake, where a value comes from", () => {
         .getAllByRole("button", { name: /^Reset/ })
         .map((each) => each.getAttribute("aria-label")),
     ).toEqual(["Reset Checks failed"]);
+  });
+
+  it("describes the switch by the hint and by the line that says where its value comes from", async () => {
+    const { handlers } = buildIntakeHandlers({
+      plugin: { eventKinds: {}, signalKinds: { [MENTIONED]: false } },
+    });
+    await openIntake("/settings/intake", handlers);
+
+    const describedBy = (label: string): string[] =>
+      getSwitch(label)
+        .getAttribute("aria-describedby")!
+        .split(" ")
+        .map((id) => document.getElementById(id)!.textContent);
+    expect(describedBy("Mentioned")).toEqual([
+      "Someone mentions you",
+      "Off · all GitHub connections",
+    ]);
+    expect(describedBy("Review requested")).toEqual(["Someone asks you to review"]);
+  });
+
+  it("dims Reset and sends nothing more while the reset is saving", async () => {
+    const { handlers, records } = buildIntakeHandlers({
+      plugin: { eventKinds: {}, signalKinds: { [MENTIONED]: false } },
+    });
+    const calls = await openIntake("/settings/intake", handlers);
+    const gate = buildGate();
+    records.holdNextWrite = gate.promise;
+    const reset = screen.getByRole("button", { name: "Reset Mentioned" });
+
+    await userEvent.click(reset);
+    expect(reset.getAttribute("aria-disabled")).toBe("true");
+    expect(reset.hasAttribute("data-unready")).toBe(true);
+    await userEvent.click(reset);
+    gate.open();
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Reset Mentioned" })).toBeNull();
+    });
+    expect(listWrites(calls)).toHaveLength(1);
   });
 
   it("writes the level's choices without the kind when Reset is pressed", async () => {
