@@ -66,11 +66,12 @@
  *    and open, idle with 4 running and with every subagent ended, how often
  *    the rows' durations change, the live topics held on each page, and
  *    the reads that subagent changes cause (see `perf-subagents.ts`).
- * 7. Last, the fixture creates 10 workflows with 50 live runs across them,
- *    and the script opens Workflows once, so one more plain launch opens on
- *    the workflow list. It measures how many reads one `run` push causes, and
- *    how long they take (see `perf-workflows.ts`). Pass `--workflows-only`
- *    to skip steps 2 to 6:
+ * 7. Last, the fixture creates 50 workflows, 10 of them with 5 live runs
+ *    each, and the script opens Workflows once, so one more plain launch
+ *    opens on the workflow list. It measures memory and idle with the list
+ *    open, what opening the list reads and how long that takes, and how many
+ *    reads one `run` push causes and how long they take (see
+ *    `perf-workflows.ts`). Pass `--workflows-only` to skip steps 2 to 6:
  *
  *        pnpm --filter @hercule/desktop perf -- --workflows-only
  *
