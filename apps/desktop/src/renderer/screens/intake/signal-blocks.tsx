@@ -241,7 +241,7 @@ function ChecksBlockView({ block }: { readonly block: ChecksBlock }): JSX.Elemen
               key={index}
               className={row.state === "failed" ? "b-check b-check--failed" : "b-check"}
             >
-              <span className={row.state === "failed" ? "dot dot--fail" : "dot"} />
+              <Mark state={row.state === "failed" ? "failed" : "working"} />
               <span className="mono">{row.name}</span>
               {row.url === undefined ? (
                 <span>{row.state === "failed" ? "Failed" : "Pending"}</span>

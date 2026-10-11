@@ -19,6 +19,8 @@
  * moves for a reviewer, at a pace a person can follow, and records a video
  * of itself at 1440 × 900 into `<dir>`. Without it, that test is skipped,
  * because the test of the moves above already checks every step it shows.
+ * The failed-checks test also writes `checks-failed-light.png` and
+ * `checks-failed-dark.png` of the open signal there, at 1440 × 900.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
@@ -88,30 +90,154 @@ const raiseProposal = (arranged: ArrangedFleet, title: string): Promise<string> 
   raiseSignal(arranged, "proposal", title, ["--task", JSON.stringify({ title, description: "" })]);
 
 /**
- * Raises the signal `signalId` to the priority `urgent`, in the controller's
- * database. No operation does this: only a plugin's kind may be urgent, and
- * no plugin raises signals yet. The controller must be stopped, because it
- * holds its database locked while it runs.
+ * Runs `script` against the controller's database, for the rare arrangement
+ * no operation can make: only a plugin's kind may be urgent or carry its own
+ * blocks, no plugin raises signals in the test binary, and a Connection to
+ * GitHub cannot be signed in to offline. The script sees `database` (a
+ * `bun:sqlite` database) and `args`, and its failure fails the test. The
+ * controller must be stopped, because it holds its database locked while it
+ * runs.
  */
-function makeSignalUrgent(home: string, signalId: string): void {
+function editDatabase(home: string, script: string, args: ReadonlyArray<unknown>): void {
   const written = spawnSync(
     "bun",
     [
       "--eval",
-      String.raw`
+      `
     import { Database } from "bun:sqlite";
     const database = new Database(process.argv[1]);
-    const id = Buffer.from(process.argv[2].replaceAll("-", ""), "hex");
-    const { changes } = database.query("UPDATE signals SET priority = 'urgent' WHERE id = ?").run(id);
+    const args = JSON.parse(process.argv[2]);
+    ${script}
     database.close();
-    if (changes !== 1) throw new Error("no signal " + process.argv[2]);
   `,
       join(home, "data", "hercule.db"),
-      signalId,
+      JSON.stringify(args),
     ],
     { encoding: "utf8", env: buildCleanEnv() },
   );
   expect(written.status, written.stderr).toBe(0);
+}
+
+/**
+ * Sets columns of the signal `signalId`, to the values in `columns` (column
+ * name to value). See `editDatabase`.
+ */
+function writeSignalColumns(
+  home: string,
+  signalId: string,
+  columns: Readonly<Record<string, string>>,
+): void {
+  editDatabase(
+    home,
+    String.raw`
+    const [signalId, columns] = args;
+    const id = Buffer.from(signalId.replaceAll("-", ""), "hex");
+    const entries = Object.entries(columns);
+    const assignments = entries.map(([name]) => name + " = ?").join(", ");
+    const { changes } = database
+      .query("UPDATE signals SET " + assignments + " WHERE id = ?")
+      .run(...entries.map(([, value]) => value), id);
+    if (changes !== 1) throw new Error("no signal " + signalId);
+  `,
+    [signalId, columns],
+  );
+}
+
+/**
+ * Adds a GitHub Connection with the id `connectionId`, with no credentials.
+ * Its status is `needs-reauth`, which is true of a Connection that holds no
+ * token and keeps the controller from polling GitHub for it. Unlike
+ * `disabled`, it still lets a signal's answer act through it. See `editDatabase`.
+ */
+function addGithubConnection(home: string, connectionId: string): void {
+  editDatabase(
+    home,
+    String.raw`
+    const [connectionId] = args;
+    const at = new Date().toISOString();
+    database
+      .query(
+        "INSERT INTO connections (id, plugin_id, type, label, display_name, account_id, status, labels, config, created_at, updated_at) VALUES (?, 'github', 'github/github', 'acme', 'acme', '1', 'needs-reauth', '[]', '{}', ?, ?)",
+      )
+      .run(Buffer.from(connectionId.replaceAll("-", ""), "hex"), at, at);
+  `,
+    [connectionId],
+  );
+}
+
+/** Raises the signal `signalId` to the priority `urgent`, in the controller's database. */
+const makeSignalUrgent = (home: string, signalId: string): void =>
+  writeSignalColumns(home, signalId, { priority: "urgent" });
+
+/**
+ * The failed-checks signal GitHub raises for a pull request, as the build of
+ * `github/checks-failed` lays it out: two failed checks with the end of what
+ * they reported, a passed count, and the Re-run failed checks answer.
+ */
+const FAILED_CHECKS = {
+  title: "Rework the cart totals",
+  asker: "GitHub Actions",
+  rows: [
+    {
+      name: "unit",
+      state: "failed",
+      url: "https://github.com/acme/webshop/runs/2",
+      log: [
+        "FAIL  src/cart/totals.test.ts > totals > adds the shipping to the total",
+        "AssertionError: expected 4290 to be 4590 // Object.is equality",
+        "  - Expected: 4590",
+        "  + Received: 4290",
+        " ❯ src/cart/totals.test.ts:57:30",
+        "Test Files  1 failed | 41 passed (42)",
+        "     Tests  1 failed | 318 passed (319)",
+      ].join("\n"),
+    },
+    {
+      name: "types",
+      state: "failed",
+      url: "https://github.com/acme/webshop/runs/5",
+      log: [
+        "src/cart/totals.ts:88:14 - error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.",
+        "src/cart/summary.tsx:31:9 - error TS2322: Type 'number | undefined' is not assignable to type 'number'.",
+        "Found 2 errors in 2 files.",
+      ].join("\n"),
+    },
+  ],
+  passed: 3,
+} as const;
+
+/** The id of the GitHub Connection that the Re-run answer is bound to. */
+const GITHUB_CONNECTION_ID = "01990000-0000-7000-8000-000000000001";
+
+/**
+ * Turns the signal `signalId` into the signal `github/checks-failed` builds
+ * for pull request 1293 of acme/webshop, in the controller's database, with
+ * the GitHub Connection its answer acts through. See `editDatabase`.
+ */
+function makeSignalFailedChecks(home: string, signalId: string): void {
+  addGithubConnection(home, GITHUB_CONNECTION_ID);
+  writeSignalColumns(home, signalId, {
+    kind: "github/checks-failed",
+    title: FAILED_CHECKS.title,
+    asker: FAILED_CHECKS.asker,
+    place: "acme/webshop#1293",
+    priority: "normal",
+    blocks: JSON.stringify([
+      { type: "checks", rows: FAILED_CHECKS.rows, passed: FAILED_CHECKS.passed, omitted: 0 },
+    ]),
+    actions: JSON.stringify([
+      {
+        id: "rerun",
+        label: "Re-run failed checks",
+        operation: {
+          op: "github/checks.rerun",
+          connectionId: GITHUB_CONNECTION_ID,
+          input: { repo: "acme/webshop", number: 1293, sha: "abc123" },
+        },
+        primary: true,
+      },
+    ]),
+  });
 }
 
 /** Returns which face the sidebar shows, by its selected segment and the label of the list under it. */
@@ -394,6 +520,51 @@ describe("Intake", () => {
     await expect.poll(() => readSelectedTitle(page)).toBe("Checkout is down");
     expect(await openSignalPane(page).locator(".ad-title").textContent()).toBe("Checkout is down");
     expect(await page.locator(".asks-sec", { hasText: "Now" }).count()).toBe(1);
+  });
+
+  it("draws a GitHub failed-checks signal's Checks block with the log lines of each failed check", async () => {
+    const arranged = await arrangeFleet();
+    const signalId = await raiseSignal(arranged, "fyi", "Raised to be failed checks");
+    await arranged.restartController(() => makeSignalFailedChecks(arranged.home, signalId));
+    const { app, page } = await openSignedIn(arranged.url);
+    await chooseMenuItem(app, "Go", "Intake");
+    await expect.poll(() => readRowTitles(page)).toEqual([FAILED_CHECKS.title]);
+    await selectRow(page, FAILED_CHECKS.title);
+
+    const pane = openSignalPane(page);
+    await expect.poll(() => pane.locator(".ad-title").textContent()).toBe(FAILED_CHECKS.title);
+    expect(await pane.locator(".ad-asked").textContent()).toMatch(/^GitHub Actions/);
+    const rows = pane.locator(".b-check");
+    expect(await rows.locator(".mono:not(.b-log)").allTextContents()).toEqual(["unit", "types"]);
+    expect(await rows.locator("a").allTextContents()).toEqual(["Failed", "Failed"]);
+    // The log keeps its line breaks: `textContent` of the `<pre>` is the log itself.
+    expect(await pane.locator(".b-log").allTextContents()).toEqual(
+      FAILED_CHECKS.rows.map((row) => row.log),
+    );
+    expect(await pane.locator(".b-checks-more").textContent()).toBe("3 passed");
+    await pane.getByRole("button", { name: "Re-run failed checks" }).waitFor();
+    // The plugin's own line for the answer, which the core writes only when
+    // the answer's Connection exists.
+    expect(await pane.locator(".ans-desc").first().textContent()).toContain(
+      "Re-runs the failed checks on pull request #1293 in acme/webshop",
+    );
+
+    if (evidence === undefined) return;
+    mkdirSync(evidence, { recursive: true });
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900);
+    });
+    for (const theme of ["light", "dark"] as const) {
+      await app.evaluate(({ nativeTheme }, chosen) => {
+        nativeTheme.themeSource = chosen;
+      }, theme);
+      await page.waitForFunction(
+        (dark) => matchMedia("(prefers-color-scheme: dark)").matches === dark,
+        theme === "dark",
+      );
+      await sleep(PAUSE_MS / 4);
+      await page.screenshot({ path: join(evidence, `checks-failed-${theme}.png`) });
+    }
   });
 
   it.skipIf(evidence === undefined)(
