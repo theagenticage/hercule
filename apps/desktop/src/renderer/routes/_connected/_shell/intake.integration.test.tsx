@@ -41,10 +41,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** A stand-in for the mark the GitHub plugin returns with its record: one path on the 16 by 16 grid. */
+const GITHUB_MARK_PATH = "M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0z";
+
 const GITHUB: PluginDetail = {
   id: "github",
   displayName: "GitHub",
-  hostApi: 1,
+  mark: { paths: [GITHUB_MARK_PATH] },
+  hostApi: 2,
   capabilities: [],
   enabled: true,
   status: { _tag: "active" },
@@ -69,6 +73,8 @@ const buildEvent = (id: number, url: string): Event => ({
   payload: {},
   raw: null,
   actor: null,
+  title: `Pull request #${String(id)}`,
+  author: "Marta",
 });
 
 const buildAction = (id: string, over: Partial<SignalAction> = {}): SignalAction => ({
@@ -180,7 +186,7 @@ const resolve = (
     actionId: "approve",
     outcome,
     actor,
-    origin: actor === "user" ? "web" : "plugin:github",
+    origin: actor === "user" ? "web" : "core",
     at,
   },
 });
@@ -331,6 +337,26 @@ describe("Intake's list", () => {
     ).toEqual(["All3", "GitHub3"]);
   });
 
+  it("draws GitHub's mark from its plugin record on its tab, its rows and the pane's provenance line", async () => {
+    await openIntake(`/intake?signal=${REVIEW.id}`);
+    const tabs = screen.getByRole("navigation", { name: "Sources" });
+    const pane = await findPane();
+    const marks = [
+      within(tabs)
+        .getByRole("button", { name: /GitHub/ })
+        .querySelector("svg"),
+      getRow(REVIEW).querySelector(".ask-mark svg"),
+      pane.querySelector(".ad-kind .src svg"),
+    ];
+    expect(marks.map((mark) => mark?.querySelector("path")?.getAttribute("d"))).toEqual([
+      GITHUB_MARK_PATH,
+      GITHUB_MARK_PATH,
+      GITHUB_MARK_PATH,
+    ]);
+    expect(marks.map((mark) => mark?.getAttribute("width"))).toEqual(["14", "16", "14"]);
+    expect(pane.querySelector(".ad-kind .src")!.textContent).toBe("GitHub · Review requested");
+  });
+
   it("names the workflow or the assistant that raised a core signal", async () => {
     const triage = { id: "01a06d02-7b00-7000-8000-000000000001", name: "Triage" };
     const ada = buildFixtureAssistant({
@@ -476,19 +502,38 @@ describe("Intake's pane", () => {
     expect(calls.some(isAct)).toBe(false);
   });
 
+  it("says when no workflow screened the signal, under its blocks", async () => {
+    const unscreened = buildSignal("01a06d02-7a00-7000-8000-000000000009", 9, "09:30", {
+      title: "Mail from Marta",
+      origin: {
+        type: "event",
+        eventId: 9,
+        connectionId: CONNECTION_ID,
+        threadRef: "acme/webshop#9",
+        notScreened: { reason: "no-screener" },
+      },
+      blocks: [{ type: "text", markdown: "Can you sign the lease?" }],
+    });
+    await openIntake(`/intake?signal=${unscreened.id}`, storeSignals([unscreened]).handlers);
+    const pane = await findPane();
+    const line = within(pane).getByText("Not screened: no workflow screens signals");
+    const blocks = pane.querySelector(".ad-blocks")!;
+    expect(blocks.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("says when the signal was resolved elsewhere while it was open, and keeps the reply typed", async () => {
     const { handlers, store } = storeSignals(SIGNALS);
     const { live } = await openIntake(`/intake?signal=${MENTION.id}`, handlers);
     const pane = await findPane();
     await userEvent.type(within(pane).getByRole("textbox", { name: "Reply" }), "Ledger first.");
 
-    store(resolve(MENTION, "plugin:github", "Replied on GitHub"));
+    store(resolve(MENTION, "system", "Replied on GitHub"));
     live.pushInvalidation("signal", [MENTION.id]);
 
     const outcome = await within(pane).findByRole("status");
-    expect(outcome.querySelector(".b-work-label")!.textContent).toBe("Left on its own");
+    expect(outcome.querySelector(".b-work-label")!.textContent).toBe("What you did");
     expect(outcome.querySelector(".ad-outcome-desc")!.textContent).toBe(
-      "Resolved elsewhere: replied on GitHub, by GitHub",
+      "Resolved elsewhere: Replied on GitHub, by you",
     );
     const kept = within(pane).getByRole("textbox", { name: "Your reply, not sent" });
     expect((kept as HTMLTextAreaElement).value).toBe("Ledger first.");
@@ -617,7 +662,7 @@ describe("Intake's keys", () => {
     const pane = await findPane();
     await userEvent.type(within(pane).getByRole("textbox", { name: "Reply" }), "Ledger first.");
 
-    store(resolve(MENTION, "plugin:github", "Replied on GitHub"));
+    store(resolve(MENTION, "system", "Replied on GitHub"));
     live.pushInvalidation("signal", [MENTION.id]);
     await within(pane).findByRole("status");
 

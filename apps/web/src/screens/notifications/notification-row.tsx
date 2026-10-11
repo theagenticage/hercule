@@ -1,6 +1,7 @@
 import type { JSX, ReactNode } from "react";
 import {
   chooseNotificationMark,
+  describeFailedBuildCount,
   describeProducer,
   describeResolution,
   formatAge,
@@ -29,8 +30,9 @@ function NotificationMarkGlyph({ mark }: { readonly mark: NotificationMark }): J
 
 /**
  * Renders one notification in the notification center: its mark, its title,
- * who produced it and, for a resolved decision, how it was resolved, then its
- * body as markdown and its age. A notification whose producer can be muted
+ * who produced it, for a resolved decision how it was resolved, and for a
+ * signal kind whose build fails how often it has failed, then its body as
+ * markdown and its age. A notification whose producer can be muted
  * has a button that mutes or unmutes that producer, and a muted one says so.
  *
  * `answers` goes under the body. The screen passes the answers of an open
@@ -39,6 +41,7 @@ function NotificationMarkGlyph({ mark }: { readonly mark: NotificationMark }): J
 export function NotificationRow({
   notification,
   now,
+  timezone,
   muted,
   isMuting,
   onToggleMute,
@@ -47,6 +50,8 @@ export function NotificationRow({
   readonly notification: Notification;
   /** The time the age counts to. */
   readonly now: Date;
+  /** The user's timezone setting, which the time in the failed-build count is shown in. */
+  readonly timezone: string;
   /** Whether the notification's producer is in the user's mute list. */
   readonly muted: boolean;
   /** Whether a change to the mute list is being saved; the button waits for it. */
@@ -59,6 +64,8 @@ export function NotificationRow({
   if (notification.resolution !== undefined) {
     facts.push(describeResolution(notification.resolution));
   }
+  const failedBuilds = describeFailedBuildCount(notification, timezone, now);
+  if (failedBuilds !== undefined) facts.push(failedBuilds);
 
   return (
     <li className="flex items-start gap-3 rounded-control px-2.5 py-2 text-row">

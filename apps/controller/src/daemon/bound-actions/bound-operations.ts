@@ -25,7 +25,6 @@ import {
   isId,
   isQualifiedId,
   listSchemaIssues,
-  MAX_SIGNAL_OUTCOME_LENGTH,
   nameAnswerRecord,
   type AnswerOperationHandlers,
   type BoundAction,
@@ -44,6 +43,7 @@ import { connectionRepository, ConnectionTypes } from "../../connections";
 import type { PermissionProfiles } from "../../permissions";
 import { executePluginAction, PluginHost, type RegisteredWorkflowAction } from "../../plugins";
 import { RunService } from "../../runs";
+import { truncateOutcome } from "../../signals";
 import { TaskService } from "../../tasks";
 import { PermissionRequests } from "../permissions";
 import { Live } from "../sessions";
@@ -201,13 +201,20 @@ const make = Effect.gen(function* () {
       }
       const fieldIssues =
         field === undefined ? [] : listFieldIssues(action, field, operation.input, path);
+      // The text of a typed reply comes only at the click. The input is
+      // checked as it will be then, with some text in the field, so a check
+      // that spans fields passes, such as pr.review's "a body is required
+      // unless the verdict is approve". Any problem with the field's own
+      // value is not counted, because the user has not typed it yet.
+      const inputAtClick =
+        field === undefined || typeof operation.input !== "object" || operation.input === null
+          ? operation.input
+          : { ...operation.input, [field.name]: "typed reply" };
       const decoded = yield* Effect.result(
         Schema.decodeUnknownEffect(action.input as Schema.Codec<unknown>, { errors: "all" })(
-          operation.input,
+          inputAtClick,
         ),
       );
-      // The text of a typed reply comes only at the click, so a missing or
-      // empty field is not a problem yet.
       const inputIssues =
         decoded._tag === "Success"
           ? []
@@ -326,8 +333,7 @@ const make = Effect.gen(function* () {
  *
  * - when `outcome` throws, this returns `undefined`, and the caller writes
  *   the line from the answer's label instead;
- * - a line longer than `MAX_SIGNAL_OUTCOME_LENGTH` is cut to that length and
- *   ends in "…", so the reader sees it was cut.
+ * - a line that is too long is cut by `truncateOutcome`.
  */
 const writeOutcome = (action: RegisteredWorkflowAction, input: unknown): string | undefined => {
   let line: string | undefined;
@@ -336,9 +342,7 @@ const writeOutcome = (action: RegisteredWorkflowAction, input: unknown): string 
   } catch {
     return undefined;
   }
-  return line === undefined || line.length <= MAX_SIGNAL_OUTCOME_LENGTH
-    ? line
-    : `${line.slice(0, MAX_SIGNAL_OUTCOME_LENGTH - 1)}…`;
+  return line === undefined ? undefined : truncateOutcome(line);
 };
 
 /**

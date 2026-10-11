@@ -11,6 +11,7 @@ import {
   decidePluginMark,
   describeAnswerKey,
   describeBuildFailure,
+  describeNotScreened,
   describeOrchestrationSegment,
   describeResolvedElsewhere,
   describeSignalAsker,
@@ -426,6 +427,26 @@ describe("describeBuildFailure", () => {
   });
 });
 
+describe("describeNotScreened", () => {
+  it("says no workflow screened a signal the core raised without a Screener", () => {
+    const signal = buildSignal("a", {
+      origin: { ...EVENT_ORIGIN, notScreened: { reason: "no-screener" } },
+    });
+    expect(describeNotScreened(signal)).toBe("Not screened: no workflow screens signals");
+  });
+
+  it("returns null for a screened signal, one that needed no Screening, and a raised one", () => {
+    const screened = buildSignal("a", {
+      origin: { ...EVENT_ORIGIN, screened: { runId: TRIAGE_ID, reason: "Marta asks" } },
+    });
+    expect(describeNotScreened(screened)).toBeNull();
+    expect(describeNotScreened(buildSignal("b"))).toBeNull();
+    expect(
+      describeNotScreened(buildSignal("c", { kind: "proposal", origin: fromUser() })),
+    ).toBeNull();
+  });
+});
+
 describe("buildSignalAnswers", () => {
   const signal = buildSignal("a", {
     actions: [
@@ -554,6 +575,80 @@ describe("describeSignalOutcome and describeResolvedElsewhere", () => {
     expect(describeResolvedElsewhere(resolved("plugin:github"), PLUGINS)).toBe(
       "Resolved elsewhere: approved #1293, by GitHub",
     );
+  });
+
+  it("names the plugin, not the core, for an end the core observed on the source", () => {
+    const ended = (outcome: string) =>
+      buildSignal("a", {
+        kind: "github/review-requested",
+        status: "resolved",
+        resolution: {
+          kind: "withdrawn",
+          outcome,
+          actor: "system",
+          origin: "core",
+          at: "2026-10-10T10:00:00.000Z",
+        },
+      });
+    expect(describeSignalOutcome(ended("Reviewed on GitHub"), PLUGINS)?.by).toBe("by GitHub");
+    expect(describeResolvedElsewhere(ended("Marta removed the request"), PLUGINS)).toBe(
+      "Resolved elsewhere: Marta removed the request, by GitHub",
+    );
+  });
+
+  it("names the core for a core signal the core resolved", () => {
+    const resolvedByCore = buildSignal("a", {
+      kind: "proposal",
+      status: "resolved",
+      resolution: {
+        kind: "withdrawn",
+        outcome: "Replaced by a newer one",
+        actor: "system",
+        origin: "core",
+        at: "2026-10-10T10:00:00.000Z",
+      },
+    });
+    expect(describeSignalOutcome(resolvedByCore, PLUGINS)?.by).toBe("by Hercule");
+  });
+
+  it("counts an answer the user gave on the source as the user's own move", () => {
+    const reviewed = buildSignal("a", {
+      kind: "github/review-requested",
+      status: "resolved",
+      resolution: {
+        kind: "decided",
+        actionId: "approve",
+        outcome: "Approved on GitHub",
+        actor: "system",
+        origin: "core",
+        at: "2026-10-10T10:00:00.000Z",
+      },
+    });
+    expect(describeSignalOutcome(reviewed, PLUGINS)).toEqual({
+      label: "What you did",
+      outcome: "Approved on GitHub",
+      by: "by you",
+      byUser: true,
+    });
+    expect(describeResolvedElsewhere(reviewed, PLUGINS)).toBe(
+      "Resolved elsewhere: Approved on GitHub, by you",
+    );
+  });
+
+  it("names the core for a plugin's signal a newer one replaced", () => {
+    const replaced = buildSignal("a", {
+      kind: "github/review-requested",
+      status: "resolved",
+      replacedBy: "b",
+      resolution: {
+        kind: "withdrawn",
+        outcome: "Replaced by a newer one",
+        actor: "system",
+        origin: "core",
+        at: "2026-10-10T10:00:00.000Z",
+      },
+    });
+    expect(describeSignalOutcome(replaced, PLUGINS)?.by).toBe("by Hercule");
   });
 });
 

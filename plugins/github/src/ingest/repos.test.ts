@@ -14,6 +14,10 @@ import {
   stubGithub,
   type IngestHarness,
   type StubResponse,
+  TEST_ACCOUNT,
+  TEST_IDENTITY,
+  answerUserRequests,
+  isUserRequest,
 } from "../testing";
 import { computeDigest } from "./digest";
 import { MAX_ITEMS_PER_REPO, MAX_REQUESTS_PER_POLL, pollRepos } from "./repos";
@@ -41,6 +45,8 @@ interface StubComment {
   id: number;
   html_url: string;
   issue_url: string;
+  user: { login: string; id: number } | null;
+  body: string;
   created_at: string;
   updated_at: string;
 }
@@ -54,6 +60,12 @@ interface StubRepository {
     Array<{ id: number; user: { login: string }; state: string; submitted_at: string | null }>
   >;
   comments: Array<StubComment>;
+  /** The accounts each pull request asks for a review now. */
+  requestedReviewers: Record<number, Array<{ login: string; id: number }>>;
+  /** The teams of the repository's owner, by slug, each pull request asks for a review now. */
+  requestedTeams: Record<number, Array<{ slug: string }>>;
+  /** Each item's history, oldest first, as `GET .../issues/{n}/events` lists it. */
+  history: Record<number, Array<object>>;
   /** How many items one page of an issue listing of all or open issues holds; GitHub's is 100. */
   issuesPerPage: number;
   /** How many comments one page of the comment listing holds; GitHub's is 100. */
@@ -90,6 +102,9 @@ const buildRepository = (): StubRepository => ({
   heads: { 2: "sha-a" },
   reviews: {},
   comments: [],
+  requestedReviewers: {},
+  requestedTeams: {},
+  history: {},
   issuesPerPage: 100,
   commentsPerPage: 100,
   etag: '"v1"',
@@ -105,6 +120,8 @@ const buildComment = (
   id,
   html_url: `https://github.com/${REPO}/${kind}/${String(number)}#issuecomment-${String(id)}`,
   issue_url: `https://api.github.com/repos/${REPO}/issues/${String(number)}`,
+  user: { login: "mona", id: 1 },
+  body: "Looks good to me.",
   created_at: time,
   updated_at: time,
 });
@@ -175,6 +192,8 @@ const answerFrom =
       const issue = repository.issues.find((item) => item.number === number)!;
       return { status: 200, body: buildPullBody(repository, issue) };
     }
+    const history = /\/issues\/(\d+)\/events$/.exec(path);
+    if (history) return { status: 200, body: repository.history[Number(history[1])] ?? [] };
     if (path === `${base}/issues/comments`) {
       const since = Date.parse(query["since"] ?? "1970-01-01T00:00:00Z");
       const listed = repository.comments
@@ -192,6 +211,8 @@ const buildPullBody = (repository: StubRepository, issue: StubIssue) => ({
   state: issue.state,
   user: issue.user,
   head: { sha: repository.heads[issue.number] },
+  requested_reviewers: repository.requestedReviewers[issue.number] ?? [],
+  requested_teams: repository.requestedTeams[issue.number] ?? [],
   updated_at: issue.updated_at,
 });
 
@@ -205,9 +226,15 @@ const poll = async (
   route: (request: HttpClientRequest.HttpClientRequest) => StubResponse,
   watchList: ReadonlyArray<string> = [REPO],
 ) => {
-  const stub = stubGithub(route);
-  const result = await runAgainstStub(pollRepos("token", harness.context, watchList), stub);
-  return { result, requests: stub.requests.map(readStubRequestTarget), sent: stub.requests };
+  const stub = stubGithub(answerUserRequests(route));
+  const result = await runAgainstStub(
+    pollRepos("token", harness.context, watchList, TEST_IDENTITY),
+    stub,
+  );
+  // The requests about the user, rather than a repository, are left out:
+  // the tests here count and read the requests for repositories.
+  const sent = stub.requests.filter((request) => !isUserRequest(request));
+  return { result, requests: sent.map(readStubRequestTarget), sent };
 };
 
 /** Returns the time `seconds` after `time`, both in GitHub's format, such as `2026-10-01T10:00:05Z`. */
@@ -220,6 +247,15 @@ const baseline = async (repository: StubRepository): Promise<IngestHarness> => {
   await poll(harness, answerFrom(repository));
   return harness;
 };
+
+/** Returns a history entry in which mona asks the user for a review at `time`. */
+const buildReviewRequest = (id: number, time: string) => ({
+  id,
+  event: "review_requested",
+  created_at: time,
+  actor: { login: "mona", id: 1 },
+  requested_reviewer: TEST_ACCOUNT,
+});
 
 /** Returns each recorded event as `kind dedupKey`, for a compact comparison. */
 const listEvents = (harness: IngestHarness) =>
@@ -275,10 +311,10 @@ describe("the repos feed", () => {
     const repository = buildRepository();
     const harness = await baseline(repository);
     await poll(harness, answerFrom(repository));
-    const stub = stubGithub(answerFrom(repository));
+    const stub = stubGithub(answerUserRequests(answerFrom(repository)));
 
     await Effect.runPromise(
-      pollRepos("token", harness.context, [REPO]).pipe(Effect.provide(stub.layer)),
+      pollRepos("token", harness.context, [REPO], TEST_IDENTITY).pipe(Effect.provide(stub.layer)),
     );
 
     expect(stub.requests[0]!.headers["if-none-match"]).toBe('"v1"');
@@ -478,11 +514,12 @@ describe("the repos feed", () => {
 
     const { requests } = await poll(harness, answerFrom(repository));
 
+    // Oldest first: the review at 10:30, then the push the pull request's 11:00 update records.
     expect(listEvents(harness)).toEqual([
-      `github.pr.synchronized pr.synchronized:${REPO}#2:sha-b`,
       `github.pr.review-submitted pr.review-submitted:101`,
+      `github.pr.synchronized pr.synchronized:${REPO}#2:sha-b`,
     ]);
-    expect(harness.events[1]!.payload).toMatchObject({
+    expect(harness.events[0]!.payload).toMatchObject({
       reviewer: "hubot",
       verdict: "changes-requested",
     });
@@ -493,6 +530,124 @@ describe("the repos feed", () => {
       `/repos/${REPO}/pulls/2`,
       `/repos/${REPO}/pulls/2/reviews`,
       `/repos/${REPO}/issues/comments`,
+    ]);
+  });
+
+  it("emits a review request made again after a review between two polls", async () => {
+    const repository = buildRepository();
+    const askedAt = "2026-10-01T09:30:00Z";
+    repository.requestedReviewers[2] = [TEST_ACCOUNT];
+    repository.history[2] = [buildReviewRequest(1, askedAt)];
+    const harness = await baseline(repository);
+    // The user reviews, so GitHub drops the request, and mona asks again.
+    // Both polls see the user asked, so the requested set looks unchanged.
+    repository.reviews[2] = [
+      { id: 200, user: TEST_ACCOUNT, state: "COMMENTED", submitted_at: "2026-10-01T10:00:00Z" },
+    ];
+    repository.history[2].push(buildReviewRequest(2, "2026-10-01T10:05:00Z"));
+    repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T10:05:00Z" };
+    repository.etag = '"v2"';
+
+    await poll(harness, answerFrom(repository));
+
+    expect(listEvents(harness)).toEqual([
+      `github.pr.review-submitted pr.review-submitted:200`,
+      `github.pr.review-requested pr.review-requested:2`,
+    ]);
+  });
+
+  it("emits a review and a request made again in the snapshot's own second, in that order", async () => {
+    const repository = buildRepository();
+    repository.requestedReviewers[2] = [TEST_ACCOUNT];
+    repository.history[2] = [buildReviewRequest(1, "2026-10-01T09:30:00Z")];
+    const harness = await baseline(repository);
+    // A label at 10:00 gives the pull request a snapshot of its own at 10:00.
+    const second = "2026-10-01T10:00:00Z";
+    repository.issues[1] = {
+      ...repository.issues[1]!,
+      labels: [{ name: "ready" }],
+      updated_at: second,
+    };
+    repository.etag = '"v2"';
+    await poll(harness, answerFrom(repository));
+    // In that same second, the user reviews and mona asks again. Neither
+    // the update time nor the list of requested reviewers moves.
+    repository.reviews[2] = [
+      { id: 200, user: TEST_ACCOUNT, state: "COMMENTED", submitted_at: second },
+    ];
+    repository.history[2].push(buildReviewRequest(2, second));
+    repository.etag = '"v3"';
+
+    await poll(harness, answerFrom(repository));
+
+    expect(listEvents(harness).slice(1)).toEqual([
+      `github.pr.review-submitted pr.review-submitted:200`,
+      `github.pr.review-requested pr.review-requested:2`,
+    ]);
+  });
+
+  it("reads who is asked after the reviews, so a review submitted during the poll comes after its request", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    const second = "2026-10-01T10:00:00Z";
+    repository.requestedReviewers[2] = [TEST_ACCOUNT];
+    repository.history[2] = [buildReviewRequest(1, second)];
+    repository.issues[1] = { ...repository.issues[1]!, updated_at: second };
+    repository.etag = '"v2"';
+    // The user reviews in the same second, between the poll's first read
+    // of the pull request and its read of the reviews. The review clears
+    // the request, so the pull request no longer asks the user.
+    const answer = answerFrom(repository);
+    const route = (request: HttpClientRequest.HttpClientRequest) => {
+      if (readStubRequestTarget(request).path.endsWith("/pulls/2/reviews")) {
+        repository.reviews[2] = [
+          { id: 200, user: TEST_ACCOUNT, state: "APPROVED", submitted_at: second },
+        ];
+        repository.requestedReviewers[2] = [];
+      }
+      return answer(request);
+    };
+
+    await poll(harness, route);
+
+    expect(listEvents(harness)).toEqual([
+      `github.pr.review-requested pr.review-requested:1`,
+      `github.pr.review-submitted pr.review-submitted:200`,
+    ]);
+  });
+
+  it("reads who is asked after the history, so removing a team's last request during the poll ends it", async () => {
+    const repository = buildRepository();
+    repository.requestedTeams[2] = [{ slug: "web" }];
+    const harness = buildIngestHarness();
+    harness.state.set("teams", { fetchedAt: new Date().toISOString(), teams: ["octocat/web"] });
+    await poll(harness, answerFrom(repository));
+    const second = "2026-10-01T10:00:00Z";
+    repository.issues[1] = { ...repository.issues[1]!, updated_at: second };
+    repository.etag = '"v2"';
+    // Mona takes the team's request back after the poll's first read of the
+    // pull request, so that read still shows the team asked.
+    repository.history[2] = [
+      {
+        id: 3,
+        event: "review_request_removed",
+        created_at: second,
+        actor: { login: "mona", id: 1 },
+        requested_team: { slug: "web" },
+      },
+    ];
+    const answer = answerFrom(repository);
+    const route = (request: HttpClientRequest.HttpClientRequest) => {
+      if (readStubRequestTarget(request).path.endsWith("/issues/2/events")) {
+        repository.requestedTeams[2] = [];
+      }
+      return answer(request);
+    };
+
+    await poll(harness, route);
+
+    expect(harness.events.map((event) => event.payload)).toEqual([
+      expect.objectContaining({ reviewer: "team", team: "octocat/web", teamStillRequested: false }),
     ]);
   });
 
@@ -515,6 +670,8 @@ describe("the repos feed", () => {
         id: 500,
         html_url: `https://github.com/${REPO}/pull/2#issuecomment-500`,
         issue_url: `https://api.github.com/repos/${REPO}/issues/2`,
+        user: { login: "mona", id: 1 },
+        body: "Edited since.",
         created_at: "2026-10-01T09:20:00Z",
         updated_at: "2026-10-01T10:59:00Z",
       },
@@ -522,6 +679,8 @@ describe("the repos feed", () => {
         id: 501,
         html_url: `https://github.com/${REPO}/issues/1#issuecomment-501`,
         issue_url: `https://api.github.com/repos/${REPO}/issues/1`,
+        user: { login: "mona", id: 1 },
+        body: "Can you take a look?",
         created_at: "2026-10-01T11:00:00Z",
         updated_at: "2026-10-01T11:00:00Z",
       },
@@ -529,6 +688,8 @@ describe("the repos feed", () => {
         id: 502,
         html_url: `https://github.com/${REPO}/pull/2#issuecomment-502`,
         issue_url: `https://api.github.com/repos/${REPO}/issues/2`,
+        user: { login: "mona", id: 1 },
+        body: "Thanks!",
         created_at: "2026-10-01T11:01:00Z",
         updated_at: "2026-10-01T11:01:00Z",
       },
@@ -650,7 +811,7 @@ describe("the repos feed", () => {
     expect(Result.isFailure(result)).toBe(true);
     if (!Result.isFailure(result)) return;
     expect(result.failure.message).toContain(
-      `${REPO}: Reading the next page of GET /repos/${REPO}/issues failed. ` +
+      `${REPO}: Reading another page of GET /repos/${REPO}/issues failed. ` +
         "The request to https://example.com was not sent",
     );
   });
@@ -716,43 +877,57 @@ describe("the repos feed", () => {
       "github.issue.labeled",
       "github.issue.assigned",
       "github.issue.closed",
-      "github.pr.labeled",
+      // The pull request is read before its changes are listed, because a
+      // merge's author comes from it, so its new head is emitted first.
       "github.pr.synchronized",
+      "github.pr.labeled",
     ]);
   });
 
-  it("builds the same keys again after a poll that emitted its events but could not save them", async () => {
+  it("emits nothing from a poll that fails, and all of it, in order, at the next poll", async () => {
     const repository = buildRepository();
     const harness = await baseline(repository);
+    const second = "2026-10-01T11:00:00Z";
     repository.issues[0] = {
       ...repository.issues[0]!,
       assignees: [{ login: "hubot" }],
-      updated_at: "2026-10-01T11:00:00Z",
+      updated_at: second,
     };
-    repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T11:01:00Z" };
+    // In one second, the user reviews and mona asks for a review again.
+    repository.issues[1] = { ...repository.issues[1]!, updated_at: second };
+    repository.requestedReviewers[2] = [TEST_ACCOUNT];
+    repository.history[2] = [buildReviewRequest(1, second)];
+    repository.reviews[2] = [
+      { id: 200, user: TEST_ACCOUNT, state: "APPROVED", submitted_at: second },
+    ];
     repository.etag = '"v2"';
-    // The issue's events are emitted, then the pull request fails the poll, so nothing is saved.
-    const failing = (request: HttpClientRequest.HttpClientRequest): StubResponse =>
-      readStubRequestTarget(request).path === `/repos/${REPO}/pulls/2`
+    // The poll reads the pull request again, after its reviews and history,
+    // for who is asked now, and that read fails.
+    let pullReads = 0;
+    const failing = (request: HttpClientRequest.HttpClientRequest): StubResponse => {
+      if (readStubRequestTarget(request).path !== `/repos/${REPO}/pulls/2`) {
+        return answerFrom(repository)(request);
+      }
+      pullReads += 1;
+      return pullReads === 2
         ? { status: 500, body: { message: "Server Error" } }
         : answerFrom(repository)(request);
+    };
     const first = await poll(harness, failing);
     expect(Result.isFailure(first.result)).toBe(true);
-    // The issue changes again before the next poll.
-    repository.issues[0] = {
-      ...repository.issues[0],
-      title: "Renamed",
-      updated_at: "2026-10-01T11:30:00Z",
-    };
-    repository.etag = '"v3"';
+    expect(harness.events).toEqual([]);
 
     await poll(harness, answerFrom(repository));
 
-    const assigned = harness.events
-      .filter((event) => event.kind === "github.issue.assigned")
-      .map((event) => event.dedupKey);
-    expect(assigned).toHaveLength(2);
-    expect(assigned[1]).toBe(assigned[0]);
+    // The events of one poll go out together, ordered. Had the failed poll
+    // sent the events it read before failing, a review could go out before a
+    // request from its own second that it answered, and stay there, because
+    // the next poll's copy of it is dropped as a duplicate.
+    expect(listEvents(harness)).toEqual([
+      expect.stringMatching(/^github\.issue\.assigned /),
+      `github.pr.review-submitted pr.review-submitted:200`,
+      `github.pr.review-requested pr.review-requested:1`,
+    ]);
   });
 
   it("emits no comment or review from before the first poll, even one in the newest update's second", async () => {
@@ -932,52 +1107,49 @@ describe("the repos feed", () => {
       });
     });
 
-    it("moves on past a second that holds more items than its budget", async () => {
-      const repository = buildRepository();
-      const count = MAX_ITEMS_PER_REPO + 20;
-      for (let index = 0; index < count; index += 1) {
-        repository.issues.push(buildIssue(10 + index, BASELINE_TIME));
-      }
+    it("splits a second that holds more pull requests than one poll can diff, within its budget", async () => {
+      const count = 300;
+      const repository = buildPullRepository(count);
       const harness = await baseline(repository);
-      // Every one of them is labeled in the same second, as a bot might.
-      for (const issue of repository.issues.slice(2)) {
+      // A bot labels every one of them in the same second.
+      for (const issue of repository.issues) {
         issue.labels = [{ name: "stale" }];
         issue.updated_at = CHANGE_TIME;
       }
       repository.etag = '"v2"';
 
-      await poll(harness, answerFrom(repository));
+      const polls: Array<number> = [];
+      for (let index = 0; index < 20 && listWrittenEvents(harness).length < count; index += 1) {
+        const { requests } = await poll(harness, answerFrom(repository));
+        polls.push(requests.length);
+      }
 
-      // A second is never split, so the poll diffs them all.
+      // Each poll stays within its budget: the listing, the pull request it
+      // was diffing when the budget ran out, and the comments.
+      for (const sent of polls) expect(sent).toBeLessThanOrEqual(MAX_REQUESTS_PER_POLL + 4);
+      expect(polls.length).toBeGreaterThan(1);
+      // Every label is emitted once, though every poll lists the whole second.
       expect(harness.events).toHaveLength(count);
-      expect(harness.state.get(`repos/${REPO}`)).toMatchObject({ cursor: CHANGE_TIME });
-
-      // Two of them change again, in the next two seconds. The listing now
-      // starts with the cursor's second, which holds more than the budget.
-      const labelAgain = (number: number, seconds: number) => {
-        const issue = repository.issues.find((item) => item.number === number)!;
-        issue.labels = [...issue.labels, { name: "later" }];
-        issue.updated_at = addSeconds(CHANGE_TIME, seconds);
-      };
-      labelAgain(10, 1);
-      labelAgain(11, 2);
-      repository.etag = '"v3"';
-      const buildLaterKey = (number: number) =>
-        `github.issue.labeled issue.labeled:${REPO}#${String(number)}:${CHANGE_TIME}:${computeDigest(["+later"])}`;
-
-      await poll(harness, answerFrom(repository));
-
-      expect(listWrittenEvents(harness).slice(count)).toEqual([buildLaterKey(10)]);
+      expect(listWrittenEvents(harness)).toHaveLength(count);
       expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
-        cursor: addSeconds(CHANGE_TIME, 1),
+        cursor: CHANGE_TIME,
+        etag: '"v2"',
       });
 
+      // One of them changes again, a second later: the cursor moves on.
+      const issue = repository.issues[0]!;
+      issue.labels = [...issue.labels, { name: "later" }];
+      issue.updated_at = addSeconds(CHANGE_TIME, 1);
+      repository.etag = '"v3"';
+
       await poll(harness, answerFrom(repository));
 
-      expect(listWrittenEvents(harness).slice(count)).toEqual([
-        buildLaterKey(10),
-        buildLaterKey(11),
-      ]);
+      expect(listEvents(harness).at(-1)).toBe(
+        `github.pr.labeled pr.labeled:${REPO}#1:${CHANGE_TIME}:${computeDigest(["+later"])}`,
+      );
+      const state = harness.state.get(`repos/${REPO}`);
+      expect(state).toMatchObject({ cursor: addSeconds(CHANGE_TIME, 1) });
+      expect(state).not.toHaveProperty("diffedAtCursor");
     });
 
     it("starts each poll after the repository it polled last, so a busy one cannot hold up the others", async () => {
@@ -1086,17 +1258,25 @@ describe("the repos feed", () => {
         polled.push(listPolledRepos(requests));
       }
 
-      // Every page counts, so the first poll stops once its baselines have
-      // sent the budget.
-      expect(polled[0]).toHaveLength(Math.ceil(MAX_REQUESTS_PER_POLL / BASELINE_REQUESTS));
-      // Each poll goes on where the last one stopped, and no repository is polled twice.
-      expect(polled.flat()).toEqual(watchList);
+      // Every page counts, and so does the read of the user's teams before
+      // them, so the first poll stops once those have sent the budget.
+      expect(polled[0]).toHaveLength(Math.ceil((MAX_REQUESTS_PER_POLL - 1) / BASELINE_REQUESTS));
+      // Each poll goes on where the last one stopped, and no repository is
+      // polled twice before every one had its turn. The last poll has budget
+      // left after the last baseline, so it goes on around the list.
+      expect(polled.flat().slice(0, watchList.length)).toEqual(watchList);
       expect(harness.events).toEqual([]);
 
-      // After the last repository, the turn wraps around to the first.
+      // The next poll starts after the last repository polled and wraps
+      // around the list, so with nothing left to baseline it reaches all.
+      const lastPolled = polled.flat().at(-1)!;
+      const next = watchList.indexOf(lastPolled) + 1;
       const { requests } = await poll(harness, route, watchList);
 
-      expect(listPolledRepos(requests)).toEqual(watchList);
+      expect(listPolledRepos(requests)).toEqual([
+        ...watchList.slice(next),
+        ...watchList.slice(0, next),
+      ]);
     });
 
     it("keeps its turn when the repository it polled last leaves the watch list", async () => {

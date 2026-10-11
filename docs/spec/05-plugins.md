@@ -37,7 +37,7 @@ interface PluginManifest {
 *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided in [#394](https://github.com/theagenticage/hercule/issues/394) and [#389](https://github.com/theagenticage/hercule/issues/389).)* **The mark.** Intake shows the mark of the plugin a signal or an event came from.
 
 - `mark.paths` holds path `d` strings only, drawn on a fixed 16×16 viewBox. There is no SVG document, no `<style>`, no other element and no colour, so a mark cannot carry script or tracking, and the apps draw it in the theme's colour.
-- The core checks the mark when it loads the plugin: each string must be path data only (path commands and numbers), and all strings together must stay under 4 KB. A mark that fails the check is dropped, not the plugin: the plugin loads with no mark, the apps draw its initial, and Settings > Plugins says why.
+- The core checks the mark when it loads the plugin: each string must be path data only (path commands and numbers), and all strings together must stay under 4 KB. A mark that fails the check is dropped, not the plugin: the plugin loads with no mark, the apps draw its initial, and Settings > Plugins says why. *(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* The API returns the reason with the plugin as `markError`. *(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* A mark has at most 16 strings; one with more is dropped the same way.
 - The API returns the mark with the plugin, so every client draws it the same way. How the apps draw it, and what they draw for a plugin with no valid mark, is in [./17-desktop-app.md](./17-desktop-app.md).
 - A plugin has one mark, its own. A system reached through another plugin is shown as text ("Sentry, via Gmail"), never as a mark.
 
@@ -234,7 +234,17 @@ interface SignalDraft {
   place?: string
   priority?: TaskPriority
   blocks: Block[]
-  actions: BoundAction[]                       // this plugin's own actions only; never Done
+  actions: SignalDraftAction[]                 // this plugin's own actions only; never Done (amended 2026-10-11, #526: was BoundAction[])
+}
+
+interface SignalDraftAction {                  // added 2026-10-11, #526
+  id: string
+  label: string
+  description?: string
+  action: string                               // the unqualified id of one of this plugin's workflow actions: "pr.review"
+  input: Record<string, unknown>               // the action's input, without its Connection
+  primary?: boolean                            // the suggested answer; at most one
+  field?: { name: string; placeholder: string } // a typed reply: the user's text fills `input[name]`
 }
 
 interface IngestConnection {
@@ -257,7 +267,7 @@ interface EmittedEvent {
 
 - **A signal kind is a facet of the event source**, like an event kind. It is not a contribution and not a fifth extension point, so a plugin update can add a kind without registering anything new. The host qualifies the word to `<pluginId>/<word>` (section 1). Everything but `build` is data: the plugin never writes a Signal, and the core evaluates the rule, the thread, the match fields and the ends.
 - **What the core does with a kind**: it runs the rule, checks known work and Ignore Rules, replaces an older signal on the same thread, sends an `undecided` event to the Screener, and calls `build`. That path is in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#92-how-a-plugins-signal-is-raised), and what happens when `build` fails is in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent). How a kind's `ends` end a signal is in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#96-when-a-signal-leaves). The `Block` types are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#95-blocks), and `BoundAction` in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent). Whether a kind is on is an Intake setting (section 8.2).
-- **`build` is the one piece of plugin code.** It turns the event into the signal's content. It binds only its own plugin's actions, and the core fills in each one's Connection with the signal's own (section 4.4). It never declares Done: the core adds Done and the workflows that can take the signal ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)). It may read the service through `ctx.credentials()`, as Gmail's `build` reads the thread.
+- **`build` is the one piece of plugin code.** It turns the event into the signal's content. It binds only its own plugin's actions, and the core fills in each one's Connection with the signal's own (section 4.4). *(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* A draft action is a `SignalDraftAction`, not a `BoundAction`: it names the action by its unqualified id, and the core qualifies it to `<pluginId>/<action>`, so a plugin cannot bind another plugin's action or pick another Connection. It never declares Done: the core adds Done and the workflows that can take the signal ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)). It may read the service through `ctx.credentials()`, as Gmail's `build` reads the thread.
 - **`availableToTriage` is required**, so every plugin author decides for every event kind whether triage may read it. Adding it is a change to the host contract (section 9).
 - **The user's identity lives on the Connection** (`accountId` and `displayName`, [./08-events-and-connections.md](./08-events-and-connections.md) section 8.1). The core hands both to the source, and the source works out at ingest the facts its rules need, such as `byYou`, `toYou` and `reviewer: you | team`, and writes them into the payload. Platform Identity is not widened.
 - **`openSignals()`** lists the open signals of this Connection, so a source can watch the threads that have one: for example, read a pull request's reviews only while a review request on it is open.
@@ -531,7 +541,7 @@ Core events (`run.failed`, `cron.tick`) have no plugin and no Connection, so in 
 - **Capability APIs evolve additively.** New optional fields, new methods, new event kinds and new contribution facets are added without renaming.
 - **A breaking change mints a new capability name** (`channels.v2`). The old name keeps working until it is retired; a plugin requests whichever it was built against. There is no per-capability version matrix and no version field on a capability. Load-time compatibility is one integer check plus name lookup.
 - Contribution schemas (event kinds, action input/output schemas) follow the same rule inside a plugin: add, do not rename; a breaking change is a new contribution id. This extends ticket 11's rule, pinned for capability APIs, to contributions; it is the spec's extension.
-- *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* **Intake's additions to the host contract.** Two of them are required, so they change the core host contract and raise `hostApi`: `availableToTriage` on every event kind, and `title` on every emitted event (section 4.3). The rest are additive: `signalKinds`, `openSignals()`, the identity on `IngestConnection`, `author`, `usableIn`, `describe` and the manifest's `mark`. This spec does not fix the new integer; the ticket that builds the change does.
+- *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* **Intake's additions to the host contract.** Two of them are required, so they change the core host contract and raise `hostApi`: `availableToTriage` on every event kind, and `title` on every emitted event (section 4.3). The rest are additive: `signalKinds`, `openSignals()`, the identity on `IngestConnection`, `author`, `usableIn`, `describe` and the manifest's `mark`. This spec does not fix the new integer; the ticket that builds the change does. *(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* `hostApi` is 2.
 
 ## 10. Connections and plugin-defined connection types
 
@@ -552,7 +562,7 @@ interface ConnectionTypeContribution {
   type: string                                 // the bare word: "github", "gmail", "discord", "slack"; the host qualifies it to `<pluginId>/<word>`. No `/` in the word
   displayName: string
   setup: SetupStep[]
-  validate(credentials: Record<string, string>): Effect<{ accountId: string; displayName: string; detail?: string }, ConnectionValidationFailed, HttpClient>  // the pasted fields, or { accessToken } from a redirect or device flow
+  validate(credentials: Record<string, string>): Effect<{ accountId: string; displayName: string; warning?: string }, ConnectionValidationFailed, HttpClient>  // the pasted fields, or { accessToken } from a redirect or device flow
   oauth?: OAuthDeclaration                     // required iff an oauth step appears
   device?: DeviceDeclaration                   // required iff a device step appears
 }
@@ -582,6 +592,8 @@ interface DeviceDeclaration {
 *(Amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183).)* The `device` step and its `DeviceDeclaration` are new. The bullets from "Which flows a type offers" to "Token endpoint errors" below describe them, and the rules for a type that offers more than one flow.
 
 *(Amended 2026-10-02, [#326](https://github.com/theagenticage/hercule/issues/326).)* `validate` returns `accountId` beside `displayName`: the provider's stable id for the account (GitHub: the numeric user id), which does not change when the account is renamed. It is required and must not be empty; the core treats a `validate` that returns an empty `accountId` as a failed validation. The Connection records it, and a reconnect compares it (the bullet "Reconnect reuses the Connection id" below). It stays inside the controller: the public API never returns it.
+
+*(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* `validate` may also return `warning`, one sentence the Connection shows while these credentials are in use, when they work but cost the user something: "This fine-grained token cannot read notifications, so review requests raise no signal." The core stores it with the Connection, the public API returns it as `Connection.warning`, and the next sign-in replaces or clears it.
 
 - **The core runs the OAuth dance.** One generic authorization-code client (PKCE, token exchange, refresh) lives in the core, parameterised by the plugin's `OAuthDeclaration`; the plugin writes no OAuth code and never touches the client secret. The device flow client (RFC 8628) sits beside it, parameterised by the plugin's `DeviceDeclaration`. It stores its tokens in the same `oauth.tokens` secret, but it has no refresh: refresh uses only the type's `OAuthDeclaration`, so a connection set up by a device flow is never refreshed *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*. Refreshed access tokens are what `ctx.connection.credentials` hands the plugin at poll or execute time; a refresh failure sets `needs-reauth` uniformly.
 - **Callback routing**: the core mints an opaque `state` referencing a pending-setup row `{type, connectionId?, expiresAt}` (the qualified type names its plugin) and serves `/oauth/callback` itself; the row, not the plugin, is what the callback resolves. The plugin is never routed a request. The row also carries the connection the flow will write: `label`, `labels` and `config` on the same terms as the device flow's row below *(amended 2026-10-02, [#323](https://github.com/theagenticage/hercule/issues/323))*.

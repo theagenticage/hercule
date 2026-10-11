@@ -6,7 +6,7 @@
  * does not survive a restart; `enabled` and `config` do.
  */
 import { Schema } from "effect";
-import { PluginCapability, PluginId } from "@hercule/plugin-host";
+import { PluginCapability, PluginId, PluginMark } from "@hercule/plugin-host";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -23,7 +23,7 @@ export const MAX_PLUGIN_MESSAGE_LENGTH = 2048;
 const PluginMessage = Schema.String.check(Schema.isMaxLength(MAX_PLUGIN_MESSAGE_LENGTH));
 
 /** Re-exported from the package plugins are written against, so both use the same list. */
-export { PluginCapability } from "@hercule/plugin-host";
+export { PluginCapability, PluginMark } from "@hercule/plugin-host";
 
 /**
  * Why the controller refused to load a plugin. Each reason is decided from the
@@ -78,26 +78,20 @@ export const PluginContribution = Schema.Struct({
 export type PluginContribution = Schema.Schema.Type<typeof PluginContribution>;
 
 /**
- * A plugin's small icon: SVG path `d` strings on a fixed 16 by 16 viewBox,
- * with no colour, so the apps draw it in the colour of the text around it
- * (spec 05 §2).
- */
-export const PluginMark = Schema.Struct({ paths: Schema.Array(Schema.String) });
-
-export type PluginMark = Schema.Schema.Type<typeof PluginMark>;
-
-/**
  * `configSchema` is absent for every refused plugin, because it is derived only
  * after the manifest is accepted. Its absence means a form cannot be generated;
  * the reason for the refusal is in `status.reason`.
  *
  * `mark` is absent for a plugin that declares no mark, or whose mark failed
- * the core's check; the apps then draw the plugin's initial.
+ * the core's check; the apps then draw the plugin's initial. `markError`
+ * holds the reason the core dropped the plugin's mark, which Settings >
+ * Plugins shows.
  */
 export const PluginDetail = Schema.Struct({
   id: PluginId,
   displayName: Schema.String,
   mark: Schema.optionalKey(PluginMark),
+  markError: Schema.optionalKey(Schema.String),
   hostApi: Schema.Int,
   capabilities: Schema.Array(PluginCapability),
   enabled: Schema.Boolean,

@@ -98,6 +98,11 @@ export function PluginCard({
       {plugin.status._tag === "refused" ? (
         <p className="text-fine text-muted">{describeRefusalReason(plugin.status.reason)}</p>
       ) : null}
+      {/* The core drops a mark it cannot draw and loads the plugin anyway, so
+          this line is the only place the plugin's author learns why. */}
+      {plugin.markError === undefined ? null : (
+        <p className="text-fine text-muted">{plugin.markError}</p>
+      )}
 
       <div className="flex flex-col gap-px text-fine text-muted">
         {plugin.contributions.length === 0 ? (

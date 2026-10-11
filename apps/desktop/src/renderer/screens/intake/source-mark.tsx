@@ -1,17 +1,16 @@
 import { decidePluginMark, type PluginIdentity } from "@hercule/client-core";
 import type { JSX } from "react";
-import { GitHubMark } from "../../logos/brand-mark";
 import { LogoMark } from "../../logos/logo-mark";
 
 /**
  * Renders the mark of a signal's source, `size` CSS pixels square:
  *
  * - the logo mark for the core, `null`;
- * - the mark the plugin declares, each of its paths drawn in the text colour
- *   on a 16 by 16 grid (spec 17 §Design system);
- * - GitHub's mark for the `github` plugin while it declares none, because
- *   the app still keeps a copy of that mark until the plugin carries it (#526);
- * - otherwise the initial of the plugin's name in a rounded square.
+ * - the mark the plugin declares, which the API returns with the plugin:
+ *   each of its paths drawn in the text colour on a 16 by 16 grid (spec 17
+ *   §Design system);
+ * - otherwise, when the plugin declares no mark or the core dropped it, the
+ *   initial of the plugin's name in a rounded square.
  *
  * The mark is hidden from assistive technology, because the row, the pane
  * and the tabs name the source in words.
@@ -28,7 +27,6 @@ export function SourceMark({
 }): JSX.Element {
   if (pluginId === null) return <LogoMark size={size} />;
   const drawing = decidePluginMark(pluginId, plugins);
-  if (drawing._tag === "initial" && pluginId === "github") return <GitHubMark size={size} />;
   return (
     <svg
       className="br"

@@ -739,7 +739,10 @@ export const CLI = {
         flag: "view",
         help: "to-do, the signals that ask for your move now, which is the default and is never paged; later, the snoozed ones; or done, the resolved ones.",
       },
-      kind: { flag: "kind", help: "Only signals of this kind, such as fyi or github/pr-review." },
+      kind: {
+        flag: "kind",
+        help: "Only signals of this kind, such as fyi or github/review-requested.",
+      },
       source: {
         flag: "source",
         help: "Only signals whose kind belongs to this plugin, such as github.",

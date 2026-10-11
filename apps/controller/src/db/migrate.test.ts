@@ -97,7 +97,9 @@ describe("migrations", () => {
         return [first, second, yield* databaseVersion] as const;
       }),
     );
-    expect(first).toHaveLength(binaryVersion);
+    // Counted from the list rather than from the highest id, because an id
+    // may be left free for a migration another branch is adding.
+    expect(first).toHaveLength(migrations.length);
     expect(second).toEqual([]);
     expect(version).toBe(binaryVersion);
   });

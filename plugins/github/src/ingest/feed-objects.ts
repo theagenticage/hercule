@@ -27,6 +27,8 @@ export const ListedIssue = Schema.Struct({
   created_at: Schema.String,
   updated_at: Schema.String,
   closed_at: Schema.NullOr(Schema.String),
+  /** Who closed it, or merged it for a pull request. Only `GET .../issues/{number}` sends it. */
+  closed_by: Schema.optionalKey(Schema.NullOr(GithubAccount)),
   /** Why the issue is in its state, such as `reopened` for an open issue that was closed before. */
   state_reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
   pull_request: Schema.optionalKey(
@@ -36,7 +38,15 @@ export const ListedIssue = Schema.Struct({
 
 export type ListedIssue = Schema.Schema.Type<typeof ListedIssue>;
 
-/** A pull request, as `GET /repos/{owner}/{repo}/pulls` and `.../pulls/{number}` return it. */
+/** A team, as GitHub embeds one in a pull request's review requests. */
+const ListedTeamRef = Schema.Struct({ slug: Schema.String });
+
+/**
+ * A pull request, as `GET /repos/{owner}/{repo}/pulls` and `.../pulls/{number}`
+ * return it. `requested_reviewers` and `requested_teams` list the reviews
+ * still asked for: GitHub drops a reviewer from them once they review.
+ * `merged_by` is only in the answer of `.../pulls/{number}`.
+ */
 export const ListedPull = Schema.Struct({
   number: Schema.Int,
   title: Schema.String,
@@ -44,6 +54,9 @@ export const ListedPull = Schema.Struct({
   user: Schema.NullOr(GithubAccount),
   head: Schema.Struct({ sha: Schema.String }),
   updated_at: Schema.String,
+  requested_reviewers: Schema.optionalKey(GithubAccounts),
+  requested_teams: Schema.optionalKey(Schema.NullOr(Schema.Array(ListedTeamRef))),
+  merged_by: Schema.optionalKey(Schema.NullOr(GithubAccount)),
 });
 
 export type ListedPull = Schema.Schema.Type<typeof ListedPull>;
@@ -68,11 +81,52 @@ export const ListedComment = Schema.Struct({
   id: Schema.Int,
   html_url: Schema.String,
   issue_url: Schema.String,
+  user: Schema.NullOr(GithubAccount),
+  /** Markdown. GitHub leaves it out of a comment that has no text. */
+  body: Schema.optionalKey(Schema.NullOr(Schema.String)),
   created_at: Schema.String,
   updated_at: Schema.String,
 });
 
 export type ListedComment = Schema.Schema.Type<typeof ListedComment>;
+
+/**
+ * One entry of an issue's or a pull request's history, as
+ * `GET /repos/{owner}/{repo}/issues/{number}/events` returns it, oldest
+ * first. `event` is GitHub's word, such as `review_requested`, `merged` or
+ * `closed`. A review request names either one reviewer or one team.
+ */
+export const IssueEvent = Schema.Struct({
+  id: Schema.Int,
+  event: Schema.String,
+  created_at: Schema.String,
+  actor: Schema.NullOr(GithubAccount),
+  requested_reviewer: Schema.optionalKey(Schema.NullOr(GithubAccount)),
+  requested_team: Schema.optionalKey(Schema.NullOr(ListedTeamRef)),
+  review_requester: Schema.optionalKey(Schema.NullOr(GithubAccount)),
+});
+
+export type IssueEvent = Schema.Schema.Type<typeof IssueEvent>;
+
+/**
+ * One result of `GET /search/issues`. The search does not name the
+ * repository directly; `repository_url` is its API URL, which ends in
+ * `/repos/{owner}/{repo}`.
+ */
+export const FoundIssue = Schema.Struct({
+  number: Schema.Int,
+  title: Schema.String,
+  repository_url: Schema.String,
+  updated_at: Schema.String,
+});
+
+export type FoundIssue = Schema.Schema.Type<typeof FoundIssue>;
+
+/** A team the user belongs to, as `GET /user/teams` returns it. */
+export const ListedTeam = Schema.Struct({
+  slug: Schema.String,
+  organization: Schema.Struct({ login: Schema.String }),
+});
 
 /** One notification thread, as `GET /notifications` returns it. */
 export const GithubNotification = Schema.Struct({

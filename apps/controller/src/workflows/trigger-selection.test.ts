@@ -38,6 +38,8 @@ const buildEvent = (fields: Partial<Event> = {}): Event => ({
   dedupKey: "delivery-1",
   refs: [],
   url: null,
+  title: null,
+  author: null,
   payload: {},
   raw: null,
   actor: null,

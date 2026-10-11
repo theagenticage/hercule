@@ -26,6 +26,7 @@ import {
   buildSignalAnswers,
   describeAnswerKey,
   describeBuildFailure,
+  describeNotScreened,
   describeResolvedElsewhere,
   describeSignalAsker,
   describeSignalOutcome,
@@ -231,6 +232,7 @@ function SignalDetail({
   const asker = describeSignalAsker(signal);
   const askedAt = formatMessageTime(new Date(signal.createdAt), timezone, new Date());
   const buildFailure = describeBuildFailure(signal, plugins, raisers);
+  const notScreened = describeNotScreened(signal);
   const outcome = describeSignalOutcome(signal, plugins);
   const now = new Date();
   const outcomeMoment = describeSignalOutcomeMoment(signal, plugins, now, timezone);
@@ -290,8 +292,9 @@ function SignalDetail({
             {snoozeLine}
           </p>
         )}
-        {buildFailure !== null && <p className="ad-flag">{buildFailure}</p>}
         <SignalBlocks blocks={signal.blocks} task={signal.task} timezone={timezone} />
+        {buildFailure !== null && <p className="ad-flag">{buildFailure}</p>}
+        {notScreened !== null && <p className="ad-flag">{notScreened}</p>}
         {outcome === null ? (
           answers.length > 0 && (
             <SignalAnswers

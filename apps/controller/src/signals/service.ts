@@ -35,7 +35,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
@@ -49,10 +48,8 @@ import {
   DISMISS_ACTION_ID,
   DONE_ACTION_ID,
   HAND_TO_ACTION_PREFIX,
-  listSchemaIssues,
   MAX_BOUND_INPUT_BYTES,
-  MAX_SIGNAL_BYTES,
-  Signal,
+  type Signal,
   Validation,
   type BoundAction,
   type CoreSignalKind,
@@ -79,7 +76,6 @@ import {
   type SignalResolution,
   type SignalWithdrawInput,
   type Unauthenticated,
-  type WorkflowDefinition,
 } from "@hercule/contract";
 import {
   buildActorStamp,
@@ -98,9 +94,11 @@ import {
 } from "../bound-actions";
 import { mintUuid, nowIso, refuseCursor, uuidToString, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import { PluginHost } from "../plugins";
 import { runRepository } from "../runs";
 import { sessionRepository } from "../sessions";
 import { workflowRepository } from "../workflows";
+import { buildHandToActions, checkSignalFits, listOwnActionIssues } from "./actions";
 import { signalRepository } from "./repository";
 
 /** The input of `signal.act`: the signal's id, the action to take and its typed reply. */
@@ -123,6 +121,15 @@ const NO_OPERATION_DESCRIBE_LINE: DescribeLine = [{ kind: "text", text: "Does no
  * which source is not told; a core kind has no source to tell.
  */
 const DONE_DESCRIBE_LINE: DescribeLine = [{ kind: "text", text: "Takes it off your list" }];
+
+/**
+ * Returns the describe line of the core's Done on a plugin's signal. Done
+ * resolves the signal in the controller only, so the line says that the
+ * source, such as a pull request's review request, stays as it is.
+ */
+const buildPluginDoneDescribeLine = (pluginDisplayName: string): DescribeLine => [
+  { kind: "text", text: `Takes it off your list. ${pluginDisplayName} is not told` },
+];
 
 /**
  * The refusal for a caller who is not the user taking an action. A session
@@ -211,64 +218,6 @@ const buildCoreActions = (input: SignalRaiseInput): ReadonlyArray<BoundAction> =
 };
 
 /**
- * Returns one Hand to an agent action for each workflow that has a signal
- * input accepting `kind`. Each binds `run.start` with the signal's id as the
- * first such input. A proposal gets none: a workflow input cannot accept
- * `proposal`, so work always keeps its Task.
- *
- * A workflow with another required input that has no default is left out.
- * The action fills only the signal input, so `run.start` would refuse its
- * click.
- */
-const buildHandToActions = (
-  signalId: string,
-  kind: string,
-  workflows: ReadonlyArray<{ readonly id: string; readonly definition: WorkflowDefinition }>,
-): ReadonlyArray<BoundAction> =>
-  workflows.flatMap(({ id, definition }) => {
-    const inputs = definition.inputs ?? [];
-    const input = inputs.find((declared) => declared.signal?.kinds.includes(kind));
-    const needsMore = inputs.some(
-      (declared) => declared !== input && declared.required && declared.default === undefined,
-    );
-    return input === undefined || needsMore
-      ? []
-      : [
-          {
-            id: `${HAND_TO_ACTION_PREFIX}${id}`,
-            label: `Hand to ${definition.name}`,
-            operation: {
-              op: "run.start",
-              input: { workflowId: id, inputs: { [input.name]: signalId } },
-            },
-          },
-        ];
-  });
-
-/**
- * Lists the raiser's actions that the core's own actions would make
- * ambiguous: one with the id or the label of a core action. The user picks an
- * action by its label, so two "Dismiss" buttons would be one too many.
- */
-const listCollisionIssues = (
-  own: ReadonlyArray<BoundAction>,
-  core: ReadonlyArray<BoundAction>,
-): ReadonlyArray<Issue> =>
-  own.flatMap((action, index) => {
-    const clash = core.find(
-      (coreAction) => coreAction.id === action.id || coreAction.label === action.label,
-    );
-    return clash === undefined
-      ? []
-      : [
-          {
-            path: ["actions", String(index)],
-            message: `The core adds its own "${clash.label}" action (id ${clash.id}) to this signal. Give your action another id and label.`,
-          },
-        ];
-  });
-
-/**
  * Returns the reply-filled operation of an action for `act`: the stored
  * operation with the typed text in the field the action names. Fails with
  * `Validation` when:
@@ -330,6 +279,7 @@ const make = Effect.gen(function* () {
   const workflows = yield* workflowRepository;
   const audit = yield* AuditLog;
   const operations = yield* BoundOperations;
+  const host = yield* PluginHost;
 
   // The signals an action or a withdrawal is running on. A plugin action runs
   // outside any transaction, so this set is what stops a second click, or a
@@ -466,31 +416,19 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Checks the raiser's own actions: each one's operation through the port,
-   * a typed reply only beside an operation, and no collision with a core
-   * action. Fails with `Validation` listing every problem.
+   * Checks the raiser's own actions with `listOwnActionIssues`. Fails with
+   * `Validation` listing every problem.
    */
   const checkRaisedActions = (
     own: ReadonlyArray<BoundAction>,
     core: ReadonlyArray<BoundAction>,
   ): Effect.Effect<void, Validation | SqlError> =>
     Effect.gen(function* () {
-      const issues: Array<Issue> = [...listCollisionIssues(own, core)];
-      for (const [index, action] of own.entries()) {
-        const path = ["actions", String(index)];
-        if (action.operation === null) {
-          if (action.field !== undefined) {
-            issues.push({
-              path: [...path, "field"],
-              message:
-                "A typed reply fills the input of the action's operation, and this action has none. Leave out field.",
-            });
-          }
-          continue;
-        }
-        const checked = yield* checkOperation(action.operation, action.field, path);
-        if (Result.isFailure(checked)) issues.push(...checked.failure.error.details.issues);
-      }
+      const issues = yield* Effect.provideService(
+        listOwnActionIssues(own, core),
+        BoundOperations,
+        operations,
+      );
       if (issues.length > 0) return yield* Effect.fail(createValidationError(issues));
     });
 
@@ -501,13 +439,19 @@ const make = Effect.gen(function* () {
    */
   const checkForDescribeLine = (
     action: SignalAction,
+    kind: string,
   ): Effect.Effect<PendingDescribeLine, SqlError> => {
     if (action.operation === null) {
-      return Effect.succeed({
+      if (action.id !== DONE_ACTION_ID) {
+        return Effect.succeed({ _tag: "written", describeLine: NO_OPERATION_DESCRIBE_LINE });
+      }
+      return Effect.map(host.findSignalKind(kind), (registered): PendingDescribeLine => ({
         _tag: "written",
-        describeLine:
-          action.id === DONE_ACTION_ID ? DONE_DESCRIBE_LINE : NO_OPERATION_DESCRIBE_LINE,
-      });
+        describeLine: Option.match(registered, {
+          onNone: () => DONE_DESCRIBE_LINE,
+          onSome: (pluginKind) => buildPluginDoneDescribeLine(pluginKind.pluginDisplayName),
+        }),
+      }));
     }
     return Effect.map(
       checkOperation(action.operation, action.field, []),
@@ -538,7 +482,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const pending = yield* Effect.forEach(list, (signal) =>
         signal.status === "open"
-          ? Effect.forEach(signal.actions, checkForDescribeLine)
+          ? Effect.forEach(signal.actions, (action) => checkForDescribeLine(action, signal.kind))
           : Effect.succeed([]),
       );
       const lines = yield* operations.describe(
@@ -735,25 +679,15 @@ const make = Effect.gen(function* () {
           status: "open",
           createdAt,
         };
-        const encoded = yield* Effect.mapError(Schema.encodeEffect(Signal)(signal), (error) =>
-          createValidationError(
-            listSchemaIssues(error.issue),
-            "the signal does not fit the Signal schema once the core adds its own actions",
-          ),
-        );
-        // The raise input was checked against the same limit, but Accept
+        // The raise input was checked against the same limits, but Accept
         // copies the task and Hand to adds one action per workflow, so the
         // signal as written can still be larger.
-        if (countJsonBytes(encoded) > MAX_SIGNAL_BYTES) {
-          return yield* Effect.fail(
-            createValidationError([
-              {
-                path: [],
-                message: `With the actions the core adds, the signal is larger than ${MAX_SIGNAL_BYTES} bytes of JSON. Shorten its blocks or the task description, and link to the source for the rest.`,
-              },
-            ]),
-          );
-        }
+        yield* Effect.mapError(checkSignalFits(signal), (refusal) =>
+          createValidationError(
+            refusal.error.details.issues,
+            "the signal does not fit the contract once the core adds its own actions",
+          ),
+        );
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -1132,5 +1066,5 @@ export class SignalService extends Context.Service<SignalService, Effect.Success
 export const SignalServiceLayer: Layer.Layer<
   SignalService,
   never,
-  SqlClient.SqlClient | AuditLog | BoundOperations
+  SqlClient.SqlClient | AuditLog | BoundOperations | PluginHost
 > = Layer.effect(SignalService)(make);

@@ -71,6 +71,7 @@ const acmePlugin: Plugin = {
           "acme.thing.done": {
             description: "Something was done in Acme.",
             schema: Schema.Struct({ title: Schema.String }),
+            availableToTriage: true,
           },
         },
         open: (_, context) =>
@@ -95,6 +96,8 @@ const acmePlugin: Plugin = {
                   payload: { title: "Shipped" },
                   refs: [],
                   url: "https://acme.example/things/1",
+                  title: "Shipped",
+                  author: null,
                 });
                 return {};
               }),

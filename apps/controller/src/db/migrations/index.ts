@@ -76,6 +76,7 @@ import signalGrants from "./0065-signal-grants";
 import runsByFinish from "./0066-runs-by-finish";
 import sessionToolCalls from "./0067-session-tool-calls";
 import signalSnoozes from "./0068-signal-snoozes";
+import intakeSignals from "./0069-intake-signals";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -146,6 +147,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [66, "runs-by-finish", Effect.succeed(runsByFinish)],
   [67, "session-tool-calls", Effect.succeed(sessionToolCalls)],
   [68, "signal-snoozes", Effect.succeed(signalSnoozes)],
+  [69, "intake-signals", Effect.succeed(intakeSignals)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

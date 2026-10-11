@@ -14,6 +14,7 @@ import {
   refuseEmptyUpdate,
 } from "./objects";
 import { RepoName } from "../repo-name";
+import { describeItem, describeSentText, nameItemBriefly } from "./describe";
 
 /** The fields that name one issue. */
 const ISSUE_ADDRESS = {
@@ -52,6 +53,13 @@ export const issueComment = defineGithubAction({
   displayName: "Comment on a GitHub issue",
   description:
     "Adds a comment to an issue, as the Connection's account. The output holds the comment's id and URL.",
+  usableIn: ["workflow.step", "signal.answer"],
+  describe: (input) => [
+    { kind: "text", text: "Comments on " },
+    ...describeItem(input, "issue"),
+    ...describeSentText(input),
+  ],
+  outcome: (input) => `Commented on ${nameItemBriefly(input, "issue")}`,
   input: Schema.Struct({
     ...ISSUE_ADDRESS,
     body: Schema.NonEmptyString.annotate({ description: "The comment, in GitHub Markdown." }),

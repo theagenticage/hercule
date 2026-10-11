@@ -63,10 +63,16 @@ export {
   EventRoutingInterval,
   Pipeline,
   PipelineLayer,
+  SignalBuildFailuresLayer,
 } from "./events";
 export { AttachmentSweepInterval, runAttachmentSweepLoop } from "./attachments";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
-export { IngestExecutorLayer, IngestReconcileInterval, runIngestReconciler } from "./ingest";
+export {
+  IngestExecutorLayer,
+  IngestReconcileInterval,
+  OpenSignalsLayer,
+  runIngestReconciler,
+} from "./ingest";
 export { BoundOperationsLayer } from "./bound-actions";
 export {
   PermissionRequests,

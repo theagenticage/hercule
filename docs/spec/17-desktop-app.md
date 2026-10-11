@@ -2646,6 +2646,17 @@ The perf script's rows were measured 2026-10-11 on the reference machine, in one
 - **The summed footprint is 6 MB over its row, a budget miss.** The renderer grew by 7 MB, from 59.7 to 66.6 MB; the GPU process held 100.7 MB, against 101 MB then. Each side is one run on a shared machine, with a load average of 5.1 at this launch, so the growth is not yet separated from the noise between two runs. The miss is accepted for this change; a later measurement on a quiet machine settles it.
 - **Splitting the moves into their own chunk was not tried.** Intake's chunk grew by 8.7 kB, and the moves show on every row, so they load with Intake whatever the split.
 
+**GitHub review requests and mentions,** measured 2026-10-11 with `pnpm build:desktop`'s size checks, for [#526](https://github.com/theagenticage/hercule/issues/526). Before is this branch at 6063467a, before the client changes; After is this change. Sizes are counted the way the budget script counts them, 1,024 bytes to a kB; the byte counts are gzip -9. The perf script was not run: the change adds no process, no timer, no polling and no live topic, so it adds no idle work. A plugin's mark arrives with its record in the `plugin.query` read Intake already makes.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| The first screen's JavaScript, gzipped | none new | 343.4 kB across 21 chunks; first-screen chunk 263.6 kB | 343.4 kB across 21 chunks; first-screen chunk 263.6 kB (+73 bytes: client-core's Screening line and the plugin named for an end on the source) |
+| Intake's chunk, gzipped | none | 11.4 kB (11,475 bytes) | 11.3 kB (11,416 bytes): the app's fallback to its own GitHub mark is gone |
+| A plugin's mark in its `plugin.query` record | none | - | GitHub: 835 bytes of JSON, one path of 812 characters; a plugin with no mark: 0 |
+| Main's startup file, minified | 160 kB | not measured; this change touches no code in main | 150.1 kB |
+
+- **The app's copy of GitHub's mark stays.** Intake now draws only the mark the plugin returns, but first run, the Office, New project and the new-thread start cards still draw `GitHubMark` from `logos/brand-mark.tsx`, which lives in the first-screen chunk. Removing it is left to the change that moves those screens to the plugin's mark.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.

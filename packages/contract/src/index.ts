@@ -529,8 +529,10 @@ export {
   Event,
   EventId,
   MAX_DEDUP_KEY_LENGTH,
+  MAX_EVENT_AUTHOR_LENGTH,
   MAX_EVENT_KIND_LENGTH,
   MAX_EVENT_SYSTEM_LENGTH,
+  MAX_EVENT_TITLE_LENGTH,
   MAX_EVENT_URL_LENGTH,
 } from "./groups/event";
 export {

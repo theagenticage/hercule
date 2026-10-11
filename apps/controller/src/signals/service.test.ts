@@ -10,11 +10,12 @@
  * HTTP in `signals.integration.test.ts`.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Fiber, Layer } from "effect";
+import { Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { SqlClient } from "effect/unstable/sql";
 import {
   decodeAnswerOperation,
+  DONE_ACTION_ID,
   isQualifiedId,
   MAX_BOUND_INPUT_BYTES,
   type BoundAction,
@@ -29,12 +30,30 @@ import { FakeBoundOperationsLayer } from "../bound-actions/testing";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
+import { PluginHost, type RegisteredSignalKind } from "../plugins";
 import { workflowRepository } from "../workflows";
 import { signalRepository, SignalService, SignalServiceLayer } from "./index";
 
 type Deps = SignalService | SqlClient.SqlClient;
 
+/** The signal kind of the one plugin the stub host knows. */
+const PLUGIN_KIND = "acme/asked";
+
+/**
+ * A plugin host that knows one signal kind, of the plugin Acme. The signal
+ * service reads the host only to name the plugin in a Done's describe line.
+ */
+const PluginHostStub = Layer.mock(PluginHost)({
+  findSignalKind: (kind) =>
+    Effect.succeed(
+      kind === PLUGIN_KIND
+        ? Option.some({ kind, pluginId: "acme", pluginDisplayName: "Acme" } as RegisteredSignalKind)
+        : Option.none(),
+    ),
+});
+
 const layer = SignalServiceLayer.pipe(
+  Layer.provide(PluginHostStub),
   Layer.provide(FakeBoundOperationsLayer),
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(TestDatabase),
@@ -121,6 +140,7 @@ const buildHeldOperations = () => {
         Effect.provide(
           effect,
           SignalServiceLayer.pipe(
+            Layer.provide(PluginHostStub),
             Layer.provide(Layer.succeed(BoundOperations, port)),
             Layer.provideMerge(AuditLogLayer),
             Layer.provideMerge(TestDatabase),
@@ -416,6 +436,37 @@ describe("signal.query and signal.read", () => {
       { kind: "text", text: "Takes it off your list" },
     ]);
     expect(result.forSession.actions[0]!.describeLine).toBeUndefined();
+  });
+
+  it("says on a plugin's signal that Done does not tell the plugin", async () => {
+    const signal: Signal = {
+      id: "0199e0e7-0000-7000-8000-00000000c001",
+      kind: PLUGIN_KIND,
+      origin: {
+        type: "event",
+        eventId: 1,
+        connectionId: "0199e0e7-0000-7000-8000-00000000c002",
+        threadRef: "acme/web#1",
+      },
+      title: "Review acme/web#1",
+      priority: "normal",
+      blocks: [],
+      actions: [{ id: DONE_ACTION_ID, label: "Done", operation: null }],
+      match: {},
+      status: "open",
+      createdAt: AT,
+    };
+    const read = await run(
+      Effect.gen(function* () {
+        const repository = yield* signalRepository;
+        yield* repository.insert(signal, [1]);
+        return yield* as(USER)(Effect.flatMap(service, (signals) => signals.read(signal.id)));
+      }),
+    );
+
+    expect(read.actions[0]!.describeLine).toEqual([
+      { kind: "text", text: "Takes it off your list. Acme is not told" },
+    ]);
   });
 
   it("fails with NotFound for an id no signal has", async () => {
