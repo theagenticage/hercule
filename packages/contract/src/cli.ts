@@ -2360,7 +2360,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "the plugin is not enabled, the credentials cannot be read, the account could not be asked, or it answered with more than 1,000 choices; the message says which",
+        "the plugin is not running (disabled, or failed to start), the credentials cannot be read, the account could not be asked, or it answered with more than 1,000 choices; the message says which",
     },
   },
   "connection.startOAuth": {

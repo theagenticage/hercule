@@ -158,8 +158,12 @@ export function ConfigFieldRow({
     <Field id={field.kind === "stringList" ? undefined : inputId} label={field.label} error={error}>
       {/* The description goes above the input, so an error appears directly under the input. */}
       <Description field={field} />
+      {/* A disabled select holds the place of the picker, so the row keeps its
+          height when the choices arrive. */}
       {choices?.status === "loading" ? (
-        <p className="text-fine text-faint">Loading choices...</p>
+        <Select id={inputId} disabled value="">
+          <option value="">Loading choices…</option>
+        </Select>
       ) : null}
       {/* When the choices cannot be loaded, the plain widget stays so the
           user can still edit the value; the reason sits above it. */}

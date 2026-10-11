@@ -43,7 +43,7 @@ export function ChoicePicker({
       {showsChoiceFilter(options) ? (
         <Input
           aria-label={`Filter ${label}`}
-          placeholder="Filter"
+          placeholder="Filter choices…"
           value={typed}
           onChange={(event) => {
             setTyped(event.target.value);
@@ -67,8 +67,10 @@ export function ChoicePicker({
             onChange(event.target.value);
           }}
         >
-          {/* An optional setting needs an empty choice, so the user can unset it. */}
-          {required ? null : <option value="">Not set</option>}
+          {/* An optional setting needs an empty choice, so the user can unset it.
+              A value that is not set also needs it, so the select does not appear
+              to hold the first choice. */}
+          {required && value !== "" ? null : <option value="">Not set</option>}
           {shown.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}

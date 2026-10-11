@@ -17,6 +17,8 @@ import * as Schema from "effect/Schema";
 import {
   ConnectionValidationFailed,
   HOST_API,
+  PluginError,
+  type ConfigChoice,
   registerConnectionType,
   registerEventSource,
   type ActivationContext,
@@ -83,6 +85,10 @@ const buildConnectionPlugin = (options: {
   readonly type: string;
   readonly flow?: "credentials" | "oauth";
   readonly configSchema?: Schema.Top;
+  /** When given, the plugin fails to start with this message, after it registered its type. */
+  readonly activateFails?: string;
+  /** When given, the type loads the choices of its `choices` fields with this function. */
+  readonly listChoices?: (field: string) => ReadonlyArray<ConfigChoice>;
   /** When given, the plugin also declares an event source for the type, with these feeds. */
   readonly feeds?: Record<string, FeedDeclaration>;
 }): TestPlugin => {
@@ -118,6 +124,11 @@ const buildConnectionPlugin = (options: {
               }
             : {}),
           ...(options.configSchema === undefined ? {} : { configSchema: options.configSchema }),
+          ...(options.listChoices === undefined
+            ? {}
+            : {
+                listChoices: (field: string) => Effect.succeed(options.listChoices?.(field) ?? []),
+              }),
           validate: (credentials: Record<string, string>) => {
             const token = credentials["token"] ?? "";
             return token.startsWith("good-")
@@ -137,10 +148,12 @@ const buildConnectionPlugin = (options: {
             }),
       ),
     activate: (ctx) =>
-      Effect.sync(() => {
-        contexts.push(ctx);
-        return Effect.void;
-      }),
+      options.activateFails === undefined
+        ? Effect.sync(() => {
+            contexts.push(ctx);
+            return Effect.void;
+          })
+        : Effect.fail(new PluginError({ message: options.activateFails })),
   };
 
   return { plugin, contexts };
@@ -154,6 +167,30 @@ const buildPlugins = () => ({
     id: "configured",
     type: "configured-type",
     configSchema: Schema.Struct({ watch: Schema.String }),
+  }),
+  teams: buildConnectionPlugin({
+    id: "teams",
+    type: "team-type",
+    configSchema: Schema.Struct({
+      team: Schema.optionalKey(Schema.String.annotate({ choices: true })),
+      note: Schema.optionalKey(Schema.String),
+    }),
+    // The first entry has an empty value and the third repeats the second's.
+    listChoices: () => [
+      { value: "", label: "Nobody" },
+      { value: "backend", label: "Backend" },
+      { value: "backend", label: "Backend again" },
+      { value: "web", label: "Web" },
+    ],
+  }),
+  broken: buildConnectionPlugin({
+    id: "broken",
+    type: "broken-type",
+    configSchema: Schema.Struct({
+      team: Schema.optionalKey(Schema.String.annotate({ choices: true })),
+    }),
+    listChoices: () => [{ value: "backend", label: "Backend" }],
+    activateFails: "cannot open its database",
   }),
   oauth: buildConnectionPlugin({ id: "oauthy", type: "oauth-type", flow: "oauth" }),
   polled: buildConnectionPlugin({
@@ -613,6 +650,63 @@ describe("PATCH /connections/:id", () => {
       }
       const day = await patchConnection(base, token, one.id, { feedIntervals: { slow: 86_400 } });
       expect(day.status, await day.clone().text()).toBe(200);
+    });
+  });
+});
+
+describe("GET /connections/:id/choices/:field", () => {
+  const getChoices = (base: string, token: string, id: string, field: string): Promise<Response> =>
+    get(base, `/api/v1/connections/${id}/choices/${field}`, token);
+
+  it("returns the choices the type loads, without an empty value or a repeated one", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: "teams/team-type" });
+
+      const response = await getChoices(base, token, one.id, "team");
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toEqual({
+        choices: [
+          { value: "backend", label: "Backend" },
+          { value: "web", label: "Web" },
+        ],
+      });
+    });
+  });
+
+  it("returns validation for a field that does not load choices, and not_found for an unknown connection", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: "teams/team-type" });
+
+      const plain = await getChoices(base, token, one.id, "note");
+      const absent = await getChoices(base, token, ABSENT, "team");
+
+      expect(plain.status).toBe(400);
+      expect((await readError(plain)).code).toBe("validation");
+      expect(absent.status).toBe(404);
+    });
+  });
+
+  it("returns invalid_state when the plugin is enabled but failed to start", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: "broken/broken-type" });
+
+      const response = await getChoices(base, token, one.id, "team");
+
+      expect(response.status).toBe(409);
+      const error = await readError(response);
+      expect(error.code).toBe("invalid_state");
+      expect(error.message).toContain("not running (disabled, or failed to start)");
+    });
+  });
+
+  it("requires a token", async () => {
+    await withConnections(async ({ base }, _registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: "teams/team-type" });
+
+      const response = await fetch(`${base}/api/v1/connections/${one.id}/choices/team`);
+
+      expect(response.status).toBe(401);
     });
   });
 });

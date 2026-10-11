@@ -281,6 +281,10 @@ export const MAX_CONFIG_CHOICES = 1000;
  * One choice for a config field that loads its choices from the external
  * account, such as a Sentry team. `value` is what the config stores; `label`
  * is what the form shows.
+ *
+ * This is the same shape as the `ConfigChoice` interface in plugin-host, which
+ * plugins are written against. It is declared again here as a Schema because
+ * plugin-host cannot import the contract: the contract imports plugin-host.
  */
 export const ConfigChoice = Schema.Struct({ value: Schema.String, label: Schema.String });
 

@@ -58,16 +58,16 @@ const readAnnotation = (ast: SchemaAST.AST, word: "title" | "description"): stri
  * as `Schema.Finite` - has its annotation on that refinement rather than on
  * itself, so both places are checked.
  */
-const isSecret = (ast: SchemaAST.AST): boolean =>
+const isMarkedSecret = (ast: SchemaAST.AST): boolean =>
   ast.annotations?.secret === true ||
   (ast.checks ?? []).some((check) => check.annotations?.secret === true);
 
 /**
- * Checks whether a field is marked `choices: true`. Like `isSecret`, it also
+ * Checks whether a field is marked `choices: true`. Like `isMarkedSecret`, it also
  * looks at the schema's refinements, which is where an annotation lands on a
  * schema such as `Schema.String.check(...)`.
  */
-const isChoices = (ast: SchemaAST.AST): boolean =>
+const isMarkedChoices = (ast: SchemaAST.AST): boolean =>
   ast.annotations?.choices === true ||
   (ast.checks ?? []).some((check) => check.annotations?.choices === true);
 
@@ -83,7 +83,7 @@ const isChoices = (ast: SchemaAST.AST): boolean =>
 export const listChoiceFields = (schema: Schema.Top): ReadonlyArray<string> => {
   if (!SchemaAST.isObjects(schema.ast)) return [];
   return schema.ast.propertySignatures.flatMap(({ name, type }) =>
-    typeof name === "string" && isChoices(type) ? [name] : [],
+    typeof name === "string" && isMarkedChoices(type) ? [name] : [],
   );
 };
 
@@ -107,7 +107,7 @@ export const listSecretFields = (
   // properties to mark, and `deriveConfigJsonSchema` rejects it separately.
   if (!SchemaAST.isObjects(schema.ast)) return [];
   return schema.ast.propertySignatures.flatMap(({ name, type }) => {
-    if (typeof name !== "string" || !isSecret(type)) return [];
+    if (typeof name !== "string" || !isMarkedSecret(type)) return [];
     return [
       {
         name,
@@ -178,6 +178,20 @@ const findUnsupportedChoicesReason = (property: JsonSchema.JsonSchema): string |
 };
 
 /**
+ * Returns why a property that loads its choices cannot be required, or
+ * `undefined` when it is optional. The choices need working credentials, so the
+ * setup form leaves the field out and a new Connection starts with it unset.
+ * A required field would make that config invalid.
+ */
+const findRequiredChoicesReason = (
+  name: string,
+  required: ReadonlyArray<string>,
+): string | undefined =>
+  required.includes(name)
+    ? "is marked choices, so it must be optional (Schema.optionalKey): a new Connection starts with it unset, and the type must work with it unset"
+    : undefined;
+
+/**
  * Derives the JSON Schema the catalog stores and the web app builds a form
  * from. Fails with `UnsupportedConfigSchema` when the form cannot render the
  * schema. Only a flat object of scalars renders, so anything deeper is caught
@@ -202,6 +216,7 @@ export const deriveConfigJsonSchema = (
 
   const marked = new Set(listSecretFields(schema).map((field) => field.name));
   const choiceFields = new Set(listChoiceFields(schema));
+  const required = (root.required as ReadonlyArray<string> | undefined) ?? [];
   const rendered: Record<string, JsonSchema.JsonSchema> = {};
   for (const [name, property] of Object.entries(properties)) {
     const reason = marked.has(name)
@@ -210,7 +225,10 @@ export const deriveConfigJsonSchema = (
         : "is marked secret, which only a string can be: nothing else has a masked input"
       : findUnsupportedReason(property);
     const failure =
-      reason ?? (choiceFields.has(name) ? findUnsupportedChoicesReason(property) : undefined);
+      reason ??
+      (choiceFields.has(name)
+        ? (findUnsupportedChoicesReason(property) ?? findRequiredChoicesReason(name, required))
+        : undefined);
     if (failure !== undefined) {
       return Result.fail(
         new UnsupportedConfigSchema({ message: `the config property "${name}" ${failure}` }),
@@ -225,12 +243,12 @@ export const deriveConfigJsonSchema = (
 
   // A secret-marked field is not part of the config at all: its value lives in
   // the secrets table, so a config without it is complete.
-  const required = root.required as ReadonlyArray<string> | undefined;
-
   return Result.succeed({
     ...root,
     properties: rendered,
-    ...(required === undefined ? {} : { required: required.filter((name) => !marked.has(name)) }),
+    ...(root.required === undefined
+      ? {}
+      : { required: required.filter((name) => !marked.has(name)) }),
   });
 };
 

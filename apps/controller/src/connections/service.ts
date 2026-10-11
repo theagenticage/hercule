@@ -27,6 +27,7 @@
  * the controller passes an id it read from a stored row.
  */
 import type * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -54,14 +55,18 @@ import {
   ConnectionStatus,
   ConnectionUpdateInput,
   DEFAULT_PAGE_LIMIT,
+  ConfigChoice,
   Id,
   MAX_CONFIG_CHOICES,
   createDecodeValidationError,
   createInvalidStateError,
   createNotFoundError,
   createValidationError,
+  formatIssue,
   listDecodeIssues,
   MAX_PLUGIN_MESSAGE_LENGTH,
+  summarizeCause,
+  truncateMessage,
   type Connection,
   type ConnectionChoices,
   type ConnectionDevicePoll,
@@ -139,6 +144,7 @@ export type ListChoicesInput = Schema.Schema.Type<typeof ListChoicesInput>;
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeListChoices = Schema.decodeUnknownEffect(ListChoicesInput);
+const decodeChoices = Schema.decodeUnknownEffect(Schema.Array(ConfigChoice));
 const decodeCreate = Schema.decodeUnknownEffect(ConnectionCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeCredentials = Schema.decodeUnknownEffect(CredentialsInput);
@@ -1041,10 +1047,16 @@ const make = Effect.gen(function* () {
      *
      * - `validation` when the field does not load its choices from the
      *   account;
-     * - `invalid_state` when the plugin is not running, the credentials cannot
-     *   be read, the plugin fails to list the choices, or it returns more than
-     *   `MAX_CONFIG_CHOICES`. The message is the plugin's own where the plugin
-     *   failed.
+     * - `invalid_state` when the plugin is not running (disabled, or failed
+     *   to start), the credentials cannot be read, the plugin fails or dies
+     *   while listing the choices, returns choices of the wrong shape, or
+     *   returns more than `MAX_CONFIG_CHOICES`. The message is the plugin's
+     *   own where the plugin failed or died.
+     *
+     * The choices are cleaned before they are returned: an entry with an empty
+     * `value` is dropped, because it cannot be stored as a selection, and of
+     * several entries with the same `value` only the first is kept, because a
+     * picker with two identical values cannot tell them apart.
      *
      * The credentials are read through the same runtime an ingest read uses,
      * so an expired access token is refreshed first. The plugin is called
@@ -1076,7 +1088,7 @@ const make = Effect.gen(function* () {
         if (!(yield* activePlugins.isActive(row.pluginId))) {
           return yield* Effect.fail(
             createInvalidStateError(
-              `the plugin ${row.pluginId} is not enabled, so it cannot load choices: enable it first`,
+              `the plugin ${row.pluginId} is not running (disabled, or failed to start), so it cannot load choices: enable it, or see why it failed in Settings › Plugins`,
             ),
           );
         }
@@ -1091,20 +1103,39 @@ const make = Effect.gen(function* () {
               .join("; ")}`,
           ),
         );
-        const choices = yield* listChoices(decoded.field, { credentials, config }).pipe(
+        // `suspend` turns a plugin that throws before it returns an effect
+        // into a defect, which is handled like one inside the effect.
+        const listed = yield* Effect.suspend(() =>
+          listChoices(decoded.field, { credentials, config }),
+        ).pipe(
           Effect.provide(FetchHttpClient.layer),
-          Effect.mapError((error) =>
-            createInvalidStateError(error.message.slice(0, MAX_PLUGIN_MESSAGE_LENGTH)),
+          Effect.mapError((error) => createInvalidStateError(truncateMessage(error.message))),
+          Effect.catchDefect((defect) =>
+            Effect.fail(createInvalidStateError(summarizeCause(Cause.die(defect)))),
           ),
         );
-        if (choices.length > MAX_CONFIG_CHOICES) {
+        if (listed.length > MAX_CONFIG_CHOICES) {
           return yield* Effect.fail(
             createInvalidStateError(
-              `the account has ${String(choices.length)} choices for ${decoded.field}, and a picker holds at most ${String(MAX_CONFIG_CHOICES)}: the field should take a narrower list`,
+              `the account has ${String(listed.length)} choices for ${decoded.field}, and a picker holds at most ${String(MAX_CONFIG_CHOICES)}: the field should take a narrower list`,
             ),
           );
         }
-        return { choices: choices.map(({ value, label }) => ({ value, label })) };
+        const choices = yield* Effect.mapError(decodeChoices(listed), (error) =>
+          createInvalidStateError(
+            truncateMessage(
+              `the plugin ${row.pluginId} returned choices of the wrong shape: ${listDecodeIssues(error).map(formatIssue).join("; ")}`,
+            ),
+          ),
+        );
+        const seen = new Set<string>();
+        return {
+          choices: choices.filter(({ value }) => {
+            if (value === "" || seen.has(value)) return false;
+            seen.add(value);
+            return true;
+          }),
+        };
       }),
 
     /**

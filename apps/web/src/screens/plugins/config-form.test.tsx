@@ -124,18 +124,44 @@ describe("ConfigFieldRow, for a field that loads its choices", () => {
       />,
     );
 
-  it("shows a line while the choices load, and no widget to type into", () => {
+  it("shows a disabled select while the choices load, and no widget to type into", () => {
     renderRow({ status: "loading" });
 
-    expect(screen.getByText("Loading choices...")).toBeTruthy();
+    const holder = screen.getByRole<HTMLSelectElement>("combobox", { name: "Team" });
+    expect(holder.disabled).toBe(true);
+    expect(holder.selectedOptions[0]?.text).toBe("Loading choices…");
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.queryByRole("combobox")).toBeNull();
   });
 
   it("shows the picker once they load", () => {
     renderRow({ status: "loaded", choices: [{ value: "t1", label: "Backend" }] });
 
     expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Team" }).value).toBe("t1");
-    expect(screen.queryByText("Loading choices...")).toBeNull();
+    expect(screen.queryByText("Loading choices…")).toBeNull();
+  });
+
+  it("shows Not set, not the first choice, for a required field that holds no value", () => {
+    const [required] = buildConfigFields({
+      type: "object",
+      properties: { team: { type: "string", title: "Team", "x-choices": true } },
+      required: ["team"],
+      additionalProperties: false,
+    });
+    if (required === undefined) throw new Error("the schema has a team field");
+
+    render(
+      <ConfigFieldRow
+        inputId="desk-team"
+        field={required}
+        value=""
+        error={undefined}
+        entryErrors={undefined}
+        choices={{ status: "loaded", choices: [{ value: "t1", label: "Backend" }] }}
+        onChange={() => undefined}
+      />,
+    );
+
+    const select = screen.getByRole<HTMLSelectElement>("combobox", { name: "Team" });
+    expect(select.selectedOptions[0]?.text).toBe("Not set");
   });
 });

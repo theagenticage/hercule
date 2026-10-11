@@ -617,6 +617,47 @@ describe("a config field that loads its choices from the account", () => {
     expect(status?.message).toContain("limit");
   });
 
+  it("marks the plugin errored when the marked field is required, naming the field", async () => {
+    const { status, detail } = await bootConnectionType({
+      configSchema: Schema.Struct({ team: Schema.String.annotate({ choices: true }) }),
+      listChoices: () => Effect.succeed([]),
+    });
+
+    expect(status?._tag).toBe("errored");
+    expect(status?.message).toContain("teams/desk");
+    expect(status?.message).toContain('"team"');
+    expect(status?.message).toContain("must be optional");
+    expect(detail.contributions).toEqual([]);
+  });
+
+  it("marks the plugin errored when a provider definition marks a field, naming the provider", async () => {
+    const choosy = createPluginFixture({
+      id: "choosy",
+      definitions: [
+        {
+          ...buildProviderDefinition("choosy-provider", {}),
+          configSchema: TEAM_FIELD,
+        },
+      ],
+    });
+
+    const { status, detail } = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([choosy.plugin]);
+        return {
+          status: Option.getOrNull(yield* host.status("choosy")),
+          detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.read("choosy")),
+        };
+      }),
+    );
+
+    if (status?._tag !== "errored") throw new Error("the plugin should have failed to start");
+    expect(status.message).toContain("choosy-provider");
+    expect(status.message).toContain("connection type only");
+    expect(detail.contributions).toEqual([]);
+  });
+
   it("refuses the plugin when its own config marks a field, and says where one belongs", async () => {
     const { status } = await bootConnectionType({}, TEAM_FIELD);
 

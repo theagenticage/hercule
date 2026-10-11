@@ -38,7 +38,7 @@ import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MAX_FEED_INTERVAL_SECONDS } from "@hercule/contract";
+import { MAX_FEED_INTERVAL_SECONDS, summarizeCause } from "@hercule/contract";
 import {
   AuthError,
   decodeAgainst,
@@ -55,7 +55,7 @@ import {
 } from "../connections";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
-import { summarizeCause, toPluginError } from "./errors";
+import { toPluginError } from "./errors";
 import type { RegisteredEventSource } from "./event-sources";
 import { ingestContexts } from "./ingest-context";
 import { IngestExecutor } from "./ingest-executor";

@@ -42,6 +42,8 @@ import {
 } from "@hercule/plugin-host";
 import {
   createDecodeValidationError,
+  summarizeCause,
+  truncateMessage,
   type PluginRefusalReason,
   type PluginStatus,
   type Validation,
@@ -61,7 +63,7 @@ import {
   PluginConfigs,
   type RegisteredConnectionType,
 } from "../connections";
-import { toPluginError, describeFieldIssues, summarizeCause, truncateMessage } from "./errors";
+import { toPluginError, describeFieldIssues } from "./errors";
 import {
   registerEventSourceContribution,
   type RegisteredEventKind,

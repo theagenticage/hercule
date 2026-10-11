@@ -116,8 +116,15 @@ const runWithConnection = <A, E>(
 const readMessage = (failure: unknown): string =>
   (failure as { error: { message: string } }).error.message;
 
-const failureOf = <A, E>(effect: Effect.Effect<A, E, ConnectionService | Secrets>) =>
+/** Runs a call that must fail, and returns its failure. */
+const readFailure = <A, E>(effect: Effect.Effect<A, E, ConnectionService | Secrets>) =>
   Effect.flip(effect);
+
+/** Calls `connection.listChoices` for the `team` field of a connection. */
+const listTeamChoices = (id: string) =>
+  Effect.flatMap(ConnectionService, (connections) =>
+    connections.listChoices({ id, field: "team" }),
+  );
 
 describe("connection.listChoices", () => {
   it("calls the plugin with the credentials and stored config, and returns the choices", async () => {
@@ -165,7 +172,7 @@ describe("connection.listChoices", () => {
     const type = buildType([], () => Effect.succeed([]));
 
     const failure = await runWithConnection(type, () =>
-      failureOf(
+      readFailure(
         Effect.flatMap(ConnectionService, (connections) =>
           connections.listChoices({ id: "0199e0e7-0002-7000-8000-000000000000", field: "team" }),
         ),
@@ -184,7 +191,7 @@ describe("connection.listChoices", () => {
     const type = buildType(calls, () => Effect.succeed([]));
 
     const failure = await runWithConnection(type, (id) =>
-      failureOf(
+      readFailure(
         Effect.flatMap(ConnectionService, (connections) => connections.listChoices({ id, field })),
       ),
     );
@@ -193,13 +200,13 @@ describe("connection.listChoices", () => {
     expect(calls).toEqual([]);
   });
 
-  it("refuses with invalid_state when the plugin is not enabled", async () => {
+  it("refuses with invalid_state when the plugin is not running, and says it may have failed to start", async () => {
     pluginIsActive = false;
     const calls: Array<Call> = [];
     const type = buildType(calls, () => Effect.succeed([]));
 
     const failure = await runWithConnection(type, (id) =>
-      failureOf(
+      readFailure(
         Effect.flatMap(ConnectionService, (connections) =>
           connections.listChoices({ id, field: "team" }),
         ),
@@ -207,7 +214,8 @@ describe("connection.listChoices", () => {
     );
 
     expect(failure).toMatchObject({ error: { code: "invalid_state" } });
-    expect(readMessage(failure)).toContain("not enabled");
+    expect(readMessage(failure)).toContain("not running (disabled, or failed to start)");
+    expect(readMessage(failure)).toContain("Settings");
     expect(calls).toEqual([]);
   });
 
@@ -239,7 +247,7 @@ describe("connection.listChoices", () => {
     );
 
     const failure = await runWithConnection(type, (id) =>
-      failureOf(
+      readFailure(
         Effect.flatMap(ConnectionService, (connections) =>
           connections.listChoices({ id, field: "team" }),
         ),
@@ -271,10 +279,72 @@ describe("connection.listChoices", () => {
       );
 
     const accepted = await runWithConnection(build(1000), call);
-    const refused = await runWithConnection(build(1001), (id) => failureOf(call(id)));
+    const refused = await runWithConnection(build(1001), (id) => readFailure(call(id)));
 
     expect(accepted.choices).toHaveLength(1000);
     expect(refused).toMatchObject({ error: { code: "invalid_state" } });
     expect(readMessage(refused)).toContain("1001");
+  });
+
+  it("refuses with invalid_state, carrying the defect's message, when the plugin dies", async () => {
+    pluginIsActive = true;
+    const type = buildType([], () => Effect.die(new Error("cannot read property of undefined")));
+
+    const failure = await runWithConnection(type, (id) => readFailure(listTeamChoices(id)));
+
+    expect(failure).toMatchObject({
+      error: { code: "invalid_state", message: "cannot read property of undefined" },
+    });
+  });
+
+  it("refuses with invalid_state when the plugin throws before it returns an effect", async () => {
+    pluginIsActive = true;
+    const type = buildType([], () => Effect.succeed([]));
+    const throwing: RegisteredConnectionType = {
+      ...type,
+      contribution: {
+        ...type.contribution,
+        listChoices: () => {
+          throw new Error("listChoices is not implemented");
+        },
+      },
+    };
+
+    const failure = await runWithConnection(throwing, (id) => readFailure(listTeamChoices(id)));
+
+    expect(failure).toMatchObject({
+      error: { code: "invalid_state", message: "listChoices is not implemented" },
+    });
+  });
+
+  it("refuses with invalid_state when the plugin returns choices of the wrong shape", async () => {
+    pluginIsActive = true;
+    const type = buildType([], () =>
+      Effect.succeed([{ value: 7, label: "Backend" }] as unknown as ReadonlyArray<ConfigChoice>),
+    );
+
+    const failure = await runWithConnection(type, (id) => readFailure(listTeamChoices(id)));
+
+    expect(failure).toMatchObject({ error: { code: "invalid_state" } });
+    expect(readMessage(failure)).toContain("wrong shape");
+  });
+
+  it("drops a choice with an empty value and a repeated value, keeping the first of each value", async () => {
+    pluginIsActive = true;
+    const type = buildType([], () =>
+      Effect.succeed([
+        { value: "", label: "Nobody" },
+        { value: "backend", label: "Backend" },
+        { value: "web", label: "Web" },
+        { value: "backend", label: "Backend, again" },
+      ]),
+    );
+
+    const answer = await runWithConnection(type, listTeamChoices);
+
+    expect(answer.choices).toEqual([
+      { value: "backend", label: "Backend" },
+      { value: "web", label: "Web" },
+    ]);
   });
 });

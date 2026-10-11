@@ -169,7 +169,7 @@ describe("a config field the plugin marked secret", () => {
 describe("a config field the plugin marked choices", () => {
   it("derives as its own kind with the choices marker", () => {
     const schema = Schema.Struct({
-      team: Schema.String.annotate({ title: "Team", choices: true }),
+      team: Schema.optionalKey(Schema.String.annotate({ title: "Team", choices: true })),
       projects: Schema.optionalKey(Schema.Array(Schema.String).annotate({ choices: true })),
       note: Schema.String,
     });
@@ -187,7 +187,9 @@ describe("a config field the plugin marked choices", () => {
 
   it("finds the mark on a refinement of the field", () => {
     const schema = Schema.Struct({
-      team: Schema.String.check(Schema.isMinLength(1)).annotate({ choices: true }),
+      team: Schema.optionalKey(
+        Schema.String.check(Schema.isMinLength(1)).annotate({ choices: true }),
+      ),
     });
 
     expect(listChoiceFields(schema)).toEqual(["team"]);
@@ -202,7 +204,7 @@ describe("a config field the plugin marked choices", () => {
     ["a boolean", Schema.Boolean.annotate({ choices: true })],
     ["a list of numbers", Schema.Array(Schema.Finite).annotate({ choices: true })],
   ])("rejects %s marked choices, with the property in the message", (_label, marked) => {
-    const result = deriveConfigJsonSchema(Schema.Struct({ team: marked }));
+    const result = deriveConfigJsonSchema(Schema.Struct({ team: Schema.optionalKey(marked) }));
 
     expect(Result.isFailure(result)).toBe(true);
     if (!Result.isFailure(result)) return;
@@ -212,11 +214,23 @@ describe("a config field the plugin marked choices", () => {
 
   it("explains that only a string or a list of strings can load choices", () => {
     const result = deriveConfigJsonSchema(
-      Schema.Struct({ team: Schema.Boolean.annotate({ choices: true }) }),
+      Schema.Struct({ team: Schema.optionalKey(Schema.Boolean.annotate({ choices: true })) }),
     );
 
     expect(Result.isFailure(result)).toBe(true);
     if (!Result.isFailure(result)) return;
     expect(result.failure.message).toContain("string or a list of strings");
+  });
+
+  it("rejects a required property marked choices, naming the property and the fix", () => {
+    const result = deriveConfigJsonSchema(
+      Schema.Struct({ team: Schema.String.annotate({ choices: true }) }),
+    );
+
+    expect(Result.isFailure(result)).toBe(true);
+    if (!Result.isFailure(result)) return;
+    expect(result.failure._tag).toBe("UnsupportedConfigSchema");
+    expect(result.failure.message).toContain('"team"');
+    expect(result.failure.message).toContain("must be optional");
   });
 });

@@ -184,7 +184,7 @@ export interface ConnectionTypeContribution extends ConnectionType {
   ) => Effect.Effect<ExternalAccount, ConnectionValidationFailed, HttpClient.HttpClient>;
   /**
    * Returns the choices for one config field, read from the external account
-   * with the connection's credentials. Required when, and only when, a
+   * with the connection's credentials. Required when a
    * property of `configSchema` carries the `choices: true` annotation; only a
    * string or a list of strings may carry it. `credentials` has the shape
    * `ConnectionsRuntime.credentials` returns, and `config` is the connection's
