@@ -28,6 +28,7 @@ import {
 } from "../errors";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
+import { IntakeOverrides, IntakeSettings } from "./intake-settings";
 import { Authenticated } from "../security";
 import { atMost, bounded, SecretValue } from "../strings";
 import { Label, MAX_TASK_LABELS } from "./task";
@@ -139,6 +140,20 @@ export const Connection = Schema.Struct({
 
 export type Connection = Schema.Schema.Type<typeof Connection>;
 
+/**
+ * A Connection with its Intake settings: the value in effect for every kind
+ * its plugin declares, from the plugin's default, the user's choice for the
+ * plugin, or the user's choice for this Connection. Only `connection.read`
+ * and `connection.update` return it, so a listing never works out the levels
+ * for every row.
+ */
+export const ConnectionDetail = Schema.Struct({
+  ...Connection.fields,
+  intake: IntakeSettings,
+});
+
+export type ConnectionDetail = Schema.Schema.Type<typeof ConnectionDetail>;
+
 /** What a connection listing may be sorted by. */
 export const CONNECTION_SORT_FIELDS = ["createdAt", "label"] as const;
 
@@ -163,6 +178,11 @@ export const ConnectionUpdateInput = Schema.Struct({
   config: Schema.optionalKey(Config),
   /** Replaces every poll interval at once. `{}` puts every feed back on its default. */
   feedIntervals: Schema.optionalKey(FeedIntervals),
+  /**
+   * Replaces this Connection's Intake overrides at once. `{ eventKinds: {},
+   * signalKinds: {} }` makes every kind follow the plugin's level again.
+   */
+  intake: Schema.optionalKey(IntakeOverrides),
 });
 
 export type ConnectionUpdateInput = Schema.Schema.Type<typeof ConnectionUpdateInput>;
@@ -283,7 +303,7 @@ export const connection = HttpApiGroup.make("connection")
     }),
     HttpApiEndpoint.get("read", "/connections/:id", {
       params: { id: Id },
-      success: Connection,
+      success: ConnectionDetail,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     HttpApiEndpoint.post("create", "/connections", {
@@ -296,7 +316,7 @@ export const connection = HttpApiGroup.make("connection")
     HttpApiEndpoint.patch("update", "/connections/:id", {
       params: { id: Id },
       payload: ConnectionUpdateInput,
-      success: Connection,
+      success: ConnectionDetail,
       // `invalid_state`: the stored row has a type this build no longer
       // defines. A different build fixes that, not a different request.
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],

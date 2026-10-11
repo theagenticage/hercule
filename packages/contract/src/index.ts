@@ -161,7 +161,16 @@ export {
   PluginMark,
   PluginRefusalReason,
   PluginStatus,
+  PluginUpdateIntakeInput,
 } from "./groups/plugin";
+export {
+  EventKindIntakeSetting,
+  IntakeOverrides,
+  IntakeSettingLevel,
+  IntakeSettings,
+  MAX_INTAKE_OVERRIDES,
+  SignalKindIntakeSetting,
+} from "./groups/intake-settings";
 export {
   PERMISSION_DECISION_OUTCOMES,
   PermissionDecideCall,
@@ -318,6 +327,7 @@ export {
   Connection,
   ConnectionCreateInput,
   ConnectionCredentialsInput,
+  ConnectionDetail,
   ConnectionDevicePoll,
   ConnectionDevicePollInput,
   ConnectionDeviceStart,
