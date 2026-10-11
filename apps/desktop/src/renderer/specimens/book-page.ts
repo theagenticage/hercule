@@ -46,3 +46,32 @@ export function findElementByText(scope: ParentNode, selector: string, text: str
 export function replaceTextAfterIcon(control: Element, text: string): void {
   control.replaceChildren(findElement(control, "svg"), text);
 }
+
+/** The outlines of the Intake icon, as the app's `IntakeIcon` draws them (and the book's `intake` icon). */
+const INTAKE_ICON_OUTLINES = [
+  "M2.4 9.2h3.2l1 1.8h2.8l1-1.8h3.2",
+  "M2.4 9.2l1.6-5.4h8l1.6 5.4v3.6a1 1 0 0 1-1 1H3.4a1 1 0 0 1-1-1z",
+];
+
+/**
+ * Adds an Intake row after Threads in the book's settings list. The book
+ * predates Settings > Intake, so its list has no such row, and the app's
+ * list does. The new row is a copy of the Threads row with its own label
+ * and icon, so it is laid out the way the book lays out every row. Fails
+ * when the book's list has no Threads row.
+ */
+export function insertIntakeSettingsRow(scope: ParentNode): void {
+  const threads = findElementByText(scope, ".set-nav .nav-row", "Threads");
+  const row = threads.cloneNode(true) as Element;
+  findElement(row, "svg").replaceChildren(
+    ...INTAKE_ICON_OUTLINES.map((outline) => {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", outline);
+      return path;
+    }),
+  );
+  findElement(row, "span").textContent = "Intake";
+  row.classList.remove("is-on");
+  row.setAttribute("href", "#");
+  threads.after(row);
+}

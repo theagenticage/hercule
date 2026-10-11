@@ -20,7 +20,7 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
-import { useRouteContext } from "@tanstack/react-router";
+import { Link, useRouteContext } from "@tanstack/react-router";
 import { DONE_ACTION_ID, type Signal } from "@hercule/contract";
 import {
   buildSignalAnswers,
@@ -187,6 +187,13 @@ function SignalDetail({
   const [event] = useQueries({ queries: eventReads });
   const sourceUrl = event?.data?.url ?? null;
   const sourceName = nameSignalSource(signal, plugins, raisers);
+  const sourcePluginId = parseSignalPluginId(signal.kind);
+  const provenance = (
+    <>
+      <SourceMark pluginId={sourcePluginId} plugins={plugins} size={14} />
+      {describeSignalProvenance(signal, plugins, raisers)}
+    </>
+  );
 
   /** Puts the focus in the Reply box of `actionId`, opening it first. */
   const focusReply = (actionId: string): void => {
@@ -261,10 +268,22 @@ function SignalDetail({
       <article ref={rootRef} className="ad" tabIndex={-1}>
         <header>
           <div className="ad-kind">
-            <span className="src">
-              <SourceMark pluginId={parseSignalPluginId(signal.kind)} plugins={plugins} size={14} />
-              {describeSignalProvenance(signal, plugins, raisers)}
-            </span>
+            {sourcePluginId === null ? (
+              <span className="src">{provenance}</span>
+            ) : (
+              // The line of a plugin's signal opens that signal kind on Settings > Intake,
+              // on the Connection the signal came from when it came from an event.
+              <Link
+                className="src"
+                to="/settings/intake"
+                search={{
+                  kind: signal.kind,
+                  ...(origin.type === "event" ? { connection: origin.connectionId } : {}),
+                }}
+              >
+                {provenance}
+              </Link>
+            )}
             <span className="spacer" />
             {sourceUrl !== null && (
               <a
