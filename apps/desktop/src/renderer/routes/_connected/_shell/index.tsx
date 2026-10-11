@@ -18,17 +18,21 @@ import { DraftScreen } from "../../../screens/new-thread/draft-screen";
  * label's `+` in the sidebar set them.
  */
 export interface NewThreadSearch {
-  readonly project?: string;
-  readonly workspace?: string;
+  readonly project?: string | undefined;
+  readonly workspace?: string | undefined;
 }
 
 /**
  * Returns the new thread's search params from the URL's. A param that is not
  * an id is dropped, so the screen never acts on a malformed link.
+ *
+ * A dropped param is returned as `undefined` rather than left out, because
+ * the router lays the returned params over the URL's: a param left out
+ * would keep the URL's value.
  */
 const validateNewThreadSearch = (search: Record<string, unknown>): NewThreadSearch => ({
-  ...(isId(search.project) ? { project: search.project } : {}),
-  ...(isId(search.workspace) ? { workspace: search.workspace } : {}),
+  project: isId(search.project) ? search.project : undefined,
+  workspace: isId(search.workspace) ? search.workspace : undefined,
 });
 
 /**

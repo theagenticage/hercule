@@ -1,0 +1,193 @@
+/* The Runs tab's timeline: the Bureau book's "Timelines" rules
+   (system.css), with their selectors. A place across the day, --at, is a
+   percentage of the lanes' width, so ticks, lines and bars line up. Each
+   departure from the book is explained in a comment. */
+
+/* The day stepper: arrows around the day, whose room fits "Yesterday", so
+   the arrows stay put as the user steps. */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.stepper > .btn {
+  margin-right: 6px;
+}
+.stepper-day {
+  min-width: 76px;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+/* The axis sits where a list's column heads sit, as tall and in their
+   type. */
+.axis {
+  position: relative;
+  height: 32px;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.axis-tick {
+  position: absolute;
+  top: 0;
+  left: var(--at);
+  line-height: 32px;
+  transform: translateX(-50%);
+}
+/* Below 900px of pane the day's axis labels only every third hour, so no
+   two labels touch. */
+@container open-pane (width < 900px) {
+  .axis > .axis-tick:not(.is-major) {
+    display: none;
+  }
+}
+/* The time now: an ink pill with a stem down to the axis's hairline, where
+   the now line goes on. */
+.axis-now {
+  position: absolute;
+  top: 7px;
+  left: var(--at);
+  z-index: 1;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+  font-family: var(--font-ui);
+  font-variation-settings: normal;
+  font-weight: var(--w-bold);
+  line-height: 16px;
+  transform: translateX(-50%);
+}
+.axis-now::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1px;
+  height: 7px;
+  background: var(--ink);
+}
+
+/* The day's runs, one 24px track per overlap: a 16px bar and the room
+   between two. */
+.lanes {
+  position: relative;
+  height: calc(var(--tracks) * 24px + 16px);
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+/* The hour lines behind everything, and the now line in ink. */
+.hour-line,
+.now-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--at);
+  width: 1px;
+  background: var(--line-soft);
+}
+.now-line {
+  background: var(--ink);
+}
+/* A day with no runs says so over the hour lines. */
+.lanes-empty {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  margin: 0;
+  padding-right: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--t-12);
+  transform: translateY(-50%);
+}
+/* Not in the book, which draws no fire. A start trigger's next fire later
+   today: a dashed tick on the top track with its time beside it. */
+.fire-tick {
+  position: absolute;
+  top: 13px;
+  left: var(--at);
+  height: 14px;
+  border-left: 1.5px dashed var(--faint);
+}
+.fire-tick > span {
+  position: absolute;
+  left: 5px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+/* A run: a 4px line from its start to its end with its mark at the end, at
+   least 7px long, so a short run is its mark alone. */
+.run-bar {
+  position: absolute;
+  top: calc(var(--track) * 24px + 12px);
+  left: min(var(--at), calc(100% - 7px));
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: max(var(--span), 7px);
+  height: 16px;
+}
+.run-bar-line {
+  position: absolute;
+  inset: 6px 0;
+  border-radius: var(--r-pill);
+  background: var(--line);
+}
+.run-bar--you > .run-bar-line {
+  background: var(--you);
+}
+.run-bar--fail > .run-bar-line {
+  background: var(--fail);
+}
+.run-bar.is-cut-start > .run-bar-line {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.run-bar.is-cut-end > .run-bar-line {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* The mark sits on the line's end on a disc of the colour behind it, so
+   the hour lines pass behind it. A bar cut at the day's end has no mark,
+   because the run has not ended there. */
+.run-bar > .mark {
+  position: relative;
+  margin-right: -7px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+/* A cancelled or starting run has no mark: a faint dot in the mark's 14px
+   place stands in for it. */
+.dot--mark {
+  width: 10px;
+  height: 10px;
+  margin: 2px;
+}
+.run-bar > .dot--mark {
+  position: relative;
+  margin-right: -5px;
+}
+/* The chevron of a bar cut at the day's edge, in the page's side padding,
+   pointing to the day the run went on into. */
+.run-bar-cut {
+  position: absolute;
+  top: 2px;
+  display: inline-grid;
+  color: var(--faint);
+}
+.run-bar-cut--start {
+  left: -18px;
+}
+.run-bar-cut--end {
+  right: -18px;
+}

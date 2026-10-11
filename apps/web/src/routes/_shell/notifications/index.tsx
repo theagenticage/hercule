@@ -23,10 +23,12 @@ export const Route = createFileRoute("/_shell/notifications/")({
   staticData: { title: "Notifications", sinceMarker: "lastChecked.notifications" },
   // `since` pins the previous "last checked" instant for the whole visit, so
   // a refresh keeps the same notifications new (see `useSinceMarker`).
-  validateSearch: (search: Record<string, unknown>): { readonly since?: string } => {
-    const since = parseSincePin(search["since"]);
-    return since === undefined ? {} : { since };
-  },
+  // An invalid param is returned as `undefined` rather than left out: the
+  // router lays the returned params over the URL's, so a param left out would
+  // keep the URL's value.
+  validateSearch: (search: Record<string, unknown>): { readonly since?: string | undefined } => ({
+    since: parseSincePin(search["since"]),
+  }),
   // Loads the first page before the screen shows, so it never renders empty
   // and then fills in. The shell has already read the settings.
   loader: ({ context }) =>

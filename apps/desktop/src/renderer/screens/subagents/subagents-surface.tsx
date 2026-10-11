@@ -6,7 +6,7 @@
  * where the web app shows a state mark, still in its pose (spec 17 §The
  * thread, Subagents).
  */
-import { useCallback, useEffect, useId, useRef, useState, type JSX, type RefObject } from "react";
+import { useId, useRef, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
 import {
@@ -26,6 +26,7 @@ import {
 } from "@hercule/client-core";
 import type { SessionRequest, Subagent } from "@hercule/contract";
 import { useDurationText } from "../../app/age-clock";
+import { useIsOnScreen, useScreenWatcher, type ScreenWatcher } from "../../app/screen-watcher";
 import { sessionQuery, subagentsQuery } from "../../app/queries";
 import { StopIcon } from "../../icons/stop";
 import { useStopAgent } from "../use-stop-agent";
@@ -66,55 +67,6 @@ interface TreeContext {
   readonly openSubagentId: string | undefined;
   readonly watchScreen: ScreenWatcher;
 }
-
-/**
- * Starts reporting whether `element` is inside the visible part of the
- * surface's scroller: `onChange(true)` when it comes into view, and
- * `onChange(false)` when it leaves. Returns the function that stops the
- * reports.
- */
-type ScreenWatcher = (element: Element, onChange: (onScreen: boolean) => void) => () => void;
-
-/**
- * Returns a `ScreenWatcher` for the elements inside the scroller `scrollerRef`
- * points at. All elements share one IntersectionObserver, created on the
- * first watch and disconnected when the surface unmounts.
- */
-const useScreenWatcher = (scrollerRef: RefObject<HTMLElement | null>): ScreenWatcher => {
-  const watchedRef = useRef<{
-    readonly observer: IntersectionObserver;
-    readonly callbacks: Map<Element, (onScreen: boolean) => void>;
-  } | null>(null);
-  useEffect(
-    () => () => {
-      watchedRef.current?.observer.disconnect();
-      watchedRef.current = null;
-    },
-    [],
-  );
-  return useCallback(
-    (element, onChange) => {
-      if (watchedRef.current === null) {
-        const callbacks = new Map<Element, (onScreen: boolean) => void>();
-        const observer = new IntersectionObserver(
-          (entries) => {
-            for (const entry of entries) callbacks.get(entry.target)?.(entry.isIntersecting);
-          },
-          { root: scrollerRef.current },
-        );
-        watchedRef.current = { observer, callbacks };
-      }
-      const { observer, callbacks } = watchedRef.current;
-      callbacks.set(element, onChange);
-      observer.observe(element);
-      return () => {
-        callbacks.delete(element);
-        observer.unobserve(element);
-      };
-    },
-    [scrollerRef],
-  );
-};
 
 /**
  * Renders the Subagents surface of the session `sessionId`. With no
@@ -234,12 +186,7 @@ function SubagentRow({
   const rowRef = useRef<HTMLDivElement>(null);
   // Off until the observer first reports, which it does as soon as the row
   // is watched. The first render reads the duration either way.
-  const [onScreen, setOnScreen] = useState(false);
-  const { watchScreen } = context;
-  useEffect(
-    () => (running ? watchScreen(rowRef.current!, setOnScreen) : undefined),
-    [running, watchScreen],
-  );
+  const onScreen = useIsOnScreen(context.watchScreen, rowRef, running);
   const duration = useDurationText(
     subagent.startedAt,
     running && onScreen,

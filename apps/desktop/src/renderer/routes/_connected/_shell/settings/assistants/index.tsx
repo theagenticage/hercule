@@ -38,8 +38,14 @@ import "../../../../../screens/settings/assistants/assistants.css";
  */
 export const Route = createFileRoute("/_connected/_shell/settings/assistants/")({
   staticData: { title: "Assistants" },
-  validateSearch: (search: Record<string, unknown>): { readonly assistant?: string } =>
-    isId(search.assistant) ? { assistant: search.assistant } : {},
+  // An invalid param is returned as `undefined` rather than left out: the
+  // router lays the returned params over the URL's, so a param left out would
+  // keep the URL's value.
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { readonly assistant?: string | undefined } => ({
+    assistant: isId(search.assistant) ? search.assistant : undefined,
+  }),
   loaderDeps: ({ search }) => ({ assistant: search.assistant }),
   loader: async ({ context: { controller, queryClient }, deps }) => {
     const { client } = controller;

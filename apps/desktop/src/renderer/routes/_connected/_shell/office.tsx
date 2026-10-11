@@ -11,8 +11,8 @@ import type { OpenColleague } from "../../../office/office-store";
  * sidebar row clicked while the Office is open sets one of them.
  */
 export interface OfficeSearch {
-  readonly session?: string;
-  readonly assistant?: string;
+  readonly session?: string | undefined;
+  readonly assistant?: string | undefined;
 }
 
 /**
@@ -20,11 +20,15 @@ export interface OfficeSearch {
  * id is dropped, so the screen never acts on a malformed link. When a link
  * names both a thread and an assistant, the thread wins, so the drawer
  * always shows one of them.
+ *
+ * A dropped param is returned as `undefined` rather than left out, because
+ * the router lays the returned params over the URL's: a param left out
+ * would keep the URL's value.
  */
 const validateOfficeSearch = (search: Record<string, unknown>): OfficeSearch => {
-  if (isId(search.session)) return { session: search.session };
-  if (isId(search.assistant)) return { assistant: search.assistant };
-  return {};
+  const session = isId(search.session) ? search.session : undefined;
+  const assistant = session === undefined && isId(search.assistant) ? search.assistant : undefined;
+  return { session, assistant };
 };
 
 /**

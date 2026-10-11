@@ -117,3 +117,11 @@ describe("the connect screen", () => {
     logged.mockRestore();
   });
 });
+
+describe("the connect screen's search params", () => {
+  it("drops a problem it does not know", async () => {
+    const { router } = await renderApp(createFakeBridge(), { path: "/connect?problem=offline" });
+
+    expect(router.state.matches.at(-1)!.search).toEqual({});
+  });
+});

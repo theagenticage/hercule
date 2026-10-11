@@ -111,10 +111,16 @@ export async function readProcessUse(inspectorUrl: string): Promise<ProcessUse[]
   }));
 }
 
-/** Returns each process's use over the next 10 s, read through main's inspector at `inspectorUrl`. */
-export async function sampleIdleUse(inspectorUrl: string): Promise<ProcessUse[]> {
+/**
+ * Returns each process's use over the next `durationMs`, 10 s unless given,
+ * read through main's inspector at `inspectorUrl`.
+ */
+export async function sampleIdleUse(
+  inspectorUrl: string,
+  durationMs: number = SAMPLE_MS,
+): Promise<ProcessUse[]> {
   await readProcessUse(inspectorUrl);
-  await sleep(SAMPLE_MS);
+  await sleep(durationMs);
   return readProcessUse(inspectorUrl);
 }
 

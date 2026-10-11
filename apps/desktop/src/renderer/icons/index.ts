@@ -13,6 +13,7 @@
 // fills small dots (radius .4 to .6) at runtime; here the fill is written on
 // the dot itself.
 export { IconFrame, type IconProps } from "./icon-frame";
+export { AgentIcon } from "./agent";
 export { AlarmIcon } from "./alarm";
 export { ArrowIcon } from "./arrow";
 export { BoltIcon } from "./bolt";
@@ -20,6 +21,7 @@ export { BoundIcon } from "./bound";
 export { BranchIcon } from "./branch";
 export { ChatIcon } from "./chat";
 export { CheckIcon } from "./check";
+export { ChevronLeftIcon } from "./chevron-left";
 export { ChevronRightIcon } from "./chevron-right";
 export { ClockIcon } from "./clock";
 export { CloseIcon } from "./close";
@@ -42,6 +44,7 @@ export { LaptopIcon } from "./laptop";
 export { ListIcon } from "./list";
 export { MemoryIcon } from "./memory";
 export { MicIcon } from "./mic";
+export { MinusIcon } from "./minus";
 export { MoonIcon } from "./moon";
 export { MoreIcon } from "./more";
 export { OfficeIcon } from "./office";

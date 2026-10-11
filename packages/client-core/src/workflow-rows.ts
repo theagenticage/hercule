@@ -26,8 +26,15 @@ import {
   type WorkflowSummary,
 } from "@hercule/contract";
 import { isRunLive } from "./run-display";
+import {
+  decideRunMarkState,
+  describeLiveRuns,
+  describeWaitingRunSession,
+  type RunMarkState,
+} from "./run-marks";
 import { describeCronInWords, describeSchedule } from "./schedule-text";
 import type { Pose } from "./threads/pose";
+import { decideFiresOn } from "./trigger-display";
 import type { WaitingRunSession } from "./waiting";
 
 /**
@@ -55,15 +62,6 @@ const WORKFLOW_GROUPS: ReadonlyArray<{ readonly group: WorkflowGroup; readonly t
  * `idle`, or `paused` for a workflow that is off.
  */
 export type WorkflowRowMark = Extract<Pose, "waiting" | "failed" | "working" | "idle" | "paused">;
-
-/**
- * One run in a row's strip. A run waiting on the user, a running run, a
- * completed run and a failed run each have a mark. A cancelled run and a
- * run that has not started yet have none: the strip draws a faint dot for
- * them, and names it with the state.
- */
-export type StripRunState =
-  Extract<Pose, "waiting" | "working" | "done" | "failed"> | "cancelled" | "starting";
 
 /** The colour of a row's status text: the user's, failure's, or muted ink. */
 export type WorkflowStatusTone = "you" | "fail" | "muted";
@@ -99,7 +97,7 @@ export interface WorkflowListRow {
    */
   readonly startsOnIsCode: ReadonlyArray<boolean>;
   /** The newest runs, at most 20, oldest first, so the newest sits at the strip's right end. */
-  readonly strip: ReadonlyArray<StripRunState>;
+  readonly strip: ReadonlyArray<RunMarkState>;
   /**
    * Completed runs out of completed and failed ones in the strip, as "85%".
    * Empty when there are none.
@@ -176,59 +174,9 @@ const groupByKey = <Item, Key>(
   return groups;
 };
 
-/**
- * Checks whether a run has not started any step yet: it is pending, or
- * running with nothing active or awaited.
- */
-const isRunStarting = (run: RunSummary): boolean =>
-  run.status === "pending" ||
-  (run.status === "running" && run.activeStepIds.length === 0 && run.awaitedSignalIds.length === 0);
-
 /** Returns the newer of two runs, by when they were created. */
 const pickNewerRun = (a: RunSummary | undefined, b: RunSummary): RunSummary =>
   a === undefined || Date.parse(b.createdAt) > Date.parse(a.createdAt) ? b : a;
-
-/**
- * Returns a run's state in a strip. `isWaiting` tells whether a session of
- * the run waits on the user.
- */
-const decideStripRunState = (run: RunSummary, isWaiting: boolean): StripRunState => {
-  if (isWaiting) return "waiting";
-  if (isRunStarting(run)) return "starting";
-  if (run.status === "running") return "working";
-  if (run.status === "completed") return "done";
-  if (run.status === "failed") return "failed";
-  return "cancelled";
-};
-
-/**
- * Returns the status text of a workflow that waits on the user, from one
- * session of its runs that waits: "review asks: Ship v2.4?", the step and
- * the question of its oldest open Request. A session that is no step's
- * reads "Waiting on you".
- */
-const describeWaitingRunSession = (session: WaitingRunSession): string =>
-  session.stepId === null ? "Waiting on you" : `${session.stepId} asks: ${session.question}`;
-
-/**
- * Returns where a workflow's live runs are: "At review", "Waiting for
- * approved" while a run waits on a signal, or "Starting" before a run has
- * started a step. Several live runs are counted, and their places listed
- * once each: "2 runs · at fix, waiting for pr_merged".
- */
-const describeLiveRuns = (runs: ReadonlyArray<RunSummary>): string => {
-  const places = new Set<string>();
-  for (const run of runs) {
-    if (isRunStarting(run)) places.add("starting");
-    if (run.status !== "running") continue;
-    for (const stepId of run.activeStepIds) places.add(`at ${stepId}`);
-    for (const signalId of run.awaitedSignalIds) places.add(`waiting for ${signalId}`);
-  }
-  const where = [...places].join(", ");
-  return runs.length > 1
-    ? `${String(runs.length)} runs · ${where}`
-    : where.charAt(0).toUpperCase() + where.slice(1);
-};
 
 /**
  * Returns the status text of a run that has ended: "Failed at review",
@@ -347,15 +295,14 @@ export const buildWorkflowRows = ({
                 : "idle",
       isOff,
       startsOnTexts: starts.length === 0 ? ["On demand"] : startTexts,
-      startsOnFiresOn:
-        firstStart === undefined ? null : isSchedule(firstStart.on) ? "schedule" : "event",
+      startsOnFiresOn: firstStart === undefined ? null : decideFiresOn(firstStart.on),
       startsOnIsCode:
         starts.length === 0
           ? [false]
           : starts.map(
               ({ on }) => isSchedule(on) && describeCronInWords(on.schedule) === undefined,
             ),
-      strip: strip.toReversed().map((run) => decideStripRunState(run, waitingRunIds.has(run.id))),
+      strip: strip.toReversed().map((run) => decideRunMarkState(run, waitingRunIds.has(run.id))),
       successText: ended === 0 ? "" : `${String(Math.round((completed / ended) * 100))}%`,
       statusText,
       statusTone: group === "needsYou" ? "you" : group === "failing" ? "fail" : "muted",

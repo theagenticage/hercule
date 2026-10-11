@@ -50,6 +50,13 @@ export interface TriggerReading {
 }
 
 /**
+ * Decides whether a trigger that fires on `on` fires on a schedule or on
+ * events, which picks the clock or the bolt drawn beside it.
+ */
+export const decideFiresOn = (on: TriggerOn): TriggerFiresOn =>
+  isSchedule(on) ? "schedule" : "event";
+
+/**
  * Returns the text for what a trigger fires on:
  *
  * - For events, the event kind and the Connection they arrive through:
@@ -97,7 +104,7 @@ export const describeTrigger = (
       status === undefined
         ? undefined
         : { text: status, tone: status === "paused" ? "attn" : "muted" },
-    firesOn: isSchedule(trigger.on) ? "schedule" : "event",
+    firesOn: decideFiresOn(trigger.on),
     firesOnText: describeTriggerOn(trigger.on),
     nextFireText:
       nextFireAt === undefined || status === "paused" || !isWorkflowEnabled

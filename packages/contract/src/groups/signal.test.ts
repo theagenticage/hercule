@@ -11,7 +11,7 @@ import {
   SignalActInput,
   SignalRaiseInput,
 } from "./signal";
-import { decodeWorkflowDefinition } from "./workflow-definition";
+import { decodeWorkflowDefinition } from "./workflow-definition-decode";
 
 /** Decodes a value with a schema, and returns the issues, or an empty list when it fits. */
 const listIssues = (schema: Schema.Decoder<unknown>, value: unknown) => {

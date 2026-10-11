@@ -476,3 +476,11 @@ describe("the new-thread screen", () => {
     });
   });
 });
+
+describe("the new thread's search params", () => {
+  it("drops a project and a workspace that are not ids", async () => {
+    const { router } = await openDraft("/?project=not-an-id&workspace=42");
+
+    expect(router.state.matches.at(-1)!.search).toEqual({});
+  });
+});

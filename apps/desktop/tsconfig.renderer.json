@@ -7,5 +7,8 @@
   },
   "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"],
   // Checked by tsconfig.node.json instead; the comment there says why.
-  "exclude": ["src/renderer/styles/motion.test.ts"]
+  "exclude": [
+    "src/renderer/styles/motion.test.ts",
+    "src/renderer/routes/_connected/_shell/workflows/react-compiler.test.ts"
+  ]
 }

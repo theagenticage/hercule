@@ -57,6 +57,7 @@ import {
   type SnoozeMenuPlace,
 } from "./use-signal-moves";
 import "./intake.css";
+import { isTextField } from "../../app/text-field";
 
 declare module "react" {
   interface CSSProperties {
@@ -90,13 +91,6 @@ interface Checks {
   readonly scope: string;
   readonly ids: ReadonlySet<string>;
 }
-
-/** Checks whether a key press lands in a text field, where Intake's keys never act. */
-const isTextField = (target: EventTarget): boolean =>
-  target instanceof HTMLInputElement ||
-  target instanceof HTMLTextAreaElement ||
-  target instanceof HTMLSelectElement ||
-  (target instanceof HTMLElement && target.isContentEditable);
 
 /** Checks whether `signal` can be checked in `view`. */
 const isCheckable = (signal: Signal | undefined, view: SignalView): signal is Signal =>

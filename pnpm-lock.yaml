@@ -235,9 +235,6 @@ importers:
       '@codemirror/view':
         specifier: 6.43.13
         version: 6.43.13
-      '@dagrejs/dagre':
-        specifier: 3.1.1
-        version: 3.1.1
       '@hercule/client-core':
         specifier: workspace:*
         version: link:../../packages/client-core
@@ -320,6 +317,9 @@ importers:
 
   packages/client-core:
     dependencies:
+      '@dagrejs/dagre':
+        specifier: 3.1.1
+        version: 3.1.1
       '@hercule/contract':
         specifier: workspace:*
         version: link:../contract
