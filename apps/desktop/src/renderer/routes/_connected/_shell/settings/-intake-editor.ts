@@ -13,10 +13,9 @@ import {
   readErrorMessage,
   type HerculeClient,
   type IntakeChange,
-  type IntakeEditedLevel,
   type IntakeKindList,
 } from "@hercule/client-core";
-import type { IntakeSettings } from "@hercule/contract";
+import type { IntakeOverrideLevel, IntakeSettings } from "@hercule/contract";
 import { connectionQuery, pluginsQuery } from "../../../../app/queries";
 
 /**
@@ -47,7 +46,7 @@ export type IntakeEditor =
   | {
       readonly status: "ready";
       /** The level this editor writes: the plugin's own, or one Connection's. */
-      readonly level: IntakeEditedLevel;
+      readonly level: IntakeOverrideLevel;
       /** The saved settings, with every change still saving applied, so a toggle shows its new value at once. */
       readonly settings: IntakeSettings;
       /** Returns what the last save of the kind in `list` did. */
@@ -154,7 +153,7 @@ export function useIntakeEditor(
   connectionId: string | undefined,
 ): IntakeEditor {
   const queryClient = useQueryClient();
-  const level: IntakeEditedLevel = connectionId === undefined ? "plugin" : "connection";
+  const level: IntakeOverrideLevel = connectionId === undefined ? "plugin" : "connection";
   const targetId = connectionId ?? pluginId;
   const plugin = useSuspenseQuery(pluginsQuery(client)).data.find(({ id }) => id === pluginId);
   // The Connection is read only while its segment is shown, so the list of

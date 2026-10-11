@@ -11,6 +11,7 @@
  */
 import type {
   Connection,
+  IntakeOverrideLevel,
   IntakeOverrides,
   IntakeSettingLevel,
   IntakeSettings,
@@ -20,13 +21,6 @@ import { readJsonObject } from "./json-shape";
 
 /** The two lists of kinds a plugin's Intake settings hold. */
 export type IntakeKindList = keyof IntakeOverrides;
-
-/**
- * The level a segment edits: the plugin's own, for all its Connections, or
- * one Connection's. The controller also reports `default`, which no segment
- * edits.
- */
-export type IntakeEditedLevel = Exclude<IntakeSettingLevel, "default">;
 
 /** What a row of either list holds: the kind, and the value in effect with the level it comes from. */
 export interface IntakeKindValue {
@@ -123,13 +117,13 @@ export const describeIntakeSource = (
  */
 export const canResetIntakeRow = (
   row: Pick<IntakeKindValue, "level">,
-  editedLevel: IntakeEditedLevel,
+  editedLevel: IntakeOverrideLevel,
 ): boolean => row.level === editedLevel;
 
 /** Returns the choices stored at `editedLevel`: the rows whose value comes from that level. */
 const readStoredChoices = (
   rows: ReadonlyArray<IntakeKindValue>,
-  editedLevel: IntakeEditedLevel,
+  editedLevel: IntakeOverrideLevel,
 ): Record<string, boolean> =>
   Object.fromEntries(
     rows.filter((row) => row.level === editedLevel).map((row) => [row.kind, row.on]),
@@ -145,7 +139,7 @@ const readStoredChoices = (
  */
 export const buildIntakeOverrides = (
   settings: IntakeSettings,
-  editedLevel: IntakeEditedLevel,
+  editedLevel: IntakeOverrideLevel,
   change: IntakeChange,
 ): IntakeOverrides => {
   const stored = {
@@ -169,7 +163,7 @@ export const buildIntakeOverrides = (
  */
 export const applyIntakeChange = (
   settings: IntakeSettings,
-  editedLevel: IntakeEditedLevel,
+  editedLevel: IntakeOverrideLevel,
   change: IntakeChange,
 ): IntakeSettings => {
   if (change.on === null) return settings;

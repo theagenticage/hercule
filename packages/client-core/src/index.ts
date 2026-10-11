@@ -180,7 +180,6 @@ export {
   listIntakeSegments,
   listPluginsWithIntake,
   type IntakeChange,
-  type IntakeEditedLevel,
   type IntakeKindList,
   type IntakeKindValue,
   type IntakeSegment,
