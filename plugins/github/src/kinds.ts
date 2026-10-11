@@ -128,6 +128,12 @@ export const GITHUB_EVENT_KINDS: Record<string, EventKindDeclaration> = {
       reviewer: Reviewer,
       /** The team, as `org/slug`, when `reviewer` is `team`. */
       team: Schema.optionalKey(Schema.String),
+      /**
+       * When `reviewer` is `team`: true when the pull request still asks
+       * another of the user's teams for a review, as GitHub listed its
+       * requests when the removal was read.
+       */
+      teamStillRequested: Schema.optionalKey(Schema.Boolean),
       /** True when the user took the request back. */
       byYou: ByYou,
     }),

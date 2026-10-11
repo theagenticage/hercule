@@ -38,9 +38,21 @@ const buildPull = (number: number, extra: object = {}) => ({
   ...extra,
 });
 
+/** An open pull request of `acme/webshop`, as `GET .../pulls/{number}` returns it, still asking the user. */
+const buildPullDetail = (number: number) => ({
+  number,
+  title: `Pull ${String(number)}`,
+  state: "open",
+  user: { login: "marta", id: 9 },
+  head: { sha: "sha-a" },
+  updated_at: "2026-10-11T09:30:00Z",
+  requested_reviewers: [TEST_ACCOUNT],
+});
+
 /**
- * Answers the requests for item `number`: the item itself, no comments, no
- * reviews, and a history with one review request to the user.
+ * Answers the requests for item `number`: the item itself, as an issue and
+ * as a pull request, no comments, no reviews, and a history with one review
+ * request to the user.
  */
 const answerItem =
   (item: (number: number) => object) =>
@@ -50,7 +62,10 @@ const answerItem =
     const number = Number(match?.[2]);
     switch (match?.[3]) {
       case undefined:
-        return { status: 200, body: item(number) };
+        return {
+          status: 200,
+          body: match?.[1] === "pulls" ? buildPullDetail(number) : item(number),
+        };
       case "/events":
         return {
           status: 200,
@@ -160,7 +175,31 @@ describe("pollFollowedItems", () => {
   it("reads at most 20 items a poll, and keeps the hints of the rest for the next poll", async () => {
     const harness = buildIngestHarness();
     await recordHints(harness, MAX_FOLLOWED_ITEMS_PER_POLL + 5);
-    const stub = stubGithub(answerUserRequests(answerItem((number) => buildPull(number))));
+    // One comment per item and an empty history: four requests an item, so
+    // the item limit, not the request budget, stops the poll.
+    const answer = answerItem((number) => buildPull(number));
+    const stub = stubGithub(
+      answerUserRequests((request) => {
+        const { path } = readStubRequestTarget(request);
+        const number = readItemNumber(request)!;
+        if (path.endsWith("/events")) return { status: 200, body: [] };
+        if (!path.endsWith("/comments")) return answer(request);
+        return {
+          status: 200,
+          body: [
+            {
+              id: number,
+              html_url: `https://github.com/${REPO}/pull/${String(number)}#issuecomment-${String(number)}`,
+              issue_url: `https://api.github.com/repos/${REPO}/issues/${String(number)}`,
+              user: { login: "marta", id: 9 },
+              body: "Looks good.",
+              created_at: "2026-10-11T09:00:00Z",
+              updated_at: "2026-10-11T09:00:00Z",
+            },
+          ],
+        };
+      }),
+    );
 
     await runAgainstStub(
       pollFollowedItems(TEST_TOKEN, harness.context, [], TEST_IDENTITY, new Set()),
@@ -292,6 +331,69 @@ describe("pollFollowedItems", () => {
     await pollOnce(harness, route);
 
     expect(harness.events.map((event) => event.kind)).toEqual(["github.pr.review-requested"]);
+  });
+
+  it("goes back to a notification's hint from before an own pull request's last read", async () => {
+    const harness = buildIngestHarness();
+    const answer = answerItem((number) => buildPull(number));
+    const route = (request: HttpClientRequest.HttpClientRequest): StubResponse => {
+      const { path } = readStubRequestTarget(request);
+      if (path === "/search/issues") {
+        return {
+          status: 200,
+          body: {
+            total_count: 1,
+            items: [
+              {
+                number: 1,
+                title: "Pull 1",
+                repository_url: `https://api.github.com/repos/${REPO}`,
+                updated_at: "2026-10-11T09:30:00Z",
+              },
+            ],
+          },
+        };
+      }
+      if (path === `/repos/${REPO}/issues/1`) {
+        return request.headers["if-none-match"] === '"e1"'
+          ? { status: 304 }
+          : { status: 200, body: buildPull(1), headers: { etag: '"e1"' } };
+      }
+      if (path.endsWith("/comments")) {
+        // A comment from before the own pull request was first recorded.
+        return {
+          status: 200,
+          body: [
+            {
+              id: 400,
+              html_url: `https://github.com/${REPO}/pull/1#issuecomment-400`,
+              issue_url: `https://api.github.com/repos/${REPO}/issues/1`,
+              user: { login: "marta", id: 9 },
+              body: `@${TEST_IDENTITY.login} can you look?`,
+              created_at: "2026-10-11T09:10:00Z",
+              updated_at: "2026-10-11T09:10:00Z",
+            },
+          ],
+        };
+      }
+      return answerUserRequests(answer)(request);
+    };
+    // The first poll records the pull request; the second reads it and keeps its ETag.
+    await pollOnce(harness, route);
+    await pollOnce(harness, route);
+    expect(harness.events).toEqual([]);
+    expect(harness.state.get(`followed/github:pr:${REPO}#1`)).toMatchObject({ etag: '"e1"' });
+
+    // The notifications feed then reports the mention, from before the last read.
+    await recordHints(harness, 1);
+    const { stub } = await pollOnce(harness, route);
+
+    const itemRead = stub.requests.find(
+      (request) => readStubRequestTarget(request).path === `/repos/${REPO}/issues/1`,
+    );
+    expect(itemRead?.headers["if-none-match"]).toBeUndefined();
+    expect(harness.events.map((event) => event.kind)).toContain("github.mentioned");
+    expect(harness.state.has("followed-hints")).toBe(false);
   });
 
   it("emits one item's events oldest first, so a request after a review comes after it", async () => {

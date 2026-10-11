@@ -17,11 +17,12 @@
  *    reviews, and, when it is open or was just closed, `GET .../pulls/{n}`,
  *    for its head commit, its review requests and who merged it. When the
  *    review requests to the user or their teams changed, or the pull
- *    request changed while it asks for one of them, `GET .../issues/{n}/events`
- *    too, for who asked and when. The second case catches a request made
- *    again after a review between two polls: the reviewer leaves the list
- *    when they review and is back on it by the next poll, so the list alone
- *    looks unchanged. Reviews and history are read newest first, up to a
+ *    request asks for one of them, `GET .../issues/{n}/events` too, for who
+ *    asked and when. The second case catches a request made again after a
+ *    review between two polls: the reviewer leaves the list when they review
+ *    and is back on it by the next poll, so the list alone looks unchanged,
+ *    and the update time may not have moved either when both happened in
+ *    the snapshot's own second. Reviews and history are read newest first, up to a
  *    page limit, and a listing cut short logs a warning.
  * 3. When the listing held any item, or the last poll's comment listing
  *    stopped at its page limit: one
@@ -33,20 +34,32 @@
  * twenty repositories linked at once that all need a baseline, cannot make
  * every poll run out of time and never save its progress:
  *
- * - One repository diffs a limited number of items per poll. It stops at the
- *   end of a second, after the limit is reached: the cursor and the snapshot
- *   cover only the items it diffed, and the next poll goes on from there. A
- *   poll that stopped early, or whose listing stopped at its page limit,
- *   keeps no ETag, because a 304 on the next poll would hide the items it
- *   did not reach. Comments are still read for the whole repository, so a
- *   comment on an item past the stop is emitted now, counted as new from the
- *   cursor.
+ * - One repository diffs a limited number of items per poll. It stops
+ *   before the next item once the limit is reached: the cursor and the
+ *   snapshot cover only the items it diffed, and the next poll goes on from
+ *   there. A poll that stopped early, or whose listing stopped at its page
+ *   limit, keeps no ETag, because a 304 on the next poll would hide the
+ *   items it did not reach. Comments are still read for the whole
+ *   repository, so a comment on an item past the stop is emitted now,
+ *   counted as new from the cursor.
  * - One poll sends a limited number of requests across the watch list. Once
- *   they are spent, the repository the poll is on stops diffing at the end
- *   of the next second, as for its own limit, and the poll stops. The next
- *   poll starts with the repository after the last one polled, so every
- *   repository gets its turn. A repository that waits is polled later, not
- *   skipped: nothing it holds is lost, so the user is not told.
+ *   they are spent, the repository the poll is on stops before its next
+ *   item, as for its own limit, and the poll stops. The next poll starts
+ *   with the repository after the last one polled, so every repository gets
+ *   its turn. A repository that waits is polled later, not skipped: nothing
+ *   it holds is lost, so the user is not told.
+ *
+ * A poll can stop between two items updated in the same second, so the
+ * cursor alone cannot say where it stopped: the next listing starts with
+ * that whole second again. A poll that stopped early also keeps the numbers
+ * of the items it diffed in the cursor's second (`diffedAtCursor`), and the
+ * next poll skips them. Without that, a second holding more items than one
+ * poll can diff, such as 300 pull requests a bot labeled at once, would be
+ * diffed from its start by every poll and never finished. The kept numbers
+ * grow while the cursor stays in that second and are dropped once it moves
+ * on. The price: an item in that list that changes again within the same
+ * second is not diffed again. And a second holding more items than the
+ * listing's page limit reads still cannot be finished.
  *
  * The events of one repository are emitted oldest first once its poll is
  * done (`emitInTimeOrder`), so a review and a later request for another
@@ -82,7 +95,7 @@
 import { Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { IngestContext, PollResult } from "@hercule/plugin-host";
-import { isUserAccount, type GithubIdentity } from "../identity";
+import type { GithubIdentity } from "../identity";
 import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
 import {
   emitCommentEvents,
@@ -90,6 +103,7 @@ import {
   emitReviewRequestEvents,
   emitInTimeOrder,
   isAtOrAfter,
+  readReviewRequests,
   type ActivityPoll,
 } from "./activity";
 import { computeDigest } from "./digest";
@@ -105,7 +119,7 @@ import {
   type FeedError,
 } from "./requests";
 import { pollWatchedRepos, type RepoPollBudget } from "./state";
-import { buildTeamName, readUserTeams } from "./teams";
+import { readUserTeams } from "./teams";
 
 /** What the snapshot keeps of one issue or pull request: only what a diff compares. */
 const ItemSnapshot = Schema.Struct({
@@ -160,6 +174,12 @@ const RepoState = Schema.Struct({
   items: Schema.Record(Schema.String, ItemSnapshot),
   /** Present while comments are left to read from a listing that stopped at its page limit. */
   pendingComments: Schema.optionalKey(PendingComments),
+  /**
+   * The numbers of the items updated in the cursor's second that a poll
+   * which stopped early already diffed, so the next poll skips them. Absent
+   * when no poll stopped in the cursor's second.
+   */
+  diffedAtCursor: Schema.optionalKey(Schema.Array(Schema.Number)),
 });
 
 type RepoState = Schema.Schema.Type<typeof RepoState>;
@@ -171,11 +191,7 @@ type RepoState = Schema.Schema.Type<typeof RepoState>;
  */
 const MAX_LISTING_PAGES = 10;
 
-/**
- * How many issues and pull requests one poll diffs in one repository. A
- * repository diffs this many and then finishes the second it is in, so it
- * can diff a few more. Exported for the tests.
- */
+/** How many issues and pull requests one poll diffs in one repository. Exported for the tests. */
 export const MAX_ITEMS_PER_REPO = 50;
 
 /**
@@ -192,9 +208,7 @@ export const MAX_ITEMS_PER_REPO = 50;
  *   requests, 151 in all;
  * - a later poll: up to 10 listing pages, then one pull request's worst
  *   case, the pull request, 3 pages of reviews and 10 of history, and up to
- *   10 comment pages: 34 in all. A repository whose listing starts with many
- *   items updated in the cursor's own second must diff past that second
- *   first; the listing's 1,000 items bound those.
+ *   10 comment pages: 34 in all.
  *
  * So the watch list costs at most about 100 + 151 = 251 requests. The
  * followed items after it have their own budget, about 100 requests at most
@@ -235,9 +249,9 @@ const listMissingFrom = (
   reference: ReadonlyArray<string>,
 ): Array<string> => values.filter((value) => !reference.includes(value)).sort();
 
-/** Checks whether ISO 8601 timestamp `time` is strictly after `start`. An absent start is before everything. */
-const isAfter = (time: string, start: string | undefined): boolean =>
-  start === undefined || Date.parse(time) > Date.parse(start);
+/** Checks whether two ISO 8601 timestamps are the same second. An absent one matches nothing. */
+const isSameSecond = (left: string | undefined, right: string | undefined): boolean =>
+  left !== undefined && right !== undefined && Date.parse(left) === Date.parse(right);
 
 /** Returns the label names of an issue. */
 const readLabels = (issue: ListedIssue): Array<string> => issue.labels.map((label) => label.name);
@@ -528,23 +542,6 @@ const buildItemSnapshot = (issue: ListedIssue, extras: SnapshotExtras): ItemSnap
   ...(extras.reviewRequests === undefined ? {} : { reviewRequests: extras.reviewRequests }),
 });
 
-/**
- * Returns the reviews a pull request asks of the user and their teams now,
- * as the snapshot keeps them: `you`, and `team:<org>/<slug>` per team,
- * sorted.
- */
-const readReviewRequests = (poll: ActivityPoll, pull: ListedPull): Array<string> => {
-  const owner = poll.repo.split("/")[0]!;
-  const you = (pull.requested_reviewers ?? []).some((account) =>
-    isUserAccount(poll.identity, account),
-  );
-  const teams = (pull.requested_teams ?? [])
-    .map((team) => buildTeamName(owner, team.slug))
-    .filter((team) => poll.teams.has(team))
-    .map((team) => `team:${team}`);
-  return [...(you ? ["you"] : []), ...teams].sort();
-};
-
 /** Checks whether two sorted lists of review requests differ. */
 const haveReviewRequestsChanged = (
   before: ReadonlyArray<string>,
@@ -660,50 +657,13 @@ const emitNewComments = (
   });
 
 /**
- * Checks whether a poll may stop diffing a listing before the item at
- * `index`, given the `updated_at` of each item, oldest first. It may when
- * that item starts a new second, so items that share an `updated_at` are
- * diffed by the same poll, and the item before it is past `cursor`, the
- * last poll's cursor.
- *
- * The listing starts with the cursor's second again, so a poll that stopped
- * at the end of that second would leave the cursor where it was, and a
- * second holding more items than the limit would be listed again forever.
- * A poll can stop only between two items, so never before the first.
- */
-const canStopBefore = (
-  updateTimes: ReadonlyArray<string>,
-  index: number,
-  cursor: string | undefined,
-): boolean => {
-  if (index < 1 || index >= updateTimes.length) return false;
-  const last = updateTimes[index - 1]!;
-  return Date.parse(updateTimes[index]!) !== Date.parse(last) && isAfter(last, cursor);
-};
-
-/**
- * Returns how many items at the start of a listing one poll diffs at most,
- * given the `updated_at` of each item, oldest first: `limit`, and then on to
- * the first place `canStopBefore` allows.
- */
-const countItemsToDiff = (
-  updateTimes: ReadonlyArray<string>,
-  cursor: string | undefined,
-  limit: number,
-): number => {
-  for (let index = Math.max(limit, 1); index < updateTimes.length; index += 1) {
-    if (canStopBefore(updateTimes, index, cursor)) return index;
-  }
-  return updateTimes.length;
-};
-
-/**
  * Polls one watched repository: lists what changed since the last poll,
- * diffs up to `MAX_ITEMS_PER_REPO` items of it as `countItemsToDiff` counts
- * them, emits an event for each change, and returns the new state. Once
- * `budget` is spent, the diff stops at the first place `canStopBefore`
- * allows. When GitHub answers 304, only a comment listing left unfinished by
- * the last poll is read, and with none, `stored` itself is returned.
+ * diffs up to `MAX_ITEMS_PER_REPO` items of it, emits an event for each
+ * change, and returns the new state. Once `budget` is spent, the diff stops
+ * before the next item. Items the last poll diffed in the cursor's second
+ * before it stopped are skipped (see the header comment). When GitHub
+ * answers 304, only a comment listing left unfinished by the last poll is
+ * read, and with none, `stored` itself is returned.
  */
 const pollRepo = (
   poll: ActivityPoll,
@@ -735,14 +695,18 @@ const pollRepo = (
     const listed = new Map(
       issues.map(({ issue }) => [issue.number, buildIssueItem(poll.repo, issue)] as const),
     );
-    const updateTimes = issues.map(({ issue }) => issue.updated_at);
-    const toDiff = countItemsToDiff(updateTimes, stored.cursor, MAX_ITEMS_PER_REPO);
+    const diffedBefore = new Set(stored.diffedAtCursor ?? []);
     const diffed: typeof issues = [];
     const items: Record<string, ItemSnapshot> = { ...stored.items };
     const commentStarts = new Map<number, string | undefined>();
 
-    for (const [index, { issue, raw }] of issues.slice(0, toDiff).entries()) {
-      if (budget.isSpent() && canStopBefore(updateTimes, index, stored.cursor)) break;
+    let stopped = false;
+    for (const { issue, raw } of issues) {
+      if (isSameSecond(issue.updated_at, stored.cursor) && diffedBefore.has(issue.number)) continue;
+      if (diffed.length >= MAX_ITEMS_PER_REPO || (diffed.length > 0 && budget.isSpent())) {
+        stopped = true;
+        break;
+      }
       diffed.push({ issue, raw });
       const previous = stored.items[String(issue.number)];
       const item = buildIssueItem(poll.repo, issue);
@@ -766,17 +730,13 @@ const pollRepo = (
           // A pull request new since the last poll has every request in its
           // history after `start`; one the snapshot has without requests
           // was written by an older version, and counts as unchanged. The
-          // history is read too when the pull request changed while it asks
-          // for the user or a team, for a request made again after a review
-          // between two polls (see the header comment).
+          // history is read too whenever the pull request asks for the user
+          // or a team, for a request made again after a review between two
+          // polls, even within the snapshot's own second (see the header
+          // comment).
           const before = previous === undefined ? [] : previous.reviewRequests;
-          const changedWhileAsking =
-            now.length > 0 && previous !== undefined && previous.updatedAt !== issue.updated_at;
-          if (
-            (before !== undefined && haveReviewRequestsChanged(before, now)) ||
-            changedWhileAsking
-          ) {
-            yield* emitReviewRequestEvents(poll, item, start);
+          if (now.length > 0 || (before !== undefined && haveReviewRequestsChanged(before, now))) {
+            yield* emitReviewRequestEvents(poll, item, start, Effect.succeed(now));
           }
           reviewRequests = now;
         }
@@ -815,7 +775,17 @@ const pollRepo = (
     // GitHub answers 304 when the listing is the same as when it sent the
     // ETag. A poll that left listed items undiffed keeps no ETag, or the
     // next poll's 304 would skip them.
-    const stoppedEarly = diffed.length < issues.length || listing.truncated;
+    const stoppedEarly = stopped || listing.truncated;
+    const diffedAtCursor = new Set([
+      ...(isSameSecond(cursor, stored.cursor) ? diffedBefore : []),
+      ...diffed
+        .filter(({ issue }) => isSameSecond(issue.updated_at, cursor))
+        .map(({ issue }) => issue.number),
+    ]);
+    // Kept while a poll stops early, and carried while the cursor stays in
+    // that second, so a later poll does not diff the whole second again.
+    const keepDiffedAtCursor =
+      stoppedEarly || (isSameSecond(cursor, stored.cursor) && diffedBefore.size > 0);
     const etag = listing.unchanged
       ? stored.etag
       : stoppedEarly
@@ -826,6 +796,9 @@ const pollRepo = (
       ...(etag === undefined ? {} : { etag }),
       items: evictClosedItems(items, cursor),
       ...(pendingComments === undefined ? {} : { pendingComments }),
+      ...(keepDiffedAtCursor && diffedAtCursor.size > 0
+        ? { diffedAtCursor: [...diffedAtCursor].sort((left, right) => left - right) }
+        : {}),
     };
   });
 

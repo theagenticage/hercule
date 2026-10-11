@@ -118,7 +118,10 @@ describe("emitReviewRequestEvents", () => {
     const { harness, poll } = buildPoll();
     const stub = stubGithub(() => ({ status: 200, body: history }));
 
-    const result = await runAgainstStub(emitReviewRequestEvents(poll, PULL, undefined), stub);
+    const result = await runAgainstStub(
+      emitReviewRequestEvents(poll, PULL, undefined, Effect.succeed([])),
+      stub,
+    );
 
     expect(Result.isSuccess(result)).toBe(true);
     expect(harness.events).toMatchObject([
@@ -153,8 +156,35 @@ describe("emitReviewRequestEvents", () => {
     const { harness, poll } = buildPoll();
     const stub = stubGithub(() => ({ status: 200, body: history }));
 
-    await runAgainstStub(emitReviewRequestEvents(poll, PULL, "2026-10-11T11:00:00Z"), stub);
+    await runAgainstStub(
+      emitReviewRequestEvents(poll, PULL, "2026-10-11T11:00:00Z", Effect.succeed([])),
+      stub,
+    );
 
     expect(harness.events).toEqual([]);
+  });
+
+  it("says on a team's removal whether the pull request still asks another of the user's teams", async () => {
+    const { harness, poll } = buildPoll();
+    const teams = new Set(["acme/payments", "acme/design"]);
+    const removal = buildEntry(7, "review_request_removed", {
+      requested_team: { slug: "payments" },
+    });
+    const stub = stubGithub(() => ({ status: 200, body: [removal] }));
+
+    const readRemoval = async (requestsNow: ReadonlyArray<string>) => {
+      harness.events.length = 0;
+      await runAgainstStub(
+        emitReviewRequestEvents({ ...poll, teams }, PULL, undefined, Effect.succeed(requestsNow)),
+        stub,
+      );
+      return harness.events[0]!.payload;
+    };
+
+    expect(await readRemoval(["team:acme/design"])).toMatchObject({
+      team: "acme/payments",
+      teamStillRequested: true,
+    });
+    expect(await readRemoval(["you"])).toMatchObject({ teamStillRequested: false });
   });
 });

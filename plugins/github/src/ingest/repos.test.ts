@@ -552,6 +552,36 @@ describe("the repos feed", () => {
     ]);
   });
 
+  it("emits a review and a request made again in the snapshot's own second, in that order", async () => {
+    const repository = buildRepository();
+    repository.requestedReviewers[2] = [TEST_ACCOUNT];
+    repository.history[2] = [buildReviewRequest(1, "2026-10-01T09:30:00Z")];
+    const harness = await baseline(repository);
+    // A label at 10:00 gives the pull request a snapshot of its own at 10:00.
+    const second = "2026-10-01T10:00:00Z";
+    repository.issues[1] = {
+      ...repository.issues[1]!,
+      labels: [{ name: "ready" }],
+      updated_at: second,
+    };
+    repository.etag = '"v2"';
+    await poll(harness, answerFrom(repository));
+    // In that same second, the user reviews and mona asks again. Neither
+    // the update time nor the list of requested reviewers moves.
+    repository.reviews[2] = [
+      { id: 200, user: TEST_ACCOUNT, state: "COMMENTED", submitted_at: second },
+    ];
+    repository.history[2].push(buildReviewRequest(2, second));
+    repository.etag = '"v3"';
+
+    await poll(harness, answerFrom(repository));
+
+    expect(listEvents(harness).slice(1)).toEqual([
+      `github.pr.review-submitted pr.review-submitted:200`,
+      `github.pr.review-requested pr.review-requested:2`,
+    ]);
+  });
+
   it("emits the comments created since the last poll, on issues and pull requests alike", async () => {
     const repository = buildRepository();
     const harness = await baseline(repository);
@@ -996,52 +1026,49 @@ describe("the repos feed", () => {
       });
     });
 
-    it("moves on past a second that holds more items than its budget", async () => {
-      const repository = buildRepository();
-      const count = MAX_ITEMS_PER_REPO + 20;
-      for (let index = 0; index < count; index += 1) {
-        repository.issues.push(buildIssue(10 + index, BASELINE_TIME));
-      }
+    it("splits a second that holds more pull requests than one poll can diff, within its budget", async () => {
+      const count = 300;
+      const repository = buildPullRepository(count);
       const harness = await baseline(repository);
-      // Every one of them is labeled in the same second, as a bot might.
-      for (const issue of repository.issues.slice(2)) {
+      // A bot labels every one of them in the same second.
+      for (const issue of repository.issues) {
         issue.labels = [{ name: "stale" }];
         issue.updated_at = CHANGE_TIME;
       }
       repository.etag = '"v2"';
 
-      await poll(harness, answerFrom(repository));
+      const polls: Array<number> = [];
+      for (let index = 0; index < 20 && listWrittenEvents(harness).length < count; index += 1) {
+        const { requests } = await poll(harness, answerFrom(repository));
+        polls.push(requests.length);
+      }
 
-      // A second is never split, so the poll diffs them all.
+      // Each poll stays within its budget: the listing, the pull request it
+      // was diffing when the budget ran out, and the comments.
+      for (const sent of polls) expect(sent).toBeLessThanOrEqual(MAX_REQUESTS_PER_POLL + 4);
+      expect(polls.length).toBeGreaterThan(1);
+      // Every label is emitted once, though every poll lists the whole second.
       expect(harness.events).toHaveLength(count);
-      expect(harness.state.get(`repos/${REPO}`)).toMatchObject({ cursor: CHANGE_TIME });
-
-      // Two of them change again, in the next two seconds. The listing now
-      // starts with the cursor's second, which holds more than the budget.
-      const labelAgain = (number: number, seconds: number) => {
-        const issue = repository.issues.find((item) => item.number === number)!;
-        issue.labels = [...issue.labels, { name: "later" }];
-        issue.updated_at = addSeconds(CHANGE_TIME, seconds);
-      };
-      labelAgain(10, 1);
-      labelAgain(11, 2);
-      repository.etag = '"v3"';
-      const buildLaterKey = (number: number) =>
-        `github.issue.labeled issue.labeled:${REPO}#${String(number)}:${CHANGE_TIME}:${computeDigest(["+later"])}`;
-
-      await poll(harness, answerFrom(repository));
-
-      expect(listWrittenEvents(harness).slice(count)).toEqual([buildLaterKey(10)]);
+      expect(listWrittenEvents(harness)).toHaveLength(count);
       expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
-        cursor: addSeconds(CHANGE_TIME, 1),
+        cursor: CHANGE_TIME,
+        etag: '"v2"',
       });
 
+      // One of them changes again, a second later: the cursor moves on.
+      const issue = repository.issues[0]!;
+      issue.labels = [...issue.labels, { name: "later" }];
+      issue.updated_at = addSeconds(CHANGE_TIME, 1);
+      repository.etag = '"v3"';
+
       await poll(harness, answerFrom(repository));
 
-      expect(listWrittenEvents(harness).slice(count)).toEqual([
-        buildLaterKey(10),
-        buildLaterKey(11),
-      ]);
+      expect(listEvents(harness).at(-1)).toBe(
+        `github.pr.labeled pr.labeled:${REPO}#1:${CHANGE_TIME}:${computeDigest(["+later"])}`,
+      );
+      const state = harness.state.get(`repos/${REPO}`);
+      expect(state).toMatchObject({ cursor: addSeconds(CHANGE_TIME, 1) });
+      expect(state).not.toHaveProperty("diffedAtCursor");
     });
 
     it("starts each poll after the repository it polled last, so a busy one cannot hold up the others", async () => {

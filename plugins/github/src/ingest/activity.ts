@@ -12,7 +12,7 @@ import type { EmittedEvent, IngestContext, PluginError } from "@hercule/plugin-h
 import { readReviewVerdict, type ReviewVerdict } from "../github-objects";
 import { findMention, isUserAccount, type GithubIdentity } from "../identity";
 import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
-import { IssueEvent, ListedReview, type ListedComment } from "./feed-objects";
+import { IssueEvent, ListedReview, type ListedComment, type ListedPull } from "./feed-objects";
 import { decodeGithubValue, fetchNewestItems, truncateRaw, type FeedError } from "./requests";
 import { buildTeamName } from "./teams";
 
@@ -65,8 +65,25 @@ const isNewerThanStart =
   };
 
 /**
+ * Where a review request goes among the events of its own second, by
+ * event: -1 before the others, 1 after them. Events not in the map stay
+ * in the middle.
+ *
+ * GitHub's timestamps count whole seconds, so a review and a request made
+ * again right after it can share one. Their times cannot tell the order, but
+ * the pull request's current requests can: a request it still holds came
+ * last, and one it no longer holds was answered or taken back after. Kept
+ * beside the events, rather than in them, because the order is not a fact
+ * about the event the core should store.
+ */
+const TIE_RANKS = new WeakMap<EmittedEvent, number>();
+
+/**
  * Runs `read` with a copy of `poll` whose `emit` holds events back, then
  * emits the held events through `poll.emit`, oldest `occurredAt` first.
+ * Within one second, a review request the pull request still holds comes
+ * after the other events, and one it no longer holds before them
+ * (`TIE_RANKS`); the rest keep the order they were found in.
  * The held events are emitted whether `read` succeeds or fails, as they
  * would have been without holding them; a failed read is read again by the
  * next poll, and the dedup keys keep its events from being written twice.
@@ -83,10 +100,14 @@ export const emitInTimeOrder = <A, E, R>(
 ): Effect.Effect<A, E | PluginError, R> => {
   const held: Array<EmittedEvent> = [];
   const emitHeld = Effect.suspend(() => {
-    // Array.prototype.sort is stable, so events of one second keep the order they were found in.
+    // Array.prototype.sort is stable, so events of one second and rank keep the order they were found in.
     const ordered = held
       .splice(0)
-      .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
+      .sort(
+        (left, right) =>
+          Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||
+          (TIE_RANKS.get(left) ?? 0) - (TIE_RANKS.get(right) ?? 0),
+      );
     return Effect.forEach(ordered, poll.emit, { discard: true });
   });
   return read({ ...poll, emit: (event) => Effect.sync(() => void held.push(event)) }).pipe(
@@ -270,6 +291,23 @@ const readRequestedReviewer = (
 };
 
 /**
+ * Returns the reviews a pull request asks of the user and their teams now,
+ * as the snapshot keeps them: `you`, and `team:<org>/<slug>` per team,
+ * sorted.
+ */
+export const readReviewRequests = (poll: ActivityPoll, pull: ListedPull): Array<string> => {
+  const owner = poll.repo.split("/")[0]!;
+  const you = (pull.requested_reviewers ?? []).some((account) =>
+    isUserAccount(poll.identity, account),
+  );
+  const teams = (pull.requested_teams ?? [])
+    .map((team) => buildTeamName(owner, team.slug))
+    .filter((team) => poll.teams.has(team))
+    .map((team) => `team:${team}`);
+  return [...(you ? ["you"] : []), ...teams].sort();
+};
+
+/**
  * Fetches a pull request's history, newest first, and emits `github.pr.review-requested`
  * and `github.pr.review-request-removed` for each request to the user or one
  * of their teams made or taken back at or after `start`. Each one's dedup
@@ -278,13 +316,25 @@ const readRequestedReviewer = (
  * Only the history says who asked and when. A pull request's list of
  * requested reviewers says only who is asked now, and GitHub also drops a
  * reviewer from it when they review, which is not a removal.
+ *
+ * `readRequestsNow` returns the reviews the pull request asks of the user
+ * and their teams now, as `readReviewRequests` returns them. It runs at most
+ * once, and only when the history holds a request or a removal to emit. Its
+ * answer decides two things:
+ *
+ * - where a request goes among the events of its own second
+ *   (`TIE_RANKS`);
+ * - `teamStillRequested` on a team's removal: whether the pull request
+ *   still asks another of the user's teams, so the team's signal stays open.
  */
 export const emitReviewRequestEvents = (
   poll: ActivityPoll,
   item: GithubItem,
   start: string | undefined,
+  readRequestsNow: Effect.Effect<ReadonlyArray<string>, FeedError, HttpClient.HttpClient>,
 ): Effect.Effect<void, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
+    let requestsNow: ReadonlyArray<string> | undefined;
     const listing = yield* fetchNewestItems(
       {
         method: "GET",
@@ -308,43 +358,52 @@ export const emitReviewRequestEvents = (
       if (!isAtOrAfter(entry.created_at, start)) continue;
       const target = readRequestedReviewer(poll, entry);
       if (target === undefined) continue;
+      requestsNow ??= yield* readRequestsNow;
       const asker = entry.review_requester ?? entry.actor;
       const askerLogin = asker?.login ?? null;
       const whom = target.reviewer === "you" ? "you" : target.team;
       const team = target.reviewer === "team" ? { team: target.team } : {};
-      yield* poll.emit(
-        requested
-          ? buildItemEvent(item, {
-              kind: "github.pr.review-requested",
-              dedupKey: `pr.review-requested:${String(entry.id)}`,
-              occurredAt: entry.created_at,
-              title:
-                target.reviewer === "you"
-                  ? `${askerLogin ?? "Someone"} requested your review on ${place}`
-                  : `${askerLogin ?? "Someone"} requested a review from ${target.team} on ${place}`,
-              author: askerLogin,
-              fields: {
-                reviewer: target.reviewer,
-                ...team,
-                requestedBy: askerLogin,
-                byYou: isUserAccount(poll.identity, asker),
-                toYou: target.reviewer === "you",
-              },
-              raw: truncateRaw(raw),
-            })
-          : buildItemEvent(item, {
-              kind: "github.pr.review-request-removed",
-              dedupKey: `pr.review-request-removed:${String(entry.id)}`,
-              occurredAt: entry.created_at,
-              title: `${entry.actor?.login ?? "Someone"} removed the review request for ${whom} on ${place}`,
-              author: entry.actor?.login ?? null,
-              fields: {
-                reviewer: target.reviewer,
-                ...team,
-                byYou: isUserAccount(poll.identity, entry.actor),
-              },
-              raw: truncateRaw(raw),
-            }),
-      );
+      const event = requested
+        ? buildItemEvent(item, {
+            kind: "github.pr.review-requested",
+            dedupKey: `pr.review-requested:${String(entry.id)}`,
+            occurredAt: entry.created_at,
+            title:
+              target.reviewer === "you"
+                ? `${askerLogin ?? "Someone"} requested your review on ${place}`
+                : `${askerLogin ?? "Someone"} requested a review from ${target.team} on ${place}`,
+            author: askerLogin,
+            fields: {
+              reviewer: target.reviewer,
+              ...team,
+              requestedBy: askerLogin,
+              byYou: isUserAccount(poll.identity, asker),
+              toYou: target.reviewer === "you",
+            },
+            raw: truncateRaw(raw),
+          })
+        : buildItemEvent(item, {
+            kind: "github.pr.review-request-removed",
+            dedupKey: `pr.review-request-removed:${String(entry.id)}`,
+            occurredAt: entry.created_at,
+            title: `${entry.actor?.login ?? "Someone"} removed the review request for ${whom} on ${place}`,
+            author: entry.actor?.login ?? null,
+            fields: {
+              reviewer: target.reviewer,
+              ...team,
+              ...(target.reviewer === "team"
+                ? {
+                    teamStillRequested: requestsNow.some((request) => request.startsWith("team:")),
+                  }
+                : {}),
+              byYou: isUserAccount(poll.identity, entry.actor),
+            },
+            raw: truncateRaw(raw),
+          });
+      if (requested) {
+        const key = target.reviewer === "you" ? "you" : `team:${target.team}`;
+        TIE_RANKS.set(event, requestsNow.includes(key) ? 1 : -1);
+      }
+      yield* poll.emit(event);
     }
   });

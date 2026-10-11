@@ -65,6 +65,12 @@ const AUTHOR_MATCH_FIELD = { name: "author", label: "Author", path: "event.autho
  * `you` or `team`: only a removal of the same kind of request ends it. A
  * teammate's review does not end a team request, because the request still
  * asks the user's team, and GitHub lets every member answer it.
+ *
+ * A pull request has one team signal for all of the user's teams, because
+ * the user's review, which ends it, names no team. So a team's removal ends
+ * the signal only when the pull request asks none of the user's teams any
+ * more. A removal event from before `teamStillRequested` existed has no such
+ * field, and ends the signal as it always did.
  */
 const buildReviewRequestEnds = (reviewer: "you" | "team"): ReadonlyArray<SignalEndDeclaration> => [
   {
@@ -90,7 +96,10 @@ const buildReviewRequestEnds = (reviewer: "you" | "team"): ReadonlyArray<SignalE
   },
   {
     eventKind: "github.pr.review-request-removed",
-    condition: `event.payload.reviewer == "${reviewer}"`,
+    condition:
+      reviewer === "you"
+        ? 'event.payload.reviewer == "you"'
+        : 'event.payload.reviewer == "team" && !(has(event.payload.teamStillRequested) && event.payload.teamStillRequested)',
     resolution: "withdrawn",
     outcome:
       'event.author == null ? "Review request removed" : "Review request removed by " + event.author',

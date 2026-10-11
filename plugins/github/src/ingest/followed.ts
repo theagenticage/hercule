@@ -33,6 +33,8 @@
  * the news; for an open signal, when the signal was raised. An own pull
  * request seen for the first time is recorded at its `updated_at` and emits
  * nothing, as a newly watched repository baselines.
+ * A notification's hint from before an item's stored `since` moves `since`
+ * back to the hint and drops the ETag, so the news it names is read.
  *
  * One poll reads at most `MAX_FOLLOWED_ITEMS_PER_POLL` items, in turn, and
  * starts none once it has sent `MAX_FOLLOWED_REQUESTS_PER_POLL` requests. It
@@ -55,9 +57,10 @@ import {
   emitReviewRequestEvents,
   emitInTimeOrder,
   isAtOrAfter,
+  readReviewRequests,
   type ActivityPoll,
 } from "./activity";
-import { ListedComment, ListedIssue } from "./feed-objects";
+import { ListedComment, ListedIssue, ListedPull } from "./feed-objects";
 import { fetchOwnOpenPullRequests } from "./own-pulls";
 import {
   countRequests,
@@ -90,8 +93,8 @@ export const MAX_FOLLOWED_ITEMS_PER_POLL = 20;
 /**
  * How many requests the followed items may send in one poll before no
  * further item is started. The item being read when the count is reached
- * still finishes, at most 17 more requests: the item, 3 pages of comments, 3
- * of reviews and 10 of history. With the search for the user's own pull
+ * still finishes, at most 18 more requests: the item, 3 pages of comments, 3
+ * of reviews, 10 of history and the pull request. With the search for the user's own pull
  * requests, a poll sends at most about 100 requests here, about 50 seconds.
  * Exported for the tests.
  */
@@ -175,6 +178,28 @@ const addOneSecond = (time: string): string => new Date(Date.parse(time) + 1000)
 const GONE_STATUSES = [403, 404, 410];
 
 /**
+ * Fetches a pull request outside the watch list and returns the reviews it
+ * asks of the user and their teams now, as `readReviewRequests` returns
+ * them. The item itself is read from the issues API, which does not list
+ * requested reviewers. Fails as `fetchFeedResponse` fails, and with a
+ * `PluginError` when GitHub returns an object without the fields read.
+ */
+const fetchReviewRequests = (
+  poll: ActivityPoll,
+  number: number,
+): Effect.Effect<ReadonlyArray<string>, FeedError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const response = yield* fetchFeedResponse({
+      method: "GET",
+      path: `/repos/${poll.repo}/pulls/${String(number)}`,
+      token: poll.token,
+    });
+    const body = yield* readGithubObject(response.body, "a pull request");
+    const pull = yield* decodeGithubValue(ListedPull, body, "a pull request");
+    return readReviewRequests(poll, pull);
+  });
+
+/**
  * Reads one followed item and emits what happened on it at or after
  * `stored.since`, as the header comment describes. Returns the item's new
  * state, or `Option.none()` when GitHub answers that the item is gone
@@ -243,7 +268,7 @@ const readFollowedItem = (
     }
 
     if (item.kind === "pr") {
-      yield* emitReviewRequestEvents(poll, item, since);
+      yield* emitReviewRequestEvents(poll, item, since, fetchReviewRequests(poll, number));
       yield* emitNewReviews(poll, item, since);
     }
 
@@ -366,7 +391,7 @@ export const pollFollowedItems = (
         if (item !== undefined)
           addFollowedItem(followed, { item, start: signal.raisedAt, baseline: false });
       }
-      const hints = Option.getOrElse(
+      const hints: Readonly<Record<string, string>> = Option.getOrElse(
         yield* readFeedState(store, HINTS_KEY, FollowedHints),
         () => ({}),
       );
@@ -422,7 +447,21 @@ export const pollFollowedItems = (
             continue;
           }
           read += 1;
-          const state = Option.getOrElse(stored, () => ({ since: start }));
+          const state = Option.match(stored, {
+            onNone: () => ({ since: start }),
+            // A hint from before the stored `since` is news the item's
+            // last read did not cover, such as a mention on an own pull
+            // request that was recorded after it. The read goes back to the
+            // hint, without the ETag, whose 304 would hide that news. An
+            // open signal's start does not do this: it is earlier than
+            // `since` after every first read.
+            onSome: (known) => {
+              const hint = hints[ref];
+              return hint !== undefined && Date.parse(hint) < Date.parse(known.since)
+                ? { since: hint }
+                : known;
+            },
+          });
           const poll: ActivityPoll = {
             repo: item.repo,
             token,
