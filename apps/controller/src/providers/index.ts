@@ -14,7 +14,7 @@ export {
   ProviderProbeDeadline,
   ProviderProbeInterval,
 } from "./probes";
-export { providerRepository, type StoredSnapshot } from "./repository";
+export { providerRepository, type StoredInstance, type StoredSnapshot } from "./repository";
 export { isLoggedIn, NO_PLACEMENT, resolvedInstance } from "./resolved";
 export {
   ProviderLoginDeadline,

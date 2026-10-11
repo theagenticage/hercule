@@ -269,11 +269,12 @@ export const CLI = {
     examples: [
       { args: ["--user", '{"ui.threadRows":"plain"}'] },
       { args: ["--controller", '{"retention.events":30,"backup.time":"03:30"}'] },
+      { args: ["--controller", '{"textGeneration.model":"off"}'] },
     ],
     fields: {
       controller: {
         flag: "controller",
-        help: "The controller's operational settings as a JSON object: retention, backup, session timeouts, how long an idle assistant session stays loaded (session.idleUnloadMinutes), workspace expiry and how deep runs may nest (run.nestingLimit).",
+        help: 'The controller\'s operational settings as a JSON object: retention, backup, session timeouts, how long an idle assistant session stays loaded (session.idleUnloadMinutes), workspace expiry, how deep runs may nest (run.nestingLimit) and which model makes text generations (textGeneration.model: "automatic" by default, "off", or {"instanceId":"<provider instance id>","model":"<model slug>"}; a chosen model never falls back to another provider).',
       },
       user: {
         flag: "user",

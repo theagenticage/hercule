@@ -61,6 +61,7 @@ const buildControllerInfo = (localRunnerId: string | null) => ({
   version: "0.4.2",
   defaultRunnerId: null,
   localRunnerId,
+  textGeneration: { model: null, lastFailure: null },
 });
 
 /** The settings of a user whose account step marked the web app's onboarding done. */

@@ -39,6 +39,7 @@ describe("Settings > System", () => {
           version: "0.4.2",
           defaultRunnerId: MOSS!.id,
           localRunnerId: GONE_RUNNER_ID,
+          textGeneration: { model: null, lastFailure: null },
         },
       },
     });
@@ -68,6 +69,7 @@ describe("Settings > System", () => {
           version: "0.4.2",
           defaultRunnerId,
           localRunnerId: null,
+          textGeneration: { model: null, lastFailure: null },
         },
       }),
     });

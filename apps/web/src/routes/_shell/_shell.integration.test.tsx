@@ -36,6 +36,7 @@ const api: Readonly<Record<string, Handler>> = {
       version: "0.1.0",
       defaultRunnerId: null,
       localRunnerId: null,
+      textGeneration: { model: null, lastFailure: null },
     },
   },
 };

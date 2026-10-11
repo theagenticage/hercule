@@ -512,3 +512,53 @@ describe("the workspace expiry windows", () => {
     });
   });
 });
+
+describe("the text generation model", () => {
+  const readFirstInstanceId = async (base: string, token: string): Promise<string> => {
+    const response = await get(base, "/api/v1/providers", token);
+    const instances = (await response.json()) as ReadonlyArray<{ readonly id: string }>;
+    return instances[0]!.id;
+  };
+
+  it("accepts off, automatic and an existing provider instance with a model", async () => {
+    await withSettings(async (base, token) => {
+      const instanceId = await readFirstInstanceId(base, token);
+      for (const model of ["off", "automatic", { instanceId, model: "fast" }]) {
+        const response = await patchSettings(base, token, {
+          controller: { "textGeneration.model": model },
+        });
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect((await readSettings(base, token)).controller["textGeneration.model"]).toEqual(model);
+      }
+    });
+  });
+
+  it("rejects an instance that does not exist, and keeps the stored value", async () => {
+    await withSettings(async (base, token) => {
+      await patchSettings(base, token, { controller: { "textGeneration.model": "off" } });
+
+      const response = await patchSettings(base, token, {
+        controller: {
+          "textGeneration.model": {
+            instanceId: "0199e0e7-0000-7000-8000-0000000000aa",
+            model: "fast",
+          },
+        },
+      });
+
+      expect(await readErrorCode(response)).toBe("validation");
+      expect((await readSettings(base, token)).controller["textGeneration.model"]).toBe("off");
+    });
+  });
+
+  it("rejects a model with no instance, and an unknown word", async () => {
+    await withSettings(async (base, token) => {
+      for (const model of [{ model: "fast" }, "sometimes"]) {
+        const response = await patchSettings(base, token, {
+          controller: { "textGeneration.model": model },
+        });
+        expect(await readErrorCode(response), JSON.stringify(model)).toBe("validation");
+      }
+    });
+  });
+});

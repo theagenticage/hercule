@@ -26,7 +26,7 @@ import {
 } from "@hercule/contract";
 import { requireUserActor, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
-import { withTransaction } from "../db";
+import { uuidFromString, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError, type TypedScope } from "./repository";
 import { validateTimezone } from "./timezone";
@@ -41,6 +41,10 @@ interface WrittenKey {
 const GITHUB_DEFAULT = "github.defaultConnectionId";
 
 const NOT_GITHUB = "that connection is not a GitHub connection";
+
+const TEXT_GENERATION_MODEL = "textGeneration.model";
+
+const NO_SUCH_INSTANCE = "that provider instance does not exist";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -66,6 +70,35 @@ const make = Effect.gen(function* () {
       if (Option.isNone(found) || !isGithubConnection(found.value)) {
         return yield* Effect.fail(
           createValidationError([{ path: ["user", GITHUB_DEFAULT], message: NOT_GITHUB }]),
+        );
+      }
+    });
+
+  /**
+   * Checks that `textGeneration.model`, when the patch chooses an instance, names
+   * an existing provider instance. Fails with a validation error otherwise,
+   * because a text generation set to a missing instance could never run.
+   *
+   * It reads the `provider_instances` table directly. The providers domain
+   * imports the runners domain, which imports settings, so settings cannot
+   * import the provider repository without a cycle.
+   */
+  const validateTextGenerationInstance = (
+    patch: SettingsPatch,
+  ): Effect.Effect<void, Validation | SqlError> =>
+    Effect.gen(function* () {
+      const chosen = patch.controller?.[TEXT_GENERATION_MODEL];
+      if (chosen === undefined || typeof chosen === "string") return;
+      const rows = yield* sql<{ readonly one: number }>`
+        SELECT 1 AS one FROM provider_instances WHERE id = ${uuidFromString(chosen.instanceId)}`;
+      if (rows.length === 0) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["controller", TEXT_GENERATION_MODEL, "instanceId"],
+              message: NO_SUCH_INSTANCE,
+            },
+          ]),
         );
       }
     });
@@ -148,10 +181,11 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // Check inside the transaction that writes: a connection deleted
-            // between the check and the write would leave the setting pointing
-            // at nothing.
+            // Check inside the transaction that writes: a connection or provider
+            // instance deleted between the check and the write would leave the
+            // setting pointing at nothing.
             yield* validateGithubConnection(patch);
+            yield* validateTextGenerationInstance(patch);
             const written = [
               ...(patch.controller === undefined
                 ? []

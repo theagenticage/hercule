@@ -118,6 +118,7 @@ const buildController = (
       version: "0.4.2",
       defaultRunnerId: null,
       localRunnerId: null,
+      textGeneration: { model: null, lastFailure: null },
     },
   },
   "GET /api/v1/runners": { body: { items: runners } },

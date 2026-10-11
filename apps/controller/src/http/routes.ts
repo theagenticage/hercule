@@ -64,6 +64,7 @@ import {
   ProfileRemovalLayer,
   Provisioning,
   ProvisioningLayer,
+  TextGenerationLayer,
   Retirement,
   RetirementLayer,
   RunExecutorLayer,
@@ -82,6 +83,7 @@ import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
+import { LastTextGenerationFailureLayer, TextGenerationModelsLayer } from "../text-generation";
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ResourceService, ResourceServiceLayer } from "../resources";
 import { WorkspaceService } from "../workspaces";
@@ -729,6 +731,18 @@ const PermissionRequestsDomainLayer = PermissionRequestsLayer.pipe(
 );
 
 /**
+ * What text generation resolves and remembers: which model the setting means
+ * now, and the last failure. The controller service shows both in
+ * `ControllerInfo`, and the `TextGeneration` service in the controller daemon
+ * writes the failure, so both are provided this one layer. A layer is built
+ * once however many times it is provided, so they share one last failure.
+ */
+const TextGenerationStatusLayer = Layer.mergeAll(
+  TextGenerationModelsLayer,
+  LastTextGenerationFailureLayer,
+);
+
+/**
  * Every service an operation uses, together with the controller daemon. The
  * listener starts the controller daemon's drivers, so they are built here
  * rather than a second time elsewhere. It is one list because otherwise a
@@ -747,7 +761,8 @@ export const operationLayers = Layer.mergeAll(
   ApiKeysLayer,
   UserLayer,
   SecretLayer,
-  ControllerLayer,
+  ControllerLayer.pipe(Layer.provide(TextGenerationStatusLayer)),
+  TextGenerationLayer.pipe(Layer.provide(TextGenerationStatusLayer)),
   PromotionServiceLayer,
   PromotionTokensLayer,
   // The controller daemon's promotion preview asks the transfer whether a
