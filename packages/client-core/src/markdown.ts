@@ -141,17 +141,16 @@ const isFootnoteReferenceToken = (token: Token): token is FootnoteReferenceToken
 /**
  * Matches the first line of a footnote definition: up to 3 spaces, the label,
  * the colon, and the spaces after it. As on GitHub, a label holds no
- * whitespace and no brackets, so `[^note 1]: text` stays text. The label is at
- * most 999 characters, as in marked's own link labels, which keeps a long line
- * without a closing bracket from being read to its end at every `[^`.
+ * whitespace and no unescaped bracket, so `[^note 1]: text` and
+ * `[^a\]: text` stay text. A backslash escapes the character after it. The
+ * label is at most 999 characters, as in marked's own link labels, which keeps
+ * a long line without a closing bracket from being read to its end at every
+ * `[^`.
  */
-const FOOTNOTE_DEFINITION_START = /^ {0,3}\[\^([^[\] \t\r\n]{1,999})\]:[ \t]*/;
-
-/** Matches a line that starts like a footnote definition, whatever its label. */
-const FOOTNOTE_LINE_START = /^ {0,3}\[\^/;
+const FOOTNOTE_DEFINITION_START = /^ {0,3}\[\^((?:[^[\]\\ \t\r\n]|\\[^ \t\r\n]){1,999})\]:[ \t]*/;
 
 /** Matches a footnote reference at the start of the inline text, with a label as above. */
-const FOOTNOTE_REFERENCE = /^\[\^([^[\] \t\r\n]{1,999})\]/;
+const FOOTNOTE_REFERENCE = /^\[\^((?:[^[\]\\ \t\r\n]|\\[^ \t\r\n]){1,999})\]/;
 
 /** Matches the indentation that makes a line part of a footnote: 4 spaces or a tab. */
 const FOOTNOTE_INDENT = /^(?: {4}| {0,3}\t)/;
@@ -340,16 +339,6 @@ const footnoteExtension: MarkedExtension = {
       },
     },
   ],
-  tokenizer: {
-    // A line starting with `[^` is a footnote definition or text, never a
-    // link definition, as on GitHub. Otherwise marked would read
-    // `[^note 1]: text`, whose label is not a footnote label, as a link
-    // definition and show nothing. Returning false hands every other line
-    // back to marked's own reader.
-    def(source) {
-      return FOOTNOTE_LINE_START.test(source) ? undefined : false;
-    },
-  },
 };
 
 /** Creates a GitHub-flavoured markdown parser with footnotes. */

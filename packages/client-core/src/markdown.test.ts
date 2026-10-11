@@ -582,12 +582,32 @@ describe("parseMarkdown footnotes", () => {
     });
   });
 
-  it.each([["[^note 1]: IMPORTANT"], ["[^ ]: IMPORTANT"], ["[^a\tb]: IMPORTANT"]])(
-    "keeps %s as text, because a footnote label holds no whitespace",
-    (source) => {
-      expect(parseMarkdown(source)).toEqual(blocks(paragraph(text(source))));
-    },
-  );
+  it.each([
+    ["[^note 1]: IMPORTANT WARNING", "[^note 1]: IMPORTANT WARNING"],
+    ["[^ ]: IMPORTANT WARNING", "[^ ]: IMPORTANT WARNING"],
+    ["[^a\tb]: IMPORTANT WARNING", "[^a\tb]: IMPORTANT WARNING"],
+  ])("keeps %j as text, because a footnote label holds no whitespace", (source, shown) => {
+    expect(parseMarkdown(source)).toEqual(blocks(paragraph(text(shown))));
+  });
+
+  it("keeps a definition whose closing bracket is escaped as text", () => {
+    expect(parseMarkdown("[^a\\]: note\nIMPORTANT WARNING")).toEqual(
+      blocks(paragraph(text("[^a"), text("]"), text(": note\nIMPORTANT WARNING"))),
+    );
+  });
+
+  it("keeps a link definition whose label starts with a caret but is not a footnote label", () => {
+    expect(parseMarkdown("[use][^a b]\n\n[^a b]: https://example.com")).toEqual(
+      blocks(
+        paragraph({
+          type: "link",
+          href: "https://example.com",
+          title: undefined,
+          children: [text("use")],
+        }),
+      ),
+    );
+  });
 
   it("ends the footnote at a blank line followed by a line without indentation", () => {
     expect(parseMarkdown("[^a]\n\n[^a]: first\n\nafter")).toEqual({
