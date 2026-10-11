@@ -507,13 +507,28 @@ const describeOrigin = (run: Run | RunSummary): string => {
 };
 
 /**
- * Returns a run as a row of `run list`: its id, status, workflow, who started
- * it, and its age. The failure reason follows the status of a failed run,
- * because it is the first thing a reader of a failed run wants to know.
+ * Returns a run's status as the `run list` column shows it. What a reader
+ * wants to know first follows the status in parentheses:
+ *
+ * - for a failed run, its failure reason: `failed (step-failed)`;
+ * - for a running run, where it is: `running (at review)`, or
+ *   `running (waiting for approved)` when it waits on signals. A running run
+ *   with neither prints `running` alone.
  */
+const describeRunStatus = (run: RunSummary): string => {
+  if (run.status === "failed") return `${run.status} (${run.failureReason})`;
+  if (run.status !== "running") return run.status;
+  if (run.activeStepIds.length > 0) return `running (at ${run.activeStepIds.join(", ")})`;
+  if (run.awaitedSignalIds.length > 0) {
+    return `running (waiting for ${run.awaitedSignalIds.join(", ")})`;
+  }
+  return run.status;
+};
+
+/** Returns a run as a row of `run list`: its id, status, workflow, who started it, and its age. */
 const summarizeRun = (run: RunSummary, now: Date): Record<string, unknown> => ({
   id: run.id,
-  status: run.status === "failed" ? `${run.status} (${run.failureReason})` : run.status,
+  status: describeRunStatus(run),
   workflow: run.workflowName,
   startedBy: describeOrigin(run),
   age: formatAge(run.createdAt, now),
@@ -592,16 +607,19 @@ const summarizeOpenRequest = (request: SessionRequest): Record<string, unknown> 
  * Returns a session as a row of `session list`: every field, but with the
  * open Requests as a count and the Token Usage as the tokens used, so the
  * row is not stretched by two JSON objects. `session read` prints both in
- * full.
+ * full. The tool calls sit beside the tokens, as they do in a row of
+ * `session subagent list`.
  */
 const summarizeSession = ({
   openRequests,
   usage,
   usageReport,
+  toolCalls,
   ...fields
 }: Session): Record<string, unknown> => ({
   ...fields,
   openRequests: openRequests.length,
+  toolCalls,
   tokens:
     usageReport !== undefined
       ? describeTokenUsage(usageReport)

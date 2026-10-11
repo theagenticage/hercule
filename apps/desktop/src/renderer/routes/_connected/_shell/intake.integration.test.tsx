@@ -38,6 +38,7 @@ beforeEach(() => {
 
 afterEach(() => {
   localStorage.clear();
+  vi.useRealTimers();
 });
 
 const GITHUB: PluginDetail = {
@@ -879,6 +880,9 @@ describe("Intake's moves", () => {
   });
 
   it("snoozes the selected signal with H and a choice's key", async () => {
+    // The second choice depends on the time of day, so the clock is set to a
+    // Tuesday morning. Only the date is faked; timers still run.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-13T08:30:00Z") });
     const { calls } = await openIntake(`/intake?signal=${MENTION.id}`);
     await findPane();
     act(() => {

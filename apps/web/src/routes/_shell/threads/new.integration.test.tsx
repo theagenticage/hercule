@@ -194,6 +194,7 @@ const NEW_SESSION: Session = {
   status: "starting",
   resumable: false,
   resumeHeld: false,
+  toolCalls: 0,
   permissionProfileId: PROFILE_UNRESTRICTED.id,
   agentId: null,
   conversationId: null,

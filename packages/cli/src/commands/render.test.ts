@@ -153,7 +153,7 @@ describe("hercule session read", () => {
 });
 
 describe("hercule session list", () => {
-  it("counts each session's open Requests and sums its tokens instead of printing their JSON", () => {
+  it("counts each session's open Requests and sums its tokens instead of printing their JSON, with its tool calls beside the tokens", () => {
     const lines = renderHuman(
       {
         kind: "value",
@@ -164,8 +164,9 @@ describe("hercule session list", () => {
               status: "busy",
               openRequests: OPEN_REQUESTS,
               usage: { inputTokens: 1500, outputTokens: 200, cacheReadTokens: 1200 },
+              toolCalls: 14,
             },
-            { id: SESSION, status: "starting", openRequests: [] },
+            { id: SESSION, status: "starting", openRequests: [], toolCalls: 0 },
           ],
         },
       },
@@ -174,9 +175,9 @@ describe("hercule session list", () => {
     );
 
     expect(lines).toEqual([
-      "id        status    openRequests  tokens",
-      `${SESSION.slice(-8)}  busy      2             2900`,
-      `${SESSION.slice(-8)}  starting  0`,
+      "id        status    openRequests  toolCalls  tokens",
+      `${SESSION.slice(-8)}  busy      2             14         2900`,
+      `${SESSION.slice(-8)}  starting  0             0`,
     ]);
   });
 });

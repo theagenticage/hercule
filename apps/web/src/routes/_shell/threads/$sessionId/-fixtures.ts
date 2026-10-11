@@ -18,6 +18,7 @@ export const SESSION: Session = {
   status: "idle",
   resumable: false,
   resumeHeld: false,
+  toolCalls: 0,
   permissionProfileId: "01a06d02-2000-7000-8000-000000000001",
   agentId: null,
   conversationId: null,

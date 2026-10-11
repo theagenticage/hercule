@@ -1250,6 +1250,10 @@
         color: var(--muted);
         font-size: var(--t-13);
       }
+      /* Class names are longer than the book's usual terms, so this list gives them a wider column. */
+      .bk-notes--wide li {
+        grid-template-columns: 96px 1fr;
+      }
       .bk-notes b {
         color: var(--ink);
         font-variant-numeric: tabular-nums;
@@ -2461,6 +2465,27 @@
           </ul>
         </div>
 
+        <div class="bk-sub" id="lists"><h3>Lists that scroll</h3><p>The Workflows page's patterns, in <code>system.css</code>. Each one is a pattern the book already had, made to work in a long list under the floating pills.</p></div>
+        <ul class="bk-notes bk-notes--wide">
+          <li><b>.workflow-list</b><span>One list at three widths. A table when nothing is open, a 340px column beside the open workflow, and hidden when the workflow fills the pane. Below 800px the workflow always fills the pane.</span></li>
+          <li><b>.table-row</b><span>The profiles table's row at 40px, with one line. Hover and selection hide the hairline above and below, so no line crosses the rounded corners.</span></li>
+          <li><b>.group-h</b><span>A group heading across a table: <code>.side-h</code> with the count right after the name, as in "Failing 4".</span></li>
+          <li><b>.side-lead</b><span>A state mark in the face's 24px slot, for a row of a run or a workflow. Every row's text then starts at the same x.</span></li>
+          <li><b>.strip</b><span>The last 20 runs as 10px marks, 1px apart, right-aligned, so the latest run is always in the same place.</span></li>
+          <li><b>col-*</b><span>A narrow pane drops columns: below 1000px Starts on; below 820px the strip and Success; below 560px, in the open workflow, Started by and Does.</span></li>
+          <li><b>.filters</b><span>The page's name and its filter tabs. Below 780px of pane the counts go; below 640px the name is left only for the screen reader, and the search shrinks to its icon until it is focused.</span></li>
+          <li><b>.pill-title</b><span>The page's name as a title, leading the floating pill. Office and Workflows use it.</span></li>
+          <li><b>.pill-back</b><span>Over the column the page's name becomes a pill tab in title ink, back to the table.</span></li>
+          <li><b>.ptab small</b><span>A count on a pill tab: "Needs you 2".</span></li>
+          <li><b>.find</b><span>A real search field in a pill of its own at the header's far end, or boxed at the top of the column. The filters never shrink; the search gives up its width first.</span></li>
+          <li><b>.pill-room</b><span>An opaque band, 56px, as tall as the floating header, at the top of a scrolling pane, so the pills never float over half a row.</span></li>
+          <li><b>.tab-band</b><span>The open tab's bar and column heads stick under the pill room, with a hairline.</span></li>
+          <li><b>.open-name</b><span>The workflow's name with its <code>.toggle</code>, then the description, then one muted line saying what the switch does.</span></li>
+          <li><b>.chip-row</b><span>Chips in a wrapping row: what starts the workflow and what its steps run. A trigger in error is <code>.chip--fail</code>.</span></li>
+          <li><b>.side-sub</b><span>"From runs" in Waiting on you: a 16px sentence-case label, indented to the rows' text, over the run sessions that wait on you.</span></li>
+          <li><b>--dur-3</b><span>Two moves, with reduced motion off. An opened workflow settles in from 14px to the right. When a run joins a strip, the older marks slide one slot (11px) left.</span></li>
+        </ul>
+
         <div class="bk-sub" id="signature"><h3>The signature: a colleague</h3><p>Every character is drawn from its name. Four parts vary; the pose changes with state.</p></div>
         <div class="bk-sig">
           <div>
@@ -2527,6 +2552,15 @@
           <figure data-frame="desktop" data-src="desktop/settings-assistants.html" data-caption="Settings · Assistants" data-note="Ada's face, provider, access mode and how she replies, on one page."></figure>
           <figure data-frame="desktop" data-src="desktop/settings-connections.html" data-caption="Settings · Connections" data-note="Where work comes from, and the one Connection that needs attention."></figure>
           <figure data-frame="desktop" data-src="desktop/settings-profiles.html" data-caption="Settings · Permission profiles" data-note="Every profile, how much it grants and who runs on it."></figure>
+          <figure id="s-workflows" data-frame="desktop" data-src="desktop/workflows.html" data-caption="Workflows" data-note="Every workflow in one table, grouped by what needs you. The last 20 runs as a strip of marks."></figure>
+          <figure data-frame="desktop" data-src="desktop/workflows.html?view=split" data-caption="Workflows · Ship release" data-note="The list becomes a column beside the open workflow: its switch, its graph and its runs."></figure>
+          <figure data-frame="desktop" data-src="desktop/workflows.html?view=full&amp;tab=triggers" data-caption="Ship release · Triggers" data-note="The workflow fills the pane. Each start trigger has its own pause switch."></figure>
+          <figure data-frame="desktop" data-src="desktop/workflows.html?view=full&amp;runs=timeline" data-caption="Ship release · a day of runs" data-note="The Runs tab as a timeline: one bar per run, from its start to its end."></figure>
+          <figure data-frame="desktop" data-src="desktop/run.html" data-caption="A run · waiting on you" data-note="The run's state, the question it waits on with Open thread, its trigger and inputs, and its steps as a graph."></figure>
+          <figure data-frame="desktop" data-src="desktop/run.html?card=security" data-caption="A run · a step's card" data-note="Clicking a node opens its card: the step's state, model, tokens and cost, its prompt, and Open thread."></figure>
+          <figure data-frame="desktop" data-src="desktop/run.html?state=failed&amp;steps=timeline" data-caption="A run · its steps on a timeline" data-note="Each step is a bar from its start to its end. Loop iterations are numbered, and steps that never ran say so."></figure>
+          <figure data-frame="desktop" data-src="desktop/run.html?dialog=cancel" data-caption="Cancel run" data-note="Keep running takes the focus, because cancelling stops work. Delete workspace is checked."></figure>
+          <figure data-frame="desktop" data-src="desktop/run.html?state=completed&amp;dialog=rerun&amp;refused" data-caption="Re-run, refused" data-note="Re-run from the current workflow or as it ran. A refusal reads in red under the choices."></figure>
           <figure data-frame="desktop" data-src="desktop/glance.html" data-caption="At a glance" data-note="Outside the app: menu bar, hotkey panel, notifications and a marigold dock badge."></figure>
         </div>
 

@@ -32,6 +32,7 @@ const buildSession = (tail: string) => ({
   status: "idle",
   resumable: false,
   resumeHeld: false,
+  toolCalls: 0,
   permissionProfileId: buildId("dddddddd"),
   agentId: null,
   conversationId: null,

@@ -155,7 +155,7 @@ type RecordChange = Extract<Change, { readonly _tag: "record" }>;
 
 /** Checks whether a record change is collected for the slow window rather than the short one. */
 const isSlowPaced = (change: RecordChange): boolean =>
-  change.topic === "subagent" || change.usageOnly === true;
+  change.topic === "subagent" || change.countsOnly === true;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

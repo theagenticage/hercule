@@ -1764,11 +1764,21 @@ export const CLI = {
   },
   "run.query": {
     command: "run list",
-    help: "Lists runs, newest first. Each row shows the run's status, its workflow, who started it, and its age. Use it to find the id that `hercule run read` and `hercule run cancel` take.",
+    help: "Lists runs, newest first. Each row shows the run's status, its workflow, who started it, and its age. A failed run's status names the failure reason; a running run's names the steps it is at, or the signals it waits for. Use it to find the id that `hercule run read` and `hercule run cancel` take.",
     examples: [
       { args: [] },
       { args: ["--status", "failed"] },
       { args: ["--workflow", "1f3a9c2e", "--since", "2026-09-24T00:00:00.000Z"] },
+      {
+        args: [
+          "--workflow",
+          "1f3a9c2e",
+          "--active-since",
+          "2026-10-09T00:00:00.000Z",
+          "--until",
+          "2026-10-09T23:59:59.999Z",
+        ],
+      },
     ],
     fields: {
       workflowId: {
@@ -1787,6 +1797,10 @@ export const CLI = {
       until: {
         flag: "until",
         help: "Only runs created at or before this UTC instant, with milliseconds.",
+      },
+      activeSince: {
+        flag: "active-since",
+        help: "Only runs that had not ended before this UTC instant, with milliseconds: runs still pending or running, and runs that finished at or after it. With --until, every run that was live at some moment of that range.",
       },
       actor: {
         flag: "actor",
@@ -2964,7 +2978,7 @@ export const CLI = {
   },
   "session.read": {
     command: "session read",
-    help: "Reads one session: its status, what it runs under, and whether it can be resumed. The Requests its agents are parked on come with it, oldest first, each naming the subagent that asked when it was not the session's own agent; decide an approval with `hercule session respond-to-approval-request`, and answer a question with `hercule session respond-to-question`. The Token Usage of the whole session comes with it too, once the harness has reported any.",
+    help: "Reads one session: its status, what it runs under, and whether it can be resumed. The Requests its agents are parked on come with it, oldest first, each naming the subagent that asked when it was not the session's own agent; decide an approval with `hercule session respond-to-approval-request`, and answer a question with `hercule session respond-to-question`. The Token Usage of the whole session comes with it too, once the harness has reported any, and `toolCalls`, how many tool calls its own agent and its subagents have made.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {

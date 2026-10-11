@@ -32,7 +32,14 @@ import { buildHomePaths, HerculeHome } from "../config";
 import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } from "../connections";
 import { hashToken } from "../credentials";
 import { IngestExecutorLayer } from "../daemon/ingest";
-import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
+import {
+  AfterCommit,
+  mintUuid,
+  uuidFromString,
+  uuidToString,
+  withTransaction,
+  type Change,
+} from "../db";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
@@ -1479,6 +1486,54 @@ describe("a report applied after its session ended", () => {
     expect(result.session.status).toBe("exited");
     expect(result.session.openRequests).toEqual([]);
     expect(result.notifications).toEqual([]);
+  });
+});
+
+describe("a report that starts a tool call", () => {
+  it("counts the call and announces the session at the slow pace", async () => {
+    const published: Array<Change> = [];
+    const listener = Layer.succeed(AfterCommit, {
+      publish: (changes: ReadonlyArray<Change>) =>
+        Effect.sync(() => {
+          published.push(...changes);
+        }),
+    });
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const rows = yield* sessionRepository;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        const event = {
+          _tag: "item.started" as const,
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at,
+          turnId: "t1",
+          itemId: "i1",
+          kind: "command_execution" as const,
+          detail: {},
+        };
+
+        const folded = yield* sessions.foldReport(runnerId, 1, event);
+        yield* withTransaction(sql, sessions.applyReport(runnerId, event, folded!)).pipe(
+          Effect.provide(listener),
+        );
+
+        return { sessionId, session: Option.getOrThrow(yield* rows.one(sessionId)) };
+      }),
+    );
+
+    expect(result.session.toolCalls).toBe(1);
+    expect(published).toContainEqual(
+      expect.objectContaining({
+        _tag: "record",
+        topic: "session",
+        id: result.sessionId,
+        countsOnly: true,
+      }),
+    );
   });
 });
 

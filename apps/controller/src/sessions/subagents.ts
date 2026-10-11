@@ -17,7 +17,7 @@
  */
 import type { ItemKind, ProviderEvent, ProviderReport, SubagentId } from "@hercule/protocol";
 import type { Subagent, SubagentStatus } from "@hercule/contract";
-import { attributeEvent } from "./stream";
+import { attributeEvent, TOOL_CALL_KINDS } from "./stream";
 import {
   addUsageReport,
   buildUsageFields,
@@ -57,17 +57,6 @@ export interface StoredSubagent {
  * list row, and the full text, when there is one, is in the transcript.
  */
 const MAX_LINE_LENGTH = 200;
-
-/** The item kinds that count as tool calls in `toolCalls`. */
-const TOOL_CALL_KINDS: ReadonlySet<ItemKind> = new Set([
-  "command_execution",
-  "file_change",
-  "file_read",
-  "file_search",
-  "tool_call",
-  "web_search",
-  "subagent",
-]);
 
 /** The words `activity` starts with for each item kind. */
 const ACTIVITY_VERBS: Readonly<Record<ItemKind, string>> = {

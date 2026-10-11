@@ -331,6 +331,7 @@
   var ICONS = {
     search: '<circle cx="7.2" cy="7.2" r="4.4"/><path d="M10.5 10.5l3 3"/>',
     plus: '<path d="M8 3.2v9.6M3.2 8h9.6"/>',
+    minus: '<path d="M3.2 8h9.6"/>',
     compose: '<path d="M7.4 2.8H4.2a1.4 1.4 0 0 0-1.4 1.4v7.6a1.4 1.4 0 0 0 1.4 1.4h7.6a1.4 1.4 0 0 0 1.4-1.4V8.6"/><path d="M11.6 2.4l2 2-5.4 5.4-2.6.6.6-2.6z"/>',
     close: '<path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/>',
     check: '<path d="M3.4 8.4l3 3 6.2-6.6"/>',
@@ -345,6 +346,8 @@
     threads: '<path d="M2.6 4.4a1.6 1.6 0 0 1 1.6-1.6h7.6a1.6 1.6 0 0 1 1.6 1.6v5a1.6 1.6 0 0 1-1.6 1.6H7.4L4.4 13.4V11h-.2a1.6 1.6 0 0 1-1.6-1.6z"/>',
     runs: '<rect x="2.4" y="2.4" width="11.2" height="11.2" rx="3.2"/><path d="M6.6 5.6v4.8L10.4 8z"/>',
     workflows: '<circle cx="4" cy="4" r="1.7"/><circle cx="12" cy="8" r="1.7"/><circle cx="4" cy="12" r="1.7"/><path d="M5.7 4.4c3 .4 3.2 3.2 4.6 3.6M5.7 11.6c3-.4 3.2-3.2 4.6-3.6"/>',
+    agent:
+      '<path d="M8 2.4c2.7 0 4.6 2.6 4.6 5.8 0 3-2 5.4-4.6 5.4s-4.6-2.4-4.6-5.4c0-3.2 1.9-5.8 4.6-5.8z"/><circle cx="6.4" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="9.6" cy="8" r=".9" fill="currentColor" stroke="none"/>',
     tasks: '<rect x="2.6" y="2.6" width="10.8" height="10.8" rx="3"/><path d="M5.4 8.2l1.8 1.7 3.4-3.6"/>',
     fleet: '<rect x="2.4" y="2.6" width="11.2" height="4.4" rx="1.4"/><rect x="2.4" y="9" width="11.2" height="4.4" rx="1.4"/><path d="M5 4.8h.1M5 11.2h.1"/>',
     connections: '<path d="M6 2.6v2.6M10 2.6v2.6M4.2 5.2h7.6v2.4a3.8 3.8 0 0 1-7.6 0zM8 11.4v2.2"/>',
@@ -443,7 +446,12 @@
   var WAITING = [
     { name: "Fix 3-D Secure checkout for EU cards", short: "Fix 3-D Secure checkout", ask: "Run git push?", href: "session-active.html" },
     { name: "Migrate ops dashboards", short: "Migrate ops dashboards", ask: "Keep the old Grafana folder?", href: "#" },
-    { name: "Ship release v2.15", short: "Ship release v2.15", ask: "Publish to npm?", href: "#" },
+    { name: "Ship release v2.15", short: "Ship release v2.15", ask: "Publish to npm?", href: "#", run: true },
+  ];
+  // The run sessions a page that lists runs apart ("From runs") draws in place of the run above.
+  var WAITING_RUNS = [
+    { title: "Ship release · security", ask: "Run npm audit fix --force?" },
+    { title: "Rotate prod keys · rotate", ask: "Run aws iam delete-access-key --user-name deploy-bot --access-key-id AKIA4XQ7?" },
   ];
   var ASSISTANTS = [
     { name: "Ada", pose: "working", key: "ada" },
@@ -499,19 +507,34 @@
 
   /* ------------------------------------------------------------------ shells */
 
-  /** Returns the "Waiting on you" section: one row per waiting item, its question on one line. */
-  function waitingSection(selected) {
+  /**
+   * Returns the "Waiting on you" section: one row per waiting item, its question on one line.
+   * With runsApart, the threads come first, then the run sessions under "From runs", each led
+   * by its state mark, because a run's agents have no face.
+   */
+  function waitingSection(selected, runsApart) {
     var swarm = isSwarm();
+    var threads = runsApart ? WAITING.filter(function (w) { return !w.run; }) : WAITING;
+    var count = swarm ? 30 : threads.length + (runsApart ? WAITING_RUNS.length : 0);
     return (
       '<section class="side-sec side-sec--you">' +
-      '<h3 class="side-h"><span>Waiting on you</span><b class="count count--you">' + (swarm ? "30" : "3") + "</b></h3>" +
-      WAITING.map(function (w) {
+      '<h3 class="side-h"><span>Waiting on you</span><b class="count count--you">' + count + "</b></h3>" +
+      threads.map(function (w) {
         return (
           '<a class="side-row side-row--wait' + (selected === w.name ? " is-on" : "") + '" href="' + w.href + '">' +
           face(w.name, { pose: "waiting", size: 24 }) +
           '<span class="side-text"><span class="side-name">' + w.short + '</span><span class="side-ask">' + w.ask + "</span></span></a>"
         );
       }).join("") +
+      (runsApart
+        ? '<h4 class="side-sub">From runs</h4>' +
+          WAITING_RUNS.map(function (r) {
+            return (
+              '<a class="side-row side-row--wait" href="#"><span class="side-lead">' + mark("waiting") + "</span>" +
+              '<span class="side-text"><span class="side-name">' + r.title + '</span><span class="side-ask">' + r.ask + "</span></span></a>"
+            );
+          }).join("")
+        : "") +
       (swarm ? '<a class="side-row side-row--more" href="intake.html">27 more waiting on you</a>' : "") +
       "</section>"
     );
@@ -546,7 +569,7 @@
 
   /** Returns one navigation row of the Hercule tab: icon, label and a right-aligned count. */
   function navRow(key, label, ic, selected, count, extra) {
-    var href = { office: "office.html", intake: "intake.html", settings: "settings-appearance.html" }[key] || "#";
+    var href = { office: "office.html", intake: "intake.html", workflows: "workflows.html", settings: "settings-appearance.html" }[key] || "#";
     return (
       '<a class="nav-row' + (selected === key ? " is-on" : "") + '" href="' + href + '"' + (selected === key ? ' aria-current="page"' : "") + ">" +
       icon(ic) + "<span>" + label + "</span>" + (extra || "") +
@@ -557,12 +580,13 @@
 
   // Which tab of the sidebar each page opens on. Session and assistant pages open on Threads;
   // the places of Hercule itself open on the Hercule tab.
-  var HERCULE_TAB = { office: 1, intake: 1, checkin: 1, fleet: 1, settings: 1 };
+  var HERCULE_TAB = { office: 1, intake: 1, checkin: 1, fleet: 1, workflows: 1, settings: 1 };
 
   /**
    * Renders the desktop sidebar into el. data-side names what is selected: a thread key ("fix",
-   * "new"), an assistant key ("ada") or a place ("intake", "office", "settings"). The two tabs
-   * are real: clicking one swaps the list without leaving the page.
+   * "new"), an assistant key ("ada") or a place ("intake", "office", "workflows", "settings").
+   * The two tabs are real: clicking one swaps the list without leaving the page. With
+   * data-side-runs, Waiting on you lists the sessions of runs apart, under "From runs".
    */
   function sidebar(el) {
     var selected = el.dataset.side;
@@ -572,6 +596,8 @@
     el.classList.add("side");
     el.dataset.tab = tab;
     var waitingName = { fix: "Fix 3-D Secure checkout for EU cards" }[selected];
+    // "From runs" in Waiting on you shows only where a page opts in with data-side-runs: the Workflows pages.
+    // session-active.html's sidebar is pixel-compared with the app's (pnpm compare:bureau), which has no such row, so it must stay without one.
     el.innerHTML =
       '<div class="side-top"><span class="tl"><i></i><i></i><i></i></span><button class="icon-btn" title="Hide the sidebar">' + icon("sidebar") + "</button></div>" +
       '<div class="seg seg--side" role="tablist">' +
@@ -581,7 +607,7 @@
       '<a class="nav-row" href="session-empty.html">' + icon("compose") + "<span>New thread</span><kbd>⌘N</kbd></a>" +
       '<button class="nav-row">' + icon("search") + "<span>Search</span><kbd>⌘K</kbd></button></div>" +
       '<div class="side-scroll">' +
-      (first ? "" : waitingSection(waitingName)) +
+      (first ? "" : waitingSection(waitingName, "sideRuns" in el.dataset)) +
       '<div class="side-pane" data-pane="threads">' +
       threadSections(selected) +
       '<section class="side-sec"><h3 class="side-h"><span>Assistants</span></h3>' +
@@ -599,7 +625,8 @@
       navRow("checkin", "Check-in", "checkin", selected) +
       navRow("tasks", "Tasks", "tasks", selected, first ? "" : swarm ? "118" : "14") +
       navRow("runs", "Runs", "runs", selected, first ? "" : swarm ? "64" : "6") +
-      navRow("workflows", "Workflows", "workflows", selected, first ? "1" : swarm ? "14" : "6") +
+      // The Workflows row has no count: a total asks nothing of the user.
+      navRow("workflows", "Workflows", "workflows", selected) +
       "</section>" +
       '<section class="side-sec"><h3 class="side-h"><span>System</span></h3>' +
       navRow("fleet", "Fleet", "fleet", selected, first ? "1" : swarm ? "9" : "3") +

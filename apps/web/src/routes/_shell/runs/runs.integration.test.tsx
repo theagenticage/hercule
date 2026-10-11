@@ -154,15 +154,22 @@ const CONNECTIONS: readonly Connection[] = [GITHUB_WORK, GITHUB_OLD, MAIL];
 
 const SESSION_ID = "0199c0ff-5555-7000-8000-00000000abcd";
 
-/** A run that is still going, started by the user. The newest run. */
-const RUNNING: RunSummary = {
+/** The fields of the newest run that do not depend on its status. */
+const NEWEST_RUN_FIELDS = {
   id: "0199c0ff-2222-7000-8000-000000000001",
   workflowId: RELEASE_ID,
   workflowName: RELEASE_NAME,
   origin: { kind: "manual", actor: "user" },
-  status: "running",
   createdAt: buildTimestampMinutesAgo(2),
+} as const;
+
+/** A run that is still going, started by the user, at its `build` step. The newest run. */
+const RUNNING: RunSummary = {
+  ...NEWEST_RUN_FIELDS,
+  status: "running",
   startedAt: buildTimestampMinutesAgo(2),
+  activeStepIds: ["build"],
+  awaitedSignalIds: [],
 };
 
 /** A run that failed at a step, started by an agent's session. */
@@ -543,7 +550,7 @@ describe("Runs > the list", () => {
     await findRunRow(RUNNING.id);
 
     const started: RunSummary = {
-      ...RUNNING,
+      ...NEWEST_RUN_FIELDS,
       id: "0199c0ff-2222-7000-8000-000000000004",
       status: "pending",
       createdAt: new Date().toISOString(),
@@ -556,7 +563,12 @@ describe("Runs > the list", () => {
 
     hold([
       started,
-      { ...RUNNING, status: "completed", finishedAt: new Date().toISOString() },
+      {
+        ...NEWEST_RUN_FIELDS,
+        status: "completed",
+        startedAt: buildTimestampMinutesAgo(2),
+        finishedAt: new Date().toISOString(),
+      },
       FAILED,
       OF_DELETED,
     ]);

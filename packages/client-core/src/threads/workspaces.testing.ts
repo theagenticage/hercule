@@ -109,6 +109,7 @@ export const buildSession = (over: Partial<Session> & { id: string }): Session =
   status: "idle",
   resumable: false,
   resumeHeld: false,
+  toolCalls: 0,
   permissionProfileId: "p-unrestricted",
   agentId: null,
   conversationId: null,

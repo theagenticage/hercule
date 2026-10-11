@@ -268,6 +268,56 @@ describe("paging through a transcript", () => {
   });
 });
 
+describe("a session's tool calls", () => {
+  it("counts each stored tool call start from every agent, and a replayed one once", async () => {
+    const toolCalls = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* aSession;
+        const counts: Array<number> = [];
+        const appendItem = (seq: number, event: Partial<ProviderEvent>) =>
+          Effect.gen(function* () {
+            yield* sessions.append(sessionId, {
+              seq,
+              at,
+              event: {
+                eventId: mintId(),
+                sessionId,
+                at,
+                turnId: "t1",
+                itemId: `i${String(seq)}`,
+                detail: {},
+                ...event,
+              } as ProviderEvent,
+            });
+            const session = yield* sessions.one(sessionId);
+            counts.push(Option.getOrThrow(session).toolCalls);
+          });
+        yield* appendItem(1, { _tag: "item.started", kind: "user_message" });
+        yield* appendItem(2, { _tag: "item.started", kind: "command_execution" });
+        yield* appendItem(3, {
+          _tag: "item.completed",
+          kind: "command_execution",
+          status: "completed",
+        });
+        yield* appendItem(4, { _tag: "item.started", kind: "subagent" });
+        yield* appendItem(5, { _tag: "item.started", kind: "file_read", subagentId: "sub-1" });
+        yield* appendItem(6, {
+          _tag: "item.started",
+          kind: "assistant_message",
+          subagentId: "sub-1",
+        });
+        // A replayed frame: its sequence number is already stored.
+        yield* appendItem(5, { _tag: "item.started", kind: "file_read", subagentId: "sub-1" });
+        return counts;
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    // A message, a completed item and a replayed frame add nothing.
+    expect(toolCalls).toEqual([0, 1, 1, 2, 3, 3, 3]);
+  });
+});
+
 /** Inserts a session and moves it to `starting` with a token hash, as dispatch does. */
 const insertStartedSession = (tokenHash: string) =>
   Effect.gen(function* () {

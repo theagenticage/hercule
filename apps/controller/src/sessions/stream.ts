@@ -25,7 +25,7 @@
  * session's own agent moves the session's status and closes its own Requests
  * at the end of a turn (spec 06 section 13.1).
  */
-import type { ProviderEvent, StreamKind, SubagentId } from "@hercule/protocol";
+import type { ItemKind, ProviderEvent, StreamKind, SubagentId } from "@hercule/protocol";
 import type { SessionRequest, SessionStatus } from "@hercule/contract";
 
 /**
@@ -89,6 +89,26 @@ export const attributeEvent = (event: ProviderEvent): SubagentId | undefined => 
   if (event._tag === "subagent.started") return event.parentSubagentId;
   return "subagentId" in event ? event.subagentId : undefined;
 };
+
+/**
+ * The item kinds that count as tool calls. An `item.started` of one of these
+ * kinds adds one to its session's `toolCalls`, and one to the `toolCalls` of
+ * the subagent that reported it, when a subagent did. Handing work to a
+ * subagent, the `subagent` kind, counts as a call too.
+ *
+ * Migration 0067 copies this list to count the tool calls stored before it.
+ * A kind added here counts only the calls stored after the change, unless a
+ * new migration counts the earlier ones.
+ */
+export const TOOL_CALL_KINDS: ReadonlySet<ItemKind> = new Set([
+  "command_execution",
+  "file_change",
+  "file_read",
+  "file_search",
+  "tool_call",
+  "web_search",
+  "subagent",
+]);
 
 /**
  * Builds the key one held text is stored under. Two agents may stream at the

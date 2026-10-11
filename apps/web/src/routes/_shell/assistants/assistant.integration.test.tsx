@@ -78,6 +78,7 @@ const buildConversationSession = (overrides: Partial<Session>): Session => ({
   status: "idle",
   resumable: true,
   resumeHeld: false,
+  toolCalls: 0,
   permissionProfileId: ADA.permissionProfileId,
   agentId: ADA.id,
   conversationId: WEB.id,

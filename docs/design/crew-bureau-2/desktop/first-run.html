@@ -263,11 +263,6 @@
         color: var(--faint);
         white-space: nowrap;
       }
-      /* The flex display above would otherwise outrank the hidden attribute,
-         and the ladder would show on the welcome. */
-      .fr-ladder[hidden] {
-        display: none;
-      }
       [data-variant="a"] .fr-ladder {
         margin-top: 34px;
       }
@@ -469,14 +464,6 @@
           border-right-color: currentColor;
           opacity: 0.5;
         }
-      }
-      .btn[disabled] {
-        opacity: 0.5;
-        pointer-events: none;
-      }
-      /* A button at work keeps its colour: it is busy, not unavailable. */
-      .btn[aria-busy="true"] {
-        pointer-events: none;
       }
 
       /* ---------- welcome ---------- */
