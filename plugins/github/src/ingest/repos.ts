@@ -15,19 +15,26 @@
  *    repository where nothing changed answers 304, which costs no quota.
  * 2. For each pull request diffed: `GET .../pulls/{n}/reviews`, for new
  *    reviews, and, when it is open or was just closed, `GET .../pulls/{n}`,
- *    for its head commit, its review requests and who merged it. When the
- *    review requests to the user or their teams changed, or the pull
- *    request asks for one of them, `GET .../issues/{n}/events` too, for who
- *    asked and when. The same request is sent for any issue or pull request
- *    whose assignees changed, for who was assigned or unassigned, by whom
- *    and when; an item whose assignees did not change costs no history
- *    request of its own. The second case above catches a request made again after a
- *    review between two polls: the reviewer leaves the list when they review
- *    and is back on it by the next poll, so the list alone looks unchanged,
- *    and the update time may not have moved either when both happened in
- *    the snapshot's own second. When the history holds a request or a
- *    removal to emit, `GET .../pulls/{n}` once more, after the reviews and
- *    the history, for who is asked now (see `emitHistoryEvents`).
+ *    for its head commit, its review requests and who merged it. It also
+ *    sends `GET .../issues/{n}/events`, for who asked and when, in any of
+ *    these cases:
+ *    - the review requests to the user or their teams changed;
+ *    - the pull request asks for the user or one of their teams. This
+ *      catches a request made again after a review between two polls: the
+ *      reviewer leaves the list when they review and is back on it by the
+ *      next poll, so the list alone looks unchanged, and the update time may
+ *      not have moved either when both happened in the snapshot's own
+ *      second;
+ *    - the user wrote the pull request and the reviewers it asks, anyone,
+ *      changed. This finds the user asking someone else for another review.
+ *
+ *    When the history holds a request or a removal to emit,
+ *    `GET .../pulls/{n}` once more, after the reviews and the history, for
+ *    who is asked now (see `emitHistoryEvents`).
+ *
+ *    The history is also read for any issue or pull request whose assignees
+ *    changed, for who was assigned or unassigned, by whom and when. An item
+ *    whose assignees did not change costs no history request of its own.
  *    Reviews and history are read newest first, up to a page limit, and a
  *    listing cut short logs a warning.
  * 3. When the listing held any item, or the last poll's comment listing
@@ -93,8 +100,9 @@
  * state the diff started from. A poll that emitted its events but failed
  * before saving the snapshot diffs from the same snapshot next time and
  * builds the same keys, so the host writes each event once. When the item
- * changed again in between, a label change that grew holds a different digest and is emitted again with the newer change in it, so
- * nothing is lost. The one key without a snapshot is `reopened` for an item
+ * changed again in between, a label change that grew holds a different
+ * digest and is emitted again with the newer change in it, so nothing is
+ * lost. The one key without a snapshot is `reopened` for an item
  * missing from it, which holds the item's own `updated_at`.
  */
 import { Effect, Option, Schema } from "effect";
@@ -109,6 +117,7 @@ import {
   emitInTimeOrder,
   fetchReviewRequests,
   isAtOrAfter,
+  readAllReviewRequests,
   readReviewRequests,
   type ActivityPoll,
 } from "./activity";
@@ -151,6 +160,15 @@ const ItemSnapshot = Schema.Struct({
    * which counts as no change.
    */
   reviewRequests: Schema.optionalKey(Schema.Array(Schema.String)),
+  /**
+   * The reviews an open pull request asks of anyone: the login of each
+   * account, and `team:<org>/<slug>` for each team, sorted. For a pull
+   * request the user wrote, a change in it makes the poll read the history,
+   * which tells when the user asked someone else for a review. Absent for an
+   * issue, and for a snapshot an older version of this plugin wrote, which
+   * counts as no change.
+   */
+  allReviewRequests: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
 type ItemSnapshot = Schema.Schema.Type<typeof ItemSnapshot>;
@@ -509,7 +527,11 @@ const baselineRepo = (
       items[String(issue.number)] = buildItemSnapshot(issue, {
         ...(pull === undefined
           ? {}
-          : { headSha: pull.head.sha, reviewRequests: readReviewRequests(poll, pull) }),
+          : {
+              headSha: pull.head.sha,
+              reviewRequests: readReviewRequests(poll, pull),
+              allReviewRequests: readAllReviewRequests(poll, pull),
+            }),
         fromBaseline: true,
       });
     }
@@ -520,12 +542,14 @@ const baselineRepo = (
 interface SnapshotExtras {
   readonly headSha?: string | undefined;
   readonly reviewRequests?: ReadonlyArray<string> | undefined;
+  readonly allReviewRequests?: ReadonlyArray<string> | undefined;
   readonly fromBaseline: boolean;
 }
 
 /**
  * Builds an item's snapshot from the listing, with the head commit and the
- * review requests of a pull request when they are known, marked
+ * review requests (to the user and their teams, and to anyone) of a pull
+ * request when they are known, marked
  * `fromBaseline` when `extras.fromBaseline` is true.
  */
 const buildItemSnapshot = (issue: ListedIssue, extras: SnapshotExtras): ItemSnapshot => ({
@@ -537,6 +561,9 @@ const buildItemSnapshot = (issue: ListedIssue, extras: SnapshotExtras): ItemSnap
   ...(extras.headSha === undefined ? {} : { headSha: extras.headSha }),
   ...(extras.fromBaseline ? { fromBaseline: true } : {}),
   ...(extras.reviewRequests === undefined ? {} : { reviewRequests: extras.reviewRequests }),
+  ...(extras.allReviewRequests === undefined
+    ? {}
+    : { allReviewRequests: extras.allReviewRequests }),
 });
 
 /** Checks whether two lists of assignee logins hold different people, in any order. */
@@ -727,6 +754,7 @@ const pollRepo = (
       }
       let headSha = previous?.headSha;
       let reviewRequests = previous?.reviewRequests;
+      let allReviewRequests = previous?.allReviewRequests;
       // An item missing from the snapshot that is not new has unknown
       // assignees before, so only the history since the cursor could tell,
       // and it is not read: see `listItemChanges`.
@@ -734,7 +762,8 @@ const pollRepo = (
         (previous !== undefined || isNewItem(issue, previous, stored.cursor)) &&
         haveAssigneesChanged(previous?.assignees ?? [], readAssignees(issue));
       if (item.kind === "pr") {
-        yield* emitNewReviews(poll, item, start, isUserAccount(poll.identity, issue.user));
+        const wroteIt = isUserAccount(poll.identity, issue.user);
+        yield* emitNewReviews(poll, item, start, wroteIt);
         if (pull !== undefined && pull.state === "open") {
           headSha = pull.head.sha;
           const now = readReviewRequests(poll, pull);
@@ -750,6 +779,19 @@ const pollRepo = (
             readsHistory = true;
           }
           reviewRequests = now;
+          // Only the pull requests the user wrote are watched for a request
+          // to someone else, so a busy repository does not cost a history
+          // read for every reviewer change on other people's pull requests.
+          const everyoneNow = readAllReviewRequests(poll, pull);
+          const everyoneBefore = previous === undefined ? [] : previous.allReviewRequests;
+          if (
+            wroteIt &&
+            everyoneBefore !== undefined &&
+            haveReviewRequestsChanged(everyoneBefore, everyoneNow)
+          ) {
+            readsHistory = true;
+          }
+          allReviewRequests = everyoneNow;
         }
       }
       if (readsHistory) {
@@ -769,6 +811,7 @@ const pollRepo = (
       items[String(issue.number)] = buildItemSnapshot(issue, {
         headSha,
         reviewRequests: item.kind === "pr" ? reviewRequests : undefined,
+        allReviewRequests: item.kind === "pr" ? allReviewRequests : undefined,
         fromBaseline: unchangedSinceBaseline,
       });
     }

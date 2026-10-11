@@ -687,6 +687,106 @@ describe("the repos feed", () => {
     ]);
   });
 
+  describe("when the user asks someone else for a review", () => {
+    const OUTSIDE_REVIEWER = { login: "hubot", id: 77 };
+
+    /** Returns a history entry in which the user asks `OUTSIDE_REVIEWER` for a review at `time`. */
+    const buildRequestToOutsider = (id: number, time: string) => ({
+      id,
+      event: "review_requested",
+      created_at: time,
+      actor: TEST_ACCOUNT,
+      requested_reviewer: OUTSIDE_REVIEWER,
+    });
+
+    /** Returns a repository whose pull request 2 was written by `author`, baselined. */
+    const baselineWithPullBy = async (author: { login: string }) => {
+      const repository = buildRepository();
+      repository.issues[1] = { ...repository.issues[1]!, user: author };
+      return { repository, harness: await baseline(repository) };
+    };
+
+    const askAtTen = (repository: StubRepository) => {
+      repository.requestedReviewers[2] = [OUTSIDE_REVIEWER];
+      repository.history[2] = [buildRequestToOutsider(5, "2026-10-01T10:05:00Z")];
+      repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T10:05:00Z" };
+      repository.etag = '"v2"';
+    };
+
+    it("emits the request to someone else on a pull request the user wrote", async () => {
+      const { repository, harness } = await baselineWithPullBy(TEST_ACCOUNT);
+      askAtTen(repository);
+
+      const { requests } = await poll(harness, answerFrom(repository));
+
+      expect(listEvents(harness)).toEqual([`github.pr.review-requested pr.review-requested:5`]);
+      expect(harness.events[0]!.payload).toMatchObject({
+        reviewer: "other",
+        requestedBy: TEST_ACCOUNT.login,
+        byYou: true,
+        toYou: false,
+      });
+      expect(requests.filter((request) => request.path.endsWith("/issues/2/events"))).toHaveLength(
+        1,
+      );
+    });
+
+    it("reads no history when the reviewers asked did not change", async () => {
+      const { repository, harness } = await baselineWithPullBy(TEST_ACCOUNT);
+      askAtTen(repository);
+      await poll(harness, answerFrom(repository));
+      repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T11:00:00Z" };
+      repository.etag = '"v3"';
+
+      const { requests } = await poll(harness, answerFrom(repository));
+
+      expect(requests.filter((request) => request.path.endsWith("/issues/2/events"))).toHaveLength(
+        0,
+      );
+      expect(listEvents(harness)).toHaveLength(1);
+    });
+
+    it("emits nothing for a pull request someone else wrote, and reads no history", async () => {
+      const { repository, harness } = await baselineWithPullBy({ login: "mona" });
+      askAtTen(repository);
+
+      const { requests } = await poll(harness, answerFrom(repository));
+
+      expect(listEvents(harness)).toEqual([]);
+      expect(requests.filter((request) => request.path.endsWith("/issues/2/events"))).toHaveLength(
+        0,
+      );
+    });
+
+    it("counts a snapshot from before the feed kept the reviewers asked as unchanged", async () => {
+      const { repository, harness } = await baselineWithPullBy(TEST_ACCOUNT);
+      repository.requestedReviewers[2] = [OUTSIDE_REVIEWER];
+      repository.history[2] = [buildRequestToOutsider(4, "2026-10-01T09:20:00Z")];
+      repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T09:30:00Z" };
+      await poll(harness, answerFrom(repository));
+      const stored = harness.state.get(`repos/${REPO}`) as {
+        items: Record<string, Record<string, unknown>>;
+      };
+      delete stored.items["2"]!["allReviewRequests"];
+      repository.issues[1] = {
+        ...repository.issues[1],
+        labels: [{ name: "ready" }],
+        updated_at: "2026-10-01T11:00:00Z",
+      };
+      repository.etag = '"v3"';
+
+      const { requests } = await poll(harness, answerFrom(repository));
+
+      expect(listEvents(harness).filter((key) => key.includes("review-requested"))).toEqual([]);
+      expect(requests.filter((request) => request.path.endsWith("/issues/2/events"))).toHaveLength(
+        0,
+      );
+      expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
+        items: { "2": { allReviewRequests: [OUTSIDE_REVIEWER.login] } },
+      });
+    });
+  });
+
   it("emits a review and a request made again in the snapshot's own second, in that order", async () => {
     const repository = buildRepository();
     repository.requestedReviewers[2] = [TEST_ACCOUNT];

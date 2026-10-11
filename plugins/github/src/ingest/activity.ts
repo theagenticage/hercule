@@ -9,7 +9,7 @@
 import { Effect, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { EmittedEvent, IngestContext, PluginError } from "@hercule/plugin-host";
-import { readReviewVerdict, type GithubAccount, type ReviewVerdict } from "../github-objects";
+import { readReviewVerdict, type ReviewVerdict } from "../github-objects";
 import { findMention, isUserAccount, type GithubIdentity } from "../identity";
 import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
 import { IssueEvent, ListedPull, ListedReview, type ListedComment } from "./feed-objects";
@@ -327,6 +327,21 @@ export const readReviewRequests = (poll: ActivityPoll, pull: ListedPull): Array<
 };
 
 /**
+ * Returns every review a pull request asks for now, of anyone: the login of
+ * each requested account, and `team:<org>/<slug>` for each requested team,
+ * sorted. The snapshot keeps it to notice a request to someone other than the
+ * user or their teams.
+ */
+export const readAllReviewRequests = (poll: ActivityPoll, pull: ListedPull): Array<string> => {
+  const owner = poll.repo.split("/")[0]!;
+  const accounts = (pull.requested_reviewers ?? []).map((account) => account.login);
+  const teams = (pull.requested_teams ?? []).map(
+    (team) => `team:${buildTeamName(owner, team.slug)}`,
+  );
+  return [...accounts, ...teams].sort();
+};
+
+/**
  * Fetches a pull request and returns the reviews it asks of the user and
  * their teams now, as `readReviewRequests` returns them. Fails as
  * `fetchFeedResponse` fails, and with a `PluginError` when GitHub returns an
@@ -364,11 +379,12 @@ const emitAssignmentEvent = (
   const actor = entry.actor?.login ?? null;
   const assignee = entry.assignee.login;
   const place = buildItemPlace(item);
-  const key = assigned ? "issue.assigned" : "issue.unassigned";
+  const kind = assigned ? "github.issue.assigned" : "github.issue.unassigned";
+  const dedupPrefix = assigned ? "issue.assigned" : "issue.unassigned";
   return poll.emit(
     buildItemEvent(item, {
-      kind: `github.${key}`,
-      dedupKey: `${key}:${String(entry.id)}`,
+      kind,
+      dedupKey: `${dedupPrefix}:${String(entry.id)}`,
       occurredAt: entry.created_at,
       title: assigned
         ? `${actor ?? "Someone"} assigned ${assignee} to ${place}`
@@ -386,15 +402,14 @@ const emitAssignmentEvent = (
 
 /**
  * Emits `github.pr.review-requested` with `reviewer: "other"` for one
- * history entry in which the user (`asker`) asked someone who is neither the
- * user nor one of their teams. A request that two other people made between
+ * history entry in which the user asked someone who is neither the user nor
+ * one of their teams. A request that two other people made between
  * themselves is none of the user's business, so the caller does not pass it.
  */
 const emitReviewRequestToOther = (
   poll: ActivityPoll,
   item: GithubItem,
   entry: IssueEvent,
-  asker: GithubAccount | null,
   raw: Schema.JsonObject,
 ): Effect.Effect<void, FeedError> => {
   const requested =
@@ -407,9 +422,9 @@ const emitReviewRequestToOther = (
       kind: "github.pr.review-requested",
       dedupKey: `pr.review-requested:${String(entry.id)}`,
       occurredAt: entry.created_at,
-      title: `${asker?.login ?? "Someone"} requested a review from ${requested} on ${buildItemPlace(item)}`,
-      author: asker?.login ?? null,
-      fields: { reviewer: "other", requestedBy: asker?.login ?? null, byYou: true, toYou: false },
+      title: `${poll.identity.login} requested a review from ${requested} on ${buildItemPlace(item)}`,
+      author: poll.identity.login,
+      fields: { reviewer: "other", requestedBy: poll.identity.login, byYou: true, toYou: false },
       raw: truncateRaw(raw),
     }),
   );
@@ -482,7 +497,7 @@ export const emitHistoryEvents = (
       const target = readRequestedReviewer(poll, entry);
       if (target === undefined) {
         if (requested && isUserAccount(poll.identity, asker)) {
-          yield* emitReviewRequestToOther(poll, item, entry, asker, raw);
+          yield* emitReviewRequestToOther(poll, item, entry, raw);
         }
         continue;
       }
