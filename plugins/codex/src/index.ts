@@ -33,9 +33,10 @@ const definition: ProviderDefinition = {
     disallowedTools: "unsupported",
     structuredOutput: "supported",
   },
-  // Codex's own catalog describes this model as its "fast and efficient" one.
-  // It is in the live model list of codex 0.154.0, which `gpt-6-luna` is not.
-  suggestedTextGenerationModel: "gpt-5.6-luna",
+  // Codex lists this model from release 0.162 on. On an older release it is
+  // not in the instance's model list, so Automatic passes over Codex rather
+  // than ask for a model that is not there.
+  suggestedTextGenerationModel: "gpt-6-luna",
 };
 
 export const codex: Plugin = {

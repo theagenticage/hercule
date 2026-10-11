@@ -81,6 +81,7 @@ const SHIPPED = [
         disallowedTools: "unsupported",
         structuredOutput: "supported",
       },
+      suggestedTextGenerationModel: "gpt-6-luna",
     },
   },
   {
