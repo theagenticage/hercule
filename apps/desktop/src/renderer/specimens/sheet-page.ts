@@ -143,4 +143,3 @@ export function stillGraphPane(): void {
   style.textContent = ".graph-pane { mask-image: none !important; overflow: hidden !important; }";
   document.head.append(style);
 }
-
