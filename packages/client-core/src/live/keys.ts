@@ -10,7 +10,6 @@
  * would be a screen that silently stops updating.
  */
 import type {
-  EventHandling,
   Invalidate,
   MutableLiveTopic,
   NotificationFilter,
@@ -20,18 +19,21 @@ import type {
   SignalFilter,
   TaskFilter,
 } from "@hercule/contract";
+import type { HerculeClient } from "../client";
 import { listLoopbackEndpoints } from "../local-runner";
 
 /** A cache key. This package does not read it; the app's query client does. */
 export type LiveQueryKey = ReadonlyArray<unknown>;
 
-/** The filter of an event listing that identifies it in the cache: what `event.query` filters on, without paging. */
-export interface EventListFilter {
-  readonly intake?: boolean;
-  readonly text?: string;
-  readonly source?: string;
-  readonly handling?: ReadonlyArray<EventHandling>;
-}
+/**
+ * The filter of an event listing that identifies it in the cache: the fields
+ * of `event.query` that narrow the listing. Paging and `since` are left out,
+ * so every page of one listing shares one key.
+ */
+export type EventListFilter = Pick<
+  NonNullable<Parameters<HerculeClient["event"]["query"]>[0]["query"]>,
+  "intake" | "text" | "source" | "handling"
+>;
 
 /**
  * The key builder for every read the app makes. The argument of a list or
