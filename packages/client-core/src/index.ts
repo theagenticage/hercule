@@ -323,7 +323,6 @@ export {
   parseSignalPluginId,
   trimAnswerEllipsis,
   type EventDaySection,
-  type EventFacts,
   type EventHandlingLabel,
   type IntakeSection,
   type IntakeTab,

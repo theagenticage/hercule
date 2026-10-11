@@ -13,6 +13,7 @@ import {
   HAND_TO_ACTION_PREFIX,
   isCoreSignalKind,
   type Event,
+  type EventFacts,
   type EventHandling,
   type EventWithFacts,
   type PluginMark,
@@ -755,9 +756,6 @@ export const fitIntakeListWidth = (width: number, available: number): number =>
 
 /** The views of Intake's list: the three over signals, and Everything over the events behind them. */
 export type IntakeView = SignalView | "everything";
-
-/** The facts an event row's handlings are worked out from: what `event.query` reads beside the event. */
-export type EventFacts = Pick<EventWithFacts, "signals" | "resolvedSignals" | "tasks" | "knownBy">;
 
 /**
  * The record a handling's label links to. A client opens the ones it has a

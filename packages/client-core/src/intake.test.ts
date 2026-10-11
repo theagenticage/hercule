@@ -1,5 +1,6 @@
 import {
   EVENT_HANDLINGS,
+  type EventFacts,
   type EventWithFacts,
   type Signal,
   type SignalAction,
@@ -48,7 +49,6 @@ import {
   parseIntakeListWidth,
   parseSignalPluginId,
   trimAnswerEllipsis,
-  type EventFacts,
   type EventHandlingLabel,
 } from "./intake";
 
@@ -877,7 +877,6 @@ describe("buildHandlingLabels", () => {
         resolvedSignals: [
           {
             signalId: "s2",
-            kind: "github/review-requested",
             title: "Review #12",
             outcome: "Approved",
           },
