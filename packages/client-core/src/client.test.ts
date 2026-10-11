@@ -289,8 +289,9 @@ describe("createClient", () => {
   });
 
   it("calls every plugin operation on the route the contract defines", async () => {
-    // The list operation returns an array and every other plugin operation
-    // returns one plugin, so the stub picks its response by route.
+    // The list operation returns an array, `updateIntake` returns the intake
+    // settings, and every other plugin operation returns one plugin, so the
+    // stub picks its response by route.
     const detail = {
       id: "claude-code",
       displayName: "Claude Code",
@@ -300,9 +301,16 @@ describe("createClient", () => {
       status: { _tag: "active" },
       config: {},
       contributions: [],
+      intake: { eventKinds: [], signalKinds: [] },
     };
     const { fetch, sent } = stubFetch((request) =>
-      buildJsonResponse(request.url.endsWith("/api/v1/plugins") ? [detail] : detail),
+      buildJsonResponse(
+        request.url.endsWith("/api/v1/plugins")
+          ? [detail]
+          : request.url.endsWith("/intake")
+            ? detail.intake
+            : detail,
+      ),
     );
     const client = createClient({ baseUrl: BASE, fetch });
     const params = { id: "claude-code" };
@@ -314,8 +322,12 @@ describe("createClient", () => {
     await client.plugin.retry({ params });
     await client.plugin.resetState({ params });
     await client.plugin.configure({ params, payload: { config: { model: "sonnet" } } });
+    await client.plugin.updateIntake({
+      params,
+      payload: { intake: { eventKinds: {}, signalKinds: { "claude-code/done": false } } },
+    });
 
-    const calls = [0, 1, 2, 3, 4, 5, 6].map((index) => {
+    const calls = [0, 1, 2, 3, 4, 5, 6, 7].map((index) => {
       const request = sent(index);
       return `${request.method} ${request.url.slice(BASE.length)}`;
     });
@@ -327,8 +339,12 @@ describe("createClient", () => {
       "POST /api/v1/plugins/claude-code/retry",
       "POST /api/v1/plugins/claude-code/reset-state",
       "PUT /api/v1/plugins/claude-code/config",
+      "PUT /api/v1/plugins/claude-code/intake",
     ]);
     assert.deepStrictEqual(await sent(6).json(), { config: { model: "sonnet" } });
+    assert.deepStrictEqual(await sent(7).json(), {
+      intake: { eventKinds: {}, signalKinds: { "claude-code/done": false } },
+    });
   });
 
   it("sends several statuses as repeated query keys", async () => {
