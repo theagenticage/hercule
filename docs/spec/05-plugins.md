@@ -537,7 +537,7 @@ The writes are `plugin.updateIntake` for level 2 ([./11-public-api-and-agent-sur
 
 What a change affects:
 
-- A signal kind switched on is raised only from new events. Nothing is backfilled.
+- A signal kind switched on is raised only from new events. Nothing is backfilled. *(Amended 2026-10-11, [#528](https://github.com/theagenticage/hercule/issues/528).)* One exception: enrichment routes one event again ([ADR 0025](../adr/0025-enrichment-re-matches-one-event-idempotently.md)), and that routing reads today's settings. So an older event that is enriched after its kind was switched on may raise a signal of that kind. This is a re-match of an event someone chose to touch, not a scan of past events.
 - A signal kind switched off raises no new signals. Its open signals stay and end the usual way.
 - An event kind switched on or off changes Intake's events at once, on read ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#910-intakes-events-and-handlings)).
 - When a Connection is deleted, its entries are deleted with it.

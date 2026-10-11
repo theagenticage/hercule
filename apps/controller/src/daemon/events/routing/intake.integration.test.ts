@@ -31,7 +31,7 @@ import {
   type Plugin,
   type SignalDraft,
 } from "@hercule/plugin-host";
-import { del, get, post } from "../../../http/testing";
+import { del, get, post, send } from "../../../http/testing";
 import { freezeController, requestTransfer } from "../../../promotion/testing";
 import { IDLE_FEEDS, IDLE_INGEST_OPEN } from "../../../plugins/testing";
 import { WAIT_DEADLINE_MS, waitUntil } from "../../../sessions/testing";
@@ -685,6 +685,109 @@ describe("raising a plugin's signals from its events", () => {
         (await listOpenSignals(controller, ASKED_KIND)).length === 2 ? true : undefined,
       );
       expect(builds).toBe(2);
+    });
+  });
+});
+
+/** Switches the `desk/asked` signal kind on or off for the Desk plugin, or for one Connection. */
+const switchAskedSignal = async (
+  { base, token }: SetUpController,
+  on: boolean,
+  connectionId?: string,
+): Promise<void> => {
+  const intake = { eventKinds: {}, signalKinds: { [ASKED_KIND]: on } };
+  const response =
+    connectionId === undefined
+      ? await send("PUT", base, "/api/v1/plugins/desk/intake", { body: { intake }, token })
+      : await send("PATCH", base, `/api/v1/connections/${connectionId}`, {
+          body: { intake },
+          token,
+        });
+  expect(response.status, await response.clone().text()).toBe(200);
+};
+
+/** Emits a question to the user on a new thread, waits until it is routed, and returns its id. */
+const askAndWaitUntilRouted = async (
+  controller: SetUpController,
+  connectionId: string,
+  thread: string,
+): Promise<number> => {
+  const asked = await emitDeskEvent(controller, connectionId, "desk.asked", {
+    thread,
+    by: "marta",
+    toYou: true,
+  });
+  await waitUntilRouted(controller.harness, asked);
+  await waitOutSeveralTicks();
+  return asked;
+};
+
+describe("switching a signal kind on and off in the Intake settings", () => {
+  it("raises a signal from a kind that is on by default", async () => {
+    await withDeskController({ build: "draft" }, async (controller, connectionId) => {
+      const asked = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "s-1",
+        by: "marta",
+        toYou: true,
+      });
+
+      expect((await waitForSignalFrom(controller, ASKED_KIND, asked)).status).toBe("open");
+    });
+  });
+
+  it("raises nothing from a kind that is off for the plugin", async () => {
+    await withDeskController({ build: "draft" }, async (controller, connectionId) => {
+      await switchAskedSignal(controller, false);
+
+      await askAndWaitUntilRouted(controller, connectionId, "s-2");
+
+      expect(await listOpenSignals(controller, ASKED_KIND)).toEqual([]);
+    });
+  });
+
+  it("raises a signal from a kind that is off for the plugin and on for the Connection", async () => {
+    await withDeskController({ build: "draft" }, async (controller, connectionId) => {
+      await switchAskedSignal(controller, false);
+      await switchAskedSignal(controller, true, connectionId);
+
+      const asked = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "s-3",
+        by: "marta",
+        toYou: true,
+      });
+
+      expect((await waitForSignalFrom(controller, ASKED_KIND, asked)).status).toBe("open");
+    });
+  });
+
+  it("raises nothing from a kind that is on for the plugin and off for the Connection", async () => {
+    await withDeskController({ build: "draft" }, async (controller, connectionId) => {
+      await switchAskedSignal(controller, true);
+      await switchAskedSignal(controller, false, connectionId);
+
+      await askAndWaitUntilRouted(controller, connectionId, "s-4");
+
+      expect(await listOpenSignals(controller, ASKED_KIND)).toEqual([]);
+    });
+  });
+
+  it("follows each switch between two events, without a restart", async () => {
+    await withDeskController({ build: "draft" }, async (controller, connectionId) => {
+      await switchAskedSignal(controller, false);
+      await askAndWaitUntilRouted(controller, connectionId, "s-5");
+      expect(await listOpenSignals(controller, ASKED_KIND)).toEqual([]);
+
+      await switchAskedSignal(controller, true);
+      const second = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "s-6",
+        by: "marta",
+        toYou: true,
+      });
+      await waitForSignalFrom(controller, ASKED_KIND, second);
+
+      await switchAskedSignal(controller, false, connectionId);
+      await askAndWaitUntilRouted(controller, connectionId, "s-7");
+      expect(await listOpenSignals(controller, ASKED_KIND)).toHaveLength(1);
     });
   });
 });

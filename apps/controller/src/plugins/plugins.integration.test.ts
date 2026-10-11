@@ -26,9 +26,11 @@ import {
 import { registry as shipped } from "./registry";
 import {
   buildProviderDefinition,
+  createIntakeFixture,
   createPluginFixture,
   IDLE_FEEDS,
   IDLE_INGEST_OPEN,
+  INTAKE_FIXTURE,
 } from "./testing";
 
 /** A plugin as the API returns it. */
@@ -50,6 +52,7 @@ interface PluginDetail {
     readonly id: string;
     readonly definition: Record<string, unknown>;
   }>;
+  readonly intake: IntakeSettingsBody;
 }
 
 /**
@@ -412,6 +415,302 @@ describe("what a live subscriber receives about a plugin", () => {
       for (const message of seen) {
         expect(message._tag).toBe("invalidate");
       }
+    });
+  });
+});
+
+/** The Intake settings of a plugin as the API returns them. */
+interface IntakeSettingsBody {
+  readonly eventKinds: ReadonlyArray<{ kind: string; on: boolean; level: string }>;
+  readonly signalKinds: ReadonlyArray<{ kind: string; on: boolean; level: string }>;
+}
+
+/** Turns a settings list into `kind -> "on@level"`, so a test reads one line per list. */
+const summarizeSettings = (
+  settings: ReadonlyArray<{ kind: string; on: boolean; level: string }>,
+): Record<string, string> =>
+  Object.fromEntries(
+    settings.map(({ kind, on, level }) => [kind, `${on ? "on" : "off"}@${level}`]),
+  );
+
+const updatePluginIntake = (
+  base: string,
+  token: string,
+  id: string,
+  intake: { eventKinds?: Record<string, boolean>; signalKinds?: Record<string, boolean> },
+): Promise<Response> =>
+  send("PUT", base, `/api/v1/plugins/${id}/intake`, {
+    body: { intake: { eventKinds: {}, signalKinds: {}, ...intake } },
+    token,
+  });
+
+/** Boots the fixture plugin that declares event kinds and signal kinds beside the usual ones. */
+const withIntakePlugin = (
+  body: (harness: ServerHarness, calls: ReadonlyArray<string>) => Promise<void>,
+): Promise<void> => {
+  const fixture = createIntakeFixture();
+  return withServer((harness) => body(harness, fixture.calls), {
+    plugins: [fixture.plugin, ...buildPlugins()],
+  });
+};
+
+describe("the Intake settings of a plugin", () => {
+  const { opened, labeled, asked, mentioned } = INTAKE_FIXTURE;
+
+  it("are in the plugin's detail, from the defaults the plugin declares", async () => {
+    await withIntakePlugin(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      const detail = await readPlugin(base, token, "intaked");
+      expect(summarizeSettings(detail.intake.eventKinds)).toEqual({
+        [opened]: "on@default",
+        [labeled]: "off@default",
+      });
+      expect(summarizeSettings(detail.intake.signalKinds)).toEqual({
+        [asked]: "on@default",
+        [mentioned]: "on@default",
+      });
+      const firstSignalKind = detail.intake.signalKinds[0] as
+        { label: string; description: string } | undefined;
+      expect(firstSignalKind?.label).toBe("Asked");
+      expect(firstSignalKind?.description).not.toBe("");
+      expect(detail.intake.eventKinds[0]).toMatchObject({ description: "Something was opened." });
+
+      // The listing carries the same settings.
+      const listed = (await listPlugins(base, token)).find((plugin) => plugin.id === "intaked");
+      expect(listed).toEqual(detail);
+    });
+  });
+
+  it("are empty lists for a plugin that declares no kinds, and for a refused plugin", async () => {
+    await withIntakePlugin(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      for (const id of ["alpha", ...REFUSED]) {
+        const detail = await readPlugin(base, token, id);
+        expect(detail.intake, id).toEqual({ eventKinds: [], signalKinds: [] });
+      }
+    });
+  });
+
+  it("are returned resolved by PUT /plugins/{id}/intake, and stored by the plugin", async () => {
+    await withIntakePlugin(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      const response = await updatePluginIntake(base, token, "intaked", {
+        eventKinds: { [labeled]: true },
+        signalKinds: { [asked]: false },
+      });
+      expect(response.status, await response.clone().text()).toBe(200);
+      const settings = (await response.json()) as IntakeSettingsBody;
+      expect(summarizeSettings(settings.eventKinds)).toEqual({
+        [opened]: "on@default",
+        [labeled]: "on@plugin",
+      });
+      expect(summarizeSettings(settings.signalKinds)).toEqual({
+        [asked]: "off@plugin",
+        [mentioned]: "on@default",
+      });
+
+      const read = await readPlugin(base, token, "intaked");
+      expect(read.intake).toEqual(settings);
+    });
+  });
+
+  it("drop an entry equal to the default, so toggling a kind on and off stores nothing", async () => {
+    await withIntakePlugin(async ({ base, sql }) => {
+      const token = await completeSetup(base);
+      const readStored = async (): Promise<unknown> => {
+        const rows = await Effect.runPromise(
+          Effect.orDie(
+            sql<{ readonly intake: string }>`SELECT intake FROM plugins WHERE id = 'intaked'`,
+          ),
+        );
+        return JSON.parse(rows[0]!.intake);
+      };
+
+      await updatePluginIntake(base, token, "intaked", { eventKinds: { [labeled]: true } });
+      expect(await readStored()).toEqual({ eventKinds: { [labeled]: true }, signalKinds: {} });
+
+      // Turning it off again sends the same level with the kind equal to its default.
+      const off = await updatePluginIntake(base, token, "intaked", {
+        eventKinds: { [labeled]: false, [opened]: true },
+        signalKinds: { [mentioned]: true },
+      });
+      expect(off.status, await off.clone().text()).toBe(200);
+      expect(await readStored()).toEqual({ eventKinds: {}, signalKinds: {} });
+      expect(summarizeSettings(((await off.json()) as IntakeSettingsBody).eventKinds)).toEqual({
+        [opened]: "on@default",
+        [labeled]: "off@default",
+      });
+    });
+  });
+
+  it("replace the plugin's whole level on every write", async () => {
+    await withIntakePlugin(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      await updatePluginIntake(base, token, "intaked", { signalKinds: { [asked]: false } });
+      const second = await updatePluginIntake(base, token, "intaked", {
+        signalKinds: { [mentioned]: false },
+      });
+
+      expect(summarizeSettings(((await second.json()) as IntakeSettingsBody).signalKinds)).toEqual({
+        [asked]: "on@default",
+        [mentioned]: "off@plugin",
+      });
+    });
+  });
+
+  it("refuse a kind the plugin does not declare, naming its path, and store nothing", async () => {
+    await withIntakePlugin(async ({ base, audit }) => {
+      const token = await completeSetup(base);
+
+      const response = await updatePluginIntake(base, token, "intaked", {
+        eventKinds: { "intaked.unknown": true },
+        signalKinds: { "intaked/unknown": false, [asked]: false },
+      });
+
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as {
+        readonly error: {
+          readonly code: string;
+          readonly message: string;
+          readonly details: {
+            readonly issues: ReadonlyArray<{ path: ReadonlyArray<string>; message: string }>;
+          };
+        };
+      };
+      expect(body.error.code).toBe("validation");
+      expect(body.error.details.issues.map((issue) => issue.path)).toEqual([
+        ["intake", "eventKinds", "intaked.unknown"],
+        ["intake", "signalKinds", "intaked/unknown"],
+      ]);
+      expect(body.error.message).toContain("intaked/unknown");
+      expect(await audit("plugin.intakeUpdated")).toHaveLength(0);
+      const read = await readPlugin(base, token, "intaked");
+      expect(summarizeSettings(read.intake.signalKinds)[asked]).toBe("on@default");
+    });
+  });
+
+  it("refuse a plugin that failed to load, and say so instead of saying it declares no kinds", async () => {
+    const broken = createPluginFixture({
+      id: "broken",
+      registerFails: "broken could not register",
+    });
+    await withServer(
+      async ({ base, audit }) => {
+        const token = await completeSetup(base);
+        expect((await readPlugin(base, token, "broken")).status._tag).toBe("errored");
+
+        // A refused plugin is refused the same way: neither declares any kind.
+        for (const id of ["broken", ...REFUSED]) {
+          const response = await updatePluginIntake(base, token, id, {});
+          expect(response.status, id).toBe(400);
+          const body = (await response.json()) as {
+            readonly error: { readonly code: string; readonly message: string };
+          };
+          expect(body.error.code, id).toBe("validation");
+          expect(body.error.message, id).toContain(`The plugin ${id} failed to load`);
+          expect(body.error.message, id).toContain("restart the controller");
+          expect(body.error.message, id).not.toContain("declares no");
+        }
+        expect(await audit("plugin.intakeUpdated")).toHaveLength(0);
+      },
+      { plugins: [broken.plugin, ...buildPlugins()] },
+    );
+  });
+
+  it("refuse a plugin this binary does not include", async () => {
+    await withIntakePlugin(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      const response = await updatePluginIntake(base, token, "gamma", {});
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+    });
+  });
+
+  it("change while the plugin is disabled, and are kept when it is enabled again", async () => {
+    await withIntakePlugin(async ({ base }) => {
+      const token = await completeSetup(base);
+      await movePlugin(base, token, "intaked", "disable");
+
+      const disabled = await readPlugin(base, token, "intaked");
+      expect(disabled.intake.eventKinds).toHaveLength(2);
+      const response = await updatePluginIntake(base, token, "intaked", {
+        signalKinds: { [asked]: false },
+      });
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      await movePlugin(base, token, "intaked", "enable");
+      const enabled = await readPlugin(base, token, "intaked");
+      expect(summarizeSettings(enabled.intake.signalKinds)[asked]).toBe("off@plugin");
+    });
+  });
+
+  it("write one audit entry per change, and leave the plugin running without a restart", async () => {
+    await withIntakePlugin(async ({ base, audit }, calls) => {
+      const token = await completeSetup(base);
+      expect(calls).toEqual(["activate"]);
+
+      await updatePluginIntake(base, token, "intaked", { signalKinds: { [asked]: false } });
+
+      const entries = await audit("plugin.intakeUpdated");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.payload).toEqual({ pluginId: "intaked" });
+      // The plugin's code is neither stopped nor started: only the core reads these settings.
+      expect(calls).toEqual(["activate"]);
+      expect(await readPlugin(base, token, "intaked")).toMatchObject({
+        status: { _tag: "active" },
+      });
+    });
+  });
+
+  it("push one live change naming the plugin", async () => {
+    await withIntakePlugin(async (harness) => {
+      const token = await completeSetup(harness.base);
+      await waitForLiveToSettle();
+      const ticket = await fetchTicket(harness.base, token);
+
+      let seen: ReadonlyArray<LiveMessage> = [];
+      await onSocket(harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const plugins = yield* collectPushes(client, "plugin");
+          yield* Effect.promise(() => expectHeld(harness.live, 1, "plugin"));
+
+          const response = yield* Effect.promise(() =>
+            updatePluginIntake(harness.base, token, "intaked", {
+              signalKinds: { [asked]: false },
+            }),
+          );
+          expect(response.status).toBe(200);
+          const arrived = yield* Effect.promise(() =>
+            waitWithin(2000, () => plugins.received.length > 0),
+          );
+          expect(arrived).toBe(true);
+          seen = plugins.received;
+          yield* Fiber.interrupt(plugins.fiber);
+        }),
+      );
+
+      expect(seen.map((message) => (message as { ids: ReadonlyArray<string> }).ids)).toEqual([
+        ["intaked"],
+      ]);
+    });
+  });
+
+  it("are refused with 401 for a request with no credential", async () => {
+    await withIntakePlugin(async ({ base, audit }) => {
+      await completeSetup(base);
+
+      const response = await send("PUT", base, "/api/v1/plugins/intaked/intake", {
+        body: { intake: { eventKinds: {}, signalKinds: { [asked]: false } } },
+      });
+
+      expect(response.status).toBe(401);
+      expect(await audit("plugin.intakeUpdated")).toHaveLength(0);
     });
   });
 });

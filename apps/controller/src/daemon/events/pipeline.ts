@@ -25,6 +25,7 @@ import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { AuditLog } from "../../events";
 import type { Notifier } from "../../notifications";
+import type { PluginIntake } from "../../intake-settings";
 import type { PluginHost } from "../../plugins";
 import type { RunService } from "../../runs";
 import type { SessionService } from "../../sessions";
@@ -110,6 +111,7 @@ export const PipelineLayer: Layer.Layer<
   | PromotionState
   | SqlClient.SqlClient
   | PluginHost
+  | PluginIntake
   | SignalRaises
   | AuditLog
 > = Layer.effect(Pipeline)(make);

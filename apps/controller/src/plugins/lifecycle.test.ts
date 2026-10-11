@@ -1075,6 +1075,9 @@ describe("a caller with no credential behind it", () => {
           Effect.flip(plugins.configure("alpha", { config: {} })),
           Effect.flip(plugins.retry("alpha")),
           Effect.flip(plugins.resetState("alpha")),
+          Effect.flip(
+            plugins.updateIntake("alpha", { intake: { eventKinds: {}, signalKinds: {} } }),
+          ),
         ]);
         return {
           failures,
@@ -1085,6 +1088,7 @@ describe("a caller with no credential behind it", () => {
               "plugin.configured",
               "plugin.retried",
               "plugin.stateReset",
+              "plugin.intakeUpdated",
             ] as const,
             (kind) => readEventsOfKind(kind),
           ),

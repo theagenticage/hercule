@@ -9,11 +9,14 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { IntakeOverrides } from "@hercule/contract";
 
 /** The user's settings for one plugin. */
 export interface PluginState {
   readonly enabled: boolean;
   readonly config: Schema.Json;
+  /** The user's Intake choices for all the plugin's Connections, as stored. */
+  readonly intake: IntakeOverrides;
 }
 
 /** One catalog row, as it is read back. */
@@ -40,6 +43,9 @@ export interface NewContribution {
 
 /** The `config` and `definition` columns: JSON text holding a JSON value. */
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
+
+/** The `intake` column: JSON text holding the user's Intake choices. */
+const decodeIntake = Schema.decodeUnknownEffect(Schema.fromJsonString(IntakeOverrides));
 
 /**
  * Returns a plugin's stored state, or dies when it has none. Boot writes the
@@ -82,6 +88,12 @@ const make = Effect.gen(function* () {
         UPDATE plugins SET config = ${JSON.stringify(config)}, updated_at = ${at} WHERE id = ${id}
       `.pipe(Effect.asVoid),
 
+    /** Stores the user's Intake choices for the plugin, which the caller has already normalized. */
+    setIntake: (id: string, intake: IntakeOverrides, at: string): Effect.Effect<void, SqlError> =>
+      sql`
+        UPDATE plugins SET intake = ${JSON.stringify(intake)}, updated_at = ${at} WHERE id = ${id}
+      `.pipe(Effect.asVoid),
+
     /** Returns the user's settings for every plugin, by plugin id. */
     states: (): Effect.Effect<ReadonlyMap<string, PluginState>, SqlError | Schema.SchemaError> =>
       Effect.gen(function* () {
@@ -89,12 +101,14 @@ const make = Effect.gen(function* () {
           readonly id: string;
           readonly enabled: number;
           readonly config: string;
-        }>`SELECT id, enabled, config FROM plugins`;
+          readonly intake: string;
+        }>`SELECT id, enabled, config, intake FROM plugins`;
         const states = new Map<string, PluginState>();
         for (const row of rows) {
           states.set(row.id, {
             enabled: row.enabled === 1,
             config: yield* decodeJson(row.config),
+            intake: yield* decodeIntake(row.intake),
           });
         }
         return states;
@@ -106,12 +120,17 @@ const make = Effect.gen(function* () {
         const rows = yield* sql<{
           readonly enabled: number;
           readonly config: string;
-        }>`SELECT enabled, config FROM plugins WHERE id = ${id}`;
+          readonly intake: string;
+        }>`SELECT enabled, config, intake FROM plugins WHERE id = ${id}`;
         const row = rows[0];
         return yield* readStoredStateOrDie(
           row === undefined
             ? undefined
-            : { enabled: row.enabled === 1, config: yield* decodeJson(row.config) },
+            : {
+                enabled: row.enabled === 1,
+                config: yield* decodeJson(row.config),
+                intake: yield* decodeIntake(row.intake),
+              },
           id,
         );
       }),

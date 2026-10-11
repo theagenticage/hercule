@@ -84,6 +84,7 @@ import {
   type LocalRunnerFailed,
   type LocalRunnerOptions,
 } from "./runners";
+import { PluginIntake } from "./intake-settings";
 import {
   IngestLoops,
   PluginConfigsLayer,
@@ -242,6 +243,7 @@ export type ControllerServices =
   | JoinTokens
   | Plugins
   | PluginHost
+  | PluginIntake
   | IngestLoops
   | ConnectionTypes
   | RunnerConnections

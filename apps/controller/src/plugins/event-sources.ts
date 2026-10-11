@@ -33,10 +33,12 @@ import { decodeSignalKinds, type RegisteredSignalKind } from "./signal-kinds";
  * An event kind a plugin registered at boot, with the id of that plugin and
  * the schema that emitted payloads are decoded against. `connectionType` is
  * always set, because a plugin's events always arrive through a Connection.
+ * `availableToTriage` is the plugin's default for the kind's Intake switch.
  */
 export interface RegisteredEventKind extends DeclaredEventKindWithConnectionType {
   readonly pluginId: string;
   readonly connectionType: string;
+  readonly availableToTriage: boolean;
   readonly schema: Schema.Top;
 }
 
@@ -287,6 +289,7 @@ export const registerEventSourceContribution = (
         pluginId,
         connectionType: names.connectionType,
         description: declaration.description,
+        availableToTriage: declaration.availableToTriage,
         schema: declaration.schema,
       };
       kinds.set(kind, registered);

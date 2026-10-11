@@ -16,6 +16,7 @@ import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { ServingPromotionStateLayer } from "../promotion/testing";
+import { PluginIntake } from "../intake-settings";
 import { masterKeyLayer, Secrets, SecretLayer, secretsLayer } from "../secrets";
 import { ActivePlugins } from "./active-plugins";
 import { PluginConfigs } from "./plugin-configs";
@@ -49,6 +50,8 @@ const buildStack = () => {
     Layer.provide(
       Layer.succeed(ActivePlugins)({ isActive: () => Effect.sync(() => pluginIsActive) }),
     ),
+    // Listing choices never reads Intake settings, so the stub has no methods.
+    Layer.provide(Layer.mock(PluginIntake)({})),
     Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(Layer.succeed(PluginConfigs)({ of: () => Effect.succeed({}) })),
     Layer.provideMerge(SecretLayer),

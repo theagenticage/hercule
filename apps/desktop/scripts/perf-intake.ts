@@ -20,6 +20,10 @@
  * row on screen to animate. The Performance panel rows of the cost table,
  * the per-push animation and inbox zero, are not measured here.
  *
+ * A second scenario, `measureEverythingWork`, measures Everything on 1,000
+ * events (see `seedEvents`): opening the view, scrolling the list to its end,
+ * and the memory after.
+ *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
  */
@@ -503,6 +507,328 @@ export function reportIntakeWork(measured: IntakeWork): void {
     formatTable(
       ["Budget", "Limit", "Measured", "Within"],
       budgets.map(([budget, limit, measuredText, within]) => [
+        budget,
+        limit,
+        measuredText,
+        within === null ? "-" : within ? "yes" : "over",
+      ]),
+    ),
+  );
+  console.log();
+}
+
+/** How many events Everything's list holds when it is measured. */
+export const EVENT_COUNT = 1_000;
+
+/**
+ * How many events one signal names at most (`MAX_SIGNAL_EVENT_IDS` in the
+ * contract; this script imports only the contract's types).
+ */
+const EVENTS_PER_SIGNAL = 64;
+
+/** The events page Everything reads at a time, the controller's default page size. */
+const EVENTS_PAGE_SIZE = 50;
+
+/** Everything's list of events, which holds one `.ask-row` for each row it draws. */
+const EVENTS_LIST = 'section[aria-label="Events"]';
+
+/**
+ * How long the app idles so that V8 runs its idle garbage collection, which
+ * in a trace of an earlier version of the app first ran about 30 s after
+ * launch. A reading taken before it holds garbage the app no longer uses.
+ */
+const IDLE_GARBAGE_COLLECTION_MS = 30_000;
+
+/** How long the scroll to the end of the list may take before the scenario fails, in milliseconds. */
+const SCROLL_TIMEOUT_MS = 60_000;
+
+/** How far each step of the scroll moves the list, in pixels, and how long it waits, in milliseconds. */
+const SCROLL_STEP_PX = 1_500;
+const SCROLL_STEP_MS = 50;
+
+/**
+ * Writes `EVENT_COUNT` events into the controller, all of them events of
+ * Intake: `event.emit` writes each one, `signal.raise` raises signals that
+ * name them 64 at a time (the most one signal may name), and `signal.markDone`
+ * resolves those signals at once. An event is an event of Intake when a
+ * signal is behind it, and the resolved signals leave To do as it was. Fails
+ * when the controller refuses a call, or when its listing of Intake's events
+ * does not hold `EVENT_COUNT` afterwards.
+ *
+ * `event.emit` writes no title, no author and no arrival time, so the
+ * fixture sets them in the database before each launch (see `titleEvents`).
+ */
+export async function seedEvents(fixture: ThreadFixture): Promise<void> {
+  const eventIds: number[] = [];
+  for (let number = 1; number <= EVENT_COUNT; number += 1) {
+    const { eventId } = await fixture.call<{ readonly eventId: number }>("POST", "/events/emit", {
+      kind: "github.notification",
+      payload: {
+        subject: {
+          repo: "acme/webshop",
+          url: `https://github.com/acme/webshop/pull/${String(number)}`,
+        },
+        reason: "review_requested",
+      },
+    });
+    eventIds.push(eventId);
+  }
+  const signalIds: string[] = [];
+  for (let from = 0; from < eventIds.length; from += EVENTS_PER_SIGNAL) {
+    const { signalId } = await fixture.call<SignalRaiseResult>("POST", "/signals/raise", {
+      kind: "fyi",
+      title: `Signal over events from ${String(from + 1)}`,
+      reason: "Raised by the perf script",
+      eventIds: eventIds.slice(from, from + EVENTS_PER_SIGNAL),
+    });
+    signalIds.push(signalId);
+  }
+  await fixture.call("POST", "/signals/mark-done", { signalIds });
+
+  let held = 0;
+  let cursor: string | undefined;
+  do {
+    const query = new URLSearchParams({ intake: "true", limit: "500" });
+    if (cursor !== undefined) query.set("cursor", cursor);
+    const result = await fixture.call<{
+      readonly items: readonly unknown[];
+      readonly nextCursor?: string;
+    }>("GET", `/events?${query.toString()}`);
+    held += result.items.length;
+    cursor = result.nextCursor;
+  } while (cursor !== undefined);
+  if (held !== EVENT_COUNT) {
+    throw new Error(
+      `Intake lists ${String(held)} events after seeding, and the scenario needs ${String(EVENT_COUNT)}`,
+    );
+  }
+}
+
+/** What opening Everything and scrolling it to its end cost. */
+export interface EverythingWork {
+  /** The machine's load average over the minute before the app was spawned. */
+  readonly loadAtSpawn: number;
+  /** From the click on "Everything" until the list drew its first row, in milliseconds. */
+  readonly firstRowMs: number;
+  /** The longest task the renderer's main thread ran from the click until one second after the first row, in milliseconds. */
+  readonly openLongestTaskMs: number;
+  /** How many events reads the page made from the click until the end of the scroll. */
+  readonly eventReads: number;
+  /** How long the scroll took, from its first step until the list showed its end line, in milliseconds. */
+  readonly scrollMs: number;
+  /** The longest task the renderer's main thread ran over the scroll, in milliseconds. */
+  readonly scrollLongestTaskMs: number;
+  /** How many of the main thread's tasks over the scroll took over 50 ms. */
+  readonly scrollLongTasks: number;
+  /** How many rows the list drew at its end, out of `EVENT_COUNT`. */
+  readonly rowsDrawn: number;
+  /** The processes' memory on To do, 35 s after Intake showed, with no connection to the page. */
+  readonly memoryOnToDo: Awaited<ReturnType<typeof readProcessMemory>>;
+  /** The processes' memory 4 s after the scroll, with no connection to the page. */
+  readonly memory: Awaited<ReturnType<typeof readProcessMemory>>;
+  /** The processes' memory 30 s after `memory`, once the app idled. */
+  readonly memoryAfterRest: Awaited<ReturnType<typeof readProcessMemory>>;
+}
+
+/**
+ * Starts the signed-in app on `userDataDir` as a plain process, where it
+ * opens Intake on To do again, and measures Everything in `EVENT_COUNT`
+ * events:
+ *
+ * - a click on "Everything": the time until the list draws its first row,
+ *   which includes loading the view's code, and the renderer's longest
+ *   task until one second after;
+ * - a scroll to the end of the list in steps of 1,500 px, 50 ms apart,
+ *   which reads every page: the renderer's longest task and the tasks over
+ *   50 ms in a trace, the events reads counted from the page's resource
+ *   timing entries, and how many rows are drawn at the end;
+ * - the processes' memory 3 s after the scroll, read once the connection to
+ *   the page is closed, so the inspector's own cost is not in it.
+ *
+ * Fails when Intake does not show within 15 s, when the list does not draw a
+ * row within 10 s of the click or reach its end line within a minute, when
+ * a trace lost events, or when the app does not quit cleanly afterwards.
+ */
+export async function measureEverythingWork(userDataDir: string): Promise<EverythingWork> {
+  const loadAtSpawn = loadavg()[0]!;
+  const app = await launchPlainApp(userDataDir);
+  let measured: EverythingWork;
+  try {
+    const connect = async () => connectInspector(await waitForPageSocketUrl(app.endpoint));
+    const waitForIntake = async (page: Inspector) =>
+      pollUntil(
+        async () =>
+          (await page.evaluate("Runtime.evaluate", {
+            expression: `document.querySelector(${JSON.stringify(`${SIGNALS_LIST} .ask-row`)}) !== null`,
+            returnByValue: true,
+          })) === true
+            ? true
+            : undefined,
+        { timeoutMs: 15_000, intervalMs: 20, timeoutMessage: "the app did not open Intake" },
+      );
+    // The memory of Intake on To do comes first, read with no connection to
+    // the page, so the Everything reading can be compared with it.
+    const first = await connect();
+    try {
+      await waitForIntake(first);
+      await sleep(LAUNCH_SETTLE_MS + IDLE_GARBAGE_COLLECTION_MS);
+    } finally {
+      first.close();
+    }
+    await sleep(1_000);
+    const memoryOnToDo = await readProcessMemory(app.process.pid!);
+
+    const page = await connect();
+    let readings: Omit<
+      EverythingWork,
+      "loadAtSpawn" | "memoryOnToDo" | "memory" | "memoryAfterRest"
+    >;
+    try {
+      const evaluate = (expression: string) =>
+        page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
+      const waitInPage = (expression: string, timeoutMs: number, timeoutMessage: string) =>
+        pollUntil(async () => ((await evaluate(expression)) === true ? true : undefined), {
+          timeoutMs,
+          intervalMs: 20,
+          timeoutMessage,
+        });
+
+      let clickedAt = 0;
+      let firstRowMs = 0;
+      const openTasks = await traceRendererTasks(page, async () => {
+        clickedAt = (await evaluate(`(() => {
+          const at = performance.now();
+          [...document.querySelectorAll('[role="group"][aria-label="View"] button')]
+            .find((button) => button.textContent.startsWith("Everything")).click();
+          return at;
+        })()`)) as number;
+        await waitInPage(
+          `document.querySelector(${JSON.stringify(`${EVENTS_LIST} .ask-row`)}) !== null`,
+          10_000,
+          "Everything did not draw a row",
+        );
+        firstRowMs = ((await evaluate("performance.now()")) as number) - clickedAt;
+        await sleep(1_000);
+      });
+
+      const endShown = `document.querySelector(${JSON.stringify(`${EVENTS_LIST} .asks-note`)})
+        ?.textContent.startsWith("No more events") === true`;
+      const scrollStep = `document.querySelector(${JSON.stringify(`${EVENTS_LIST} .asks-scroll`)})
+        .scrollTop += ${String(SCROLL_STEP_PX)}`;
+      const scrollStarted = Date.now();
+      const scrollTasks = await traceRendererTasks(page, async () => {
+        while ((await evaluate(endShown)) !== true) {
+          if (Date.now() - scrollStarted > SCROLL_TIMEOUT_MS) {
+            throw new Error("Everything's list did not reach its end line within a minute");
+          }
+          await evaluate(scrollStep);
+          await sleep(SCROLL_STEP_MS);
+        }
+      });
+      const scrollMs = Date.now() - scrollStarted;
+      const eventReads = (await evaluate(`performance.getEntriesByType("resource").filter((entry) =>
+        entry.startTime >= ${String(clickedAt)} && new URL(entry.name).pathname === "/api/v1/events"
+      ).length`)) as number;
+      const rowsDrawn = (await evaluate(
+        `document.querySelectorAll(${JSON.stringify(`${EVENTS_LIST} .ask-row`)}).length`,
+      )) as number;
+      readings = {
+        firstRowMs,
+        openLongestTaskMs: Math.max(...openTasks),
+        eventReads,
+        scrollMs,
+        scrollLongestTaskMs: Math.max(...scrollTasks),
+        scrollLongTasks: scrollTasks.filter((ms) => ms > BUDGET.streamingTaskMs).length,
+        rowsDrawn,
+      };
+      await sleep(3_000);
+    } finally {
+      page.close();
+    }
+    await sleep(1_000);
+    const memory = await readProcessMemory(app.process.pid!);
+    await sleep(IDLE_GARBAGE_COLLECTION_MS);
+    measured = {
+      loadAtSpawn,
+      ...readings,
+      memoryOnToDo,
+      memory,
+      memoryAfterRest: await readProcessMemory(app.process.pid!),
+    };
+  } finally {
+    await stopPlainApp(app);
+  }
+  assertExitedCleanly(app.process);
+  return measured;
+}
+
+/** Prints what the Everything scenario measured, against the limits spec 17 sets. */
+export function reportEverythingWork(measured: EverythingWork): void {
+  const sumFootprintMb = (memory: EverythingWork["memory"]) =>
+    memory.reduce((sum, sample) => sum + sample.footprintMb, 0);
+  const readFootprintMb = (memory: EverythingWork["memory"], label: string) =>
+    memory.find((sample) => sample.label === label)?.footprintMb ?? 0;
+  const formatFootprint = (memory: EverythingWork["memory"]) =>
+    `${sumFootprintMb(memory).toFixed(0)} MB summed: renderer ${readFootprintMb(memory, "Tab").toFixed(0)} MB, GPU ${readFootprintMb(memory, "GPU").toFixed(0)} MB`;
+  const summedFootprintMb = sumFootprintMb(measured.memoryAfterRest);
+  const rendererFootprintMb = readFootprintMb(measured.memoryAfterRest, "Tab");
+  const summedGrowthMb = summedFootprintMb - sumFootprintMb(measured.memoryOnToDo);
+  const rendererGrowthMb = rendererFootprintMb - readFootprintMb(measured.memoryOnToDo, "Tab");
+  const pages = Math.ceil(EVENT_COUNT / EVENTS_PAGE_SIZE);
+  const rows: [string, string, string, boolean | null][] = [
+    [
+      "Opening Everything",
+      "recorded; not budgeted",
+      `first row ${measured.firstRowMs.toFixed(0)} ms after the click, longest task ${measured.openLongestTaskMs.toFixed(1)} ms`,
+      null,
+    ],
+    [
+      `Scrolling ${String(EVENT_COUNT)} events, renderer main thread`,
+      `recorded; streaming's limit is no task over ${String(BUDGET.streamingTaskMs)} ms`,
+      `longest task ${measured.scrollLongestTaskMs.toFixed(1)} ms (${String(measured.scrollLongTasks)} over ${String(BUDGET.streamingTaskMs)} ms), end line after ${(measured.scrollMs / 1_000).toFixed(1)} s`,
+      null,
+    ],
+    [
+      "Events reads",
+      `one read for each page of ${String(EVENTS_PAGE_SIZE)}, ${String(pages)} for the list`,
+      String(measured.eventReads),
+      measured.eventReads <= pages,
+    ],
+    [
+      "Rows drawn at the end of the list",
+      `far fewer than the ${String(EVENT_COUNT)} events`,
+      String(measured.rowsDrawn),
+      measured.rowsDrawn < EVENT_COUNT / 10,
+    ],
+    [
+      "Memory on To do, 35 s after Intake showed",
+      "recorded",
+      formatFootprint(measured.memoryOnToDo),
+      null,
+    ],
+    ["Memory 4 s after the scroll", "recorded", formatFootprint(measured.memory), null],
+    [
+      "Memory 34 s after the scroll, summed footprint",
+      `at most ${String(BUDGET.summedFootprintMb)} MB`,
+      `${summedFootprintMb.toFixed(0)} MB, ${summedGrowthMb.toFixed(0)} MB more than on To do`,
+      summedFootprintMb <= BUDGET.summedFootprintMb,
+    ],
+    [
+      "Memory 34 s after the scroll, renderer footprint",
+      `at most ${String(BUDGET.rendererFootprintMb)} MB`,
+      `${rendererFootprintMb.toFixed(0)} MB, ${rendererGrowthMb.toFixed(0)} MB more than on To do`,
+      rendererFootprintMb <= BUDGET.rendererFootprintMb,
+    ],
+  ];
+
+  console.log(`## Everything at work, on ${String(EVENT_COUNT)} events`);
+  console.log();
+  console.log(`Load average over the minute before the launch: ${measured.loadAtSpawn.toFixed(2)}`);
+  console.log();
+  console.log(
+    formatTable(
+      ["Budget", "Limit", "Measured", "Within"],
+      rows.map(([budget, limit, measuredText, within]) => [
         budget,
         limit,
         measuredText,

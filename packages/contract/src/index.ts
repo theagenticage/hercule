@@ -161,7 +161,14 @@ export {
   PluginMark,
   PluginRefusalReason,
   PluginStatus,
+  PluginUpdateIntakeInput,
 } from "./groups/plugin";
+export {
+  IntakeOverrideLevel,
+  IntakeOverrides,
+  IntakeSettingLevel,
+  IntakeSettings,
+} from "./groups/intake-settings";
 export {
   PERMISSION_DECISION_OUTCOMES,
   PermissionDecideCall,
@@ -320,6 +327,7 @@ export {
   ConnectionChoices,
   ConnectionCreateInput,
   ConnectionCredentialsInput,
+  ConnectionDetail,
   ConnectionDevicePoll,
   ConnectionDevicePollInput,
   ConnectionDeviceStart,
@@ -545,6 +553,17 @@ export {
   MAX_EVENT_SYSTEM_LENGTH,
   MAX_EVENT_TITLE_LENGTH,
   MAX_EVENT_URL_LENGTH,
+} from "./groups/event-record";
+export {
+  EVENT_HANDLINGS,
+  EventFacts,
+  EventResolvedSignalFact,
+  EventHandling,
+  EventKnownByFact,
+  EventSignalFact,
+  EventTaskFact,
+  EventWithFacts,
+  MAX_EVENT_SOURCE_LENGTH,
 } from "./groups/event";
 export {
   SUBSCRIPTION_SORT_FIELDS,

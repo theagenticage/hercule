@@ -69,6 +69,7 @@ import {
   truncateMessage,
   type Connection,
   type ConnectionChoices,
+  type ConnectionDetail,
   type ConnectionDevicePoll,
   type ConnectionDeviceStart,
   type ConnectionOAuthStart,
@@ -89,6 +90,7 @@ import {
   type ResolvedSortKey,
 } from "../db";
 import { AuditLog } from "../events";
+import { applyIntakeOverrides, normalizeIntakeOverrides, PluginIntake } from "../intake-settings";
 import { Secrets, type SecretNameRef, type SecretOwner } from "../secrets";
 import { ActivePlugins } from "./active-plugins";
 import { deviceSetupRepository } from "./device-setups";
@@ -366,6 +368,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const references = yield* ConnectionReferences;
   const activePlugins = yield* ActivePlugins;
+  const pluginIntake = yield* PluginIntake;
 
   const buildSecretOwner = (id: string): SecretOwner => ({ kind: "connection", id });
 
@@ -573,6 +576,22 @@ const make = Effect.gen(function* () {
 
   const readConnectionOrFail = (id: string): Effect.Effect<Connection, NotFound | SqlError> =>
     Effect.flatMap(readStoredConnectionOrFail(id), readConnectionRecord);
+
+  /**
+   * Reads a Connection with its Intake settings: for every kind its plugin
+   * declares, the value in effect from the plugin's default, the plugin's
+   * level or the Connection's own choice. Fails with `not_found` when there
+   * is no such Connection.
+   */
+  const readConnectionDetailOrFail = (
+    id: string,
+  ): Effect.Effect<ConnectionDetail, NotFound | SqlError> =>
+    Effect.gen(function* () {
+      const row = yield* readStoredConnectionOrFail(id);
+      const record = yield* readConnectionRecord(row);
+      const pluginLevel = yield* pluginIntake.read(row.pluginId);
+      return { ...record, intake: applyIntakeOverrides(pluginLevel, row.intake, "connection") };
+    });
 
   /**
    * Makes the connection's secrets exactly these credentials: stores each
@@ -862,10 +881,12 @@ const make = Effect.gen(function* () {
         };
       }),
 
-    read: (id: Id): Effect.Effect<Connection, Unauthenticated | Forbidden | NotFound | SqlError> =>
+    read: (
+      id: Id,
+    ): Effect.Effect<ConnectionDetail, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("connection.read");
-        return yield* readConnectionOrFail(id);
+        return yield* readConnectionDetailOrFail(id);
       }),
 
     /**
@@ -932,13 +953,20 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Updates what the user chose: the label, topics, config and poll
-     * intervals. Not the account or status.
+     * Updates what the user chose: the label, topics, config, poll intervals
+     * and Intake choices. Not the account or status. Returns the Connection
+     * with its Intake settings.
+     *
+     * An Intake choice equal to what the plugin's level gives is dropped, so
+     * that kind follows the plugin again. Fails with `validation` for a kind
+     * the plugin does not declare, and for any write of Intake choices when
+     * the plugin failed to load. Intake choices are not part of what an ingest
+     * handle is opened with, so changing them leaves the handle open.
      */
     update: (
       input: UpdateInput,
     ): Effect.Effect<
-      Connection,
+      ConnectionDetail,
       Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
     > =>
       Effect.gen(function* () {
@@ -958,8 +986,22 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            // The choices are checked against the plugin's level inside the
+            // transaction, so a plugin write that commits in between cannot
+            // make the check drop a choice that now differs from the level.
+            const intake =
+              patch.intake === undefined
+                ? undefined
+                : yield* normalizeIntakeOverrides(
+                    patch.intake,
+                    yield* pluginIntake.readBeforeWrite(row.pluginId),
+                  );
             const at = yield* nowIso;
-            yield* connections.update(id, patch, at);
+            yield* connections.update(
+              id,
+              { ...patch, ...(intake === undefined ? {} : { intake }) },
+              at,
+            );
             yield* audit.append({
               kind: "connection.updated",
               actor: yield* currentStamp,
@@ -967,7 +1009,7 @@ const make = Effect.gen(function* () {
               record: { topic: "connection", id },
               at,
             });
-            return yield* readConnectionOrFail(id);
+            return yield* readConnectionDetailOrFail(id);
           }),
         );
       }),
@@ -1481,6 +1523,7 @@ export const ConnectionServiceLayer: Layer.Layer<
   | AuditLog
   | ConnectionTypes
   | PluginConfigs
+  | PluginIntake
   | ConnectionReferences
   | ActivePlugins
 > = Layer.effect(ConnectionService)(make);

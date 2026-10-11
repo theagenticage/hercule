@@ -44,7 +44,7 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
-import { Event } from "./event";
+import { Event } from "./event-record";
 import { TranscriptRow } from "./transcript";
 
 /** The protocol version `hello` agrees on. A connection uses one version throughout. */

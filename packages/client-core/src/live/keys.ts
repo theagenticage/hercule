@@ -19,10 +19,21 @@ import type {
   SignalFilter,
   TaskFilter,
 } from "@hercule/contract";
+import type { HerculeClient } from "../client";
 import { listLoopbackEndpoints } from "../local-runner";
 
 /** A cache key. This package does not read it; the app's query client does. */
 export type LiveQueryKey = ReadonlyArray<unknown>;
+
+/**
+ * The filter of an event listing that identifies it in the cache: the fields
+ * of `event.query` that narrow the listing. Paging and `since` are left out,
+ * so every page of one listing shares one key.
+ */
+export type EventListFilter = Pick<
+  NonNullable<Parameters<HerculeClient["event"]["query"]>[0]["query"]>,
+  "intake" | "text" | "source" | "handling"
+>;
 
 /**
  * The key builder for every read the app makes. The argument of a list or
@@ -187,6 +198,14 @@ export const queryKeys = {
    * append-only, so a stored event is read once and kept.
    */
   event: (id: number): LiveQueryKey => ["event", id],
+  /**
+   * Pages of `event.query`, keyed on the filter without its cursor, so every
+   * page of one listing shares one key. Without the filter, the prefix of
+   * every event listing. Not a live topic: the event log is append-only, so a
+   * screen that shows a listing reads it again each time it opens.
+   */
+  events: (filter?: EventListFilter): LiveQueryKey =>
+    filter === undefined ? ["events"] : ["events", filter],
   /** Not a live topic yet. A change to an Agent made elsewhere shows up on the next fetch. */
   agents: (): LiveQueryKey => ["agents"],
   assistants: (): LiveQueryKey => ["assistants"],
@@ -379,8 +398,12 @@ export const buildQueryKeys = (
   }
   // The plugin set is fixed at build time and read as one list, so the whole
   // list is refetched whichever plugin changed. Every signal read is
-  // refetched too, see `SIGNAL_DESCRIBE_KEYS`.
-  if (topic === "plugin") return [queryKeys.plugins(), ...SIGNAL_DESCRIBE_KEYS];
+  // refetched too, see `SIGNAL_DESCRIBE_KEYS`. So is every Connection's own
+  // page: a plugin-level write changes what every Connection of the plugin
+  // resolves to.
+  if (topic === "plugin") {
+    return [queryKeys.plugins(), queryKeys.connection(), ...SIGNAL_DESCRIBE_KEYS];
+  }
   // Provider instances are read as one list (there is one per shipped
   // provider), so the whole list is refetched whichever instance changed.
   if (topic === "provider") return [queryKeys.providers()];

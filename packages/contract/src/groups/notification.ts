@@ -35,7 +35,7 @@ import { isOperationId } from "../operations";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
-import { EventId } from "./event";
+import { EventId } from "./event-record";
 
 /** The longest kind. A kind is a dotted name, not a sentence. */
 export const MAX_NOTIFICATION_KIND_LENGTH = 128;

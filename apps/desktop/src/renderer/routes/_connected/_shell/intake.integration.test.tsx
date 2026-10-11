@@ -1,13 +1,20 @@
 /**
  * Tests Intake: the list of signals on To do in its sections, the pane of the
  * selected signal, Intake's keys, answering a signal, a signal resolved
- * elsewhere while its pane is open, the split's handle, and the To do count
- * on the sidebar.
+ * elsewhere while its pane is open, the split's handle, the To do count on
+ * the sidebar, and the Everything view of the events behind the signals.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Event, PluginDetail, Signal, SignalAction } from "@hercule/contract";
+import type {
+  Connection,
+  Event,
+  EventWithFacts,
+  PluginDetail,
+  Signal,
+  SignalAction,
+} from "@hercule/contract";
 import {
   answerSignalQuery,
   buildErrorBody,
@@ -15,6 +22,7 @@ import {
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
+  FIXTURE_GITHUB_CONNECTION,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -54,6 +62,7 @@ const GITHUB: PluginDetail = {
   status: { _tag: "active" },
   config: {},
   contributions: [],
+  intake: { eventKinds: [], signalKinds: [] },
 };
 
 const CONNECTION_ID = "01a06d02-7200-7000-8000-0000000000c1";
@@ -355,6 +364,47 @@ describe("Intake's list", () => {
     ]);
     expect(marks.map((mark) => mark?.getAttribute("width"))).toEqual(["14", "16", "14"]);
     expect(pane.querySelector(".ad-kind .src")!.textContent).toBe("GitHub · Review requested");
+  });
+
+  it("links a plugin signal's provenance line to its kind on Settings > Intake, on the Connection it came from", async () => {
+    await openIntake(`/intake?signal=${REVIEW.id}`);
+    const pane = await findPane();
+
+    const link = pane.querySelector(".ad-kind a.src")!;
+    const href = new URL(link.getAttribute("href")!, "http://app.test");
+    expect(href.pathname).toBe("/settings/intake");
+    expect(Object.fromEntries(href.searchParams)).toEqual({
+      kind: "github/review-requested",
+      connection: CONNECTION_ID,
+    });
+  });
+
+  it("links a plugin signal raised through the API to its kind only", async () => {
+    const byApi = buildSignal("01a06d02-7a00-7000-8000-000000000013", 0, "12:00", {
+      title: "Raised through the API",
+      origin: { type: "api", actor: "user", eventIds: [], reason: "Seen twice" },
+    });
+    await openIntake(`/intake?signal=${byApi.id}`, storeSignals([byApi]).handlers);
+    const pane = await findPane();
+
+    const href = new URL(
+      pane.querySelector(".ad-kind a.src")!.getAttribute("href")!,
+      "http://app.test",
+    );
+    expect(Object.fromEntries(href.searchParams)).toEqual({ kind: "github/review-requested" });
+  });
+
+  it("draws the provenance line of a core signal as plain text", async () => {
+    const core = buildSignal("01a06d02-7a00-7000-8000-000000000014", 0, "12:01", {
+      kind: "proposal",
+      title: "A proposal",
+      origin: { type: "api", actor: "user", eventIds: [], reason: "Seen twice" },
+    });
+    await openIntake(`/intake?signal=${core.id}`, storeSignals([core]).handlers);
+    const pane = await findPane();
+
+    expect(pane.querySelector(".ad-kind a")).toBeNull();
+    expect(pane.querySelector(".ad-kind span.src")!.textContent).toBe("You · Proposal");
   });
 
   it("names the workflow or the assistant that raised a core signal", async () => {
@@ -813,7 +863,7 @@ describe("Intake's views", () => {
       within(views)
         .getAllByRole("button")
         .map((button) => button.textContent),
-    ).toEqual(["To do3", "Later1", "Done"]);
+    ).toEqual(["To do3", "Later1", "Done", "Everything"]);
     await userEvent.click(within(getItem(REVIEW)).getByRole("checkbox"));
     await userEvent.click(within(views).getByRole("button", { name: /^Later/ }));
     expect(router.state.location.search).toEqual({ view: "later" });
@@ -1061,10 +1111,804 @@ describe("Intake's moves", () => {
   });
 });
 
+const SIGNAL_FACT_ID = "01a06d02-7a00-7000-8000-0000000000a1";
+const TASK_ID = "01a06d02-7b00-7000-8000-0000000000a1";
+const SUBSCRIPTION_ID = "01a06d02-7c00-7000-8000-0000000000a1";
+const SESSION_ID = "01a06d02-7d00-7000-8000-0000000000a1";
+
+/** The Connection the Everything events came through, so the pane can name it. */
+const EVENTS_CONNECTION: Connection = {
+  ...FIXTURE_GITHUB_CONNECTION,
+  id: CONNECTION_ID,
+  label: "acme-bot",
+};
+
+/** Builds a GitHub event with no handling, received a minute after the event with the id before it. */
+const buildListedEvent = (id: number, over: Partial<EventWithFacts> = {}): EventWithFacts => ({
+  ...buildEvent(id, `https://github.com/acme/webshop/pull/${String(id)}`),
+  receivedAt: new Date(Date.UTC(2026, 9, 10, 12, 0) - (1000 - id) * 60_000).toISOString(),
+  signals: [],
+  resolvedSignals: [],
+  tasks: [],
+  knownBy: [],
+  ...over,
+});
+
+/**
+ * Returns the handlers that play `event.query` over `stored`, newest first,
+ * `pageSize` events to a page, with a cursor to the next page while events
+ * are left. The text, source and handling filters work as the controller's do,
+ * for the two handlings the tests filter by.
+ */
+const storeEvents = (stored: ReadonlyArray<EventWithFacts>, pageSize = 20) => {
+  const handlers: Record<string, Handler> = {
+    "GET /api/v1/connections": { body: { items: [EVENTS_CONNECTION] } },
+    "GET /api/v1/plugins": { body: [GITHUB] },
+    "GET /api/v1/events": (call) => {
+      const query = new URLSearchParams(call.search);
+      const text = query.get("text")?.toLowerCase();
+      const source = query.get("source");
+      const handlings = query.getAll("handling");
+      const before = Number(query.get("cursor") ?? Infinity);
+      const matching = stored
+        .filter(
+          (event) =>
+            event.id < before &&
+            (source === null || event.source === source) &&
+            (text === undefined ||
+              `${event.title ?? ""} ${event.author ?? ""}`.toLowerCase().includes(text)) &&
+            (handlings.length === 0 ||
+              (handlings.includes("raised-signal") && event.signals.length > 0) ||
+              (handlings.includes("no-action") &&
+                event.signals.length + event.tasks.length + event.knownBy.length === 0)),
+        )
+        .toSorted((a, b) => b.id - a.id);
+      const items = matching.slice(0, pageSize);
+      return {
+        body: {
+          items,
+          ...(matching.length > pageSize ? { nextCursor: String(items.at(-1)!.id) } : {}),
+        },
+      };
+    },
+  };
+  for (const event of stored) handlers[`GET /api/v1/events/${String(event.id)}`] = { body: event };
+  return handlers;
+};
+
+/** Opens Intake at `path` on top of the signals' handlers, with `events` behind Everything. */
+const openEverything = (
+  events: ReadonlyArray<EventWithFacts>,
+  path = "/intake?view=everything",
+  pageSize = 20,
+) => openIntake(path, { ...storeSignals(SIGNALS).handlers, ...storeEvents(events, pageSize) });
+
+const getEventList = () => screen.getByRole("region", { name: "Events" });
+const getEventRow = (event: EventWithFacts) =>
+  getEventList().querySelector<HTMLElement>(`[data-event-id="${String(event.id)}"]`)!;
+const findEventPane = () => screen.findByRole("region", { name: "The open event" });
+const isEventPaneShown = (): boolean => {
+  const pane = screen.queryByRole("region", { name: "The open event" });
+  return pane !== null && !pane.hasAttribute("inert");
+};
+/** Returns the titles of the rows the list draws, top to bottom. */
+const readEventTitles = () =>
+  [...getEventList().querySelectorAll(".ask-title")].map((title) => title.textContent);
+/** Returns the requests that read the events listing, each with its query as a map of lists. */
+const findRawEventReads = (calls: ReadonlyArray<Call>) =>
+  calls
+    .filter((call) => call.method === "GET" && call.path === "/api/v1/events")
+    .map((call) => {
+      const query = new URLSearchParams(call.search);
+      return Object.fromEntries([...new Set(query.keys())].map((key) => [key, query.getAll(key)]));
+    });
+/**
+ * Returns the same requests without their `since`, which moves with the
+ * clock. One test checks it on its own.
+ */
+const findEventReads = (calls: ReadonlyArray<Call>) =>
+  findRawEventReads(calls).map((query) =>
+    Object.fromEntries(Object.entries(query).filter(([key]) => key !== "since")),
+  );
+
+describe("Intake's Everything view", () => {
+  it("switches to Everything, which reads Intake's events newest first and states the horizon", async () => {
+    const events = [1, 2, 3].map((id) => buildListedEvent(id));
+    const { calls, router } = await openEverything(events, "/intake");
+    const views = screen.getByRole("group", { name: "View" });
+    await userEvent.click(within(views).getByRole("button", { name: "Everything" }));
+
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+    expect(router.state.location.search).toEqual({ view: "everything" });
+    expect(readEventTitles()).toEqual(["Pull request #3", "Pull request #2", "Pull request #1"]);
+    expect(findEventReads(calls)).toEqual([{ intake: ["true"] }]);
+    expect(screen.getByText("Events from the last 90 days")).not.toBeNull();
+    // The Everything screen draws its own switcher, so the one clicked is gone.
+    const everythingViews = screen.getByRole("group", { name: "View" });
+    expect(
+      within(everythingViews)
+        .getByRole("button", { name: "Everything" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
+  it("draws a row's mark, title, author, first two handlings and the count of the rest", async () => {
+    const busy = buildListedEvent(1, {
+      signals: [
+        {
+          signalId: SIGNAL_FACT_ID,
+          kind: "github/review-requested",
+          status: "open",
+          title: "Review",
+        },
+      ],
+      tasks: [{ taskId: TASK_ID, title: "Fix the flaky test" }],
+      knownBy: [
+        {
+          subscriptionId: SUBSCRIPTION_ID,
+          holder: { kind: "session", id: SESSION_ID },
+          title: "Release thread",
+        },
+      ],
+    });
+    await openEverything([busy]);
+    const row = await waitFor(() => {
+      const found = getEventRow(busy);
+      expect(found).not.toBeNull();
+      return found;
+    });
+    expect(row.querySelector(".ask-mark svg path")?.getAttribute("d")).toBe(GITHUB_MARK_PATH);
+    expect(row.querySelector(".ask-title")!.textContent).toBe("Pull request #1");
+    expect(row.querySelector(".ask-sub")!.textContent).toBe(
+      "Marta · → signal · on your To do list · → Fix the flaky test · +1",
+    );
+    expect(row.querySelector("input, [role=checkbox], .ask-acts")).toBeNull();
+  });
+
+  it("titles an event that has no title by its kind", async () => {
+    const untitled = buildListedEvent(1, { title: null, author: null });
+    await openEverything([untitled]);
+    await waitFor(() => {
+      expect(getEventRow(untitled).querySelector(".ask-title")!.textContent).toBe(
+        "github.notification",
+      );
+    });
+  });
+
+  it("waits for typing to pause, then searches with the text in the URL", async () => {
+    const events = [
+      buildListedEvent(1, { title: "Deploy failed" }),
+      buildListedEvent(2, { title: "Mention in the sprint doc" }),
+    ];
+    const { calls, router } = await openEverything(events);
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search events" }), "sprint");
+
+    // No read carries the text while the user is still typing.
+    expect(findEventReads(calls).some((read) => "text" in read)).toBe(false);
+    await waitFor(() => {
+      expect(findEventReads(calls).at(-1)).toEqual({ intake: ["true"], text: ["sprint"] });
+    });
+    expect(router.state.location.search).toEqual({ view: "everything", text: "sprint" });
+    await waitFor(() => {
+      expect(readEventTitles()).toEqual(["Mention in the sprint doc"]);
+    });
+  });
+
+  it("says no event has come yet when the log is empty", async () => {
+    await openEverything([]);
+    expect(await screen.findByText("No events yet.")).not.toBeNull();
+  });
+
+  it("says no event matches when a search finds none", async () => {
+    await openEverything([buildListedEvent(1)], "/intake?view=everything&text=nothing");
+    expect(await screen.findByText("No events match.")).not.toBeNull();
+  });
+
+  it("filters by what came of an event, with a menu named What came of it", async () => {
+    const raised = buildListedEvent(1, {
+      title: "Review requested",
+      signals: [
+        {
+          signalId: SIGNAL_FACT_ID,
+          kind: "github/review-requested",
+          status: "open",
+          title: "Review",
+        },
+      ],
+    });
+    const quiet = buildListedEvent(2, { title: "Push to main" });
+    const { calls, router } = await openEverything([raised, quiet]);
+    await waitFor(() => {
+      expect(getEventRow(quiet)).not.toBeNull();
+    });
+    const menu = screen.getByRole("combobox", { name: "What came of it" });
+    expect(
+      within(menu)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual([
+      "All events",
+      "Raised a signal",
+      "Ended a signal",
+      "Evidence for a signal",
+      "Added to a Task",
+      "Known to running work",
+      "No action",
+    ]);
+
+    await userEvent.selectOptions(menu, "raised-signal");
+
+    await waitFor(() => {
+      expect(findEventReads(calls).at(-1)).toEqual({
+        intake: ["true"],
+        handling: ["raised-signal"],
+      });
+    });
+    expect(router.state.location.search).toEqual({
+      view: "everything",
+      handling: "raised-signal",
+    });
+    await waitFor(() => {
+      expect(readEventTitles()).toEqual(["Review requested"]);
+    });
+  });
+
+  it("narrows the list to a source when its tab is pressed, in the URL, with one request", async () => {
+    const events = [
+      buildListedEvent(1, { source: "github" }),
+      buildListedEvent(2, { source: "cron", connectionId: null, title: "Nightly" }),
+    ];
+    const { calls, router } = await openEverything(events, "/intake?view=everything&event=2");
+    await waitFor(() => {
+      expect(getEventRow(events[1]!)).not.toBeNull();
+    });
+    const readsBefore = findEventReads(calls).length;
+    const tabs = screen.getByRole("navigation", { name: "Sources" });
+    await userEvent.click(within(tabs).getByRole("button", { name: /GitHub/ }));
+
+    await waitFor(() => {
+      expect(findEventReads(calls).at(-1)).toEqual({ intake: ["true"], source: ["github"] });
+    });
+    await waitFor(() => {
+      expect(getEventList().querySelector('[data-event-id="2"]')).toBeNull();
+    });
+    expect(getEventRow(events[0]!)).not.toBeNull();
+    // The tab is in the URL, and the selection of the other source is gone.
+    expect(router.state.location.search).toEqual({ view: "everything", source: "github" });
+    // Nothing asks again after the first request, such as the screen or a refresh.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(findEventReads(calls)).toHaveLength(readsBefore + 1);
+  });
+
+  it("reads events back to the retention horizon", async () => {
+    const startedAt = Date.now();
+    const { calls } = await openEverything([buildListedEvent(1)]);
+    await waitFor(() => {
+      expect(getEventRow(buildListedEvent(1))).not.toBeNull();
+    });
+    const since = findRawEventReads(calls)[0]!.since![0]!;
+    const ninetyDays = 90 * 24 * 60 * 60 * 1000;
+    expect(Math.abs(Date.parse(since) - (startedAt - ninetyDays))).toBeLessThan(60_000);
+  });
+
+  it("shows the failure of the first read in the list, with a Retry, and keeps the screen", async () => {
+    const events = [buildListedEvent(1)];
+    let failing = true;
+    const handlers = storeEvents(events);
+    const listEvents = handlers["GET /api/v1/events"] as (call: Call) => unknown;
+    handlers["GET /api/v1/events"] = ((call: Call) =>
+      failing
+        ? { status: 500, body: buildErrorBody("internal", "The database is busy.") }
+        : listEvents(call)) as Handler;
+    await openIntake("/intake?view=everything", { ...storeSignals(SIGNALS).handlers, ...handlers });
+
+    const alert = await within(getEventList()).findByRole("alert");
+    expect(alert.textContent).toContain("The database is busy.");
+    expect(screen.getByRole("searchbox", { name: "Search events" })).not.toBeNull();
+
+    failing = false;
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+    expect(within(getEventList()).queryByRole("alert")).toBeNull();
+  });
+
+  it("does not ask again for a page that failed, until Retry is pressed", async () => {
+    const events = Array.from({ length: 45 }, (_, index) => buildListedEvent(index + 1));
+    let failing = true;
+    const handlers = storeEvents(events);
+    const listEvents = handlers["GET /api/v1/events"] as (call: Call) => unknown;
+    handlers["GET /api/v1/events"] = ((call: Call) =>
+      failing && new URLSearchParams(call.search).has("cursor")
+        ? { status: 500, body: buildErrorBody("internal", "The database is busy.") }
+        : listEvents(call)) as Handler;
+    const { calls } = await openIntake("/intake?view=everything", {
+      ...storeSignals(SIGNALS).handlers,
+      ...handlers,
+    });
+    await waitFor(() => {
+      expect(getEventRow(events.at(-1)!)).not.toBeNull();
+    });
+    const readsOfSecondPage = () =>
+      findEventReads(calls).filter((read) => read.cursor?.[0] === "26").length;
+
+    const scroll = getEventList().querySelector<HTMLElement>(".asks-scroll")!;
+    scroll.scrollTop = 100_000;
+    fireEvent.scroll(scroll);
+    const alert = await within(getEventList()).findByRole("alert");
+    expect(alert.textContent).toContain("The database is busy.");
+    fireEvent.scroll(scroll);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(readsOfSecondPage()).toBe(1);
+
+    failing = false;
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(readsOfSecondPage()).toBe(2);
+    });
+    await waitFor(() => {
+      expect(within(getEventList()).queryByRole("alert")).toBeNull();
+    });
+  });
+
+  it("starts the search 200 ms after the last key, with one request", async () => {
+    const events = [buildListedEvent(1, { title: "Deploy failed" })];
+    const { calls, router } = await openEverything(events);
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+    const searchReads = () => findEventReads(calls).filter((read) => "text" in read);
+
+    vi.useFakeTimers();
+    const field = screen.getByRole("searchbox", { name: "Search events" });
+    fireEvent.change(field, { target: { value: "deploy" } });
+    await act(() => vi.advanceTimersByTimeAsync(199));
+    expect(searchReads()).toHaveLength(0);
+    expect(router.state.location.search).toEqual({ view: "everything" });
+
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(router.state.location.search).toEqual({ view: "everything", text: "deploy" });
+    vi.useRealTimers();
+    await waitFor(() => {
+      expect(searchReads()).toEqual([{ intake: ["true"], text: ["deploy"] }]);
+    });
+  });
+
+  it("keeps the text a link brings, and does not write the old text back", async () => {
+    const events = [buildListedEvent(1, { title: "Alpha release" })];
+    const { router } = await openEverything(events, "/intake?view=everything&text=alpha");
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+    const field = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search events" });
+    expect(field.value).toBe("alpha");
+
+    await act(() =>
+      router.navigate({ to: "/intake", search: { view: "everything", text: "beta" } }),
+    );
+
+    await waitFor(() => {
+      expect(field.value).toBe("beta");
+    });
+    // Longer than the wait after typing, which an old draft would use to write itself back.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(router.state.location.search).toEqual({ view: "everything", text: "beta" });
+    expect(field.value).toBe("beta");
+  });
+
+  it("lets a link replace a typed draft while the link's list is still loading", async () => {
+    const events = [1, 2, 3].map((id) =>
+      buildListedEvent(id, { title: ["alpha", "beta", "gamma"][id - 1]! }),
+    );
+    const handlers = storeEvents(events);
+    const listEvents = handlers["GET /api/v1/events"] as (call: Call) => Answer;
+    let answerBeta: () => void = () => {};
+    handlers["GET /api/v1/events"] = (call: Call) =>
+      new URLSearchParams(call.search).get("text") === "beta"
+        ? new Promise<Answer>((resolve) => {
+            answerBeta = () => {
+              resolve(listEvents(call));
+            };
+          })
+        : listEvents(call);
+    const { calls, router } = await openIntake("/intake?view=everything&text=alpha", {
+      ...storeSignals(SIGNALS).handlers,
+      ...handlers,
+    });
+    await waitFor(() => {
+      expect(readEventTitles()).toEqual(["alpha"]);
+    });
+
+    vi.useFakeTimers();
+    const field = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search events" });
+    fireEvent.change(field, { target: { value: "gamma" } });
+    let navigating: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      navigating = router.navigate({ to: "/intake", search: { view: "everything", text: "beta" } });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // The typed wait ends while the link's list is still being read.
+    await act(() => vi.advanceTimersByTimeAsync(400));
+    expect(router.state.location.search).toEqual({ view: "everything", text: "beta" });
+    expect(field.value).toBe("beta");
+
+    vi.useRealTimers();
+    await act(async () => {
+      answerBeta();
+      await navigating;
+    });
+    await waitFor(() => {
+      expect(readEventTitles()).toEqual(["beta"]);
+    });
+    expect(field.value).toBe("beta");
+    expect(findEventReads(calls).some((read) => read.text?.[0] === "gamma")).toBe(false);
+  });
+
+  it("keeps the typed search in the field while its own list is still loading", async () => {
+    const events = [buildListedEvent(1, { title: "alpha" })];
+    const handlers = storeEvents(events);
+    const listEvents = handlers["GET /api/v1/events"] as (call: Call) => Answer;
+    let answerSearch: () => void = () => {};
+    handlers["GET /api/v1/events"] = (call: Call) =>
+      new URLSearchParams(call.search).has("text")
+        ? new Promise<Answer>((resolve) => {
+            answerSearch = () => {
+              resolve(listEvents(call));
+            };
+          })
+        : listEvents(call);
+    const { calls, router } = await openIntake("/intake?view=everything", {
+      ...storeSignals(SIGNALS).handlers,
+      ...handlers,
+    });
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+
+    vi.useFakeTimers();
+    const field = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search events" });
+    fireEvent.change(field, { target: { value: "alpha" } });
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    expect(router.state.location.search).toEqual({ view: "everything", text: "alpha" });
+    await act(() => vi.advanceTimersByTimeAsync(400));
+    expect(field.value).toBe("alpha");
+
+    vi.useRealTimers();
+    await act(async () => {
+      answerSearch();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(readEventTitles()).toEqual(["alpha"]);
+    });
+    expect(field.value).toBe("alpha");
+    expect(findEventReads(calls).filter((read) => "text" in read)).toHaveLength(1);
+  });
+
+  it("does not write a typed search after Everything closes", async () => {
+    const events = [buildListedEvent(1, { title: "alpha" })];
+    const { router } = await openEverything(events);
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search events" }), {
+      target: { value: "alpha" },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    vi.useRealTimers();
+    await userEvent.click(
+      within(screen.getByRole("group", { name: "View" })).getByRole("button", { name: /To do/ }),
+    );
+    await screen.findByRole("region", { name: "Signals" });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(router.state.location.search.text).toBeUndefined();
+  });
+
+  it("shows a failed refresh at the end of the list, and keeps the rows it has", async () => {
+    const events = [buildListedEvent(1)];
+    let failing = false;
+    const handlers = storeEvents(events);
+    const listEvents = handlers["GET /api/v1/events"] as (call: Call) => unknown;
+    handlers["GET /api/v1/events"] = ((call: Call) =>
+      failing
+        ? { status: 500, body: buildErrorBody("internal", "The database is busy.") }
+        : listEvents(call)) as Handler;
+    await openIntake("/intake?view=everything", { ...storeSignals(SIGNALS).handlers, ...handlers });
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+
+    const views = () => screen.getByRole("group", { name: "View" });
+    await userEvent.click(within(views()).getByRole("button", { name: /To do/ }));
+    await screen.findByRole("region", { name: "Signals" });
+    failing = true;
+    await userEvent.click(within(views()).getByRole("button", { name: "Everything" }));
+
+    const alert = await within(getEventList()).findByRole("alert");
+    expect(alert.textContent).toContain("Couldn't refresh the events.");
+    expect(alert.textContent).toContain("The database is busy.");
+    expect(getEventRow(events[0]!)).not.toBeNull();
+
+    failing = false;
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(within(getEventList()).queryByRole("alert")).toBeNull();
+    });
+    expect(getEventRow(events[0]!)).not.toBeNull();
+  });
+
+  it("reads the first page again each time Everything opens", async () => {
+    const events = Array.from({ length: 45 }, (_, index) => buildListedEvent(index + 1));
+    const { calls } = await openEverything(events);
+    await waitFor(() => {
+      expect(getEventRow(events.at(-1)!)).not.toBeNull();
+    });
+    const scroll = getEventList().querySelector<HTMLElement>(".asks-scroll")!;
+    scroll.scrollTop = 100_000;
+    fireEvent.scroll(scroll);
+    await waitFor(() => {
+      expect(findEventReads(calls).map((read) => read.cursor)).toEqual([undefined, ["26"], ["6"]]);
+    });
+
+    const views = screen.getByRole("group", { name: "View" });
+    await userEvent.click(within(views).getByRole("button", { name: /To do/ }));
+    await screen.findByRole("region", { name: "Signals" });
+    await userEvent.click(
+      within(screen.getByRole("group", { name: "View" })).getByRole("button", {
+        name: "Everything",
+      }),
+    );
+
+    // The list starts again from its first page, read once, and then reads
+    // the older pages as it is scrolled to them.
+    await waitFor(() => {
+      expect(
+        findEventReads(calls)
+          .slice(3)
+          .map((read) => read.cursor),
+      ).toEqual([undefined, ["26"]]);
+    });
+    await waitFor(() => {
+      expect(getEventRow(events.at(-1)!)).not.toBeNull();
+    });
+  });
+
+  describe("source tabs", () => {
+    /** GitHub with a signal kind switched on, so its tab shows with no signal on To do. */
+    const GITHUB_WITH_KIND: PluginDetail = {
+      ...GITHUB,
+      intake: {
+        eventKinds: [],
+        signalKinds: [
+          {
+            kind: "github/review-requested",
+            label: "Review requested",
+            description: "A review is requested of you",
+            on: true,
+            level: "default",
+          },
+        ],
+      },
+    };
+    const openWithNoSignals = (path: string) =>
+      openIntake(path, {
+        ...storeSignals([]).handlers,
+        ...storeEvents([buildListedEvent(1)]),
+        "GET /api/v1/plugins": { body: [GITHUB_WITH_KIND] },
+      });
+
+    it("keeps a plugin's tab when the view switches, with no signal on To do", async () => {
+      await openWithNoSignals("/intake");
+      expect(
+        within(screen.getByRole("navigation", { name: "Sources" })).getByRole("button", {
+          name: /GitHub/,
+        }),
+      ).not.toBeNull();
+
+      await userEvent.click(
+        within(screen.getByRole("group", { name: "View" })).getByRole("button", {
+          name: "Everything",
+        }),
+      );
+
+      await waitFor(() => {
+        expect(getEventRow(buildListedEvent(1))).not.toBeNull();
+      });
+      expect(
+        within(screen.getByRole("navigation", { name: "Sources" })).getByRole("button", {
+          name: /GitHub/,
+        }),
+      ).not.toBeNull();
+    });
+
+    it("carries the pressed tab to Everything and back", async () => {
+      const { router } = await openWithNoSignals("/intake");
+      await userEvent.click(
+        within(screen.getByRole("navigation", { name: "Sources" })).getByRole("button", {
+          name: /GitHub/,
+        }),
+      );
+      await userEvent.click(
+        within(screen.getByRole("group", { name: "View" })).getByRole("button", {
+          name: "Everything",
+        }),
+      );
+      await waitFor(() => {
+        expect(router.state.location.search).toEqual({ view: "everything", source: "github" });
+      });
+
+      await userEvent.click(
+        within(screen.getByRole("group", { name: "View" })).getByRole("button", { name: /To do/ }),
+      );
+      await screen.findByRole("region", { name: "Signals" });
+      expect(
+        within(screen.getByRole("navigation", { name: "Sources" }))
+          .getByRole("button", { name: /GitHub/ })
+          .getAttribute("aria-pressed"),
+      ).toBe("true");
+    });
+  });
+
+  it("reads the next page as the list is scrolled, and ends with a line when none is left", async () => {
+    const events = Array.from({ length: 45 }, (_, index) => buildListedEvent(index + 1));
+    const { calls } = await openEverything(events);
+    await waitFor(() => {
+      expect(getEventRow(events.at(-1)!)).not.toBeNull();
+    });
+    expect(screen.queryByText("No more events from the last 90 days.")).toBeNull();
+
+    const scroll = getEventList().querySelector<HTMLElement>(".asks-scroll")!;
+    scroll.scrollTop = 100_000;
+    fireEvent.scroll(scroll);
+
+    await waitFor(() => {
+      expect(findEventReads(calls).map((read) => read.cursor)).toEqual([undefined, ["26"], ["6"]]);
+    });
+    expect(await screen.findByText("No more events from the last 90 days.")).not.toBeNull();
+  });
+
+  it("opens the pane with every handling of the event, each linked where the app has a screen", async () => {
+    const busy = buildListedEvent(1, {
+      signals: [
+        { signalId: REVIEW.id, kind: "github/review-requested", status: "open", title: "Review" },
+      ],
+      resolvedSignals: [{ signalId: MENTION.id, title: "Mention", outcome: "Replied" }],
+      tasks: [{ taskId: TASK_ID, title: "Fix the flaky test" }],
+      knownBy: [
+        {
+          subscriptionId: SUBSCRIPTION_ID,
+          holder: { kind: "session", id: SESSION_ID },
+          title: "Release thread",
+        },
+      ],
+      refs: ["github:pr:acme/webshop#1"],
+    });
+    const { router } = await openEverything([busy]);
+    await waitFor(() => {
+      expect(getEventRow(busy)).not.toBeNull();
+    });
+    expect(isEventPaneShown()).toBe(false);
+
+    await userEvent.click(getEventRow(busy));
+
+    const pane = await findEventPane();
+    expect(router.state.location.search).toEqual({ view: "everything", event: 1 });
+    expect(isEventPaneShown()).toBe(true);
+    expect(pane.querySelector(".ad-title")!.textContent).toBe("Pull request #1");
+    expect(within(pane).getByRole("heading", { name: "What came of it" })).not.toBeNull();
+    const blocks = [...pane.querySelectorAll(".ad-came-list .b-work")];
+    expect(blocks.map((block) => block.textContent)).toEqual([
+      "Raised a signalReviewon your To do list",
+      "Ended a signalMentionReplied",
+      "Added to a TaskFix the flaky test",
+      "Known to running workRelease threadThread",
+    ]);
+    expect(blocks.map((block) => block.getAttribute("href"))).toEqual([
+      `/intake?signal=${REVIEW.id}`,
+      `/intake?view=done&signal=${MENTION.id}`,
+      null,
+      `/threads/${SESSION_ID}`,
+    ]);
+    expect(pane.querySelector(".b-fields")!.textContent).toBe(
+      "ConnectionGitHub · acme-botReferencesgithub:pr:acme/webshop#1",
+    );
+    const open = within(pane).getByRole("link", { name: /Open in GitHub/ });
+    expect(open.getAttribute("href")).toBe("https://github.com/acme/webshop/pull/1");
+  });
+
+  it("links the pane's kind to its row on Settings > Intake, on the event's Connection", async () => {
+    const event = buildListedEvent(1);
+    await openEverything([event], "/intake?view=everything&event=1");
+    const pane = await findEventPane();
+
+    const href = new URL(
+      pane.querySelector(".ad-kind a.ad-kind-type")!.getAttribute("href")!,
+      "http://app.test",
+    );
+    expect(href.pathname).toBe("/settings/intake");
+    expect(Object.fromEntries(href.searchParams)).toEqual({
+      kind: "github.notification",
+      connection: CONNECTION_ID,
+    });
+  });
+
+  it("opens an event the list has not read from a link, with its fields and no handlings", async () => {
+    const events = Array.from({ length: 200 }, (_, index) => buildListedEvent(index + 1));
+    await openEverything(events, "/intake?view=everything&event=3", 5);
+    const pane = await findEventPane();
+
+    await waitFor(() => {
+      expect(pane.querySelector(".ad-title")!.textContent).toBe("Pull request #3");
+    });
+    expect(within(pane).queryByRole("heading", { name: "What came of it" })).toBeNull();
+  });
+
+  it("moves the selection with J, K and the arrows, and closes the pane and then the selection with Esc", async () => {
+    const events = [1, 2, 3].map((id) => buildListedEvent(id));
+    const { router } = await openEverything(events);
+    await waitFor(() => {
+      expect(getEventRow(events[2]!)).not.toBeNull();
+    });
+    await userEvent.click(getEventRow(events[2]!));
+    await findEventPane();
+
+    await userEvent.keyboard("j");
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ view: "everything", event: 2 });
+    });
+    await userEvent.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ view: "everything", event: 1 });
+    });
+    await userEvent.keyboard("k");
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ view: "everything", event: 2 });
+    });
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(isEventPaneShown()).toBe(false);
+    });
+    expect(router.state.location.search).toEqual({ view: "everything", event: 2 });
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ view: "everything" });
+    });
+  });
+
+  it("draws no count on the view and no controls on a row", async () => {
+    await openEverything([buildListedEvent(1)]);
+    await waitFor(() => {
+      expect(getEventList().querySelector(".ask-row")).not.toBeNull();
+    });
+    const views = screen.getByRole("group", { name: "View" });
+    expect(
+      within(views).getByRole("button", { name: "Everything" }).querySelector("small"),
+    ).toBeNull();
+    expect(getEventList().querySelector(".ask-check, .ask-acts")).toBeNull();
+  });
+});
+
 describe("Intake's search params", () => {
   it("drops a view and a signal it does not know", async () => {
     const { router } = await openIntake("/intake?view=archived&signal=not-an-id");
 
     expect(router.state.matches.at(-1)!.search).toEqual({});
+  });
+
+  it("drops an event, a text, a source and a handling it does not accept", async () => {
+    const { router } = await openIntake(
+      "/intake?view=everything&event=0&text=&source=&handling=ignored",
+    );
+
+    expect(router.state.matches.at(-1)!.search).toEqual({ view: "everything" });
   });
 });

@@ -75,6 +75,12 @@
   overflow-y: auto;
   padding: 0 10px 16px;
 }
+/* Everything's rows fade in under the horizon line instead of being cut by its
+   edge. Only this list has the mask, because a mask changes how the browser
+   rasterizes the rows, and the To do list must stay pixel-equal to the drawing. */
+.asks-scroll--faded {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
+}
 /* The handle between the list and the pane: an 8px strip centred on the
    pane's edge that takes no room of its own, with a 2px accent line on
    hover, while dragging and on keyboard focus. */
@@ -379,6 +385,69 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Everything's search field and filter menu, under the view switcher, then
+   the horizon the list reaches back to. */
+.asks-find {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.asks-search,
+.asks-stamp {
+  height: 30px;
+  font-size: var(--t-12);
+}
+.asks-search {
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+  color: var(--faint);
+}
+.asks-search input {
+  color: var(--ink);
+  font: inherit;
+}
+.asks-stamp {
+  width: 168px;
+}
+.asks-stamp select {
+  font: inherit;
+}
+.asks-search:focus-within,
+.asks-stamp:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.asks-horizon {
+  margin: 6px 0 0;
+  padding: 0 10px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 16px;
+}
+/* A line of Everything's list that is not an event: no events, no match, the
+   end of the list, and a failed read. They share one look. */
+.asks-note {
+  margin: 0;
+  padding: 16px 10px 24px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.asks-note--failed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* The count of handlings a row does not list, which keeps its width as it changes. */
+.ev-more {
+  font-variant-numeric: tabular-nums;
+}
+/* An event's first handling, ahead of what it led to. */
+.ev-stamp {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+
 /* The foot under To do: how many signals were cleared today. */
 .asks-cleared {
   margin: 8px 0 0;
@@ -639,6 +708,18 @@
   gap: 6px;
   color: var(--ink);
   font-weight: var(--w-medium);
+}
+/* The line of a plugin's signal, and an event's kind, are links to that
+   kind's switches on Settings > Intake. Each keeps the look of plain text;
+   hovering it underlines the text, as the app's other text links do (`.link`). */
+.ad-kind-type {
+  color: var(--muted);
+  text-decoration: none;
+}
+.ad-kind a.src:hover,
+.ad-kind-type:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 /* The drawing's system.css softens a source's mark the same way. */
 .ad-kind .src .br,
@@ -1034,4 +1115,46 @@
 }
 .b-work-text span:last-child {
   color: var(--muted);
+}
+
+/* Everything's pane: what came of the event, one block per handling, under a
+   small heading. A handling that names a record is a link, drawn as the block
+   it is, and lifts on hover. */
+.ad-came-h {
+  margin: 0 0 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.ad-came-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.b-work--link {
+  color: inherit;
+  text-decoration: none;
+}
+.b-work--link:hover {
+  background: color-mix(in oklab, var(--ink) 4%, var(--raised));
+}
+/* The event's Connection and references, as the drawing's field list. */
+.b-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 32px;
+  margin: 0;
+}
+.b-fields dt {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.b-fields dd {
+  margin: 1px 0 0;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  overflow-wrap: anywhere;
 }

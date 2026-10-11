@@ -120,6 +120,7 @@ const buildPlugin = (id: string, contributions: PluginDetail["contributions"]): 
   status: { _tag: "active" },
   config: {},
   contributions,
+  intake: { eventKinds: [], signalKinds: [] },
 });
 
 const PAPER = {

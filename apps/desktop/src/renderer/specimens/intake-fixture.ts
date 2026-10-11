@@ -40,7 +40,19 @@
  * - `evening`: the snooze menu opened at 18:41, when This evening is past
  *   and disabled;
  * - `toast-bulk`: Marta's review request marked done, then the next row
- *   checked, so the toast stands above the bulk bar.
+ *   checked, so the toast stands above the bulk bar;
+ * - `everything`: the Everything view, sixteen events newest first: the
+ *   fifth row went on to a Task and a session as well, so its line ends in
+ *   "+1", and one has no title, so its kind stands in for it;
+ * - `everything-end`: the same list scrolled to its end, with the line that
+ *   says no older event is left;
+ * - `everything-pane`: the event that came to the most open, with every
+ *   handling in the pane;
+ * - `everything-search`: the search field holding "pieter", with the events
+ *   it finds;
+ * - `everything-filter`: the "What came of it" filter on Raised a signal;
+ * - `everything-no-match`: a search that finds no event;
+ * - `everything-empty`: no event received yet.
  *
  * Done also holds a signal a newer one replaced, from yesterday, so the
  * `done` and `hover-done` scenes show its "Replaced by a newer one" line.
@@ -50,7 +62,9 @@
  */
 import {
   HAND_TO_ACTION_PREFIX,
+  type Connection,
   type Event,
+  type EventWithFacts,
   type PluginDetail,
   type PluginMark,
   type Signal,
@@ -99,6 +113,29 @@ const CONNECTION_IDS: Readonly<Record<string, string>> = {
   linear: "01a0ec64-6e80-7000-8000-0000000000c3",
   slack: "01a0ec64-6e80-7000-8000-0000000000c4",
 };
+
+/** Builds the connected Connection of plugin `pluginId`, named `label`, made a day before the specimen's clock. */
+const buildConnection = (pluginId: string, label: string): Connection => ({
+  id: CONNECTION_IDS[pluginId]!,
+  type: `${pluginId}/${pluginId}`,
+  label,
+  displayName: label,
+  status: "connected",
+  labels: [],
+  config: {},
+  feedIntervals: {},
+  credentials: [],
+  createdAt: new Date(SPECIMEN_NOW - 24 * 60 * 60_000).toISOString(),
+  updatedAt: new Date(SPECIMEN_NOW - 24 * 60 * 60_000).toISOString(),
+});
+
+/** The four Connections the events came through, which the event pane names. */
+const INTAKE_CONNECTIONS: ReadonlyArray<Connection> = [
+  buildConnection("sentry", "acme"),
+  buildConnection("github", "rogier"),
+  buildConnection("linear", "acme"),
+  buildConnection("slack", "acme"),
+];
 
 /** Returns the moment `minutes` before the specimen's clock, as a timestamp. */
 const minutesAgo = (minutes: number): string =>
@@ -582,6 +619,182 @@ const buildEvent = (signal: Signal, url: string): Event => {
   };
 };
 
+const TASK_ID = "01a0ec64-7b00-7000-8000-000000000001";
+const SESSION_ID = "01a0ec64-7c00-7000-8000-000000000001";
+
+/**
+ * Builds the event `id`, received `minutes` ago, with no handling. `event`
+ * gives what makes it differ: its source, kind, title and author, and the
+ * facts of what came of it.
+ */
+const buildListedEvent = (
+  id: number,
+  minutes: number,
+  event: Pick<Event, "source" | "kind" | "title" | "author"> & Partial<EventWithFacts>,
+): EventWithFacts => ({
+  id,
+  connectionId: CONNECTION_IDS[event.source] ?? null,
+  system: event.source,
+  occurredAt: minutesAgo(minutes),
+  receivedAt: minutesAgo(minutes),
+  dedupKey: `${event.source}-${String(id)}`,
+  refs: [],
+  url: null,
+  payload: {},
+  actor: null,
+  signals: [],
+  resolvedSignals: [],
+  tasks: [],
+  knownBy: [],
+  ...event,
+});
+
+/** Returns the fact that `signal` was raised from an event. */
+const raisedSignal = (signal: Signal): EventWithFacts["signals"][number] => ({
+  signalId: signal.id,
+  kind: signal.kind,
+  status: signal.status,
+  title: signal.title,
+});
+
+/** Returns the event `signal` was raised from, at `url`, with the fact that it raised `signal`. */
+const buildSignalEvent = (signal: Signal, url: string): EventWithFacts => ({
+  ...buildEvent(signal, url),
+  signals: [raisedSignal(signal)],
+  resolvedSignals: [],
+  tasks: [],
+  knownBy: [],
+});
+
+/**
+ * Intake's events, newest first, as Everything lists them: the six events
+ * behind To do, one that went on to a Task and to a session as well (so its
+ * row ends in "+1"), one that ended a signal and reached three other places,
+ * and events nothing came of, one of them with no title.
+ */
+const EVENTS: ReadonlyArray<EventWithFacts> = [
+  buildSignalEvent(SLACK, "https://acme.slack.com/archives/acceptance"),
+  buildListedEvent(30, 25, {
+    source: "github",
+    kind: "github.push",
+    title: "Round cart totals once, at checkout",
+    author: "Pieter",
+    url: "https://github.com/rogier/webshop/commit/9f3c2ab",
+  }),
+  buildSignalEvent(MENTION, "https://linear.app/acme/issue/PAY-212"),
+  buildListedEvent(31, 52, {
+    source: "linear",
+    kind: "linear.issue.updated",
+    title: "PAY-219 moved to In progress",
+    author: "Sanne",
+  }),
+  {
+    ...buildSignalEvent(CHECKS, "https://github.com/rogier/webshop/pull/1300"),
+    tasks: [{ taskId: TASK_ID, title: "Fix VAT rounding on invoices" }],
+    knownBy: [
+      {
+        subscriptionId: "01a0ec64-7d00-7000-8000-000000000001",
+        holder: { kind: "session", id: SESSION_ID },
+        title: "Fix the VAT rounding",
+      },
+    ],
+  },
+  buildListedEvent(32, 96, {
+    source: "github",
+    kind: "github.pull_request.closed",
+    title: "Pieter closed #1286 without merging it",
+    author: "Pieter",
+    url: "https://github.com/rogier/webshop/pull/1286",
+    refs: ["github:pr:rogier/webshop#1286"],
+    signals: [
+      {
+        signalId: "01a0ec64-7e00-7000-8000-000000000001",
+        kind: "proposal",
+        status: "open",
+        title: "Retire the old checkout copy",
+      },
+    ],
+    resolvedSignals: [
+      {
+        signalId: DONE[6]!.id,
+        title: DONE[6]!.title,
+        outcome: "Withdrawn",
+      },
+    ],
+    tasks: [{ taskId: TASK_ID, title: "Drop the checkout copy experiment" }],
+    knownBy: [
+      {
+        subscriptionId: "01a0ec64-7d00-7000-8000-000000000002",
+        holder: { kind: "session", id: SESSION_ID },
+        title: "Release thread",
+      },
+    ],
+  }),
+  buildSignalEvent(REVIEW, "https://github.com/rogier/payments-api/pull/1294"),
+  buildSignalEvent(ALERT, "https://sentry.io/organizations/acme/issues/4521"),
+  buildSignalEvent(CHANGES, "https://github.com/rogier/webshop/pull/1298"),
+  buildListedEvent(33, 240, {
+    source: "github",
+    kind: "github.push",
+    title: "Sanne pushed 3 commits to marta/webhook-backoff",
+    author: "Sanne",
+  }),
+  buildListedEvent(34, 300, {
+    source: "sentry",
+    kind: "sentry.deploy",
+    title: "Deploy of webshop-prod finished",
+    author: null,
+  }),
+  buildListedEvent(35, 360, {
+    source: "slack",
+    kind: "slack.message",
+    title: null,
+    author: null,
+  }),
+  buildListedEvent(36, 420, {
+    source: "github",
+    kind: "github.release",
+    title: "Release v2.31.0 published",
+    author: "Marta",
+  }),
+  buildListedEvent(37, 480, {
+    source: "github",
+    kind: "github.issue_comment",
+    title: "Pieter commented on #1296",
+    author: "Pieter",
+  }),
+  buildListedEvent(38, 540, {
+    source: "github",
+    kind: "github.check_suite",
+    title: "Nightly dependency check passed",
+    author: "GitHub Actions",
+  }),
+  buildListedEvent(39, 600, {
+    source: "linear",
+    kind: "linear.comment",
+    title: "Jonas commented on PAY-209",
+    author: "Jonas",
+  }),
+];
+
+/** Returns the events whose title or author holds `text`, as the controller's search matches them. */
+const searchEvents = (text: string): ReadonlyArray<EventWithFacts> =>
+  EVENTS.filter((event) =>
+    `${event.title ?? ""} ${event.author ?? ""}`.toLowerCase().includes(text),
+  );
+
+/** Returns a scene that opens Everything on `everything`. `play` is what the user does once it opens. */
+const buildEverythingScene = (
+  name: string,
+  everything: NonNullable<IntakeRecords["everything"]>,
+  play?: () => Promise<void>,
+): IntakeScene => ({
+  name,
+  records: RECORDS,
+  intake: { signal: null, event: null, view: "everything", everything },
+  ...(play !== undefined && { play }),
+});
+
 /** One state of Intake the specimen draws. */
 export interface IntakeScene {
   /** The scene's name in `?scene=` and in its capture's file name. */
@@ -609,6 +822,7 @@ const RECORDS: SidebarRecords = {
   later: LATER,
   done: DONE,
   plugins: INTAKE_PLUGINS,
+  connections: INTAKE_CONNECTIONS,
 };
 
 /** Waits until the page holds an element that matches `selector`. Fails after five seconds. */
@@ -790,4 +1004,18 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
       await waitForElement(".asks-bulk");
     },
   }),
+  buildEverythingScene("everything", { events: EVENTS }),
+  buildEverythingScene("everything-end", { events: EVENTS }, async () => {
+    const scroll = (await waitForElement(".asks-scroll")) as HTMLElement;
+    scroll.scrollTop = scroll.scrollHeight;
+    await waitForElement(".asks-scroll > .asks-note");
+  }),
+  buildEverythingScene("everything-pane", { events: EVENTS, selectedEventId: 32 }),
+  buildEverythingScene("everything-search", { events: searchEvents("pieter"), text: "pieter" }),
+  buildEverythingScene("everything-filter", {
+    events: EVENTS.filter((event) => event.signals.some((signal) => signal.kind !== "proposal")),
+    handling: "raised-signal",
+  }),
+  buildEverythingScene("everything-no-match", { events: [], text: "invoice" }),
+  buildEverythingScene("everything-empty", { events: [] }),
 ];

@@ -28,6 +28,10 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # The job takes about 18 minutes. The bound stops a hung test from holding
+    # the runner for GitHub's default of six hours, and a job that times out
+    # keeps its logs, which a cancelled job does not.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:

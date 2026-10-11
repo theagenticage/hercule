@@ -912,7 +912,7 @@ The set is worked out on read against today's settings, never stored. An event t
 | 3 | **→ ignored** · rule *text* | an Ignore Rule's catch row for the event |
 | 4 | **→ proposal / offer / FYI / unsure** · *title* | a core Signal listing the event in `origin.eventIds` |
 | 5 | **→** *task title* | a Task's provenance carries the event |
-| 6 | **known** · *task or run* | a live Subscription received the event |
+| 6 | ~~**known** · *task or run*~~ **known to** *Thread or run title*, or "a Thread" or "a run" when the title is not readable *(amended 2026-10-11, [#529](https://github.com/theagenticage/hercule/issues/529))* | a live Subscription received the event |
 | 7 | **pending triage** | the event is newer than the `until` of the last run of the workflow `intake.triageWorkflowId` names; hidden when none is named |
 | 8 | **no action** | none of the above |
 
@@ -930,7 +930,7 @@ A signal an Ignore Rule resolved when the rule was created shows handling 1, "�
 - **Snooze.** It shows only inside handling 1's state.
 - **Stopped.** There is no such handling in v1.
 
-**Everything** lists Intake's events, newest first, back to the retention horizon, with no counts and no row controls. It replaces the per-connection events view and the "since you last checked" marker for Intake (Section 8). Its query is `event.query` with `intake: true`, plus `text` (a search over each event's `title` and `author` that keeps newest-first order), `source`, a `handling` filter run in SQL, and the row facts `signals`, `resolvedSignals`, `ignoredBy`, `tasks` and `knownBy` read in the same query ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#event)). The envelope's `title` and `author` are set at emit ([./08-events-and-connections.md](./08-events-and-connections.md) section 2).
+**Everything** lists Intake's events, newest first, back to the retention horizon, with no counts and no row controls. It replaces the per-connection events view and the "since you last checked" marker for Intake (Section 8). Its query is `event.query` with `intake: true`, plus `text` (a search over each event's `title` and `author` that keeps newest-first order), `source`, a `handling` filter run in SQL, and the row facts ~~`signals`, `resolvedSignals`, `ignoredBy`, `tasks` and `knownBy` read in the same query~~ `signals`, `resolvedSignals`, `tasks` and `knownBy`, each read in one query for the whole page's events *(amended 2026-10-11, [#529](https://github.com/theagenticage/hercule/issues/529): `ignoredBy` joins with Ignore Rules, [#532](https://github.com/theagenticage/hercule/issues/532))* ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#event)). The envelope's `title` and `author` are set at emit ([./08-events-and-connections.md](./08-events-and-connections.md) section 2).
 
 ## Post-v1
 

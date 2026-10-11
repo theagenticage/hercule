@@ -176,6 +176,18 @@ export {
   RequestError,
 } from "./errors";
 export { toIdTail } from "./id-tail";
+export {
+  applyIntakeChange,
+  buildIntakeOverrides,
+  canResetIntakeRow,
+  describeIntakeSource,
+  listIntakeSegments,
+  listPluginsWithIntake,
+  type IntakeChange,
+  type IntakeKindList,
+  type IntakeKindValue,
+  type IntakeSegment,
+} from "./intake-settings";
 export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
 export { isWebLink } from "./web-link";
 export {
@@ -258,7 +270,7 @@ export { createLive, type Live } from "./live/live";
 export { invalidateWithoutCancelling } from "./live/invalidation";
 export { readEveryPage } from "./read-every-page";
 export { isMutationRunning } from "./mutation-running";
-export { queryKeys, buildQueryKeys, type LiveQueryKey } from "./live/keys";
+export { queryKeys, buildQueryKeys, type EventListFilter, type LiveQueryKey } from "./live/keys";
 export { buildFetchIdentityProbe, detectLocalRunner } from "./local-runner";
 export {
   buildBoundActionRows,
@@ -278,12 +290,22 @@ export {
 export { parsePluginId } from "./plugin-id";
 export { formatBlocksAsText, isKnownBlock, UNKNOWN_BLOCK_TEXT } from "./signal-blocks";
 export {
+  buildHandlingLabels,
+  buildInitials,
   buildIntakeTabs,
   buildSignalAnswers,
+  computeEventHorizonStart,
   countToDo,
+  cutHandlingLabels,
+  DEFAULT_INTAKE_LIST_WIDTH,
   decidePluginMark,
   describeAnswerKey,
   describeBuildFailure,
+  describeEventHorizon,
+  describeEventListEnd,
+  describeEventSystem,
+  describeEventTitle,
+  describeHandlingCaption,
   describeNotScreened,
   describeOrchestrationSegment,
   describeResolvedElsewhere,
@@ -292,23 +314,29 @@ export {
   describeSignalOutcomeMoment,
   describeSignalProvenance,
   describeSignalRow,
+  EVENT_HANDLING_OPTIONS,
   findReplyAnswer,
   findSuggestedAnswer,
+  fitIntakeListWidth,
+  fitsIntakePane,
+  groupEventsByDay,
   groupSignalsByDay,
   groupSignalsIntoSections,
   isBackFromSnooze,
   listUrgentSignals,
-  moveSignalSelection,
-  nameSignalSource,
-  buildInitials,
-  trimAnswerEllipsis,
-  DEFAULT_INTAKE_LIST_WIDTH,
   MIN_INTAKE_LIST_WIDTH,
   MIN_INTAKE_PANE_WIDTH,
+  moveEventSelection,
+  moveSignalSelection,
+  nameSignalSource,
   parseIntakeListWidth,
-  fitsIntakePane,
-  fitIntakeListWidth,
+  trimAnswerEllipsis,
+  type EventDaySection,
+  type EventHandlingLabel,
   type IntakeSection,
+  type IntakeTab,
+  type IntakeTabPlugin,
+  type IntakeView,
   type PluginIdentity,
   type PluginMarkDrawing,
   type PluginName,

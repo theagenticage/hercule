@@ -402,6 +402,11 @@ const TABLE = {
     method: "PUT",
     path: "/api/v1/plugins/:id/config",
   },
+  "plugin.updateIntake": {
+    requires: "infra.write",
+    method: "PUT",
+    path: "/api/v1/plugins/:id/intake",
+  },
 
   "provider.query": { requires: "infra.read", method: "GET", path: "/api/v1/providers" },
   "provider.read": { requires: "infra.read", method: "GET", path: "/api/v1/providers/:id" },
