@@ -53,6 +53,13 @@ export type FieldRow =
        * id, and its help line must say so.
        */
       readonly resolves?: OperationId;
+      /**
+       * The query sent to the list operation `resolves` names, when its
+       * default listing does not hold the ids this field takes. `{ view:
+       * "later" }` makes `signal unsnooze` match a tail among the snoozed
+       * signals.
+       */
+      readonly resolvesQuery?: Readonly<Record<string, string>>;
     }
   | {
       readonly flag: string;
@@ -852,17 +859,13 @@ export const CLI = {
   "signal.markDone": {
     command: "signal done",
     help: "Marks signals done, as you, without telling their source. Each one leaves To do with the outcome Done, nothing sent. A signal already resolved is skipped and listed in skipped. Only a kind that offers Done can be marked done; a proposal, an offer or an unsure item is answered with `hercule signal act` instead.",
-    examples: [
-      { args: ["0199e0e7-7b21-7000-8000-000000000001"] },
-      {
-        args: ["0199e0e7-7b21-7000-8000-000000000001", "0199e0e7-7b21-7000-8000-000000000002"],
-      },
-    ],
+    examples: [{ args: ["0b1c2d3e"] }, { args: ["0b1c2d3e", "9f8e7d6c"] }],
     fields: {
       signalIds: {
         positional: true,
         placeholder: "signal-id",
-        help: "A signal's full id; a tail is not accepted. Give several to mark them done in one call.",
+        help: "A signal's id, or a tail of eight or more characters of a signal on To do. Give several to mark them done in one call.",
+        resolves: "signal.query",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
@@ -870,42 +873,44 @@ export const CLI = {
   "signal.snooze": {
     command: "signal snooze",
     help: "Takes signals off To do until a time, without answering them. Each one waits in Later and comes back to To do when the time passes. Snoozing a snoozed signal replaces its time. A signal already resolved is skipped and listed in skipped.",
-    examples: [
-      { args: ["0199e0e7-7b21-7000-8000-000000000001", "--until", "2026-10-12T07:00:00.000Z"] },
-    ],
+    examples: [{ args: ["0b1c2d3e", "9f8e7d6c", "--until", "2026-10-13T09:00+02:00"] }],
     fields: {
       signalIds: {
         positional: true,
         placeholder: "signal-id",
-        help: "A signal's full id; a tail is not accepted. Give several to snooze them in one call.",
+        help: "A signal's id, or a tail of eight or more characters of a signal on To do. Give several to snooze them in one call.",
+        resolves: "signal.query",
       },
       until: {
         flag: "until",
-        help: "When the signals come back, as a UTC time with milliseconds, such as 2026-10-12T07:00:00.000Z. It must be in the future.",
+        help: "When the signals come back, as an ISO 8601 time with its offset or Z, such as 2026-10-13T09:00+02:00. It must be in the future.",
       },
     },
   },
   "signal.unsnooze": {
     command: "signal unsnooze",
     help: "Puts snoozed signals back on To do now. A signal that is not snoozed is left as it is, and one already resolved is skipped and listed in skipped.",
-    examples: [{ args: ["0199e0e7-7b21-7000-8000-000000000001"] }],
+    examples: [{ args: ["0b1c2d3e"] }],
     fields: {
       signalIds: {
         positional: true,
         placeholder: "signal-id",
-        help: "A signal's full id; a tail is not accepted. Give several to unsnooze them in one call.",
+        help: "A signal's id, or a tail of eight or more characters of a snoozed signal. Give several to unsnooze them in one call.",
+        resolves: "signal.query",
+        resolvesQuery: { view: "later" },
       },
     },
   },
   "signal.lowerPriority": {
     command: "signal lower-priority",
     help: "Moves urgent signals out of Now, as you: each one goes from urgent to high. A signal that is not urgent is left as it is, and one already resolved is skipped and listed in skipped.",
-    examples: [{ args: ["0199e0e7-7b21-7000-8000-000000000001"] }],
+    examples: [{ args: ["0b1c2d3e"] }],
     fields: {
       signalIds: {
         positional: true,
         placeholder: "signal-id",
-        help: "A signal's full id; a tail is not accepted. Give several to lower them in one call.",
+        help: "A signal's id, or a tail of eight or more characters of a signal on To do. Give several to lower them in one call.",
+        resolves: "signal.query",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },

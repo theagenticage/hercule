@@ -40,9 +40,19 @@ export const markShorthandOnItself = <S extends Schema.Codec<unknown, string>>(s
  * word.
  */
 export const readShorthandDecoder = (field: unknown): ((text: string) => unknown) | undefined => {
-  const marked = (
-    field as { readonly ast?: { readonly annotations?: Record<string, unknown> } } | undefined
-  )?.ast?.annotations?.[SHORTHAND];
+  const ast = (
+    field as
+      | {
+          readonly ast?: {
+            readonly annotations?: Record<string, unknown>;
+            readonly checks?: ReadonlyArray<{ readonly annotations?: Record<string, unknown> }>;
+          };
+        }
+      | undefined
+  )?.ast;
+  // Annotating a schema that has checks annotates its last check, so the
+  // codec of a checked schema, such as a timestamp, is found there.
+  const marked = ast?.annotations?.[SHORTHAND] ?? ast?.checks?.at(-1)?.annotations?.[SHORTHAND];
   if (marked === undefined) return undefined;
   const decode = Schema.decodeSync(marked as Schema.Codec<unknown, string>);
   return (text: string): unknown => decode(text);

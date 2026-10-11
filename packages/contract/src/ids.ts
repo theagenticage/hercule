@@ -2,8 +2,92 @@
  * The shared wire vocabulary: ids, timestamps, the actor stamp, and the
  * canonical form of an identifier for a thing outside Hercule.
  */
-import { Schema } from "effect";
-export { Timestamp } from "@hercule/protocol";
+import { Schema, SchemaGetter } from "effect";
+import { Timestamp } from "@hercule/protocol";
+import { markShorthandOnItself } from "./shorthand";
+export { Timestamp };
+
+/**
+ * An exact time as a person or an agent writes it: an ISO 8601 date and time
+ * with its offset or `Z`. Seconds and milliseconds are optional. The capture
+ * groups are the year, month, day, hour, minute, second, millisecond and
+ * offset.
+ */
+const TIME_WITH_OFFSET =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** The same time written without an offset, which says nothing about where it is. */
+const TIME_WITHOUT_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/;
+
+/**
+ * Converts a time written with its offset into the canonical UTC
+ * `Timestamp`, such as `2026-10-13T09:00+02:00` into
+ * `2026-10-13T07:00:00.000Z`. Returns `undefined` when the text is not such
+ * a time, or names a date or a time of day that does not exist, such as
+ * `2026-02-30` or `25:00`.
+ */
+const convertTimeWithOffset = (text: string): string | undefined => {
+  const parts = TIME_WITH_OFFSET.exec(text);
+  if (parts === null) return undefined;
+  const [, year, month, day, hour, minute, second = "0", fraction = "0", offset] = parts;
+  const local = new Date(
+    Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+      Number(fraction.padEnd(3, "0")),
+    ),
+  );
+  // Date.UTC rolls an impossible date over into the next month or day, so a
+  // date that exists reads back with the same fields it was built from.
+  const exists =
+    local.getUTCFullYear() === Number(year) &&
+    local.getUTCMonth() === Number(month) - 1 &&
+    local.getUTCDate() === Number(day) &&
+    local.getUTCHours() === Number(hour) &&
+    local.getUTCMinutes() === Number(minute) &&
+    local.getUTCSeconds() === Number(second);
+  if (!exists) return undefined;
+  if (offset === "Z") return local.toISOString();
+  const [offsetHours, offsetMinutes] = offset!.slice(1).split(":").map(Number) as [number, number];
+  if (offsetHours > 23 || offsetMinutes > 59) return undefined;
+  const sign = offset!.startsWith("-") ? -1 : 1;
+  return new Date(
+    local.getTime() - sign * (offsetHours * 60 + offsetMinutes) * 60_000,
+  ).toISOString();
+};
+
+/**
+ * An exact time an input takes, such as when a snoozed signal comes back. It
+ * accepts any ISO 8601 date and time with its offset or `Z`, and decodes to
+ * the canonical UTC `Timestamp` the controller stores and compares. A time
+ * without an offset is refused, because it could mean any of 24 instants.
+ *
+ * It is its own shorthand, so the CLI checks and converts the text a person
+ * types by the same rules before anything is sent.
+ */
+export const TimestampWithOffset = markShorthandOnItself(
+  Schema.String.check(
+    Schema.makeFilter((text: string) => {
+      if (convertTimeWithOffset(text) !== undefined) return undefined;
+      if (TIME_WITHOUT_OFFSET.test(text)) {
+        return `${text} has no offset, so it could be any of 24 times. Add the offset or Z, such as 2026-10-13T09:00+02:00 or 2026-10-13T07:00Z.`;
+      }
+      return `${text} is not an exact time. Write a real date and time with its offset, such as 2026-10-13T09:00+02:00 or 2026-10-13T07:00Z.`;
+    }),
+  ).pipe(
+    Schema.decodeTo(Timestamp, {
+      // The check above has already refused every text this cannot convert.
+      decode: SchemaGetter.transform((text: string) => convertTimeWithOffset(text)!),
+      encode: SchemaGetter.transform((timestamp: string) => timestamp),
+    }),
+  ),
+);
+
+export type TimestampWithOffset = Schema.Schema.Type<typeof TimestampWithOffset>;
 
 /**
  * A canonical lowercase UUIDv7 string: what every Hercule id looks like on the

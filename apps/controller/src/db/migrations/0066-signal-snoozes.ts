@@ -11,7 +11,9 @@
  * - `signals.resolved_at` is the resolution's time, read out of the JSON
  *   `resolution` column. A keyset seek works only on plain columns, so the
  *   Done view's order, newest resolution first, needs this virtual column and
- *   the partial index over resolved signals.
+ *   the partial index over resolved signals. A second partial index leads
+ *   with the kind, so the Done view of one kind, or of one plugin's kinds,
+ *   reads only that kind's rows instead of all of history.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -40,5 +42,9 @@ export default Effect.gen(function* () {
   `;
   yield* sql`
     CREATE INDEX signals_resolved ON signals (resolved_at DESC, id DESC) WHERE status = 'resolved'
+  `;
+  yield* sql`
+    CREATE INDEX signals_resolved_kind ON signals (kind, resolved_at DESC, id DESC)
+    WHERE status = 'resolved'
   `;
 });

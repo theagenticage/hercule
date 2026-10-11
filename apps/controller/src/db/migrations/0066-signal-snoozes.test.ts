@@ -6,7 +6,10 @@
  * - a signal is not lowered until it is marked so;
  * - the Later view reads the snoozes by `until` from an index without sorting;
  * - the Done view reads the resolved signals, newest resolution first, from an
- *   index without sorting, and seeks a page from it.
+ *   index without sorting, and seeks a page from it;
+ * - the Done view filtered to one kind reads the kind index without sorting;
+ *   filtered to one source (a range of kinds) it reads the same index but
+ *   sorts, because the resolutions of several kinds interleave.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -104,5 +107,33 @@ describe("the signal snoozes migration", () => {
 
     expect(plan).toMatch(/USING (COVERING )?INDEX signals_resolved\b/);
     expect(plan).not.toContain("TEMP B-TREE");
+  });
+
+  it("serves a page of the Done view for one kind from the kind index without sorting", async () => {
+    const plan = await run(
+      explainQueryPlan(
+        `SELECT id FROM signals WHERE status = 'resolved' AND kind = 'github/pr'
+           AND (resolved_at < '${at}' OR (resolved_at = '${at}' AND id < x'${ID}'))
+         ORDER BY resolved_at DESC, id DESC`,
+      ),
+    );
+
+    expect(plan).toMatch(/USING (COVERING )?INDEX signals_resolved_kind \(kind=\?/);
+    expect(plan).not.toContain("TEMP B-TREE");
+  });
+
+  // A source is a range of kinds. The index narrows the rows to that range,
+  // but the rows of several kinds are not in resolution order, so SQLite sorts
+  // the range. It sorts only the source's resolved signals, not all of them.
+  it("narrows the Done view for one source to its kinds through the kind index", async () => {
+    const plan = await run(
+      explainQueryPlan(
+        `SELECT id FROM signals WHERE status = 'resolved'
+           AND kind >= 'github/' AND kind < 'github0'
+         ORDER BY resolved_at DESC, id DESC`,
+      ),
+    );
+
+    expect(plan).toMatch(/USING (COVERING )?INDEX signals_resolved_kind \(kind>\? AND kind<\?\)/);
   });
 });

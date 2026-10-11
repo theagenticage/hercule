@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Schema } from "effect";
-import { ExternalRef, Id, listDecodeIssues } from "./index";
+import {
+  ExternalRef,
+  Id,
+  listDecodeIssues,
+  readShorthandDecoder,
+  SignalSnoozeInput,
+  Timestamp,
+  TimestampWithOffset,
+} from "./index";
 
 const decode = (input: unknown) =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(ExternalRef)(input))._tag;
@@ -28,5 +36,60 @@ describe("the id grammar", () => {
     expect(listDecodeIssues(error)).toEqual([
       { path: [], message: "Expected a canonical lowercase UUIDv7" },
     ]);
+  });
+});
+
+describe("a timestamp", () => {
+  const isTimestamp = Schema.is(Timestamp);
+
+  // The exact time with its offset is a shorthand built on a timestamp, and
+  // marking it must not make every timestamp field take an offset time.
+  it("is not a shorthand itself", () => {
+    expect(readShorthandDecoder(Timestamp)).toBeUndefined();
+  });
+
+  it("takes a real UTC instant, and refuses a date or a time of day that does not exist", () => {
+    expect(isTimestamp("2024-02-29T23:59:59.999Z")).toBe(true);
+    expect(isTimestamp("2026-13-45T99:99:99.999Z")).toBe(false);
+    expect(isTimestamp("2026-02-30T09:00:00.000Z")).toBe(false);
+    expect(isTimestamp("2026-10-11T24:00:00.000Z")).toBe(false);
+  });
+});
+
+describe("an exact time with its offset", () => {
+  const decode = Schema.decodeUnknownExit(TimestampWithOffset);
+  const decodeToUtc = (text: string) => {
+    const decoded = decode(text);
+    return decoded._tag === "Success" ? decoded.value : undefined;
+  };
+  const readRefusal = (text: string) => {
+    const decoded = decode(text);
+    if (decoded._tag !== "Failure") return undefined;
+    return listDecodeIssues(Cause.squash(decoded.cause) as Schema.SchemaError)[0]?.message;
+  };
+
+  it("decodes a time with an offset or Z to the canonical UTC timestamp", () => {
+    expect(decodeToUtc("2026-10-13T09:00+02:00")).toBe("2026-10-13T07:00:00.000Z");
+    expect(decodeToUtc("2026-10-13T01:30:15-05:30")).toBe("2026-10-13T07:00:15.000Z");
+    expect(decodeToUtc("2026-10-13T07:00:00.5Z")).toBe("2026-10-13T07:00:00.500Z");
+    expect(decodeToUtc("2026-10-13T07:00:00.000Z")).toBe("2026-10-13T07:00:00.000Z");
+    expect(decodeToUtc("2026-01-01T00:30+01:00")).toBe("2025-12-31T23:30:00.000Z");
+  });
+
+  it("refuses a time without an offset, and says to add one", () => {
+    expect(readRefusal("2026-10-13T09:00")).toMatch(/has no offset/);
+  });
+
+  it("refuses a date, a time of day or an offset that does not exist", () => {
+    expect(readRefusal("2026-02-30T09:00+02:00")).toMatch(/is not an exact time/);
+    expect(readRefusal("2026-10-13T25:00Z")).toMatch(/is not an exact time/);
+    expect(readRefusal("2026-10-13T09:00+24:00")).toMatch(/is not an exact time/);
+    expect(readRefusal("tomorrow")).toMatch(/is not an exact time/);
+  });
+
+  it("is its own shorthand, so the command line converts the typed time the same way", () => {
+    expect(readShorthandDecoder(SignalSnoozeInput.fields.until)?.("2026-10-13T09:00+02:00")).toBe(
+      "2026-10-13T07:00:00.000Z",
+    );
   });
 });

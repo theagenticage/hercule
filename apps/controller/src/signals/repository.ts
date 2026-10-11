@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { Fragment } from "effect/unstable/sql/Statement";
 import type {
   Actor,
   Block,
@@ -137,10 +138,63 @@ const make = Effect.gen(function* () {
   const buildFilterClauses = (filter: SignalListFilter) => {
     const clauses = [];
     if (filter.kind !== undefined) clauses.push(sql`s.kind = ${filter.kind}`);
-    // A plugin id holds no `%` or `_`, so the pattern matches only the prefix.
-    if (filter.source !== undefined) clauses.push(sql`s.kind LIKE ${`${filter.source}/%`}`);
+    // The kinds of one plugin are the kinds that start with `<source>/`. They
+    // are selected as a range rather than with LIKE, because SQLite can seek
+    // an index for a range. `0` is the character after `/`, so the range
+    // ends right after the last kind with that prefix.
+    if (filter.source !== undefined) {
+      clauses.push(sql`s.kind >= ${`${filter.source}/`} AND s.kind < ${`${filter.source}0`}`);
+    }
     return clauses;
   };
+
+  /**
+   * Returns one page of a paged view, ordered by `sortColumn` and then by
+   * the signal's id, both in `direction`.
+   *
+   * - `scope` is the view's cursor scope, so a cursor from another view is
+   *   refused with `CursorError`;
+   * - `from` is the view's `FROM` clause, which names the signal `s` and its
+   *   snooze `z`, and `idColumn` is the id column the view seeks on;
+   * - `condition` keeps the view's rows;
+   * - `readSortValue` returns a signal's value in `sortColumn`, for the next
+   *   page's cursor.
+   */
+  const listPage = (view: {
+    readonly scope: CursorScope;
+    readonly from: string;
+    readonly sortColumn: string;
+    readonly idColumn: string;
+    readonly direction: "asc" | "desc";
+    readonly condition: Fragment;
+    readonly filter: SignalListFilter;
+    readonly request: SignalPageRequest;
+    readonly readSortValue: (signal: Signal) => string;
+  }): Effect.Effect<Page<Signal>, CursorError | SqlError> =>
+    Effect.gen(function* () {
+      const { request } = view;
+      const after =
+        request.cursor === undefined
+          ? undefined
+          : yield* decodeCursor(request.cursor, view.scope, ["string"]);
+      const { keyset, order } = buildKeyset(
+        sql,
+        [{ column: view.sortColumn, direction: view.direction }],
+        [view.idColumn],
+        after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
+      );
+      const rows = yield* sql<SignalRow>`
+        SELECT ${sql.literal(COLUMNS)} FROM ${sql.literal(view.from)}
+        WHERE ${sql.and([view.condition, keyset, ...buildFilterClauses(view.filter)])}
+        ${order} LIMIT ${request.limit + 1}
+      `;
+      return yield* buildPage(
+        rows,
+        request.limit,
+        (page) => Effect.succeed(page.map(parseRow)),
+        (last) => encodeCursor(view.scope, [view.readSortValue(last)], last.id),
+      );
+    });
 
   /** Builds the condition that a signal's id is one of `ids`, which may be empty. */
   const buildIdIn = (column: string, ids: ReadonlyArray<string>) =>
@@ -264,30 +318,17 @@ const make = Effect.gen(function* () {
       request: SignalPageRequest,
       now: string,
     ): Effect.Effect<Page<Signal>, CursorError | SqlError> =>
-      Effect.gen(function* () {
-        const after =
-          request.cursor === undefined
-            ? undefined
-            : yield* decodeCursor(request.cursor, LATER_SCOPE, ["string"]);
-        const { keyset, order } = buildKeyset(
-          sql,
-          [{ column: "z.until", direction: "asc" }],
-          ["z.signal_id"],
-          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
-        );
-        const rows = yield* sql<SignalRow>`
-          SELECT ${sql.literal(COLUMNS)}
-          FROM signal_snoozes z JOIN signals s ON s.id = z.signal_id
-          WHERE ${sql.and([sql`z.until > ${now}`, keyset, ...buildFilterClauses(filter)])}
-          ${order} LIMIT ${request.limit + 1}
-        `;
-        return yield* buildPage(
-          rows,
-          request.limit,
-          (page) => Effect.succeed(page.map(parseRow)),
-          // Every row of this view has a snooze, joined from `signal_snoozes`.
-          (last) => encodeCursor(LATER_SCOPE, [last.snooze!.until], last.id),
-        );
+      listPage({
+        scope: LATER_SCOPE,
+        from: "signal_snoozes z JOIN signals s ON s.id = z.signal_id",
+        sortColumn: "z.until",
+        idColumn: "z.signal_id",
+        direction: "asc",
+        condition: sql`z.until > ${now}`,
+        filter,
+        request,
+        // Every row of this view has a snooze, joined from `signal_snoozes`.
+        readSortValue: (signal) => signal.snooze!.until,
       }),
 
     /**
@@ -299,29 +340,17 @@ const make = Effect.gen(function* () {
       filter: SignalListFilter,
       request: SignalPageRequest,
     ): Effect.Effect<Page<Signal>, CursorError | SqlError> =>
-      Effect.gen(function* () {
-        const after =
-          request.cursor === undefined
-            ? undefined
-            : yield* decodeCursor(request.cursor, DONE_SCOPE, ["string"]);
-        const { keyset, order } = buildKeyset(
-          sql,
-          [{ column: "s.resolved_at", direction: "desc" }],
-          ["s.id"],
-          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
-        );
-        const rows = yield* sql<SignalRow>`
-          SELECT ${sql.literal(COLUMNS)} FROM ${sql.literal(SIGNALS_WITH_SNOOZES)}
-          WHERE ${sql.and([sql`s.status = 'resolved'`, keyset, ...buildFilterClauses(filter)])}
-          ${order} LIMIT ${request.limit + 1}
-        `;
-        return yield* buildPage(
-          rows,
-          request.limit,
-          (page) => Effect.succeed(page.map(parseRow)),
-          // A resolved signal has a resolution, and `resolved_at` is its `at`.
-          (last) => encodeCursor(DONE_SCOPE, [last.resolution!.at], last.id),
-        );
+      listPage({
+        scope: DONE_SCOPE,
+        from: SIGNALS_WITH_SNOOZES,
+        sortColumn: "s.resolved_at",
+        idColumn: "s.id",
+        direction: "desc",
+        condition: sql`s.status = 'resolved'`,
+        filter,
+        request,
+        // A resolved signal has a resolution, and `resolved_at` is its `at`.
+        readSortValue: (signal) => signal.resolution!.at,
       }),
 
     /**
@@ -343,24 +372,47 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Snoozes the signals with these ids until `until`, a UTC ISO time. A
-     * signal that is already snoozed gets the new time, and the new
-     * `snoozedAt` and actor. The caller passes only open signals.
+     * Resolves the open signals among these ids, all with one resolution,
+     * deletes their snoozes, and returns the ids it resolved. A signal that
+     * is not open is left as it is. Run it inside a transaction, so both
+     * writes commit together.
+     */
+    resolveMany: (
+      ids: ReadonlyArray<string>,
+      resolution: SignalResolution,
+    ): Effect.Effect<ReadonlySet<string>, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly id: Uint8Array }>`
+          UPDATE signals SET status = 'resolved', resolution = ${JSON.stringify(resolution)}
+          WHERE ${buildIdIn("id", ids)} AND status = 'open'
+          RETURNING id
+        `;
+        const resolved = rows.map((row) => uuidToString(row.id));
+        yield* sql`DELETE FROM signal_snoozes WHERE ${buildIdIn("signal_id", resolved)}`;
+        return new Set(resolved);
+      }),
+
+    /**
+     * Snoozes the signals with these ids until `until`, a UTC ISO time, in
+     * one statement. A signal that is already snoozed gets the new time, and
+     * the new `snoozedAt` and actor. The caller passes only open signals, at
+     * least one.
      */
     snooze: (
       ids: ReadonlyArray<string>,
       snooze: { readonly until: string; readonly snoozedAt: string; readonly actor: Actor },
     ): Effect.Effect<void, SqlError> =>
-      Effect.forEach(
-        ids,
-        (id) => sql`
-          INSERT INTO signal_snoozes (signal_id, until, snoozed_at, actor)
-          VALUES (${uuidFromString(id)}, ${snooze.until}, ${snooze.snoozedAt}, ${snooze.actor})
-          ON CONFLICT (signal_id) DO UPDATE SET
-            until = excluded.until, snoozed_at = excluded.snoozed_at, actor = excluded.actor
-        `,
-        { discard: true },
-      ),
+      Effect.asVoid(sql`
+        INSERT INTO signal_snoozes (signal_id, until, snoozed_at, actor)
+        VALUES ${sql.csv(
+          ids.map(
+            (id) =>
+              sql`(${uuidFromString(id)}, ${snooze.until}, ${snooze.snoozedAt}, ${snooze.actor})`,
+          ),
+        )}
+        ON CONFLICT (signal_id) DO UPDATE SET
+          until = excluded.until, snoozed_at = excluded.snoozed_at, actor = excluded.actor
+      `),
 
     /**
      * Deletes the snoozes of the signals with these ids, and returns the ids

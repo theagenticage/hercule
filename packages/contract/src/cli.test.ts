@@ -303,6 +303,10 @@ const RESOLVES: Record<string, string> = {
   "signal.read id": "signal.query",
   "signal.act id": "signal.query",
   "signal.withdraw id": "signal.query",
+  "signal.markDone signalIds": "signal.query",
+  "signal.snooze signalIds": "signal.query",
+  "signal.unsnooze signalIds": "signal.query",
+  "signal.lowerPriority signalIds": "signal.query",
 
   "project.read id": "project.query",
   "project.update id": "project.query",

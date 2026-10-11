@@ -79,6 +79,12 @@ export interface Field {
    * full id is accepted.
    */
   readonly resolves: OperationId | undefined;
+  /**
+   * The query sent to the list operation in `resolves`, such as `{ view:
+   * "later" }` to match a tail among the snoozed signals; empty when the
+   * listing's default holds the ids this field takes.
+   */
+  readonly resolvesQuery: Readonly<Record<string, string>>;
   readonly help: string;
 }
 
@@ -278,6 +284,7 @@ const buildField = (
     stdin: "stdin" in row && row.stdin === true,
     uploads: "upload" in row && row.upload === true,
     resolves: "resolves" in row ? row.resolves : undefined,
+    resolvesQuery: ("resolvesQuery" in row ? row.resolvesQuery : undefined) ?? {},
     help: row.help,
   };
 };

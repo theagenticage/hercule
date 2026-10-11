@@ -751,6 +751,35 @@ describe("signal.markDone", () => {
     expect(acted.resolution).toMatchObject({ kind: "decided", actionId: "approve" });
   });
 
+  it("pages Done one signal at a time across signals resolved at the same time", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const ids = [yield* raiseId(FYI), yield* raiseId(FYI), yield* raiseId(FYI)];
+        // One call resolves all three, so their resolutions share one time and
+        // only the id orders them.
+        yield* as(USER)(signals.markDone({ signalIds: ids }));
+        const pages = [yield* as(USER)(signals.query({ view: "done", limit: 1 }))];
+        while (pages.at(-1)!.nextCursor !== undefined && pages.length < 5) {
+          pages.push(
+            yield* as(USER)(
+              signals.query({ view: "done", limit: 1, cursor: pages.at(-1)!.nextCursor! }),
+            ),
+          );
+        }
+        return { ids, pages };
+      }),
+    );
+
+    expect(result.pages.map((page) => page.items.map((item) => item.id))).toEqual(
+      [...result.ids]
+        .sort()
+        .reverse()
+        .map((id) => [id]),
+    );
+    expect(result.pages.at(-1)).not.toHaveProperty("nextCursor");
+  });
+
   it("announces the log once and each signal it changed", async () => {
     const { listener, announced } = buildAnnouncementRecorder();
     const { ids, raisesAnnounced } = await run(
@@ -918,6 +947,29 @@ describe("signal.snooze and signal.unsnooze", () => {
     expect(readIds(result.done2)).toEqual([a]);
     expect(result.mixed).toMatchObject({ error: { code: "validation" } });
   });
+
+  it("announces the log once and each signal it changed, for a snooze and an unsnooze", async () => {
+    const { listener, announced } = buildAnnouncementRecorder();
+    const { ids, snoozeAnnounced, unsnoozeAnnounced } = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const ids = [yield* raiseId(FYI), yield* raiseId(FYI)];
+        const before = announced.length;
+        yield* as(USER)(signals.snooze({ signalIds: ids, until: "2999-01-01T00:00:00.000Z" }));
+        const snoozeAnnounced = announced.slice(before);
+        const between = announced.length;
+        yield* as(USER)(signals.unsnooze({ signalIds: ids }));
+        return { ids, snoozeAnnounced, unsnoozeAnnounced: announced.slice(between) };
+      }).pipe(Effect.provide(listener)),
+    );
+
+    const expected = [
+      { _tag: "event" },
+      ...ids.map((id) => ({ _tag: "record", topic: "signal", id, kind: "updated" })),
+    ];
+    expect(snoozeAnnounced).toEqual(expected);
+    expect(unsnoozeAnnounced).toEqual(expected);
+  });
 });
 
 describe("signal.lowerPriority", () => {
@@ -970,5 +1022,25 @@ describe("signal.lowerPriority", () => {
     );
 
     expect(error).toMatchObject({ error: { code: "forbidden" } });
+  });
+
+  it("announces the log once and each signal it lowered", async () => {
+    const { listener, announced } = buildAnnouncementRecorder();
+    const { ids, loweredAnnounced } = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const sql = yield* SqlClient.SqlClient;
+        const ids = [yield* raiseId(FYI), yield* raiseId(FYI)];
+        yield* sql`UPDATE signals SET priority = 'urgent'`;
+        const before = announced.length;
+        yield* as(USER)(signals.lowerPriority({ signalIds: ids }));
+        return { ids, loweredAnnounced: announced.slice(before) };
+      }).pipe(Effect.provide(listener)),
+    );
+
+    expect(loweredAnnounced).toEqual([
+      { _tag: "event" },
+      ...ids.map((id) => ({ _tag: "record", topic: "signal", id, kind: "updated" })),
+    ]);
   });
 });

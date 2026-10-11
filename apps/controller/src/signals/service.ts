@@ -84,6 +84,7 @@ import {
 import {
   buildActorStamp,
   buildResolutionOrigin,
+  requireActor,
   requireGrant,
   requireUserActor,
   type Actor,
@@ -709,8 +710,7 @@ const make = Effect.gen(function* () {
       input: SignalRaiseInput,
     ): Effect.Effect<SignalRaiseResult, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
-        const caller = yield* requireGrant("signal.raise");
-        if (caller._tag === "none") return yield* Effect.die("signal.raise reached with no actor");
+        const caller = yield* requireActor("signal.raise");
         const id = uuidToString(mintUuid());
         const own = input.actions ?? [];
         const handTo =
@@ -867,9 +867,7 @@ const make = Effect.gen(function* () {
       Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
     > =>
       Effect.gen(function* () {
-        const caller = yield* requireGrant("signal.withdraw");
-        if (caller._tag === "none")
-          return yield* Effect.die("signal.withdraw reached with no actor");
+        const caller = yield* requireActor("signal.withdraw");
         const actor = buildActorStamp(caller);
         const withdrawInTransaction = withTransaction(
           sql,
@@ -926,7 +924,9 @@ const make = Effect.gen(function* () {
      *   action. That is checked before a signal is skipped as resolved, so a
      *   client that offers Done where there is none hears of it;
      * - `InvalidState` when an action or a withdrawal on one of the signals
-     *   is running.
+     *   is running. The whole call is refused rather than that signal
+     *   skipped, because the running action may still fail and leave the
+     *   signal open, so it is not resolved yet.
      *
      * Nothing is changed when the call fails.
      */
@@ -970,10 +970,11 @@ const make = Effect.gen(function* () {
                 origin: buildResolutionOrigin(caller),
                 at,
               };
-              const done: Array<string> = [];
-              for (const signal of open) {
-                if (yield* signals.resolve(signal.id, resolution)) done.push(signal.id);
-              }
+              const resolved = yield* signals.resolveMany(
+                open.map((signal) => signal.id),
+                resolution,
+              );
+              const done = ids.filter((id) => resolved.has(id));
               if (done.length > 0) {
                 yield* audit.append({
                   kind: "signal.markedDone",
@@ -1006,12 +1007,12 @@ const make = Effect.gen(function* () {
       Unauthenticated | Forbidden | Validation | NotFound | SqlError
     > =>
       Effect.gen(function* () {
-        const caller = yield* requireGrant("signal.snooze");
-        if (caller._tag === "none") return yield* Effect.die("signal.snooze reached with no actor");
+        const caller = yield* requireActor("signal.snooze");
         const ids = removeDuplicateIds(input.signalIds);
-        const until = new Date(input.until).toISOString();
         const now = yield* nowIso;
-        if (until <= now) {
+        // The contract decodes `until` to a canonical UTC timestamp, so two
+        // times compare as text.
+        if (input.until <= now) {
           return yield* Effect.fail(
             createValidationError([
               {
@@ -1028,12 +1029,12 @@ const make = Effect.gen(function* () {
             const { open, skipped } = splitResolved(yield* readManyOrFail(ids));
             const snoozed = open.map((signal) => signal.id);
             if (snoozed.length > 0) {
-              yield* signals.snooze(snoozed, { until, snoozedAt: now, actor });
+              yield* signals.snooze(snoozed, { until: input.until, snoozedAt: now, actor });
               yield* audit.append({
                 kind: "signal.snoozed",
                 actor,
                 record: { topic: "signal", ids: snoozed },
-                payload: { signalIds: snoozed, until },
+                payload: { signalIds: snoozed, until: input.until },
                 at: now,
               });
             }
@@ -1055,10 +1056,7 @@ const make = Effect.gen(function* () {
       input: SignalIdsInput,
     ): Effect.Effect<SignalUnsnoozeResult, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
-        const caller = yield* requireGrant("signal.unsnooze");
-        if (caller._tag === "none") {
-          return yield* Effect.die("signal.unsnooze reached with no actor");
-        }
+        const caller = yield* requireActor("signal.unsnooze");
         const ids = removeDuplicateIds(input.signalIds);
         const actor = buildActorStamp(caller);
         return yield* withTransaction(
@@ -1084,8 +1082,9 @@ const make = Effect.gen(function* () {
      * Moves open `urgent` signals to `high` as the user, which takes them out
      * of Now, and returns the ids it lowered and the ones it skipped because
      * they had already resolved. An open signal of any other priority is in
-     * neither list. A signal raised later to replace a lowered one keeps the
-     * lowered priority.
+     * neither list. Each lowered signal is marked lowered, so the code that
+     * raises a replacement can read that mark through
+     * `isPriorityLowered` and keep the lower priority (issue #526).
      *
      * Fails with `Forbidden` for any caller but the user, and with
      * `NotFound` when an id names no signal. Nothing is changed when the call

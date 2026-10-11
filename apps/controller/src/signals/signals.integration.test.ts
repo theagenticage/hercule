@@ -16,7 +16,9 @@
  *   copies its task, is refused;
  * - while a plugin action runs, a second action on its signal is refused;
  * - Snooze, Unsnooze, Done and Not urgent each move several signals in one
- *   call, and the Later and Done views read them back a page at a time.
+ *   call, and the Later and Done views read them back a page at a time;
+ * - a snooze takes its time with any offset, stores it in UTC, and refuses a
+ *   date that does not exist.
  *
  * The rules that need no real operation are tested in `service.test.ts`.
  */
@@ -540,6 +542,41 @@ describe("Intake's moves", () => {
       expect(past.status).toBe(400);
       expect((await readErrorBody(past)).code).toBe("validation");
       expect(await listView(base, token, "to-do")).toEqual([id]);
+    });
+  });
+
+  it("takes a snooze time with its offset and stores it in UTC, and refuses a date that does not exist", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const id = await raiseOrFail(base, token, FYI);
+
+      const impossible = await post(
+        base,
+        "/api/v1/signals/snooze",
+        { signalIds: [id], until: "2999-02-30T09:00+02:00" },
+        token,
+      );
+      const withoutOffset = await post(
+        base,
+        "/api/v1/signals/snooze",
+        { signalIds: [id], until: "2999-01-01T09:00" },
+        token,
+      );
+      const snoozed = await post(
+        base,
+        "/api/v1/signals/snooze",
+        { signalIds: [id], until: "2999-01-01T09:00+02:00" },
+        token,
+      );
+      const later = await get(base, "/api/v1/signals?view=later", token);
+
+      expect(impossible.status).toBe(400);
+      expect((await readErrorBody(impossible)).code).toBe("validation");
+      expect(withoutOffset.status).toBe(400);
+      expect(snoozed.status, await snoozed.clone().text()).toBe(200);
+      expect(
+        ((await later.json()) as SignalPage).items.map((signal) => signal.snooze?.until),
+      ).toEqual([UNTIL]);
     });
   });
 });

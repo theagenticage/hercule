@@ -29,8 +29,8 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
-import { Actor, Id, isQualifiedId, Timestamp } from "../ids";
-import { MAX_PAGE_LIMIT, page } from "../pagination";
+import { Actor, Id, isQualifiedId, Timestamp, TimestampWithOffset } from "../ids";
+import { cursorParams, MAX_PAGE_LIMIT, page } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 import { EventId } from "./event";
@@ -485,10 +485,7 @@ export const SignalFilter = Schema.Struct({
   view: Schema.optionalKey(SignalView),
   kind: Schema.optionalKey(SignalKind),
   source: Schema.optionalKey(PluginId),
-  limit: Schema.optionalKey(
-    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
-  ),
-  cursor: Schema.optionalKey(Schema.NonEmptyString),
+  ...cursorParams.fields,
 }).check(
   Schema.makeFilter((filter) =>
     (filter.view ?? "to-do") === "to-do" &&
@@ -533,9 +530,14 @@ export type SignalIdsInput = Schema.Schema.Type<typeof SignalIdsInput>;
 
 /**
  * The payload of `signal.snooze`: the signals, and the exact time they come
- * back to To do, as a UTC timestamp. A time in the past is refused.
+ * back to To do. `until` is written with its offset, such as
+ * `2026-10-13T09:00+02:00`, and decodes to the UTC timestamp the controller
+ * stores. A time in the past is refused.
  */
-export const SignalSnoozeInput = Schema.Struct({ signalIds: SignalIds, until: Timestamp });
+export const SignalSnoozeInput = Schema.Struct({
+  signalIds: SignalIds,
+  until: TimestampWithOffset,
+});
 
 export type SignalSnoozeInput = Schema.Schema.Type<typeof SignalSnoozeInput>;
 

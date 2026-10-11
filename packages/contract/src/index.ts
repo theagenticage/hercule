@@ -129,6 +129,7 @@ export {
   OWN_AGENT_ALIAS,
   OWN_SESSION_ALIAS,
   Timestamp,
+  TimestampWithOffset,
 } from "./ids";
 
 export { Authenticated, SetupToken } from "./security";
