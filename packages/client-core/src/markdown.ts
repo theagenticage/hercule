@@ -69,8 +69,15 @@ export type MarkdownInline =
   | { readonly type: "link"; readonly href: string; readonly children: ReadonlyArray<MarkdownInline> }
   /** An image whose address passed the same check as a link's. */
   | { readonly type: "image"; readonly src: string; readonly alt: string }
-  /** A reference to the footnote with the same number. */
-  | { readonly type: "footnoteReference"; readonly number: number };
+  /**
+   * A reference to the footnote with the same number. The footnote's back
+   * link returns to its first reference, the one with `isFirstReference`.
+   */
+  | {
+      readonly type: "footnoteReference";
+      readonly number: number;
+      readonly isFirstReference: boolean;
+    };
 
 /** A footnote, numbered by the order of its first reference in the message. */
 export interface MarkdownFootnote {
