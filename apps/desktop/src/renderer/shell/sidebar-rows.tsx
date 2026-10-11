@@ -1,7 +1,8 @@
 /**
  * The items of the sidebar's thread list: section headers, thread rows, the
- * waiting assistants' rows, the draft's row and "more" rows,
- * drawn as the Bureau book's crew.js draws them.
+ * waiting assistants' rows, "From runs" and the waiting runs' sessions' rows,
+ * the draft's row and "more" rows, drawn as the Bureau book's crew.js draws
+ * them.
  *
  * Each item draws itself at its kind's fixed height, with the space above it
  * as its top margin. The list stacks the items one under another, so an item
@@ -216,6 +217,76 @@ export const WaitingAssistantRow = memo(function WaitingAssistantRow({
         </span>
       </span>
     </ConversationLink>
+  );
+});
+
+/**
+ * Renders "From runs", the book's `.side-sub` label over the runs' sessions
+ * in Waiting on you. It is a heading under Waiting on you's, so a screen
+ * reader lists the runs' sessions as a group of their own.
+ */
+export const WaitingRunsLabel = memo(function WaitingRunsLabel({
+  itemKey,
+  leading,
+}: Placement): JSX.Element {
+  return (
+    <h4
+      className="side-sub side-item"
+      data-key={itemKey}
+      tabIndex={-1}
+      style={{ marginTop: leading, height: ITEM_HEIGHTS["waiting-runs-label"] }}
+    >
+      From runs
+    </h4>
+  );
+});
+
+/**
+ * Renders a run's session that waits on the user, under "From runs": the
+ * waiting mark where a thread's row draws a face, because a run's agents have
+ * no face, its title and the question it asks. The link is named "<title>,
+ * waiting on you" and described by the question; the mark is hidden, because
+ * the name already says the state. It opens the session's thread screen,
+ * where the Request is answered: in the Office's drawer while `officeOpen`
+ * is true, on its own screen otherwise.
+ */
+export const WaitingRunRow = memo(function WaitingRunRow({
+  itemKey,
+  leading,
+  sessionId,
+  title,
+  question,
+  officeOpen,
+}: Placement & {
+  readonly sessionId: string;
+  readonly title: string;
+  readonly question: string;
+  readonly officeOpen: boolean;
+}): JSX.Element {
+  const questionId = useId();
+  // The session is waiting, so `ThreadLink` opens it in the Office's drawer
+  // while the Office is open, as a waiting thread's row does.
+  return (
+    <ThreadLink
+      sessionId={sessionId}
+      pose="waiting"
+      officeOpen={officeOpen}
+      className="side-row side-row--wait side-item"
+      data-key={itemKey}
+      style={{ marginTop: leading, height: ITEM_HEIGHTS["waiting-run-row"] }}
+      aria-label={`${title}, ${describePose("waiting")}`}
+      aria-describedby={questionId}
+    >
+      <span className="side-lead">
+        <Mark state="waiting" />
+      </span>
+      <span className="side-text">
+        <span className="side-name">{title}</span>
+        <span className="side-ask" id={questionId}>
+          {question}
+        </span>
+      </span>
+    </ThreadLink>
   );
 });
 

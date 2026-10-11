@@ -59,6 +59,7 @@ import {
   createNotFoundError,
   createValidationError,
   listDecodeIssues,
+  MAX_PLUGIN_MESSAGE_LENGTH,
   type Connection,
   type ConnectionDevicePoll,
   type ConnectionDeviceStart,
@@ -282,6 +283,22 @@ const describeIntervalPastExpiry = (interval: number): string =>
  * error would otherwise cost the user a new code.
  */
 const ACCOUNT_CHECK_RETRY = { schedule: Schedule.exponential("1 second"), times: 2 };
+
+/**
+ * Returns the warning a Connection type's `validate` returned with the
+ * account, cut to the length of a plugin message, or null when it returned
+ * none. Null clears the warning a reconnect's earlier credentials left.
+ */
+const readAccountWarning = (account: ExternalAccount): string | null =>
+  account.warning === undefined || account.warning === ""
+    ? null
+    : account.warning.slice(0, MAX_PLUGIN_MESSAGE_LENGTH);
+
+/** Returns `{ warning }` for a new Connection's row, or nothing when the account has no warning. */
+const buildWarningField = (account: ExternalAccount): { readonly warning?: string } => {
+  const warning = readAccountWarning(account);
+  return warning === null ? {} : { warning };
+};
 
 /**
  * Checks whether new credentials belong to another account than the one the
@@ -509,6 +526,7 @@ const make = Effect.gen(function* () {
     displayName: row.displayName,
     status: row.status,
     ...(row.statusDetail === undefined ? {} : { statusDetail: row.statusDetail }),
+    ...(row.warning === undefined ? {} : { warning: row.warning }),
     labels: row.labels,
     config: row.config,
     feedIntervals: row.feedIntervals,
@@ -677,6 +695,7 @@ const make = Effect.gen(function* () {
             label: setup.label ?? buildDefaultLabel(account.displayName, contribution.displayName),
             displayName: account.displayName,
             accountId: account.accountId,
+            ...buildWarningField(account),
             labels: setup.labels,
             config: setup.config,
             at: now,
@@ -698,7 +717,12 @@ const make = Effect.gen(function* () {
           }
           yield* connections.update(
             id,
-            { displayName: account.displayName, status: "connected", statusDetail: null },
+            {
+              displayName: account.displayName,
+              status: "connected",
+              statusDetail: null,
+              warning: readAccountWarning(account),
+            },
             now,
           );
         }
@@ -865,6 +889,7 @@ const make = Effect.gen(function* () {
                 decoded.label ?? buildDefaultLabel(account.displayName, contribution.displayName),
               displayName: account.displayName,
               accountId: account.accountId,
+              ...buildWarningField(account),
               labels: decoded.labels ?? [],
               config,
               at,
@@ -976,7 +1001,12 @@ const make = Effect.gen(function* () {
             yield* replaceSecrets(row.id, credentials);
             yield* connections.update(
               row.id,
-              { displayName: account.displayName, status: "connected", statusDetail: null },
+              {
+                displayName: account.displayName,
+                status: "connected",
+                statusDetail: null,
+                warning: readAccountWarning(account),
+              },
               at,
             );
             yield* audit.append({

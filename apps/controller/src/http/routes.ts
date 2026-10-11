@@ -57,6 +57,7 @@ import {
   EventRouterLayer,
   PipelineLayer,
   Placement,
+  SignalBuildFailuresLayer,
   PermissionRequests,
   PermissionRequestsLayer,
   PlacementLayer,
@@ -64,6 +65,7 @@ import {
   ProfileRemovalLayer,
   Provisioning,
   ProvisioningLayer,
+  TextGenerationLayer,
   Retirement,
   RetirementLayer,
   RunExecutorLayer,
@@ -75,13 +77,14 @@ import {
   WorkspaceStepsLayer,
 } from "../daemon";
 import { NotificationService, NotificationServiceLayer } from "../notifications";
-import { SignalService, SignalServiceLayer } from "../signals";
+import { SignalRaisesLayer, SignalService, SignalServiceLayer } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
+import { LastTextGenerationFailureLayer, TextGenerationModelsLayer } from "../text-generation";
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ResourceService, ResourceServiceLayer } from "../resources";
 import { WorkspaceService } from "../workspaces";
@@ -280,7 +283,11 @@ const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
       )
       .handle("withdraw", ({ params, payload }) =>
         withApiErrors(signals.withdraw({ id: params.id, ...payload })),
-      );
+      )
+      .handle("markDone", ({ payload }) => withApiErrors(signals.markDone(payload)))
+      .handle("snooze", ({ payload }) => withApiErrors(signals.snooze(payload)))
+      .handle("unsnooze", ({ payload }) => withApiErrors(signals.unsnooze(payload)))
+      .handle("lowerPriority", ({ payload }) => withApiErrors(signals.lowerPriority(payload)));
   }),
 );
 
@@ -729,6 +736,32 @@ const PermissionRequestsDomainLayer = PermissionRequestsLayer.pipe(
 );
 
 /**
+ * What text generation resolves and remembers: which model the setting means
+ * now, and the last failure. The controller service shows both in
+ * `ControllerInfo`, and the `TextGeneration` service in the controller daemon
+ * writes the failure, so both are provided this one layer. A layer is built
+ * once however many times it is provided, so they share one last failure.
+ */
+const TextGenerationStatusLayer = Layer.mergeAll(
+  TextGenerationModelsLayer,
+  LastTextGenerationFailureLayer,
+);
+
+/**
+ * The controller daemon's `BoundOperations`, which checks and runs the
+ * operation of a chosen answer. The operation can be a task, run, live
+ * session or Permission Request operation, so the port gets the run layers,
+ * which include the task service, and the Permission Request use case. The
+ * notification and signal services run answers through it, and
+ * `SignalRaises` checks a plugin's answers with it. All three are provided
+ * this one layer, so it is built once.
+ */
+const BoundOperationsDomainLayer = BoundOperationsLayer.pipe(
+  Layer.provide(RunDomainLayer),
+  Layer.provide(PermissionRequestsDomainLayer),
+);
+
+/**
  * Every service an operation uses, together with the controller daemon. The
  * listener starts the controller daemon's drivers, so they are built here
  * rather than a second time elsewhere. It is one list because otherwise a
@@ -741,8 +774,11 @@ const PermissionRequestsDomainLayer = PermissionRequestsLayer.pipe(
  * built. A second instance would have no plugins, no connections, none of the
  * state a session's stream is coalesced in, and no promotion phase, and would
  * write over the same rows the drivers use. The handlers get them from the boot.
+ *
+ * The text generation status is provided once, around the whole list, so
+ * `controller.read` reads the last failure the text generation service writes.
  */
-export const operationLayers = Layer.mergeAll(
+const operationServices = Layer.mergeAll(
   AuthLayer,
   ApiKeysLayer,
   UserLayer,
@@ -790,20 +826,15 @@ export const operationLayers = Layer.mergeAll(
   // The inbound driver hands a workspace step's result to the run service.
   // The notification and signal services run the operation of a chosen
   // answer through their `BoundOperations` port, which the controller daemon
-  // implements. The operation can be a task, run, live session or Permission
-  // Request operation, so the port gets the run layers, which include the
-  // task service, and the Permission Request use case, and sits in this
-  // group, which provides `Live`.
+  // implements, and which sits in this group because it uses `Live`. The
+  // notification service counts a failed signal build's signals through the
+  // controller daemon's `SignalBuildFailures`.
   Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunDomainLayer)),
-    Layer.mergeAll(NotificationServiceLayer, SignalServiceLayer).pipe(
-      Layer.provide(
-        BoundOperationsLayer.pipe(
-          Layer.provide(RunDomainLayer),
-          Layer.provide(PermissionRequestsDomainLayer),
-        ),
-      ),
-    ),
+    Layer.mergeAll(
+      NotificationServiceLayer.pipe(Layer.provide(SignalBuildFailuresLayer)),
+      SignalServiceLayer,
+    ).pipe(Layer.provide(BoundOperationsDomainLayer)),
     SetupLayer,
     // The events service reads the registered event kinds from the plugins
     // domain. The plugins domain appends to the event log, so the events
@@ -815,7 +846,9 @@ export const operationLayers = Layer.mergeAll(
     // effect, and its failed filter on its health. The pipeline also starts
     // the runs of the matches, and the trigger effects start them through
     // the run service (`TriggeredRunsLayer`), so the trigger effects are
-    // provided above the run domain.
+    // provided above the run domain. The pipeline raises Intake's signals
+    // through `SignalRaises`, which checks a plugin's answers through
+    // `BoundOperations`.
     Layer.mergeAll(
       PipelineLayer,
       EnrichmentLayer.pipe(
@@ -824,6 +857,7 @@ export const operationLayers = Layer.mergeAll(
     ).pipe(
       Layer.provideMerge(EventRouterLayer),
       Layer.provide(TriggerEffectsLayer.pipe(Layer.provide(TriggeredRunsLayer))),
+      Layer.provide(SignalRaisesLayer.pipe(Layer.provide(BoundOperationsDomainLayer))),
       Layer.provide(RunDomainLayer),
     ),
   ).pipe(
@@ -851,6 +885,12 @@ export const operationLayers = Layer.mergeAll(
   LiveTopicsLayer,
   WsTicketsLayer,
   AttachmentServiceLayer,
+);
+
+/** Every service an operation uses. */
+export const operationLayers = operationServices.pipe(
+  Layer.provideMerge(TextGenerationLayer),
+  Layer.provide(TextGenerationStatusLayer),
 );
 
 /** The handlers of every group, which `HttpApiBuilder.layer(api)` needs to build routes. */

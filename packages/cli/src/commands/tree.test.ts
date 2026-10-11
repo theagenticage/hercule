@@ -1,6 +1,6 @@
 import { CLI, NOUNS } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
-import { parseArguments } from "./args";
+import { formatPositionalShape, parseArguments } from "./args";
 import { COMMANDS, findCommandByWords, findMentions } from "./tree";
 
 /**
@@ -153,11 +153,15 @@ describe("a command's fields against the schema", () => {
     }
   });
 
-  it("gives every paged command a non-empty sort field list", () => {
+  it("gives every paged command a non-empty sort field list, except a list with one fixed order", () => {
+    // `signal list` reads each view in the one order the view is defined by,
+    // so it pages with --limit and --cursor but takes no --sort.
+    const FIXED_ORDER = ["signal list"];
     const paged = COMMANDS.filter((command) => command.paged);
     expect(paged.length).toBeGreaterThan(0);
     for (const command of paged) {
-      expect(command.sortFields, readSpelling(command)).not.toEqual([]);
+      const spelled = readSpelling(command);
+      expect(command.sortFields.length === 0, spelled).toBe(FIXED_ORDER.includes(spelled));
     }
   });
 
@@ -292,11 +296,9 @@ describe("a command's fields against the schema", () => {
 
 describe("the placeholders a usage line shows", () => {
   const buildUsageShape = (spelled: string): string =>
-    findCommandByWords(spelled.split(" "))!
-      .positionals.map((field) => `<${field.spelling}>`)
-      .join(" ");
+    findCommandByWords(spelled.split(" "))!.positionals.map(formatPositionalShape).join(" ");
 
-  /** Every command whose positionals are not a single plain `<id>`. */
+  /** Every command whose positionals are not a single plain `<id>`, with `...` after a repeated one. */
   const NAMED: Record<string, string> = {
     "secret set": "<owner-kind> <owner-id> <name>",
     "subscription create": "<target>",
@@ -323,6 +325,10 @@ describe("the placeholders a usage line shows", () => {
     "conversation send": "<conversation-id>",
     "trigger pause": "<workflow-id> <trigger-id>",
     "trigger resume": "<workflow-id> <trigger-id>",
+    "signal done": "<signal-id>...",
+    "signal snooze": "<signal-id>...",
+    "signal unsnooze": "<signal-id>...",
+    "signal lower-priority": "<signal-id>...",
   };
 
   it("names whose id a positional holds when the field name alone would not", () => {

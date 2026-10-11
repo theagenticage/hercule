@@ -11,16 +11,19 @@ import {
   decidePluginMark,
   describeAnswerKey,
   describeBuildFailure,
+  describeNotScreened,
   describeOrchestrationSegment,
   describeResolvedElsewhere,
   describeSignalAsker,
   describeSignalOutcome,
+  describeSignalOutcomeMoment,
   describeSignalProvenance,
   describeSignalRow,
   findReplyAnswer,
   findSuggestedAnswer,
   fitIntakeListWidth,
   fitsIntakePane,
+  groupSignalsByDay,
   groupSignalsIntoSections,
   isBackFromSnooze,
   listUrgentSignals,
@@ -249,6 +252,51 @@ describe("buildIntakeTabs", () => {
   });
 });
 
+describe("groupSignalsByDay", () => {
+  // Sunday 11 October 2026, 10:00 in Amsterdam.
+  const now = new Date("2026-10-11T08:00:00.000Z");
+  const AMSTERDAM = "Europe/Amsterdam";
+  const sectionsOf = (sections: ReturnType<typeof groupSignalsByDay>) =>
+    sections.map((section) => [section.label, section.signals.map((signal) => signal.id)]);
+
+  it("groups Later by the date each signal comes back in the user's zone", () => {
+    const snoozed = (id: string, until: string) =>
+      buildSignal(id, { snooze: { until, snoozedAt: "2026-10-11T07:00:00.000Z" } });
+    const later = [
+      snoozed("a", "2026-10-11T12:00:00.000Z"),
+      // 23:30 tonight in Amsterdam, though already Monday in UTC.
+      snoozed("b", "2026-10-11T21:30:00.000Z"),
+      snoozed("c", "2026-10-12T07:00:00.000Z"),
+      snoozed("d", "2026-10-13T07:00:00.000Z"),
+    ];
+    expect(sectionsOf(groupSignalsByDay(later, "later", now, AMSTERDAM))).toEqual([
+      ["Back today", ["a", "b"]],
+      ["Back tomorrow", ["c"]],
+      ["Back Tuesday", ["d"]],
+    ]);
+  });
+
+  it("groups Done by the date each signal was resolved, with a capital", () => {
+    const resolvedAt = (id: string, at: string) =>
+      buildSignal(id, {
+        status: "resolved",
+        resolution: { kind: "decided", outcome: "Done", actor: "user", origin: "api", at },
+      });
+    const done = [
+      resolvedAt("a", "2026-10-11T07:00:00.000Z"),
+      resolvedAt("b", "2026-10-10T15:00:00.000Z"),
+      resolvedAt("c", "2026-10-08T15:00:00.000Z"),
+    ];
+    const sections = groupSignalsByDay(done, "done", now, AMSTERDAM);
+    expect(sectionsOf(sections)).toEqual([
+      ["Today", ["a"]],
+      ["Yesterday", ["b"]],
+      ["Thursday", ["c"]],
+    ]);
+    expect(sections.map((section) => section.key)).toEqual(["day:0", "day:-1", "day:-3"]);
+  });
+});
+
 describe("groupSignalsIntoSections", () => {
   it("puts urgent signals in Now and every other one in Signals, leaving out an empty section", () => {
     const sections = groupSignalsIntoSections(
@@ -379,6 +427,26 @@ describe("describeBuildFailure", () => {
   });
 });
 
+describe("describeNotScreened", () => {
+  it("says no workflow screened a signal the core raised without a Screener", () => {
+    const signal = buildSignal("a", {
+      origin: { ...EVENT_ORIGIN, notScreened: { reason: "no-screener" } },
+    });
+    expect(describeNotScreened(signal)).toBe("Not screened: no workflow screens signals");
+  });
+
+  it("returns null for a screened signal, one that needed no Screening, and a raised one", () => {
+    const screened = buildSignal("a", {
+      origin: { ...EVENT_ORIGIN, screened: { runId: TRIAGE_ID, reason: "Marta asks" } },
+    });
+    expect(describeNotScreened(screened)).toBeNull();
+    expect(describeNotScreened(buildSignal("b"))).toBeNull();
+    expect(
+      describeNotScreened(buildSignal("c", { kind: "proposal", origin: fromUser() })),
+    ).toBeNull();
+  });
+});
+
 describe("buildSignalAnswers", () => {
   const signal = buildSignal("a", {
     actions: [
@@ -493,10 +561,94 @@ describe("describeSignalOutcome and describeResolvedElsewhere", () => {
     );
   });
 
+  it("says where, when and by whom the signal ended", () => {
+    const now = new Date("2026-10-10T12:00:00.000Z");
+    const read = (signal: Signal) =>
+      describeSignalOutcomeMoment(signal, PLUGINS, now, "Europe/Amsterdam");
+    expect(read(resolved("user"))).toBe("Here · today 12:00 · by you");
+    expect(read(resolved("plugin:github"))).toBe("Resolved by GitHub · today 12:00");
+    expect(read(resolved("plugin:github", "withdrawn"))).toBe("Withdrawn by GitHub · today 12:00");
+    expect(read(buildSignal("b"))).toBeNull();
+  });
+
   it("says the signal was resolved elsewhere, how and by whom", () => {
     expect(describeResolvedElsewhere(resolved("plugin:github"), PLUGINS)).toBe(
       "Resolved elsewhere: approved #1293, by GitHub",
     );
+  });
+
+  it("names the plugin, not the core, for an end the core observed on the source", () => {
+    const ended = (outcome: string) =>
+      buildSignal("a", {
+        kind: "github/review-requested",
+        status: "resolved",
+        resolution: {
+          kind: "withdrawn",
+          outcome,
+          actor: "system",
+          origin: "core",
+          at: "2026-10-10T10:00:00.000Z",
+        },
+      });
+    expect(describeSignalOutcome(ended("Reviewed on GitHub"), PLUGINS)?.by).toBe("by GitHub");
+    expect(describeResolvedElsewhere(ended("Marta removed the request"), PLUGINS)).toBe(
+      "Resolved elsewhere: Marta removed the request, by GitHub",
+    );
+  });
+
+  it("names the core for a core signal the core resolved", () => {
+    const resolvedByCore = buildSignal("a", {
+      kind: "proposal",
+      status: "resolved",
+      resolution: {
+        kind: "withdrawn",
+        outcome: "Replaced by a newer one",
+        actor: "system",
+        origin: "core",
+        at: "2026-10-10T10:00:00.000Z",
+      },
+    });
+    expect(describeSignalOutcome(resolvedByCore, PLUGINS)?.by).toBe("by Hercule");
+  });
+
+  it("counts an answer the user gave on the source as the user's own move", () => {
+    const reviewed = buildSignal("a", {
+      kind: "github/review-requested",
+      status: "resolved",
+      resolution: {
+        kind: "decided",
+        actionId: "approve",
+        outcome: "Approved on GitHub",
+        actor: "system",
+        origin: "core",
+        at: "2026-10-10T10:00:00.000Z",
+      },
+    });
+    expect(describeSignalOutcome(reviewed, PLUGINS)).toEqual({
+      label: "What you did",
+      outcome: "Approved on GitHub",
+      by: "by you",
+      byUser: true,
+    });
+    expect(describeResolvedElsewhere(reviewed, PLUGINS)).toBe(
+      "Resolved elsewhere: Approved on GitHub, by you",
+    );
+  });
+
+  it("names the core for a plugin's signal a newer one replaced", () => {
+    const replaced = buildSignal("a", {
+      kind: "github/review-requested",
+      status: "resolved",
+      replacedBy: "b",
+      resolution: {
+        kind: "withdrawn",
+        outcome: "Replaced by a newer one",
+        actor: "system",
+        origin: "core",
+        at: "2026-10-10T10:00:00.000Z",
+      },
+    });
+    expect(describeSignalOutcome(replaced, PLUGINS)?.by).toBe("by Hercule");
   });
 });
 

@@ -113,18 +113,27 @@ const handle = async (frame) => {
     }
   }
 };
+// The new socket becomes the one every send uses only once it is open. Bun's
+// WebSocket throws InvalidStateError on a send while it is still connecting,
+// and an answer to a frame from the previous connection can finish during a
+// reconnect. That late answer goes to the closed socket, which drops it. A
+// real runner never sends it on the new connection either: it answers on the
+// connection that asked, and stops that work when the connection ends.
 const dial = () => new Promise((done, fail) => {
-  socket = new WebSocket(options.url.replace(/^http/, "ws") + "/api/v1/runners/socket", { headers: { authorization: "Bearer " + options.credential } });
-  socket.onopen = () => send({ _tag: "runnerHello", protocolVersion: PROTOCOL_VERSION, capabilities: [WORKSPACE_LIFECYCLE_CAPABILITY], binaryVersion: "fixture", nonce: randomBytes(16).toString("base64"),
+  const next = new WebSocket(options.url.replace(/^http/, "ws") + "/api/v1/runners/socket", { headers: { authorization: "Bearer " + options.credential } });
+  next.onopen = () => {
+    socket = next;
+    send({ _tag: "runnerHello", protocolVersion: PROTOCOL_VERSION, capabilities: [WORKSPACE_LIFECYCLE_CAPABILITY], binaryVersion: "fixture", nonce: randomBytes(16).toString("base64"),
     facts: { os: options.os, arch: "arm64", totalMemoryBytes: 64 * 1024 ** 3, docker: false, toolchains: [], providers: [{ name: "claude", present: true, path: "/fixture/never-executed" }], adapters: ["claude-code"], identityPort: options.identityPort } });
-  socket.onmessage = ({ data }) => {
+  };
+  next.onmessage = ({ data }) => {
     const frame = JSON.parse(String(data));
     if (frame._tag === "controllerHello") {
       send({ _tag: "sessionsReport", sessions: [...sessions.values()].map((session) => ({ sessionId: session.id, nativeSessionId: session.id, instanceId: session.instanceId })) });
       done();
     } else handle(frame).catch((error) => log({ kind: "fatal", message: String(error) }));
   };
-  socket.onerror = fail;
+  next.onerror = fail;
 });
 await dial();
 log({ kind: "online" });

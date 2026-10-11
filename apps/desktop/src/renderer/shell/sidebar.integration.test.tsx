@@ -665,6 +665,30 @@ describe("the sidebar's faces", () => {
     expect(document.querySelector(".side-foot")).not.toBeNull();
   });
 
+  it("lists Intake, then Workflows with no count, in Work, and marks Workflows while it is open", async () => {
+    const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
+    await userEvent.click(getSegment("Hercule"));
+    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const work = within(nav).getByRole("heading", { name: "Work" }).closest("section")!;
+
+    expect(
+      within(work)
+        .getAllByRole("link")
+        .map((row) => row.textContent),
+    ).toEqual([expect.stringMatching(/^Intake/), "Workflows"]);
+    const workflows = within(work).getByRole("link", { name: "Workflows" });
+    expect(workflows.getAttribute("href")).toBe("/workflows");
+    expect(workflows.getAttribute("aria-current")).toBeNull();
+
+    await userEvent.click(workflows);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/workflows");
+    });
+    expect(workflows.getAttribute("aria-current")).toBe("page");
+    expect(workflows.classList.contains("is-on")).toBe(true);
+  });
+
   it("draws Fleet and Connections as rows that do nothing yet", async () => {
     const { calls, router, live } = await startSidebar({
       path: `/threads/${FIXTURE_THREAD_IDS.flaky}`,
@@ -914,6 +938,72 @@ describe("the sidebar's assistants", () => {
   });
 });
 
+describe(`the sidebar's "From runs"`, () => {
+  /**
+   * Returns `count` sessions of one run's steps, each waiting on the user's
+   * approval of `git push`, titled "Deploy · step 1" to "Deploy · step
+   * <count>", the last the most recently active.
+   */
+  const buildRunSessions = (count: number): Session[] =>
+    buildThreads(count, {
+      status: "busy",
+      openRequests: [APPROVAL],
+      runId: "01a06d02-7900-7000-8000-000000000001",
+    }).map((session) => ({
+      ...session,
+      id: session.id.replace("-7400-", "-7a00-"),
+      title: session.title.replace("Thread", "Deploy · step"),
+    }));
+
+  it("lists the runs' waiting sessions under Waiting on you's threads, capped at 3, the rest on the more row", async () => {
+    const runSessions = buildRunSessions(5);
+    const { nav, fake } = await startSidebar({
+      records: { ...SIDEBAR_FIXTURE, agentSessions: runSessions },
+    });
+
+    expect(within(nav).getByRole("heading", { name: "Waiting on you 6" })).toBeTruthy();
+    const label = within(nav).getByRole("heading", { name: "From runs" });
+    expect(label.tagName).toBe("H4");
+    expect(label.style.marginTop).toBe("7px");
+    expect(
+      [...nav.querySelectorAll("[data-key^='waiting'], [data-key='label:waiting-runs']")].map(
+        (row) => row.getAttribute("aria-label") ?? row.textContent,
+      ),
+    ).toEqual([
+      "Write the retry runbook, waiting on you",
+      "From runs",
+      "Deploy · step 5, waiting on you",
+      "Deploy · step 4, waiting on you",
+      "Deploy · step 3, waiting on you",
+    ]);
+    const row = within(nav).getByRole("link", {
+      name: "Deploy · step 5, waiting on you",
+      description: "Run git push?",
+    });
+    expect(row.getAttribute("href")).toBe(`/threads/${runSessions[0]!.id}`);
+    // The Go menu lists the user's own threads, never a run's session.
+    expect(fake.goMenus.at(-1)?.map((item) => item.title)).not.toContain("Deploy · step 5");
+
+    await userEvent.click(within(nav).getByRole("button", { name: "2 more waiting on you" }));
+
+    expect(nav.querySelectorAll("[data-key^='waiting-run:']")).toHaveLength(5);
+  });
+
+  it("opens a run's waiting session in the Office's drawer while the Office is open", async () => {
+    const [runSession] = buildRunSessions(1);
+    const { nav } = await startSidebar({
+      path: "/office",
+      records: { ...SIDEBAR_FIXTURE, agentSessions: [runSession!] },
+    });
+
+    expect(
+      within(nav)
+        .getByRole("link", { name: "Deploy · step 1, waiting on you" })
+        .getAttribute("href"),
+    ).toBe(`/office?session=${runSession!.id}`);
+  });
+});
+
 describe("the sidebar's card of thread details", () => {
   /** Returns the text of the card beside the sidebar, empty while it is hidden. */
   const readCard = (): string => document.querySelector(".thread-hover")?.textContent ?? "";
@@ -1009,7 +1099,7 @@ describe("the sidebar's card of thread details", () => {
 
   it("keeps a card that shows in the space between two rows, and cancels one that waits for the delay", async () => {
     const { nav, bunPin } = await startHovering();
-    const gap = nav.querySelector(".side-list")!;
+    const gap = nav.querySelector(".virtual-list-items")!;
 
     restOn(bunPin);
     fireEvent.pointerOver(gap);

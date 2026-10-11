@@ -388,10 +388,15 @@ export interface SidebarRecords {
   readonly username: string;
   /** The assistants, each with the current session of its main conversation. None when absent. */
   readonly assistants?: readonly AssistantRecords[];
-  /** The signals on To do. None when absent. */
+  /**
+   * The signals the controller holds, open and resolved. Each view of
+   * Intake reads its own of them (see `answerSignalQuery`). None when absent.
+   */
   readonly signals?: readonly Signal[];
   /** The installed plugins. None when absent. */
   readonly plugins?: readonly PluginDetail[];
+  /** The live sessions that are not threads, such as a run's agent steps'. None when absent. */
+  readonly agentSessions?: readonly Session[];
 }
 
 /** An assistant as the stubbed controller holds it. */
@@ -413,18 +418,58 @@ export const NO_SIDEBAR_RECORDS: SidebarRecords = {
 };
 
 /**
- * Answers a session listing from `records`. A listing filtered to one
- * conversation, which is how the app reads an assistant's current session,
- * gets that assistant's session, or no session. Any other listing gets the
- * threads.
+ * Answers a session listing from `records`:
+ *
+ * - a listing filtered to one conversation, which is how the app reads an
+ *   assistant's current session, gets that assistant's session, or none;
+ * - a listing of the sessions that are not threads gets `agentSessions`;
+ * - any other listing gets the threads.
  */
 const answerSessionQuery = (records: SidebarRecords, call: Call): Answer => {
-  const conversationId = new URLSearchParams(call.search).get("conversationId");
-  if (conversationId === null) return { body: { items: records.threads } };
+  const params = new URLSearchParams(call.search);
+  const conversationId = params.get("conversationId");
+  if (conversationId === null) {
+    if (params.get("thread") === "false") return { body: { items: records.agentSessions ?? [] } };
+    return { body: { items: records.threads } };
+  }
   const session = records.assistants?.find(
     ({ assistant }) => assistant.mainConversationId === conversationId,
   )?.session;
   return { body: { items: session ? [session] : [] } };
+};
+
+/**
+ * Answers a signal listing from `signals` as the controller does, in one page
+ * with no cursor to a next one:
+ *
+ * - `to-do`, the default: the open signals not snoozed, or whose snooze has
+ *   run out by now;
+ * - `later`: the open signals snoozed until after now, soonest first;
+ * - `done`: the resolved signals, newest first.
+ *
+ * A `source` keeps the signals of that plugin's kinds.
+ */
+export const answerSignalQuery = (signals: readonly Signal[], call: Call): Answer => {
+  const query = new URLSearchParams(call.search);
+  const view = query.get("view") ?? "to-do";
+  const source = query.get("source");
+  const now = Date.now();
+  const snoozed = (signal: Signal): boolean =>
+    signal.snooze !== undefined && Date.parse(signal.snooze.until) > now;
+  const fromSource = signals.filter(
+    (signal) => source === null || signal.kind.startsWith(`${source}/`),
+  );
+  const items =
+    view === "done"
+      ? fromSource
+          .filter((signal) => signal.status === "resolved")
+          .toSorted((a, b) => (b.resolution?.at ?? "").localeCompare(a.resolution?.at ?? ""))
+      : view === "later"
+        ? fromSource
+            .filter((signal) => signal.status === "open" && snoozed(signal))
+            .toSorted((a, b) => a.snooze!.until.localeCompare(b.snooze!.until))
+        : fromSource.filter((signal) => signal.status === "open" && !snoozed(signal));
+  return { body: { items } };
 };
 
 /**
@@ -457,7 +502,7 @@ export const buildSidebarHandlers = (
   // The shell reads the Connections, for New project and the starter threads.
   "GET /api/v1/connections": { body: { items: [] } },
   // The shell reads To do for Intake's count, and the plugins for its sources.
-  "GET /api/v1/signals": { body: records.signals ?? [] },
+  "GET /api/v1/signals": (call) => answerSignalQuery(records.signals ?? [], call),
   "GET /api/v1/plugins": { body: records.plugins ?? [] },
   // Intake reads the workflows, whose names label the signals their runs raised.
   "GET /api/v1/workflows": { body: { items: [] } },

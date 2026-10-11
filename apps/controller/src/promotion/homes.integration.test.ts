@@ -9,7 +9,15 @@
  * platform store. `--no-service` leaves `hercule serve` running in the
  * foreground on B.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -61,6 +69,37 @@ const homes: Array<string> = [];
 const controllers: Array<Controller> = [];
 const children: Array<ReturnType<typeof Bun.spawn>> = [];
 
+/**
+ * The step the first test is in, and the output of every process it started.
+ * This test has failed once by running into its timeout, which names no step.
+ * When a test fails, `afterEach` calls `reportFailure`, so the next failure
+ * shows where the test waited and what the processes printed and logged.
+ */
+let step = "";
+const outputs: Array<{ readonly name: string; readonly text: () => string }> = [];
+
+/** Records the step the test is about to wait on. */
+const enterStep = (name: string): void => {
+  step = name;
+};
+
+/**
+ * Prints the step the test failed in, the output of every process it
+ * started, and the process logs in each Home, to stderr.
+ */
+const reportFailure = (): void => {
+  const sections = [`The test failed while waiting for: ${step}`];
+  for (const output of outputs) sections.push(`--- ${output.name}\n${output.text()}`);
+  for (const home of homes) {
+    const logs = join(home, "logs");
+    if (!existsSync(logs)) continue;
+    for (const file of readdirSync(logs)) {
+      sections.push(`--- ${join(logs, file)}\n${readFileSync(join(logs, file), "utf8")}`);
+    }
+  }
+  console.error(sections.join("\n"));
+};
+
 const stopChild = async (child: ReturnType<typeof Bun.spawn>): Promise<void> => {
   if (child.exitCode === null) child.kill("SIGTERM");
   await Promise.race([child.exited, delay(2_000)]);
@@ -80,7 +119,9 @@ const stopHeld = async (controller: Controller): Promise<void> => {
   ]);
 };
 
-afterEach(async () => {
+afterEach(async (context) => {
+  // Before the cleanup, which stops the processes and removes the Homes.
+  if (context.task.result?.state === "fail") reportFailure();
   const toKill = children.splice(0);
   const toStop = controllers.splice(0);
   const toRemove = homes.splice(0);
@@ -119,6 +160,7 @@ const holdController = async (home: string, port?: number, extraArgs?: ReadonlyA
     timeoutMs: 40_000,
   });
   controllers.push(controller);
+  outputs.push({ name: `hercule serve on ${controller.url} in ${home}`, text: controller.output });
   return controller;
 };
 
@@ -236,6 +278,7 @@ const startPromote = (
   );
   children.push(child);
   const drained = drainSpawnOutput(child);
+  outputs.push({ name: `hercule promote into ${home}`, text: drained.text });
   return { child, output: drained.text };
 };
 
@@ -335,13 +378,17 @@ describe("promotion across two Homes", () => {
   it(
     "moves A to B, re-points the local runner, set-controllers a missed remote runner, seals A across a restart, and restores A with --force-unseal",
     async () => {
+      step = "";
+      outputs.length = 0;
       const aHome = createHome();
       const bHome = createHome();
       const runnerHome = createHome();
+      enterStep("A to start");
       const a = await holdController(aHome);
       await finishSetup(aHome, a.url);
       const user = await login(a.url);
 
+      enterStep("A's local runner to join");
       const identity = await waitUntil("A's local runner to join", async () => {
         const info = await readController(a.url, user);
         return info.localRunnerId === null ? undefined : info;
@@ -370,6 +417,7 @@ describe("promotion across two Homes", () => {
       const joinMinted = await post(a.url, "/api/v1/runners/join-tokens", {}, user);
       expect(joinMinted.status, await joinMinted.clone().text()).toBe(201);
       const joinToken = ((await joinMinted.json()) as { token: string }).token;
+      enterStep("`hercule runner join` against A");
       const joined = await runCli(["runner", "join", a.url, "--token", joinToken, "--no-service"], {
         home: runnerHome,
       });
@@ -381,6 +429,7 @@ describe("promotion across two Homes", () => {
       const portB = await findFreePort();
       writeHomeConfig(bHome, portB);
       const bUrl = `http://127.0.0.1:${String(portB)}`;
+      enterStep("`hercule promote` to serve B");
       const promoted = startPromote(bHome, a.url, token, bUrl);
       let bUser: string;
       try {
@@ -427,23 +476,29 @@ describe("promotion across two Homes", () => {
         items: [{ ownerKind: "runner", ownerId: SECRET_OWNER, name: "api-token" }],
       });
 
+      enterStep("A's local runner to come online on B");
       await waitForRunnerOnline(bUrl, bUser, localRunnerId);
       expect(readPinnedUrl(aHome)).toBe(bUrl);
       expect(readPinnedUrl(runnerHome)).toBe(a.url);
 
+      enterStep("A to answer sealed with a forwarding pointer");
       await expectSealedWithPointer(a.url, user, bUrl, identity.publicKey, remotePin.credential);
 
+      enterStep("`hercule runner set-controller` to B");
       const setController = await runCli(["runner", "set-controller", bUrl], { home: runnerHome });
       expect(setController.code, `${setController.stdout}\n${setController.stderr}`).toBe(0);
       expect(readPinnedUrl(runnerHome)).toBe(bUrl);
+      enterStep("the remote runner to come online on B");
       startRemoteRunner(runnerHome);
       await waitForRunnerOnline(bUrl, bUser, remotePin.runnerId);
 
       const aPort = a.port;
+      enterStep("A to stop");
       expect(await a.stop()).toBe(0);
       const aAt = controllers.indexOf(a);
       if (aAt >= 0) controllers.splice(aAt, 1);
 
+      enterStep("A to restart sealed");
       const aAgain = await holdController(aHome, aPort);
       await expectSealedWithPointer(
         aAgain.url,
@@ -453,9 +508,11 @@ describe("promotion across two Homes", () => {
         remotePin.credential,
       );
 
+      enterStep("the sealed A to stop");
       expect(await aAgain.stop()).toBe(0);
       const aAgainAt = controllers.indexOf(aAgain);
       if (aAgainAt >= 0) controllers.splice(aAgainAt, 1);
+      enterStep("A to restart with --force-unseal");
       const restored = await holdController(aHome, aPort, ["--force-unseal"]);
       const restoredUser = await login(restored.url);
       const restoredIdentity = await readController(restored.url, restoredUser);

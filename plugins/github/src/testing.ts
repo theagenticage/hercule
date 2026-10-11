@@ -5,7 +5,8 @@
  *   `HttpClient`, so a test provides the stub's layer, or runs the function
  *   with `runAgainstStub`, and reads back the requests it received;
  * - an ingest context that keeps its state in memory and records every event
- *   emitted, after checking it as the host would.
+ *   emitted, after checking it as the host would;
+ * - the GitHub account the test Connection belongs to.
  */
 import { Effect, Layer, Option, type Result, Schema } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
@@ -18,16 +19,26 @@ import {
   type IngestContext,
   type KeyValueStore,
   type LinkedResource,
+  type OpenSignal,
 } from "@hercule/plugin-host";
 import {
   bounded,
   ExternalRef,
   MAX_DEDUP_KEY_LENGTH,
+  MAX_EVENT_AUTHOR_LENGTH,
   MAX_EVENT_SYSTEM_LENGTH,
+  MAX_EVENT_TITLE_LENGTH,
   MAX_EVENT_URL_LENGTH,
 } from "@hercule/contract";
 import { TEST_TOKEN } from "./actions/testing";
+import type { GithubIdentity } from "./identity";
 import { GITHUB_EVENT_KINDS } from "./kinds";
+
+/** The GitHub account of the test Connection: the user, in every ingest test. */
+export const TEST_IDENTITY: GithubIdentity = { accountId: "583231", login: "octocat" };
+
+/** The user's account as GitHub embeds it in an object, such as a comment's `user`. */
+export const TEST_ACCOUNT = { login: TEST_IDENTITY.login, id: Number(TEST_IDENTITY.accountId) };
 
 /** The stub's layer, and every request it received, in order. */
 export interface GithubStub {
@@ -95,6 +106,31 @@ export const runAgainstStub = <A, E>(
 ): Promise<Result.Result<A, E>> =>
   Effect.runPromise(Effect.result(effect).pipe(Effect.provide(stub.layer)));
 
+/**
+ * The paths of the requests a feed sends about the user rather than about a
+ * repository: the user's teams, and the search for the user's own open pull
+ * requests.
+ */
+const USER_REQUEST_PATHS: ReadonlySet<string> = new Set(["/user/teams", "/search/issues"]);
+
+/** Checks whether a request is about the user rather than about a repository. */
+export const isUserRequest = (request: HttpClientRequest.HttpClientRequest): boolean =>
+  USER_REQUEST_PATHS.has(new URL(request.url).pathname);
+
+/**
+ * Returns a route that answers the requests about the user as GitHub would
+ * for a user on no team with no open pull requests, and passes every other
+ * request to `route`.
+ */
+export const answerUserRequests =
+  (route: (request: HttpClientRequest.HttpClientRequest) => StubResponse) =>
+  (request: HttpClientRequest.HttpClientRequest): StubResponse => {
+    const path = new URL(request.url).pathname;
+    if (path === "/user/teams") return { status: 200, body: [] };
+    if (path === "/search/issues") return { status: 200, body: { total_count: 0, items: [] } };
+    return route(request);
+  };
+
 /** The path and query parameters of a request the stub received. */
 export interface StubRequestTarget {
   /** The path below the API root, such as `/repos/owner/repo/issues`. */
@@ -123,6 +159,8 @@ export interface IngestHarness {
   readonly state: Map<string, Schema.Json>;
   /** The Resources linked to the Connection; a test may change them between polls. */
   readonly resources: Array<LinkedResource>;
+  /** The open signals `openSignals` returns; a test may change them between polls. */
+  readonly openSignals: Array<OpenSignal>;
 }
 
 /**
@@ -141,6 +179,8 @@ const EventEnvelope = Schema.Struct({
   url: Schema.optionalKey(bounded(1, MAX_EVENT_URL_LENGTH)),
   system: Schema.optionalKey(bounded(1, MAX_EVENT_SYSTEM_LENGTH)),
   raw: Schema.optionalKey(Schema.JsonObject),
+  title: bounded(1, MAX_EVENT_TITLE_LENGTH),
+  author: Schema.NullOr(bounded(1, MAX_EVENT_AUTHOR_LENGTH)),
 });
 
 /**
@@ -177,6 +217,7 @@ export const buildIngestHarness = (
   const events: Array<EmittedEvent> = [];
   const state = new Map<string, Schema.Json>();
   const resources: Array<LinkedResource> = [];
+  const openSignals: Array<OpenSignal> = [];
   const store: KeyValueStore = {
     get: (key) => Effect.sync(() => Option.fromUndefinedOr(state.get(key))),
     set: (key, value) => Effect.sync(() => void state.set(key, value)),
@@ -194,9 +235,11 @@ export const buildIngestHarness = (
       state: store,
       credentials: () => Effect.succeed({ ...credentials }),
       resources: { list: () => Effect.sync(() => [...resources]) },
+      openSignals: () => Effect.sync(() => [...openSignals]),
     },
     events,
     state,
     resources,
+    openSignals,
   };
 };

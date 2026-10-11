@@ -14,12 +14,17 @@
  * - a typed reply that makes the input too large is refused;
  * - a proposal that fits the size limit as raised, but not once Accept
  *   copies its task, is refused;
- * - while a plugin action runs, a second action on its signal is refused.
+ * - while a plugin action runs, a second action on its signal is refused;
+ * - Snooze, Unsnooze, Done and Not urgent each move several signals in one
+ *   call, and the Later and Done views read them back a page at a time;
+ * - a snooze takes its time with any offset, stores it in UTC, and refuses a
+ *   date that does not exist.
  *
  * The rules that need no real operation are tested in `service.test.ts`.
  */
 import { describe, expect, it } from "vitest";
 import {
+  type SignalPage,
   MAX_SIGNAL_BYTES,
   MAX_SIGNAL_OUTCOME_LENGTH,
   type Run,
@@ -462,6 +467,116 @@ describe("a plugin action as a typed reply", () => {
       const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(400);
       expect(refusal.text).toContain(`larger than ${MAX_SIGNAL_BYTES} bytes`);
+    });
+  });
+});
+
+describe("Intake's moves", () => {
+  const FYI: SignalRaiseInput = { ...OFFER, kind: "fyi", title: "Release 4.2 shipped" };
+  const UNTIL = "2999-01-01T07:00:00.000Z";
+
+  /** Lists the ids in one view of the signals. Fails the test unless the read succeeds. */
+  const listView = async (base: string, token: string, view: string) => {
+    const response = await get(base, `/api/v1/signals?view=${view}`, token);
+    expect(response.status, await response.clone().text()).toBe(200);
+    return ((await response.json()) as SignalPage).items.map((signal) => signal.id);
+  };
+
+  it("snoozes, unsnoozes, marks done and lowers several signals per call, and the views follow", async () => {
+    await withServer(async (harness) => {
+      const { base } = harness;
+      const token = await completeSetup(base);
+      const ids = [await raiseOrFail(base, token, FYI), await raiseOrFail(base, token, FYI)];
+
+      const snoozed = await post(
+        base,
+        "/api/v1/signals/snooze",
+        { signalIds: ids, until: UNTIL },
+        token,
+      );
+      expect(await snoozed.json()).toEqual({ snoozed: ids, skipped: [] });
+      expect(await listView(base, token, "to-do")).toEqual([]);
+      expect(await listView(base, token, "later")).toEqual(ids);
+
+      const unsnoozed = await post(
+        base,
+        "/api/v1/signals/unsnooze",
+        { signalIds: [ids[0]] },
+        token,
+      );
+      expect(await unsnoozed.json()).toEqual({ unsnoozed: [ids[0]], skipped: [] });
+
+      const lowered = await post(base, "/api/v1/signals/lower-priority", { signalIds: ids }, token);
+      // Neither signal is urgent, so neither moves.
+      expect(await lowered.json()).toEqual({ lowered: [], skipped: [] });
+
+      const done = await post(base, "/api/v1/signals/mark-done", { signalIds: ids }, token);
+      expect(await done.json()).toEqual({ done: ids, skipped: [] });
+      expect(await listView(base, token, "later")).toEqual([]);
+      expect(new Set(await listView(base, token, "done"))).toEqual(new Set(ids));
+      expect((await harness.audit("signal.markedDone")).map((entry) => entry.payload)).toEqual([
+        { signalIds: ids },
+      ]);
+    });
+  });
+
+  it("refuses an unknown id with 404 and a past time with 400, and changes nothing", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const id = await raiseOrFail(base, token, FYI);
+
+      const unknown = await post(
+        base,
+        "/api/v1/signals/mark-done",
+        { signalIds: [id, "0199e0e7-9999-7000-8000-000000000000"] },
+        token,
+      );
+      const past = await post(
+        base,
+        "/api/v1/signals/snooze",
+        { signalIds: [id], until: "2000-01-01T00:00:00.000Z" },
+        token,
+      );
+
+      expect(unknown.status).toBe(404);
+      expect(past.status).toBe(400);
+      expect((await readErrorBody(past)).code).toBe("validation");
+      expect(await listView(base, token, "to-do")).toEqual([id]);
+    });
+  });
+
+  it("takes a snooze time with its offset and stores it in UTC, and refuses a date that does not exist", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const id = await raiseOrFail(base, token, FYI);
+
+      const impossible = await post(
+        base,
+        "/api/v1/signals/snooze",
+        { signalIds: [id], until: "2999-02-30T09:00+02:00" },
+        token,
+      );
+      const withoutOffset = await post(
+        base,
+        "/api/v1/signals/snooze",
+        { signalIds: [id], until: "2999-01-01T09:00" },
+        token,
+      );
+      const snoozed = await post(
+        base,
+        "/api/v1/signals/snooze",
+        { signalIds: [id], until: "2999-01-01T09:00+02:00" },
+        token,
+      );
+      const later = await get(base, "/api/v1/signals?view=later", token);
+
+      expect(impossible.status).toBe(400);
+      expect((await readErrorBody(impossible)).code).toBe("validation");
+      expect(withoutOffset.status).toBe(400);
+      expect(snoozed.status, await snoozed.clone().text()).toBe(200);
+      expect(
+        ((await later.json()) as SignalPage).items.map((signal) => signal.snooze?.until),
+      ).toEqual([UNTIL]);
     });
   });
 });

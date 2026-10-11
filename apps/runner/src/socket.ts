@@ -32,6 +32,10 @@ import { VERSION } from "@hercule/home/version";
 import {
   AGENT_STEPS_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
+  TEXT_GENERATION_CAPABILITY,
+  TEXT_GENERATION_DEADLINE_MS,
+  type TextGenerationOutcome,
+  type TextGenerationRequest,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   ControllerToRunner,
   PeerVersion,
@@ -69,6 +73,7 @@ import {
   type ProviderRunnerContext,
 } from "./providers";
 import type { LoginAnswer, Logins } from "./providers/login";
+import { makeTextGenerator } from "./text-generation";
 import type { Supervising } from "./sessions";
 import { reportWatermark } from "./watermark";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
@@ -89,6 +94,7 @@ const NONCE_BYTES = 16;
  *   how it ended, and answers a start sent again for the step.
  * - `ATTACHMENTS_CAPABILITY`: this runner fetches the images an input refers
  *   to and gives them to the harness.
+ * - `TEXT_GENERATION_CAPABILITY`: this runner answers a text generation.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
@@ -96,6 +102,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   AGENT_STEPS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
+  TEXT_GENERATION_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;
@@ -468,6 +475,36 @@ export const connect = (
       );
     };
 
+    // One generator for the whole connection, because its limit on calls
+    // running at once covers all of them.
+    const generateText = makeTextGenerator({
+      scratchDir: options.scratchDir,
+      findAdapter,
+      buildContext,
+      deadline: Duration.millis(TEXT_GENERATION_DEADLINE_MS),
+    });
+
+    /** Makes one text generation and sends its outcome. */
+    const answerTextGeneration = (request: TextGenerationRequest) => {
+      const sendReport = (outcome: TextGenerationOutcome) =>
+        write(
+          encodeFrameText({ _tag: "textGenerationReport", requestId: request.requestId, outcome }),
+        );
+      return generateText(request).pipe(
+        Effect.flatMap(sendReport),
+        // The encoding happens inside the catch, so an outcome that cannot be
+        // encoded reaches the controller as a failure, not as silence.
+        Effect.catchCause((cause) =>
+          Effect.ignore(
+            sendReport({ outcome: "failed", message: describeCause(cause, MAX_MESSAGE_LENGTH) }),
+          ),
+        ),
+        // If the write itself failed, the connection is closing and there is
+        // nowhere left to report to.
+        Effect.ignore,
+      );
+    };
+
     /**
      * Runs an install and sends its result. After a successful install, the
      * new facts are sent first, so a controller that reads the runner row
@@ -672,6 +709,9 @@ export const connect = (
             return yield* Effect.asVoid(Effect.forkIn(answerProbe(message), connection));
           case "installRequest":
             return yield* Effect.asVoid(Effect.forkIn(answerInstall(message), connection));
+          case "textGenerationRequest":
+            // Forked, because a text generation takes seconds.
+            return yield* Effect.asVoid(Effect.forkIn(answerTextGeneration(message), connection));
           case "loginStart":
             return yield* Effect.asVoid(
               Effect.forkIn(answerLogin(message.requestId, startLogin(message)), connection),

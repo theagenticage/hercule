@@ -13,12 +13,15 @@ import {
   MAX_OUTPUT_SCHEMA_LENGTH,
   type ModelDescriptor,
   type RunnerFacts,
+  type TextGenerationOutcome,
+  type TextGenerationRequest,
 } from "@hercule/protocol";
 import { get, post, send } from "../../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
 import {
   spawnThreadUnder,
   findInstanceId,
+  listFrames,
   listInputs,
   readProfileNamed,
   createProfile,
@@ -582,6 +585,158 @@ describe("placeSession from an Agent", () => {
 
       const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
       expect(((await listing.json()) as { items: ReadonlyArray<unknown> }).items).toEqual([]);
+    });
+  });
+});
+
+/** What the fake runner does when the controller asks it for a title. */
+type TitleBehaviour =
+  | { readonly kind: "answers"; readonly title: string; readonly needsRefinement: boolean }
+  | { readonly kind: "fails" }
+  | { readonly kind: "never-answers" };
+
+/** Decides the fake runner's answer to a text generation request. */
+const decideTitleAnswer = (behaviour: TitleBehaviour): TextGenerationOutcome | undefined => {
+  switch (behaviour.kind) {
+    case "answers":
+      return {
+        outcome: "ok",
+        value: { title: behaviour.title, needsRefinement: behaviour.needsRefinement },
+        usage: null,
+      };
+    case "fails":
+      return { outcome: "failed", message: "the harness could not start" };
+    case "never-answers":
+      return undefined;
+  }
+};
+
+/** Reads the stored `needs_refinement` of a session: null when no title was generated. */
+const readNeedsRefinement = async (
+  arranged: Arranged,
+  id: string,
+): Promise<number | null | undefined> => {
+  const [row] = await Effect.runPromise(
+    Effect.orDie(
+      arranged.harness.sql<{ readonly needs_refinement: number | null }>`
+        SELECT needs_refinement FROM sessions WHERE id = unhex(replace(${id}, '-', ''))`,
+    ),
+  );
+  return row?.needs_refinement;
+};
+
+describe("placeSession generates a Thread title", () => {
+  const withTitles = (
+    behaviour: TitleBehaviour,
+    body: (
+      arranged: Arranged,
+      requests: () => ReadonlyArray<TextGenerationRequest>,
+    ) => Promise<void>,
+  ): Promise<void> =>
+    sharedWithFleet(
+      async (arranged) => {
+        arranged.wire.setTextGenerationAnswer(() => decideTitleAnswer(behaviour));
+        // None of the fixture providers is one `automatic` tries, so the
+        // Thread title runs on the instance the test chooses.
+        const chosen = await send("PATCH", arranged.harness.base, "/api/v1/settings", {
+          body: {
+            controller: {
+              "textGeneration.model": {
+                instanceId: findInstanceId(arranged, "alpha-provider"),
+                model: "clever",
+              },
+            },
+          },
+          token: arranged.token,
+        });
+        expect(chosen.status, await chosen.clone().text()).toBe(200);
+        await body(arranged, () =>
+          listFrames<TextGenerationRequest>(arranged.wire, "textGenerationRequest"),
+        );
+      },
+      { plugins: buildPlugins(), facts: FACTS, models: MODELS },
+    );
+
+  const answers = {
+    kind: "answers",
+    title: "Fix the login redirect",
+    needsRefinement: true,
+  } as const;
+
+  it("replaces the cut-short title with the generated one and keeps the refinement flag", async () => {
+    await withTitles(answers, async (arranged, requests) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "login redirect is broken" });
+
+      expect(session.title).toBe("login redirect is broken");
+      const renamed = await waitForSession(
+        arranged,
+        session.id,
+        (one) => one.title === "Fix the login redirect",
+      );
+      expect(renamed.status).not.toBe("exited");
+      expect(await readNeedsRefinement(arranged, session.id)).toBe(1);
+      expect(requests()).toHaveLength(1);
+    });
+  });
+
+  it("sends the first message only, cut to 4000 characters", async () => {
+    await withTitles(answers, async (arranged, requests) => {
+      const prompt = `${"a".repeat(3990)}\nsecond line ${"b".repeat(2000)}`;
+
+      await spawnSessionOrFail(arranged, { prompt });
+
+      await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
+      expect(requests()).toHaveLength(1);
+      expect(requests()[0]?.spec.input).toBe(prompt.slice(0, 4000));
+      expect(requests()[0]?.spec.instructions).not.toContain("a".repeat(20));
+    });
+  });
+
+  it("asks for no title for an agent's session or a message with no text", async () => {
+    await withTitles(answers, async (arranged, requests) => {
+      const profile = await readProfileNamed(arranged, "worker");
+      const agent = await createAgent(arranged, {
+        name: "titleless",
+        systemPrompt: "You assess tasks.",
+        instanceId: findInstanceId(arranged, "alpha-provider"),
+        permissionProfileId: profile.id,
+        accessMode: "auto-accept-edits",
+        model: "fast",
+      });
+      await spawnSessionOrFail(arranged, { agentId: agent.id, prompt: "assess this" });
+      await spawnSessionOrFail(arranged, { prompt: " \n " });
+
+      // A Thread that does have text, spawned last: when its request has
+      // arrived, the two spawns above had their chance to ask first.
+      await spawnSessionOrFail(arranged, { prompt: "a real message" });
+      await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
+      expect(requests().map((request) => request.spec.input)).toEqual(["a real message"]);
+    });
+  });
+
+  it("starts the turn at once while the title is still being generated", async () => {
+    await withTitles({ kind: "never-answers" }, async (arranged, requests) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "slow title" });
+
+      await waitForStartFrames(arranged, session.id, 1);
+      await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
+      const after = await readSession(arranged, session.id);
+      expect(after.title).toBe("slow title");
+      expect(await listInputs(arranged, session.id)).toHaveLength(1);
+    });
+  });
+
+  it("keeps the cut-short title and starts the turn when the generation fails", async () => {
+    await withTitles({ kind: "fails" }, async (arranged, requests) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "title will fail" });
+
+      await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
+      await waitForStartFrames(arranged, session.id, 1);
+      // Nothing happens after a failure, so there is nothing to wait for.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const after = await readSession(arranged, session.id);
+      expect(after.title).toBe("title will fail");
+      expect(await readNeedsRefinement(arranged, session.id)).toBeNull();
     });
   });
 });

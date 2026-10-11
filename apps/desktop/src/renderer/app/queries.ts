@@ -30,11 +30,13 @@ import {
 } from "@hercule/client-core";
 import {
   DEFAULT_PAGE_LIMIT,
+  LIVE_SESSION_STATUSES,
   MAX_PAGE_LIMIT,
   type ConversationMessage,
   type Input,
   type Runner,
   type Session,
+  type SignalFilter,
   type Task,
   type TranscriptRow,
 } from "@hercule/contract";
@@ -165,6 +167,24 @@ export const threadsQuery = (client: HerculeClient) =>
       readEveryPage((page) => client.session.query({ query: { thread: true, ...page } })),
     ...SHELL_READ_OPTIONS,
   });
+
+/**
+ * Reads every live session an Agent spawned: the sessions of runs'
+ * agent steps, the assistants' and any other that is not a thread. "From
+ * runs" in Waiting on you, and the workflow list's Needs you, keep those of
+ * a run that wait on the user (`listWaitingRunSessions`). The controller has
+ * no filter for that, so the client keeps them. The read follows the cursor
+ * to the last page, and its key sits under the `sessions` prefix, so a push
+ * on the `session` topic invalidates it.
+ */
+export const liveAgentSessionsQuery = (client: HerculeClient) => {
+  const filter = { thread: false, status: LIVE_SESSION_STATUSES } as const;
+  return queryOptions({
+    queryKey: queryKeys.sessions(filter),
+    queryFn: () => readEveryPage((page) => client.session.query({ query: { ...filter, ...page } })),
+    ...SHELL_READ_OPTIONS,
+  });
+};
 
 /** Reads every project, for the sidebar's project headers. */
 export const projectsQuery = (client: HerculeClient) =>
@@ -404,18 +424,116 @@ export const assistantsQuery = (client: HerculeClient) =>
     ...SHELL_READ_OPTIONS,
   });
 
+/** The key of the soonest `until` on Later, which each read of To do writes. See `snoozeTimerQuery`. */
+const SNOOZE_TIMER_KEY = ["snooze-timer"] as const;
+
 /**
  * Reads Intake's To do list: every open signal that is not snoozed, read
  * whole, because every client counts it. The Hercule segment's count and
  * Intake's list both come from it, and a push on the `signal` topic reads it
  * again.
+ *
+ * Each read first reads the soonest `until` on Later and stores it for the
+ * snooze timer. Read in that order, a snooze that runs out between the two
+ * reads is missing from To do but still sets the timer, which reads To do
+ * again once it has run out. Read in the other order, or apart, that snooze
+ * could be missing from both, and To do would stay without it.
  */
 export const signalsToDoQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.signals({ view: "to-do" }),
-    queryFn: () => client.signal.query({ query: { view: "to-do" } }),
+    queryFn: async ({ client: queryClient }) => {
+      const soonest = await client.signal.query({ query: { view: "later", limit: 1 } });
+      queryClient.setQueryData(SNOOZE_TIMER_KEY, soonest.items[0]?.snooze?.until ?? null);
+      return (await client.signal.query({ query: { view: "to-do" } })).items;
+    },
     ...SHELL_READ_OPTIONS,
   });
+
+/**
+ * Reads Intake's Later list page by page, soonest snooze first: every open
+ * signal snoozed until a future time, or only those of the plugin `source`
+ * for a plugin's tab. A push on the `signal` topic reads the held pages
+ * again. Intake reads it only while it shows Later, or the Later count.
+ */
+export const signalsLaterQuery = (client: HerculeClient, source?: string) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.signals(buildPagedSignalFilter("later", source)),
+    queryFn: ({ pageParam }) =>
+      client.signal.query({ query: buildPagedSignalFilter("later", source, pageParam) }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Returns the soonest `until` on Later, or `null` when nothing is snoozed,
+ * as the last read of To do stored it (see `signalsToDoQuery`). The snooze
+ * timer waits for that time on every screen (see `SnoozeTimer`), so this is
+ * a shell read. It reads To do when To do has not been read yet, and never
+ * reads Later on its own.
+ */
+export const snoozeTimerQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: SNOOZE_TIMER_KEY,
+    queryFn: async ({ client: queryClient }): Promise<string | null> => {
+      await queryClient.fetchQuery(signalsToDoQuery(client));
+      return queryClient.getQueryData<string | null>(SNOOZE_TIMER_KEY) ?? null;
+    },
+    ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads Intake's Done list page by page, newest first: every resolved
+ * signal, or only those of the plugin `source` for a plugin's tab. A push on
+ * the `signal` topic reads the held pages again.
+ */
+export const signalsDoneQuery = (client: HerculeClient, source?: string) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.signals(buildPagedSignalFilter("done", source)),
+    queryFn: ({ pageParam }) =>
+      client.signal.query({ query: buildPagedSignalFilter("done", source, pageParam) }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads Done newest first in the largest pages the controller gives, for the
+ * count of signals cleared today under To do. The foot reads the next page
+ * only until a page reaches a signal resolved before today, so most days it
+ * takes one request. A push on the `signal` topic reads the held pages again.
+ */
+export const signalsClearedTodayQuery = (client: HerculeClient) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.signals(
+      buildPagedSignalFilter("done", undefined, undefined, MAX_PAGE_LIMIT),
+    ),
+    queryFn: ({ pageParam }) =>
+      client.signal.query({
+        query: buildPagedSignalFilter("done", undefined, pageParam, MAX_PAGE_LIMIT),
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Builds the filter of one page of the paged view `view`, `limit` signals
+ * long. The query key is built from the same filter without a cursor, so
+ * every page of one list shares one key.
+ */
+const buildPagedSignalFilter = (
+  view: "later" | "done",
+  source: string | undefined,
+  cursor?: string,
+  limit: number = DEFAULT_PAGE_LIMIT,
+): SignalFilter => ({
+  view,
+  limit,
+  ...(source === undefined ? {} : { source }),
+  ...(cursor === undefined ? {} : { cursor }),
+});
 
 /**
  * Reads every plugin, for the names Intake gives each signal's source. A push
@@ -429,10 +547,12 @@ export const pluginsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads every workflow, for the name Intake gives a signal a workflow's run
- * raised. The shell subscribes to no `workflow` topic, because the controller
- * pushes on it at every cron fire, so Intake reads it each time it opens, see
- * `readOnOpen`.
+ * Reads every workflow: the workflow list's rows, and the name Intake gives a
+ * signal a workflow's run raised. The shell holds no `workflow` topic,
+ * because the controller pushes on it at every cron fire. The workflows page
+ * holds it while it is mounted and the window is visible (`useWorkflowsLive`),
+ * so a push reads the list again there. Intake holds no topic, so it reads
+ * the list each time it opens, see `readOnOpen`.
  */
 export const workflowsQuery = (client: HerculeClient) =>
   queryOptions({
@@ -442,7 +562,51 @@ export const workflowsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Checks whether a failed read of a thread's records, or of an assistant's
+ * Reads every trigger of every workflow, for the workflow list's Starts on,
+ * Next, and a trigger in error. A trigger is part of its workflow, so a push
+ * on the `workflow` topic reads it again.
+ */
+export const triggersQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.triggers(),
+    queryFn: () => readEveryPage((page) => client.trigger.query({ query: page })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** How many of a workflow's newest runs its strip in the workflow list shows. */
+export const STRIP_RUN_LIMIT = 20;
+
+/**
+ * Reads every workflow's newest runs, at most `STRIP_RUN_LIMIT` per workflow,
+ * each workflow's newest first: the strips of the workflow list, in one read
+ * rather than one per workflow. Its key sits under the `runs` prefix, so a
+ * push on the `run` topic reads it again.
+ */
+export const newestRunsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.runs({ newestPerWorkflow: STRIP_RUN_LIMIT }),
+    queryFn: () =>
+      readEveryPage((page) =>
+        client.run.query({ query: { newestPerWorkflow: STRIP_RUN_LIMIT, ...page } }),
+      ),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads every run with the status `status`. The workflow list reads the
+ * `running` runs and the `pending` ones, which are its Running group: the
+ * filter takes one status, so it takes two reads. Its key sits under the
+ * `runs` prefix, so a push on the `run` topic reads it again.
+ */
+export const liveRunsQuery = (client: HerculeClient, status: "running" | "pending") =>
+  queryOptions({
+    queryKey: queryKeys.runs({ status }),
+    queryFn: () => readEveryPage((page) => client.run.query({ query: { status, ...page } })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Checks whether a failed read, such as a thread's records or an assistant's
  * current session, is worth trying again. Returns `true` for the first three
  * failures that got no answer from the controller, such as a dropped
  * connection, and `false` for an `ApiError`.
@@ -865,8 +1029,9 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
 
 /**
  * Reads everything the shell shows into `queryClient`: the sidebar's records,
- * the assistants and the current session of each one's main conversation,
- * the Connections, the signed-in user, Intake's To do list, whose count the
+ * the live sessions an Agent spawned, for "From runs" in Waiting on you, the
+ * assistants and the current session of each one's main conversation, the
+ * Connections, the signed-in user, Intake's To do list, whose count the
  * Hercule segment shows, and the plugins that name each signal's source.
  * Resolves once every read is cached,
  * and fails with the first read that fails.
@@ -891,6 +1056,7 @@ export const ensureShellData = async (
 ): Promise<void> => {
   await Promise.all([
     queryClient.ensureQueryData(threadsQuery(client)),
+    queryClient.ensureQueryData(liveAgentSessionsQuery(client)),
     queryClient.ensureQueryData(projectsQuery(client)),
     queryClient.ensureQueryData(workspacesQuery(client)),
     queryClient.ensureQueryData(resourcesQuery(client)),
@@ -899,6 +1065,7 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(connectionsQuery(client)),
     queryClient.ensureQueryData(userQuery(client)),
     queryClient.ensureQueryData(signalsToDoQuery(client)),
+    queryClient.ensureQueryData(snoozeTimerQuery(client)),
     queryClient.ensureQueryData(pluginsQuery(client)),
     queryClient
       .ensureQueryData(assistantsQuery(client))

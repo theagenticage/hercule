@@ -52,6 +52,7 @@ const SCREEN_PARAM_CHECKS = {
   sessionId: isId,
   assistantId: isId,
   subagentId: isSubagentId,
+  workflowId: isId,
 } satisfies Record<ScreenParamName, (value: string) => boolean>;
 
 /** Returns the `localStorage` key that holds the last screen for `controllerUrl`. */

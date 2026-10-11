@@ -147,10 +147,13 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the open notifications whose subject lists any of these
-     * subjects, oldest first. Only a decision is ever open.
+     * subjects, oldest first. Only a decision is ever open. `kind` keeps the
+     * notifications of one kind, and lets the database find them by index
+     * rather than read the subject of every open decision.
      */
     listOpenDecisionsAbout: (
       subjects: ReadonlyArray<NotificationSubject>,
+      kind?: string,
     ): Effect.Effect<ReadonlyArray<Notification>, SqlError> =>
       subjects.length === 0
         ? Effect.succeed([])
@@ -158,6 +161,7 @@ const make = Effect.gen(function* () {
             sql<NotificationRow>`
               SELECT ${sql.literal(COLUMNS)} FROM notifications
               WHERE notifications.status = 'open'
+                ${kind === undefined ? sql`` : sql`AND notifications.kind = ${kind}`}
                 AND EXISTS (SELECT 1 FROM json_each(notifications.subject) AS subject
                             WHERE ${sql.or(subjects.map(buildSubjectMatch))})
               ORDER BY notifications.created_at, notifications.id

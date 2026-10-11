@@ -11,6 +11,7 @@ export {
   PluginCapability,
   PluginId,
   PluginManifest,
+  PluginMark,
   SchemaValue,
 } from "./manifest";
 
@@ -52,6 +53,8 @@ export {
   MAX_CONTRIBUTION_NAME_LENGTH,
   MAX_EMITTED_FIELD_BYTES,
   ProviderDefinition,
+  SignalDraft,
+  SignalDraftAction,
   WorkflowActionNames,
   type ActionContext,
   type AnswerAction,
@@ -64,10 +67,26 @@ export {
   type IngestContext,
   type IngestHandle,
   type LinkedResource,
+  type OpenSignal,
   type PollResult,
+  type SignalBuildContext,
+  type SignalEndDeclaration,
+  type SignalKindDeclaration,
+  type SignalMatchField,
+  type StoredEvent,
   type WorkflowActionContribution,
   type WorkflowStepAction,
 } from "./contributions";
+
+export {
+  MAX_BLOCK_NAME_LENGTH,
+  MAX_BLOCK_URL_LENGTH,
+  MAX_EVENT_TITLE_LENGTH,
+  MAX_MESSAGE_TEXT_LENGTH,
+  MAX_SIGNAL_TITLE_LENGTH,
+  TASK_PRIORITIES,
+  TaskPriority,
+} from "./limits";
 
 export {
   PluginError,

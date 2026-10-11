@@ -6,6 +6,7 @@ import type { JSX, ReactNode } from "react";
 import type { AllSetRecap, FirstRunStep } from "@hercule/client-core";
 import { buildLook, Face, UserAvatar } from "../../faces";
 import { QuestionIcon } from "../../icons/question";
+import { SparkleIcon } from "../../icons/sparkle";
 import { GitHubMark, LogoMark } from "../../logos";
 import type { ProjectTint } from "../project-tile";
 import "../project-tile.css";
@@ -14,9 +15,12 @@ import { ProviderLogo } from "../thread/provider-logo";
 
 /**
  * Renders All set for `username` in `timezone`, from `recap`. `tint` is the
- * project's tint. A step with nothing to show links back to it with Do it
- * now, through `onDoItNow`. Every other button calls `onLeave`, which opens
- * the new project's draft. `error` is why the last leave failed, or null.
+ * project's tint. `textGeneration` is the name of the model that makes text
+ * generations, or "no model available" when none can; it is null while the
+ * controller has not answered yet, and then the row is left out. A step with
+ * nothing to show links back to it with Do it now, through `onDoItNow`. Every
+ * other button calls `onLeave`, which opens the new project's draft. `error`
+ * is why the last leave failed, or null.
  *
  * Without a logged-in provider, no agent can take a desk, so the main button
  * is Log in to a provider and Open Hercule is the quiet one. Both open the
@@ -26,6 +30,7 @@ export function AllSet({
   username,
   timezone,
   recap,
+  textGeneration,
   tint,
   error,
   onDoItNow,
@@ -34,6 +39,7 @@ export function AllSet({
   readonly username: string;
   readonly timezone: string;
   readonly recap: AllSetRecap;
+  readonly textGeneration: string | null;
   readonly tint: ProjectTint | null;
   readonly error: string | null;
   readonly onDoItNow: (step: FirstRunStep) => void;
@@ -82,6 +88,11 @@ export function AllSet({
         >
           {recap.providerNames === null ? doItNow("providers") : <em>logged in</em>}
         </RecapRow>
+        {recap.providerNames === null || textGeneration === null ? null : (
+          <RecapRow mark={<SparkleIcon size={16} />} name={<b>Text generation</b>}>
+            <em>{textGeneration}</em>
+          </RecapRow>
+        )}
         <RecapRow
           mark={<GitHubMark size={16} />}
           name={

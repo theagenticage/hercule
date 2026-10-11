@@ -21,21 +21,26 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import type { Signal } from "@hercule/contract";
+import { DONE_ACTION_ID, type Signal } from "@hercule/contract";
 import {
   buildSignalAnswers,
   describeAnswerKey,
   describeBuildFailure,
+  describeNotScreened,
   describeResolvedElsewhere,
   describeSignalAsker,
   describeSignalOutcome,
+  describeSignalOutcomeMoment,
   describeSignalProvenance,
+  describeSnoozeLine,
   findReplyAnswer,
   findSuggestedAnswer,
   formatMessageTime,
+  hasDoneAction,
   nameSignalSource,
   readErrorMessage,
   parseSignalPluginId,
+  planSignalMove,
 } from "@hercule/client-core";
 import {
   assistantsQuery,
@@ -44,11 +49,14 @@ import {
   signalQuery,
   workflowsQuery,
 } from "../../app/queries";
-import { CheckIcon } from "../../icons/check";
+import { AlarmIcon } from "../../icons/alarm";
 import { ExternalIcon } from "../../icons/external";
+import { Mark } from "../../marks";
 import { SignalAnswers, type AnswerFailure } from "./signal-answers";
 import { SignalBlocks } from "./signal-blocks";
+import { SignalPaneMoves } from "./signal-moves";
 import { SourceMark } from "./source-mark";
+import { useIntakeMoves } from "./use-signal-moves";
 
 /** What Intake's keys do in the pane, called by the screen's key handler. */
 export interface SignalPaneHandle {
@@ -135,6 +143,7 @@ function SignalDetail({
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
+  const moves = useIntakeMoves();
   const idPrefix = useId();
   const rootRef = useRef<HTMLElement>(null);
   const sourceLinkRef = useRef<HTMLAnchorElement>(null);
@@ -223,7 +232,14 @@ function SignalDetail({
   const asker = describeSignalAsker(signal);
   const askedAt = formatMessageTime(new Date(signal.createdAt), timezone, new Date());
   const buildFailure = describeBuildFailure(signal, plugins, raisers);
+  const notScreened = describeNotScreened(signal);
   const outcome = describeSignalOutcome(signal, plugins);
+  const now = new Date();
+  const outcomeMoment = describeSignalOutcomeMoment(signal, plugins, now, timezone);
+  const snoozeLine =
+    moves.view === "later"
+      ? describeSnoozeLine(signal, now, timezone, sourceUrl === null ? null : sourceName)
+      : null;
   const resolvedElsewhere =
     openedOpen && !actedHere ? describeResolvedElsewhere(signal, plugins) : null;
   const keptDraft = openReplyId === null ? "" : (drafts[openReplyId] ?? "");
@@ -270,15 +286,22 @@ function SignalDetail({
             {askedAt !== undefined && <time dateTime={signal.createdAt}>{askedAt}</time>}
           </p>
         </header>
-        {buildFailure !== null && <p className="ad-flag">{buildFailure}</p>}
+        {snoozeLine !== null && (
+          <p className="ad-flag">
+            <AlarmIcon size={14} />
+            {snoozeLine}
+          </p>
+        )}
         <SignalBlocks blocks={signal.blocks} task={signal.task} timezone={timezone} />
+        {buildFailure !== null && <p className="ad-flag">{buildFailure}</p>}
+        {notScreened !== null && <p className="ad-flag">{notScreened}</p>}
         {outcome === null ? (
           answers.length > 0 && (
             <SignalAnswers
               answers={answers}
               openReplyId={openReplyId}
               drafts={drafts}
-              locked={act.isPending}
+              locked={act.isPending || moves.pending}
               failure={failure}
               idPrefix={idPrefix}
               onOpenReply={focusReply}
@@ -286,24 +309,39 @@ function SignalDetail({
                 setDrafts((current) => ({ ...current, [actionId]: text }));
               }}
               onAct={(actionId, text) => {
-                act.mutate(text === undefined ? { actionId } : { actionId, text });
+                // Done takes the signal off the list with `signal.markDone`, as on a row.
+                if (actionId === DONE_ACTION_ID) {
+                  setActedHere(true);
+                  moves.run(planSignalMove([signal], "done"));
+                } else act.mutate(text === undefined ? { actionId } : { actionId, text });
               }}
             />
           )
         ) : (
           <div className="ad-answers">
-            <div className="ad-outcome" role="status">
-              <span className={outcome.byUser ? "ad-mark ad-mark--you" : "ad-mark"}>
-                <CheckIcon size={14} />
-              </span>
-              <p className="ad-outcome-desc">
-                {resolvedElsewhere ?? (
-                  <>
-                    {outcome.label}: <b>{outcome.outcome}</b>, {outcome.by}
-                  </>
-                )}
-              </p>
-            </div>
+            <section className="ad-outcome" role="status">
+              <div className="ad-outcome-top">
+                <span className={outcome.byUser ? "ad-mark" : "ad-mark ad-mark--quiet"}>
+                  {outcome.byUser ? (
+                    <Mark state="done" size={16} />
+                  ) : signal.resolution?.kind === "withdrawn" ? (
+                    <Mark state="idle" size={16} />
+                  ) : (
+                    <SourceMark
+                      pluginId={parseSignalPluginId(signal.kind)}
+                      plugins={plugins}
+                      size={16}
+                    />
+                  )}
+                </span>
+                <span className="b-work-text">
+                  <span className="b-work-label">{outcome.label}</span>
+                  <b>{outcome.outcome}</b>
+                  <span>{outcomeMoment}</span>
+                </span>
+              </div>
+              {resolvedElsewhere !== null && <p className="ad-outcome-desc">{resolvedElsewhere}</p>}
+            </section>
             {resolvedElsewhere !== null && keptDraft !== "" && (
               <div className="ad-compose">
                 <textarea
@@ -316,11 +354,24 @@ function SignalDetail({
             )}
           </div>
         )}
+        <SignalPaneMoves signal={signal} />
       </article>
-      {signal.status === "open" && (
+      {signal.status === "open" ? (
         <PaneKeys
           suggestedKey={suggested === undefined ? null : describeAnswerKey(suggested, "↩")}
           replyKey={reply === undefined ? null : describeAnswerKey(reply, "R")}
+          canMarkDone={hasDoneAction(signal)}
+          canSnooze
+          later={moves.view === "later"}
+          canOpen={sourceUrl !== null}
+        />
+      ) : (
+        <PaneKeys
+          suggestedKey={null}
+          replyKey={null}
+          canMarkDone={false}
+          canSnooze={false}
+          later={false}
           canOpen={sourceUrl !== null}
         />
       )}
@@ -328,14 +379,25 @@ function SignalDetail({
   );
 }
 
-/** Renders the keys at the foot of the pane, each with what it does for this signal. */
+/**
+ * Renders the keys at the foot of the pane, each with what it does for this
+ * signal. `later` is set when the pane shows a signal on Later, which `U`
+ * puts back on To do. A resolved signal takes no answer and no move, so its
+ * foot keeps only J K, O and Esc.
+ */
 function PaneKeys({
   suggestedKey,
   replyKey,
+  canMarkDone,
+  canSnooze,
+  later,
   canOpen,
 }: {
   readonly suggestedKey: string | null;
   readonly replyKey: string | null;
+  readonly canMarkDone: boolean;
+  readonly canSnooze: boolean;
+  readonly later: boolean;
   readonly canOpen: boolean;
 }): JSX.Element {
   return (
@@ -352,6 +414,21 @@ function PaneKeys({
       {replyKey !== null && (
         <span>
           <kbd>R</kbd> {replyKey}
+        </span>
+      )}
+      {canMarkDone && (
+        <span>
+          <kbd>E</kbd> done
+        </span>
+      )}
+      {canSnooze && (
+        <span>
+          <kbd>H</kbd> snooze
+        </span>
+      )}
+      {later && (
+        <span>
+          <kbd>U</kbd> unsnooze
         </span>
       )}
       {canOpen && (

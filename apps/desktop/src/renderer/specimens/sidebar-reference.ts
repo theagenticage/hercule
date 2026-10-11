@@ -14,7 +14,9 @@
  * 1. removes the Assistants section: the sidebar fixture has no assistant,
  *    so the app draws none. The Threads | Hercule switch stays;
  * 2. removes "Ship release v2.15" from Waiting on you and sets the count to
- *    2: it is a Run, and v1 lists threads only;
+ *    2: it is a run's session, and the sidebar fixture holds threads only.
+ *    The app lists such a session under "From runs", which this comparison
+ *    does not cover;
  * 3. sets the counts line to the fixture's counts, without "paused", which
  *    the app does not count;
  * 4. sets each waiting row's name to the thread's full title: a thread has

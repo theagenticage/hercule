@@ -272,6 +272,44 @@ describe("createCoreNotification with unlessRaised", () => {
   });
 });
 
+describe("createCoreNotification with unlessOpenAbout", () => {
+  const SIGNAL_KIND: NotificationSubject = { kind: "signalKind", id: "acme/asked" };
+
+  /** A decision about a plugin and one of its signal kinds. */
+  const FAILED: CoreNotification = {
+    kind: "core.signal-build-failed",
+    title: 'Acme could not build a "Question for you" signal',
+    subject: [{ kind: "plugin", id: "acme" }, SIGNAL_KIND],
+    eventId: 17,
+    actions: [{ id: "dismiss", label: "Dismiss", operation: null }],
+  };
+
+  it("creates nothing while an open decision of the same kind lists the subject, and creates it again once that decision is resolved", async () => {
+    const counts = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
+        const create = (notification: CoreNotification) =>
+          notifier.createCoreNotification(notification, { unlessOpenAbout: [SIGNAL_KIND] });
+        const count = Effect.map(actAs(USER, notifications.query({})), (page) => page.items.length);
+
+        yield* create(FAILED);
+        const afterFirst = yield* count;
+        yield* create(FAILED);
+        const whileOpen = yield* count;
+        yield* create({ ...FAILED, kind: "core.run-failed" });
+        const otherKind = yield* count;
+        yield* notifier.withdrawDecisionsAbout([SIGNAL_KIND], "the build works again");
+        yield* create(FAILED);
+        const afterResolved = yield* count;
+        return { afterFirst, whileOpen, otherKind, afterResolved };
+      }),
+    );
+
+    expect(counts).toEqual({ afterFirst: 1, whileOpen: 1, otherKind: 2, afterResolved: 3 });
+  });
+});
+
 describe("withdrawDecisionsAbout", () => {
   const TRIGGER: NotificationSubject = {
     kind: "trigger",

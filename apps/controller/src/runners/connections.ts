@@ -48,6 +48,10 @@ import {
   RETIRED_CLOSE_REASON,
   supportsWorkspaceLifecycle,
   requiresWorkspaceLifecycle,
+  TEXT_GENERATION_CAPABILITY,
+  WORKSPACE_LIFECYCLE_CAPABILITY,
+  type TextGenerationReport,
+  type TextGenerationRequest,
   type WorkspaceInspect,
   type WorkspaceInspection,
   type InstallRequest,
@@ -100,7 +104,8 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
  * carries an input. Those go through `sendFrameCarryingInput`, whose answer
  * is always a `SessionInputResult`.
  */
-export type Request = ProbeRequest | InstallRequest | LoginStart | LoginCode | WorkspaceInspect;
+export type Request =
+  ProbeRequest | InstallRequest | LoginStart | LoginCode | WorkspaceInspect | TextGenerationRequest;
 
 /**
  * What came of sending a frame the runner answers:
@@ -113,6 +118,23 @@ export type SendOutcome<A> =
   { readonly _tag: "notSent" } | { readonly _tag: "sent"; readonly answer: Option.Option<A> };
 
 const NOT_SENT: SendOutcome<never> = { _tag: "notSent" };
+
+/**
+ * Returns the capability a runner must have negotiated before it is sent the
+ * request, or undefined when every runner can read it. A runner on an older
+ * build closes the socket on a frame it cannot read, so such a request is not
+ * sent to it at all, and the caller sees the runner as not answering.
+ */
+const readRequiredCapability = (request: Request): string | undefined => {
+  switch (request._tag) {
+    case "workspaceInspect":
+      return WORKSPACE_LIFECYCLE_CAPABILITY;
+    case "textGenerationRequest":
+      return TEXT_GENERATION_CAPABILITY;
+    default:
+      return undefined;
+  }
+};
 
 /**
  * A frame a runner sent about the sessions it hosts, and which runner sent it.
@@ -175,7 +197,8 @@ export type Answer =
   | LoginFailed
   | LoginResult
   | SessionInputResult
-  | WorkspaceInspection;
+  | WorkspaceInspection
+  | TextGenerationReport;
 
 /**
  * The key callers of `refreshedFacts` wait under. The facts report has no
@@ -318,13 +341,13 @@ const make = Effect.gen(function* () {
     key: string,
     send: (held: Reachable) => Effect.Effect<void>,
     deadline: Duration.Duration,
-    requiresWorkspaceLifecycle = false,
+    requiredCapability?: string,
   ): Effect.Effect<SendOutcome<Reported>> =>
     Effect.suspend(() => {
       const held = reachable.get(id);
       if (
         held === undefined ||
-        (requiresWorkspaceLifecycle && !supportsWorkspaceLifecycle(held.capabilities))
+        (requiredCapability !== undefined && !held.capabilities.includes(requiredCapability))
       )
         return Effect.succeed(NOT_SENT);
       // Registered and removed as a resource: the removal runs however the
@@ -369,11 +392,10 @@ const make = Effect.gen(function* () {
     key: string,
     send: (held: Reachable) => Effect.Effect<void>,
     deadline: Duration.Duration,
-    requiresWorkspaceLifecycle = false,
+    requiredCapability?: string,
   ): Effect.Effect<Option.Option<Reported>> =>
-    Effect.map(
-      sendAndAwaitReport(id, key, send, deadline, requiresWorkspaceLifecycle),
-      (outcome) => (outcome._tag === "sent" ? outcome.answer : Option.none()),
+    Effect.map(sendAndAwaitReport(id, key, send, deadline, requiredCapability), (outcome) =>
+      outcome._tag === "sent" ? outcome.answer : Option.none(),
     );
 
   /**
@@ -423,6 +445,41 @@ const make = Effect.gen(function* () {
       }
     }),
   );
+
+  /**
+   * Sends a request to the runner and waits for its answer, up to `deadline`.
+   * Returns `notSent`, sending nothing, when the runner has no connection or
+   * has not negotiated the capability the request needs. Otherwise returns
+   * `sent`, with the answer, or with `none` when the connection ended or no
+   * answer came in time. With `Duration.infinity` the wait ends only on the
+   * answer or on the end of the connection, which ends every wait on it.
+   */
+  const sendRequest = (
+    id: string,
+    request: Request,
+    deadline: Duration.Duration,
+  ): Effect.Effect<SendOutcome<Answer>> =>
+    Effect.map(
+      sendAndAwaitReport(
+        id,
+        request.requestId,
+        (held) => held.ask(request),
+        deadline,
+        readRequiredCapability(request),
+      ),
+      (outcome): SendOutcome<Answer> =>
+        outcome._tag === "notSent"
+          ? outcome
+          : {
+              _tag: "sent",
+              // The facts report uses its own key, never a request id, so only
+              // an answer can arrive under this key.
+              answer: Option.filter(
+                outcome.answer,
+                (reported): reported is Answer => reported._tag !== "factsReported",
+              ),
+            },
+    );
 
   return {
     /** Returns the id of the runner this credential belongs to. Only the hash is stored, and the lookup needs only that. */
@@ -534,25 +591,20 @@ const make = Effect.gen(function* () {
      * `deadline`. Returns `none` when the runner has no connection, the
      * connection ended, or no answer came in time. With
      * `Duration.infinity` the wait ends only on the answer or on the end of
-     * the connection, which ends every wait on it.
+     * the connection, which ends every wait on it. A caller that must tell a
+     * request that was never sent from one that went unanswered uses
+     * `sendRequest`.
      */
     asked: (
       id: string,
       request: Request,
       deadline: Duration.Duration,
     ): Effect.Effect<Option.Option<Answer>> =>
-      Effect.map(
-        askAndAwaitReport(
-          id,
-          request.requestId,
-          (held) => held.ask(request),
-          deadline,
-          request._tag === "workspaceInspect",
-        ),
-        // The facts report uses its own key, never a request id, so only an
-        // answer can arrive under this key.
-        Option.filter((reported): reported is Answer => reported._tag !== "factsReported"),
+      Effect.map(sendRequest(id, request, deadline), (outcome) =>
+        outcome._tag === "sent" ? outcome.answer : Option.none(),
       ),
+
+    sendRequest,
 
     /**
      * Sends a frame that carries an input and waits for the runner's answer

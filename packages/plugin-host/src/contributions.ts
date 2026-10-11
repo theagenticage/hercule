@@ -2,6 +2,7 @@ import { type Effect, Schema } from "effect";
 import { AccessMode } from "@hercule/protocol";
 import type { ConnectionUnavailable } from "./connections";
 import { SchemaValue } from "./manifest";
+import { TaskPriority } from "./limits";
 import type { KeyValueStore, PluginError } from "./plugin";
 
 const Support = Schema.Literals(["native", "unsupported"]);
@@ -74,6 +75,14 @@ export const ProviderDefinition = Schema.Struct({
   configSchema: SchemaValue,
   defaultConfig: Schema.Json,
   declared: DeclaredCapabilities,
+  /**
+   * The model slug this provider suggests for text generation: a small, cheap
+   * model from its catalog. The controller's `Automatic` text generation
+   * model picks the first provider, in its own order, whose suggested model
+   * a logged-in instance offers (spec 06 section 14). Absent when the
+   * provider suggests none.
+   */
+  suggestedTextGenerationModel: Schema.optionalKey(Schema.NonEmptyString),
 });
 
 export type ProviderDefinition = Schema.Schema.Type<typeof ProviderDefinition>;
@@ -83,10 +92,16 @@ export type ProviderDefinition = Schema.Schema.Type<typeof ProviderDefinition>;
  * event's payload, and one line describing what the event means. The host
  * derives JSON Schema from the schema for the catalog, and keeps the schema
  * itself to validate emitted payloads.
+ *
+ * `availableToTriage` is the default of the kind's Intake switch: whether
+ * triage may read events of this kind. It is required, so the plugin author
+ * decides it for every kind. A kind that matters only because it ends a
+ * signal, such as a removed review request, is usually not available.
  */
 export interface EventKindDeclaration {
   readonly description: string;
   readonly schema: Schema.Top;
+  readonly availableToTriage: boolean;
 }
 
 /**
@@ -133,6 +148,15 @@ export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
 export interface IngestConnection {
   readonly id: string;
   readonly config: unknown;
+  /**
+   * The user's account on the external system, as the Connection type's
+   * `validate` returned it at sign-in. A source compares it with what an
+   * event names to work out facts such as "this review was requested from
+   * you".
+   */
+  readonly accountId: string;
+  /** The user's account name on the external system, such as a GitHub login. */
+  readonly displayName: string;
 }
 
 /**
@@ -153,6 +177,11 @@ export interface IngestConnection {
  *   plugin's id.
  * - `raw` is the external system's own body, as a JSON object. It is stored,
  *   and no expression can read it.
+ * - `title` is one line saying what happened, built from the payload:
+ *   "Marta requested your review on #1293". Intake shows it, and search
+ *   finds the event by it.
+ * - `author` is who caused the event on the external system, such as a
+ *   GitHub login, or null when nobody did.
  *
  * The host refuses a `payload` or a `raw` larger than `MAX_EMITTED_FIELD_BYTES`,
  * each measured on its own as UTF-8 JSON.
@@ -166,6 +195,8 @@ export interface EmittedEvent {
   readonly url?: string;
   readonly system?: string;
   readonly raw?: Schema.JsonObject;
+  readonly title: string;
+  readonly author: string | null;
 }
 
 /**
@@ -224,6 +255,22 @@ export interface IngestContext {
   readonly credentials: () => Effect.Effect<Record<string, string>, ConnectionUnavailable>;
   /** Present only when the manifest requested the `resources` capability. */
   readonly resources?: ConnectionResources;
+  /**
+   * Returns the open signals raised from this Connection's events, read at
+   * the moment of the call. A source uses it to watch the threads that have
+   * one, so it sees the event that ends the signal even when the thread is
+   * outside what its feeds read.
+   */
+  readonly openSignals: () => Effect.Effect<ReadonlyArray<OpenSignal>>;
+}
+
+/** One open signal, as an ingest handle reads it. */
+export interface OpenSignal {
+  /** The qualified signal kind, such as `github/review-requested`. */
+  readonly kind: string;
+  /** The thread the signal is about, as the kind's `threadRef` worked it out. */
+  readonly threadRef: string;
+  readonly raisedAt: string;
 }
 
 /** What one poll tells the host about the next one. */
@@ -291,6 +338,12 @@ export interface EventSourceContribution {
    */
   readonly feeds: Record<string, FeedDeclaration>;
   /**
+   * The kinds of Signal this source's events can raise. None when left out.
+   * The host refuses the source when two kinds share a word, or when a kind
+   * reads an event kind the source does not declare.
+   */
+  readonly signalKinds?: ReadonlyArray<SignalKindDeclaration>;
+  /**
    * Starts ingesting for one Connection. The host opens a handle for every
    * Connection of the source's type that is `connected` or `error` while the
    * plugin is active. Its first poll of each feed records where the feed
@@ -302,6 +355,157 @@ export interface EventSourceContribution {
     context: IngestContext,
   ) => Effect.Effect<IngestHandle, AuthError | PluginError>;
 }
+
+/**
+ * One kind of Signal an event source can raise, such as a review request.
+ * Everything but `build` is data that the core evaluates: the plugin never
+ * writes a Signal itself. Each expression is CEL over `event`, the stored
+ * event without its `raw` body. Spec 10 §9.2 owns how the core raises one.
+ *
+ * - `word` is the unqualified kind. The host qualifies it with the plugin's
+ *   id, so `review-requested` becomes `github/review-requested`.
+ * - `label` and `description` are shown to the user: the label on Intake,
+ *   the description in Intake's settings.
+ * - `from` lists the event kinds the rule reads. The rule never runs on
+ *   another kind.
+ * - `rule` returns `"yes"`, `"no"` or `"undecided"`: whether the event is a
+ *   signal of this kind by itself, is not, or needs the Screener.
+ * - `guidance` is what the Screener reads when the rule returns `undecided`.
+ * - `threadRef` returns the thread the signal is about, as a string. One
+ *   thread has at most one open signal of each kind: a newer one replaces it.
+ * - `namesYou` says whether the kind names the user directly, not a team. A
+ *   kind that names the user is raised even when a run already receives the
+ *   event.
+ * - `priority` is the default; `build` may change it.
+ * - `matchFields` are what an Ignore Rule may match on. Each `path` returns
+ *   the field's value.
+ * - `ends` are the events that end an open signal of this kind.
+ * - `build` turns the event into the signal's content. It is the one piece
+ *   of plugin code, and it may read the external system.
+ */
+export interface SignalKindDeclaration {
+  readonly word: string;
+  readonly label: string;
+  readonly description: string;
+  readonly from: ReadonlyArray<string>;
+  readonly rule: string;
+  readonly guidance: string;
+  readonly threadRef: string;
+  readonly namesYou: boolean;
+  readonly priority: TaskPriority;
+  readonly matchFields: ReadonlyArray<SignalMatchField>;
+  readonly ends: ReadonlyArray<SignalEndDeclaration>;
+  readonly build: (
+    event: StoredEvent,
+    context: SignalBuildContext,
+  ) => Effect.Effect<SignalDraft, PluginError>;
+}
+
+/** One field an Ignore Rule may match on, such as the repo. `path` is CEL over `event`. */
+export interface SignalMatchField {
+  readonly name: string;
+  readonly label: string;
+  readonly path: string;
+}
+
+/**
+ * One event that ends an open signal of a kind. The core checks every event
+ * from the signal's Connection against the ends of the open signals on the
+ * same thread.
+ *
+ * - `eventKind` is the kind of the ending event, and `condition` is CEL over
+ *   `event` that must return true as well, when it is given.
+ * - `resolution` is `decided` when the event is the user's own answer, such
+ *   as their review, and `withdrawn` when no move is asked of them any more,
+ *   such as a merged pull request.
+ * - `outcome` is CEL that returns the line the signal keeps once it ended:
+ *   "Reviewed on GitHub", "Merged by marta".
+ * - `actionId` is the answer this end stands for, when there is one: an
+ *   approval on GitHub stands for the Approve answer.
+ */
+export interface SignalEndDeclaration {
+  readonly eventKind: string;
+  readonly condition?: string;
+  readonly resolution: "decided" | "withdrawn";
+  readonly outcome: string;
+  readonly actionId?: string;
+}
+
+/**
+ * An event as the log stores it, as `build` reads it. `id` is its position
+ * in the log. `title` and `author` are null for an event stored before the
+ * source set them.
+ */
+export interface StoredEvent {
+  readonly id: number;
+  readonly kind: string;
+  readonly occurredAt: string;
+  readonly payload: Readonly<Record<string, unknown>>;
+  readonly refs: ReadonlyArray<string>;
+  readonly url: string | null;
+  readonly title: string | null;
+  readonly author: string | null;
+}
+
+/** What the host passes to `build`: the Connection the event arrived through, and its credentials. */
+export interface SignalBuildContext {
+  readonly connection: IngestConnection;
+  /** Returns the Connection's credentials, read at the moment of the call, as `IngestContext.credentials` does. */
+  readonly credentials: () => Effect.Effect<Record<string, string>, ConnectionUnavailable>;
+}
+
+/**
+ * One answer `build` lays out. It binds one of the plugin's own workflow
+ * actions, named by its unqualified id (`pr.review`), so a plugin can bind no
+ * other plugin's action. The core qualifies the id and binds the signal's own
+ * Connection, so the plugin cannot pick another.
+ *
+ * - `input` is the action's input, without its Connection.
+ * - `primary` marks the suggested answer. At most one answer is primary.
+ * - `field` makes the answer a typed reply: `name` is the top-level text
+ *   field of `input` that the user's text fills in, and `placeholder` is the
+ *   grey text of the empty box.
+ */
+export const SignalDraftAction = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  description: Schema.optionalKey(Schema.String),
+  action: Schema.String,
+  input: Schema.Record(Schema.String, Schema.Unknown),
+  primary: Schema.optionalKey(Schema.Boolean),
+  field: Schema.optionalKey(Schema.Struct({ name: Schema.String, placeholder: Schema.String })),
+});
+
+export type SignalDraftAction = Schema.Schema.Type<typeof SignalDraftAction>;
+
+/**
+ * The content `build` returns for one signal. The core decodes it with this
+ * schema, which checks only its shape, and then checks the whole signal
+ * against the contract. When either check fails, the core writes the signal
+ * from the event instead, as it does when `build` fails.
+ *
+ * - `asker` is who waits on the user ("marta"), and `place` is where the
+ *   question is asked ("acme/webshop#1296").
+ * - `blocks` are the signal's body. Their types and limits are the
+ *   contract's `Block`. Here a block needs only its `type`, and its other
+ *   fields are kept as they are, for the contract's check to read.
+ * - `actions` are the plugin's own answers. The core adds Done and the
+ *   workflows that can take the signal, so `build` never declares them.
+ */
+export const SignalDraft = Schema.Struct({
+  title: Schema.String,
+  asker: Schema.optionalKey(Schema.String),
+  place: Schema.optionalKey(Schema.String),
+  priority: Schema.optionalKey(TaskPriority),
+  blocks: Schema.Array(
+    Schema.StructWithRest(Schema.Struct({ type: Schema.String }), [
+      Schema.Record(Schema.String, Schema.Unknown),
+    ]),
+  ),
+  actions: Schema.Array(SignalDraftAction),
+});
+
+export type SignalDraft = Schema.Schema.Type<typeof SignalDraft>;
 
 /**
  * The id and display name of a workflow action. Both are stored in a column

@@ -16,7 +16,9 @@
  * - settings-profiles.tsx, which opens Settings > Permission profiles, the
  *   list or one profile's page, and whose main pane `pnpm compare:bureau`
  *   compares with the book's;
- * - intake.tsx, which opens Intake, with or without a signal's pane.
+ * - intake.tsx, which opens Intake, with or without a signal's pane;
+ * - workflows.tsx, which opens Workflows, and whose workflow list
+ *   `pnpm compare:bureau` compares with the book's table.
  *
  * The page builds a router whose routes have the app's route ids, so the
  * sidebar and the screens find the controller in their route context, and
@@ -75,6 +77,7 @@ import {
   createClient,
   type FetchLike,
   type HerculeClient,
+  type Live,
   type ThreadPicks,
 } from "@hercule/client-core";
 import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
@@ -86,9 +89,12 @@ import {
   conversationMessagesQuery,
   currentConversationSessionQuery,
   eventQuery,
+  liveAgentSessionsQuery,
+  liveRunsQuery,
   localRunnerQuery,
   memoryDocumentQuery,
   memoryIndexQuery,
+  newestRunsQuery,
   pluginsQuery,
   profilesQuery,
   projectsQuery,
@@ -101,11 +107,16 @@ import {
   sessionQuery,
   settingsQuery,
   signalQuery,
+  signalsClearedTodayQuery,
+  signalsDoneQuery,
+  signalsLaterQuery,
   signalsToDoQuery,
+  snoozeTimerQuery,
   startTasksQuery,
   subagentsQuery,
   threadsQuery,
   transcriptQuery,
+  triggersQuery,
   userQuery,
   workflowsQuery,
   workspacesQuery,
@@ -126,8 +137,10 @@ import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/se
 import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/index";
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
 import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
+import { Route as WorkflowsRoute } from "../routes/_connected/_shell/workflows/route";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
+import type { WorkflowsRecords } from "./workflows-fixture";
 
 /**
  * An assistant, the current session of its main conversation, or `null`
@@ -160,8 +173,18 @@ export interface SidebarRecords {
   readonly connections?: ReadonlyArray<Connection>;
   /** The signals on To do, which Intake's row and the Hercule segment count. None when left out. */
   readonly signals?: ReadonlyArray<Signal>;
+  /** The signals on Later, soonest snooze first. None when left out. */
+  readonly later?: ReadonlyArray<Signal>;
+  /** The signals on Done, newest first, which Intake's foot counts. None when left out. */
+  readonly done?: ReadonlyArray<Signal>;
   /** The installed plugins, which name each signal's source. None when left out. */
   readonly plugins?: ReadonlyArray<PluginDetail>;
+  /**
+   * The live sessions that are not threads. Those of a run with an open
+   * Request show under "From runs" in Waiting on you, and put their
+   * workflow in Needs you. None when left out.
+   */
+  readonly agentSessions?: ReadonlyArray<Session>;
 }
 
 /** What the thread screen reads of the one thread it shows, as the thread route's loader reads it. */
@@ -230,14 +253,23 @@ export interface AppearanceSettingsRecords {
 }
 
 /**
- * What Intake reads besides the shell's lists, which hold To do and the
- * plugins: the selected signal and the event it was raised from.
+ * What Intake reads besides the shell's lists, which hold To do, Later, Done
+ * and the plugins: the selected signal and the event it was raised from. It
+ * also says which view Intake opens on, and how the page answers a move.
  */
 export interface IntakeRecords {
   /** The selected signal, as the controller reads it, or `null` when none is selected. */
   readonly signal: Signal | null;
   /** The event the selected signal was raised from, or `null` for none. */
   readonly event: Event | null;
+  /** The view Intake opens on. To do when left out. */
+  readonly view?: "later" | "done";
+  /**
+   * Answers the requests that move signals, such as `signal.markDone`, for a
+   * scene that makes a move. Every other request is refused, as on every
+   * page. When left out, moves are refused too.
+   */
+  readonly answerMove?: FetchLike;
 }
 
 /** The screens a shell specimen opens beside the sidebar. It opens at most one of them. */
@@ -248,6 +280,7 @@ interface OpenScreens {
   readonly permissionProfilesSettings?: PermissionProfilesSettingsRecords;
   readonly appearanceSettings?: AppearanceSettingsRecords;
   readonly intake?: IntakeRecords;
+  readonly workflows?: WorkflowsRecords;
 }
 
 /** An address that never answers. The client sends nothing to it. */
@@ -266,12 +299,29 @@ const refuseRequest: FetchLike = (url) =>
     ),
   );
 
+/** Matches the address of a request that moves signals: Done, Snooze, Unsnooze or Not urgent. */
+const MOVE_PATH = /\/api\/v1\/signals\/(mark-done|snooze|unsnooze|lower-priority)$/;
+
 /** Returns an error for a bridge call the page made, naming `call`. */
 const buildBridgeCallError = (call: string): Error =>
   new Error(
     `The shell specimen refuses ${call}, because the page reads everything from the ` +
       "specimen's query cache. Add the record the page needs there.",
   );
+
+/**
+ * The live connection the page passes to the app. It never connects: it
+ * accepts every subscription and never pushes, so the reads stay as the
+ * fixture seeded them. The Workflows page subscribes to its topics as it
+ * opens, which is why the page needs one at all.
+ */
+const SILENT_LIVE: Live = {
+  start: () => undefined,
+  stop: () => Promise.resolve(),
+  subscribe: () => () => undefined,
+  onStatus: () => () => undefined,
+  serverVersion: null,
+};
 
 /**
  * The bridge the page passes to the app. It refuses every call, for the same
@@ -359,6 +409,7 @@ const seedQueryCache = (
     permissionProfilesSettings,
     appearanceSettings,
     intake,
+    workflows,
   }: OpenScreens,
 ): void => {
   queryClient.setQueryData(threadsQuery(client).queryKey, records.threads);
@@ -370,7 +421,25 @@ const seedQueryCache = (
   queryClient.setQueryData(userQuery(client).queryKey, records.user);
   queryClient.setQueryData(connectionsQuery(client).queryKey, records.connections ?? []);
   queryClient.setQueryData(signalsToDoQuery(client).queryKey, records.signals ?? []);
+  // Each paged list fits on its one page.
+  queryClient.setQueryData(signalsLaterQuery(client).queryKey, {
+    pages: [{ items: records.later ?? [] }],
+    pageParams: [undefined],
+  });
+  queryClient.setQueryData(signalsDoneQuery(client).queryKey, {
+    pages: [{ items: records.done ?? [] }],
+    pageParams: [undefined],
+  });
+  queryClient.setQueryData(signalsClearedTodayQuery(client).queryKey, {
+    pages: [{ items: records.done ?? [] }],
+    pageParams: [undefined],
+  });
+  queryClient.setQueryData(
+    snoozeTimerQuery(client).queryKey,
+    records.later?.[0]?.snooze?.until ?? null,
+  );
   queryClient.setQueryData(pluginsQuery(client).queryKey, records.plugins ?? []);
+  queryClient.setQueryData(liveAgentSessionsQuery(client).queryKey, records.agentSessions ?? []);
   queryClient.setQueryData(
     assistantsQuery(client).queryKey,
     records.assistants.map(({ assistant }) => assistant),
@@ -423,6 +492,18 @@ const seedQueryCache = (
   }
   if (intake?.event != null) {
     queryClient.setQueryData(eventQuery(client, intake.event.id).queryKey, intake.event);
+  }
+  if (workflows !== undefined) {
+    queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
+    queryClient.setQueryData(triggersQuery(client).queryKey, workflows.triggers);
+    queryClient.setQueryData(newestRunsQuery(client).queryKey, workflows.newestRuns);
+    queryClient.setQueryData(liveRunsQuery(client, "running").queryKey, workflows.runningRuns);
+    queryClient.setQueryData(liveRunsQuery(client, "pending").queryKey, []);
+    // The book's times are UTC, and so is the specimen's clock.
+    queryClient.setQueryData(settingsQuery(client).queryKey, {
+      controller: {},
+      user: { timezone: "UTC" },
+    });
   }
   if (thread !== undefined) {
     const sessionId = thread.session.id;
@@ -480,7 +561,7 @@ function AssistantRoute(): JSX.Element {
 /**
  * Builds the router: the root, the `_connected` and `_shell` layout routes,
  * the three screens the sidebar links to, `/`, `/threads/$sessionId` and
- * `/assistants/$assistantId`, Intake, and Settings with its Appearance,
+ * `/assistants/$assistantId`, Intake, Workflows, and Settings with its Appearance,
  * Assistants and Permission profiles sections, starting at `path`. The ids are the app's, because the sidebar and the
  * screens read their context, and the sidebar its selected thread or draft,
  * by route id.
@@ -497,7 +578,8 @@ function AssistantRoute(): JSX.Element {
  * attached without its loader: the loader reads the permission profiles and
  * the settings again each time the section opens, and the query cache
  * already holds both. The Permission profiles routes are attached the same
- * way, and so is Intake, whose loader reads the selected signal.
+ * way, and so are Intake, whose loader reads the selected signal, and
+ * Workflows, whose loader reads the lists the cache already holds.
  */
 const buildRouter = (
   client: HerculeClient,
@@ -509,14 +591,14 @@ const buildRouter = (
   const connectedRoute = createRoute({
     getParentRoute: () => rootRoute,
     id: "_connected",
-    // `live` is null: the sidebar never touches the live connection.
+    // The live connection never connects, so nothing invalidates a seeded read.
     beforeLoad: () => ({
       bridge: REFUSING_BRIDGE,
       appearance: createAppearanceStore(REFUSING_BRIDGE),
       controller: {
         url: CONTROLLER_URL,
         client,
-        live: null,
+        live: SILENT_LIVE,
         pendingSubmissions,
       },
     }),
@@ -564,6 +646,12 @@ const buildRouter = (
     getParentRoute: () => shellRoute,
     loader: undefined,
   } as never);
+  const workflowsRoute = WorkflowsRoute.update({
+    id: "/workflows",
+    path: "/workflows",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
   const routeTree = rootRoute.addChildren([
     connectedRoute.addChildren([
       shellRoute.addChildren([
@@ -582,6 +670,7 @@ const buildRouter = (
           component: AssistantRoute,
         }),
         intakeRoute,
+        workflowsRoute,
         settingsRoute.addChildren([
           appearanceSettingsRoute,
           assistantsSettingsRoute,
@@ -613,7 +702,7 @@ const waitForElement = async (selector: string): Promise<void> => {
  * Checks that the page drew the sidebar's thread rows, the transcript when
  * `screens` opens a thread, an assistant's settings when it opens Settings >
  * Assistants, the theme cards when it opens Settings > Appearance, the
- * list's rows or its empty line when it opens Intake, and the start cards with the focus in the message field when
+ * list's rows or its empty line when it opens Intake or Workflows, and the start cards with the focus in the message field when
  * it opens a draft, and started no read. Fails with the keys of the
  * reads it started, or with what it did not draw, otherwise.
  */
@@ -657,6 +746,14 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens): void 
       "Intake drew no row and no empty line. Check the page's console for the error.",
     );
   }
+  if (
+    screens.workflows !== undefined &&
+    document.querySelector(".table-row, .workflow-list-empty") === null
+  ) {
+    throw new Error(
+      "Workflows drew no row and no empty line. Check the page's console for the error.",
+    );
+  }
   if (screens.draft !== undefined) {
     if (document.querySelector(".start") === null) {
       throw new Error(
@@ -691,7 +788,14 @@ async function mountShellSpecimen(
   unsentThreadIds: readonly string[] = [],
 ): Promise<void> {
   applySheetTheme();
-  const client = createClient({ baseUrl: CONTROLLER_URL, fetch: refuseRequest });
+  const answerMove = screens.intake?.answerMove;
+  const client = createClient({
+    baseUrl: CONTROLLER_URL,
+    fetch:
+      answerMove === undefined
+        ? refuseRequest
+        : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init)),
+  });
   const queryClient = createQueryClient();
   seedQueryCache(queryClient, client, records, screens);
   const pendingSubmissions = createPendingSubmissions();
@@ -721,6 +825,9 @@ async function mountShellSpecimen(
   if (screens.draft !== undefined) await waitForElement(".start");
   // The list draws its rows once it has measured its height, after the first render.
   if (screens.intake !== undefined) await waitForElement(".ask-row, .asks-empty");
+  if (screens.workflows !== undefined) {
+    await waitForElement(".table-row, .workflow-list-empty");
+  }
   assertShellDrawn(queryClient, screens);
 }
 
@@ -827,9 +934,9 @@ export async function mountAppearanceSettingsSpecimen(
 
 /**
  * Applies the URL's theme and draws the shell into `#root` from `records`,
- * with Intake open: the main pane shows the app's real Intake screen, with
- * the signals on To do from `records`, and the pane of `intake.signal` when
- * it is not `null`. Returns once the list's rows, or its empty line, are in
+ * with Intake open: the main pane shows the app's real Intake screen, on
+ * `intake.view` or To do, with the signals from `records`, and the pane of
+ * `intake.signal` when it is not `null`. Returns once the list's rows, or its empty line, are in
  * the document. Fails when the page has no `#root`, draws no sidebar row, no
  * list row and no empty line, or tries to read a record the cache does not
  * hold.
@@ -838,6 +945,24 @@ export async function mountIntakeSpecimen(
   records: SidebarRecords,
   intake: IntakeRecords,
 ): Promise<void> {
-  const path = intake.signal === null ? "/intake" : `/intake?signal=${intake.signal.id}`;
+  const search = new URLSearchParams();
+  if (intake.view !== undefined) search.set("view", intake.view);
+  if (intake.signal !== null) search.set("signal", intake.signal.id);
+  const path = search.size === 0 ? "/intake" : `/intake?${search.toString()}`;
   await mountShellSpecimen(records, path, { intake });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Workflows open: the main pane shows the app's real workflow list,
+ * built from `workflows`. Returns once the list's rows, or its empty line,
+ * are in the document. Fails when the page has no `#root`, draws no sidebar
+ * row, no list row and no empty line, or tries to read a record the cache
+ * does not hold.
+ */
+export async function mountWorkflowsSpecimen(
+  records: SidebarRecords,
+  workflows: WorkflowsRecords,
+): Promise<void> {
+  await mountShellSpecimen(records, "/workflows", { workflows });
 }

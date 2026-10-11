@@ -54,13 +54,20 @@ const SHOP: Project = { ...WEBSHOP!, id: "01a06d02-7000-7000-8000-0000000000aa",
 /** The remote of the folder the user picks on the project step. */
 const REMOTE = "git@github.com:rogier/shop.git";
 
-/** Returns the controller's record, with `localRunnerId` as the runner it started. */
-const buildControllerInfo = (localRunnerId: string | null) => ({
+/**
+ * Returns the controller's record, with `localRunnerId` as the runner it
+ * started and `model` as the model that text generation runs on.
+ */
+const buildControllerInfo = (
+  localRunnerId: string | null,
+  model: { instanceId: string; model: string } | null = null,
+) => ({
   id: "01a06d02-7800-7000-8000-000000000001",
   publicKey: "controller-key",
   version: "0.4.2",
   defaultRunnerId: null,
   localRunnerId,
+  textGeneration: { model, lastFailure: null },
 });
 
 /** The settings of a user whose account step marked the web app's onboarding done. */
@@ -720,6 +727,43 @@ describe("the first run's steps", () => {
       expect(readCalls(calls, "PATCH", "/api/v1/settings")).toHaveLength(0);
     });
 
+    it("names the model that makes text generations, read again when All set opens", async () => {
+      // The first run reads the record before the user logs in, when no model can be chosen yet.
+      let reads = 0;
+      const sonnet = { instanceId: FIXTURE_INSTANCE.id, model: "claude-sonnet-5" };
+      await openSignedIn({
+        firstRun: { putOff: [] },
+        handlers: {
+          "GET /api/v1/controller": () => {
+            reads += 1;
+            return { body: buildControllerInfo(MOSS!.id, reads === 1 ? null : sonnet) };
+          },
+          "GET /api/v1/runners": { body: { items: [MOSS] } },
+          "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] },
+          "GET /api/v1/connections": { body: { items: [FIXTURE_GITHUB_CONNECTION] } },
+          "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
+        },
+      });
+
+      expect(await screen.findByText("Claude Code · Claude Sonnet 5")).toBeTruthy();
+      expect(screen.getByText("Text generation")).toBeTruthy();
+    });
+
+    it("says that no model is available when a logged-in provider offers none", async () => {
+      await openSignedIn({
+        firstRun: { putOff: [] },
+        handlers: {
+          "GET /api/v1/controller": { body: buildControllerInfo(MOSS!.id) },
+          "GET /api/v1/runners": { body: { items: [MOSS] } },
+          "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] },
+          "GET /api/v1/connections": { body: { items: [FIXTURE_GITHUB_CONNECTION] } },
+          "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
+        },
+      });
+
+      expect(await screen.findByText("no model available")).toBeTruthy();
+    });
+
     it("marks onboarding done before it ends a first run whose account step could not", async () => {
       const user = userEvent.setup();
       let firstRunWritesAtSettings = -1;
@@ -782,6 +826,7 @@ describe("the first run's steps", () => {
         handlers: { "GET /api/v1/projects": { body: { items: [WEBSHOP] } } },
       });
       expect(screen.getByText("No provider yet")).toBeTruthy();
+      expect(screen.queryByText("Text generation")).toBeNull();
       const [doProviders] = screen.getAllByRole("button", { name: "Do it now" });
       await user.click(doProviders!);
       expect(readHeading()).toBe("Waiting for the runner");

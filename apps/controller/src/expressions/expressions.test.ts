@@ -18,6 +18,8 @@ import {
   ExpressionBudget,
   isTemplate,
   parseExpression,
+  formatExpressionValue,
+  validateTextExpression,
   type ExpressionError,
 } from "./index";
 import { provideUnlimitedBudget } from "./testing";
@@ -373,4 +375,22 @@ describe("evaluateCondition", () => {
       expect(readFailureMessage(evaluateCondition(source, context))).toMatch(/\S/);
     },
   );
+});
+
+describe("validateTextExpression", () => {
+  it("accepts a string or a dyn source, and refuses one whose known type is not a string", () => {
+    expect(Effect.runSync(validateTextExpression(`"yes"`, "event"))).toBeUndefined();
+    expect(Effect.runSync(validateTextExpression(`event.payload.answer`, "event"))).toBeUndefined();
+    expect(readFailureMessage(validateTextExpression(`event.kind == "x"`, "event"))).toContain(
+      "type bool",
+    );
+  });
+});
+
+describe("formatExpressionValue", () => {
+  it("writes an integer as JSON and never throws on one too large for a JSON number", () => {
+    expect(formatExpressionValue(3n)).toBe("3");
+    expect(formatExpressionValue(2n ** 64n)).toBe("a value with no JSON form");
+    expect(formatExpressionValue(undefined)).toBe("nothing");
+  });
 });

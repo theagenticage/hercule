@@ -658,6 +658,16 @@ const make = Effect.gen(function* () {
         UPDATE session_inputs SET status = 'sent', reason = NULL
         WHERE status = 'queued' AND sent_at IS NOT NULL AND step_iteration IS NOT NULL
       `),
+
+    /**
+     * Checks whether a Subscription delivered the event `eventId` to a
+     * session, whatever became of the input since.
+     */
+    hasInputForEvent: (eventId: number): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql`SELECT 1 FROM session_inputs WHERE event_id = ${eventId} LIMIT 1`,
+        (rows) => rows.length > 0,
+      ),
   };
 });
 

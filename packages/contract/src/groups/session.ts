@@ -128,6 +128,24 @@ export const refuseEmptyPrompt = Schema.makeFilter(
  */
 export const SESSION_STATUSES = ["queued", "starting", "idle", "busy", "exited"] as const;
 
+/**
+ * Every session status except `exited`: the statuses of a session that is
+ * still live. A read of the live sessions filters on these, and a live
+ * session blocks deleting the runner, workspace and token it uses, so a
+ * status left out here would let those be deleted under a running session.
+ *
+ * It is written out, not filtered from `SESSION_STATUSES`, because a status
+ * filter must be a list that is never empty and `filter` cannot show that.
+ * A test checks that it holds every status but `exited`, so a status added
+ * later must be placed here or the test fails.
+ */
+export const LIVE_SESSION_STATUSES = [
+  "queued",
+  "starting",
+  "idle",
+  "busy",
+] as const satisfies ReadonlyArray<SessionStatus>;
+
 export const SessionStatus = Schema.Literals(SESSION_STATUSES);
 
 export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>;
@@ -135,10 +153,14 @@ export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>;
 export const Session = Schema.Struct({
   id: Id,
   /**
-   * The session's title, capped at 80 characters, set once and never
-   * rewritten. For an agent step's session it is the run's workflow name and
-   * the step's id, as `<workflow name> · <step id>`. For any other session it
-   * is the opening prompt's first non-empty line.
+   * The session's title, capped at 80 characters. For an agent step's session
+   * it is the run's workflow name and the step's id, as
+   * `<workflow name> · <step id>`, and it never changes. For any other
+   * session it starts as the opening prompt's first non-empty line. A
+   * Thread's title is replaced once, shortly after it starts, by a title a
+   * model generated from the first message, when text generation is
+   * available; the cut-short title stays when it is not. Whether the
+   * generated title was judged too vague is stored but not exposed here.
    */
   title: Schema.String,
   status: SessionStatus,

@@ -31,6 +31,8 @@ const buildEvent = (fields: Partial<Event>): Event => ({
   dedupKey: "one",
   refs: ["github:pr:o/r#87"],
   url: null,
+  title: null,
+  author: null,
   payload: {},
   raw: null,
   actor: "user",

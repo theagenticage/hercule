@@ -40,8 +40,12 @@ import {
   type SessionBinding,
   type SessionSpec,
   type SubagentId,
+  type TextGenerationOutcome,
+  type TextGenerationSpec,
 } from "@hercule/protocol";
+import { createChildOwner } from "./claude-code-child";
 import {
+  decideTextGenerationOutcome,
   normalize,
   buildNormalizingState,
   openTurn,
@@ -61,7 +65,12 @@ import {
 import type { AttachmentUploader } from "../attachments";
 import { readAttachmentBase64 } from "./attachments";
 import { replaceToolResultImages } from "./claude-code-tool-result-images";
-import type { AdapterTurnInput, ProviderAdapter, ProviderRunnerContext } from "./index";
+import type {
+  AdapterTurnInput,
+  ProviderAdapter,
+  ProviderRunnerContext,
+  TextGenerationContext,
+} from "./index";
 import { makeInstall } from "./install";
 import { PROBE_DEADLINE, buildFailedProbe } from "./probe";
 import type { LoginCommand } from "./login";
@@ -115,8 +124,18 @@ export interface ClaudeStream extends AsyncIterable<SDKMessage> {
    * subagent's task as stopped, and the subagent cannot be continued.
    */
   readonly stopTask: (taskId: string) => Promise<void>;
-  /** Ends the query. The CLI is a child process, and it does not exit on its own. */
-  readonly close: () => void;
+  /**
+   * Ends the query. The CLI is a child process, and it does not exit on its
+   * own. Returns a promise that never rejects. A session that is stopping
+   * ignores it. What it means depends on the `closeWaitsForExit` the stream
+   * was made with:
+   *
+   * - false: it settles when the SDK has finished closing the query, which
+   *   the SDK does after waiting about 2 seconds for the CLI to exit,
+   *   whether or not the CLI has;
+   * - true: it settles only after the CLI process has exited.
+   */
+  readonly close: () => void | Promise<void>;
 }
 
 export interface ClaudeSeam {
@@ -124,6 +143,13 @@ export interface ClaudeSeam {
   readonly stream: (params: {
     readonly options: Options;
     readonly input: AsyncIterable<SDKUserMessage>;
+    /**
+     * Makes `close()` settle only once the CLI process has exited, by
+     * stopping that process itself if the SDK has not. A text generation needs
+     * this to free its slot and remove its scratch folder only when nothing
+     * is running. A session leaves it out.
+     */
+    readonly closeWaitsForExit?: boolean;
   }) => ClaudeStream;
   readonly run: Run;
 }
@@ -478,6 +504,78 @@ const EFFORTS: ReadonlyArray<EffortLevel> = ["low", "medium", "high", "xhigh", "
 const readEffort = (options: SessionSpec["modelSelection"]["options"]): EffortLevel | undefined => {
   const chosen = options["effort"];
   return EFFORTS.find((level) => level === chosen);
+};
+
+/**
+ * The most turns a text generation may take. The first turn is the model's
+ * answer. With no tools, a second turn happens only when the harness rejected
+ * that answer because it did not match the schema and asked the model to try
+ * again. One retry fixes the common slip, and a model that fails twice is not
+ * worth a third call.
+ */
+const TEXT_GENERATION_MAX_TURNS = 2;
+
+/**
+ * Returns the SDK options for a text generation. It is one model call, so the
+ * harness gets nothing a session has:
+ *
+ * - no tools (the harness adds its own structured-output tool, which is what
+ *   answers in the schema);
+ * - no setting source, no MCP server and no plugin, so no file on this
+ *   machine reaches the prompt;
+ * - no saved transcript;
+ * - the instructions as the whole system prompt, in place of Claude Code's own;
+ * - the cheapest reasoning. Some models still think a little with thinking
+ *   disabled, so the lowest effort is set as well.
+ *
+ * The harness runs in `ctx.cwd`, the empty scratch directory of this call.
+ */
+const buildTextGenerationOptions = (
+  ctx: TextGenerationContext,
+  spec: TextGenerationSpec,
+): Options => ({
+  pathToClaudeCodeExecutable: ctx.binary,
+  cwd: ctx.cwd,
+  tools: [],
+  systemPrompt: spec.instructions,
+  outputFormat: { type: "json_schema", schema: spec.outputSchema },
+  persistSession: false,
+  settingSources: [],
+  strictMcpConfig: true,
+  model: spec.model,
+  thinking: { type: "disabled" },
+  effort: "low",
+  maxTurns: TEXT_GENERATION_MAX_TURNS,
+  env: { ...buildEnv(ctx), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+});
+
+/**
+ * Returns the input of a text generation's harness query: one user message,
+ * then the end of the input. The harness answers that message and exits.
+ */
+const buildTextGenerationInput = (input: string): AsyncIterable<SDKUserMessage> => {
+  const messages = createPushable<SDKUserMessage>();
+  messages.push({
+    type: "user",
+    message: { role: "user", content: input },
+    parent_tool_use_id: null,
+  });
+  messages.end();
+  return messages;
+};
+
+/**
+ * Reads the harness's messages until its `result`. Returns undefined when the
+ * harness ended without one. Rejects when the harness fails to run, for
+ * example when the binary cannot start.
+ */
+const readQueryResult = async (
+  messages: AsyncIterable<SDKMessage>,
+): Promise<Extract<SDKMessage, { type: "result" }> | undefined> => {
+  for await (const message of messages) {
+    if (message.type === "result") return message;
+  }
+  return undefined;
 };
 
 /**
@@ -1178,7 +1276,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // pump's `finally` ends the parks on every exit.
         held.uploads.abort();
         held.input.end();
-        held.stream.close();
+        void held.stream.close();
       }),
 
     respondToApprovalRequest: (
@@ -1206,6 +1304,35 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),
+    // The config is empty for every shipped provider, so it is not read.
+    generateText: (ctx, _config, spec) =>
+      // The harness is closed, and its exit awaited, before the runner
+      // removes its working directory and frees the call's slot, so nothing is
+      // still writing into the directory. The stream stops the CLI itself if
+      // the SDK's own close leaves it running.
+      Effect.acquireUseRelease(
+        Effect.try({
+          try: () =>
+            seam.stream({
+              options: buildTextGenerationOptions(ctx, spec),
+              input: buildTextGenerationInput(spec.input),
+              closeWaitsForExit: true,
+            }),
+          catch: describeError,
+        }),
+        (stream) =>
+          Effect.map(
+            Effect.tryPromise({ try: () => readQueryResult(stream), catch: describeError }),
+            (result): TextGenerationOutcome =>
+              result === undefined
+                ? { outcome: "failed", message: "the harness ended without an answer" }
+                : decideTextGenerationOutcome(spec.outputSchema, result),
+          ),
+        (stream) =>
+          Effect.promise(async () => {
+            await stream.close();
+          }),
+      ),
 
     // Every shipped provider's config schema is empty, so the Claude adapter
     // does not read the config and leaves out that parameter.
@@ -1259,17 +1386,29 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
 };
 
 export const claudeCode: ProviderAdapter = makeClaudeCodeAdapter({
-  stream: ({ options, input }) => {
-    const running: Query = sdkQuery({ prompt: input, options });
+  stream: ({ options, input, closeWaitsForExit }) => {
+    // Only a text generation starts the CLI itself. A session keeps the SDK's
+    // own start and its own way of stopping.
+    const owner = closeWaitsForExit === true ? createChildOwner() : undefined;
+    const running: Query = sdkQuery({
+      prompt: input,
+      options: owner === undefined ? options : { ...options, spawnClaudeCodeProcess: owner.spawn },
+    });
     return {
       [Symbol.asyncIterator]: () => running[Symbol.asyncIterator](),
       interrupt: () => running.interrupt().then(() => undefined),
       setModel: (model) => running.setModel(model),
       stopTask: (taskId) => running.stopTask(taskId),
-      close: () => {
+      close: async () => {
         // The child may already be gone, and an unhandled rejection would take
         // the whole daemon down just because one session ended.
-        running.return(undefined).catch(() => undefined);
+        await running.return(undefined).then(
+          () => undefined,
+          () => undefined,
+        );
+        // The SDK stops waiting about 2 seconds after it asked the CLI to
+        // exit, and the CLI can still be running then.
+        if (owner !== undefined) await Effect.runPromise(owner.stop);
       },
     };
   },

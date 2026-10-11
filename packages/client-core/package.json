@@ -6,6 +6,8 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
+    "./list-time": "./src/list-time.ts",
+    "./workflow-rows": "./src/workflow-rows.ts",
     "./testing": "./src/testing.ts",
     "./threads/testing": "./src/threads/workspaces.testing.ts",
     "./workflow-source/testing": "./src/workflow-source.testing.ts"

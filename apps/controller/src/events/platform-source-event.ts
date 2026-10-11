@@ -53,6 +53,8 @@ export const appendPlatformSourceEvent = (
       dedupKey: crypto.randomUUID(),
       refs: [],
       url: null,
+      title: null,
+      author: null,
       payload: event.payload,
       raw: null,
       actor: event.actor,

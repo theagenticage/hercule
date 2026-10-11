@@ -129,6 +129,7 @@ export {
   OWN_AGENT_ALIAS,
   OWN_SESSION_ALIAS,
   Timestamp,
+  TimestampWithOffset,
 } from "./ids";
 
 export { Authenticated, SetupToken } from "./security";
@@ -145,6 +146,7 @@ export {
   SettingsPatch,
   SettingsState,
   ThreadRows,
+  TextGenerationModel,
   ThreadWorkspace,
   TimeOfDay,
   UserSettings,
@@ -226,6 +228,7 @@ export {
 export type { ApprovalRequest } from "./groups/session";
 export {
   ApprovalDecision,
+  LIVE_SESSION_STATUSES,
   MAX_PROMPT_LENGTH,
   MAX_SPAWN_CHECKOUTS,
   OpenRequest,
@@ -328,7 +331,13 @@ export {
   MAX_CONNECTION_LABEL_LENGTH,
   MAX_FEED_INTERVAL_SECONDS,
 } from "./groups/connection";
-export { ControllerInfo, ControllerUpdateInput, MintedPromotionToken } from "./groups/controller";
+export {
+  ControllerInfo,
+  ControllerUpdateInput,
+  MintedPromotionToken,
+  TextGenerationFailureReason,
+  TextGenerationStatus,
+} from "./groups/controller";
 export {
   IDENTITY_PORT,
   IDENTITY_PORT_COUNT,
@@ -442,6 +451,7 @@ export {
   MAX_SIGNAL_EVENT_IDS,
   MAX_SIGNAL_KIND_LENGTH,
   MAX_SIGNAL_OUTCOME_LENGTH,
+  MAX_SIGNAL_IDS,
   MAX_SIGNAL_PLACE_LENGTH,
   MAX_SIGNAL_REASON_LENGTH,
   MAX_SIGNAL_REPLY_LENGTH,
@@ -453,15 +463,24 @@ export {
   SignalAction,
   SignalActInput,
   SignalFilter,
+  SignalIdsInput,
   SignalKind,
+  SignalLowerPriorityResult,
+  SignalMarkDoneResult,
   SignalMatch,
   SignalOrigin,
   SignalRaiseInput,
   SignalRaiseResult,
   SignalResolution,
+  SignalPage,
   SignalSnooze,
+  SignalSnoozeInput,
+  SignalSnoozeResult,
   SignalStatus,
+  SignalUnsnoozeResult,
+  SignalView,
   SignalWithdrawInput,
+  SkippedSignal,
   TextBlock,
   ThreadMessage,
   UnknownBlock,
@@ -518,8 +537,10 @@ export {
   Event,
   EventId,
   MAX_DEDUP_KEY_LENGTH,
+  MAX_EVENT_AUTHOR_LENGTH,
   MAX_EVENT_KIND_LENGTH,
   MAX_EVENT_SYSTEM_LENGTH,
+  MAX_EVENT_TITLE_LENGTH,
   MAX_EVENT_URL_LENGTH,
 } from "./groups/event";
 export {

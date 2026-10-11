@@ -13,9 +13,21 @@ import { SPECIMEN_NOW } from "./sidebar-fixture";
 
 const RealDate = Date;
 
+/** The moment the page's clock is stopped at. */
+let stoppedAt = SPECIMEN_NOW;
+
 globalThis.Date = new Proxy(RealDate, {
   construct: (target, args, newTarget) =>
-    Reflect.construct(target, args.length === 0 ? [SPECIMEN_NOW] : args, newTarget) as object,
+    Reflect.construct(target, args.length === 0 ? [stoppedAt] : args, newTarget) as object,
   get: (target, key, receiver) =>
-    key === "now" ? () => SPECIMEN_NOW : (Reflect.get(target, key, receiver) as unknown),
+    key === "now" ? () => stoppedAt : (Reflect.get(target, key, receiver) as unknown),
 });
+
+/**
+ * Stops the page's clock at `moment`, in milliseconds since the epoch, from
+ * now on. A scene that shows a later time of day, such as the snooze menu
+ * after 17:00, calls it before it opens what reads the time.
+ */
+export const stopSpecimenClockAt = (moment: number): void => {
+  stoppedAt = moment;
+};

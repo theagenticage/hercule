@@ -10,8 +10,18 @@
  */
 import { Schema } from "effect";
 
-/** An account, as GitHub embeds one in another object. */
-export const GithubAccount = Schema.Struct({ login: Schema.String });
+/**
+ * An account, as GitHub embeds one in another object. The numeric `id` stays
+ * the same when the account is renamed; GitHub sends it everywhere but in a
+ * few older payloads.
+ */
+export const GithubAccount = Schema.Struct({
+  login: Schema.String,
+  id: Schema.optionalKey(Schema.Number),
+  avatar_url: Schema.optionalKey(Schema.String),
+});
+
+export type GithubAccount = Schema.Schema.Type<typeof GithubAccount>;
 
 /** A list of accounts. GitHub sends null in place of an empty list in some responses. */
 export const GithubAccounts = Schema.NullOr(Schema.Array(GithubAccount));

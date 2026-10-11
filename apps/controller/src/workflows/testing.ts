@@ -85,6 +85,7 @@ export const localGithubPlugin: Plugin = {
               added: Schema.Array(Schema.String),
               removed: Schema.Array(Schema.String),
             }),
+            availableToTriage: true,
           },
         },
       }),

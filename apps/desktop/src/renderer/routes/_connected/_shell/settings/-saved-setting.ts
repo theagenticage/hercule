@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
+import { queryKeys, readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import type { SettingsPatch } from "@hercule/contract";
 import { settingsQuery } from "../../../../app/queries";
 import type { SavedField } from "../../../../app/saved-field";
@@ -13,7 +13,9 @@ import type { SavedField } from "../../../../app/saved-field";
  * - While a save runs, the control already shows the new value.
  * - A successful save puts the settings the controller returns in the cache,
  *   so every screen that reads them shows the new value at once, and then
- *   reads the settings again.
+ *   reads the settings again. The controller's record is read again with
+ *   them, because it reports what the settings decide, such as the model
+ *   text generation runs on.
  * - A failed save puts the control back to `stored` and returns the error,
  *   which the row shows under itself until the next save.
  *
@@ -44,7 +46,13 @@ export function useSavedSetting<Value>(
     mutationFn: (value: Value) => client.settings.update({ payload: buildPatch(value) }),
     onSuccess: async (updated) => {
       queryClient.setQueryData(queryKey, updated);
-      await queryClient.invalidateQueries({ queryKey });
+      // The controller's record reports facts worked out from the settings, such as
+      // the model Automatic resolves to. It is marked stale for every save, and
+      // read again only while a screen shows it.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.controller() }),
+      ]);
     },
   });
   return {

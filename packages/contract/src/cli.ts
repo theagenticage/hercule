@@ -53,6 +53,13 @@ export type FieldRow =
        * id, and its help line must say so.
        */
       readonly resolves?: OperationId;
+      /**
+       * The query sent to the list operation `resolves` names, when its
+       * default listing does not hold the ids this field takes. `{ view:
+       * "later" }` makes `signal unsnooze` match a tail among the snoozed
+       * signals.
+       */
+      readonly resolvesQuery?: Readonly<Record<string, string>>;
     }
   | {
       readonly flag: string;
@@ -269,11 +276,12 @@ export const CLI = {
     examples: [
       { args: ["--user", '{"ui.threadRows":"plain"}'] },
       { args: ["--controller", '{"retention.events":30,"backup.time":"03:30"}'] },
+      { args: ["--controller", '{"textGeneration.model":"off"}'] },
     ],
     fields: {
       controller: {
         flag: "controller",
-        help: "The controller's operational settings as a JSON object: retention, backup, session timeouts, how long an idle assistant session stays loaded (session.idleUnloadMinutes), workspace expiry and how deep runs may nest (run.nestingLimit).",
+        help: 'The controller\'s operational settings as a JSON object: retention, backup, session timeouts, how long an idle assistant session stays loaded (session.idleUnloadMinutes), workspace expiry, how deep runs may nest (run.nestingLimit) and which model makes text generations (textGeneration.model: "automatic" by default, "off", or {"instanceId":"<provider instance id>","model":"<model slug>"}; a chosen model never falls back to another provider).',
       },
       user: {
         flag: "user",
@@ -720,14 +728,22 @@ export const CLI = {
 
   "signal.query": {
     command: "signal list",
-    help: "Lists the signals on your To do list: what asks for your move now. Use it to find the id that `hercule signal read`, `hercule signal act` and `hercule signal withdraw` take.",
-    examples: [{ args: [] }, { args: ["--kind", "unsure"] }],
+    help: "Lists the signals on your To do list: what asks for your move now. --view later lists the snoozed signals, soonest back first, and --view done the resolved ones, newest first; those two are read a page at a time. Use it to find the id that `hercule signal read`, `hercule signal act` and `hercule signal withdraw` take.",
+    examples: [
+      { args: [] },
+      { args: ["--kind", "unsure"] },
+      { args: ["--view", "later"] },
+      { args: ["--view", "done", "--limit", "20"] },
+    ],
     fields: {
       view: {
         flag: "view",
-        help: "to-do, the signals that ask for your move now. It is the default.",
+        help: "to-do, the signals that ask for your move now, which is the default and is never paged; later, the snoozed ones; or done, the resolved ones.",
       },
-      kind: { flag: "kind", help: "Only signals of this kind, such as fyi or github/pr-review." },
+      kind: {
+        flag: "kind",
+        help: "Only signals of this kind, such as fyi or github/review-requested.",
+      },
       source: {
         flag: "source",
         help: "Only signals whose kind belongs to this plugin, such as github.",
@@ -843,6 +859,65 @@ export const CLI = {
       },
       reason: { flag: "reason", help: "One line the user reads under the withdrawn signal." },
     },
+  },
+  "signal.markDone": {
+    command: "signal done",
+    help: "Marks signals done, as you, without telling their source. Each one leaves To do with the outcome Done, nothing sent. A signal already resolved is skipped and listed in skipped. Only a kind that offers Done can be marked done; a proposal, an offer or an unsure item is answered with `hercule signal act` instead.",
+    examples: [{ args: ["0b1c2d3e"] }, { args: ["0b1c2d3e", "9f8e7d6c"] }],
+    fields: {
+      signalIds: {
+        positional: true,
+        placeholder: "signal-id",
+        help: "A signal's id, or a tail of eight or more characters of a signal on To do. Give several to mark them done in one call.",
+        resolves: "signal.query",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "signal.snooze": {
+    command: "signal snooze",
+    help: "Takes signals off To do until a time, without answering them. Each one waits in Later and comes back to To do when the time passes. Snoozing a snoozed signal replaces its time. A signal already resolved is skipped and listed in skipped.",
+    examples: [{ args: ["0b1c2d3e", "9f8e7d6c", "--until", "2026-10-13T09:00+02:00"] }],
+    fields: {
+      signalIds: {
+        positional: true,
+        placeholder: "signal-id",
+        help: "A signal's id, or a tail of eight or more characters of a signal on To do. Give several to snooze them in one call.",
+        resolves: "signal.query",
+      },
+      until: {
+        flag: "until",
+        help: "When the signals come back, as an ISO 8601 time with its offset or Z, such as 2026-10-13T09:00+02:00. It must be in the future.",
+      },
+    },
+  },
+  "signal.unsnooze": {
+    command: "signal unsnooze",
+    help: "Puts snoozed signals back on To do now. A signal that is not snoozed is left as it is, and one already resolved is skipped and listed in skipped.",
+    examples: [{ args: ["0b1c2d3e"] }],
+    fields: {
+      signalIds: {
+        positional: true,
+        placeholder: "signal-id",
+        help: "A signal's id, or a tail of eight or more characters of a snoozed signal. Give several to unsnooze them in one call.",
+        resolves: "signal.query",
+        resolvesQuery: { view: "later" },
+      },
+    },
+  },
+  "signal.lowerPriority": {
+    command: "signal lower-priority",
+    help: "Moves urgent signals out of Now, as you: each one goes from urgent to high. A signal that is not urgent is left as it is, and one already resolved is skipped and listed in skipped.",
+    examples: [{ args: ["0b1c2d3e"] }],
+    fields: {
+      signalIds: {
+        positional: true,
+        placeholder: "signal-id",
+        help: "A signal's id, or a tail of eight or more characters of a signal on To do. Give several to lower them in one call.",
+        resolves: "signal.query",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
 
   "project.query": {
@@ -1708,6 +1783,7 @@ export const CLI = {
           "2026-10-09T23:59:59.999Z",
         ],
       },
+      { args: ["--newest-per-workflow", "5", "--status", "failed"] },
     ],
     fields: {
       workflowId: {
@@ -1739,6 +1815,10 @@ export const CLI = {
         flag: "original-run",
         help: "Only the re-runs of this run, by its id or a tail of eight or more characters.",
         resolves: "run.query",
+      },
+      newestPerWorkflow: {
+        flag: "newest-per-workflow",
+        help: "Only each workflow's newest runs, at most this many per workflow, among the runs the other flags keep. Leaves out the runs of a sent workflow and of a deleted workflow.",
       },
     },
   },

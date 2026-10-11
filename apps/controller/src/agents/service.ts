@@ -46,6 +46,7 @@ import {
   createInvalidStateError,
   createNotFoundError,
   createValidationError,
+  LIVE_SESSION_STATUSES,
   type Agent,
   type Forbidden,
   type InvalidState,
@@ -65,7 +66,7 @@ import {
 import { AuditLog } from "../events";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
-import { LIVE_SESSION_STATUSES, sessionRepository } from "../sessions";
+import { sessionRepository } from "../sessions";
 import { buildAgentFieldChecks, buildModelSelection } from "./fields";
 import { agentRepository, type AgentEdit, type StoredAgent } from "./repository";
 

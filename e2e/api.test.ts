@@ -218,6 +218,9 @@ describe("the first run and everything after it", () => {
       // fleet's first member and so the one placement falls back to.
       defaultRunnerId: expect.any(String) as string,
       localRunnerId: expect.any(String) as string,
+      // No provider is logged in on a fresh machine, so no text generation
+      // model resolves, and no call has failed yet.
+      textGeneration: { model: null, lastFailure: null },
     });
     expect(read.localRunnerId).toBe(read.defaultRunnerId);
 

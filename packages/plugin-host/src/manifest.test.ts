@@ -23,8 +23,8 @@ const omitKey = (key: string) => {
 };
 
 describe("the host API version", () => {
-  it("is 1", () => {
-    expect(HOST_API).toBe(1);
+  it("is 2", () => {
+    expect(HOST_API).toBe(2);
   });
 });
 
@@ -39,7 +39,7 @@ describe("the plugin manifest", () => {
 
     expect(decoded.id).toBe("fixture");
     expect(decoded.displayName).toBe("Fixture Plugin");
-    expect(decoded.hostApi).toBe(1);
+    expect(decoded.hostApi).toBe(HOST_API);
     expect(decoded.capabilities).toEqual(["providers", "kv"]);
     // The schema is passed as the same value the plugin wrote, not a copy: the
     // host derives the JSON Schema from this object.

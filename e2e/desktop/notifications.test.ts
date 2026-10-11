@@ -133,7 +133,7 @@ describe("the dock badge and the threads' notifications", () => {
     expect(await readBadgeCount(app)).toBe(1);
     await expect
       .poll(async () => (await readMenuItems(app, "Go")).map((item) => item.label))
-      .toEqual(["Office", "Intake", "Thread 1"]);
+      .toEqual(["Office", "Intake", "Workflows", "Thread 1"]);
 
     await chooseMenuItem(app, "Hercule", "Sign Out");
 
@@ -145,6 +145,7 @@ describe("the dock badge and the threads' notifications", () => {
     expect(await readMenuItems(app, "Go")).toEqual([
       { label: "Office", accelerator: "CmdOrCtrl+Shift+O", enabled: false },
       { label: "Intake", accelerator: "CmdOrCtrl+Shift+I", enabled: false },
+      { label: "Workflows", accelerator: "CmdOrCtrl+Shift+W", enabled: false },
       { label: "No Threads", accelerator: null, enabled: false },
     ]);
   });

@@ -197,6 +197,40 @@
     inset 0 1px 0 var(--glass-edge),
     var(--glass-shadow);
 }
+/* The page's name, set as a title, leading a floating pill. The margin and
+   the size are reset so it can be the page's h1. */
+.pill-title {
+  margin: 0;
+  padding: 0 8px 0 10px;
+  font-size: inherit;
+  font-weight: var(--w-bold);
+}
+/* A tab in a floating pill: a thread of the open thread's workspace, with
+   its state mark, its title and an age when idle, or a filter with its
+   count. */
+.ptab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.ptab:hover {
+  background: var(--hover);
+}
+.ptab.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+.ptab small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
 
 /* ---------- Segmented controls ---------- */
 /* A row of buttons that picks one of a few values, such as a model option's

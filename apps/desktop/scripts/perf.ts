@@ -53,7 +53,8 @@
  *    open.
  * 4. One more plain launch, which reopens the same thread, measures a turn
  *    that streams into it at full speed (see `measureStreaming`).
- * 5. The fixture raises 200 signals, and the script opens Intake once, so
+ * 5. The fixture raises 200 signals, and one more that it snoozes for an
+ *    hour, so Intake's snooze timer is set. The script opens Intake once, so
  *    the last measured launch opens on Intake (see `openIntakeOnce`), with
  *    the Hercule face showing. Its first screen is Intake's list, and its
  *    memory and idle are read with Intake open. One more plain launch, which
@@ -66,6 +67,14 @@
  *    and open, idle with 4 running and with every subagent ended, how often
  *    the rows' durations change, the live topics held on each page, and
  *    the reads that subagent changes cause (see `perf-subagents.ts`).
+ * 7. Last, the fixture creates 50 workflows, 10 of them with 5 live runs
+ *    each, and the script opens Workflows once, so one more plain launch
+ *    opens on the workflow list. It measures memory and idle with the list
+ *    open, what opening the list reads and how long that takes, and how many
+ *    reads one `run` push causes and how long they take (see
+ *    `perf-workflows.ts`). Pass `--workflows-only` to skip steps 2 to 6:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --workflows-only
  *
  * The first thread screen's JavaScript is not measured here: `pnpm
  * build:desktop` checks it, and prints it as "the first screen", because the
@@ -199,9 +208,16 @@ import {
   measureIntakeWork,
   openIntakeOnce,
   raiseSignals,
+  raiseSnoozedSignal,
   reportIntakeWork,
 } from "./perf-intake.ts";
 import { measureSubagentLaunch, reportSubagentLaunch } from "./perf-subagents.ts";
+import {
+  measureWorkflowWork,
+  openWorkflowsOnce,
+  reportWorkflowWork,
+  seedWorkflows,
+} from "./perf-workflows.ts";
 import { pollUntil } from "./poll.ts";
 import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../src/main/window-visibility.ts";
 
@@ -1105,86 +1121,110 @@ function reportLaunch(measured: MeasuredLaunch): void {
   console.log();
 }
 
-const { streaming, longThread, subagents } = await runWithThreadFixture(async (fixture) => {
+/**
+ * Whether the run measures only the workflow list (see `perf-workflows.ts`),
+ * on 40 threads, and skips every other launch, which take long.
+ */
+const WORKFLOWS_ONLY = process.argv.includes("--workflows-only");
+
+/**
+ * Measures every launch but the workflow list's, and reports each launch as
+ * it is measured. Returns the readings that are reported once the
+ * controller has stopped.
+ */
+async function measureLaunches(fixture: ThreadFixture, userDataDir: string) {
+  const measure = async (
+    name: string,
+    threadCount: number,
+    twoMinuteRow: boolean,
+    {
+      openThread = null,
+      opensIntake = false,
+      settingsSection = null,
+      showsOrchestrationFace = false,
+    }: {
+      readonly openThread?: LongThread | null;
+      readonly opensIntake?: boolean;
+      readonly settingsSection?: SettingsSection | null;
+      readonly showsOrchestrationFace?: boolean;
+    } = {},
+  ) => {
+    await fixture.prepareLaunch({ twoMinuteRow });
+    if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
+    if (opensIntake) await openIntakeOnce(userDataDir);
+    await warmUpApp(userDataDir);
+    const reopens: ReopenedScreen | null =
+      openThread !== null ? "thread" : opensIntake ? "intake" : null;
+    // Each launch is reported as soon as it is measured, so a launch that
+    // fails later in the run does not take the earlier readings with it.
+    reportLaunch({
+      name,
+      threadCount,
+      twoMinuteRow,
+      reopens,
+      loadAtSpawn: loadavg()[0]!,
+      ...(await measurePlainLaunch(
+        userDataDir,
+        fixture,
+        reopens,
+        settingsSection,
+        showsOrchestrationFace,
+      )),
+    });
+  };
+  await measure("40 threads, run 1", 40, false);
+  await measure("40 threads, run 2", 40, true);
+  for (const section of SETTINGS_SECTIONS) {
+    await measure(`40 threads, Settings › ${section} open`, 40, false, {
+      settingsSection: section,
+    });
+  }
+  await measure("40 threads, the Hercule face showing", 40, false, {
+    showsOrchestrationFace: true,
+  });
+  await fixture.growTo(500);
+  await measure("500 threads, run 1", 500, false);
+  const thread = await fixture.growTranscript(LONG_THREAD_ROWS);
+  await measure(
+    `500 threads, a thread of ${String(thread.rowCount)} transcript rows open`,
+    500,
+    false,
+    { openThread: thread },
+  );
+  const streaming = await measureStreaming(userDataDir, fixture, thread);
+  await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
+  await raiseSnoozedSignal(fixture);
+  await measure(`500 threads, Intake open on ${String(INTAKE_SIGNALS)} signals`, 500, false, {
+    opensIntake: true,
+  });
+  // The app opens Intake again, as the launch above left it.
+  reportIntakeWork(await measureIntakeWork(userDataDir, fixture));
+  return {
+    streaming,
+    longThread: thread,
+    subagents: await measureSubagentLaunch(userDataDir, fixture, thread.id),
+  };
+}
+
+const launches = await runWithThreadFixture(async (fixture) => {
   const userDataDir = mkdtempSync(join(tmpdir(), "hercule-desktop-perf-"));
   try {
     await fixture.growTo(40);
     writeSettings(userDataDir, { controllerUrl: fixture.url });
     await signInOnce(userDataDir);
-    const measure = async (
-      name: string,
-      threadCount: number,
-      twoMinuteRow: boolean,
-      {
-        openThread = null,
-        opensIntake = false,
-        settingsSection = null,
-        showsOrchestrationFace = false,
-      }: {
-        readonly openThread?: LongThread | null;
-        readonly opensIntake?: boolean;
-        readonly settingsSection?: SettingsSection | null;
-        readonly showsOrchestrationFace?: boolean;
-      } = {},
-    ) => {
-      await fixture.prepareLaunch({ twoMinuteRow });
-      if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
-      if (opensIntake) await openIntakeOnce(userDataDir);
-      await warmUpApp(userDataDir);
-      const reopens: ReopenedScreen | null =
-        openThread !== null ? "thread" : opensIntake ? "intake" : null;
-      // Each launch is reported as soon as it is measured, so a launch that
-      // fails later in the run does not take the earlier readings with it.
-      reportLaunch({
-        name,
-        threadCount,
-        twoMinuteRow,
-        reopens,
-        loadAtSpawn: loadavg()[0]!,
-        ...(await measurePlainLaunch(
-          userDataDir,
-          fixture,
-          reopens,
-          settingsSection,
-          showsOrchestrationFace,
-        )),
-      });
-    };
-    await measure("40 threads, run 1", 40, false);
-    await measure("40 threads, run 2", 40, true);
-    for (const section of SETTINGS_SECTIONS) {
-      await measure(`40 threads, Settings › ${section} open`, 40, false, {
-        settingsSection: section,
-      });
-    }
-    await measure("40 threads, the Hercule face showing", 40, false, {
-      showsOrchestrationFace: true,
-    });
-    await fixture.growTo(500);
-    await measure("500 threads, run 1", 500, false);
-    const thread = await fixture.growTranscript(LONG_THREAD_ROWS);
-    await measure(
-      `500 threads, a thread of ${String(thread.rowCount)} transcript rows open`,
-      500,
-      false,
-      { openThread: thread },
-    );
-    const streaming = await measureStreaming(userDataDir, fixture, thread);
-    await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
-    await measure(`500 threads, Intake open on ${String(INTAKE_SIGNALS)} signals`, 500, false, {
-      opensIntake: true,
-    });
-    // The app opens Intake again, as the launch above left it.
-    reportIntakeWork(await measureIntakeWork(userDataDir, fixture));
-    return {
-      streaming,
-      longThread: thread,
-      subagents: await measureSubagentLaunch(userDataDir, fixture, thread.id),
-    };
+    const measured = WORKFLOWS_ONLY ? null : await measureLaunches(fixture, userDataDir);
+    // The workflow list comes last, because its 50 runs stay live, and a
+    // later `prepareLaunch` would restart the controller under them.
+    const runIds = await seedWorkflows(fixture);
+    await openWorkflowsOnce(userDataDir);
+    reportWorkflowWork(await measureWorkflowWork(userDataDir, fixture, runIds));
+    return measured;
   } finally {
     rmSync(userDataDir, { recursive: true, force: true });
   }
 });
 
-reportStreaming(streaming, longThread);
-reportSubagentLaunch(subagents);
+if (launches !== null) {
+  reportStreaming(launches.streaming, launches.longThread);
+  reportSubagentLaunch(launches.subagents);
+}

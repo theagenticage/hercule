@@ -15,11 +15,12 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { LIVE_SESSION_STATUSES } from "@hercule/contract";
 import type { ProviderEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { inputRepository } from "./inputs";
-import { LIVE_SESSION_STATUSES, sessionRepository, type StoredStreamRow } from "./repository";
+import { sessionRepository, type StoredStreamRow } from "./repository";
 
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
 

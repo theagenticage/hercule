@@ -13,6 +13,17 @@ import { FakeBoundOperationsLayer } from "../bound-actions/testing";
 import { Notifier, NotifierLayer } from "./notifier";
 import { notificationRepository } from "./repository";
 import { NotificationService, NotificationServiceLayer } from "./service";
+import { SignalBuildFailures } from "./signal-build-failures";
+
+/**
+ * A fake of the `SignalBuildFailures` port that counts no failed build. The
+ * real port reads the signals, which a test of this domain cannot import; a
+ * test of the count runs the controller over HTTP.
+ */
+export const NoSignalBuildFailuresLayer: Layer.Layer<SignalBuildFailures> = Layer.succeed(
+  SignalBuildFailures,
+  SignalBuildFailures.of({ countSince: () => Effect.succeed(0) }),
+);
 
 /**
  * The notification service and the notifier over the fake `BoundOperations`
@@ -27,6 +38,7 @@ export const NotificationServiceTestLayer: Layer.Layer<
   SqlClient.SqlClient | AuditLog
 > = NotificationServiceLayer.pipe(
   Layer.provide(FakeBoundOperationsLayer),
+  Layer.provide(NoSignalBuildFailuresLayer),
   Layer.provideMerge(NotifierLayer),
 );
 

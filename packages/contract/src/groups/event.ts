@@ -69,6 +69,14 @@ export const Event = Schema.Struct({
    * a platform event's payload never repeats it.
    */
   actor: NullableActor,
+  /**
+   * One line saying what happened, set by the emitter: "marta requested your
+   * review on #1293". Null for an event stored before sources set it, and for
+   * an event sent with `event.emit`.
+   */
+  title: Schema.NullOr(Schema.String),
+  /** Who caused the event on its own system, such as a GitHub login, or null when nobody did. */
+  author: Schema.NullOr(Schema.String),
 });
 
 export type Event = Schema.Schema.Type<typeof Event>;
@@ -84,6 +92,16 @@ export const MAX_EVENT_SYSTEM_LENGTH = 64;
 
 /** The longest source URL. It is where a person opens the event, not a document. */
 export const MAX_EVENT_URL_LENGTH = 2048;
+
+/** Re-exported from the package plugins are written against, so a plugin cuts its titles to the limit this API checks. */
+export { MAX_EVENT_TITLE_LENGTH } from "@hercule/plugin-host";
+
+/**
+ * The longest author a plugin's event may name. A signal written from the
+ * event alone takes it as its asker, so it is the limit of a signal's asker
+ * too.
+ */
+export const MAX_EVENT_AUTHOR_LENGTH = 256;
 
 /** The payload of a manual emit. The core fills in every other field of the event. */
 export const EventEmitInput = Schema.Struct({

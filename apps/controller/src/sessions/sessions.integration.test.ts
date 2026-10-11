@@ -974,7 +974,7 @@ describe("session.spawn: the title built from the prompt", () => {
     });
   });
 
-  it("cuts a first line over 80 characters down to exactly 80", async () => {
+  it("cuts a first line over 80 characters to 80 and drops a space left at the cut", async () => {
     await withFleet(async (arranged) => {
       const longLine =
         "the bug is somewhere in the login flow and nobody can pin down exactly where it is";
@@ -985,8 +985,19 @@ describe("session.spawn: the title built from the prompt", () => {
       });
 
       const title = (session as unknown as { title: string }).title;
-      expect(title).toBe(longLine.slice(0, 80));
-      expect(title).toHaveLength(80);
+      // The cut falls after a space, which the title does not keep.
+      expect(title).toBe(longLine.slice(0, 80).trimEnd());
+      expect(title).toHaveLength(79);
+    });
+  });
+
+  it("does not leave a space at the end of a title the cut landed after", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, {
+        prompt: `${"a".repeat(79)} and then more words`,
+      });
+
+      expect((session as unknown as { title: string }).title).toBe("a".repeat(79));
     });
   });
 

@@ -33,6 +33,7 @@ import { Notifier, NotifierLayer } from "./notifier";
 import { notificationRepository } from "./repository";
 import {
   insertOpenDecision,
+  NoSignalBuildFailuresLayer,
   NotificationServiceTestLayer,
   readStoredNotification,
 } from "./testing";
@@ -1145,6 +1146,7 @@ describe("notification.act", () => {
           }),
         ),
       ),
+      Layer.provide(NoSignalBuildFailuresLayer),
       Layer.provideMerge(NotifierLayer),
       Layer.provideMerge(AuditLogLayer),
       Layer.provideMerge(TestDatabase),

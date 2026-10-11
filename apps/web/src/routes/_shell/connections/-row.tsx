@@ -137,6 +137,12 @@ export function ConnectionRow({
         <p className="text-fine text-muted">{connection.statusDetail}</p>
       )}
 
+      {/* The credentials work, but they cost the user something, such as
+          signals that never arrive, so the warning uses the attention colour. */}
+      {connection.warning === undefined ? null : (
+        <p className="text-fine text-attn">{connection.warning}</p>
+      )}
+
       {panel === "reconnect" && type !== undefined ? (
         <ConnectionSetup client={client} type={type} connection={connection} onDone={close} />
       ) : null}

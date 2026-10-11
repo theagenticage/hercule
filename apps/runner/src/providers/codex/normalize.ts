@@ -414,6 +414,17 @@ const buildUsage = (counts: TokenCounts): Usage => ({
 });
 
 /**
+ * Returns everything a thread has used so far, from one of Codex's usage
+ * reports, or `undefined` when the report's counts are not valid. A thread
+ * that started empty, such as a text generation's, has used exactly its
+ * total, so no baseline is needed.
+ */
+export const readTotalUsage = (usage: ThreadTokenUsage): Usage | undefined => {
+  const decoded = Schema.decodeUnknownOption(NativeTokenCounts)(usage.total);
+  return Option.isNone(decoded) ? undefined : buildUsage(decoded.value);
+};
+
+/**
  * Counts how much the thread's total grew since Codex's previous report, and
  * returns the tokens counted since this process started. Returns `undefined`
  * for a report that comes before the first turn: that report is the restored
@@ -493,7 +504,7 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
  * in prose or a code fence is not the constrained output, and extracting JSON
  * from it would be guessing at an answer the model never gave.
  */
-const readHarnessAnswer = (last: ThreadItem | undefined): HarnessAnswer => {
+export const readHarnessAnswer = (last: ThreadItem | undefined): HarnessAnswer => {
   if (last?.type !== "agentMessage") {
     return { missing: "the turn ended without a final agent message" };
   }

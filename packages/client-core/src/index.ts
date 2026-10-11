@@ -180,7 +180,14 @@ export {
   type MarkdownBlock,
   type MarkdownInline,
 } from "./markdown";
-export { listWaiting, type Waiting, type WaitingAssistant, type WaitingThread } from "./waiting";
+export {
+  listWaiting,
+  listWaitingRunSessions,
+  type Waiting,
+  type WaitingAssistant,
+  type WaitingRunSession,
+  type WaitingThread,
+} from "./waiting";
 export { buildIdOptions } from "./id-options";
 export { readJsonObject, readStringList } from "./json-shape";
 export { listJsonLines } from "./json-lines";
@@ -253,6 +260,7 @@ export {
   buildBoundActionRows,
   chooseNotificationMark,
   describeProducer,
+  describeFailedBuildCount,
   describeResolution,
   formatDescribeLine,
   formatUnseenCount,
@@ -271,14 +279,17 @@ export {
   decidePluginMark,
   describeAnswerKey,
   describeBuildFailure,
+  describeNotScreened,
   describeOrchestrationSegment,
   describeResolvedElsewhere,
   describeSignalAsker,
   describeSignalOutcome,
+  describeSignalOutcomeMoment,
   describeSignalProvenance,
   describeSignalRow,
   findReplyAnswer,
   findSuggestedAnswer,
+  groupSignalsByDay,
   groupSignalsIntoSections,
   isBackFromSnooze,
   listUrgentSignals,
@@ -304,6 +315,29 @@ export {
   type SignalRaiserNames,
   type UrgentSignal,
 } from "./intake";
+export {
+  applySignalMove,
+  buildSnoozeChoices,
+  countClearedToday,
+  decideSignalPaneMoves,
+  decideSignalRowControls,
+  describeBulkDoneTitle,
+  describeDoneRowOutcome,
+  describeIntakeFoot,
+  describeMoveToast,
+  describeSnoozeLine,
+  hasDoneAction,
+  isMoveLeavingView,
+  listBulkMoves,
+  parsePickedSnoozeTime,
+  planSignalMove,
+  reachesBeforeToday,
+  SIGNAL_MOVE_LABELS,
+  toggleSignalCheck,
+  type SignalMove,
+  type SignalMovePlan,
+  type SignalPaneMove,
+} from "./intake-moves";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
@@ -391,8 +425,11 @@ export {
 } from "./onboarding";
 export {
   chooseStamps,
+  computeNextMidnight,
+  formatClock,
   formatDayStamp,
   formatPreciseStamp,
+  formatRelativeMoment,
   formatSince,
   formatStamp,
   formatTimeContext,
@@ -441,6 +478,14 @@ export {
   type SubagentNode,
 } from "./subagents/tree";
 export { resolveThreadRowsMode } from "./thread-rows";
+export {
+  buildTextGenerationField,
+  describeTextGenerationFailure,
+  describeTextGenerationModel,
+  describeTextGenerationRecap,
+  type TextGenerationChoice,
+  type TextGenerationField,
+} from "./text-generation";
 export { findTimeOfDayError, formatTimeOfDay } from "./time-of-day";
 export { countUsedTokens, describeTokenUsage } from "./token-usage";
 export { formatAccessMode, type AccessModeMenuItem } from "./threads/access-modes";

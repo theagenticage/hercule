@@ -111,7 +111,13 @@ export const AUDIT_KINDS = [
   "signal.raised",
   "signal.decided",
   "signal.withdrawn",
+  "signal.markedDone",
+  "signal.snoozed",
+  "signal.unsnoozed",
+  "signal.priorityLowered",
   "permission.requested",
+  "textGeneration.completed",
+  "textGeneration.failed",
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -181,6 +187,12 @@ const RECORD_KINDS = {
   "signal.raised": "created",
   "signal.decided": "updated",
   "signal.withdrawn": "updated",
+  // One entry of these four kinds records one move on several signals, so it
+  // names every signal the move changed.
+  "signal.markedDone": "updated",
+  "signal.snoozed": "updated",
+  "signal.unsnoozed": "updated",
+  "signal.priorityLowered": "updated",
   // The record it names is the asking session, whose list of open Permission
   // Requests gained one.
   "permission.requested": "updated",
@@ -189,12 +201,17 @@ const RECORD_KINDS = {
 type RecordAuditKind = keyof typeof RECORD_KINDS;
 
 /**
- * Which record an entry is about, in the vocabulary the live overlay uses. A
- * session also names the conversation it answers, or `null` for none, which
- * the live overlay pushes with it.
+ * Which records an entry is about, in the vocabulary the live overlay uses:
+ *
+ * - most entries name one record by its `id`;
+ * - an entry that records one change made to several records at once names
+ *   them all in `ids`;
+ * - a session also names the conversation it answers, or `null` for none,
+ *   which the live overlay pushes with it.
  */
 export type AuditRecord =
   | { readonly topic: Exclude<MutableLiveTopic, "session">; readonly id: string }
+  | { readonly topic: Exclude<MutableLiveTopic, "session">; readonly ids: ReadonlyArray<string> }
   | { readonly topic: "session"; readonly id: string; readonly conversationId: string | null };
 
 /** What every audit entry carries, whichever kind it is. */
@@ -248,9 +265,15 @@ const make = Effect.gen(function* () {
           payload: entry.payload,
           at: entry.at ?? (yield* nowIso),
         });
-        // A row about a record is also announced as a change to that record.
-        if (entry.record !== undefined) {
-          yield* announce({ _tag: "record", ...entry.record, kind: RECORD_KINDS[entry.kind] });
+        // A row about records is also announced as a change to each of them.
+        if (entry.record === undefined) return;
+        const kind = RECORD_KINDS[entry.kind];
+        if ("ids" in entry.record) {
+          for (const id of entry.record.ids) {
+            yield* announce({ _tag: "record", topic: entry.record.topic, id, kind });
+          }
+        } else {
+          yield* announce({ _tag: "record", ...entry.record, kind });
         }
       }),
   };
