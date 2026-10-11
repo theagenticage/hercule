@@ -14,7 +14,8 @@
  * - decoding the query the browser comes back with;
  * - requesting a device code, and exchanging it for tokens;
  * - requesting tokens from the token endpoint;
- * - storing a token set and deciding when it needs a refresh.
+ * - storing a token set and deciding when it needs a refresh;
+ * - refreshing a token set, as the redirect flow's client or the device flow's.
  *
  * The flows themselves (starting them, handling the callback or the poll,
  * writing the connection) are in the connection service. The refresh that a
@@ -110,10 +111,12 @@ const CLIENT_ID_FIELD = "clientId";
 const CLIENT_SECRET_NAME = "clientSecret";
 
 /**
- * A token is refreshed this long before it expires, so a call that takes a
- * moment to reach the provider does not arrive with an expired token.
+ * A token is refreshed this long before it expires. `credentials()` hands out
+ * a token that must last through the poll or action that asked for it, and a
+ * poll can take a minute or more. A token that expired halfway would get a
+ * 401, which sets `needs-reauth` for nothing.
  */
-const REFRESH_MARGIN_MS = 60_000;
+const REFRESH_MARGIN_MS = 10 * 60 * 1000;
 
 /** The tokens the provider issued, as stored in the `oauth.tokens` secret. */
 export interface TokenSet {
@@ -126,6 +129,16 @@ export interface TokenSet {
 export interface OAuthClient {
   readonly clientId: string;
   readonly clientSecret: string;
+}
+
+/**
+ * The client a refresh identifies itself as. A redirect flow's client is
+ * confidential and sends its `clientSecret`. A device flow's client is public
+ * and has none, so no `client_secret` is sent for it.
+ */
+export interface RefreshClient {
+  readonly clientId: string;
+  readonly clientSecret?: string;
 }
 
 /**
@@ -374,19 +387,23 @@ export const exchangeCode = (request: {
   });
 
 /**
- * Exchanges the refresh token for a new token set. When the response has no
- * new refresh token, the old one is still valid, and the caller keeps it.
+ * Exchanges the refresh token for a new token set. Sends the client's secret
+ * only when it has one, so a device flow's public client sends none. When the
+ * response has no new refresh token, the old one is still valid, and the
+ * caller keeps it.
  */
 export const refreshAccess = (request: {
   readonly tokenUrl: string;
-  readonly client: OAuthClient;
+  readonly client: RefreshClient;
   readonly refreshToken: string;
 }): Effect.Effect<TokenSet, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
   requestTokens(request.tokenUrl, {
     grant_type: "refresh_token",
     refresh_token: request.refreshToken,
     client_id: request.client.clientId,
-    client_secret: request.client.clientSecret,
+    ...(request.client.clientSecret === undefined
+      ? {}
+      : { client_secret: request.client.clientSecret }),
   });
 
 /** The grant type a device code is exchanged with (RFC 8628 section 3.4). */
