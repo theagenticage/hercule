@@ -149,6 +149,46 @@ describe("SnoozeTimer", () => {
     expect(Math.max(...gaps)).toBe(60_000);
   });
 
+  it("waits for a until further away than one timer can, with no read before it", async () => {
+    const thirtyDaysMs = 30 * 24 * 60 * 60_000;
+    const { reads } = renderSnoozeTimer(new Date(NOW + thirtyDaysMs).toISOString());
+
+    await act(() => vi.advanceTimersByTimeAsync(thirtyDaysMs));
+    expect(reads).toEqual([]);
+
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(reads[0]?.view).toBe("later");
+  });
+
+  it("brings back a snooze that runs out between a push's two reads, when nothing was snoozed before", async () => {
+    // Snoozed elsewhere for half a second, then a push reads To do while
+    // the signal is still on Later. The read stores the signal's until
+    // before it reads To do, so the timer reads To do again once that until
+    // has passed, though nothing was snoozed when the timer started.
+    const until = NOW + 500;
+    const { reads, queryClient } = renderSnoozeTimer(null);
+    const snoozedClient = {
+      signal: {
+        query: ({ query }: { readonly query: SignalFilter }) => {
+          reads.push({ view: query.view, at: Date.now() });
+          const snoozed = Date.now() < until;
+          if (query.view === "later") {
+            return Promise.resolve({
+              items: snoozed
+                ? [{ snooze: { until: new Date(until).toISOString() } } as Signal]
+                : [],
+            });
+          }
+          return Promise.resolve({ items: [] });
+        },
+      },
+    } as unknown as HerculeClient;
+    await act(() => queryClient.fetchQuery({ ...signalsToDoQuery(snoozedClient), staleTime: 0 }));
+
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    expect(reads.some((read) => read.view === "to-do" && read.at >= until)).toBe(true);
+  });
+
   it("reads the until again when the window gets focus after it ran out while the Mac slept", async () => {
     const { reads } = renderSnoozeTimer(new Date(NOW + FIVE_MINUTES_MS).toISOString());
 

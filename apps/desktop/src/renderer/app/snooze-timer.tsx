@@ -4,21 +4,20 @@
  *
  * The controller sends no push when a snooze runs out, because nothing is
  * written then: the signal simply belongs to To do from that moment. So the
- * app keeps one timer for the soonest `until` on Later, which the shell
- * reads as one signal (`snoozeTimerQuery`). With nothing snoozed there is no
+ * app keeps one timer for the soonest `until` on Later, which every read of
+ * To do reads first (`snoozeTimerQuery`). With nothing snoozed there is no
  * timer.
  *
- * When the timer fires, it reads the soonest `until` again. Once that read
- * returns a different `until`, the snooze has left Later, and the timer
- * reads To do and every other signal list again (spec 17 §Intake). The
- * lists are read after the `until` read, never before it, so To do cannot
- * be read a moment before the controller moves the signal and then stay
- * out of date.
+ * When the timer fires, it reads To do again, and with it the soonest
+ * `until`. Once that read returns a different `until`, the snooze has left
+ * Later, and the timer reads Later and Done again too (spec 17 §Intake).
  *
  * The controller decides with its own clock, which may run behind this
  * Mac's. While the `until` read still returns the `until` that ran out, the
  * timer reads it again after 1 s, then 2 s, 4 s and so on, up to once a
- * minute. One timer runs at a time.
+ * minute. One timer runs at a time. A `until` further away than
+ * `setTimeout` can wait is waited for in several timers, one after another,
+ * with no read between them.
  *
  * The timer also runs while the window is hidden: a signal coming back may
  * be a Now signal, whose notification must show. A timer may not count the
@@ -30,13 +29,9 @@
 import { useEffect } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { invalidateWithoutCancelling, queryKeys, type HerculeClient } from "@hercule/client-core";
-import { snoozeTimerQuery } from "./queries";
+import { signalsToDoQuery, snoozeTimerQuery } from "./queries";
 
-/**
- * The longest delay `setTimeout` keeps. A longer one runs after 1 ms
- * instead. When a timer this long fires, nothing has run out yet, the read
- * returns the same `until`, and the timer waits again.
- */
+/** The longest delay `setTimeout` keeps. A longer one runs after 1 ms instead. */
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /**
@@ -61,7 +56,7 @@ export function SnoozeTimer({ client }: { readonly client: HerculeClient }): nul
     if (until === null) return;
     const runsOutAt = Date.parse(until);
     const readUntilAgain = (): void => {
-      invalidateWithoutCancelling(queryClient, snoozeTimerQuery(client).queryKey);
+      invalidateWithoutCancelling(queryClient, signalsToDoQuery(client).queryKey);
     };
     let retryDelay = CONTROLLER_CLOCK_MARGIN_MS;
     let timer: ReturnType<typeof setTimeout>;
@@ -72,13 +67,12 @@ export function SnoozeTimer({ client }: { readonly client: HerculeClient }): nul
       timer = setTimeout(fire, retryDelay);
       retryDelay = Math.min(2 * retryDelay, MAX_RETRY_DELAY_MS);
     };
-    timer = setTimeout(
-      fire,
-      Math.min(
-        MAX_TIMER_DELAY_MS,
-        Math.max(0, runsOutAt - Date.now()) + CONTROLLER_CLOCK_MARGIN_MS,
-      ),
-    );
+    const waitForUntil = (): void => {
+      const left = runsOutAt + CONTROLLER_CLOCK_MARGIN_MS - Date.now();
+      if (left > 0) timer = setTimeout(waitForUntil, Math.min(MAX_TIMER_DELAY_MS, left));
+      else fire();
+    };
+    waitForUntil();
     const readIfRunOut = (): void => {
       if (document.visibilityState === "visible" && Date.now() >= runsOutAt) readUntilAgain();
     };
@@ -89,8 +83,8 @@ export function SnoozeTimer({ client }: { readonly client: HerculeClient }): nul
       document.removeEventListener("visibilitychange", readIfRunOut);
       window.removeEventListener("focus", readIfRunOut);
       // The `until` changed after it ran out: the snoozed signal has left
-      // Later, so To do, Later and Done are read again now. This reads the
-      // `until` once more too, which returns what it just did.
+      // Later, so Later and Done are read again now. This reads To do once
+      // more too, which returns what it just did.
       if (Date.now() >= runsOutAt) invalidateWithoutCancelling(queryClient, queryKeys.signals());
     };
   }, [client, queryClient, until]);

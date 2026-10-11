@@ -53,11 +53,15 @@ export function IntakeFoot({ timezone }: { readonly timezone: string }): JSX.Ele
   useRedrawAtMidnight(timezone);
   const now = ageClock.readNow();
   const complete = reachesBeforeToday(signals, now, timezone);
-  const { hasNextPage, isFetchingNextPage, fetchNextPage } = done;
+  const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = done;
 
+  // A page that failed is not asked for again here: the effect would retry
+  // it at once, over and over. The next push reads the pages again.
   useEffect(() => {
-    if (!complete && hasNextPage && !isFetchingNextPage) void fetchNextPage();
-  }, [complete, hasNextPage, isFetchingNextPage, fetchNextPage]);
+    if (!complete && hasNextPage && !isFetchingNextPage && !isFetchNextPageError) {
+      void fetchNextPage();
+    }
+  }, [complete, hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage]);
 
   const line = describeIntakeFoot(countClearedToday(signals, now, timezone));
   if (line === null) return null;

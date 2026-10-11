@@ -146,17 +146,14 @@ const applyMoveToCache = (
   );
   queryClient.setQueriesData<InfiniteData<SignalPage>>(
     { predicate: (query) => isViewQuery(query.queryKey, "later") },
-    // The snooze timer's read is under Later too, and holds a time, not pages.
     (data) =>
-      data?.pages === undefined
-        ? data
-        : {
-            ...data,
-            pages: data.pages.map((page) => ({
-              ...page,
-              items: [...applySignalMove(page.items, "later", move, movedIds)],
-            })),
-          },
+      data && {
+        ...data,
+        pages: data.pages.map((page) => ({
+          ...page,
+          items: [...applySignalMove(page.items, "later", move, movedIds)],
+        })),
+      },
   );
 };
 

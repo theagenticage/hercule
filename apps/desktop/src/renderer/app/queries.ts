@@ -405,16 +405,29 @@ export const assistantsQuery = (client: HerculeClient) =>
     ...SHELL_READ_OPTIONS,
   });
 
+/** The key of the soonest `until` on Later, which each read of To do writes. See `snoozeTimerQuery`. */
+const SNOOZE_TIMER_KEY = ["snooze-timer"] as const;
+
 /**
  * Reads Intake's To do list: every open signal that is not snoozed, read
  * whole, because every client counts it. The Hercule segment's count and
  * Intake's list both come from it, and a push on the `signal` topic reads it
  * again.
+ *
+ * Each read first reads the soonest `until` on Later and stores it for the
+ * snooze timer. Read in that order, a snooze that runs out between the two
+ * reads is missing from To do but still sets the timer, which reads To do
+ * again once it has run out. Read in the other order, or apart, that snooze
+ * could be missing from both, and To do would stay without it.
  */
 export const signalsToDoQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.signals({ view: "to-do" }),
-    queryFn: () => client.signal.query({ query: { view: "to-do" } }).then((page) => page.items),
+    queryFn: async ({ client: queryClient }) => {
+      const soonest = await client.signal.query({ query: { view: "later", limit: 1 } });
+      queryClient.setQueryData(SNOOZE_TIMER_KEY, soonest.items[0]?.snooze?.until ?? null);
+      return (await client.signal.query({ query: { view: "to-do" } })).items;
+    },
     ...SHELL_READ_OPTIONS,
   });
 
@@ -435,19 +448,19 @@ export const signalsLaterQuery = (client: HerculeClient, source?: string) =>
   });
 
 /**
- * Reads the soonest `until` on Later, or `null` when nothing is snoozed: one
- * signal, the first of Later, which is sorted soonest snooze first. The
- * snooze timer waits for that time on every screen (see `SnoozeTimer`), so
- * this is a shell read. Its key sits under the `signals` prefix, so a push
- * on the `signal` topic reads it again.
+ * Returns the soonest `until` on Later, or `null` when nothing is snoozed,
+ * as the last read of To do stored it (see `signalsToDoQuery`). The snooze
+ * timer waits for that time on every screen (see `SnoozeTimer`), so this is
+ * a shell read. It reads To do when To do has not been read yet, and never
+ * reads Later on its own.
  */
 export const snoozeTimerQuery = (client: HerculeClient) =>
   queryOptions({
-    queryKey: queryKeys.signals({ view: "later", limit: 1 }),
-    queryFn: () =>
-      client.signal
-        .query({ query: { view: "later", limit: 1 } })
-        .then((page) => page.items[0]?.snooze?.until ?? null),
+    queryKey: SNOOZE_TIMER_KEY,
+    queryFn: async ({ client: queryClient }): Promise<string | null> => {
+      await queryClient.fetchQuery(signalsToDoQuery(client));
+      return queryClient.getQueryData<string | null>(SNOOZE_TIMER_KEY) ?? null;
+    },
     ...SHELL_READ_OPTIONS,
   });
 
