@@ -3,11 +3,11 @@
  * stubbed. The fixtures were captured from the real CLI, version 2.1.263; they
  * are not invented.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Fiber, Stream } from "effect";
+import { Duration, Effect, Fiber, Option, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
   Options,
@@ -3141,7 +3141,7 @@ describe("a text generation", () => {
   const TITLE = { title: "Fix flaky login test", needsRefinement: false };
 
   const GENERATION: TextGenerationSpec = {
-    model: { model: "haiku", options: {} },
+    model: "haiku",
     instructions: "Write a short title for the user's message.",
     input: "fix the flaky login test",
     outputSchema: TITLE_SCHEMA,
@@ -3151,16 +3151,16 @@ describe("a text generation", () => {
   interface Query {
     readonly options: Options;
     readonly messages: Array<SDKUserMessage>;
-    readonly scratchExistedDuringQuery: () => boolean;
     readonly closes: () => number;
   }
 
   /**
    * Builds an adapter whose harness answers a text generation with `answer`:
-   * the messages it yields, or an error it throws instead.
+   * the messages it yields, an error it throws instead, or `"hangs"` for a
+   * harness that never answers.
    */
   const createGenerating = (
-    answer: ReadonlyArray<unknown> | Error,
+    answer: ReadonlyArray<unknown> | Error | "hangs",
   ): { readonly adapter: ProviderAdapter; readonly queries: Array<Query> } => {
     const queries: Array<Query> = [];
     const seam: ClaudeSeam = {
@@ -3170,17 +3170,11 @@ describe("a text generation", () => {
       stream: ({ options, input }) => {
         let closes = 0;
         const messages: Array<SDKUserMessage> = [];
-        let scratchExisted = false;
-        queries.push({
-          options,
-          messages,
-          scratchExistedDuringQuery: () => scratchExisted,
-          closes: () => closes,
-        });
+        queries.push({ options, messages, closes: () => closes });
         return {
           async *[Symbol.asyncIterator]() {
             for await (const message of input) messages.push(message);
-            scratchExisted = options.cwd !== undefined && existsSync(options.cwd);
+            if (answer === "hangs") await new Promise<never>(() => undefined);
             if (answer instanceof Error) throw answer;
             for (const message of answer) yield message as SDKMessage;
           },
@@ -3201,7 +3195,12 @@ describe("a text generation", () => {
     adapter: ProviderAdapter,
     context: ProviderRunnerContext = CONTEXT,
   ): Promise<TextGenerationOutcome> =>
-    Effect.runPromise(adapter.generateText(context, {}, GENERATION));
+    Effect.runPromise(
+      Effect.catch(
+        adapter.generateText(testing.buildTextGenerationContext(context), {}, GENERATION),
+        (message) => Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
+      ),
+    );
 
   it("returns the structured output with the usage when it matches the schema", async () => {
     const { adapter } = createGenerating([{ ...RESULT, structured_output: TITLE }]);
@@ -3298,15 +3297,6 @@ describe("a text generation", () => {
         message: expect.stringMatching(/\S/) as string,
       });
     });
-
-    it("fails without starting a harness when the machine has no claude", async () => {
-      const { adapter, queries } = createGenerating([]);
-
-      const outcome = await generate(adapter, { ...CONTEXT, binary: undefined });
-
-      expect(outcome.outcome).toBe("failed");
-      expect(queries).toHaveLength(0);
-    });
   });
 
   describe("the harness it starts", () => {
@@ -3357,34 +3347,34 @@ describe("a text generation", () => {
       });
     });
 
-    it("runs in an empty scratch directory that is removed afterwards", async () => {
+    it("runs in the scratch directory the runner made for the call", async () => {
       const { adapter, queries } = createGenerating([{ ...RESULT, structured_output: TITLE }]);
-      await generate(adapter);
+      const ctx = testing.buildTextGenerationContext(CONTEXT);
+      await Effect.runPromise(adapter.generateText(ctx, {}, GENERATION));
 
-      const query = queries[0]!;
-      const cwd = query.options.cwd!;
-      expect(cwd).not.toBe(CONTEXT.cwd);
-      expect(query.scratchExistedDuringQuery()).toBe(true);
-      expect(existsSync(cwd)).toBe(false);
-    });
-
-    it("gets a different scratch directory for each call", async () => {
-      const { adapter, queries } = createGenerating([{ ...RESULT, structured_output: TITLE }]);
-      await generate(adapter);
-      await generate(adapter);
-
-      expect(queries[0]!.options.cwd).not.toBe(queries[1]!.options.cwd);
+      expect(queries[0]!.options.cwd).toBe(ctx.cwd);
     });
 
     it.each([
       ["answers", [{ ...RESULT, structured_output: TITLE }]],
       ["fails", new Error("boom")],
-    ])("is closed, and the scratch directory removed, when it %s", async (_, answer) => {
+    ])("is closed when it %s", async (_, answer) => {
       const { adapter, queries } = createGenerating(answer);
       await generate(adapter);
 
       expect(queries[0]!.closes()).toBe(1);
-      expect(existsSync(queries[0]!.options.cwd!)).toBe(false);
+    });
+
+    it("is closed when the caller gives up on a harness that never answers", async () => {
+      const { adapter, queries } = createGenerating("hangs");
+      const outcome = await Effect.runPromise(
+        adapter
+          .generateText(testing.buildTextGenerationContext(CONTEXT), {}, GENERATION)
+          .pipe(Effect.timeoutOption("50 millis")),
+      );
+
+      expect(Option.isNone(outcome)).toBe(true);
+      expect(queries[0]!.closes()).toBe(1);
     });
   });
 });

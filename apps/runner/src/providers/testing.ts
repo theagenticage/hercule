@@ -19,7 +19,12 @@ import { expect } from "vitest";
 import * as Effect from "effect/Effect";
 import type { ProviderEvent } from "@hercule/protocol";
 import type { AttachmentUploader } from "../attachments";
-import type { LocalAttachment, UserMaterial } from "./index";
+import type {
+  LocalAttachment,
+  ProviderRunnerContext,
+  TextGenerationContext,
+  UserMaterial,
+} from "./index";
 
 const homes: Array<string> = [];
 
@@ -37,6 +42,17 @@ export const createScratchHome = (label: string): string => {
   homes.push(home);
   return home;
 };
+
+/**
+ * Returns the context of a text generation made from `ctx`: the runner has
+ * found the binary and made an empty scratch directory for the call. The
+ * directory is removed by `cleanupHomes`, because an adapter never removes it.
+ */
+export const buildTextGenerationContext = (ctx: ProviderRunnerContext): TextGenerationContext => ({
+  ...ctx,
+  binary: ctx.binary ?? "/usr/local/bin/harness",
+  cwd: createScratchHome("text-generation"),
+});
 
 /** The native session id a test resumes. `CWD` is the directory that session ran in. */
 export const PRIOR = "0199e0e7-0000-7000-8000-0000000000fa";

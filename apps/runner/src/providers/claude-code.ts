@@ -7,9 +7,6 @@
  * page. The adapter uses only the instance's own config directory, never the
  * user's `~/.claude`.
  */
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -67,7 +64,12 @@ import {
 import type { AttachmentUploader } from "../attachments";
 import { readAttachmentBase64 } from "./attachments";
 import { replaceToolResultImages } from "./claude-code-tool-result-images";
-import type { AdapterTurnInput, ProviderAdapter, ProviderRunnerContext } from "./index";
+import type {
+  AdapterTurnInput,
+  ProviderAdapter,
+  ProviderRunnerContext,
+  TextGenerationContext,
+} from "./index";
 import { makeInstall } from "./install";
 import { PROBE_DEADLINE, buildFailedProbe } from "./probe";
 import type { LoginCommand } from "./login";
@@ -508,23 +510,21 @@ const TEXT_GENERATION_MAX_TURNS = 2;
  * - the cheapest reasoning. Some models still think a little with thinking
  *   disabled, so the lowest effort is set as well.
  *
- * `scratch` is the empty directory the harness runs in.
+ * The harness runs in `ctx.cwd`, the empty scratch directory of this call.
  */
 const buildTextGenerationOptions = (
-  ctx: ProviderRunnerContext,
+  ctx: TextGenerationContext,
   spec: TextGenerationSpec,
-  binary: string,
-  scratch: string,
 ): Options => ({
-  pathToClaudeCodeExecutable: binary,
-  cwd: scratch,
+  pathToClaudeCodeExecutable: ctx.binary,
+  cwd: ctx.cwd,
   tools: [],
   systemPrompt: spec.instructions,
   outputFormat: { type: "json_schema", schema: spec.outputSchema },
   persistSession: false,
   settingSources: [],
   strictMcpConfig: true,
-  model: spec.model.model,
+  model: spec.model,
   thinking: { type: "disabled" },
   effort: "low",
   maxTurns: TEXT_GENERATION_MAX_TURNS,
@@ -1287,52 +1287,28 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),
     // The config is empty for every shipped provider, so it is not read.
-    generateText: (
-      ctx: ProviderRunnerContext,
-      _config: unknown,
-      spec: TextGenerationSpec,
-    ): Effect.Effect<TextGenerationOutcome> => {
-      const binary = ctx.binary;
-      if (binary === undefined) {
-        return Effect.succeed({
-          outcome: "failed",
-          message: `no ${CLAUDE_BINARY} on this machine`,
-        });
-      }
-      // The harness is closed before its working directory is removed, so
-      // nothing is still writing into the directory.
-      const generate = Effect.acquireUseRelease(
-        Effect.tryPromise({
-          try: () => mkdtemp(join(tmpdir(), "hercule-text-generation-")),
+    generateText: (ctx, _config, spec) =>
+      // The harness is closed before the runner removes its working
+      // directory, so nothing is still writing into the directory.
+      Effect.acquireUseRelease(
+        Effect.try({
+          try: () =>
+            seam.stream({
+              options: buildTextGenerationOptions(ctx, spec),
+              input: buildTextGenerationInput(spec.input),
+            }),
           catch: describeError,
         }),
-        (scratch) =>
-          Effect.acquireUseRelease(
-            Effect.try({
-              try: () =>
-                seam.stream({
-                  options: buildTextGenerationOptions(ctx, spec, binary, scratch),
-                  input: buildTextGenerationInput(spec.input),
-                }),
-              catch: describeError,
-            }),
-            (stream) =>
-              Effect.map(
-                Effect.tryPromise({ try: () => readQueryResult(stream), catch: describeError }),
-                (result): TextGenerationOutcome =>
-                  result === undefined
-                    ? { outcome: "failed", message: "the harness ended without an answer" }
-                    : decideTextGenerationOutcome(spec.outputSchema, result),
-              ),
-            (stream) => Effect.sync(() => stream.close()),
+        (stream) =>
+          Effect.map(
+            Effect.tryPromise({ try: () => readQueryResult(stream), catch: describeError }),
+            (result): TextGenerationOutcome =>
+              result === undefined
+                ? { outcome: "failed", message: "the harness ended without an answer" }
+                : decideTextGenerationOutcome(spec.outputSchema, result),
           ),
-        (scratch) => Effect.promise(() => rm(scratch, { recursive: true, force: true })),
-      );
-      return Effect.match(generate, {
-        onFailure: (message): TextGenerationOutcome => ({ outcome: "failed", message }),
-        onSuccess: (outcome) => outcome,
-      });
-    },
+        (stream) => Effect.sync(() => stream.close()),
+      ),
 
     // Every shipped provider's config schema is empty, so the Claude adapter
     // does not read the config and leaves out that parameter.

@@ -7,8 +7,7 @@
  * controller's local runner, which also reads the user's own skills, prompt
  * templates and instructions, each named on its command line.
  */
-import { mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -38,6 +37,7 @@ import type {
   LocalAttachment,
   ProviderAdapter,
   ProviderRunnerContext,
+  TextGenerationContext,
   UserMaterial,
 } from "../index";
 import { readAttachmentBase64 } from "../attachments";
@@ -70,7 +70,7 @@ import {
   type RunningTool,
 } from "./normalize";
 import { DEFAULT_THINKING, makePiInstall, makeProbe, ZAI } from "./probe";
-import { makeRpc, PI_GONE, type PiChild, type PiRpc, type PiSpawn } from "./rpc";
+import { describeError, makeRpc, PI_GONE, type PiChild, type PiRpc, type PiSpawn } from "./rpc";
 
 export const PI = "pi";
 
@@ -146,9 +146,6 @@ interface Subagent extends RunningAgent {
   /** The item id of that call in the parent's transcript. */
   readonly toolCallItemId: string;
 }
-
-const describeError = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 const isSubagent = (agent: RunningAgent): agent is Subagent => "parent" in agent;
 
@@ -667,12 +664,36 @@ const buildTextGenerationArgv = (
   "-e",
   extensionFile,
   "--model",
-  `${ZAI}/${spec.model.model}`,
+  `${ZAI}/${spec.model}`,
   "--thinking",
   "off",
   "--system-prompt",
   instructionsFile,
 ];
+
+/**
+ * Checks a line pi wrote during a text generation. Returns why the call must
+ * fail at once, or undefined when the line breaks no rule. A text generation
+ * allows one tool, `submit_result`, and has nobody to ask, so these end it:
+ *
+ * - the model starts a call to any other tool;
+ * - pi asks for approval of a call, which can only be a call to another tool,
+ *   because `submit_result` is never asked about (see `requiresApproval`).
+ *
+ * pi is started with its other tools removed, so this is a second check: a pi
+ * that did not honor the flags is stopped here, before it can run anything.
+ */
+const findTextGenerationViolation = (frame: unknown): string | undefined => {
+  if (typeof frame !== "object" || frame === null) return undefined;
+  const event = frame as Record<string, unknown>;
+  if (event["type"] === "tool_execution_start" && event["toolName"] !== SUBMIT_RESULT_TOOL) {
+    const name = typeof event["toolName"] === "string" ? truncateFact(event["toolName"]) : "(none)";
+    return `the model tried to use the tool ${name}, and a text generation allows only ${SUBMIT_RESULT_TOOL}`;
+  }
+  return parseDialog(frame) === undefined
+    ? undefined
+    : `pi asked for approval, and a text generation allows only ${SUBMIT_RESULT_TOOL} and has nobody to ask`;
+};
 
 /**
  * Decides how a text generation ended from the turn that pi's one prompt
@@ -881,7 +902,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * nothing when the subagent has already ended. For the subagent it:
    *
    * - cancels its open approvals;
-   * - ends its turn as `ended` says, when the turn is still open;
+   * - ends its turn with the outcome `ended` gives, when the turn is still open;
    * - sends `reply` to its parent, unless `reply` is undefined because the
    *   parent's call no longer waits for one;
    * - closes its pi process.
@@ -1021,7 +1042,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       Effect.catch(subagent.rpc.send({ type: "prompt", message: dialog.prompt }), (error) =>
         Effect.sync(() => {
           // A pi that exited is reported by `watchChild`, with its stderr as
-          // the reason, which says more than this error does.
+          // the reason, which tells more than this error does.
           if (error === PI_GONE) return;
           endSubagent(
             held,
@@ -1425,41 +1446,46 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     });
 
   /**
-   * Runs one text generation in the `scratch` directory and returns how it
-   * ended. Fails with a message when pi cannot be started or refuses the
-   * prompt. The pi gets the instructions as its system prompt and the input as
-   * its one prompt, and this waits for the turn to end. The pi is killed when
-   * this finishes or is interrupted.
+   * Runs one text generation in the call's scratch directory, `ctx.cwd`, and
+   * returns how it ended. Fails with a message when pi cannot be started or
+   * refuses the prompt. The pi gets the instructions as its system prompt and
+   * the input as its one prompt, and this waits for the turn to end. The pi is
+   * killed when this finishes or is interrupted.
+   *
+   * The call fails at once when the model uses a tool other than
+   * `submit_result` or pi asks for an approval (see
+   * `findTextGenerationViolation`).
    *
    * The turn is read with the same normalizer as a session, so the answer,
    * the usage and the schema check are the ones a session with an output
    * schema gets. Unlike a session, the turn is not re-prompted when pi
    * settles without an answer: that is reported as invalid output.
    */
-  const runTextGeneration = (
-    ctx: ProviderRunnerContext,
-    binary: string,
+  const generateText = (
+    ctx: TextGenerationContext,
     spec: TextGenerationSpec,
-    scratch: string,
   ): Effect.Effect<TextGenerationOutcome, string> =>
     Effect.acquireUseRelease(
       Effect.try({
         try: () => {
-          const extensionFile = join(scratch, "extension.ts");
-          const instructionsFile = join(scratch, "instructions.txt");
+          const extensionFile = join(ctx.cwd, "extension.ts");
+          const instructionsFile = join(ctx.cwd, "instructions.txt");
           writeFileSync(instructionsFile, spec.instructions, { mode: 0o600 });
           return spawnAgent(
-            [binary, ...buildTextGenerationArgv(spec, extensionFile, instructionsFile)],
+            [ctx.binary, ...buildTextGenerationArgv(spec, extensionFile, instructionsFile)],
             buildEnv(ctx, {
               // pi writes bookkeeping files into its agent directory even with
               // `--no-session`. Pointing it at the scratch directory keeps
               // them out of the instance's home, and removes them with the
               // call. The key comes from the environment, not from this
               // directory.
-              PI_CODING_AGENT_DIR: scratch,
-              // Full access registers no approval hook, so the `submit_result`
-              // call cannot wait for an approval nobody will answer.
-              [ACCESS_MODE_VARIABLE]: "full-access",
+              PI_CODING_AGENT_DIR: ctx.cwd,
+              // The approval hook never asks about `submit_result`, so the
+              // answer does not wait. It asks about every other tool, and
+              // such a request fails the call (see
+              // `findTextGenerationViolation`). Full access would instead run
+              // a tool that pi kept by mistake, without asking.
+              [ACCESS_MODE_VARIABLE]: "approval-required",
               [AGENT_FILE_VARIABLE]: extensionFile,
               [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(spec.outputSchema),
               // Given as undefined so `buildEnv` removes them, in case the
@@ -1469,7 +1495,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
             }),
             // pi's working directory. It is the scratch directory, never a
             // workspace, so a call can neither see nor change the user's files.
-            scratch,
+            ctx.cwd,
             extensionFile,
           );
         },
@@ -1495,6 +1521,14 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           const agent: RunningAgent = {
             child,
             rpc: makeRpc(child, (line, frame) => {
+              const violation = findTextGenerationViolation(frame);
+              if (violation !== undefined) {
+                Deferred.doneUnsafe(
+                  settled,
+                  Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message: violation }),
+                );
+                return;
+              }
               for (const event of normalize(agent.state, line, frame)) {
                 if (event._tag === "turn.completed") {
                   Deferred.doneUnsafe(settled, Effect.succeed(decideTextGenerationOutcome(event)));
@@ -1536,7 +1570,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           );
           yield* Effect.catch(agent.rpc.send({ type: "prompt", message: spec.input }), (error) =>
             // A pi that already exited is reported below with its error output,
-            // which says more than this error does.
+            // which tells more than this error does.
             error === PI_GONE ? Effect.void : Effect.fail(error),
           );
           return yield* Deferred.await(settled);
@@ -1803,35 +1837,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
-    generateText: (ctx, _config, spec) => {
-      const binary = ctx.binary;
-      if (binary === undefined) {
-        return Effect.succeed<TextGenerationOutcome>({
-          outcome: "failed",
-          message: `no ${PI_BINARY} on this machine`,
-        });
-      }
-      // The scratch directory is pi's working directory and holds its copy of
-      // the extension and the instructions. It is removed after pi is killed,
-      // whichever way the call ends, so nothing of the call stays on the
-      // machine.
-      return Effect.acquireUseRelease(
-        Effect.try({
-          try: () => mkdtempSync(join(tmpdir(), "hercule-text-generation-")),
-          catch: describeError,
-        }),
-        (scratch) => runTextGeneration(ctx, binary, spec, scratch),
-        (scratch) =>
-          Effect.sync(() => attempt(() => rmSync(scratch, { recursive: true, force: true }))),
-      ).pipe(
-        Effect.catch((message) =>
-          Effect.succeed<TextGenerationOutcome>({
-            outcome: "failed",
-            message: truncateMessage(message),
-          }),
-        ),
-      );
-    },
+    generateText: (ctx, _config, spec) => generateText(ctx, spec),
 
     install: makePiInstall(seam.run),
   };
