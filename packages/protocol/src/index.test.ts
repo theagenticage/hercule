@@ -210,6 +210,11 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
     outcome: { status: "completed", output: { sha: "4b825dc6", branch: "main", committed: true } },
   },
   { _tag: "workspaceStepsReport", steps: [STEP_KEY] },
+  {
+    _tag: "textGenerationReport",
+    requestId: REQUEST_ID,
+    outcome: { outcome: "ok", value: { title: "Fix the login bug" }, usage: null },
+  },
   { _tag: "goodbye" },
 ];
 
@@ -310,6 +315,25 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     _tag: "forwardingPointer",
     newAddress: "https://controller-b.example:4937",
     signature: "dGVzdC1zaWduYXR1cmU=",
+  },
+  {
+    _tag: "textGenerationRequest",
+    requestId: REQUEST_ID,
+    instanceId: INSTANCE_ID,
+    providerId: "claude-code",
+    config: {},
+    secrets: {},
+    spec: {
+      model: { model: "haiku", options: {} },
+      instructions: "Write a short title for this message.",
+      input: "fix the login bug",
+      outputSchema: {
+        type: "object",
+        properties: { title: { type: "string" } },
+        required: ["title"],
+        additionalProperties: false,
+      },
+    },
   },
 ];
 

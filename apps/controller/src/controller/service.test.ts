@@ -80,6 +80,7 @@ describe("controller.read", () => {
       "id",
       "localRunnerId",
       "publicKey",
+      "textGeneration",
       "version",
     ]);
   });
