@@ -18,7 +18,7 @@ These facts back the Sentry plugin's spec. They come from Sentry's documentation
 - **The token is limited to one organization**, the one the user picks on the approval page: "The access token only provides access to the specific organization the user selected during the OAuth flow" ([Sentry API authentication](https://docs.sentry.io/api/auth/)). `GET /api/0/organizations/` listed one organization. The approving user belongs to one organization, so the recording does not prove this; the documentation does.
 - **Refresh needs no client secret.** `POST https://sentry.io/oauth/token/` with `client_id`, `grant_type=refresh_token` and `refresh_token` returns a new token set of the same shape. Recorded.
 - **Refresh rotates both tokens at once.** Right after a refresh, the old access token gets 401 and the old refresh token gets 400. Recorded. So two refreshes that race lose the Connection: the refresh must run once at a time per Connection, and the new token set must be stored before anything uses it.
-- **Who signed in** comes from the token response's `user`. `GET /api/0/users/me/` answers 404 on the region host.
+- **Who signed in** comes from the token response's `user`, or from `GET /api/0/organizations/{org}/members/me/`, whose `user` holds `id`, `username` and `email`. That one works for a pasted token too. `GET /api/0/users/me/` and `GET /api/0/auth/` answer 404 on the region host.
 
 ## Hosts
 
@@ -41,7 +41,8 @@ These facts back the Sentry plugin's spec. They come from Sentry's documentation
 | `GET /api/0/teams/{org}/{team}/projects/` | a team's projects | `id`, `slug`, `name` |
 | `GET /api/0/organizations/{org}/projects/` | every project | `id`, `slug`, `name`, `teams` |
 | `GET /api/0/organizations/{org}/environments/` | every environment | `id`, `name` |
-| `GET /api/0/organizations/{org}/members/` | every member | `id`, `email`, `name`, `user` |
+| `GET /api/0/organizations/{org}/members/` | every member | `id`, `email`, `name`, `user` (`id`, `username`) |
+| `GET /api/0/organizations/{org}/members/me/` | the signed-in member | as above |
 
 All recorded.
 
@@ -51,7 +52,9 @@ All recorded.
 
 - `query`: Sentry search syntax. Tokens that worked:
   - `is:unresolved`, `is:resolved`, `is:archived`, `is:regressed`, `is:escalating`
-  - `assigned:[me, my_teams]`, `assigned:#<team-slug>`, `assigned:<email>`
+  - `assigned:me`, `assigned:my_teams`, `assigned:none` (no assignee), `assigned:#<team-slug>`, `assigned:<username>`
+  - a list in brackets is OR'd: `assigned:[me, my_teams, none, #<team-slug>, <username>]` returned the union of each value alone
+  - a user is matched by `user.username`, not by email: `assigned:<email>` returned nothing for a user whose username is not their email, and `assigned:<user id>` returned nothing either
   - `lastSeen:-90d`, and an absolute time, `lastSeen:>2026-10-01T00:00:00`
   - `environment:<name>`, inside the query
 - `environment`: repeat it for more than one. Repeated values are OR'd: two environments returned the union of each alone.

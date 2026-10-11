@@ -453,7 +453,7 @@ This section owns what a signal means: the record, how it is raised, its actions
 
 - the operations, their grants, inputs, refusals and CLI rows: [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, [`signal`](./11-public-api-and-agent-surface.md#signal), [`ignoreRule`](./11-public-api-and-agent-surface.md#ignorerule) and [`event`](./11-public-api-and-agent-surface.md#event);
 - what a plugin declares for its signal kinds and actions: [./05-plugins.md](./05-plugins.md) [section 4.3](./05-plugins.md#43-event-source) and [section 4.4](./05-plugins.md#44-workflow-action); the Intake settings' switches and levels: [section 8.2](./05-plugins.md#82-intake-settings);
-- each v1 kind's priority, rule, match fields, ends, actions and blocks: [./08-events-and-connections.md](./08-events-and-connections.md) [section 5.1](./08-events-and-connections.md#51-github-plugin) (GitHub) and [section 5.2](./08-events-and-connections.md#52-gmail-plugin) (Gmail);
+- each v1 kind's priority, rule, match fields, ends, actions and blocks: [./08-events-and-connections.md](./08-events-and-connections.md) [section 5.1](./08-events-and-connections.md#51-github-plugin) (GitHub), [section 5.2](./08-events-and-connections.md#52-gmail-plugin) (Gmail) and [section 5.6](./08-events-and-connections.md#56-sentry-plugin) (Sentry);
 - the tables (snooze, screenings, Ignore Rule catches) and retention: [./04-state-store.md](./04-state-store.md#event-log-as-audit-log-and-retention);
 - the screen: [./17-desktop-app.md](./17-desktop-app.md#intake).
 
@@ -686,7 +686,7 @@ interface Checks {           // failed and pending checks are rows; passing ones
 - **As text.** Agents read blocks as JSON through `signal.read`. The CLI turns them into text with one function in `@hercule/client-core`.
 - **Images.** Markdown images and `Person.avatarUrl` load inline, only for the open signal. Both apps' CSP allows `img-src https:` for this, a relaxation recorded with its costs in [Content from untrusted sources: images, tracking and the CSP (#503)](https://github.com/theagenticage/hercule/issues/503).
 
-Which blocks each v1 plugin kind fills is in [./08-events-and-connections.md](./08-events-and-connections.md#51-github-plugin) section 5.1 and [section 5.2](./08-events-and-connections.md#52-gmail-plugin). The core kinds carry a `text` block, and a `signal.raise` caller may add any other block.
+Which blocks each v1 plugin kind fills is in [./08-events-and-connections.md](./08-events-and-connections.md#51-github-plugin) section 5.1, [section 5.2](./08-events-and-connections.md#52-gmail-plugin) and [section 5.6](./08-events-and-connections.md#56-sentry-plugin). The core kinds carry a `text` block, and a `signal.raise` caller may add any other block.
 
 ### 9.6 When a signal leaves
 
@@ -706,7 +706,7 @@ Which blocks each v1 plugin kind fills is in [./08-events-and-connections.md](./
 
 **Ends on the source.**
 
-- Each plugin kind declares its ends: `{ eventKind, condition?, decided | withdrawn, outcome, actionId? }`, where `outcome` is a CEL string ([./05-plugins.md](./05-plugins.md#43-event-source); the v1 ends are in [./08-events-and-connections.md](./08-events-and-connections.md#51-github-plugin) section 5.1 and [section 5.2](./08-events-and-connections.md#52-gmail-plugin)).
+- Each plugin kind declares its ends: `{ eventKind, condition?, decided | withdrawn, outcome, actionId? }`, where `outcome` is a CEL string ([./05-plugins.md](./05-plugins.md#43-event-source); the v1 ends are in [./08-events-and-connections.md](./08-events-and-connections.md#51-github-plugin) section 5.1, [section 5.2](./08-events-and-connections.md#52-gmail-plugin) and [section 5.6](./08-events-and-connections.md#56-sentry-plugin)).
 - In the ingest transaction, the core matches each event from a Connection to the open signals on the same thread and resolves the ones whose end it meets. The check runs on every event from the Connection, whatever the switches: `github.pr.review-submitted` raises no signal, but it ends one. Nothing polls in the core.
 - An end is stamped actor `system`, origin `core`. `resolution.eventId` holds the ending event. `actionId` is set only when the kind maps the end to one of its answers (an approval on GitHub to the Approve answer).
 - **Only the answer itself counts as the user's move.** A move on the source that is not the answer the signal asks for (moving a ticket to In Progress, a PR comment that is not a review) ends nothing. A teammate's review on a team review request is not an end either; the pane shows it as context. The test for `withdrawn` is that no move is asked of the user any more.
