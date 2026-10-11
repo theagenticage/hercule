@@ -23,6 +23,28 @@ export type Id = Schema.Schema.Type<typeof Id>;
 export const isId = Schema.is(Id);
 
 /**
+ * The word a session writes in place of its own session id. An agent binds
+ * `session.input` to itself this way to get the user's answer back as its
+ * next input, and filters `transcript.query` by `actor: "me"` to find what the
+ * sessions it created said. The controller replaces it with the session's id.
+ */
+export const OWN_SESSION_ALIAS = "me";
+
+/**
+ * The word a session writes in place of an id to name the Agent or the
+ * assistant it runs as. The controller replaces it with that id; a user
+ * credential, or a session that runs as no Agent, gets a `validation` error.
+ * It is the same word as `OWN_SESSION_ALIAS`; the two are kept apart because
+ * they resolve to different ids.
+ */
+export const OWN_AGENT_ALIAS = "me";
+
+/** An id, or `me` for the calling session's own Agent or assistant. */
+export const IdOrMe = Schema.Union([Id, Schema.Literal(OWN_AGENT_ALIAS)]);
+
+export type IdOrMe = Schema.Schema.Type<typeof IdOrMe>;
+
+/**
  * Who performed an operation. The controller derives it from the credential;
  * the caller never supplies it. It will be widened when multi-user support
  * arrives, never restructured.

@@ -16,7 +16,9 @@
  *
  * Every assistant gets its main conversation in the transaction that creates
  * it, so every app has a conversation to open from the start. The record
- * names it in `mainConversationId`.
+ * names it in `mainConversationId`. Its memory's `core` document is seeded
+ * empty in the same transaction, because every session of the assistant
+ * starts with it.
  *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract.
@@ -34,6 +36,7 @@ import {
   AssistantUpdateInput,
   DEFAULT_PAGE_LIMIT,
   Id,
+  MEMORY_CORE,
   createDecodeValidationError,
   createInvalidStateError,
   createNotFoundError,
@@ -65,6 +68,7 @@ import {
   withTransaction,
 } from "../db";
 import { AuditLog } from "../events";
+import { memoryRepository } from "../memory";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository } from "../providers";
@@ -175,6 +179,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const agents = yield* agentRepository;
   const assistants = yield* assistantRepository;
+  const memory = yield* memoryRepository;
   const instances = yield* providerRepository;
   const host = yield* PluginHost;
   const profiles = yield* PermissionProfiles;
@@ -387,6 +392,15 @@ const make = Effect.gen(function* () {
               channel: "web",
               containerKey: null,
             });
+            yield* memory.insert({
+              assistantId: agent.id,
+              name: MEMORY_CORE,
+              gist: "",
+              body: "",
+              size: 0,
+              at,
+              actor: yield* currentStamp,
+            });
             yield* nudge(agent.id, "created");
             yield* audit.append({
               kind: "assistant.created",
@@ -468,7 +482,9 @@ const make = Effect.gen(function* () {
     /**
      * Deletes an assistant, its agent row, its conversations and their
      * messages, in one transaction, and cancels any input still waiting on
-     * its sessions. Its sessions and their transcripts stay, as history.
+     * its sessions. Its memory goes with it, through the foreign key from
+     * each memory document. Its sessions and their transcripts stay, as
+     * history.
      *
      * Every session of its conversations that has not exited is stopped
      * once the transaction commits, and the delete does not wait for the

@@ -31,6 +31,7 @@ const AGENT: Actor = {
   grants: ["session.read"],
   profileGrants: ["session.read"],
   assistantId: null,
+  agentId: null,
 };
 
 const FIVE_MINUTES = 5 * 60_000;

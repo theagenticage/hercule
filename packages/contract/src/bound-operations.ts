@@ -93,14 +93,6 @@ export const dispatchBindableOperation = <R>(
   return handler(operation.input);
 };
 
-/**
- * The session id a session writes in an answer's input to name itself. An
- * agent binds `session.input` to itself this way to get the user's answer
- * back as its next input, without having to know its own id. The core
- * replaces it with the session's id before it checks and stores the answer.
- */
-export const OWN_SESSION_ALIAS = "me";
-
 /** Checks whether an operation id is one an answer may run. */
 const isBindableOperationId = (op: string): op is BindableOperationId =>
   Object.hasOwn(BINDABLE_OPERATIONS, op);

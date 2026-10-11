@@ -2,18 +2,25 @@
  * Tests Settings > Assistants: New assistant creates one and picks it, a
  * changed field saves only that field, built onto the stored assistant,
  * Delete asks first, and a failed save puts the field back and shows why
- * under its row.
+ * under its row. The Memory column shows the picked assistant's memory, and
+ * New topic creates a topic and opens its page.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describeWhenAssistantChangesApply } from "@hercule/client-core";
-import type { Assistant, AssistantUpdateInput, Profile } from "@hercule/contract";
+import {
+  MEMORY_CORE,
+  type Assistant,
+  type AssistantUpdateInput,
+  type Profile,
+} from "@hercule/contract";
 import { forgetLastSettingsSection } from "../../../../../app/last-settings-section";
 import {
   buildErrorBody,
   buildFixtureAssistant,
+  buildMemoryDocument,
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
@@ -24,6 +31,7 @@ import {
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
+  storeMemory,
   type Call,
   type Handler,
 } from "../../../../../app/testing";
@@ -110,6 +118,7 @@ const openAssistants = async (handlers: Readonly<Record<string, Handler>> = {}) 
     }),
     "GET /api/v1/profiles": { body: { items: PROFILES } },
     ...storeAssistants(),
+    ...storeMemory(CREATED.id, [buildMemoryDocument(MEMORY_CORE, "")]),
     ...handlers,
   });
   const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
@@ -387,5 +396,122 @@ describe("Settings > Assistants", () => {
     expect(error.textContent).toBe("Could not save: The database is locked.");
     expect(error.previousElementSibling?.contains(prompt)).toBe(true);
     expect(prompt).toHaveProperty("value", ADA.heartbeat.prompt);
+  });
+});
+
+/** Ada's memory in these tests: a short core note and two topics. */
+const ADA_MEMORY = [
+  buildMemoryDocument(MEMORY_CORE, "Rogier runs Acme alone. Be brief."),
+  buildMemoryDocument("webshop", "Stripe checkout.\n".repeat(80), "Stripe checkout, EU customers"),
+  buildMemoryDocument("family", "School run Tue/Thu."),
+];
+
+describe("Settings > Assistants, Memory", () => {
+  it("shows the picked assistant's core note against its cap, and each topic", async () => {
+    await openAssistants(storeMemory(ADA.id, ADA_MEMORY));
+
+    const memory = screen.getByRole("complementary", { name: "Memory" });
+    expect(within(memory).getByText("33 of 4,000")).toBeTruthy();
+    expect(within(memory).getByText("Rogier runs Acme alone. Be brief.")).toBeTruthy();
+    // The topics are listed by name, as the controller lists them.
+    expect(
+      within(memory)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual(["Edit", "family19", "webshop1.4kStripe checkout, EU customers"]);
+    expect(within(memory).getByText("2 of 24 topics · up to 12,000 characters each")).toBeTruthy();
+  });
+
+  it("reads the memory of the assistant picked from its tab", async () => {
+    const { calls } = await openAssistants(storeMemory(ADA.id, ADA_MEMORY));
+    const tabs = screen.getByRole("navigation", { name: "Choose an assistant" });
+
+    await userEvent.click(within(tabs).getByRole("link", { name: "Milo" }));
+
+    const memory = await screen.findByRole("complementary", { name: "Memory" });
+    expect(await within(memory).findByText("Milo’s core note is empty.")).toBeTruthy();
+    expect(
+      calls
+        .filter((call) => call.path.startsWith(`/api/v1/assistants/${MILO.id}/memory`))
+        .map((call) => call.path),
+    ).toEqual([
+      `/api/v1/assistants/${MILO.id}/memory`,
+      `/api/v1/assistants/${MILO.id}/memory/core`,
+    ]);
+  });
+
+  it("creates a topic from New topic and opens its page", async () => {
+    const { calls } = await openAssistants(storeMemory(ADA.id, ADA_MEMORY, ["decisions"]));
+
+    await userEvent.click(screen.getByRole("button", { name: "New topic" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Topic name" }), " decisions {Enter}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "decisions" })).toBeTruthy();
+    expect(
+      calls.filter((call) => call.method === "PUT").map((call) => [call.path, call.body]),
+    ).toEqual([
+      [`/api/v1/assistants/${ADA.id}/memory/decisions`, { body: "", gist: "", expectedVersion: 0 }],
+    ]);
+  });
+
+  it("refuses a new topic the assistant created since the index was read, and lists it", async () => {
+    const store = storeMemory(ADA.id, ADA_MEMORY, ["decisions"]);
+    const path = `/api/v1/assistants/${ADA.id}/memory/decisions`;
+    await openAssistants(store);
+    const memory = await screen.findByRole("complementary", { name: "Memory" });
+    // The assistant creates the topic after the column read the index.
+    const createdByAssistant = store[`PUT ${path}`];
+    if (typeof createdByAssistant !== "function") throw new Error("no write handler");
+    await createdByAssistant({
+      method: "PUT",
+      path,
+      search: "",
+      body: { body: "Use SQLite." },
+      authorization: null,
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "New topic" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Topic name" }), "decisions{Enter}");
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Could not create: decisions is at version 1, not 0",
+    );
+    expect(await within(memory).findByText("decisions")).toBeTruthy();
+  });
+
+  it("refuses a new topic named like a stored one, or core, and sends nothing", async () => {
+    const { calls } = await openAssistants(storeMemory(ADA.id, ADA_MEMORY));
+
+    await userEvent.click(screen.getByRole("button", { name: "New topic" }));
+    const name = screen.getByRole("textbox", { name: "Topic name" });
+    await userEvent.type(name, "webshop{Enter}");
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      'A topic named "webshop" already exists; open it to edit it.',
+    );
+    await userEvent.clear(name);
+    await userEvent.type(name, "core{Enter}");
+    expect(screen.getByRole("alert").textContent).toBe(
+      '"core" is the core note; choose another name.',
+    );
+
+    expect(calls.filter((call) => call.method === "PUT")).toEqual([]);
+  });
+
+  it("shows the controller's refusal of a new topic in the dialog, which stays open", async () => {
+    const message =
+      "this would be topic 25; an assistant has at most 24 topics. Delete a topic first.";
+    await openAssistants({
+      ...storeMemory(ADA.id, ADA_MEMORY),
+      [`PUT /api/v1/assistants/${ADA.id}/memory/decisions`]: {
+        status: 422,
+        body: { error: { code: "cap_exceeded", message, details: { count: 25, cap: 24 } } },
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "New topic" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Topic name" }), "decisions{Enter}");
+
+    expect((await screen.findByRole("alert")).textContent).toBe(`Could not create: ${message}`);
+    expect(screen.getByRole("dialog", { name: "New topic" })).toBeTruthy();
   });
 });

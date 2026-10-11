@@ -34,6 +34,7 @@ export interface ErrorEnvelope {
  * - `{ grant }` for `forbidden`;
  * - `{ issues }` for `validation`;
  * - a size or a count for `cap_exceeded`;
+ * - `{ previousSize, size }` for `shrink_rejected`;
  * - absent for every other code.
  */
 export class ApiError extends Error {
@@ -101,6 +102,13 @@ export const readErrorMessage = (error: unknown): string =>
 /** Returns true when the error is a `not_found` response from the controller. */
 export const isNotFound = (error: unknown): boolean =>
   error instanceof ApiError && error.code === "not_found";
+
+/**
+ * Returns true when the error is a `conflict` response from the controller:
+ * the record changed since the caller read it, or a name is already taken.
+ */
+export const isConflict = (error: unknown): boolean =>
+  error instanceof ApiError && error.code === "conflict";
 
 /**
  * Returns the issues of a `validation` error response, in order, or

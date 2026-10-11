@@ -1,5 +1,5 @@
 /* Settings > Permission profiles, from the Bureau book's page
-   (desktop/settings-profiles.html), with the book's `.stack` and `.meter`
+   (desktop/settings-profiles.html), with the book's `.stack`
    from system.css. As in assistants.css, the book's short class names, such
    as `.prof` and `.user`, would reach any element of the app that uses them,
    so each rule here carries a name of its own and says which of the book's
@@ -100,20 +100,6 @@
   color: var(--muted);
   font-size: var(--t-12);
   font-variant-numeric: tabular-nums;
-}
-/* The book's `.meter` (system.css). */
-.profile-meter {
-  position: relative;
-  height: 6px;
-  border-radius: var(--r-pill);
-  background: var(--sunken);
-  overflow: hidden;
-}
-.profile-meter i {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: inherit;
-  background: var(--who, var(--ink));
 }
 /* The book's `.used`. */
 .profile-used {

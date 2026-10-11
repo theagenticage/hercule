@@ -34,6 +34,7 @@ import { settings } from "./groups/settings";
 import { setup } from "./groups/setup";
 import { subscription } from "./groups/subscription";
 import { task } from "./groups/task";
+import { memory } from "./groups/memory";
 import { transcript } from "./groups/transcript";
 import { trigger } from "./groups/trigger";
 import { user } from "./groups/user";
@@ -73,6 +74,7 @@ export const api = HttpApi.make("hercule")
     session,
     input,
     transcript,
+    memory,
     attachment,
     controller,
   )

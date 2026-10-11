@@ -202,6 +202,12 @@ const COMMANDS: Record<string, string> = {
   "assistant.create": "assistant create",
   "assistant.update": "assistant update",
   "assistant.delete": "assistant delete",
+  "memory.list": "memory list",
+  "memory.search": "memory search",
+  "memory.read": "memory read",
+  "memory.write": "memory write",
+  "memory.append": "memory append",
+  "memory.delete": "memory delete",
 
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
@@ -226,6 +232,7 @@ const COMMANDS: Record<string, string> = {
   "input.steer": "input steer",
 
   "transcript.read": "transcript read",
+  "transcript.query": "transcript list",
 
   "controller.read": "controller read",
   "controller.update": "controller update",
@@ -263,6 +270,8 @@ const STDIN_FIELDS = [
   "workflow.update source",
   "workflow.validate source",
   "run.start source",
+  "memory.write body",
+  "memory.append body",
 ];
 
 /** Every field that accepts an id tail, and the list operation that resolves the tail to a full id. */
@@ -351,6 +360,13 @@ const RESOLVES: Record<string, string> = {
   "assistant.update permissionProfileId": "profile.query",
   "assistant.delete id": "assistant.query",
 
+  "memory.list id": "assistant.query",
+  "memory.search id": "assistant.query",
+  "memory.read id": "assistant.query",
+  "memory.write id": "assistant.query",
+  "memory.append id": "assistant.query",
+  "memory.delete id": "assistant.query",
+
   "conversation.query assistantId": "assistant.query",
   "conversation.read id": "conversation.query",
   "conversation.queryMessages id": "conversation.query",
@@ -384,6 +400,8 @@ const RESOLVES: Record<string, string> = {
   "input.steer id": "session.query",
 
   "transcript.read id": "session.query",
+  "transcript.query sessionId": "session.query",
+  "transcript.query agentId": "agent.query",
   "transcript.read subagentId": "session.querySubagents",
 };
 

@@ -27,10 +27,13 @@ import {
   buildAgentTapTopic,
   buildSessionStreamTopic,
   GITHUB_CONNECTION_TYPE,
+  MEMORY_CORE,
   type Assistant,
   type Connection,
   type ConversationMessage,
   type Input,
+  type MemoryDocument,
+  type MemoryWriteInput,
   type ModelOption,
   type MutableLiveTopic,
   type OpenRequest,
@@ -384,7 +387,8 @@ const answerSessionQuery = (records: SidebarRecords, call: Call): Answer => {
  *
  * They also answer the three reads a Draft Thread adds, which the app makes
  * whenever it opens at `/`: the settings, with none set, the profiles, and
- * the project's open tasks, of which there are none.
+ * the project's open tasks, of which there are none. And each assistant has
+ * an empty core note and no topic, which Settings > Assistants reads.
  */
 export const buildSidebarHandlers = (
   records: SidebarRecords,
@@ -404,7 +408,100 @@ export const buildSidebarHandlers = (
   "GET /api/v1/tasks": { body: { items: [] } },
   // The shell reads the Connections, for New project and the starter threads.
   "GET /api/v1/connections": { body: { items: [] } },
+  // Settings > Assistants reads the picked assistant's memory.
+  ...Object.fromEntries(
+    (records.assistants ?? []).flatMap(({ assistant }) =>
+      Object.entries(storeMemory(assistant.id, [buildMemoryDocument(MEMORY_CORE, "")])),
+    ),
+  ),
 });
+
+/** The moment every fixture memory document was last written. */
+const MEMORY_UPDATED_AT = "2026-10-01T09:00:00.000Z";
+
+/**
+ * Returns the memory document `name` holding `body`, with its size counted
+ * in characters as the controller counts them, `gist`, and `version`.
+ */
+export const buildMemoryDocument = (
+  name: string,
+  body: string,
+  gist = "",
+  version = 1,
+): MemoryDocument => ({
+  name,
+  gist,
+  size: [...body].length,
+  body,
+  version,
+  updatedAt: MEMORY_UPDATED_AT,
+});
+
+/**
+ * Returns handlers that play the controller's memory of the assistant
+ * `assistantId`, on one stored set of documents that starts as `documents`:
+ *
+ * - the index lists the core note first, then the topics by name;
+ * - a document named in `documents` or `newNames` can be read, written and
+ *   deleted. A read of one that is not stored answers 404;
+ * - a write creates the document when it is not stored, with an empty gist
+ *   unless the write sets one, and otherwise replaces its text, and its gist
+ *   when the write sets one. The core note keeps an empty gist. Each write
+ *   adds one to the version, and a write whose `expectedVersion` is not the
+ *   stored version, 0 for a document not stored, answers 409 `conflict`.
+ *
+ * A handler for the same path, spread after these, answers in its place.
+ */
+export const storeMemory = (
+  assistantId: string,
+  documents: readonly MemoryDocument[],
+  newNames: readonly string[] = [],
+): Readonly<Record<string, Handler>> => {
+  let stored = [...documents];
+  const base = `/api/v1/assistants/${assistantId}/memory`;
+  const listEntries = () =>
+    stored
+      .map(({ name, gist, size }) => ({ name, gist, size }))
+      .toSorted((a, b) =>
+        a.name === MEMORY_CORE ? -1 : b.name === MEMORY_CORE ? 1 : a.name < b.name ? -1 : 1,
+      );
+  const handlers: Record<string, Handler> = { [`GET ${base}`]: () => ({ body: listEntries() }) };
+  for (const name of [...documents.map((each) => each.name), ...newNames]) {
+    const path = `${base}/${encodeURIComponent(name)}`;
+    const notFound = { status: 404, body: buildErrorBody("not_found", `no document ${name}`) };
+    handlers[`GET ${path}`] = () => {
+      const document = stored.find((each) => each.name === name);
+      return document === undefined ? notFound : { body: document };
+    };
+    handlers[`PUT ${path}`] = (call) => {
+      const { body, gist, expectedVersion } = call.body as MemoryWriteInput;
+      const previous = stored.find((each) => each.name === name);
+      const version = previous?.version ?? 0;
+      if (expectedVersion !== undefined && expectedVersion !== version) {
+        return {
+          status: 409,
+          body: buildErrorBody(
+            "conflict",
+            `${name} is at version ${String(version)}, not ${String(expectedVersion)}`,
+          ),
+        };
+      }
+      const written = buildMemoryDocument(
+        name,
+        body,
+        name === MEMORY_CORE ? "" : (gist ?? previous?.gist ?? ""),
+        version + 1,
+      );
+      stored = [...stored.filter((each) => each.name !== name), written];
+      return { body: written };
+    };
+    handlers[`DELETE ${path}`] = () => {
+      stored = stored.filter((each) => each.name !== name);
+      return { body: {} };
+    };
+  }
+  return handlers;
+};
 
 /**
  * The ids of client-core's shared fixture world, in the UUIDv7 format the

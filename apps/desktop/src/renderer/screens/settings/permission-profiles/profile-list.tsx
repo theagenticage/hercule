@@ -64,7 +64,7 @@ export function ProfileList({
             </span>
             <span className="profile-held">
               {`${profile.grants.length} of ${MAX_PROFILE_GRANTS}`}
-              <span className="profile-meter">
+              <span className="meter">
                 <i style={{ width: `${(profile.grants.length / MAX_PROFILE_GRANTS) * 100}%` }} />
               </span>
             </span>

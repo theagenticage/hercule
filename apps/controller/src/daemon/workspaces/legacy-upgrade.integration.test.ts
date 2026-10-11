@@ -254,8 +254,11 @@ const withLegacyController = async (
       expect(reader.query("SELECT * FROM controller_identity").all()).toEqual(
         fixture.before.identity,
       );
+      // The only change to a session row is the column that records who
+      // created it. These rows were written with no audit entry of their
+      // creation, so nobody can tell any more, and the column stays null.
       expect(reader.query("SELECT * FROM sessions ORDER BY id").all()).toEqual(
-        fixture.before.sessions,
+        fixture.before.sessions.map((row) => ({ ...(row as object), created_by: null })),
       );
       expect(reader.query("SELECT * FROM session_stream ORDER BY session_id").all()).toEqual(
         fixture.before.streams,

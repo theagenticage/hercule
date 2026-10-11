@@ -112,7 +112,8 @@ describe("the HttpApi declaration", () => {
 });
 
 /**
- * The Task, Notification, Project, Event, Runner, Plugin, Session and Controller operations:
+ * The Task, Notification, Project, Event, Runner, Plugin, Session, Controller, Memory and
+ * Transcript operations:
  * the operation table row and the endpoint that serves it.
  */
 const NEW_OPERATIONS = [
@@ -238,6 +239,48 @@ const NEW_OPERATIONS = [
     requires: "infra.write",
     method: "PATCH",
     path: "/api/v1/controller",
+  },
+  {
+    id: "memory.list",
+    requires: "memory.read",
+    method: "GET",
+    path: "/api/v1/assistants/:id/memory",
+  },
+  {
+    id: "memory.search",
+    requires: "memory.read",
+    method: "GET",
+    path: "/api/v1/assistants/:id/memory/search",
+  },
+  {
+    id: "memory.read",
+    requires: "memory.read",
+    method: "GET",
+    path: "/api/v1/assistants/:id/memory/:name",
+  },
+  {
+    id: "memory.write",
+    requires: "memory.write",
+    method: "PUT",
+    path: "/api/v1/assistants/:id/memory/:name",
+  },
+  {
+    id: "memory.append",
+    requires: "memory.write",
+    method: "POST",
+    path: "/api/v1/assistants/:id/memory/:name/append",
+  },
+  {
+    id: "memory.delete",
+    requires: "memory.write",
+    method: "DELETE",
+    path: "/api/v1/assistants/:id/memory/:name",
+  },
+  {
+    id: "transcript.query",
+    requires: "session.read",
+    method: "GET",
+    path: "/api/v1/transcripts",
   },
 ] as const;
 

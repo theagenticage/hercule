@@ -33,7 +33,6 @@ export { DESKTOP_APP_ORIGIN } from "./desktop-app";
 export {
   decodeBindableOperation,
   dispatchBindableOperation,
-  OWN_SESSION_ALIAS,
   type BindableOperation,
   type BindableOperationHandlers,
   type BindableOperationId,
@@ -55,11 +54,13 @@ export {
   Issue,
   NotFound,
   Unauthenticated,
+  ShrinkRejected,
   Validation,
   createCapExceededError,
   createConflictError,
   createControllerSealedError,
   createPromotionInProgressError,
+  createShrinkRejectedError,
   createDecodeValidationError,
   createForbiddenError,
   createInternalError,
@@ -73,6 +74,7 @@ export {
   isApiError,
   type ApiError,
   type CapDetails,
+  ShrinkDetails,
   type ErrorCode,
 } from "./errors";
 
@@ -101,6 +103,7 @@ export {
   Username,
   atMost,
   bounded,
+  countCharacters,
 } from "./strings";
 
 export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
@@ -112,9 +115,12 @@ export {
   Actor,
   ExternalRef,
   Id,
+  IdOrMe,
   isId,
   MAX_EXTERNAL_REF_LENGTH,
   NullableActor,
+  OWN_AGENT_ALIAS,
+  OWN_SESSION_ALIAS,
   Timestamp,
 } from "./ids";
 
@@ -272,7 +278,29 @@ export {
   InputUpdatePayload,
   refuseEmptyInputUpdate,
 } from "./groups/input";
-export { StructuredResult, TRANSCRIPT_SORT_FIELDS, TranscriptRow } from "./groups/transcript";
+export {
+  PASSAGE_SORT_FIELDS,
+  Passage,
+  PassageFilter,
+  StructuredResult,
+  TRANSCRIPT_SORT_FIELDS,
+  TranscriptRow,
+} from "./groups/transcript";
+export {
+  MAX_MEMORY_GIST_LENGTH,
+  MAX_MEMORY_NAME_LENGTH,
+  MEMORY_CORE,
+  MEMORY_CORE_CAP,
+  MEMORY_TOPIC_CAP,
+  MEMORY_TOPIC_COUNT_CAP,
+  MemoryDocument,
+  MemoryDocumentName,
+  MemoryEntry,
+  MemoryMatch,
+  MemoryWriteInput,
+  chooseMemoryCap,
+  requiresShrinkConfirmation,
+} from "./groups/memory";
 export { OwnerKind, SECRET_SORT_FIELDS, SecretFilter, SecretRef } from "./groups/secret";
 export {
   CONNECTION_SORT_FIELDS,

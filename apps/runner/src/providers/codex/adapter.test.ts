@@ -331,6 +331,37 @@ describe("the home directories a session's app-server gets", () => {
     await started;
   });
 
+  it("turns automatic compaction off with arguments of the session's own app-server when the spec asks for it", async () => {
+    const home = createCodexHome();
+    const { seam, spawns } = buildScriptedSeam();
+    const ctx = buildContext(home);
+
+    const started = Effect.runPromise(
+      makeCodexAdapter(seam).startSession(SESSION, { ...SPEC, autoCompaction: false }, ctx),
+    ).then(
+      () => undefined,
+      () => undefined,
+    );
+    await waitUntil("spawned an app-server", () => spawns.length === 1);
+
+    // The scope matters: in the default scope Codex caps the limit at 90% of
+    // the context window, so the limit alone would change nothing.
+    expect(spawns[0]?.command).toEqual([
+      ctx.binary,
+      "app-server",
+      "--strict-config",
+      "-c",
+      "check_for_update_on_startup=false",
+      "-c",
+      "model_auto_compact_token_limit_scope=body_after_prefix",
+      "-c",
+      "model_auto_compact_token_limit=9223372036854775807",
+    ]);
+    // Never written into the instance's config, which every session reads.
+    expect(existsSync(join(home, "codex", "config.toml"))).toBe(false);
+    await started;
+  });
+
   it("keeps the real HOME for a Thread that sees the user's material, and still gives it the instance's own CODEX_HOME", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
@@ -1135,6 +1166,7 @@ const ANSWER = { verdict: "accept", confidence: 0.9 };
 describe("hercule-as-a-tool on a Codex thread", () => {
   /** The Agent's instructions followed by the skill, as one string. */
   const INSTRUCTED = `${SYSTEM_PROMPT}\n\n${TOOL.skill}`;
+  const MEMORY = "## Memory (core)\nThe user is Rogier.\n\n## Memory topics\n- projects";
 
   const OPENINGS: ReadonlyArray<readonly [string, SessionSpec, string]> = [
     ["thread/start", SPEC, TOOL.skill],
@@ -1154,6 +1186,13 @@ describe("hercule-as-a-tool on a Codex thread", () => {
       "thread/fork",
       { ...STRUCTURED, continue: { nativeSessionId: PRIOR, mode: "fork" } },
       INSTRUCTED,
+    ],
+    // An assistant's memory comes last, after the skill.
+    ["thread/start", { ...STRUCTURED, memory: MEMORY }, `${INSTRUCTED}\n\n${MEMORY}`],
+    [
+      "thread/resume",
+      { ...STRUCTURED, memory: MEMORY, continue: { nativeSessionId: PRIOR, mode: "resume" } },
+      `${INSTRUCTED}\n\n${MEMORY}`,
     ],
   ];
 

@@ -23,6 +23,7 @@ import {
   createNotFoundError,
   SESSION_STATUSES,
   type NotFound,
+  type Passage,
   type PermissionRequest,
   type SessionRequest,
   type SessionStatus,
@@ -176,6 +177,8 @@ export interface NewSession {
   readonly spec: string;
   readonly modelSelection: ModelSelection;
   readonly parentSessionId: string | undefined;
+  /** The actor stamp of the operation that created the session. */
+  readonly createdBy: string;
   readonly at: string;
 }
 
@@ -435,6 +438,43 @@ export interface TranscriptPageRequest {
   readonly direction: SortDirection;
 }
 
+/**
+ * A transcript search, with every `me` already resolved. Each field that is
+ * `undefined` does not narrow the search.
+ */
+export interface PassageQueryRequest {
+  /** The `MATCH` expression from `buildMatchExpression`. */
+  readonly match: string;
+  readonly sessionId: string | undefined;
+  readonly agentId: string | undefined;
+  /** The actor stamp the matching sessions were created by. */
+  readonly createdBy: string | undefined;
+  /** Keeps messages written at or after this instant. */
+  readonly since: string | undefined;
+  /** Keeps messages written before this instant. */
+  readonly until: string | undefined;
+  readonly limit: number;
+  readonly cursor: string | undefined;
+  readonly direction: SortDirection;
+}
+
+/**
+ * The number of tokens in a passage's excerpt. It is enough for a sentence
+ * or two around the hit, which is what a reader needs to decide whether to
+ * open the transcript.
+ */
+const EXCERPT_TOKENS = 32;
+
+/**
+ * Builds the cursor scope of a transcript search. Passages are sorted by when
+ * the message was written, then by session and position, which together are
+ * unique.
+ */
+const buildPassageScope = (direction: SortDirection): CursorScope => ({
+  op: "transcript.query",
+  sort: [{ field: "at", direction }],
+});
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const COLUMNS = buildColumnList();
@@ -509,14 +549,14 @@ const make = Effect.gen(function* () {
                                 workspace_id, project_id, checkout_branch, github_connection_id,
                                 requested_access_mode, access_mode, spec,
                                 model_selection, parent_session_id, status,
-                                created_at, last_activity_at)
+                                created_by, created_at, last_activity_at)
           VALUES (${id}, ${session.title}, ${uuidFromString(session.permissionProfileId)}, ${agent},
                   ${conversation}, ${run}, ${session.step?.stepId ?? null},
                   ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
                   ${workspace}, ${project}, ${session.checkoutBranch ?? null}, ${connection},
                   ${session.requestedAccessMode}, ${session.accessMode},
                   ${session.spec}, ${JSON.stringify(session.modelSelection)}, ${parent},
-                  'queued', ${session.at}, ${session.at})
+                  'queued', ${session.createdBy}, ${session.at}, ${session.at})
         `;
       }),
 
@@ -729,6 +769,80 @@ const make = Effect.gen(function* () {
             ),
           (last) => encodeIntegerKeyCursor(scope, last.position),
         );
+      }),
+
+    /**
+     * Returns one page of the messages that match a full-text search, as
+     * passages, sorted by when the message was written. Fails with
+     * `CursorError` when the cursor was not issued by this search's order.
+     *
+     * A message is what the `transcript_messages` view says it is: a user
+     * message, or a stored piece of an assistant message. A long assistant
+     * message is stored in pieces, so it can match as more than one passage.
+     */
+    queryPassages: (
+      request: PassageQueryRequest,
+    ): Effect.Effect<Page<Passage>, CursorError | SqlError> =>
+      Effect.gen(function* () {
+        const scope = buildPassageScope(request.direction);
+        const after =
+          request.cursor === undefined
+            ? undefined
+            : yield* decodeCursor(request.cursor, scope, ["string", "number"]);
+        const { keyset, order } = buildKeyset(
+          sql,
+          [{ column: "ss.at", direction: request.direction }],
+          ["ss.session_id", "ss.position"],
+          after === undefined
+            ? undefined
+            : [after.values[0], uuidFromString(after.id), after.values[1]],
+        );
+        const filters = [
+          request.sessionId === undefined
+            ? undefined
+            : sql`ss.session_id = ${uuidFromString(request.sessionId)}`,
+          request.agentId === undefined
+            ? undefined
+            : sql`s.agent_id = ${uuidFromString(request.agentId)}`,
+          request.createdBy === undefined ? undefined : sql`s.created_by = ${request.createdBy}`,
+          request.since === undefined ? undefined : sql`ss.at >= ${request.since}`,
+          request.until === undefined ? undefined : sql`ss.at < ${request.until}`,
+        ].filter((filter) => filter !== undefined);
+        const rows = yield* sql<{
+          readonly session_id: Uint8Array;
+          readonly position: number;
+          readonly at: string;
+          readonly subagent_id: SubagentId | null;
+          readonly turn_id: string;
+          readonly excerpt: string;
+        }>`
+          SELECT ss.session_id, ss.position, ss.at, ss.subagent_id,
+            json_extract(ss.event, '$.turnId') AS turn_id,
+            snippet(transcript_fts, 0, '', '', '…', ${EXCERPT_TOKENS}) AS excerpt
+          FROM transcript_fts
+          JOIN session_stream ss ON ss.rowid = transcript_fts.rowid
+          JOIN sessions s ON s.id = ss.session_id
+          WHERE transcript_fts MATCH ${request.match}
+            AND ${sql.and([...filters, keyset])}
+          ${order} LIMIT ${request.limit + 1}
+        `;
+        const page = rows.slice(0, request.limit);
+        const last = page[page.length - 1];
+        return {
+          items: page.map((row): Passage => ({
+            sessionId: uuidToString(row.session_id),
+            ...(row.subagent_id === null ? {} : { subagentId: row.subagent_id }),
+            turnId: row.turn_id,
+            at: row.at,
+            excerpt: row.excerpt,
+          })),
+          // The cursor needs the row's position, which a passage does not
+          // carry, so it is built from the row rather than with `buildPage`.
+          nextCursor:
+            rows.length > request.limit && last !== undefined
+              ? encodeCursor(scope, [last.at, last.position], uuidToString(last.session_id))
+              : undefined,
+        };
       }),
 
     /**

@@ -16,8 +16,14 @@
  * manual: what the command does and when to use it, what it returns, and
  * what to call next, by its exact spelling. A field's line is one line.
  */
-import { OWN_SESSION_ALIAS } from "./bound-operations";
+import { OWN_SESSION_ALIAS } from "./ids";
 import type { ErrorCode } from "./errors";
+import {
+  MEMORY_CORE_CAP,
+  MEMORY_TOPIC_CAP,
+  MEMORY_TOPIC_COUNT_CAP,
+  SHRINK_GUARD_MIN_SIZE,
+} from "./groups/memory";
 import type { OperationId } from "./operations";
 
 /** One example invocation: the arguments after the command words, and what is piped to stdin. */
@@ -130,6 +136,22 @@ export interface NounRow {
  */
 const USER_ONLY_FORBIDDEN =
   "only the user may make this call: a session token is refused whatever grants its profile holds, so a Permission Request cannot help; ask the user to run the command instead";
+
+/** The help line of the assistant id every memory command takes. */
+const MEMORY_ASSISTANT_HELP =
+  "`me` for the assistant this session runs as; the user may name any assistant by its id or a tail of eight or more characters.";
+
+/**
+ * The `forbidden` meaning of a memory command. A session token reaches only
+ * its own assistant's memory, so requesting the grant would not help when the
+ * session named another assistant.
+ */
+const MEMORY_FORBIDDEN =
+  "your profile lacks the memory grant, or you named an assistant other than your own; a session reaches only its own assistant's memory, as `me`";
+
+const MEMORY_CORE_CAP_TEXT = MEMORY_CORE_CAP.toLocaleString("en-US");
+const MEMORY_TOPIC_CAP_TEXT = MEMORY_TOPIC_CAP.toLocaleString("en-US");
+const SHRINK_GUARD_MIN_SIZE_TEXT = SHRINK_GUARD_MIN_SIZE.toLocaleString("en-US");
 
 export const CLI = {
   "setup.read": {
@@ -2509,6 +2531,140 @@ export const CLI = {
     },
   },
 
+  "memory.list": {
+    command: "memory list",
+    help: "Lists an assistant's memory: `core` first, then each topic with its size and one-line gist. Sizes count characters. This is the same index a session is given when it starts. Read a whole document with `hercule memory read`, and find text in all of them with `hercule memory search`.",
+    examples: [{ args: ["me"] }, { args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "assistant-id",
+        help: MEMORY_ASSISTANT_HELP,
+        resolves: "assistant.query",
+      },
+    },
+    errors: { forbidden: MEMORY_FORBIDDEN },
+  },
+  "memory.search": {
+    command: "memory search",
+    help: "Searches the text of `core` and every topic. Returns each document that matches, with a short window of text around each hit. Use it where you would use grep, then `hercule memory read` the document you need.",
+    examples: [{ args: ["me", "--text", "deploy"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "assistant-id",
+        help: MEMORY_ASSISTANT_HELP,
+        resolves: "assistant.query",
+      },
+      text: {
+        flag: "text",
+        help: "The words to find. A document matches when it holds every word.",
+      },
+    },
+    errors: { forbidden: MEMORY_FORBIDDEN },
+  },
+  "memory.read": {
+    command: "memory read",
+    help: "Reads one memory document in full: `core`, or a topic by its name. Prints the body as it is stored.",
+    examples: [{ args: ["me", "core"] }, { args: ["me", "decisions"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "assistant-id",
+        help: MEMORY_ASSISTANT_HELP,
+        resolves: "assistant.query",
+      },
+      name: { positional: true, help: "`core`, or the topic's name." },
+    },
+    errors: { forbidden: MEMORY_FORBIDDEN },
+  },
+  "memory.write": {
+    command: "memory write",
+    help: `Replaces the whole body of \`core\` or a topic with what is piped to stdin. A new name creates the topic. \`core\` holds at most ${MEMORY_CORE_CAP_TEXT} characters and each topic ${MEMORY_TOPIC_CAP_TEXT}, with at most ${String(MEMORY_TOPIC_COUNT_CAP)} topics. A write that would remove more than half of a document of ${SHRINK_GUARD_MIN_SIZE_TEXT} characters or more is refused unless you pass --confirm-shrink true; check that you are not dropping anything you still need first. Pass --expected-version with the version you read, so the write is refused if the document changed since. Prints the document's new version. To add to a document without rewriting it, use \`hercule memory append\`.`,
+    examples: [
+      {
+        args: ["me", "decisions", "--gist", "What we decided about the deploy pipeline"],
+        stdin: "- 2026-10-01: deploys go out on Tuesdays only.",
+      },
+      { args: ["me", "core"], stdin: "The user is Sam. Prefers short answers." },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "assistant-id",
+        help: MEMORY_ASSISTANT_HELP,
+        resolves: "assistant.query",
+      },
+      name: {
+        positional: true,
+        help: "`core`, or the topic's name. A new name creates the topic.",
+      },
+      body: {
+        stdin: true,
+        flag: "body",
+        help: "The whole new body. It replaces the old one.",
+      },
+      gist: {
+        flag: "gist",
+        help: "The topic's one-line summary, shown in the index. Unchanged when left out; refused for `core`, which has none.",
+      },
+      confirmShrink: {
+        flag: "confirm-shrink",
+        help: "true writes even when the write removes more than half of a large document.",
+      },
+      expectedVersion: {
+        flag: "expected-version",
+        help: "Writes only if the document is still at this version; 0 writes only if it does not exist yet. Left out, the write replaces whatever is there.",
+      },
+    },
+    errors: {
+      forbidden: MEMORY_FORBIDDEN,
+      conflict:
+        "the document changed since you read it, or it exists when you passed --expected-version 0; the message says which. Read it again with `hercule memory read`, redo your edit, and write again",
+      cap_exceeded:
+        "the document would be over its cap, or this would be one topic too many; the message gives the size and the cap. Make the text shorter, or merge topics, and write again",
+      shrink_rejected:
+        "the write would remove more than half of the document; the message gives both sizes. Read the document, keep what still matters, or pass --confirm-shrink true if the loss is intended",
+    },
+  },
+  "memory.append": {
+    command: "memory append",
+    help: "Adds what is piped to stdin to the end of an existing document, on a new line. The gist does not change, and the text must not be empty. Use `hercule memory write` to create a topic.",
+    examples: [
+      { args: ["me", "decisions"], stdin: "- 2026-10-08: staging deploys are allowed on Fridays." },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "assistant-id",
+        help: MEMORY_ASSISTANT_HELP,
+        resolves: "assistant.query",
+      },
+      name: { positional: true, help: "`core`, or the topic's name." },
+      body: { stdin: true, flag: "body", help: "The text to add." },
+    },
+    errors: {
+      forbidden: MEMORY_FORBIDDEN,
+      cap_exceeded:
+        "the document would be over its cap; the message gives the size and the cap. Rewrite it shorter with `hercule memory write`",
+    },
+  },
+  "memory.delete": {
+    command: "memory delete",
+    help: "Deletes a topic. `core` cannot be deleted; write it with an empty body to clear it.",
+    examples: [{ args: ["me", "old-notes"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "assistant-id",
+        help: MEMORY_ASSISTANT_HELP,
+        resolves: "assistant.query",
+      },
+      name: { positional: true, help: "The topic's name." },
+    },
+    errors: { forbidden: MEMORY_FORBIDDEN },
+  },
+
   "conversation.query": {
     command: "conversation list",
     help: "Lists conversations, oldest first. Each is one assistant's exchange in one channel; the web channel is the only one so far.",
@@ -3037,6 +3193,37 @@ export const CLI = {
     },
   },
 
+  "transcript.query": {
+    command: "transcript list",
+    help: "Searches the messages of every session's transcript and lists the passages that match, newest first. Each passage names its session and turn, so `hercule transcript read` shows what happened around it. An assistant recalls its own conversations with --agent me.",
+    examples: [
+      { args: ["--text", "deploy", "--agent", "me"] },
+      { args: ["--text", "flaky test", "--actor", "me"] },
+    ],
+    fields: {
+      text: {
+        flag: "text",
+        help: "The words to find. A message matches when it holds every word.",
+      },
+      sessionId: {
+        flag: "session",
+        help: "Only this session, by its id or a tail of eight or more characters.",
+        resolves: "session.query",
+      },
+      agentId: {
+        flag: "agent",
+        help: "Only the sessions of this Agent, by its id or a tail of eight or more characters; `me` is the Agent this session runs as.",
+        resolves: "agent.query",
+      },
+      actor: {
+        flag: "actor",
+        help: "`me` keeps only the sessions this session spawned.",
+      },
+      since: { flag: "since", help: "Only messages written at or after this instant." },
+      until: { flag: "until", help: "Only messages written before this instant." },
+    },
+  },
+
   // Images are uploaded through `--image` on `session spawn`, `session input`
   // and `session continue`, which call this for each file, so it has no
   // command of its own.
@@ -3174,6 +3361,11 @@ export const NOUNS = {
       "Assistants: Agents you talk to through conversations, each with a heartbeat, a rotation and a reply mode.",
     flow: "hercule assistant list to find one, hercule assistant read for the whole of it, hercule assistant create for a new one, hercule assistant update to change it.",
   },
+  memory: {
+    summary:
+      "Memory: an assistant's notes, kept by the controller. `core` is given in full to every session the assistant starts; topics are read on demand.",
+    flow: "hercule memory list me to see what there is, hercule memory search me --text <words> to find something, hercule memory read me <name> for one document, hercule memory write or hercule memory append to change it.",
+  },
   conversation: {
     summary: "Conversations: an assistant's exchange in one channel.",
   },
@@ -3185,7 +3377,10 @@ export const NOUNS = {
     summary: "The inputs a session was given, and the queued ones that can still be changed.",
     flow: "hercule input list to see them, then hercule input update, hercule input cancel or hercule input steer while a row is still queued.",
   },
-  transcript: { summary: "What a session did: its normalized stream, read back in order." },
+  transcript: {
+    summary:
+      "What a session did: its normalized stream, read back in order, and a search over every session's messages.",
+  },
   controller: {
     summary: "The controller's own identity, and the default runner that placement falls back to.",
   },

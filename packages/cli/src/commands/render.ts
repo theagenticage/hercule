@@ -24,12 +24,17 @@ import {
   readJsonObject,
   readStringList,
   readTimestamps,
+  formatMemoryUsage,
 } from "@hercule/client-core";
 import {
   truncateText,
+  chooseMemoryCap,
   formatIssue,
   isSchedule,
   type Input,
+  type MemoryDocument,
+  type MemoryEntry,
+  type MemoryMatch,
   type Notification,
   type OpenRequest,
   type OperationId,
@@ -873,6 +878,34 @@ const renderPromotionToken = (
 };
 
 /**
+ * Returns a memory document's body as it is stored, so an agent reads exactly
+ * what it would write back. An empty document prints one line saying so,
+ * because no output at all reads like a failure.
+ */
+const renderMemoryBody = ({ name, body }: MemoryDocument): ReadonlyArray<string> =>
+  body === "" ? [`${name} is empty`] : [body];
+
+/**
+ * Returns one line saying which document changed, its new version, which a
+ * later write can pass as `--expected-version`, and how full it is now.
+ */
+const renderMemorySaved = (
+  verb: string,
+  { name, size, version }: MemoryDocument,
+): ReadonlyArray<string> => [
+  `${verb} ${name} (version ${String(version)}): ${formatMemoryUsage(size, chooseMemoryCap(name))} characters`,
+];
+
+/** Returns each matching document's name, with its snippets indented under it. */
+const renderMemoryMatches = (matches: ReadonlyArray<MemoryMatch>): ReadonlyArray<string> =>
+  matches.length === 0
+    ? ["no results"]
+    : matches.flatMap(({ name, snippets }) => [
+        name,
+        ...snippets.map((snippet) => `  ${keepOnOneLine(snippet)}`),
+      ]);
+
+/**
  * The commands whose single result is not printed as generic key-value lines,
  * by command id. The derived client decoded the result with the operation's
  * schema, so each renderer may read it as that schema's type.
@@ -880,11 +913,17 @@ const renderPromotionToken = (
 const VALUE_RENDERERS: Partial<
   Record<OperationId, (value: unknown, controllerUrl: string) => ReadonlyArray<string>>
 > = {
-  // These two queries return a short, complete array instead of a page, so
-  // the array is printed as a table, like the items of a page.
+  // These queries return a short, complete array instead of a page, so the
+  // array is printed as a table, like the items of a page.
   "workflowAction.query": (value) =>
     renderTable((value as ReadonlyArray<WorkflowAction>).map(summarizeWorkflowAction)),
   "eventKind.query": (value) => renderTable(value as ReadonlyArray<Record<string, unknown>>),
+  "memory.list": (value) =>
+    renderTableColumns(value as ReadonlyArray<MemoryEntry>, ["name", "size", "gist"]),
+  "memory.search": (value) => renderMemoryMatches(value as ReadonlyArray<MemoryMatch>),
+  "memory.read": (value) => renderMemoryBody(value as MemoryDocument),
+  "memory.write": (value) => renderMemorySaved("wrote", value as MemoryDocument),
+  "memory.append": (value) => renderMemorySaved("appended to", value as MemoryDocument),
   // A create or an update prints no source, because the caller has just sent it.
   "workflow.read": (value) => renderWorkflowSource(value as Workflow),
   "workflow.create": (value) => renderWorkflowSaveResult(value as WorkflowSaveResult),

@@ -556,6 +556,31 @@ export const assistantQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
+ * Reads the index of one assistant's memory: `core` and every topic, each
+ * with its name, gist and size, for Settings > Assistants. There is no live
+ * topic for memory, so a write an agent makes shows on the next read.
+ */
+export const memoryIndexQuery = (client: HerculeClient, assistantId: string) =>
+  queryOptions({
+    queryKey: queryKeys.memory(assistantId),
+    queryFn: () => client.memory.list({ params: { id: assistantId } }),
+  });
+
+/**
+ * Reads one memory document whole, for the editor that opens it. Its key sits
+ * under the assistant's memory index, so invalidating the index without
+ * `exact` reads the documents again too. An error is not retried: a topic
+ * the assistant deleted returns 404 on every try. The desktop app reads it
+ * with the same setting.
+ */
+export const memoryDocumentQuery = (client: HerculeClient, assistantId: string, name: string) =>
+  queryOptions({
+    queryKey: queryKeys.memory(assistantId, name),
+    queryFn: () => client.memory.read({ params: { id: assistantId, name } }),
+    retry: false,
+  });
+
+/**
  * Reads the assistant a session answered, for the session view, or returns
  * null when the assistant has been deleted since. The session outlives its
  * assistant, so a not-found answer here is a fact to show, not a failure;

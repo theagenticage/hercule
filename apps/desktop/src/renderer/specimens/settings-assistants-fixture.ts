@@ -14,6 +14,9 @@
  * - Ada's context rotates at 70% or 200k tokens, and daily at 04:00.
  * - One Connection has failed, so the Settings list's Connections row
  *   carries the red dot the book draws there.
+ * - Ada's memory is the book's: a core note of 1,284 characters that starts
+ *   with the book's words, and its seven topics with their sizes and gists,
+ *   listed by name as the controller lists them.
  *
  * The reference module (settings-assistants-reference.ts) reads this module
  * too, to edit the book's page where the app draws the fixture's words.
@@ -22,6 +25,8 @@ import {
   GITHUB_CONNECTION_TYPE,
   type Assistant,
   type Connection,
+  type MemoryDocument,
+  type MemoryEntry,
   type Profile,
   type ProviderInstance,
 } from "@hercule/contract";
@@ -121,10 +126,45 @@ export const FAILED_CONNECTION: Connection = {
   updatedAt: CREATED_AT,
 };
 
+/** Ada's core note: 1,284 characters, which start with the words the book shows. */
+export const ADA_CORE_NOTE: MemoryDocument = {
+  name: "core",
+  gist: "",
+  size: 1284,
+  body: "Rogier runs Acme alone with agents. Projects: webshop, payments-api, ops. Be brief. Never deploy on Fridays. Customers write in English, Dutch and German; answer in the language they write in. Money: ask before spending more than €50, and never move funds between accounts. Calendar: no meetings before 09:30, and keep Friday afternoons free. Invoices go out on the first working day of the month from the shared billing inbox; Marta at Brightline checks them. When a deploy fails, roll back first and explain after. Status page lives at status.acme.dev; update it within 10 minutes of any customer-facing incident. Backups run nightly at 04:00 to B2; check the report each morning and raise anything red. Rogier prefers a short summary first, then the details, and dislikes long preambles. Use plain words and name the file, the ticket or the person. When unsure, ask one clear question instead of guessing. Keep secrets out of chat: point to the vault entry instead. Weekly: a revenue summary on Monday at 08:30 and a look at open support threads on Thursday. Projects in order of importance this quarter: payments-api v2 launch, webshop checkout speed, then ops clean-up. Do not touch the legacy admin panel; it is frozen until the rewrite is done and tested. In doubt? Ask Rogier.",
+  version: 1,
+  updatedAt: CREATED_AT,
+};
+
+/** Ada's memory index: the core note, then the book's seven topics in name order. */
+export const ADA_MEMORY: ReadonlyArray<MemoryEntry> = [
+  { name: "core", gist: "", size: ADA_CORE_NOTE.size },
+  {
+    name: "customers",
+    gist: "Marta @ Brightline (invoices), Jonas @ Kiteworks (API limits)",
+    size: 2690,
+  },
+  { name: "family", gist: "School run Tue/Thu; no meetings before 09:30", size: 604 },
+  { name: "ops", gist: "Backups nightly 04:00 to B2; certs on status.acme.dev", size: 1795 },
+  { name: "payments-api", gist: "Owns webhooks + payouts; v2.x; publish via npm", size: 2088 },
+  { name: "reading", gist: "Wants summaries of the weekly Rust + Postgres newsletters", size: 873 },
+  {
+    name: "webshop",
+    gist: "Stripe checkout, EU customers mostly NL/DE; deploys on weekdays only",
+    size: 3412,
+  },
+  {
+    name: "work-style",
+    gist: "Prefers short answers; decides fast; hates long preambles",
+    size: 1234,
+  },
+];
+
 /** What the section reads besides the sidebar's lists. */
 export const SETTINGS_ASSISTANTS_SCREEN: AssistantsSettingsRecords = {
   profiles: [ASSISTANT_PROFILE],
   connections: [FAILED_CONNECTION],
+  memory: { assistantId: SETTINGS_ADA.id, entries: ADA_MEMORY, core: ADA_CORE_NOTE },
 };
 
 /** The address of the section with Ada picked, which the specimen opens. */

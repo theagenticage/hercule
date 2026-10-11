@@ -187,6 +187,8 @@ const GENERIC: Record<ErrorCode, string> = {
   controller_sealed: "the controller has moved to another machine and no longer serves",
   promotion_in_progress: "a promotion is moving the controller, so nothing can be changed now",
   cap_exceeded: "a size or count cap was exceeded",
+  shrink_rejected:
+    "the write would discard most of a large document; confirm the shrink to write it anyway",
   internal: "the controller failed",
 };
 

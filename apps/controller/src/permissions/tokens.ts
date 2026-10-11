@@ -54,6 +54,7 @@ interface Row {
    */
   readonly session_grants: string;
   readonly assistant_id: Uint8Array | null;
+  readonly agent_id: Uint8Array | null;
 }
 
 const decodeGrants = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(GrantSchema)));
@@ -85,7 +86,7 @@ const make = Effect.gen(function* () {
         if (cached !== undefined) return Option.some(cached);
         const before = dropped;
         const rows = yield* sql<Row>`
-          SELECT s.id, s.permission_profile_id, p.grants, c.assistant_id,
+          SELECT s.id, s.permission_profile_id, p.grants, c.assistant_id, s.agent_id,
             ${sql.literal(buildSessionGrantsColumn("s"))} AS session_grants
           FROM sessions s
           JOIN permission_profiles p ON p.id = s.permission_profile_id
@@ -104,6 +105,7 @@ const make = Effect.gen(function* () {
           // the request was decided, so the union drops duplicates.
           grants: [...new Set([...profileGrants, ...decodeGrants(row.session_grants)])],
           assistantId: row.assistant_id === null ? null : uuidToString(row.assistant_id),
+          agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
         };
         if (dropped === before) held.set(tokenHash, actor);
         return Option.some(actor);

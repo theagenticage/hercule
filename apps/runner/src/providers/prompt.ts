@@ -1,6 +1,7 @@
 /**
- * The prompt text every adapter sends to its harness for one input, built the
- * same way for every harness.
+ * The text every adapter sends to its harness, built the same way for every
+ * harness: the prompt for one input, and the instructions a session starts
+ * with.
  */
 import type { AdapterTurnInput, LocalAttachment } from "./index";
 
@@ -56,4 +57,20 @@ export const buildHarnessPrompt = (input: AdapterTurnInput): string => {
   // one, whose first prompt arrives the same way.
   const header = `[Message from session ${input.senderSessionId}, another agent. To reply: hercule session input ${input.senderSessionId}]`;
   return body === "" ? header : `${header}\n\n${body}`;
+};
+
+/**
+ * Joins the parts of a session's instructions in the order given, with a blank
+ * line between them. A missing or empty part is left out, so the text never
+ * starts with a blank line or has two blank lines in a row. Returns undefined
+ * when no part has text, so an adapter can leave its harness's setting out
+ * instead of sending it empty.
+ *
+ * Every caller passes an assistant's memory as the last part (spec 12 section
+ * 6.3): it changes more often than anything before it, so the text before it
+ * stays the same from one session to the next.
+ */
+export const joinInstructions = (parts: ReadonlyArray<string | undefined>): string | undefined => {
+  const present = parts.filter((part): part is string => part !== undefined && part !== "");
+  return present.length === 0 ? undefined : present.join("\n\n");
 };
