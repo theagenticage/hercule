@@ -44,7 +44,7 @@ import {
 import { Actor, Id, Timestamp } from "../ids";
 import { MAX_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { Event, EventId } from "./event";
+import { Event, EventId } from "./event-record";
 import { Subscription } from "./subscription";
 import { WORKFLOW_CONTENT_FIELDS } from "./workflow";
 import { WorkflowDefinition } from "./workflow-definition";

@@ -203,7 +203,7 @@ Retention (this document owns the final statement; other documents link here):
 - **Kept in step on insert and on prune.** The insert of an event adds its index entry in the same transaction. The TTL prune removes the entry of each event it deletes, in the same transaction, with the event's old `title` and `author`, because an external-content index cannot remove an entry without them.
 - **The same tokenizer as task search**, and the same rule that callers pass plain words and never raw `MATCH` syntax ([./09-tasks.md](./09-tasks.md#search) Search).
 - **Order: newest first, never relevance.** Results are paged by keyset on `rowid` descending. Everything is a log read by time, so a search keeps the order the user is scrolling in. This is the named exception to relevance order for `text` ([./09-tasks.md](./09-tasks.md#search)).
-- **No backfill.** Events written before the envelope gained `title` and `author` have no index entry and are never found by `text`; they age out under the TTL.
+- ~~**No backfill.** Events written before the envelope gained `title` and `author` have no index entry and are never found by `text`; they age out under the TTL.~~ **The migration indexes the events already in the log.** *(Amended 2026-10-11, [#529](https://github.com/theagenticage/hercule/issues/529).)* The index landed after `title` and `author` (migration 0072, after 0069), so events with a title were already in the log. Unindexed, they would never be found, and the prune's delete would remove terms the index never held, which corrupts an external-content index. Events from before 0069 have neither field and add no terms. No update trigger: an event's `title` and `author` never change after it is emitted.
 
 ## Backups
 

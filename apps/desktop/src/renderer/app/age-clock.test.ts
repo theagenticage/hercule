@@ -106,6 +106,19 @@ describe("the age clock", () => {
     expect(vi.getTimerCount()).toBe(1);
   });
 
+  it("leaves the labels where they are when the timer fires and the wall clock has not moved", () => {
+    const clock = createAgeClock();
+    const onDurationChange = vi.fn();
+    watchLabel(clock, TWELVE_SECONDS_AGO, onDurationChange, findNextDurationChange);
+    // The timer fires 500 ms after it was set, and the wall clock still reads
+    // the moment it was set at, as a specimen's stopped clock does.
+    vi.spyOn(Date, "now").mockReturnValue(NOW.getTime());
+
+    vi.advanceTimersByTime(500);
+    expect(onDurationChange).not.toHaveBeenCalled();
+    expect(clock.readNow()).toEqual(NOW);
+  });
+
   it("marks each fire for the performance script", () => {
     const mark = vi.spyOn(performance, "mark");
     const clock = createAgeClock();

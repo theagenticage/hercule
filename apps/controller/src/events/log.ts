@@ -19,9 +19,18 @@ import type { Event } from "@hercule/contract";
 import { uuidToString } from "../db";
 import { AUDIT_KINDS } from "./audit-log";
 
-export const EVENT_COLUMNS =
+const COLUMNS_BEFORE_RAW =
   "id, source, connection_id, system, kind, occurred_at, received_at, " +
-  "dedup_key, refs, url, title, author, payload, raw, actor";
+  "dedup_key, refs, url, title, author, payload";
+
+/** Every column of an event. */
+export const EVENT_COLUMNS = `${COLUMNS_BEFORE_RAW}, raw, actor`;
+
+/**
+ * Every column except `raw`, for a page of events. The vendor payload can be
+ * large and a page does not return it, so the query does not read it.
+ */
+export const LISTED_EVENT_COLUMNS = `${COLUMNS_BEFORE_RAW}, actor`;
 
 export interface EventRow {
   readonly id: number;
@@ -41,11 +50,14 @@ export interface EventRow {
   readonly actor: string | null;
 }
 
+/** A row read with `LISTED_EVENT_COLUMNS`. */
+export type ListedEventRow = Omit<EventRow, "raw">;
+
 const parseJsonObject = (text: string): Record<string, unknown> =>
   JSON.parse(text) as Record<string, unknown>;
 
-/** Parses one row of the events table into the event the API returns. */
-export const parseEventRow = (row: EventRow): Event => ({
+/** Parses a row read without `raw` into the event a page of `event.query` returns. */
+export const parseListedEventRow = (row: ListedEventRow): Omit<Event, "raw"> => ({
   id: row.id,
   source: row.source,
   connectionId: row.connection_id === null ? null : uuidToString(row.connection_id),
@@ -59,8 +71,13 @@ export const parseEventRow = (row: EventRow): Event => ({
   title: row.title,
   author: row.author,
   payload: parseJsonObject(row.payload),
-  raw: row.raw === null ? null : parseJsonObject(row.raw),
   actor: row.actor,
+});
+
+/** Parses one row of the events table into the event the API returns. */
+export const parseEventRow = (row: EventRow): Event => ({
+  ...parseListedEventRow(row),
+  raw: row.raw === null ? null : parseJsonObject(row.raw),
 });
 
 /** Returns the position of the newest entry, or zero if the log is empty. */

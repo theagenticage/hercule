@@ -61,6 +61,11 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
  *   timer.
  * - A label that counts seconds keeps the timer under a second long, so its
  *   fires are early by far less than a second.
+ *
+ * A fire counts as on time only when the wall clock has moved since the timer
+ * was set. A wall clock that did not move is not running slow: it is stopped,
+ * as in the specimens' fixed clock, or it was set back. Moving the labels to
+ * the timer's moment would then show a time the wall clock never reached.
  */
 const EARLY_FIRE_TOLERANCE_MS = 1_000;
 
@@ -107,13 +112,16 @@ export const createAgeClock = (): AgeClock => {
    */
   let nextChange: number | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** The wall clock's time, in milliseconds, when `timer` was set. */
+  let timerSetAt = 0;
 
   /** Sets the one timer for `nextChange` unless the window is hidden. Clears any earlier timer first. */
   const setTimer = (): void => {
     clearTimeout(timer);
     timer = undefined;
     if (nextChange === null || document.visibilityState === "hidden") return;
-    timer = setTimeout(fire, Math.min(MAX_TIMER_DELAY_MS, Math.max(0, nextChange - Date.now())));
+    timerSetAt = Date.now();
+    timer = setTimeout(fire, Math.min(MAX_TIMER_DELAY_MS, Math.max(0, nextChange - timerSetAt)));
   };
 
   /** Returns the smallest `change` among the registered labels, or null with no label. */
@@ -157,7 +165,8 @@ export const createAgeClock = (): AgeClock => {
     performance.mark("age-clock-fire");
     const time = Date.now();
     const due = nextChange ?? time;
-    moveTo(new Date(due - time <= EARLY_FIRE_TOLERANCE_MS ? Math.max(time, due) : time));
+    const onTime = due - time <= EARLY_FIRE_TOLERANCE_MS && time > timerSetAt;
+    moveTo(new Date(onTime ? Math.max(time, due) : time));
   };
 
   const followVisibility = (): void => {

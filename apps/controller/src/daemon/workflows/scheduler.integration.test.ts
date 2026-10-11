@@ -307,6 +307,7 @@ describe("event.enrich on a cron tick", () => {
       await waitForTheOnlyRun(controller, workflowId);
       const [tick] = await listCronTicks(controller);
       expect(tick).toBeDefined();
+      const before = await readEvent(base, token, tick!.id);
 
       const response = await post(
         base,
@@ -318,7 +319,7 @@ describe("event.enrich on a cron tick", () => {
       const refusal = await readErrorBody(response);
       expect(response.status, refusal.text).toBe(404);
       expect(refusal.code).toBe("not_found");
-      expect(await readEvent(base, token, tick!.id)).toEqual(tick);
+      expect(await readEvent(base, token, tick!.id)).toEqual(before);
     });
   });
 });

@@ -19,7 +19,7 @@ import { Actor, ExternalRef, Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
-import { EventId } from "./event";
+import { EventId } from "./event-record";
 
 /** The longest title. A title is a line, not a paragraph. */
 export const MAX_TASK_TITLE_LENGTH = 512;

@@ -35,14 +35,12 @@ document.documentElement.setAttribute("data-bar-off", "");
 
 // The design draws parts that later tickets build, so they are removed here,
 // after the click, because the click redraws the list and the pane:
-// - Everything, the fourth view over the list (#529);
 // - the hourly triage: its tab, its section and its line in the header;
 // - the "waiting" label under an asker's age;
 // - the Stop asking answer and its M key, which spec 17 does not have;
 // - the fine print under an answer, the provider and account it acts as,
 //   which a signal's action does not carry;
 // - the pane's foot: when the signal leaves the list, and what raised it.
-findElement(document, '[data-asks-head] [data-mode="everything"]').remove();
 findElement(document, "[data-asks-triage]").replaceChildren();
 findElement(document, '[data-asks-tabs] [data-filter="triage"]').remove();
 const triageHeading = findElement(document, '[data-flip="sec-triage"]');

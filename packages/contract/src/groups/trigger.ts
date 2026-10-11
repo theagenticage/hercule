@@ -29,7 +29,7 @@ import {
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { EventKind } from "./event";
+import { EventKind } from "./event-record";
 import { TriggerFiresOn, TriggerOn } from "./workflow-definition";
 
 /** A start trigger starts runs. A signal trigger resumes a live run. */

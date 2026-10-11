@@ -1,16 +1,32 @@
-import type { Signal, SignalAction } from "@hercule/contract";
+import {
+  EVENT_HANDLINGS,
+  type EventFacts,
+  type EventWithFacts,
+  type Signal,
+  type SignalAction,
+} from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_INTAKE_LIST_WIDTH,
+  EVENT_HANDLING_OPTIONS,
   MIN_INTAKE_LIST_WIDTH,
   MIN_INTAKE_PANE_WIDTH,
+  buildHandlingLabels,
   buildInitials,
   buildIntakeTabs,
   buildSignalAnswers,
   countToDo,
+  cutHandlingLabels,
   decidePluginMark,
   describeAnswerKey,
   describeBuildFailure,
+  computeEventHorizonStart,
+  describeEventHorizon,
+  describeEventListEnd,
+  describeHandlingCaption,
+  describeEventSystem,
+  describeEventTitle,
+  moveEventSelection,
   describeNotScreened,
   describeOrchestrationSegment,
   describeResolvedElsewhere,
@@ -23,6 +39,7 @@ import {
   findSuggestedAnswer,
   fitIntakeListWidth,
   fitsIntakePane,
+  groupEventsByDay,
   groupSignalsByDay,
   groupSignalsIntoSections,
   isBackFromSnooze,
@@ -31,6 +48,7 @@ import {
   nameSignalSource,
   parseIntakeListWidth,
   trimAnswerEllipsis,
+  type EventHandlingLabel,
 } from "./intake";
 
 const PLUGINS = [
@@ -193,16 +211,24 @@ describe("countToDo and describeOrchestrationSegment", () => {
 });
 
 describe("buildIntakeTabs", () => {
-  it("lists All, then each plugin with a signal, in the plugins' order, never core signals", () => {
-    const { tabs } = buildIntakeTabs(
+  const switchedOn = { intake: { signalKinds: [{ on: true }] } };
+  const switchedOff = { intake: { signalKinds: [{ on: false }, { on: false }] } };
+  const TAB_PLUGINS = [
+    { id: "github", displayName: "GitHub", ...switchedOn },
+    { id: "slack", displayName: "Slack", ...switchedOn },
+    { id: "linear", displayName: "Linear", ...switchedOff },
+  ];
+
+  it("lists All, then each plugin with a signal kind switched on, in the plugins' order, never core signals", () => {
+    const tabs = buildIntakeTabs(
       [
         buildSignal("a", { kind: "slack/mentioned" }),
         buildSignal("b"),
         buildSignal("c"),
         buildSignal("d", { kind: "proposal", origin: fromUser() }),
       ],
-      PLUGINS,
-      new Set(),
+      TAB_PLUGINS,
+      null,
     );
     expect(tabs).toEqual([
       { pluginId: null, label: "All", count: 4 },
@@ -211,33 +237,30 @@ describe("buildIntakeTabs", () => {
     ]);
   });
 
-  it("keeps a plugin's tab after its last signal leaves", () => {
-    const first = buildIntakeTabs(
-      [buildSignal("a", { kind: "slack/mentioned" })],
-      PLUGINS,
-      new Set(),
-    );
-    const later = buildIntakeTabs([buildSignal("b")], PLUGINS, first.seenSourceIds);
-    expect(later.tabs).toEqual([
-      { pluginId: null, label: "All", count: 1 },
-      { pluginId: "github", label: "GitHub", count: 1 },
+  it("keeps a switched-on plugin's tab with no signal, so it survives its last one leaving", () => {
+    expect(buildIntakeTabs([], TAB_PLUGINS, null)).toEqual([
+      { pluginId: null, label: "All", count: 0 },
+      { pluginId: "github", label: "GitHub", count: 0 },
       { pluginId: "slack", label: "Slack", count: 0 },
     ]);
   });
 
-  it("returns the same seen set when no new plugin appears, so the caller stores nothing", () => {
-    const seen = new Set(["github"]);
-    expect(buildIntakeTabs([buildSignal("a")], PLUGINS, seen).seenSourceIds).toBe(seen);
-    expect(buildIntakeTabs([], PLUGINS, seen).seenSourceIds).toBe(seen);
+  it("gives a plugin with every kind switched off a tab only while it has a signal or is pressed", () => {
+    const labels = (signals: Signal[], pressed: string | null) =>
+      buildIntakeTabs(signals, TAB_PLUGINS, pressed).map((tab) => tab.label);
+    expect(labels([], null)).not.toContain("Linear");
+    expect(labels([buildSignal("a", { kind: "linear/assigned" })], null)).toContain("Linear");
+    expect(labels([], "linear")).toContain("Linear");
   });
 
   it("gives an unlisted plugin a tab named by its id, after the listed ones", () => {
-    const { tabs } = buildIntakeTabs(
+    const tabs = buildIntakeTabs(
       [buildSignal("a", { kind: "jira/assigned" }), buildSignal("b")],
-      PLUGINS,
-      new Set(),
+      TAB_PLUGINS,
+      null,
     );
-    expect(tabs.map((tab) => tab.label)).toEqual(["All", "GitHub", "jira"]);
+    expect(tabs.map((tab) => tab.label)).toEqual(["All", "GitHub", "Slack", "jira"]);
+    expect(buildIntakeTabs([], TAB_PLUGINS, "jira").map((tab) => tab.label)).toContain("jira");
   });
 });
 
@@ -715,5 +738,364 @@ describe("the split's widths", () => {
   it("hides the pane when the two minimums do not fit", () => {
     expect(fitsIntakePane(MIN_INTAKE_LIST_WIDTH + MIN_INTAKE_PANE_WIDTH)).toBe(true);
     expect(fitsIntakePane(MIN_INTAKE_LIST_WIDTH + MIN_INTAKE_PANE_WIDTH - 1)).toBe(false);
+  });
+});
+
+describe("buildHandlingLabels", () => {
+  // Sunday 11 October 2026, 10:00 in Amsterdam.
+  const now = new Date("2026-10-11T08:00:00.000Z");
+  const AMSTERDAM = "Europe/Amsterdam";
+  const NO_FACTS: EventFacts = { signals: [], resolvedSignals: [], tasks: [], knownBy: [] };
+  const buildLabels = (facts: Partial<EventFacts>) =>
+    buildHandlingLabels({ ...NO_FACTS, ...facts }, now, AMSTERDAM);
+  const readWords = (facts: Partial<EventFacts>) =>
+    buildLabels(facts).map((label) => [label.lead, label.detail]);
+  const MENTIONED = { signalId: "s1", kind: "github/mentioned", title: "Mentioned" } as const;
+
+  it("reads no action for an event that came to nothing", () => {
+    expect(buildLabels({})).toEqual([
+      {
+        handling: "no-action",
+        key: "no-action",
+        lead: "no action",
+        detail: null,
+        record: null,
+        standing: null,
+        target: null,
+      },
+    ]);
+  });
+
+  it("names where a raised signal stands: To do, Later, Done", () => {
+    expect(readWords({ signals: [{ ...MENTIONED, status: "open" }] })).toEqual([
+      ["→ signal", "on your To do list"],
+    ]);
+    expect(
+      readWords({
+        signals: [{ ...MENTIONED, status: "open", snoozedUntil: "2026-10-12T07:00:00.000Z" }],
+      }),
+    ).toEqual([["→ signal", "Later · back tomorrow"]]);
+    expect(
+      readWords({
+        signals: [{ ...MENTIONED, status: "resolved", outcome: "Replied in Gmail" }],
+      }),
+    ).toEqual([["→ signal", "Done · Replied in Gmail"]]);
+  });
+
+  it("reads a snooze that has run out as on To do", () => {
+    expect(
+      readWords({
+        signals: [{ ...MENTIONED, status: "open", snoozedUntil: "2026-10-11T07:00:00.000Z" }],
+      }),
+    ).toEqual([["→ signal", "on your To do list"]]);
+  });
+
+  it("links a raised signal to the view it is on", () => {
+    const [label] = buildLabels({
+      signals: [{ ...MENTIONED, status: "open", snoozedUntil: "2026-10-12T07:00:00.000Z" }],
+    });
+    expect(label!.target).toEqual({ kind: "signal", signalId: "s1", view: "later" });
+  });
+
+  it("names a signal the event ended and its outcome", () => {
+    const [label] = buildLabels({
+      resolvedSignals: [
+        {
+          signalId: "s2",
+          title: "Review #12",
+          outcome: "Approved",
+        },
+      ],
+    });
+    expect(label).toMatchObject({
+      lead: "ended Review #12",
+      detail: "Approved",
+      target: { kind: "signal", signalId: "s2", view: "done" },
+    });
+  });
+
+  it("reads a signal of a core kind as evidence, and one of a plugin's kind as raised", () => {
+    expect(
+      readWords({
+        signals: [
+          { signalId: "p", kind: "proposal", status: "open", title: "Fix the flake" },
+          { ...MENTIONED, status: "open" },
+          { signalId: "f", kind: "fyi", status: "open", title: "Release notes" },
+        ],
+      }),
+    ).toEqual([
+      ["→ signal", "on your To do list"],
+      ["→ proposal", "Fix the flake"],
+      ["→ FYI", "Release notes"],
+    ]);
+  });
+
+  it("names a Task and links it", () => {
+    const [label] = buildLabels({ tasks: [{ taskId: "t1", title: "Ship the release" }] });
+    expect(label).toMatchObject({
+      lead: "→ Ship the release",
+      detail: null,
+      target: { kind: "task", taskId: "t1" },
+    });
+  });
+
+  it("names the session or run that knows the event, with a word for one without a title", () => {
+    expect(
+      readWords({
+        knownBy: [
+          { subscriptionId: "a", holder: { kind: "session", id: "x" }, title: "Release thread" },
+          { subscriptionId: "b", holder: { kind: "run", id: "y" }, title: null },
+          { subscriptionId: "c", holder: { kind: "session", id: "z" }, title: null },
+        ],
+      }),
+    ).toEqual([
+      ["known to Release thread", null],
+      ["known to a run", null],
+      ["known to a Thread", null],
+    ]);
+  });
+
+  it("tells the pane the record each handling is about and where it stands", () => {
+    const readCard = (facts: Partial<EventFacts>) =>
+      buildLabels(facts).map((label) => [label.record, label.standing]);
+    expect(readCard({ signals: [{ ...MENTIONED, status: "open" }] })).toEqual([
+      ["Mentioned", "on your To do list"],
+    ]);
+    expect(
+      readCard({
+        resolvedSignals: [
+          {
+            signalId: "s2",
+            title: "Review #12",
+            outcome: "Approved",
+          },
+        ],
+      }),
+    ).toEqual([["Review #12", "Approved"]]);
+    expect(
+      readCard({
+        signals: [{ signalId: "p", kind: "proposal", status: "open", title: "Fix the flake" }],
+      }),
+    ).toEqual([["Fix the flake", "Proposal · on your To do list"]]);
+    expect(readCard({ tasks: [{ taskId: "t1", title: "Ship the release" }] })).toEqual([
+      ["Ship the release", null],
+    ]);
+    expect(
+      readCard({
+        knownBy: [
+          { subscriptionId: "a", holder: { kind: "session", id: "x" }, title: "Release thread" },
+          { subscriptionId: "b", holder: { kind: "run", id: "y" }, title: null },
+        ],
+      }),
+    ).toEqual([
+      ["Release thread", "Thread"],
+      ["a run", "Run"],
+    ]);
+    expect(readCard({})).toEqual([[null, null]]);
+  });
+
+  it("links the holder of a known event by its kind", () => {
+    const labels = buildLabels({
+      knownBy: [
+        { subscriptionId: "a", holder: { kind: "session", id: "x" }, title: null },
+        { subscriptionId: "b", holder: { kind: "run", id: "y" }, title: null },
+      ],
+    });
+    expect(labels.map((label) => label.target)).toEqual([
+      { kind: "session", sessionId: "x" },
+      { kind: "run", runId: "y" },
+    ]);
+  });
+
+  it("orders the labels as spec 10 does, whatever order the facts come in", () => {
+    const labels = buildLabels({
+      knownBy: [{ subscriptionId: "k", holder: { kind: "session", id: "x" }, title: "Thread" }],
+      tasks: [{ taskId: "t", title: "Task" }],
+      signals: [
+        { signalId: "p", kind: "offer", status: "open", title: "Offer" },
+        { ...MENTIONED, status: "open" },
+      ],
+      resolvedSignals: [{ signalId: "e", title: "Old", outcome: "Ok" }],
+    });
+    expect(labels.map((label) => label.handling)).toEqual([
+      "raised-signal",
+      "ended-signal",
+      "evidence",
+      "on-task",
+      "known-work",
+    ]);
+  });
+
+  it("gives every label a key of its own", () => {
+    const labels = buildLabels({
+      signals: [
+        { ...MENTIONED, signalId: "a", status: "open" },
+        { ...MENTIONED, signalId: "b", status: "open" },
+      ],
+    });
+    expect(new Set(labels.map((label) => label.key)).size).toBe(2);
+  });
+});
+
+describe("cutHandlingLabels", () => {
+  const label = (key: string): EventHandlingLabel => ({
+    handling: "on-task",
+    key,
+    lead: key,
+    detail: null,
+    record: null,
+    standing: null,
+    target: null,
+  });
+
+  it("keeps the first two labels and counts the rest", () => {
+    const cut = cutHandlingLabels([label("a"), label("b"), label("c"), label("d")]);
+    expect(cut.shown.map((each) => each.key)).toEqual(["a", "b"]);
+    expect(cut.more).toBe(2);
+  });
+
+  it("counts nothing when there are two or fewer", () => {
+    expect(cutHandlingLabels([label("a"), label("b")]).more).toBe(0);
+    expect(cutHandlingLabels([label("a")]).shown).toHaveLength(1);
+  });
+});
+
+describe("EVENT_HANDLING_OPTIONS", () => {
+  it("offers every event first, then one caption per handling, never the word handling", () => {
+    expect(EVENT_HANDLING_OPTIONS.map((option) => option.handling)).toEqual([
+      null,
+      ...EVENT_HANDLINGS,
+    ]);
+    expect(EVENT_HANDLING_OPTIONS[0]!.caption).toBe("All events");
+    expect(
+      EVENT_HANDLING_OPTIONS.some((option) => option.caption.toLowerCase().includes("handling")),
+    ).toBe(false);
+  });
+});
+
+describe("describeHandlingCaption", () => {
+  it("gives the caption the filter menu offers the handling by", () => {
+    for (const option of EVENT_HANDLING_OPTIONS) {
+      if (option.handling !== null) {
+        expect(describeHandlingCaption(option.handling)).toBe(option.caption);
+      }
+    }
+  });
+});
+
+describe("describeEventHorizon", () => {
+  it("counts the days the controller keeps events", () => {
+    expect(describeEventHorizon(90)).toBe("Events from the last 90 days");
+    expect(describeEventHorizon(1)).toBe("Events from the last day");
+  });
+
+  it("reads an unset retention as the default of 90 days", () => {
+    expect(describeEventHorizon(undefined)).toBe("Events from the last 90 days");
+  });
+});
+
+describe("describeEventListEnd", () => {
+  it("names the horizon the list stops at", () => {
+    expect(describeEventListEnd(90)).toBe("No more events from the last 90 days.");
+    expect(describeEventListEnd(1)).toBe("No more events from the last day.");
+    expect(describeEventListEnd(undefined)).toBe("No more events from the last 90 days.");
+  });
+});
+
+describe("computeEventHorizonStart", () => {
+  const now = new Date("2026-10-11T08:00:00.000Z");
+
+  it("goes back the retention's days from now", () => {
+    expect(computeEventHorizonStart(now, 90)).toBe("2026-07-13T08:00:00.000Z");
+    expect(computeEventHorizonStart(now, 1)).toBe("2026-10-10T08:00:00.000Z");
+  });
+
+  it("reads an unset retention as the default of 90 days", () => {
+    expect(computeEventHorizonStart(now, undefined)).toBe(computeEventHorizonStart(now, 90));
+  });
+});
+
+describe("groupEventsByDay", () => {
+  it("groups events by the date they were received in the user's zone, newest first", () => {
+    const now = new Date("2026-10-11T08:00:00.000Z");
+    const buildEvent = (id: number, receivedAt: string): EventWithFacts =>
+      ({ id, receivedAt, signals: [], resolvedSignals: [], tasks: [], knownBy: [] }) as never;
+    const sections = groupEventsByDay(
+      [
+        buildEvent(4, "2026-10-11T07:00:00.000Z"),
+        // 00:30 on Sunday in Amsterdam, though still Saturday in UTC.
+        buildEvent(3, "2026-10-10T22:30:00.000Z"),
+        buildEvent(2, "2026-10-10T08:00:00.000Z"),
+        buildEvent(1, "2026-10-07T08:00:00.000Z"),
+      ],
+      now,
+      "Europe/Amsterdam",
+    );
+    expect(
+      sections.map((section) => [section.label, section.events.map((each) => each.id)]),
+    ).toEqual([
+      ["Today", [4, 3]],
+      ["Yesterday", [2]],
+      ["Wednesday", [1]],
+    ]);
+    expect(sections.map((section) => section.key)).toEqual(["day:0", "day:-1", "day:-4"]);
+  });
+});
+
+describe("describeEventTitle", () => {
+  it("shows the title the source set, or the kind when there is none", () => {
+    expect(
+      describeEventTitle({ title: "marta requested your review", kind: "github.review" }),
+    ).toBe("marta requested your review");
+    expect(describeEventTitle({ title: null, kind: "github.issue.opened" })).toBe(
+      "github.issue.opened",
+    );
+  });
+});
+
+describe("moveEventSelection", () => {
+  const events = [{ id: 9 }, { id: 8 }, { id: 7 }];
+
+  it("steps through the list and stays at either end", () => {
+    expect(moveEventSelection(events, 9, 1)).toBe(8);
+    expect(moveEventSelection(events, 8, -1)).toBe(9);
+    expect(moveEventSelection(events, 7, 1)).toBe(7);
+    expect(moveEventSelection(events, 9, -1)).toBe(9);
+  });
+
+  it("starts at the first row for J and the last for K when nothing is selected", () => {
+    expect(moveEventSelection(events, null, 1)).toBe(9);
+    expect(moveEventSelection(events, null, -1)).toBe(7);
+    expect(moveEventSelection(events, 42, 1)).toBe(9);
+  });
+
+  it("returns null for an empty list", () => {
+    expect(moveEventSelection([], null, 1)).toBeNull();
+  });
+});
+
+describe("describeEventSystem", () => {
+  const plugins = [{ id: "github", displayName: "GitHub" }];
+
+  const CONNECTION_ID = "01a06d02-7a00-7000-8000-000000000001";
+
+  it("names a listed plugin by its id and display name", () => {
+    expect(describeEventSystem({ source: "github", connectionId: CONNECTION_ID }, plugins)).toEqual(
+      { pluginId: "github", name: "GitHub" },
+    );
+  });
+
+  it("gives a core emitter no plugin id and the core's name", () => {
+    expect(describeEventSystem({ source: "cron", connectionId: null }, plugins)).toEqual({
+      pluginId: null,
+      name: "Hercule",
+    });
+  });
+
+  it("names a plugin that was removed by its id, because its event came through a Connection", () => {
+    expect(describeEventSystem({ source: "jira", connectionId: CONNECTION_ID }, plugins)).toEqual({
+      pluginId: "jira",
+      name: "jira",
+    });
   });
 });
