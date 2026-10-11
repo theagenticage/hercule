@@ -7,6 +7,10 @@
 *::after {
   box-sizing: border-box;
 }
+:root {
+  /* The width of macOS's classic scroll bar, which a fading edge leaves unmasked so the bar never fades. */
+  --classic-scrollbar-width: 15px;
+}
 html,
 body {
   margin: 0;
@@ -484,6 +488,24 @@ html[data-motion="off"] .cr * {
   color: var(--muted);
   font-size: var(--t-12);
 }
+/* "From runs": a 16px sub-label in Waiting on you, 7px below the row above with the section's 1px gap, in the heading's faint ink and sentence case, indented to the rows' text. */
+.side-sub {
+  height: 16px;
+  margin: 6px 0 0;
+  padding-left: 39px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+  line-height: 16px;
+}
+/* A run's row draws its state mark in the face's 24px slot, so every row's text starts at the same x. */
+.side-lead {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
 .side-foot {
   display: flex;
   flex-direction: column;
@@ -709,6 +731,13 @@ html[data-motion="off"] .cr * {
   color: var(--faint);
   font-weight: var(--w-regular);
 }
+/* The page's name, set as a title, leading a floating pill; the margin and size are reset so it can be the page's h1. */
+.pill-title {
+  margin: 0;
+  padding: 0 8px 0 10px;
+  font-size: inherit;
+  font-weight: var(--w-bold);
+}
 /* A thread of this workspace, as a tab: its state mark, its title, and an age when idle. */
 .ptab {
   display: inline-flex;
@@ -806,6 +835,15 @@ html[data-motion="off"] .cr * {
   padding: 0 10px;
   font-size: var(--t-12);
   gap: 5px;
+}
+/* A button that cannot act now, such as a dialog's action while it runs, keeps its colours at half opacity and takes no pointer. */
+:is(.btn, .icon-btn):is(:disabled, [aria-disabled="true"]) {
+  opacity: 0.5;
+  pointer-events: none;
+}
+/* A button at work keeps its colours, because it is busy, not unavailable, and takes no second press. */
+.btn[aria-busy="true"] {
+  pointer-events: none;
 }
 .btn--lg {
   height: 38px;
@@ -1122,6 +1160,49 @@ html[data-motion="off"] .cr * {
 .toggle[aria-checked="true"]::after {
   background: var(--raised);
   transform: translateX(14px);
+}
+/* A checkbox or radio drawn in the book's ink: the native input keeps its keyboard and screen
+   reader behaviour, and a checkbox's tick is an icon laid over it. */
+.choice-box {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.choice-box input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border-radius: 4px;
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--faint) 60%, transparent);
+}
+.choice-box input[type="radio"] {
+  border-radius: 50%;
+}
+.choice-box input:checked {
+  background: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+/* A checked radio is an ink dot inside an ink ring, with the field's colour between them. */
+.choice-box input[type="radio"]:checked {
+  box-shadow: inset 0 0 0 1px var(--ink), inset 0 0 0 4px var(--field);
+}
+.choice-box input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.choice-box .ic {
+  position: absolute;
+  color: var(--field);
+  opacity: 0;
+  pointer-events: none;
+}
+.choice-box input:checked + .ic {
+  opacity: 1;
 }
 /* A slider in ink, like the toggle's on state. The native control keeps its keyboard and screen
    reader behaviour. */
@@ -1670,6 +1751,1347 @@ html[data-motion="off"] .cr * {
 }
 .dot--fail {
   background: var(--fail);
+}
+
+/* ---------- Workflow list ---------- */
+/* One list at three widths: a table when nothing is open, a 340px column beside the open workflow, hidden when that fills the pane. */
+.docket-page {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  container: docket-page / inline-size;
+}
+/* The scrolling list. --pad is its side padding, which the sticky bands reach across with negative margins. */
+.docket {
+  --pad: 20px;
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 0 var(--pad) 24px;
+  container: docket / inline-size;
+}
+/* The column is divided from the open workflow by a hairline, as the sidebar is from the main pane. */
+.docket--column {
+  --pad: 8px;
+  flex: none;
+  width: 340px;
+  border-right: 1px solid var(--line-soft);
+}
+/* Below 800px the column would leave the open workflow too little room, so the workflow fills the pane. */
+@container docket-page (width < 800px) {
+  .docket--column,
+  .list-btn {
+    display: none;
+  }
+}
+/* A group's heading is .side-h, with its count right after the name instead of at the far end of a wide row. */
+.docket-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  margin: 22px 0 0;
+  padding: 0 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+/* The first group sits closer to the column heads than groups sit to each other. */
+.pill-room + * > .docket-h {
+  margin-top: 14px;
+}
+/* In the column the heading is the sidebar's own: the count ends the row. */
+.docket--column .docket-h {
+  justify-content: space-between;
+  margin-top: 16px;
+  padding: 0 4px 0 10px;
+}
+.docket--column .pill-room + * > .docket-h {
+  margin-top: 8px;
+}
+.docket--column .side-row {
+  min-height: 46px;
+  margin-top: 1px;
+}
+/* One grid for the table's heads and rows: mark, name, Starts on, the strip, Success, Last run and its time, Next. */
+.docket--table :is(.docket-cols, .docket-row) {
+  grid-template-columns: 14px minmax(0, 1.4fr) minmax(0, 1fr) 219px 44px minmax(0, 1.4fr) 44px 72px;
+}
+/* The column heads are .tbl-h, 32px tall, with a hairline under them because rows scroll beneath. */
+.docket-cols {
+  display: grid;
+  align-items: center;
+  gap: 14px;
+  height: 32px;
+  padding: 0 8px;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+/* The dense row is .prof at 40px with one line; its hairline is drawn by ::before so it never curves with the corners. */
+.docket-row {
+  position: relative;
+  display: grid;
+  align-items: center;
+  gap: 14px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  white-space: nowrap;
+  transition: background var(--dur-1);
+}
+.docket-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  border-top: 1px solid var(--line-soft);
+}
+.docket-row > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+a.docket-row:hover {
+  background: var(--hover);
+}
+.docket-row.is-on {
+  background: var(--selected);
+}
+/* A highlighted row hides the hairlines above and below it, so no line crosses its rounded corners. */
+a.docket-row:is(:hover, .is-on)::before,
+a.docket-row:is(:hover, .is-on) + .docket-row::before {
+  border-top-color: transparent;
+}
+/* Under the sticky column heads, whose hairline is already there, the first row draws none. */
+.docket-rows > .docket-row:first-child::before {
+  border-top-color: transparent;
+}
+.docket-mark {
+  display: grid;
+  place-items: center;
+}
+.docket-name {
+  font-weight: var(--w-medium);
+}
+.docket-row.is-off .docket-name {
+  color: var(--muted);
+}
+/* A quiet cell: what starts a workflow, who started a run, its icon in faint ink. */
+.docket-quiet {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.docket-quiet .ic {
+  flex: none;
+  color: var(--faint);
+}
+.docket-quiet > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Numbers and times sit right-aligned in the faint ink of a second line. */
+.docket-num {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.docket-cols .docket-num {
+  font-size: inherit;
+}
+/* A run's status in one of three tones: muted, marigold when it waits on you, failure ink when it failed. */
+.docket-status {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.docket-status--you {
+  color: var(--you-ink);
+}
+.docket-status--fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+/* The last 20 runs as 10px marks with 1px between, right-aligned so every latest run sits in one place. */
+.strip {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1px;
+}
+/* A narrower pane drops columns while the names keep about 160px, as the profiles table drops Used by. */
+@container docket (width < 1000px) {
+  .docket--table :is(.docket-cols, .docket-row) {
+    grid-template-columns: 14px minmax(0, 1.4fr) 219px 44px minmax(0, 1.4fr) 44px 72px;
+  }
+  .docket--table .col-starts {
+    display: none;
+  }
+}
+@container docket (width < 820px) {
+  .docket--table :is(.docket-cols, .docket-row) {
+    grid-template-columns: 14px minmax(0, 1fr) minmax(0, 1fr) 44px 72px;
+  }
+  .docket--table :is(.col-strip, .col-success) {
+    display: none;
+  }
+}
+
+/* ---------- Floating header and sticky surfaces ---------- */
+/* An opaque band as tall as the floating header, so the pills never float over half a row. It can hold the column heads or the search field. */
+.pill-room {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 calc(-1 * var(--pad));
+  padding: 56px var(--pad) 0;
+  background: var(--surface);
+}
+.docket--column .pill-room {
+  padding-bottom: 8px;
+}
+/* Over the column, the page's name is a pill tab back to the table, in title ink. */
+.pill-back {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+/* The search field: .side-search as a real input, in its own pill at the header's far end, or boxed at the top of the column. */
+.find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+}
+.pill.find {
+  padding: 0 8px 0 12px;
+}
+.find--box {
+  height: 32px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-sm);
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+}
+.find:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.find > input {
+  flex: 1;
+  width: 168px;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+}
+.find > input::placeholder {
+  color: var(--faint);
+}
+/* The filter tabs never shrink: the search field gives up its width first. */
+.top > nav.pill {
+  flex: none;
+}
+/* The tab bar and the open tab's column heads stick under the pill room; the hairline above the tabs ends the graph. */
+.tab-band {
+  position: sticky;
+  top: 56px;
+  z-index: 1;
+  margin: 0 calc(-1 * var(--pad));
+  padding: 0 var(--pad);
+  background: var(--surface);
+}
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 10px 0 8px;
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+/* Tools that pick how the open tab shows, such as List | Timeline, sit at the bar's right end. */
+.tab-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+/* ---------- Open workflow ---------- */
+/* The open workflow scrolls as one: its lead, its graph, then the open tab's table. */
+.open-pane {
+  --pad: 24px;
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 0 var(--pad) 40px;
+  container: open-pane / inline-size;
+}
+/* The workflow's name, as the page's heading, with its switch at the end, as a settings section heading carries one. */
+.open-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0 6px;
+}
+.open-name > h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.open-switch {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.open-gist {
+  max-width: 700px;
+  margin: 0 0 4px;
+  font-size: var(--t-14);
+  line-height: 1.55;
+}
+/* The line under the description says what the switch does, because "Enabled" alone does not. */
+.open-hint {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* Chips in a wrapping row under a heading, as the Agent page lists tool families. */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* The open workflow's tables: Runs, Triggers and Inputs, each with its own columns. */
+:is(.docket-cols, .docket-row).tbl-runs {
+  grid-template-columns: 14px minmax(0, 2fr) minmax(0, 1fr) 64px 72px;
+}
+:is(.docket-cols, .docket-row).tbl-triggers {
+  grid-template-columns: 14px minmax(0, 1fr) 104px minmax(0, 1.4fr) minmax(0, 1.2fr) 36px;
+}
+:is(.docket-cols, .docket-row).tbl-inputs {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px minmax(0, 1.4fr);
+}
+/* A narrow pane drops who started each run and what each trigger does. */
+@container open-pane (width < 560px) {
+  :is(.docket-cols, .docket-row).tbl-runs {
+    grid-template-columns: 14px minmax(0, 1fr) 64px 72px;
+  }
+  :is(.docket-cols, .docket-row).tbl-triggers {
+    grid-template-columns: 14px minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.2fr) 36px;
+  }
+  :is(.col-by, .col-does) {
+    display: none;
+  }
+}
+/* An open workflow settles in from the side the list opens it towards; a run that joins a strip pushes the older marks one slot left. */
+@media (prefers-reduced-motion: no-preference) {
+  .open-pane {
+    animation: open-in var(--dur-3) var(--ease-out);
+  }
+  .strip.is-stepped > .mark:not(:last-child) {
+    animation: strip-step var(--dur-3) var(--ease-out);
+  }
+}
+@keyframes open-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+@keyframes strip-step {
+  from {
+    transform: translateX(11px);
+  }
+}
+
+/* ---------- Popovers and dialogs ---------- */
+/* A popover's parts on the .pop glass: a header, then sections divided by hairlines. */
+.pop-h {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 14px 10px;
+}
+.pop-h b {
+  font-weight: var(--w-bold);
+}
+.pop-h span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pop-sec {
+  padding: 6px 8px 8px;
+  border-top: 1px solid var(--line-soft);
+}
+.pop-sec .q-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+/* A row in a popover: a lead, text that takes the rest and is cut short, and a note at the end. A link or button row tints under the pointer. */
+.line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border-radius: var(--r-md);
+  font-size: var(--t-12);
+}
+button.line {
+  width: 100%;
+  text-align: left;
+}
+:is(a, button).line:hover {
+  background: var(--hover);
+}
+.line .grow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.line .grow b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.line .grow small {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  text-overflow: ellipsis;
+}
+.line-note {
+  flex: none;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* A dialog's layer: the scrim over the window, with the dialog 18vh from the top, where the project picker opens. */
+.modal {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 18vh;
+  background: var(--scrim);
+}
+.modal[hidden] {
+  display: none;
+}
+/* A dialog that asks before something changes: a title, a few lines, then the closing button and the action. Its body is a form, so Enter in it presses the action, its submit button. */
+.dialog {
+  width: 400px;
+  max-width: calc(100% - 48px);
+  border-radius: var(--r-lg);
+}
+.dialog .pop-sec {
+  padding: 14px;
+}
+.dialog p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+/* Why the action was refused, in full, in the failure ink. */
+.dialog .dialog-err {
+  color: var(--fail-ink);
+}
+.dialog .acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+/* Stacked choices: a .choice-box, its label, and its explanation under the label. The whole row is the target, and its hover reaches 8px past the text on each side. */
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 -8px 4px;
+}
+.option {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 6px 8px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+.option:hover {
+  background: var(--hover);
+}
+.option b {
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.option small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+/* ---------- Workflow graph ---------- */
+/* Steps and triggers as cards with hairline edges between them. A run shows in marks and rings, and in colour only where it asks the user something or failed. */
+/* The frame reaches 12px past the text on each side, the pane's padding, so the cards line up with the text above and below. */
+.graph {
+  position: relative;
+  margin: 8px -12px 20px;
+}
+/* The pane scrolls a graph zoomed wider than itself, and takes the zoom keys while focused. */
+.graph-pane {
+  position: relative;
+  overflow: auto;
+  border-radius: var(--r-lg);
+  outline: none;
+}
+.graph-pane:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+/* The room the scaled graph takes, with the pane's padding around it, so the pane scrolls across all of it. */
+.graph-room {
+  position: relative;
+}
+/* A graph cut off at the pane's edge fades out over 48px on that side, so no card looks broken; the scroll bar's strip stays unmasked. */
+.graph-pane:is(.is-cut-left, .is-cut-right) {
+  mask-image:
+    linear-gradient(to right, var(--cut-left-edge, #000), #000 48px, #000 calc(100% - 48px), var(--cut-right-edge, #000)),
+    linear-gradient(#000 0 0);
+  mask-size:
+    100% 100%,
+    100% var(--classic-scrollbar-width);
+  mask-position: bottom;
+  mask-repeat: no-repeat;
+}
+.graph-pane.is-cut-left {
+  --cut-left-edge: transparent;
+}
+.graph-pane.is-cut-right {
+  --cut-right-edge: transparent;
+}
+/* The drawing at its own size: the pane scales it as one piece, so a zoom never lays it out again. */
+.graph-draw {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.graph-edges {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+/* An edge is a 1.5px line in an ink tone: fired muted, active ink, not yet the soft hairline, failed red, and dashed where the run did not take it. */
+.edge {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  color: var(--line);
+}
+.edge.is-fired {
+  color: var(--muted);
+}
+.edge.is-active {
+  color: var(--ink);
+}
+.edge.is-not-taken {
+  stroke-dasharray: 3 4;
+}
+.edge.is-not-yet {
+  color: var(--line-soft);
+}
+.edge.is-failed {
+  color: var(--fail);
+}
+/* From the step a signal trigger matches on to the trigger: the run follows no such edge, it only listens. */
+.edge--signal {
+  stroke-dasharray: 2 3;
+}
+.arrow {
+  fill: var(--line);
+}
+.arrow.is-fired {
+  fill: var(--muted);
+}
+.arrow.is-active {
+  fill: var(--ink);
+}
+.arrow.is-not-yet {
+  fill: var(--line-soft);
+}
+.arrow.is-failed {
+  fill: var(--fail);
+}
+/* The dot the start triggers fan out from, and the dot after the step that ends the run. */
+.bus {
+  fill: var(--muted);
+}
+.graph-end {
+  fill: var(--ink);
+}
+/* An edge's condition or limit, in the mono face, whose fixed glyph width lets the layout leave room for it. */
+.edge-label {
+  position: absolute;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  background: var(--surface);
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+  line-height: 15px;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+}
+.edge-label:is(.is-fired, .is-active) {
+  color: var(--muted);
+}
+.edge-label.is-failed {
+  color: var(--fail-ink);
+}
+/* A step is a raised card and a trigger a sunken one, because a trigger listens rather than works. Hover and open each change one of fill, rim and lift. */
+.node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 176px;
+  height: 48px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--r-lg);
+  background: var(--node-fill);
+  box-shadow:
+    inset 0 0 0 1px var(--node-rim),
+    var(--node-lift);
+  text-align: left;
+  transition:
+    background var(--dur-1),
+    box-shadow var(--dur-1);
+}
+.node--step {
+  --node-fill: var(--raised);
+  --node-rim: var(--line-soft);
+  --node-lift: var(--shadow-1);
+}
+.node--trigger {
+  --node-fill: var(--sunken);
+  --node-rim: var(--line-soft);
+  --node-lift: 0 0 #0000;
+}
+.node:hover {
+  background: color-mix(in oklab, var(--ink) 5%, var(--node-fill));
+}
+.node.is-open {
+  --node-rim: var(--line);
+  --node-lift: var(--shadow-2);
+}
+/* The box at the card's left that shows what it is: an Agent, an action, a schedule or an event. */
+.node-lead {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--muted);
+}
+.node--trigger .node-lead {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.node-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+.node-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.node-title b {
+  overflow: hidden;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node--trigger .node-title b {
+  font-weight: var(--w-medium);
+}
+/* How often the run came to the step, such as "×2". */
+.node-times {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.node-detail {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The run's state at the card, on a disc of the page's colour on its top-right corner. */
+.node-mark {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+/* The tag "all" on a step that waits for every edge into it. */
+.node-join {
+  position: absolute;
+  top: -8px;
+  left: 10px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  line-height: 15px;
+}
+/* Cards the run did not reach, skipped or cancelled, and triggers that did not start it, stand back at half opacity. */
+.node:is(.is-unreached, .is-quiet, .is-cancelled, .is-skipped) {
+  opacity: 0.5;
+}
+.node.is-waiting {
+  --node-ring: var(--you);
+}
+.node.is-waiting .node-detail {
+  color: var(--you-ink);
+}
+.node.is-failed {
+  --node-ring: var(--fail);
+}
+.node.is-failed .node-detail {
+  color: var(--fail-ink);
+}
+.node.is-listening {
+  --node-ring: var(--line);
+}
+/* The ring of a card that waits on the user, failed or listens. It lies over the rim, and comes first, so the tag and the mark draw over it. */
+.node-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1.5px var(--node-ring);
+  pointer-events: none;
+}
+/* The zoom controls on the pane's bottom-right corner. */
+.zoom {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+}
+.zoom output {
+  min-width: 42px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+/* A node's card of details: a 320px popover beside its node, kept inside the window, that scrolls when it is taller than the room. */
+.node-pop {
+  inset: auto;
+  width: 320px;
+  max-height: calc(100vh - 16px);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 0;
+  border-radius: var(--r-lg);
+  color: var(--ink);
+}
+/* The node's id is the title and its kind is on the right; a long id gives way first. */
+.node-pop .pop-h b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-pop .pop-h .ic {
+  flex: none;
+  color: var(--muted);
+}
+/* Where the run is at the node, with what the session asks the user under it. */
+.node-status .grow {
+  white-space: normal;
+}
+.node-status .grow b {
+  font-weight: var(--w-bold);
+}
+.node-status.is-you .grow b {
+  color: var(--you-ink);
+}
+.node-status.is-fail .grow b {
+  color: var(--fail-ink);
+}
+.node-status .grow small {
+  color: var(--ink);
+  font-size: var(--t-12);
+  white-space: normal;
+}
+/* A state with no mark keeps the mark's room, so its words start where they would after one. */
+.no-mark {
+  flex: none;
+  width: 14px;
+}
+/* The facts: a label column, then the value, wrapped once and then cut short. Data and expressions are in mono. */
+.node-facts {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+  padding: 6px;
+  font-size: var(--t-12);
+}
+.node-facts > div {
+  display: contents;
+}
+.node-facts dt {
+  color: var(--muted);
+}
+.node-facts dd {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.node-facts dd.is-code {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+  line-height: 18px;
+}
+.node-facts dd.is-fail {
+  color: var(--fail-ink);
+}
+/* An agent step's prompt as written: its first three lines. */
+.node-prompt {
+  display: -webkit-box;
+  margin: 0;
+  padding: 0 6px 6px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+/* The chevron that ends a row which opens a thread. */
+.node-pop .line > .ic:last-child {
+  flex: none;
+  color: var(--faint);
+}
+
+/* ---------- Timelines ---------- */
+/* Runs across a day, or a run's steps across the run, on one time axis. A place on it, --at, is a percentage of the axis's width, so ticks, lines and bars line up. */
+/* The day stepper: arrows around the day, whose room fits "Yesterday", so the arrows stay put as the user steps. */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.stepper > .btn {
+  margin-right: 6px;
+}
+.stepper-day {
+  min-width: 76px;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+/* The axis sits where a list's column heads sit, as tall and in their type. */
+.axis {
+  position: relative;
+  height: 32px;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.axis-tick {
+  position: absolute;
+  top: 0;
+  left: var(--at);
+  line-height: 32px;
+  transform: translateX(-50%);
+}
+/* Below 900px of pane only every third hour is labelled, so no two labels touch. */
+@container open-pane (width < 900px) {
+  .axis-tick:not(.is-major) {
+    display: none;
+  }
+}
+/* The time now: an ink pill with a stem down to the axis's hairline, where the now line goes on. */
+.axis-now {
+  position: absolute;
+  top: 7px;
+  left: var(--at);
+  z-index: 1;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+  font-family: var(--font-ui);
+  font-variation-settings: normal;
+  font-weight: var(--w-bold);
+  line-height: 16px;
+  transform: translateX(-50%);
+}
+.axis-now::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1px;
+  height: 7px;
+  background: var(--ink);
+}
+/* The day's runs, one 24px track per overlap: a 16px bar and the room between two. */
+.lanes {
+  position: relative;
+  height: calc(var(--tracks) * 24px + 16px);
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+/* The hour lines behind everything, and the now line in ink. */
+.hour-line,
+.now-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--at);
+  width: 1px;
+  background: var(--line-soft);
+}
+.now-line {
+  background: var(--ink);
+}
+/* A fire still to come: a dashed tick on the top track in faint ink, its time beside it. */
+.fire {
+  position: absolute;
+  top: 13px;
+  left: var(--at);
+  height: 14px;
+  border-left: 1.5px dashed var(--faint);
+}
+.fire > span {
+  position: absolute;
+  left: 5px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+}
+/* A day with no runs says so over the hour lines. */
+.lanes-empty {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  margin: 0;
+  padding-right: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  transform: translateY(-50%);
+}
+/* A run or a step: a 4px line from its start to its end with its mark at the end, at least 7px long, so a short run is its mark alone. */
+.run-bar {
+  position: absolute;
+  top: calc(var(--track) * 24px + 12px);
+  left: min(var(--at), calc(100% - 7px));
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: max(var(--span), 7px);
+  height: 16px;
+}
+a.run-bar::before {
+  content: "";
+  position: absolute;
+  inset: -2px -11px -2px -6px;
+  border-radius: var(--r-pill);
+}
+a.run-bar:hover::before {
+  background: var(--hover);
+}
+.run-bar-line {
+  position: absolute;
+  inset: 6px 0;
+  border-radius: var(--r-pill);
+  background: var(--line);
+}
+.run-bar--you > .run-bar-line {
+  background: var(--you);
+}
+.run-bar--fail > .run-bar-line {
+  background: var(--fail);
+}
+.run-bar.is-cut-start > .run-bar-line {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.run-bar.is-cut-end > .run-bar-line {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* The mark sits on the line's end on a disc of the colour behind it, so the hour lines pass behind it. A bar cut at the day's end keeps its mark inside. */
+.run-bar > .mark {
+  position: relative;
+  margin-right: -7px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+/* Under the pointer, a disc takes the hover tint over the page's colour, as the row or bar it sits in does. */
+a.run-bar:hover > .mark,
+a.docket-row:hover :is(.run-bar > .mark, .track-note) {
+  background: linear-gradient(var(--hover), var(--hover)), var(--surface);
+}
+.run-bar.is-cut-end > .mark {
+  margin-right: 0;
+}
+/* The chevron of a bar cut at the day's edge, in the page's side padding, pointing to the day the run went on into. */
+.run-bar-cut {
+  position: absolute;
+  top: 2px;
+  display: inline-grid;
+  color: var(--faint);
+}
+.run-bar-cut--start {
+  left: -18px;
+}
+.run-bar-cut--end {
+  right: -18px;
+}
+/* A run's steps as rows: the mark, the step, its track on the run's axis, and how long it took. */
+:is(.docket-cols, .docket-row).tbl-steps {
+  grid-template-columns: 14px minmax(0, 180px) minmax(0, 1fr) 64px;
+}
+.docket-row.tbl-steps {
+  align-items: stretch;
+  height: auto;
+  min-height: 40px;
+}
+.docket-row.tbl-steps > :not(.track) {
+  align-self: center;
+}
+/* The step's id, its iteration, and why it failed under them. */
+.record {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 0;
+}
+.record-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: var(--w-medium);
+}
+.record-name small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+/* A step the run has not reached, in muted ink, as the graph draws it fainter. */
+.record-name.is-quiet {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.record-err {
+  overflow: hidden;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A track lets marks and the now pill reach past its edges. */
+:is(.docket-cols, .docket-row) > .track {
+  position: relative;
+  align-self: stretch;
+  overflow: visible;
+}
+/* The run's axis is set in mono, whose fixed glyph width tells how close its ticks can sit. */
+.docket-cols > .track {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-weight: var(--w-regular);
+}
+.docket-cols > .track > .axis-now {
+  right: 0;
+  left: auto;
+  transform: translateX(50%);
+}
+.track > .run-bar {
+  top: 50%;
+  margin-top: -8px;
+}
+/* What a step with no bar shows on its track, such as "not reached". It ends at its place by the same share of its width as its place is of the track, so it stays inside. */
+.track-note {
+  position: absolute;
+  top: 50%;
+  left: var(--at);
+  padding: 0 6px;
+  background: var(--surface);
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  transform: translate(calc(-1 * var(--at)), -50%);
+}
+
+/* ---------- A run's page ---------- */
+/* The crumb: Workflows, the workflow, then the run. The workflow's name gives way first when the header runs out of room. */
+.top > .run-crumbs {
+  min-width: 0;
+}
+.run-crumbs > .pill-crumb {
+  min-width: 0;
+}
+.run-crumbs > .pill-crumb:nth-child(2) {
+  flex-shrink: 1000;
+  max-width: 260px;
+}
+.run-crumbs > .pill-crumb > a {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--dur-1);
+}
+.run-crumbs > .pill-crumb > a:hover {
+  color: var(--ink);
+}
+.run-crumbs > .ptab {
+  flex: none;
+}
+/* The title is the run's state after its mark, with how long it has run right after it. */
+.open-name > h1.run-state {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+}
+/* How long the run has run, after its state. */
+.run-took {
+  color: var(--muted);
+  font-size: var(--t-14);
+  font-variant-numeric: tabular-nums;
+}
+/* What the run asks the user, or why it failed, on the tint of its colour, as the waiting strip is drawn. */
+.run-gist {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 700px;
+  margin: 2px 0 14px;
+  padding: 8px 8px 8px 12px;
+  border-radius: var(--r-md);
+}
+.run-gist > .btn {
+  flex: none;
+}
+.run-gist > p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--t-14);
+  line-height: 1.45;
+}
+.run-gist--you {
+  background: var(--you-tint);
+  color: var(--you-ink);
+}
+.run-gist--fail {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+/* The inputs the run started with: names in a column as wide as the longest, values in mono. */
+.run-inputs {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  max-width: 700px;
+  margin: 14px 0 0;
+  font-size: var(--t-12);
+}
+.run-inputs > div {
+  display: contents;
+}
+.run-inputs dt {
+  color: var(--muted);
+}
+.run-inputs dd {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The earlier-version note, ruled in the hairline's colour because nothing waits on the user. */
+.run-note {
+  max-width: 700px;
+  margin: 16px 0 0;
+  padding-left: 11px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.run-inputs + .tab-band,
+.run-note + .tab-band {
+  margin-top: 20px;
+}
+/* Under the steps' band, the graph keeps 16px from the band's hairline. */
+.tab-band + .graph {
+  margin-top: 16px;
+}
+.run-steps small {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Workflows' motion ---------- */
+/* Each motion says something changed: it plays once, on transform and opacity only, within --dur-3, and never loops. */
+@media (prefers-reduced-motion: no-preference) {
+  /* A mark whose state changed pops in, in a list row, a strip, on the graph and on the timeline. */
+  .mark.is-new {
+    animation: mark-in var(--dur-3) var(--ease-spring);
+  }
+  /* A card the run reaches brightens from half opacity, one it passes by dims back, and a ring fades in with its mark. */
+  .node.is-brightening {
+    animation: node-brighten var(--dur-3) var(--ease-out);
+  }
+  .node.is-dimming {
+    animation: node-dim var(--dur-3) var(--ease-out);
+  }
+  .node-ring.is-new {
+    animation: ring-in var(--dur-3) var(--ease-out);
+  }
+  /* When the run asks the user something or fails, a copy of the ring grows past the card's edge and fades, once. */
+  .node:is(.is-waiting, .is-failed) > .node-ring.is-new::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 0 0 1.5px var(--node-ring);
+    opacity: 0;
+    animation: ring-ping var(--dur-3) var(--ease-out);
+  }
+  /* Opening a timeline, or stepping to a day, brings its bars in 30ms apart: each line sweeps from its start, then its mark pops in. From the ninth on they arrive together, so it all takes 640ms at most. */
+  .run-bar-line {
+    transform-origin: left;
+    animation: bar-sweep var(--dur-3) var(--ease-out) backwards;
+    animation-delay: calc(min(var(--order), 8) * 30ms);
+  }
+  .run-bar > .mark {
+    animation: mark-in var(--dur-2) var(--ease-spring) backwards;
+    animation-delay: calc(min(var(--order), 8) * 30ms + var(--dur-2));
+  }
+  /* A bar that arrives or changes later draws its line at once and only pops its mark. */
+  .run-bar.is-late > .run-bar-line {
+    animation: none;
+  }
+  .run-bar.is-late > .mark {
+    animation: mark-in var(--dur-3) var(--ease-spring);
+  }
+}
+@keyframes mark-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+@keyframes node-brighten {
+  from {
+    opacity: 0.5;
+  }
+}
+@keyframes node-dim {
+  from {
+    opacity: 1;
+  }
+}
+@keyframes ring-in {
+  from {
+    opacity: 0;
+  }
+}
+/* The card is 176 by 48 pixels, so this scale grows the ring by about 3.5px on every side. */
+@keyframes ring-ping {
+  from {
+    opacity: 0.7;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.04, 1.15);
+  }
+}
+@keyframes bar-sweep {
+  from {
+    opacity: 0;
+    transform: scaleX(0);
+  }
 }
 
 /* ---------- Web shell ---------- */

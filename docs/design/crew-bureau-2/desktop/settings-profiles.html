@@ -222,49 +222,6 @@
         text-decoration: underline;
         text-underline-offset: 2px;
       }
-      .btn[aria-disabled="true"] {
-        opacity: 0.5;
-        pointer-events: none;
-      }
-      /* The dialog that confirms a change to unrestricted, on the glass of the app's other dialogs. */
-      .scrim {
-        position: fixed;
-        z-index: 20;
-        inset: 0;
-        display: flex;
-        justify-content: center;
-        align-items: flex-start;
-        padding-top: 18vh;
-        background: var(--scrim);
-      }
-      .scrim[hidden] {
-        display: none;
-      }
-      .dialog {
-        width: 400px;
-        border-radius: var(--r-lg);
-      }
-      .dialog .pop-h {
-        padding: 12px 14px 10px;
-      }
-      .dialog .pop-h b {
-        font-weight: var(--w-bold);
-      }
-      .dialog .pop-sec {
-        padding: 14px;
-        border-top: 1px solid var(--line-soft);
-      }
-      .dialog p {
-        margin: 0 0 10px;
-        color: var(--muted);
-        line-height: 1.5;
-      }
-      .dialog .acts {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-        margin-top: 16px;
-      }
       .fixed {
         padding: 14px 0 2px;
         border-top: 1px solid var(--line-soft);
@@ -328,7 +285,7 @@
         </div>
       </main>
     </div>
-    <div class="scrim" data-confirm hidden>
+    <div class="modal" data-confirm hidden>
       <div class="pop dialog" role="dialog" aria-label="Change unrestricted?">
         <div class="pop-h"><b>Change unrestricted?</b></div>
         <div class="pop-sec">
