@@ -8,6 +8,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import type { RunSummary, Session, Trigger, TriggerOn, WorkflowSummary } from "@hercule/contract";
 import {
+  buildErrorBody,
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
@@ -235,9 +236,9 @@ describe("the workflow list", () => {
       "Old cleanup",
     ]);
     expect(within(getList()).getByRole("heading", { level: 2, name: "Needs you 1" })).toBeTruthy();
-    expect(
-      within(getList()).getByRole("heading", { name: "Needs you 1" }).querySelector(".count--you"),
-    ).not.toBeNull();
+    // Needs you's count is drawn in marigold, which only its class shows.
+    const needsYou = within(getList()).getByRole("heading", { name: "Needs you 1" });
+    expect(within(needsYou).getByText("1").classList.contains("count--you")).toBe(true);
   });
 
   it("shows what starts each workflow, its strip, its success, its last run and when it next starts", async () => {
@@ -287,11 +288,16 @@ describe("the workflow list", () => {
       description: "review asks: Run git push?",
     });
     // The strip: the cancelled run as a dot named for it, then the completed
-    // run's mark and the waiting run's, oldest first.
-    const strip = ship.querySelector(".strip")!;
-    expect(strip.children).toHaveLength(3);
-    expect(within(ship).getByRole("img", { name: "Cancelled" })).toBe(strip.firstElementChild);
-    expect(ship.querySelector(".status-text--you")?.textContent).toBe("review asks: Run git push?");
+    // run's mark and the waiting run's, oldest first. A mark is hidden from
+    // assistive technology, so the strip is found from the named dot.
+    const cancelled = within(ship).getByRole("img", { name: "Cancelled" });
+    expect(cancelled.parentElement?.children).toHaveLength(3);
+    expect(cancelled.parentElement?.firstElementChild).toBe(cancelled);
+    // The status waiting on the user is drawn in marigold, and a workflow
+    // that is off is drawn faint; only their classes show those colours.
+    expect(
+      within(ship).getByText("review asks: Run git push?").classList.contains("status-text--you"),
+    ).toBe(true);
     expect(
       within(getList()).getByRole("link", { name: "Old cleanup" }).classList.contains("is-off"),
     ).toBe(true);
@@ -306,9 +312,38 @@ describe("the workflow list", () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe(`/workflows/${SYNC.id}`));
     expect(row.getAttribute("aria-current")).toBe("page");
+    // The selected row is drawn with the selection's fill, which only its class shows.
     expect(row.classList.contains("is-on")).toBe(true);
     // The list stays, with its heading.
     expect(screen.getByRole("heading", { level: 1, name: "Workflows" })).toBeTruthy();
+  });
+
+  it("says when a workflow's runs could not be read, and still draws the list", async () => {
+    const handlers: Readonly<Record<string, Handler>> = {
+      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, agentSessions: [WAITING] }),
+      "GET /api/v1/settings": { body: { controller: {}, user: { timezone: "UTC" } } },
+      "GET /api/v1/workflows": { body: { items: WORKFLOWS } },
+      "GET /api/v1/triggers": { body: { items: TRIGGERS } },
+      "GET /api/v1/runs": (call) =>
+        new URLSearchParams(call.search).get("workflowId") === REPORT.id
+          ? { status: 500, body: buildErrorBody("internal", "The disk is full.") }
+          : answerRunQuery(call),
+    };
+    stubApi(handlers);
+    await renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {
+      path: "/workflows",
+    });
+    await screen.findByRole("heading", { level: 1, name: "Workflows" });
+
+    // The page reads a failed strip again after it draws, so the row says so once that read
+    // fails as well.
+    expect(
+      await within(getList()).findByRole("link", {
+        name: "Ad hoc report",
+        description: "Runs could not be read",
+      }),
+    ).toBeTruthy();
+    expect(readCells(SYNC)[5]).toBe("Failed at test");
   });
 
   it("says when there are no workflows", async () => {

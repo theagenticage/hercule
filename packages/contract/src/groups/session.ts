@@ -128,6 +128,24 @@ export const refuseEmptyPrompt = Schema.makeFilter(
  */
 export const SESSION_STATUSES = ["queued", "starting", "idle", "busy", "exited"] as const;
 
+/**
+ * Every session status except `exited`: the statuses of a session that is
+ * still live. A read of the live sessions filters on these, and a live
+ * session blocks deleting the runner, workspace and token it uses, so a
+ * status left out here would let those be deleted under a running session.
+ *
+ * It is written out, not filtered from `SESSION_STATUSES`, because a status
+ * filter must be a list that is never empty and `filter` cannot show that.
+ * A test checks that it holds every status but `exited`, so a status added
+ * later must be placed here or the test fails.
+ */
+export const LIVE_SESSION_STATUSES = [
+  "queued",
+  "starting",
+  "idle",
+  "busy",
+] as const satisfies ReadonlyArray<SessionStatus>;
+
 export const SessionStatus = Schema.Literals(SESSION_STATUSES);
 
 export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>;

@@ -50,8 +50,9 @@ import { MainWindow } from "./main-window";
  * - Settings…, Sign Out, New Thread, Threads, Hercule, Office, Intake and
  *   Workflows are enabled only when `signedIn` is true. Only the shell
  *   carries them out, and the shell never shows while signed out, so they
- *   are dimmed then rather than doing nothing. Main knows only whether a login token is stored, so from the
- *   first run's account step to its end they stay enabled and do nothing.
+ *   are dimmed then rather than doing nothing. Main knows only whether a
+ *   login token is stored, so from the first run's account step to its end
+ *   they stay enabled and do nothing.
  *
  * The app menu lists its items itself, because Electron's own app menu takes
  * no extra item. Its role still names it after the app.
@@ -213,9 +214,9 @@ export class MainMenu extends Context.Service<
  *
  * Choosing Settings…, Sign Out, New Thread, Threads, Hercule, Office,
  * Intake, Workflows or Send shows the window and sends the page that menu
- * command. Choosing an item in
- * Go shows the window and asks the page to open its destination.
- * `development` adds Reload and Toggle Developer Tools to the View menu.
+ * command. Choosing an item in Go shows the window and asks the page to open
+ * its destination. `development` adds Reload and Toggle Developer Tools to
+ * the View menu.
  *
  * Each change builds the menu bar again, because macOS does not show a new
  * label on an item that is already built.

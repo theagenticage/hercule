@@ -16,7 +16,8 @@ import "./workflow-list.css";
  * `onSearchChange`.
  *
  * While the header is mounted, ⌘F focuses the search field and selects its
- * text, so typing replaces the last search.
+ * text, so typing replaces the last search. ⌘F does nothing while a dialog is
+ * open, or when something else has already handled the key press.
  */
 export function WorkflowListHeader({
   filter,
@@ -35,8 +36,12 @@ export function WorkflowListHeader({
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented) return;
       if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
-      if (event.key !== "f") return;
+      // Caps Lock turns the key into "F".
+      if (event.key.toLowerCase() !== "f") return;
+      // An open dialog is modal, and the search field behind it cannot take focus.
+      if (document.querySelector("dialog[open]") !== null) return;
       event.preventDefault();
       searchRef.current?.focus();
       searchRef.current?.select();

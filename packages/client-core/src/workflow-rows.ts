@@ -3,29 +3,32 @@
  * how many workflows each filter keeps, and the entries a virtualized list
  * draws from the rows (spec 17 §Workflows, "The list").
  *
- * A row holds only strings, numbers, booleans and null, and one array of
- * strings, the strip. Building the rows again after a push gives equal
- * values for every workflow that did not change, so a screen that compares
- * a row field by field, and the strip element by element, redraws only the
- * rows that changed.
+ * A row holds only strings, numbers, booleans and null, and arrays of
+ * strings or booleans: the strip and the parts of Starts on. Building the
+ * rows again after a push gives equal values for every workflow that did not
+ * change, so a screen that compares a row field by field, and each array
+ * element by element, redraws only the rows that changed.
  *
  * Times are kept as instants, so a row does not change as the day passes.
  * The screen formats them with `formatListTime` against the age clock, so
  * only the time text changes, at local midnight.
+ *
+ * This module is the subpath `@hercule/client-core/workflow-rows`, not part
+ * of the index, so that the row builder, the schedule text and the cron
+ * words stay off the desktop app's first screen: they load in the chunk of
+ * the Workflows route, the one screen that imports them.
  */
 import {
   isSchedule,
   type RunSummary,
-  type Session,
   type Trigger,
   type TriggerFiresOn,
   type WorkflowSummary,
 } from "@hercule/contract";
 import { isRunLive } from "./run-display";
 import { describeCronInWords, describeSchedule } from "./schedule-text";
-import { findOldestOpenRequest } from "./threads/oldest-request";
 import type { Pose } from "./threads/pose";
-import { formatRequestQuestion } from "./threads/request-question";
+import type { WaitingRunSession } from "./waiting";
 
 /**
  * The groups of the list. A workflow is in the first group whose rule it
@@ -37,7 +40,7 @@ import { formatRequestQuestion } from "./threads/request-question";
  * - `running`: one of its runs is live;
  * - `everythingElse`: the rest.
  */
-export type WorkflowGroup = "needsYou" | "failing" | "running" | "everythingElse";
+type WorkflowGroup = "needsYou" | "failing" | "running" | "everythingElse";
 
 /** The groups in the order the list shows them, each with its heading. */
 const WORKFLOW_GROUPS: ReadonlyArray<{ readonly group: WorkflowGroup; readonly title: string }> = [
@@ -66,7 +69,7 @@ export type StripRunState =
 export type WorkflowStatusTone = "you" | "fail" | "muted";
 
 /** One workflow, as its row in the list shows it. */
-export interface WorkflowRow {
+export interface WorkflowListRow {
   readonly id: string;
   readonly name: string;
   readonly group: WorkflowGroup;
@@ -77,12 +80,13 @@ export interface WorkflowRow {
    */
   readonly isOff: boolean;
   /**
-   * What starts the workflow, its start triggers joined with " · ": each
-   * schedule in words ("Daily at 01:00", with " (Europe/Amsterdam)" when the
-   * schedule has a time zone of its own) or each event's kind. "On demand"
-   * when it has no start trigger.
+   * What starts the workflow, one text per start trigger, which the screen
+   * joins with " · ": each schedule in words ("Daily at 01:00", with
+   * " (Europe/Amsterdam)" when the schedule has a time zone of its own), or
+   * as its cron expression when it has no words, or each event's kind. Only
+   * "On demand" when it has no start trigger.
    */
-  readonly startsOnText: string;
+  readonly startsOnTexts: ReadonlyArray<string>;
   /**
    * Whether the first start trigger fires on events or on a schedule, which
    * picks the bolt or the clock that leads the cell. Null with no start
@@ -90,18 +94,30 @@ export interface WorkflowRow {
    */
   readonly startsOnFiresOn: TriggerFiresOn | null;
   /**
-   * Whether `startsOnText` is one cron expression with no words for it, which
-   * is shown as code.
+   * For each text of `startsOnTexts`, whether it is a cron expression with no
+   * words for it, which is shown as code.
    */
-  readonly startsOnIsCode: boolean;
+  readonly startsOnIsCode: ReadonlyArray<boolean>;
   /** The newest runs, at most 20, oldest first, so the newest sits at the strip's right end. */
   readonly strip: ReadonlyArray<StripRunState>;
-  /** Completed runs out of completed and failed ones in the strip, as "85%". Empty when there are none. */
+  /**
+   * Completed runs out of completed and failed ones in the strip, as "85%".
+   * Empty when there are none.
+   */
   readonly successText: string;
-  /** The status text of the last run, such as "review asks: Ship v2.4?", "At review" or "Done". */
+  /**
+   * The status text of the last run, such as "review asks: Ship v2.4?", "At
+   * review" or "Done". When the workflow is in Everything else and its strip
+   * is not read yet, it is empty; when the strip's read failed, it is "Runs
+   * could not be read".
+   */
   readonly statusText: string;
   readonly statusTone: WorkflowStatusTone;
-  /** When the newest run was created, an ISO instant. Null when the workflow has no runs. */
+  /**
+   * When the newest run started, an ISO instant, or when it was created for a
+   * run that never started, such as one still pending or cancelled before
+   * its first step. Null when the workflow has no runs.
+   */
   readonly lastRunAt: string | null;
   /**
    * When the workflow next starts, in words, when it is no time: "Off" while
@@ -113,11 +129,17 @@ export interface WorkflowRow {
   readonly nextText: string;
   /** The soonest next fire of the active scheduled start triggers, an ISO instant, or null. */
   readonly nextFireAt: string | null;
-  /** The words a search looks in, in lower case: the name, the description, Starts on and the trigger ids. */
+  /**
+   * The words a search looks in, in lower case: the name, the description,
+   * Starts on and the trigger ids.
+   */
   readonly searchText: string;
 }
 
-/** What the list reads, and the workflow rows are built from (spec 17 §Workflows, "What the pages read"). */
+/**
+ * What the list reads, and the workflow rows are built from (spec 17
+ * §Workflows, "What the pages read").
+ */
 export interface WorkflowListReads {
   /** Every workflow, from `workflow.query`. */
   readonly workflows: ReadonlyArray<WorkflowSummary>;
@@ -126,16 +148,17 @@ export interface WorkflowListReads {
   /**
    * Each workflow's newest runs, newest first, from `run.query({ workflowId,
    * limit: 20 })`, by workflow id. A workflow whose strip is not read yet
-   * has no entry.
+   * has no entry, and one whose read failed with no earlier read to show has
+   * `"failed"`.
    */
-  readonly strips: ReadonlyMap<string, ReadonlyArray<RunSummary>>;
+  readonly strips: ReadonlyMap<string, ReadonlyArray<RunSummary> | "failed">;
   /** Every live run, from `run.query` with `status: "running"` and with `status: "pending"`. */
   readonly liveRuns: ReadonlyArray<RunSummary>;
   /**
-   * The live sessions that are not threads. Those with a `runId` and an open
-   * Request are the ones a run waits on the user through.
+   * The sessions of runs that wait on the user, most recently active first,
+   * as `listWaitingRunSessions` lists them.
    */
-  readonly sessions: ReadonlyArray<Session>;
+  readonly waitingRunSessions: ReadonlyArray<WaitingRunSession>;
 }
 
 /**
@@ -156,7 +179,10 @@ const groupByKey = <Item, Key>(
   return groups;
 };
 
-/** Checks whether a run has not started any step yet: it is pending, or running with nothing active or awaited. */
+/**
+ * Checks whether a run has not started any step yet: it is pending, or
+ * running with nothing active or awaited.
+ */
 const isRunStarting = (run: RunSummary): boolean =>
   run.status === "pending" ||
   (run.status === "running" && run.activeStepIds.length === 0 && run.awaitedSignalIds.length === 0);
@@ -165,7 +191,10 @@ const isRunStarting = (run: RunSummary): boolean =>
 const pickNewerRun = (a: RunSummary | undefined, b: RunSummary): RunSummary =>
   a === undefined || Date.parse(b.createdAt) > Date.parse(a.createdAt) ? b : a;
 
-/** Returns a run's state in a strip. `isWaiting` tells whether a session of the run waits on the user. */
+/**
+ * Returns a run's state in a strip. `isWaiting` tells whether a session of
+ * the run waits on the user.
+ */
 const decideStripRunState = (run: RunSummary, isWaiting: boolean): StripRunState => {
   if (isWaiting) return "waiting";
   if (isRunStarting(run)) return "starting";
@@ -176,17 +205,13 @@ const decideStripRunState = (run: RunSummary, isWaiting: boolean): StripRunState
 };
 
 /**
- * Returns the status text of a workflow that waits on the user, from the
- * session that has waited longest: "review asks: Ship v2.4?", the step and
+ * Returns the status text of a workflow that waits on the user, from one
+ * session of its runs that waits: "review asks: Ship v2.4?", the step and
  * the question of its oldest open Request. A session that is no step's
  * reads "Waiting on you".
  */
-const describeWaitingSession = (session: Session): string => {
-  const request = findOldestOpenRequest(session);
-  return request === null || session.stepId === null
-    ? "Waiting on you"
-    : `${session.stepId} asks: ${formatRequestQuestion(request)}`;
-};
+const describeWaitingRunSession = (session: WaitingRunSession): string =>
+  session.stepId === null ? "Waiting on you" : `${session.stepId} asks: ${session.question}`;
 
 /**
  * Returns where a workflow's live runs are: "At review", "Waiting for
@@ -208,7 +233,10 @@ const describeLiveRuns = (runs: ReadonlyArray<RunSummary>): string => {
     : where.charAt(0).toUpperCase() + where.slice(1);
 };
 
-/** Returns the status text of a run that has ended: "Failed at review", "Failed", "Cancelled" or "Done". */
+/**
+ * Returns the status text of a run that has ended: "Failed at review",
+ * "Failed", "Cancelled" or "Done".
+ */
 const describeEndedRun = (run: RunSummary): string => {
   if (run.status === "failed") {
     return "failedStepId" in run && run.failedStepId !== undefined
@@ -233,39 +261,42 @@ const describeStartTrigger = (trigger: Trigger): string =>
  * the strip's runs and the workflow's live runs, so a run that started after
  * the strip was read still counts. Running reads the live runs, never the
  * strip, so a live run older than the strip's 20 counts too.
+ *
+ * A session waiting on the user puts the workflow of its run in Needs you.
+ * The run's workflow is read from the live runs and the strips, so a run
+ * that shows in either counts.
  */
 export const buildWorkflowRows = ({
   workflows,
   triggers,
   strips,
   liveRuns,
-  sessions,
-}: WorkflowListReads): ReadonlyArray<WorkflowRow> => {
+  waitingRunSessions,
+}: WorkflowListReads): ReadonlyArray<WorkflowListRow> => {
   const triggersByWorkflow = groupByKey(triggers, (trigger) => trigger.workflowId);
   const liveRunsByWorkflow = groupByKey(liveRuns, (run) => run.workflowId);
-  const liveRunWorkflows = new Map(liveRuns.map((run) => [run.id, run.workflowId]));
+  const runWorkflows = new Map(liveRuns.map((run) => [run.id, run.workflowId]));
+  for (const strip of strips.values()) {
+    if (strip === "failed") continue;
+    for (const run of strip) runWorkflows.set(run.id, run.workflowId);
+  }
 
-  // The sessions waiting on the user, by the workflow of their run, the one
-  // that has waited longest first.
-  const waitingSessions = sessions
-    .filter((session) => session.runId !== null && session.openRequests.length > 0)
-    .toSorted(
-      (a, b) =>
-        Date.parse(a.lastActivityAt) - Date.parse(b.lastActivityAt) || a.id.localeCompare(b.id),
-    );
-  const waitingRunIds = new Set(waitingSessions.map((session) => session.runId));
-  const waitingByWorkflow = groupByKey(waitingSessions, (session) =>
-    liveRunWorkflows.get(session.runId ?? ""),
+  // The sessions waiting on the user, by the workflow of their run, most
+  // recently active first, so the last of each workflow's has waited longest.
+  const waitingRunIds = new Set(waitingRunSessions.map((session) => session.runId));
+  const waitingByWorkflow = groupByKey(waitingRunSessions, (session) =>
+    runWorkflows.get(session.runId),
   );
 
-  const rows = workflows.map((workflow): WorkflowRow => {
+  const rows = workflows.map((workflow): WorkflowListRow => {
     const own = triggersByWorkflow.get(workflow.id) ?? [];
     const starts = own.filter((trigger) => trigger.kind === "start");
     const active = starts.filter((trigger) => trigger.status !== "paused");
     const brokenStart = starts.find((trigger) => trigger.health?.state === "error");
-    const strip = strips.get(workflow.id) ?? [];
+    const stripRead = strips.get(workflow.id);
+    const strip = stripRead === undefined || stripRead === "failed" ? [] : stripRead;
     const live = liveRunsByWorkflow.get(workflow.id) ?? [];
-    const waiting = waitingByWorkflow.get(workflow.id)?.[0];
+    const waiting = waitingByWorkflow.get(workflow.id)?.at(-1);
     const newest = [...strip.slice(0, 1), ...live].reduce<RunSummary | undefined>(
       pickNewerRun,
       undefined,
@@ -286,20 +317,23 @@ export const buildWorkflowRows = ({
     const lastEnded = strip.find((run) => !isRunLive(run.status));
     const statusText =
       waiting !== undefined
-        ? describeWaitingSession(waiting)
+        ? describeWaitingRunSession(waiting)
         : group === "failing" &&
             newest?.status !== "failed" &&
             brokenStart?.health?.state === "error"
           ? `${brokenStart.triggerId}: ${brokenStart.health.message}`
           : group === "running"
             ? describeLiveRuns(live)
-            : lastEnded === undefined
-              ? "No runs yet"
-              : describeEndedRun(lastEnded);
+            : lastEnded !== undefined
+              ? describeEndedRun(lastEnded)
+              : stripRead === undefined
+                ? ""
+                : stripRead === "failed"
+                  ? "Runs could not be read"
+                  : "No runs yet";
 
     const startTexts = starts.map(describeStartTrigger);
     const firstStart = starts[0];
-    const onlyStartOn = starts.length === 1 ? firstStart?.on : undefined;
     const completed = strip.filter((run) => run.status === "completed").length;
     const ended = completed + strip.filter((run) => run.status === "failed").length;
     const nextFireAt =
@@ -323,18 +357,25 @@ export const buildWorkflowRows = ({
                 ? "paused"
                 : "idle",
       isOff,
-      startsOnText: starts.length === 0 ? "On demand" : startTexts.join(" · "),
+      startsOnTexts: starts.length === 0 ? ["On demand"] : startTexts,
       startsOnFiresOn:
         firstStart === undefined ? null : isSchedule(firstStart.on) ? "schedule" : "event",
       startsOnIsCode:
-        onlyStartOn !== undefined &&
-        isSchedule(onlyStartOn) &&
-        describeCronInWords(onlyStartOn.schedule) === undefined,
+        starts.length === 0
+          ? [false]
+          : starts.map(
+              ({ on }) => isSchedule(on) && describeCronInWords(on.schedule) === undefined,
+            ),
       strip: strip.toReversed().map((run) => decideStripRunState(run, waitingRunIds.has(run.id))),
       successText: ended === 0 ? "" : `${String(Math.round((completed / ended) * 100))}%`,
       statusText,
       statusTone: group === "needsYou" ? "you" : group === "failing" ? "fail" : "muted",
-      lastRunAt: newest?.createdAt ?? null,
+      lastRunAt:
+        newest === undefined
+          ? null
+          : "startedAt" in newest && newest.startedAt !== undefined
+            ? newest.startedAt
+            : newest.createdAt,
       nextText: !workflow.enabled
         ? "Off"
         : starts.length === 0
@@ -374,7 +415,7 @@ export const WORKFLOW_LIST_FILTERS: ReadonlyArray<{
 ];
 
 /** Checks whether `row` passes `filter`. */
-const isRowShown = (row: WorkflowRow, filter: WorkflowListFilter): boolean =>
+const isRowShown = (row: WorkflowListRow, filter: WorkflowListFilter): boolean =>
   filter === "all" ? true : filter === "off" ? row.isOff : row.group === filter;
 
 /**
@@ -382,7 +423,7 @@ const isRowShown = (row: WorkflowRow, filter: WorkflowListFilter): boolean =>
  * any search, so they do not change as the user types.
  */
 export const countWorkflowsByFilter = (
-  rows: ReadonlyArray<WorkflowRow>,
+  rows: ReadonlyArray<WorkflowListRow>,
 ): Readonly<Record<WorkflowListFilter, number>> => ({
   all: rows.length,
   needsYou: rows.filter((row) => isRowShown(row, "needsYou")).length,
@@ -405,7 +446,7 @@ export type WorkflowListItem =
       /** How many of the group's rows are shown. */
       readonly count: number;
     }
-  | { readonly kind: "workflow-row"; readonly key: string; readonly row: WorkflowRow };
+  | { readonly kind: "workflow-row"; readonly key: string; readonly row: WorkflowListRow };
 
 /** Returns the key of the heading of `group`. */
 const buildGroupHeaderKey = (group: WorkflowGroup): string => `group:${group}`;
@@ -418,7 +459,7 @@ const buildGroupHeaderKey = (group: WorkflowGroup): string => `group:${group}`;
  * heading.
  */
 export const buildWorkflowListItems = (
-  rows: ReadonlyArray<WorkflowRow>,
+  rows: ReadonlyArray<WorkflowListRow>,
   filter: WorkflowListFilter,
   search: string,
 ): ReadonlyArray<WorkflowListItem> => {
@@ -452,8 +493,8 @@ export const buildWorkflowListItems = (
  * - the entry that now sits where the gone entry sat, or the last entry when
  *   the list is now shorter than that.
  *
- * A row leaves when a filter or a search hides it. Focus stays in the list, so a keyboard user never lands
- * back at the top of the page.
+ * A row leaves when a filter or a search hides it. Focus stays in the list,
+ * so a keyboard user never lands back at the top of the page.
  */
 export const pickWorkflowFocusFallback = (
   goneKey: string,

@@ -5,18 +5,6 @@
 import type { Session, SessionStatus } from "@hercule/contract";
 
 /**
- * The statuses of a session that has not exited: every status but `exited`.
- * A read of the live sessions filters on these, as the desktop app's "From
- * runs" does.
- */
-export const LIVE_SESSION_STATUSES = [
-  "queued",
-  "starting",
-  "idle",
-  "busy",
-] as const satisfies ReadonlyArray<SessionStatus>;
-
-/**
  * The session statuses that count as still in progress: a turn is running, or
  * the session is still being placed. Shared because a sidebar row's marker and
  * a lane's bucket both depend on the same question.

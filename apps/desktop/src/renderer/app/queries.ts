@@ -18,7 +18,6 @@ import {
   collectRunningTurnRows,
   collectSenderSessionIds,
   detectLocalRunner,
-  LIVE_SESSION_STATUSES,
   mergeNewestMessagePage,
   mergeSentMessage,
   queryKeys,
@@ -31,6 +30,7 @@ import {
 } from "@hercule/client-core";
 import {
   DEFAULT_PAGE_LIMIT,
+  LIVE_SESSION_STATUSES,
   MAX_PAGE_LIMIT,
   type ConversationMessage,
   type Input,
@@ -487,6 +487,11 @@ export const runStripQuery = (client: HerculeClient, workflowId: string) =>
     queryKey: queryKeys.runStrip(workflowId),
     queryFn: async () =>
       (await client.run.query({ query: { workflowId, limit: STRIP_RUN_LIMIT } })).items,
+    retry: isWorthRetrying,
+    // The loader already tried, so a strip whose read failed shows that at
+    // once instead of a blank row while the list reads it again. The next
+    // `run` push reads it again.
+    retryOnMount: false,
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
@@ -504,8 +509,8 @@ export const liveRunsQuery = (client: HerculeClient, status: "running" | "pendin
   });
 
 /**
- * Checks whether a failed read of a thread's records, or of an assistant's
- * current session, is worth trying again. Returns `true` for the first three
+ * Checks whether a failed read, such as a thread's records, an assistant's
+ * current session or a workflow's strip, is worth trying again. Returns `true` for the first three
  * failures that got no answer from the controller, such as a dropped
  * connection, and `false` for an `ApiError`.
  *

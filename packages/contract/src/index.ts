@@ -226,6 +226,7 @@ export {
 export type { ApprovalRequest } from "./groups/session";
 export {
   ApprovalDecision,
+  LIVE_SESSION_STATUSES,
   MAX_PROMPT_LENGTH,
   MAX_SPAWN_CHECKOUTS,
   OpenRequest,

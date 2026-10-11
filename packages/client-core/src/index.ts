@@ -173,7 +173,6 @@ export {
 } from "./errors";
 export { toIdTail } from "./id-tail";
 export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
-export { LIVE_SESSION_STATUSES } from "./threads/status";
 export { isWebLink } from "./web-link";
 export {
   listWaiting,
@@ -393,9 +392,7 @@ export {
 } from "./onboarding";
 export {
   chooseStamps,
-  findNextListTimeChange,
   formatDayStamp,
-  formatListTime,
   formatPreciseStamp,
   formatSince,
   formatStamp,

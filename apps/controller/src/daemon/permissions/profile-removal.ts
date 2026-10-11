@@ -17,6 +17,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   createInvalidStateError,
+  LIVE_SESSION_STATUSES,
   type Forbidden,
   type InvalidState,
   type NotFound,
@@ -27,7 +28,7 @@ import { agentRepository } from "../../agents";
 import { requireGrant } from "../../actor";
 import { refuseCursor, withTransaction } from "../../db";
 import { Profiles, type GrantsError } from "../../permissions";
-import { LIVE_SESSION_STATUSES, sessionRepository } from "../../sessions";
+import { sessionRepository } from "../../sessions";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

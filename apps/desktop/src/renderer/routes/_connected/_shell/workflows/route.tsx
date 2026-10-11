@@ -11,7 +11,6 @@ import {
 } from "@hercule/client-core/workflow-rows";
 import { useWorkflowsLive } from "../../../../app/live";
 import {
-  liveAgentSessionsQuery,
   liveRunsQuery,
   readOnOpen,
   runStripQuery,
@@ -19,6 +18,7 @@ import {
   triggersQuery,
   workflowsQuery,
 } from "../../../../app/queries";
+import { useWaitingRunSessions } from "../../../../app/waiting";
 import { WorkflowList } from "../../../../screens/workflows/workflow-list";
 import { WorkflowListHeader } from "../../../../screens/workflows/workflow-list-header";
 
@@ -34,12 +34,14 @@ import { WorkflowListHeader } from "../../../../screens/workflows/workflow-list-
  *
  * - the workflows, every trigger, and the live runs, which the `workflow`
  *   and `run` topics keep current while the page is open;
- * - each workflow's strip of newest runs, once the workflows are read;
+ * - each workflow's strip of newest runs, once the workflows are read. A
+ *   strip whose read fails does not stop the page: its row says the runs
+ *   could not be read, and the next push on the `run` topic reads it again;
  * - the settings, for the time zone the times are shown in, read each time
  *   the page opens because no topic covers them.
  *
- * The live sessions that wait on the user, which put a workflow in Needs
- * you, are a shell read and already cached.
+ * The sessions of runs that wait on the user, which put a workflow in Needs
+ * you, come from a shell read and are already cached.
  *
  * Opening a workflow runs the loader again with `cause` "stay". It then
  * reads nothing that is cached, so clicking a row sends no request.
@@ -54,7 +56,7 @@ export const Route = createFileRoute("/_connected/_shell/workflows")({
         .then((workflows) =>
           Promise.all(
             workflows.map((workflow) =>
-              queryClient.ensureQueryData(runStripQuery(client, workflow.id)),
+              queryClient.prefetchQuery(runStripQuery(client, workflow.id)),
             ),
           ),
         ),
@@ -74,7 +76,7 @@ export const Route = createFileRoute("/_connected/_shell/workflows")({
  * the list's rows from them, and holds the filter and the search.
  *
  * A workflow created while the page is open has no strip until its first
- * read answers: its row shows at once, with an empty strip.
+ * read answers: its row shows at once, with an empty strip and no status.
  */
 function WorkflowsLayout(): JSX.Element {
   const { controller, queryClient } = Route.useRouteContext();
@@ -87,23 +89,24 @@ function WorkflowsLayout(): JSX.Element {
   const { data: triggers } = useSuspenseQuery(triggersQuery(client));
   const { data: running } = useSuspenseQuery(liveRunsQuery(client, "running"));
   const { data: pending } = useSuspenseQuery(liveRunsQuery(client, "pending"));
-  const { data: sessions } = useSuspenseQuery(liveAgentSessionsQuery(client));
+  const waitingRunSessions = useWaitingRunSessions();
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const stripReads = useQueries({
     queries: workflows.map((workflow) => runStripQuery(client, workflow.id)),
   });
 
-  const strips = new Map<string, ReadonlyArray<RunSummary>>();
+  const strips = new Map<string, ReadonlyArray<RunSummary> | "failed">();
   for (const [index, workflow] of workflows.entries()) {
-    const strip = stripReads[index]?.data;
-    if (strip !== undefined) strips.set(workflow.id, strip);
+    const read = stripReads[index];
+    if (read?.data !== undefined) strips.set(workflow.id, read.data);
+    else if (read?.isError === true) strips.set(workflow.id, "failed");
   }
   const rows = buildWorkflowRows({
     workflows,
     triggers,
     strips,
     liveRuns: [...running, ...pending],
-    sessions,
+    waitingRunSessions,
   });
 
   return (

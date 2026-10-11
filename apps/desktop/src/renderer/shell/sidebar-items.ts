@@ -205,7 +205,7 @@ const RUNS_LABEL_LEADING = ITEM_LEADING + 6;
  * The runs have a cap of their own, apart from the threads', so one busy
  * workflow never hides a waiting thread.
  */
-const RUN_LIMIT = 3;
+const WAITING_RUN_SESSION_LIMIT = 3;
 
 /** Returns the section key of a project's section. */
 const buildProjectSectionKey = (projectId: string | null): SectionKey =>
@@ -337,20 +337,22 @@ const placeInSection = (
  *
  * - its header, with the count of everything that waits, shown or hidden;
  * - its threads and assistants, in `waiting`'s order;
- * - "From runs" and the runs' sessions, at most `RUN_LIMIT` of them unless
- *   `expanded` is true;
+ * - "From runs" and the runs' sessions in `waitingRunSessions`, at most
+ *   `WAITING_RUN_SESSION_LIMIT` of them unless `expanded` is true;
  * - its "more" row when it hides some threads, assistants or runs' sessions.
  *
  * `waiting` is `null` when no thread or assistant waits.
  */
 const buildWaitingContents = (
   waiting: WaitingSection | null,
-  runSessions: readonly WaitingRunSession[],
+  waitingRunSessions: readonly WaitingRunSession[],
   expanded: boolean,
 ): SidebarItemContent[] => {
   const rows = waiting?.rows ?? [];
-  const shownRuns = expanded ? runSessions : runSessions.slice(0, RUN_LIMIT);
-  const hiddenCount = (waiting?.hiddenCount ?? 0) + runSessions.length - shownRuns.length;
+  const shownRuns = expanded
+    ? waitingRunSessions
+    : waitingRunSessions.slice(0, WAITING_RUN_SESSION_LIMIT);
+  const hiddenCount = (waiting?.hiddenCount ?? 0) + waitingRunSessions.length - shownRuns.length;
   if (rows.length === 0 && shownRuns.length === 0) return [];
   const contents: SidebarItemContent[] = [
     {

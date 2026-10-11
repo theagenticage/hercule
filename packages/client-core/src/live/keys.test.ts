@@ -1,6 +1,5 @@
 import { assert, describe, it } from "vitest";
-import { MUTABLE_LIVE_TOPICS } from "@hercule/contract";
-import { LIVE_SESSION_STATUSES } from "../threads/status";
+import { LIVE_SESSION_STATUSES, MUTABLE_LIVE_TOPICS } from "@hercule/contract";
 import { buildQueryKeys, queryKeys, type LiveQueryKey } from "./keys";
 
 describe("workspace pushes", () => {

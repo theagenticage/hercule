@@ -5,6 +5,7 @@ describe("describeCronInWords", () => {
   it.each([
     ["*/1 * * * *", "Every minute"],
     ["*/15 * * * *", "Every 15 minutes"],
+    ["*/30 * * * *", "Every 30 minutes"],
     ["5 * * * *", "Hourly at :05"],
     ["0 1 * * *", "Daily at 01:00"],
     ["30 9 * * 1-5", "Weekdays at 09:30"],
@@ -22,12 +23,19 @@ describe("describeCronInWords", () => {
     assert.strictEqual(describeCronInWords(cron), words);
   });
 
-  it.each(["0 7 1 */3 *", "0 9 * * 1,3", "0 9-17 * * *", "0 7 1 * 1", "@daily", "0 9 * *"])(
-    "has no words for %s",
-    (cron) => {
-      assert.isUndefined(describeCronInWords(cron));
-    },
-  );
+  // `*/45` fires at :00 and :45, so its runs are not 45 minutes apart.
+  it.each([
+    "*/45 * * * *",
+    "*/7 * * * *",
+    "0 7 1 */3 *",
+    "0 9 * * 1,3",
+    "0 9-17 * * *",
+    "0 7 1 * 1",
+    "@daily",
+    "0 9 * *",
+  ])("has no words for %s", (cron) => {
+    assert.isUndefined(describeCronInWords(cron));
+  });
 });
 
 describe("describeSchedule", () => {

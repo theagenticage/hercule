@@ -5,13 +5,14 @@
 import { assert, describe, it } from "vitest";
 import type { OpenRequest, RunSummary, Session, Trigger, TriggerOn } from "@hercule/contract";
 import { buildSession } from "./threads/workspaces.testing";
+import { listWaitingRunSessions } from "./waiting";
 import {
   buildWorkflowListItems,
   buildWorkflowRows,
   countWorkflowsByFilter,
   pickWorkflowFocusFallback,
   type WorkflowListReads,
-  type WorkflowRow,
+  type WorkflowListRow,
 } from "./workflow-rows";
 
 const AT = "2026-09-01T00:00:00.000Z";
@@ -135,7 +136,7 @@ const buildReads = (over: Partial<WorkflowListReads>): WorkflowListReads => ({
   triggers: [],
   strips: new Map(),
   liveRuns: [],
-  sessions: [],
+  waitingRunSessions: [],
   ...over,
 });
 
@@ -153,7 +154,7 @@ const buildOneRow = (
   name: string,
   over: Partial<WorkflowListReads>,
   enabled = true,
-): WorkflowRow => {
+): WorkflowListRow => {
   const [row] = buildWorkflowRows(
     buildReads({ workflows: [buildWorkflow(name, { enabled })], ...over }),
   );
@@ -167,7 +168,9 @@ describe("buildWorkflowRows groups", () => {
     const row = buildOneRow("Ship", {
       strips: new Map([["ship", [run]]]),
       liveRuns: [run],
-      sessions: [buildWaitingSession("s1", "r1", "review", "git push")],
+      waitingRunSessions: listWaitingRunSessions([
+        buildWaitingSession("s1", "r1", "review", "git push"),
+      ]),
     });
 
     assert.strictEqual(row.group, "needsYou");
@@ -182,10 +185,10 @@ describe("buildWorkflowRows groups", () => {
     const second = buildRun("r2", "ship", 5, { status: "running" });
     const row = buildOneRow("Ship", {
       liveRuns: [second, first],
-      sessions: [
+      waitingRunSessions: listWaitingRunSessions([
         buildWaitingSession("s2", "r2", "deploy", "kubectl apply", at(6)),
         buildWaitingSession("s1", "r1", "review", "git push", at(1)),
-      ],
+      ]),
     });
 
     assert.strictEqual(row.statusText, "review asks: Run git push?");
@@ -195,23 +198,25 @@ describe("buildWorkflowRows groups", () => {
     const run = buildRun("r1", "ship", 0, { status: "running" });
     const row = buildOneRow("Ship", {
       liveRuns: [run],
-      sessions: [buildWaitingSession("s1", "r1", null, "git push")],
+      waitingRunSessions: listWaitingRunSessions([
+        buildWaitingSession("s1", "r1", null, "git push"),
+      ]),
     });
 
     assert.strictEqual(row.statusText, "Waiting on you");
   });
 
-  it("ignores a session with no open Request, and a session of no run", () => {
+  it("puts a workflow in Needs you when its waiting run shows only in its strip", () => {
     const run = buildRun("r1", "ship", 0, { status: "running", activeStepIds: ["review"] });
     const row = buildOneRow("Ship", {
-      liveRuns: [run],
-      sessions: [
-        buildSession({ id: "s1", runId: "r1", stepId: "review" }),
-        buildSession({ id: "s2", openRequests: [buildRequest("r", "git push")] }),
-      ],
+      strips: new Map([["ship", [run]]]),
+      waitingRunSessions: listWaitingRunSessions([
+        buildWaitingSession("s1", "r1", "review", "git push"),
+      ]),
     });
 
-    assert.strictEqual(row.group, "running");
+    assert.strictEqual(row.group, "needsYou");
+    assert.strictEqual(row.statusText, "review asks: Run git push?");
   });
 
   it("puts a workflow whose newest run failed in Failing, though an older run is live", () => {
@@ -249,6 +254,21 @@ describe("buildWorkflowRows groups", () => {
 
     assert.strictEqual(row.group, "running");
     assert.strictEqual(row.lastRunAt, at(10));
+  });
+
+  it("shows when the newest run started, or when it was created when it never started", () => {
+    const created = buildRun("r1", "ship", 0, { status: "running" });
+    const started = { ...created, startedAt: at(3) };
+    assert.strictEqual(
+      buildOneRow("Ship", { strips: new Map([["ship", [started]]]) }).lastRunAt,
+      at(3),
+    );
+
+    const cancelled = buildRun("r2", "ship", 5, { status: "cancelled" });
+    assert.strictEqual(
+      buildOneRow("Ship", { strips: new Map([["ship", [cancelled]]]) }).lastRunAt,
+      at(5),
+    );
   });
 
   it("puts a workflow with a live run older than its 20 newest runs in Running", () => {
@@ -332,6 +352,18 @@ describe("buildWorkflowRows groups", () => {
     }
   });
 
+  it("reads nothing for a strip not read yet, and says so for a strip whose read failed", () => {
+    const unread = buildOneRow("SSL", {});
+    assert.strictEqual(unread.group, "everythingElse");
+    assert.strictEqual(unread.statusText, "");
+
+    const failed = buildOneRow("SSL", { strips: new Map([["ssl", "failed"]]) });
+    assert.strictEqual(failed.group, "everythingElse");
+    assert.strictEqual(failed.statusText, "Runs could not be read");
+    assert.strictEqual(failed.statusTone, "muted");
+    assert.deepStrictEqual(failed.strip, []);
+  });
+
   it("reads Failed for a failed run that names no step", () => {
     const row = buildOneRow("SSL", {
       strips: new Map([["ssl", [buildRun("r1", "ssl", 0, { status: "failed" })]]]),
@@ -385,7 +417,8 @@ describe("buildWorkflowRows off and Next", () => {
     });
 
     assert.isFalse(row.isOff);
-    assert.strictEqual(row.startsOnText, "On demand");
+    assert.deepStrictEqual(row.startsOnTexts, ["On demand"]);
+    assert.deepStrictEqual(row.startsOnIsCode, [false]);
     assert.isNull(row.startsOnFiresOn);
     assert.strictEqual(row.nextText, "On demand");
   });
@@ -433,12 +466,12 @@ describe("buildWorkflowRows Starts on, the strip and Success", () => {
       ],
     });
 
-    assert.strictEqual(
-      row.startsOnText,
-      "github.issue.labeled · Fridays at 14:00 (Europe/Amsterdam)",
-    );
+    assert.deepStrictEqual(row.startsOnTexts, [
+      "github.issue.labeled",
+      "Fridays at 14:00 (Europe/Amsterdam)",
+    ]);
     assert.strictEqual(row.startsOnFiresOn, "event");
-    assert.isFalse(row.startsOnIsCode);
+    assert.deepStrictEqual(row.startsOnIsCode, [false, false]);
   });
 
   it("shows a schedule with no words as its cron expression, as code", () => {
@@ -446,9 +479,21 @@ describe("buildWorkflowRows Starts on, the strip and Success", () => {
       triggers: [buildTrigger("rotate", "quarterly", { schedule: "0 7 1 */3 *" })],
     });
 
-    assert.strictEqual(row.startsOnText, "0 7 1 */3 *");
+    assert.deepStrictEqual(row.startsOnTexts, ["0 7 1 */3 *"]);
     assert.strictEqual(row.startsOnFiresOn, "schedule");
-    assert.isTrue(row.startsOnIsCode);
+    assert.deepStrictEqual(row.startsOnIsCode, [true]);
+  });
+
+  it("shows only the schedule with no words as code, beside one in words", () => {
+    const row = buildOneRow("Rotate", {
+      triggers: [
+        buildTrigger("rotate", "quarterly", { schedule: "0 7 1 */3 *" }),
+        buildTrigger("rotate", "daily", { schedule: "0 8 * * *" }),
+      ],
+    });
+
+    assert.deepStrictEqual(row.startsOnTexts, ["0 7 1 */3 *", "Daily at 08:00"]);
+    assert.deepStrictEqual(row.startsOnIsCode, [true, false]);
   });
 
   it("draws the strip oldest first, a cancelled run with no mark", () => {
@@ -518,7 +563,9 @@ const LIST_READS = (() => {
     triggers: [buildTrigger("audit", "monthly_audit", { schedule: "0 7 1 * *" })],
     strips: new Map([["backup", [buildRun("f1", "backup", 0, { status: "failed" })]]]),
     liveRuns: [waiting, live],
-    sessions: [buildWaitingSession("s1", "w1", "review", "git push")],
+    waitingRunSessions: listWaitingRunSessions([
+      buildWaitingSession("s1", "w1", "review", "git push"),
+    ]),
   });
 })();
 

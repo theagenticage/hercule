@@ -146,6 +146,8 @@ export interface WaitingRunSession {
   readonly sessionId: string;
   /** The run whose agent step started the session. */
   readonly runId: string;
+  /** The agent step that started the session, or null for a session that is no step's. */
+  readonly stepId: string | null;
   /** The session's title, "<workflow name> · <step id>". */
   readonly title: string;
   /** What the oldest open Request asks, in one line, such as "Run git push?". */
@@ -174,6 +176,7 @@ export const listWaitingRunSessions = (sessions: readonly Session[]): WaitingRun
             {
               sessionId: session.id,
               runId: session.runId,
+              stepId: session.stepId,
               title: session.title,
               question: formatRequestQuestion(oldest),
               activityAt: session.lastActivityAt,

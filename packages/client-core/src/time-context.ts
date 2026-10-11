@@ -73,7 +73,7 @@ const buildFormatter = (shape: Shape, timezone: string): Intl.DateTimeFormat | n
  * Returns a function that reads one part of the formatted instant, or
  * `undefined` when the zone or the instant is invalid.
  */
-const buildPartReader = (
+export const buildPartReader = (
   shape: Shape,
   instant: Date,
   timezone: string,
@@ -203,7 +203,7 @@ export const isSameDay = (a: Date, b: Date, timezone: string): boolean => {
  * exactly 1, however long the day between them was. Also returns that date's
  * year. Returns `undefined` in the same cases as `formatTimeContext`.
  */
-const readCalendarDate = (
+export const readCalendarDate = (
   instant: Date,
   timezone: string,
 ): { readonly dayNumber: number; readonly year: number } | undefined => {
@@ -242,117 +242,4 @@ export const formatDayStamp = (instant: Date, timezone: string, now: Date): stri
 export const formatSince = (instant: Date, timezone: string): string | undefined => {
   const reading = formatTimeContext(instant, timezone);
   return reading === undefined ? undefined : `since ${reading}`;
-};
-
-/**
- * Computes the first instant of the calendar day `instant` falls on in
- * `timezone`: its midnight, or the first instant the date has on a date whose
- * clock skips midnight for daylight saving time. Returns `undefined` in the
- * same cases as `formatTimeContext`.
- *
- * Going back by the clock's reading lands on midnight unless the clock moved
- * since then. When it moved, the first guess reads an hour or so off, and is
- * corrected by its own reading: back to midnight when it fell on the same
- * date, forward to the date's first instant when it fell on the date before.
- */
-export const computeDayStart = (instant: Date, timezone: string): Date | undefined => {
-  const date = readCalendarDate(instant, timezone);
-  const minutes = computeMinutesOfDay(instant, timezone);
-  if (date === undefined || minutes === undefined) return undefined;
-
-  const guess = new Date(Math.floor(instant.getTime() / 60_000) * 60_000 - minutes * 60_000);
-  const guessDate = readCalendarDate(guess, timezone);
-  const guessMinutes = computeMinutesOfDay(guess, timezone);
-  if (guessDate === undefined || guessMinutes === undefined) return undefined;
-  const correction = guessDate.dayNumber === date.dayNumber ? -guessMinutes : 1440 - guessMinutes;
-  return new Date(guess.getTime() + correction * 60_000);
-};
-
-/**
- * Formats an instant for a list's time column, the way a mail app dates its
- * rows, in `timezone` and relative to `now`:
- *
- * - "10:31" on the date of `now`;
- * - within the six dates before `now` (`past`), the weekday alone: "Sun",
- *   because how old a row is matters more than the minute;
- * - within the six dates after `now` (`future`), the weekday and the time:
- *   "Fri 14:00", because a schedule fires at a time;
- * - otherwise the date, "1 Oct", with the year when it is not the year of
- *   `now`: "1 Oct 2025".
- *
- * The text depends on `now` only through the date of `now`, so it changes at
- * local midnight and at no other moment (see `findNextListTimeChange`).
- * Returns `undefined` when either instant is not a valid date or the zone
- * cannot be formatted.
- */
-export const formatListTime = (
-  instant: Date,
-  timezone: string,
-  now: Date,
-  direction: "past" | "future",
-): string | undefined => {
-  const date = readCalendarDate(instant, timezone);
-  const today = readCalendarDate(now, timezone);
-  const clock = buildPartReader("clock", instant, timezone);
-  const weekday = buildPartReader("weekday", instant, timezone);
-  const day = formatDay(instant, timezone);
-  if (
-    date === undefined ||
-    today === undefined ||
-    clock === undefined ||
-    weekday === undefined ||
-    day === undefined
-  ) {
-    return undefined;
-  }
-
-  const time = `${clock("hour")}:${clock("minute")}`;
-  const days =
-    direction === "past" ? today.dayNumber - date.dayNumber : date.dayNumber - today.dayNumber;
-  if (days === 0) return time;
-  if (days > 0 && days < 7) {
-    return direction === "past" ? weekday("weekday") : `${weekday("weekday")} ${time}`;
-  }
-  return date.year === today.year ? day : `${day} ${String(date.year)}`;
-};
-
-/** The latest moment a `Date` can hold, for a text that never changes. */
-const LAST_MOMENT = new Date(8.64e15);
-
-/**
- * Returns the first moment after `now` at which a list time column showing
- * `instant` must be read again:
- *
- * - the next local midnight in `timezone`, when `formatListTime`'s text
- *   moves on, such as "10:31" turning into "Sun";
- * - for `future`, the instant itself when it comes sooner. The text does not
- *   change then, but the time it names has passed, so the Next column, which
- *   names a trigger's next fire, is read again at that moment (spec 17
- *   §Workflows, "Times read the age clock").
- *
- * The next midnight is found from the start of today and 36 hours on: a day
- * is 23 to 25 hours long when the clock moves for daylight saving time, so 36
- * hours past one midnight always falls on the next date, never the one after.
- *
- * Returns the latest moment a `Date` can hold when the zone or either
- * instant is invalid, because `formatListTime` then returns `undefined`
- * forever. A caller passing the delay to `setTimeout` must clamp it, as the
- * age clock does.
- */
-export const findNextListTimeChange = (
-  instant: Date,
-  timezone: string,
-  now: Date,
-  direction: "past" | "future",
-): Date => {
-  const todayStart = computeDayStart(now, timezone);
-  const midnight =
-    todayStart === undefined
-      ? undefined
-      : computeDayStart(new Date(todayStart.getTime() + 36 * 3_600_000), timezone);
-  if (midnight === undefined || Number.isNaN(instant.getTime())) return LAST_MOMENT;
-  const passes = instant.getTime();
-  return direction === "future" && passes > now.getTime() && passes < midnight.getTime()
-    ? instant
-    : midnight;
 };

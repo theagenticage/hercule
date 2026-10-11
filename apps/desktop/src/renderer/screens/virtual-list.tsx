@@ -20,7 +20,6 @@ import {
   useCallback,
   useLayoutEffect,
   useMemo,
-  useRef,
   useState,
   type ComponentProps,
   type FocusEvent,
@@ -63,9 +62,9 @@ const findItemKey = (element: Element): string | null =>
  *   its React key, and its root, or an element inside it that takes focus,
  *   carries it as `data-key`, which the list finds the focused item by.
  * - `computeItemHeight` returns an item's height in CSS pixels, the space
- *   above it included, which the item must draw exactly. It must keep its
- *   identity across renders: a new function makes the list place every item
- *   again.
+ *   above it included, which the item must draw exactly. The list places
+ *   the items again only when `items` changes, so the function must keep its
+ *   identity across renders and return the same height for the same `items`.
  * - `renderItem` returns the element that draws an item, told whether the
  *   item is in the visible part of the list, without the items mounted beyond
  *   it.
@@ -73,9 +72,9 @@ const findItemKey = (element: Element): string | null =>
  *   item, `goneKey`, leaves the list, or `null` to focus nothing. `before` is
  *   the list that held the item and `after` the list without it.
  * - `head` is drawn above the items, `height` pixels tall, and sticks to the
- *   top while the items scroll under it.
- * - `scrollRef` is set to the `nav`, for a caller that watches the list
- *   itself.
+ *   top while the items scroll under it. An item that takes focus is
+ *   scrolled clear of it.
+ * - `scrollRef` is set to the `nav`, which scrolls the items.
  */
 export function VirtualList<Item extends { readonly key: string }>({
   items,
@@ -100,12 +99,10 @@ export function VirtualList<Item extends { readonly key: string }>({
     after: readonly Item[],
   ) => string | null;
   readonly head?: { readonly height: number; readonly content: ReactNode };
-  readonly scrollRef?: RefObject<HTMLElement | null>;
+  readonly scrollRef: RefObject<HTMLElement | null>;
   readonly className?: string;
   readonly children?: ReactNode;
 }): JSX.Element {
-  const ownRef = useRef<HTMLElement>(null);
-  const listRef = scrollRef ?? ownRef;
   const [focus, setFocus] = useState<Focus>(NO_FOCUS);
   const headHeight = head?.height ?? 0;
 
@@ -139,14 +136,8 @@ export function VirtualList<Item extends { readonly key: string }>({
     [focusedIndex],
   );
   // The virtualizer asks only for indexes below `count`, which is
-  // `items.length`. It does not watch `estimateSize`, only `getItemKey`, so
-  // `getItemKey` is renewed when `computeItemHeight` changes too: that is
-  // what makes the virtualizer place the items again at their new heights.
-  const getItemKey = useCallback(
-    (index: number) => items[index]!.key,
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- See above: a new `computeItemHeight` must renew the callback.
-    [items, computeItemHeight],
-  );
+  // `items.length`.
+  const getItemKey = useCallback((index: number) => items[index]!.key, [items]);
   const estimateSize = useCallback(
     (index: number) => computeItemHeight(items[index]!, index),
     [items, computeItemHeight],
@@ -155,7 +146,7 @@ export function VirtualList<Item extends { readonly key: string }>({
   // eslint-disable-next-line react-hooks/incompatible-library -- The virtualizer returns an object that changes inside while its identity stays the same, which the React Compiler cannot memoize, so the compiler leaves this component alone. The callbacks above and the memoized rows keep the renders cheap instead.
   const virtualizer = useVirtualizer({
     count: items.length,
-    getScrollElement: () => listRef.current,
+    getScrollElement: () => scrollRef.current,
     estimateSize,
     getItemKey,
     rangeExtractor,
@@ -166,9 +157,9 @@ export function VirtualList<Item extends { readonly key: string }>({
 
   useLayoutEffect(() => {
     if (!focus.restore || focus.key === null) return;
-    const elements = listRef.current?.querySelectorAll<HTMLElement>("[data-key]") ?? [];
+    const elements = scrollRef.current?.querySelectorAll<HTMLElement>("[data-key]") ?? [];
     [...elements].find((element) => element.dataset.key === focus.key)?.focus();
-  }, [focus, listRef]);
+  }, [focus, scrollRef]);
 
   const noteFocus = (event: FocusEvent<HTMLElement>): void => {
     setFocus({ key: findItemKey(event.target), restore: false });
@@ -218,8 +209,12 @@ export function VirtualList<Item extends { readonly key: string }>({
 
   return (
     <nav
-      ref={listRef}
+      ref={scrollRef}
       className={className === undefined ? "virtual-list" : `virtual-list ${className}`}
+      // The browser scrolls a focused item into view on its own, when the
+      // user tabs to it and when the list moves focus itself. The padding
+      // makes it stop below the head, so the head never covers that item.
+      style={{ scrollPaddingTop: headHeight }}
       onFocus={noteFocus}
       onBlur={noteBlur}
       {...navProps}

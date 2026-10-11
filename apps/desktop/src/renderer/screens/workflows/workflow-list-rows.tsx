@@ -10,10 +10,11 @@
  * it.
  *
  * The items are memoized and take only strings, numbers, booleans and null,
- * so when a push builds the rows again, only the rows whose values changed
+ * and a row also arrays of them, which its memo compares element by element.
+ * So when a push builds the rows again, only the rows whose values changed
  * draw again.
  */
-import { memo, useId, type JSX } from "react";
+import { Fragment, memo, useId, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type { TriggerFiresOn } from "@hercule/contract";
 import type {
@@ -21,7 +22,7 @@ import type {
   WorkflowRowMark,
   WorkflowStatusTone,
 } from "@hercule/client-core/workflow-rows";
-import { useListTime } from "../../app/age-clock";
+import { useListTime } from "./list-time";
 import { STRIP_RUN_LIMIT } from "../../app/queries";
 import { BoltIcon } from "../../icons/bolt";
 import { ClockIcon } from "../../icons/clock";
@@ -110,12 +111,10 @@ function ListTime({
  * run that has not started, has no mark, so it is a faint dot named with its
  * state.
  */
-function RunStrip({ strip }: { readonly strip: string }): JSX.Element {
-  // The row takes the strip as one string, so its memo compares it by value.
-  const runs = strip === "" ? [] : (strip.split(" ") as StripRunState[]);
+function RunStrip({ strip }: { readonly strip: ReadonlyArray<StripRunState> }): JSX.Element {
   return (
     <span className="strip col-strip">
-      {runs.map((state, index) =>
+      {strip.map((state, index) =>
         state === "cancelled" || state === "starting" ? (
           <span
             key={index}
@@ -132,6 +131,73 @@ function RunStrip({ strip }: { readonly strip: string }): JSX.Element {
 }
 
 /**
+ * Renders what starts a workflow: its start triggers' texts joined with
+ * " · ", each cron expression with no words shown as code.
+ */
+function StartsOnText({
+  texts,
+  isCode,
+}: {
+  readonly texts: ReadonlyArray<string>;
+  readonly isCode: ReadonlyArray<boolean>;
+}): JSX.Element {
+  return (
+    <span>
+      {texts.map((text, index) => (
+        <Fragment key={index}>
+          {index > 0 ? " · " : null}
+          {isCode[index] === true ? <code>{text}</code> : text}
+        </Fragment>
+      ))}
+    </span>
+  );
+}
+
+/** The values a workflow's row draws. */
+interface WorkflowTableRowProps {
+  readonly itemKey: string;
+  readonly workflowId: string;
+  readonly name: string;
+  readonly mark: WorkflowRowMark;
+  readonly isOff: boolean;
+  /** What starts the workflow, one text per start trigger. */
+  readonly startsOnTexts: ReadonlyArray<string>;
+  readonly startsOnFiresOn: TriggerFiresOn | null;
+  /** For each text of `startsOnTexts`, whether it is shown as code. */
+  readonly startsOnIsCode: ReadonlyArray<boolean>;
+  /** The strip's run states, oldest first. */
+  readonly strip: ReadonlyArray<StripRunState>;
+  readonly successText: string;
+  readonly statusText: string;
+  readonly statusTone: WorkflowStatusTone;
+  readonly lastRunAt: string | null;
+  readonly nextText: string;
+  readonly nextFireAt: string | null;
+  /** The time zone the times are shown in. */
+  readonly timezone: string;
+  /** Whether the row is in the visible part of the list, which keeps its times current. */
+  readonly onScreen: boolean;
+}
+
+/** Checks whether two arrays hold the same values in the same order. */
+const areArraysEqual = <Value,>(a: ReadonlyArray<Value>, b: ReadonlyArray<Value>): boolean =>
+  a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
+
+/**
+ * Checks whether a row's props are equal: each array element by element, and
+ * every other value by `Object.is`. A push builds every row's arrays anew, so
+ * comparing them by identity would draw every row again.
+ */
+const areWorkflowRowPropsEqual = (a: WorkflowTableRowProps, b: WorkflowTableRowProps): boolean =>
+  (Object.keys(a) as Array<keyof WorkflowTableRowProps>).every((key) => {
+    const valueOfA = a[key];
+    const valueOfB = b[key];
+    return Array.isArray(valueOfA) && Array.isArray(valueOfB)
+      ? areArraysEqual<unknown>(valueOfA, valueOfB)
+      : Object.is(valueOfA, valueOfB);
+  });
+
+/**
  * Renders a workflow's row: a link to the workflow, which is selected while
  * the workflow is open. Its cells are the workflow's mark, its name, what
  * starts it, the strip of its newest runs, how many of them succeeded, its
@@ -143,7 +209,7 @@ export const WorkflowTableRow = memo(function WorkflowTableRow({
   name,
   mark,
   isOff,
-  startsOnText,
+  startsOnTexts,
   startsOnFiresOn,
   startsOnIsCode,
   strip,
@@ -155,28 +221,7 @@ export const WorkflowTableRow = memo(function WorkflowTableRow({
   nextFireAt,
   timezone,
   onScreen,
-}: {
-  readonly itemKey: string;
-  readonly workflowId: string;
-  readonly name: string;
-  readonly mark: WorkflowRowMark;
-  readonly isOff: boolean;
-  readonly startsOnText: string;
-  readonly startsOnFiresOn: TriggerFiresOn | null;
-  readonly startsOnIsCode: boolean;
-  /** The strip's run states, oldest first, joined with spaces. */
-  readonly strip: string;
-  readonly successText: string;
-  readonly statusText: string;
-  readonly statusTone: WorkflowStatusTone;
-  readonly lastRunAt: string | null;
-  readonly nextText: string;
-  readonly nextFireAt: string | null;
-  /** The time zone the times are shown in. */
-  readonly timezone: string;
-  /** Whether the row is in the visible part of the list, which keeps its times current. */
-  readonly onScreen: boolean;
-}): JSX.Element {
+}: WorkflowTableRowProps): JSX.Element {
   const statusId = useId();
   return (
     <Link
@@ -195,7 +240,7 @@ export const WorkflowTableRow = memo(function WorkflowTableRow({
       <span className="table-quiet col-starts">
         {startsOnFiresOn === "event" ? <BoltIcon size={12} /> : null}
         {startsOnFiresOn === "schedule" ? <ClockIcon size={12} /> : null}
-        <span>{startsOnIsCode ? <code>{startsOnText}</code> : startsOnText}</span>
+        <StartsOnText texts={startsOnTexts} isCode={startsOnIsCode} />
       </span>
       <RunStrip strip={strip} />
       <span className="table-num col-success">{successText}</span>
@@ -221,4 +266,4 @@ export const WorkflowTableRow = memo(function WorkflowTableRow({
       </span>
     </Link>
   );
-});
+}, areWorkflowRowPropsEqual);

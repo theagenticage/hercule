@@ -314,6 +314,7 @@ describe("listWaitingRunSessions", () => {
       {
         sessionId: "s-publish",
         runId: "run-1",
+        stepId: "publish",
         title: "Release · publish",
         question: "Run npm publish?",
         activityAt: LATE,
@@ -321,6 +322,7 @@ describe("listWaitingRunSessions", () => {
       {
         sessionId: "s-security",
         runId: "run-1",
+        stepId: "security",
         title: "Release · security",
         question: "Run npm audit fix?",
         activityAt: EARLY,

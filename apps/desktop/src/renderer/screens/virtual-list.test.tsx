@@ -3,6 +3,7 @@
  * list mounts the items the head leaves room for, not the ones it covers.
  * The sidebar's tests cover the rest of the list through its first consumer.
  */
+import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { stubElementSize } from "../app/testing";
@@ -31,6 +32,7 @@ describe("VirtualList", () => {
         )}
         pickFocusFallback={() => null}
         head={{ height: 100, content: <h2>Head</h2> }}
+        scrollRef={createRef()}
       />,
     );
 

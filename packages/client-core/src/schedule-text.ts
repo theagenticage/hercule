@@ -32,7 +32,8 @@ const isNumber = (field: string): boolean => /^\d+$/.test(field);
  * Describes a five-field cron expression in words, such as "Fridays at 14:00"
  * for `0 14 * * 5`. Knows the shapes people write most:
  *
- * - every n minutes (`*\/15 * * * *`) and hourly (`5 * * * *`);
+ * - every n minutes (`*\/15 * * * *`), for a step that divides 60, and hourly
+ *   (`5 * * * *`);
  * - daily, on weekdays, on weekends, and on one day of the week;
  * - monthly on one day of the month.
  *
@@ -51,7 +52,12 @@ export const describeCronInWords = (cron: string): string | undefined => {
   ];
   const everyMinutes = /^\*\/(\d+)$/.exec(minute);
   if (everyMinutes !== null && [hour, dayOfMonth, month, dayOfWeek].every((f) => f === "*")) {
-    return everyMinutes[1] === "1" ? "Every minute" : `Every ${everyMinutes[1]!} minutes`;
+    // A step counts from :00 again every hour, so `*/45` fires at :00 and
+    // :45, 45 and then 15 minutes apart. Only a step that divides 60 fires
+    // at even gaps, and only then is "Every n minutes" true.
+    const step = Number(everyMinutes[1]);
+    if (step === 0 || 60 % step !== 0) return undefined;
+    return step === 1 ? "Every minute" : `Every ${String(step)} minutes`;
   }
   if (!isNumber(minute) || month !== "*") return undefined;
   if (hour === "*") {

@@ -2,12 +2,14 @@
  * Tests the open Request a session record carries: the request as the harness
  * opened it, and the subagent that asked it, by id and by name. Also tests
  * that every session prompt and input takes text, images, or both, never
- * neither.
+ * neither, and that the live session statuses are every status but `exited`.
  */
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { InputUpdatePayload } from "./input";
 import {
+  LIVE_SESSION_STATUSES,
+  SESSION_STATUSES,
   SessionContinueInput,
   SessionInputCall,
   SessionInputPayload,
@@ -166,5 +168,13 @@ describe("text and images in a session prompt or input", () => {
     expect(
       Schema.decodeUnknownExit(SessionInputPayload)({ text: "", attachments: eleven })._tag,
     ).toBe("Failure");
+  });
+});
+
+describe("LIVE_SESSION_STATUSES", () => {
+  it("holds every session status but exited", () => {
+    expect([...LIVE_SESSION_STATUSES]).toEqual(
+      SESSION_STATUSES.filter((status) => status !== "exited"),
+    );
   });
 });

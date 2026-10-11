@@ -23,7 +23,7 @@ import "./workflow-list.css";
  * The band above the rows: the floating header's 56px, which no row scrolls
  * into view under, then the 32px column heads.
  */
-const HEAD = { height: 88, content: <WorkflowTableHeads /> };
+const TABLE_HEAD = { height: 88, content: <WorkflowTableHeads /> };
 
 /**
  * Returns the space above the group heading at `index`, in CSS pixels. The
@@ -62,10 +62,10 @@ const renderItem = (
       name={item.row.name}
       mark={item.row.mark}
       isOff={item.row.isOff}
-      startsOnText={item.row.startsOnText}
+      startsOnTexts={item.row.startsOnTexts}
       startsOnFiresOn={item.row.startsOnFiresOn}
       startsOnIsCode={item.row.startsOnIsCode}
-      strip={item.row.strip.join(" ")}
+      strip={item.row.strip}
       successText={item.row.successText}
       statusText={item.row.statusText}
       statusTone={item.row.statusTone}
@@ -108,7 +108,7 @@ export function WorkflowList({
       computeItemHeight={computeItemHeight}
       renderItem={(item, index, onScreen) => renderItem(item, index, onScreen, timezone)}
       pickFocusFallback={pickWorkflowFocusFallback}
-      head={HEAD}
+      head={TABLE_HEAD}
     >
       {items.length === 0 ? (
         <p className="workflow-list-empty">
