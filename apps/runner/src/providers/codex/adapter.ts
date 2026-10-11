@@ -41,7 +41,7 @@ import type {
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
-import { runProcess, spawnAppServer, type Run } from "../process";
+import { runProcess, spawnAppServer, stopChild, type Run } from "../process";
 import { truncateMessage } from "../text";
 import { now } from "../../report";
 import { ASKED } from "./approvals";
@@ -119,6 +119,8 @@ interface Host extends AppServer {
   readonly sessionId: string | undefined;
   /** The text generation this host serves, if it serves one instead of a session. */
   readonly textGeneration: TextGenerationWatch | undefined;
+  /** Stops the app-server and completes only once its process has exited (see `stopChild`). */
+  readonly stop: Effect.Effect<void>;
 }
 
 /** One session and every Codex thread its app-server runs. */
@@ -494,6 +496,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         },
       }),
       kill: child.kill,
+      stop: stopChild(child),
       complaint: () => complaints.join("\n"),
       sessionId,
       textGeneration,
@@ -923,8 +926,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   /**
    * Makes one text generation on an app-server of its own and returns its
    * outcome. Fails with a message when the app-server cannot start or a
-   * request to it fails. The app-server is killed when the call ends,
-   * including when the runner stops the call at its deadline.
+   * request to it fails. The app-server is stopped when the call ends,
+   * including when the runner stops the call at its deadline, and this
+   * returns only after its process has exited.
    *
    * It uses the instance's Codex directory for the login, like a session. The
    * thread is ephemeral, so nothing of the call is saved there. The thread
@@ -955,7 +959,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           );
           return decideTextGenerationOutcome(spec, yield* watch.ended);
         }),
-      (host) => Effect.sync(() => host.kill()),
+      (host) => host.stop,
     );
   };
 

@@ -259,6 +259,8 @@ export interface FakePiBehaviour {
   readonly dies?: boolean;
   /** A pi that keeps running after its stdin closes, like one waiting on an approval. */
   readonly lingers?: boolean;
+  /** A pi that, once killed, exits only when this promise resolves, like one that shuts down slowly. */
+  readonly exitsAfterKill?: Promise<void>;
 }
 
 /**
@@ -339,7 +341,7 @@ export const buildFakePiSeam = (
         kills += 1;
         out.end();
         err.end();
-        resolveExited(143);
+        void (behaviour.exitsAfterKill ?? Promise.resolve()).then(() => resolveExited(143));
       },
       exited: done,
     };

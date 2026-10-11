@@ -357,6 +357,34 @@ describe("codex generateText: what is asked of Codex", () => {
     expect(run.spawns[0]!.kills()).toBe(1);
   });
 
+  it("returns only after an app-server that shuts down slowly has exited", async () => {
+    const exit = Promise.withResolvers<void>();
+    const scripted = buildScriptedSeam(
+      {
+        "turn/start": () => {
+          for (const frame of answering(ANSWER)) scripted.spawns[0]!.push(frame);
+          return { turn: { id: TURN, items: [], itemsView: "full", status: "inProgress" } };
+        },
+      },
+      { exitsAfterKill: exit.promise },
+    );
+    const adapter = makeCodexAdapter(scripted.seam);
+    const outcome = Effect.runPromise(
+      runGeneration(adapter, buildTextGenerationContext(buildContext(createCodexHome()))),
+    );
+    await waitUntil("asked the app-server to stop", () => scripted.spawns[0]?.kills() === 1);
+
+    let returned = false;
+    void outcome.then(() => {
+      returned = true;
+    });
+    await settle();
+    expect(returned).toBe(false);
+
+    exit.resolve();
+    await expect(outcome).resolves.toMatchObject({ outcome: "ok" });
+  });
+
   it("stops its app-server when the caller gives up", async () => {
     const scripted = buildScriptedSeam();
     const adapter = makeCodexAdapter(scripted.seam);

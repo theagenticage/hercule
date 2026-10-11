@@ -3157,10 +3157,12 @@ describe("a text generation", () => {
   /**
    * Builds an adapter whose harness answers a text generation with `answer`:
    * the messages it yields, an error it throws instead, or `"hangs"` for a
-   * harness that never answers.
+   * harness that never answers. `closing` is what closing the query returns,
+   * for a harness that takes time to shut down.
    */
   const createGenerating = (
     answer: ReadonlyArray<unknown> | Error | "hangs",
+    closing?: Promise<void>,
   ): { readonly adapter: ProviderAdapter; readonly queries: Array<Query> } => {
     const queries: Array<Query> = [];
     const seam: ClaudeSeam = {
@@ -3183,6 +3185,7 @@ describe("a text generation", () => {
           stopTask: () => Promise.resolve(),
           close: () => {
             closes += 1;
+            return closing;
           },
         };
       },
@@ -3280,6 +3283,24 @@ describe("a text generation", () => {
       });
     });
 
+    it("leaves out the text the model had written when the harness stopped the turn", async () => {
+      const { adapter } = createGenerating([
+        {
+          ...RESULT,
+          terminal_reason: "aborted_by_user",
+          result: "PRIVATE_CUSTOMER_KEY_73dbfa is what I had so far",
+        },
+      ]);
+
+      const outcome = await generate(adapter);
+
+      expect(outcome).toEqual({
+        outcome: "failed",
+        message: expect.stringMatching(/\S/) as string,
+      });
+      expect(JSON.stringify(outcome)).not.toContain("PRIVATE_CUSTOMER_KEY_73dbfa");
+    });
+
     it("fails with the error's message when the harness cannot run", async () => {
       const { adapter } = createGenerating(new Error("spawn claude ENOENT"));
 
@@ -3363,6 +3384,26 @@ describe("a text generation", () => {
       await generate(adapter);
 
       expect(queries[0]!.closes()).toBe(1);
+    });
+
+    it("returns only after the harness has finished closing", async () => {
+      const closed = Promise.withResolvers<void>();
+      const { adapter, queries } = createGenerating(
+        [{ ...RESULT, structured_output: TITLE }],
+        closed.promise,
+      );
+      const outcome = generate(adapter);
+      await waitUntil("closed the query", () => queries[0]?.closes() === 1);
+
+      let returned = false;
+      void outcome.then(() => {
+        returned = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(returned).toBe(false);
+
+      closed.resolve();
+      expect(await outcome).toMatchObject({ outcome: "ok" });
     });
 
     it("is closed when the caller gives up on a harness that never answers", async () => {

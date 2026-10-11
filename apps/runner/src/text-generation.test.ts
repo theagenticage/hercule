@@ -16,10 +16,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Fiber } from "effect";
-import type { TextGenerationOutcome, TextGenerationRequest } from "@hercule/protocol";
+import {
+  MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER,
+  type TextGenerationOutcome,
+  type TextGenerationRequest,
+} from "@hercule/protocol";
 import type { ProviderAdapter, ProviderRunnerContext } from "./providers";
 import { NO_CONTROLLER_UPLOADER, waitUntil } from "./providers/testing";
-import { MAX_CONCURRENT_TEXT_GENERATIONS, makeTextGenerator } from "./text-generation";
+import { makeTextGenerator } from "./text-generation";
 
 const BINARY = "/usr/local/bin/harness";
 
@@ -160,15 +164,42 @@ describe("the outcome of a text generation", () => {
     expect(message.length).toBeGreaterThan(0);
   });
 
-  it("gives an invalid-output outcome a reason that is not empty", async () => {
+  it.each(["   ", "\n\t "])(
+    "fails with a message that is not blank when the adapter fails with %j",
+    async (blank) => {
+      const generate = buildGenerator(buildAdapter(() => Effect.fail(blank)));
+
+      const message = readFailedMessage(await Effect.runPromise(generate(REQUEST)));
+
+      expect(message.trim()).not.toBe("");
+    },
+  );
+
+  it("fails with a message that is not blank when the adapter returns a blank one", async () => {
     const generate = buildGenerator(
-      buildAdapter(() => Effect.succeed({ outcome: "invalid-output", reason: "" })),
+      buildAdapter(() => Effect.succeed({ outcome: "failed", message: " \n " })),
+    );
+
+    const message = readFailedMessage(await Effect.runPromise(generate(REQUEST)));
+
+    expect(message.trim()).not.toBe("");
+  });
+
+  it("gives an invalid-output outcome a fixed reason, whatever the adapter reports", async () => {
+    const generate = buildGenerator(
+      buildAdapter(() =>
+        Effect.succeed({
+          outcome: "invalid-output",
+          reason: "/PRIVATE_CUSTOMER_KEY_73dbfa must be a string",
+        }),
+      ),
     );
 
     const outcome = await Effect.runPromise(generate(REQUEST));
 
     expect(outcome.outcome).toBe("invalid-output");
-    expect(outcome.outcome === "invalid-output" && outcome.reason.length).toBeGreaterThan(0);
+    expect(JSON.stringify(outcome)).not.toContain("PRIVATE_CUSTOMER_KEY_73dbfa");
+    expect(outcome.outcome === "invalid-output" && outcome.reason.trim()).not.toBe("");
   });
 
   it("fails, instead of failing the effect, when the adapter hits a defect", async () => {
@@ -279,6 +310,8 @@ describe("the scratch directory of a text generation", () => {
 });
 
 describe("the limit on text generations at once", () => {
+  const LIMIT = MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER;
+
   it("runs as many as the limit together, fails the next at once, and frees a slot when one ends", async () => {
     const gate = Deferred.makeUnsafe<void>();
     let running = 0;
@@ -291,14 +324,12 @@ describe("the limit on text generations at once", () => {
       ),
     );
 
-    const calls = Array.from({ length: MAX_CONCURRENT_TEXT_GENERATIONS }, () =>
-      Effect.runPromise(generate(REQUEST)),
-    );
-    await waitUntil("started every call", () => running === MAX_CONCURRENT_TEXT_GENERATIONS);
+    const calls = Array.from({ length: LIMIT }, () => Effect.runPromise(generate(REQUEST)));
+    await waitUntil("started every call", () => running === LIMIT);
 
     const message = readFailedMessage(await Effect.runPromise(generate(REQUEST)));
-    expect(message).toContain(String(MAX_CONCURRENT_TEXT_GENERATIONS));
-    expect(running).toBe(MAX_CONCURRENT_TEXT_GENERATIONS);
+    expect(message).toContain(String(LIMIT));
+    expect(running).toBe(LIMIT);
 
     Deferred.doneUnsafe(gate, Effect.void);
     for (const outcome of await Promise.all(calls)) expect(outcome).toEqual(OK);
@@ -306,7 +337,100 @@ describe("the limit on text generations at once", () => {
     await expect(Effect.runPromise(generate(REQUEST))).resolves.toEqual(OK);
   });
 
-  it("is ten, as on the controller", () => {
-    expect(MAX_CONCURRENT_TEXT_GENERATIONS).toBe(10);
+  describe("while the adapter is still stopping its harness", () => {
+    /**
+     * Starts `LIMIT` calls whose adapter, once it has its answer or is
+     * interrupted, takes until `released` resolves to finish. Returns the
+     * calls and the directories the adapter was given.
+     */
+    const startSlowlyStoppingCalls = (
+      released: Promise<void>,
+      behaviour: Effect.Effect<TextGenerationOutcome, string>,
+      deadlineMillis = 5_000,
+    ) => {
+      const directories: Array<string> = [];
+      const generate = buildGenerator(
+        buildAdapter((ctx) =>
+          Effect.suspend(() => {
+            directories.push(ctx.cwd);
+            return behaviour;
+          }).pipe(Effect.ensuring(Effect.promise(() => released))),
+        ),
+        { deadlineMillis },
+      );
+      const calls = Array.from({ length: LIMIT }, () => Effect.runPromise(generate(REQUEST)));
+      return { generate, calls, directories };
+    };
+
+    /** Fails the test unless the next call is refused and every directory still exists. */
+    const expectSlotsAndDirectoriesHeld = async (
+      generate: ReturnType<typeof buildGenerator>,
+      directories: ReadonlyArray<string>,
+    ) => {
+      const refused = readFailedMessage(await Effect.runPromise(generate(REQUEST)));
+      expect(refused).toContain(String(LIMIT));
+      expect(directories).toHaveLength(LIMIT);
+      for (const directory of directories) expect(existsSync(directory)).toBe(true);
+    };
+
+    it("keeps the slot and the directory after an answer", async () => {
+      const released = Promise.withResolvers<void>();
+      const { generate, calls, directories } = startSlowlyStoppingCalls(
+        released.promise,
+        Effect.succeed(OK),
+      );
+      await waitUntil("started every call", () => directories.length === LIMIT);
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await expectSlotsAndDirectoriesHeld(generate, directories);
+
+      released.resolve();
+      for (const outcome of await Promise.all(calls)) expect(outcome).toEqual(OK);
+      for (const directory of directories) expect(existsSync(directory)).toBe(false);
+      await expect(Effect.runPromise(generate(REQUEST))).resolves.toEqual(OK);
+    });
+
+    it("keeps the slot and the directory after the deadline", async () => {
+      const released = Promise.withResolvers<void>();
+      const { generate, calls, directories } = startSlowlyStoppingCalls(
+        released.promise,
+        Effect.never,
+        50,
+      );
+      await waitUntil("started every call", () => directories.length === LIMIT);
+
+      // Well past the deadline, with the harness still not gone.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await expectSlotsAndDirectoriesHeld(generate, directories);
+
+      released.resolve();
+      for (const outcome of await Promise.all(calls))
+        expect(outcome).toEqual({ outcome: "timeout" });
+      for (const directory of directories) expect(existsSync(directory)).toBe(false);
+      await expect(Effect.runPromise(generate(REQUEST))).resolves.toEqual({ outcome: "timeout" });
+    });
+
+    it("keeps the slot and the directory after the caller gives up", async () => {
+      const released = Promise.withResolvers<void>();
+      const directories: Array<string> = [];
+      const generate = buildGenerator(
+        buildAdapter((ctx) =>
+          Effect.suspend(() => {
+            directories.push(ctx.cwd);
+            return Effect.never;
+          }).pipe(Effect.ensuring(Effect.promise(() => released.promise))),
+        ),
+      );
+      const fibers = Array.from({ length: LIMIT }, () => Effect.runFork(generate(REQUEST)));
+      await waitUntil("started every call", () => directories.length === LIMIT);
+
+      const interruptions = fibers.map((fiber) => Effect.runPromise(Fiber.interrupt(fiber)));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await expectSlotsAndDirectoriesHeld(generate, directories);
+
+      released.resolve();
+      await Promise.all(interruptions);
+      for (const directory of directories) expect(existsSync(directory)).toBe(false);
+    });
   });
 });
