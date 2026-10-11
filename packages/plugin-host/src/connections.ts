@@ -158,6 +158,16 @@ export interface ExternalAccount {
 }
 
 /**
+ * One choice for a config field that loads its choices from the external
+ * account, such as a Sentry team. `value` is what the config stores; `label`
+ * is what the form shows.
+ */
+export interface ConfigChoice {
+  readonly value: string;
+  readonly label: string;
+}
+
+/**
  * A connection type as a plugin declares it. `validate` asks the external
  * service who the credentials belong to, so it needs an `HttpClient` and
  * nothing else: the host provides the real one, and a plugin test provides a
@@ -172,6 +182,19 @@ export interface ConnectionTypeContribution extends ConnectionType {
   readonly validate: (
     credentials: Record<string, string>,
   ) => Effect.Effect<ExternalAccount, ConnectionValidationFailed, HttpClient.HttpClient>;
+  /**
+   * Returns the choices for one config field, read from the external account
+   * with the connection's credentials. Required when, and only when, a
+   * property of `configSchema` carries the `choices: true` annotation; only a
+   * string or a list of strings may carry it. `credentials` has the shape
+   * `ConnectionsRuntime.credentials` returns, and `config` is the connection's
+   * stored config. Fails with `PluginError`, whose message the form shows,
+   * when the service cannot be read. At most 1,000 choices.
+   */
+  readonly listChoices?: (
+    field: string,
+    connection: { readonly credentials: Record<string, string>; readonly config: unknown },
+  ) => Effect.Effect<ReadonlyArray<ConfigChoice>, PluginError, HttpClient.HttpClient>;
 }
 
 /** What `register` may declare: the connection types this plugin supports. */

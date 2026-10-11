@@ -33,6 +33,7 @@ export {
   DeviceDeclaration,
   OAuthDeclaration,
   SetupStep,
+  type ConfigChoice,
   type ConnectionRegistration,
   type ConnectionReport,
   type ConnectionsRuntime,
