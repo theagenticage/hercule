@@ -414,6 +414,23 @@ export const connectionsQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads one Connection with its Intake settings, for the segment of Settings >
+ * Intake that edits it. Unlike the listing, `connection.read` works out the
+ * value in effect for every kind the Connection's plugin declares. A push on
+ * the `connection` topic that names the Connection reads it again, and so
+ * does a push on the `plugin` topic, which changes what every Connection of
+ * the plugin resolves to. Fails with a `not_found` `ApiError` when no such
+ * Connection exists.
+ */
+export const connectionQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.connection(id),
+    queryFn: () => client.connection.read({ params: { id } }),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
  * Reads every assistant: for the sidebar, the assistant screen, and the one
  * the first run's room seats in the lobby.
  */

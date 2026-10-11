@@ -368,8 +368,12 @@ export const buildQueryKeys = (
   }
   // The plugin set is fixed at build time and read as one list, so the whole
   // list is refetched whichever plugin changed. Every signal read is
-  // refetched too, see `SIGNAL_DESCRIBE_KEYS`.
-  if (topic === "plugin") return [queryKeys.plugins(), ...SIGNAL_DESCRIBE_KEYS];
+  // refetched too, see `SIGNAL_DESCRIBE_KEYS`. So is every Connection's own
+  // page: a plugin-level write changes what every Connection of the plugin
+  // resolves to.
+  if (topic === "plugin") {
+    return [queryKeys.plugins(), queryKeys.connection(), ...SIGNAL_DESCRIBE_KEYS];
+  }
   // Provider instances are read as one list (there is one per shipped
   // provider), so the whole list is refetched whichever instance changed.
   if (topic === "provider") return [queryKeys.providers()];

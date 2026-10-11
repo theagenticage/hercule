@@ -10,12 +10,14 @@
  *
  * 1. removes the Density and Text size rows: the app has neither setting
  *    yet, and each comes with its own ticket;
- * 2. removes the Start and motion section, which comes with its own ticket.
+ * 2. removes the Start and motion section, which comes with its own ticket;
+ * 3. adds an Intake row after Threads in the settings list: the book
+ *    predates Settings > Intake, and the app's list has the row.
  *
  * An edit that finds nothing to edit fails, because the book has changed and
  * the comparison would no longer compare what it claims to.
  */
-import { findElement, findElementByText } from "./book-page";
+import { findElement, findElementByText, insertIntakeSettingsRow } from "./book-page";
 import { markSheetReady, stillBookPage } from "./sheet-page";
 
 /** Returns the `.set-row` whose label is `label`. */
@@ -24,6 +26,9 @@ function findRow(scope: ParentNode, label: string): HTMLElement {
 }
 
 stillBookPage();
+
+// 3. The Intake row.
+insertIntakeSettingsRow(document);
 
 const body = findElement(document, ".set-body");
 

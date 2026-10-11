@@ -72,6 +72,7 @@ const buildPlugin = (id: string, displayName: string, mark?: PluginMark): Plugin
   status: { _tag: "active" },
   config: {},
   contributions: [],
+  intake: { eventKinds: [], signalKinds: [] },
 });
 
 /**
