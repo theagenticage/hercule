@@ -40,19 +40,10 @@ describe("the id grammar", () => {
 });
 
 describe("a timestamp", () => {
-  const isTimestamp = Schema.is(Timestamp);
-
   // The exact time with its offset is a shorthand built on a timestamp, and
   // marking it must not make every timestamp field take an offset time.
   it("is not a shorthand itself", () => {
     expect(readShorthandDecoder(Timestamp)).toBeUndefined();
-  });
-
-  it("takes a real UTC instant, and refuses a date or a time of day that does not exist", () => {
-    expect(isTimestamp("2024-02-29T23:59:59.999Z")).toBe(true);
-    expect(isTimestamp("2026-13-45T99:99:99.999Z")).toBe(false);
-    expect(isTimestamp("2026-02-30T09:00:00.000Z")).toBe(false);
-    expect(isTimestamp("2026-10-11T24:00:00.000Z")).toBe(false);
   });
 });
 

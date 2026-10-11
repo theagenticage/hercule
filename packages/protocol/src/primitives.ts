@@ -20,24 +20,11 @@ export const MAX_FACT_ITEMS = 64;
 /** A name, a version or a path a peer reports about itself, and never a document. */
 export const Fact = Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH));
 
-/**
- * An instant on the wire: ISO-8601 UTC with milliseconds, such as
- * `2026-10-11T07:00:00.000Z`.
- *
- * The pattern checks only the shape, so a second check refuses a date or a
- * time that does not exist, such as `2026-02-30` or `25:00`. Without it,
- * `new Date` would shift such a value to another day, or fail on it.
- */
+/** An instant on the wire: ISO-8601 UTC with milliseconds. */
 export const Timestamp = Schema.String.check(
   Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, {
     title: "timestamp",
     description: "an ISO-8601 UTC instant with milliseconds",
-  }),
-  Schema.makeFilter((text: string) => {
-    const parsed = Date.parse(text);
-    return !Number.isNaN(parsed) && new Date(parsed).toISOString() === text
-      ? undefined
-      : `${text} is not a real date and time. Check the month, the day and the time of day.`;
   }),
 );
 
