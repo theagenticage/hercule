@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Run · Ship release · Hercule</title>
+    <style>
+      /* A run's page is opened, not slid in from the list, so the open pane does not settle in from the side. */
+      .open-pane {
+        animation: none;
+      }
+      /* A run that is gone: the sentence and the way back, in the middle of the pane. */
+      .gone {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        color: var(--muted);
+      }
+      .gone p {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <!--
+    A run of Ship release, picked by ?state=:
+    - waiting (the default): live, its security step asks the user something;
+    - listening: live, waiting for the PR it opened to be merged;
+    - failed: ended at the review loop's iteration limit;
+    - step-failed: ended when the test step's session failed;
+    - completed: ended well;
+    - cancelled: cancelled by the user while its first steps ran, so it has no mark;
+    - earlier: ended well on an earlier version of the workflow, with the note that says so;
+    - gone: the run was not found.
+    &steps=timeline shows the steps on the run's timeline instead of the graph.
+    &card=<node id> opens that node's card on the graph, such as &card=security.
+    &dialog=cancel opens Cancel run (on a live run) and &dialog=rerun opens Re-run (on an ended run);
+    &refused shows the dialog's refusal.
+  -->
+  <body>
+    <div class="app">
+      <aside data-side="workflows" data-side-runs></aside>
+      <main class="main">
+        <div class="workflows-page">
+          <header class="top" data-top></header>
+          <div class="gone" data-gone hidden>
+            <p>This run was not found.</p>
+            <a class="btn btn--sm" href="workflows.html">Workflows</a>
+          </div>
+          <div class="open-pane" data-run>
+            <div class="pill-room"></div>
+            <div class="open-name">
+              <h1 class="run-state" data-state-title></h1>
+              <span class="run-took" data-took></span>
+            </div>
+            <div data-gist></div>
+            <ul class="chip-row" aria-label="About this run"><li class="chip" data-by></li></ul>
+            <dl class="run-inputs" aria-label="Inputs" data-inputs></dl>
+            <p class="run-note" data-note hidden></p>
+            <div class="tab-band">
+              <div class="tab-bar">
+                <h2 class="section-h run-steps">Steps <small data-steps-count></small></h2>
+                <span class="tab-tools">
+                  <span class="seg" role="group" aria-label="Show the steps as">
+                    <button type="button" data-steps="graph">Graph</button>
+                    <button type="button" data-steps="timeline">Timeline</button>
+                  </span>
+                </span>
+              </div>
+              <div class="table-heads tbl-steps" data-steps-head aria-hidden="true"></div>
+            </div>
+            <div data-graph></div>
+            <div class="table-rows" data-steps-rows></div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="modal" data-dialog="cancel" hidden>
+      <div class="pop dialog" role="dialog" aria-modal="true" aria-labelledby="cancel-title">
+        <div class="pop-h"><b id="cancel-title">Cancel this run?</b></div>
+        <form class="pop-sec">
+          <p>Its running steps stop and their sessions end, and so do the runs it started. You can re-run it afterwards.</p>
+          <div class="options">
+            <label class="option">
+              <span class="choice-box"><input type="checkbox" name="delete-workspace" checked /><i data-i="check" data-size="12"></i></span>
+              <b>Delete workspace</b>
+            </label>
+          </div>
+          <p class="dialog-err" role="alert" hidden>Not cancelled: the run had already ended.</p>
+          <div class="acts">
+            <button type="button" class="btn btn--quiet" data-close>Keep running</button>
+            <button type="submit" class="btn btn--danger" data-busy="Cancelling…">Cancel run</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal" data-dialog="rerun" hidden>
+      <div class="pop dialog" role="dialog" aria-modal="true" aria-labelledby="rerun-title">
+        <div class="pop-h"><b id="rerun-title">Re-run with the same inputs?</b></div>
+        <form class="pop-sec">
+          <div class="options" role="radiogroup" aria-label="Re-run from">
+            <label class="option">
+              <span class="choice-box"><input type="radio" name="from" value="current" checked /></span>
+              <b>From the current workflow</b>
+              <small>The new run follows the workflow as it is saved now.</small>
+            </label>
+            <label class="option">
+              <span class="choice-box"><input type="radio" name="from" value="plan" /></span>
+              <b>As it ran</b>
+              <small>The new run follows this run's plan, as it was frozen when the run started.</small>
+            </label>
+          </div>
+          <p class="dialog-err" role="alert" hidden>Not re-run: no runner can take the run's workspace.</p>
+          <div class="acts">
+            <button type="button" class="btn btn--quiet" data-close>Cancel</button>
+            <button type="submit" class="btn btn--accent" data-busy="Starting…">Re-run</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="../crew.js"></script>
+    <script src="../workflows.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        var params = new URLSearchParams(location.search);
+        var state = params.get("state") || "waiting";
+        var run = Workflows.RUNS[state];
+
+        if (!run) {
+          document.querySelector("[data-run]").hidden = true;
+          document.querySelector("[data-gone]").hidden = false;
+          return;
+        }
+
+        // A cancelled or starting run has no mark, so its crumb and its state lead with none.
+        var mark = function (size) {
+          return run.mark ? Crew.mark(run.mark, size) : "";
+        };
+        document.querySelector("[data-top]").innerHTML =
+          '<nav class="pill run-crumbs" aria-label="The run\'s place in Workflows">' +
+          '<span class="pill-crumb"><a href="workflows.html">Workflows</a></span>' +
+          '<span class="pill-crumb"><a href="workflows.html?view=full">Ship release</a></span>' +
+          '<span class="ptab is-on" aria-current="page">' + mark(14) + "Run <small>" + run.time + "</small></span></nav>" +
+          '<span class="spacer"></span>' +
+          '<span class="pill"><button type="button" class="pill-btn" data-open-dialog="' + (run.live ? "cancel" : "rerun") + '">' + (run.live ? "Cancel run…" : "Re-run…") + "</button></span>";
+
+        document.querySelector("[data-state-title]").innerHTML = mark(16) + run.title;
+        document.querySelector("[data-took]").textContent = run.took;
+        if (run.gist) {
+          document.querySelector("[data-gist]").outerHTML =
+            '<div class="run-gist run-gist--' + run.gist.tone + '"' + (run.gist.tone === "fail" ? ' role="alert"' : "") + "><p>" + run.gist.text + "</p>" +
+            (run.gist.opensThread ? '<a class="btn btn--sm" href="session-active.html">Open thread</a>' : "") + "</div>";
+        }
+        document.querySelector("[data-by]").innerHTML = (run.startedBy.icon ? Crew.icon(run.startedBy.icon, 12) : "") + run.startedBy.text;
+        document.querySelector("[data-inputs]").innerHTML = run.inputs
+          .map(function (input) {
+            return "<div><dt>" + input.name + "</dt><dd>" + input.value + "</dd></div>";
+          })
+          .join("");
+        if (run.note) {
+          var note = document.querySelector("[data-note]");
+          note.textContent = run.note;
+          note.hidden = false;
+        }
+        document.querySelector("[data-steps-count]").textContent = run.rows.length;
+
+        // The steps show as Graph or Timeline. The graph is drawn when it first shows, because its zoom fits the pane's width.
+        var graphEl = document.querySelector("[data-graph]");
+        var headEl = document.querySelector("[data-steps-head]");
+        var rowsEl = document.querySelector("[data-steps-rows]");
+        var graphDrawn = false;
+        Workflows.drawStepTimeline(headEl, rowsEl, { run: state });
+        function showSteps(view) {
+          document.querySelectorAll("[data-steps]").forEach(function (button) {
+            button.setAttribute("aria-pressed", String(button.dataset.steps === view));
+          });
+          graphEl.hidden = view !== "graph";
+          headEl.hidden = rowsEl.hidden = view !== "timeline";
+          if (view === "graph" && !graphDrawn) {
+            Workflows.drawGraph(graphEl, { run: state, openNode: params.get("card") });
+            graphDrawn = true;
+          }
+        }
+        document.querySelectorAll("[data-steps]").forEach(function (button) {
+          button.addEventListener("click", function () {
+            showSteps(button.dataset.steps);
+          });
+        });
+        showSteps(params.get("steps") === "timeline" ? "timeline" : "graph");
+
+        // The dialogs. Each body is a form, so Enter presses its action; the book has no controller, so the action refuses.
+        function openDialog(name) {
+          var modal = document.querySelector('[data-dialog="' + name + '"]');
+          modal.hidden = false;
+          // Cancel run stops something, so its closing button takes the focus; Re-run only adds a run, so its action does.
+          var focused = modal.querySelector(name === "cancel" ? "[data-close]" : '[type="submit"]');
+          // A page framed in the design book must not take focus: focusing inside an iframe scrolls the book.
+          if (window.top === window) focused.focus();
+        }
+        function closeDialog(modal) {
+          modal.hidden = true;
+          modal.querySelector(".dialog-err").hidden = true;
+        }
+        document.querySelectorAll("[data-dialog]").forEach(function (modal) {
+          var submit = modal.querySelector('[type="submit"]');
+          var label = submit.textContent;
+          modal.querySelector("[data-close]").addEventListener("click", function () {
+            closeDialog(modal);
+          });
+          modal.addEventListener("click", function (event) {
+            if (event.target === modal) closeDialog(modal);
+          });
+          modal.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") closeDialog(modal);
+          });
+          modal.querySelector("form").addEventListener("submit", function (event) {
+            event.preventDefault();
+            submit.textContent = submit.dataset.busy;
+            submit.setAttribute("aria-busy", "true");
+            setTimeout(function () {
+              submit.textContent = label;
+              submit.removeAttribute("aria-busy");
+              modal.querySelector(".dialog-err").hidden = false;
+            }, 900);
+          });
+        });
+        document.querySelector("[data-open-dialog]").addEventListener("click", function (event) {
+          openDialog(event.currentTarget.dataset.openDialog);
+        });
+        var dialog = params.get("dialog");
+        if (dialog === "cancel" || dialog === "rerun") {
+          openDialog(dialog);
+          document.querySelector('[data-dialog="' + dialog + '"] .dialog-err').hidden = !params.has("refused");
+        }
+      });
+    </script>
+  </body>
+</html>

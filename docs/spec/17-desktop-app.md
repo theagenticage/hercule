@@ -15,7 +15,7 @@ This document covers:
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*. *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* Slice 9 adds [the Office](#the-office). *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Slices 11 to 19 add [Settings](#settings). *(Amended 2026-10-06, [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448).)* Slices 20 to 22 add [the assistant](#design-system). *(Amended 2026-10-10, [Write the Intake changes and the build tickets that replace #91 (#395)](https://github.com/theagenticage/hercule/issues/395).)* Slice 24 adds [the Hercule face](#the-hercule-face), slices 25 to 35 add [Intake](#intake), and slice 36 reopens the last screen at launch.
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*. *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* Slice 9 adds [the Office](#the-office). *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Slices 11 to 19 add [Settings](#settings). *(Amended 2026-10-06, [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448).)* Slices 20 to 22 add [the assistant](#design-system). *(Amended 2026-10-10, [Write the Intake changes and the build tickets that replace #91 (#395)](https://github.com/theagenticage/hercule/issues/395).)* Slice 24 adds [the Hercule face](#the-hercule-face), slices 25 to 35 add [Intake](#intake), and slice 36 reopens the last screen at launch. *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* Slices 37 to 40 add [Workflows](#workflows).
 
 ## Scope of the first milestone
 
@@ -44,7 +44,9 @@ Everything else comes later (see [Post-v1](#post-v1)). That includes ~~the Hercu
 
 *(Amended 2026-10-06, [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448).)* Assistants move into v1: the sidebar lists them, and an assistant's Conversation opens in the main pane ([The assistant](#design-system) under Design system). It is a port of the web's conversation screen, and adds no operation to the public API. The stored look stays post-v1, and so do ~~memory,~~ reminders and channels. *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93)): Settings › Assistants reads and edits an assistant's memory, [Assistants](#the-sections) under Settings; the Conversation's drawer still shows none)*
 
-*(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394), [#512](https://github.com/theagenticage/hercule/issues/512).)* The Hercule face and Intake move into v1. Intake is the list of what a source or an agent asks of the user, and it needs a way in; the way in is the sidebar's second face, which [./14-web-app.md](./14-web-app.md) §App shell already settled and the book draws ([The Hercule face](#the-hercule-face), [Intake](#intake)). The face's other screens stay post-v1: Check-in, Tasks, Runs, Workflows and Notifications.
+*(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394), [#512](https://github.com/theagenticage/hercule/issues/512).)* The Hercule face and Intake move into v1. Intake is the list of what a source or an agent asks of the user, and it needs a way in; the way in is the sidebar's second face, which [./14-web-app.md](./14-web-app.md) §App shell already settled and the book draws ([The Hercule face](#the-hercule-face), [Intake](#intake)). The face's other screens stay post-v1: Check-in, Tasks, Runs, ~~Workflows~~ and Notifications *(amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548): Workflows moves into v1, below)*.
+
+*(Amended 2026-10-11, [Desktop Workflows: spec 17 §Workflows and the book's pages (#548)](https://github.com/theagenticage/hercule/issues/548).)* Workflows moves into v1: the list of the user's workflows, an open workflow with its graph and its runs, and a run's page ([Workflows](#workflows)). It reads existing operations and the additions of [#549](https://github.com/theagenticage/hercule/issues/549), and writes only the switches that turn a workflow on and off and pause a start trigger, a run's Cancel and Re-run, and Delete workspace on a run's page. Creating and editing a workflow stay post-v1 ([#543](https://github.com/theagenticage/hercule/issues/543)).
 
 ## Architecture
 
@@ -471,6 +473,7 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - The menus, in order: the app menu, File, Edit, Go, Thread, Window. The development build adds View, with Reload and Toggle Developer Tools, after Edit.
   - *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* The release build has a View menu too, after Edit: View › Threads `⌥⌘1` and View › Hercule `⌥⌘2` switch [the sidebar's face](#the-hercule-face). They are `⌥⌘` because `⌘1` to `⌘9` already pick an item in Go. The development build adds Reload and Toggle Developer Tools to the same menu, under a separator.
   - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Go › Intake `⌘⇧I`, after Go › Office, opens [Intake](#intake).
+  - *(Added 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* Go › Workflows `⌘⇧W`, after Go › Intake, opens [Workflows](#workflows). `⌘⇧W` is free in every menu the app builds, its roles' menus included. Some Mac apps use it for Close Window; this app's File › Close Window is `⌘W`, so nothing collides.
   - File › New Thread `⌘N`.
   - Thread › Send `⌘↵`. *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* It is always enabled. It sends what the open thread's composer or the draft holds, as ⏎ in the message field does, and does nothing when there is nothing to send.
   - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* Go › Office `⌘⇧O`, the first item of Go, opens [the Office](#the-office).
@@ -478,11 +481,11 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - While the project picker is open, `⌘1` to `⌘9` pick a project instead, as spec 14 says. Choosing a thread in Go with the mouse closes the picker.
   - Sign Out, in the app menu.
   - *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Settings… `⌘,`, in the app menu under About, opens [Settings](#settings).
-  - *(Amended 2026-10-05, [#410](https://github.com/theagenticage/hercule/issues/410).)* File › New Thread, Go › Office and Settings… are dimmed while signed out, as Sign Out is, because only the shell carries them out: on the connect and sign-in screens, choosing one would do nothing. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So are Go › Intake, View › Threads and View › Hercule.
+  - *(Amended 2026-10-05, [#410](https://github.com/theagenticage/hercule/issues/410).)* File › New Thread, Go › Office and Settings… are dimmed while signed out, as Sign Out is, because only the shell carries them out: on the connect and sign-in screens, choosing one would do nothing. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So are Go › Intake, View › Threads and View › Hercule. *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* So is Go › Workflows.
 - **Dock badge:** the number of threads waiting on you. A thread waits on you while its session has an open Request (~~`Session.openRequest`~~ `Session.openRequests` is not empty, whoever asked: its own agent or a subagent *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*, [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
   - *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* macOS shows an app's dock badge only once the user has allowed the app to notify. The app asks when the user signs in, so the badge can show from the first waiting thread.
   - *(Amended 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453).)* The badge also counts the assistants waiting on you. An assistant waits on you while its current session, the newest session of its main conversation, has an open Request (see [The assistant](#design-system)).
-  - *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394) §3.)* The badge keeps one meaning, an agent is blocked on you, so it counts threads and assistants only, never signals. Intake's count shows on the sidebar instead ([The Hercule face](#the-hercule-face)). Waiting on you stays agent Requests only, for the same reason.
+  - *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394) §3.)* The badge keeps one meaning, an agent is blocked on you, so it counts threads and assistants only, never signals. Intake's count shows on the sidebar instead ([The Hercule face](#the-hercule-face)). Waiting on you stays agent Requests only, for the same reason. *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* Waiting on you also lists "From runs", the sessions of live runs that wait on the user ([Workflows](#workflows)). Those rows are agent Requests too, but the badge and the notifications do not count them, and the Go menu does not list them. A run's agent waits inside a workflow's work, not in a conversation the user holds, and one busy workflow could otherwise fill the badge. Whether they should count is post-v1 ([Post-v1](#post-v1)).
 - **Notifications:**
   - When a thread starts waiting on you and the window is not focused, main shows a native notification.
   - Clicking it focuses the window and opens the thread.
@@ -775,6 +778,11 @@ A compact workspace details surface shows runner, actual or last-observed branch
 - **Rewritten as typed modules:** `crew.js` becomes typed modules for faces, poses, icons and marks. Components render their SVG as React elements, never through `innerHTML`.
   - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394) §11.)* **A plugin's mark comes from the plugin,** with the plugin's record ([./05-plugins.md](./05-plugins.md#2-manifest)). The app draws each of its paths as a React `<path d={…} fill="currentColor">` in a 16 × 16 `<svg>`, so the mark takes the colour of the text around it and follows the theme. It draws nothing else from the plugin: no SVG document, no `<style>`, no colour. A plugin with no valid mark gets its name's initial in a rounded square. The Bureau's GitHub and Gmail marks move into those two plugins, and the app keeps no copy of them.
 - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **A button that cannot act yet is drawn at half opacity,** in its own colours, as the book's first-run page draws it, and takes no hover or press. Before the second edition the book drew no disabled button, and the app followed macOS: the button lost its accent and its label turned faint. This changes Sign in and the dock's buttons too.
+- *(Added 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* **A confirm dialog focuses its closing button when its action takes something away, and its action when it only adds.** A confirm dialog's body is a form, so Enter in it presses the action, as Enter presses the default button of a macOS dialog ([#546](https://github.com/theagenticage/hercule/issues/546)); a press of Enter right after the dialog opens presses whichever button has the focus.
+  - The action is focused when it only adds something and changes nothing that exists: Re-run starts a new run and leaves the old one as it was. A dialog with a text field, such as New topic, focuses its first text field, and Enter there presses the action too. A checkbox or a radio is not a text field: Cancel run's and Re-run's dialogs focus their button explicitly, because the browser would focus the first control, and Enter on a checkbox or a radio does nothing, so a stray Enter never presses the action.
+  - The closing button is focused when the action removes, stops or changes something that exists: Delete, Cancel run, a change to a profile's grants, and saving the shorter text of a memory topic. A stray Enter must not do any of these. The closing button is Cancel, except in Cancel run's dialog, where it is Keep running ([A run's page](#a-runs-page)).
+  - The action's colour follows the same line: `danger` for what cannot be undone, `accent` otherwise. Focus asks a different question, so a grant change is `accent` and still focuses Cancel.
+  - A dialog's error shows under its body in `--fail` ink, as an alert, and the dialog stays open.
 - **Self-hosted fonts:** fonts are served from the app bundle, and nothing is fetched from a third party.
   - Bricolage Grotesque is the UI face.
   - Limelight is used only for the wordmark and numerals.
@@ -929,6 +937,7 @@ A row for Intake above the threads, on the Threads face, was considered and drop
 **The rows.** Only rows whose screen exists are drawn, in the book's order, and each new screen adds its row. ~~No row is drawn inert.~~ *(Amended 2026-10-10, [#512](https://github.com/theagenticage/hercule/issues/512).)* Fleet and Connections are the exception: they lead to Settings sections that are not built yet, Machines ([#417](https://github.com/theagenticage/hercule/issues/417)) and Connections ([#416](https://github.com/theagenticage/hercule/issues/416)). Until those land, both rows are drawn inert, as the Settings list draws its unbuilt rows ([The frame](#the-frame)): they show their hover state, do nothing when pressed, and carry `aria-disabled` and the tooltip "Not built yet". The Connections row carries its red dot all the same. Each row becomes a link when its section is built, with no change to the face. With Intake built, the face reads:
 
 - **Work:** Intake, with its To do count in marigold, hidden at 0. The Office's row is not repeated here: it is in the shared row, because it belongs to both faces ([#332](https://github.com/theagenticage/hercule/issues/332)).
+  - *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* Workflows, after Intake, opens [Workflows](#workflows). The book puts it after Runs; Runs is not built, so Workflows follows Intake until it is. The row has **no count**. A total of the user's workflows gives the user nothing to act on: what waits on the user from a run shows in Waiting on you, under "From runs".
 - **System:** Fleet, which opens Settings › Machines, and Connections, which opens Settings › Connections and carries the red dot Settings' list carries ([The frame](#the-frame)).
 - **Settings is the foot's Settings button.** The book draws Settings twice, as a row in System and as the foot's button, and both open Settings. The desktop draws it once, at the foot, on both faces; on the Hercule face it sits below Fleet and Connections, where the System section's last row would be.
 - A row is selected while its screen is open. Fleet and Connections are selected while their Settings section is open, as the foot's button is pressed.
@@ -1182,6 +1191,255 @@ The plan for slices 25 to 35, each measuring its part and recording it in [Measu
 | Opening or closing the split | layout on each frame of the transition, no dropped frame with 50 rows in the list, nothing after | the Performance panel, once |
 | Images | loaded only for the open signal | the Network panel, once |
 | The first screen's JavaScript | grows only by the Go item, the `/intake` route stub, the `signal` subscription and the count. Intake is a chunk of its own, loaded the first time it opens | `pnpm build:desktop`'s bundle check, before and after |
+
+## Workflows
+
+*(Added 2026-10-11, [Desktop Workflows: spec 17 §Workflows and the book's pages (#548)](https://github.com/theagenticage/hercule/issues/548); designed in [#542](https://github.com/theagenticage/hercule/issues/542).)* The user's workflows, how each is doing, what one does, and one run of it. Two pages: the workflows page, with the list and the open workflow, and a run's page. The run record and its words are [./07-workflows.md](./07-workflows.md) section 7; the web app's pages are [./14-web-app.md](./14-web-app.md) §Runs and §Workflow editing.
+
+- **The pixel reference** is the book's [`desktop/workflows.html`](../design/crew-bureau-2/desktop/workflows.html) and [`desktop/run.html`](../design/crew-bureau-2/desktop/run.html), drawn from the prototype on [`prototype/desktop-workflows`](https://github.com/theagenticage/hercule/tree/prototype/desktop-workflows) (3a4baf01). Where the prototype and this section disagree, this section decides.
+- **State marks, not faces.** A state mark leads every row, where a thread's row draws a face, in the face's 24px slot, so every row's text starts at the same x. An agent step shows AgentIcon and its Agent's name. No face is drawn on these pages; a run that wears its workflow's face stays post-v1 ([Post-v1](#post-v1)).
+- **Read-only, with five writes.** The pages write only the workflow's switch, a start trigger's pause switch, Cancel run, Re-run and Delete workspace. Creating and editing a workflow, and Run now, are post-v1.
+- **The ways in:** the Hercule face's Workflows row, with no count ([The Hercule face](#the-hercule-face)), and Go › Workflows `⌘⇧W` ([Native behaviour](#native-behaviour)). A run's page is reached from the Runs tab, and a run's session from "From runs".
+
+### The routes
+
+| Route | Shows | Search parameters |
+|---|---|---|
+| `/workflows` | the list as a table | none |
+| `/workflows/$workflowId` | the list as a column, and the open workflow | `full`: `true`, the list hidden. `runsView`: `timeline`, or absent for the list. `daysBack`: a whole number above 0, the day the timeline shows counted back from today, or absent for today |
+| `/runs/$runId` | a run's page | `view`: `timeline`, or absent for the graph |
+
+- A search parameter with any other value is dropped, and the page shows its default.
+- Changing the Runs tab's view, or stepping the day, replaces the history entry, so Back leaves the workflow instead of stepping through days.
+- Switching the view goes back to today.
+- The filter and the search are not in the URL. They are the list's state, kept while the user opens and closes workflows.
+- The open workflow's tab is not in the URL either. It opens on Runs for each workflow.
+- **A workflow that is gone** shows "This workflow was not found." with a link to Workflows, as a thread that is gone does.
+- **A run that is gone** shows "This run was not found." with a link to Workflows.
+- A run whose workflow was deleted still shows everything, because its page reads the run's plan and step records.
+
+### The list
+
+**One list, three widths.** The list's width follows the pane, not the window:
+
+- **Table:** nothing is open. The list fills the pane, one 40px row per workflow.
+- **Column:** a workflow is open. The list is a 340px column beside it, with a `--line-soft` hairline between them. A row is 46px: the mark, then the name over the status, and the time at the far end.
+- **Full:** `full` is set. The list is hidden, and the header's button brings it back.
+- **Below 800px, the open workflow always fills the pane,** whatever `full` says, and the header's list button is hidden.
+- "Hide the list" snaps. Rule 2 lets a split's side pane animate its width only while its rows are one line ([Rules](#rules)), and the column's rows are two.
+
+**The table's columns,** left to right:
+
+| Column | Width | Shows |
+|---|---|---|
+| (no head) | 14px | the workflow's state mark (below) |
+| Workflow | 1.4fr | its name |
+| Starts on | 1fr | what starts it: each start trigger's schedule in words ("Daily at 01:00", "Fridays at 14:00", with " (Europe/Amsterdam)" when a schedule has its own time zone, or its cron expression in `--mono`, as code, when it has no words) or its event's kind; "On demand" with no start trigger |
+| Last 20 runs | 219px | the strip: the last 20 runs' marks at 10px, 1px apart, oldest first and right-aligned, so every workflow's newest run sits in the same place |
+| Success | 44px | completed runs out of completed and failed, among those 20, as a percentage ("85%"); empty when there are none |
+| Last run | 1.4fr | the status text (below) |
+| (no head) | 44px | when its newest run started: "10:31" today, "Sun" within 6 days, then "1 Oct", with the year when it is not this year |
+| Next | 72px | when it next starts: "Off" when the workflow is off; "On demand" with no start trigger; "Paused" when every start trigger is paused; else the soonest fire, "14:00" today, "Fri 14:00" within 6 days, or a date; else "On event" |
+
+**The status text** of the last run:
+
+- Needs you: "review asks: Ship v2.4?", the step and its question, or "Waiting on you".
+- Running: "At review", or "Waiting for approved" while it waits on a signal, from the run's `activeStepIds` and `awaitedSignalIds`. With two runs live: "2 runs · at fix, waiting for pr_merged". A run not yet started: "Starting".
+- A start trigger in error: "on_issue: <the error's message>".
+- Ended: "Failed at review", "Failed", "Cancelled", "Done", or "No runs yet".
+
+**A narrow pane drops columns,** as Settings › Permission profiles drops Used by:
+
+- below 1000px, Starts on;
+- below 820px, the strip and Success;
+- below 780px, the filters' counts;
+- below 640px, the page's name in the header (it stays for the screen reader) and the search field's `⌘F` hint.
+
+**The groups.** A workflow is in the first group whose rule it meets, in this order:
+
+1. **Needs you:** one of its runs waits on the user: a session of the run has an open Request.
+2. **Failing:** its newest run failed, or one of its start triggers is in error.
+3. **Running:** one of its runs is live.
+4. **Everything else.**
+
+The newest run decides between Failing and Running. Examples: Ship release's run from Friday failed and today's run is live, so Ship release is in Running. An older run is still live and the newest run failed, so it is in Failing. A start trigger in error puts a workflow in Failing whatever its newest run is.
+
+- Running is read from the live runs (`run.query` with `status: "running"`, and again with `status: "pending"`, because the filter takes one status), not from the strip, so a live run older than the workflow's 20 newest still counts, and so does a run not yet started.
+- Needs you is read from the waiting sessions, through each session's `runId` to its run's `workflowId`.
+- A group's heading is a 24px row across the table, with its count right after its name, in marigold for Needs you. An empty group has no heading.
+- Within a group, rows are sorted by name.
+- **The state mark** leading a row is its group's: waiting, failed or running. In Everything else it is `idle`, or `paused` for a workflow that is off.
+- **A workflow that is off** is drawn in muted ink. It is off when its switch is off, or when it has start triggers and every one of them is paused.
+
+**The filters and search,** in the floating header:
+
+- The page's name, "Workflows", leads the header as its title pill.
+- **The filters:** All, Needs you, Failing, Running and Off, each with its count, as `aria-pressed` buttons in a `nav` named "Filter workflows". Off keeps the workflows that are off, from every group. A count is taken before the search, so it does not change as the user types.
+- **Search,** in its own pill at the header's far end: "Search names, triggers". The filters never shrink; the search gives up its width first. A workflow matches when every word typed is found, ignoring case, in its name, its description, its Starts on text or one of its trigger ids.
+- **Over the column,** the page's name is a back tab that leads to the table, with the count of All. With another filter on, that filter shows beside it as a pill with its count. The column's search field sits at the top of the column.
+- Empty: "No workflows yet". Nothing matches: "No workflows match".
+- **A row opens its workflow**: it is a link to `/workflows/$workflowId`. The open workflow's row is selected, as a sidebar row is.
+
+### The open workflow
+
+Top to bottom: the lead, the graph, and the tabs. A sticky band as tall as the floating header sits at the top of the scrolling pane, so the header's pills never float over half a line. The tab bar sticks under it, with a hairline.
+
+**The lead:**
+
+- **The name, with the workflow's switch** at the lead's right end, the book's `.toggle`, labelled "Enabled".
+- **The description**, when it has one.
+- **The line under the switch says what the switch does,** in muted ink: "When on, its triggers start runs. Runs already going are not touched." when on, and "Its triggers start no runs while it is off. Runs already going are not touched." when off. Turning a workflow off stops its triggers and nothing else ([./07-workflows.md](./07-workflows.md) section 1): runs in flight carry on, and it can still be run from the web app, the CLI or the API.
+- **The chips:** what starts it and what its steps run, in a wrapping row, in a list named "About this workflow".
+  - One chip per start trigger: its schedule in words or its event's kind, then " · next Fri 14:00" while the workflow is on, " · paused", or " · error". A trigger in error is `.chip--fail`.
+  - "On demand" when it has no start trigger.
+  - Then what its steps run: "5 agents · 2 actions · 1 signal".
+
+**The switches save when pressed.** The workflow's switch saves with `workflow.update { enabled }`, and a start trigger's pause switch with `trigger.pause` or `trigger.resume`. Both work as Settings' switches do ([The sections](#the-sections)):
+
+- While the save runs, the switch shows the value pressed.
+- When the save fails, the switch goes back to the saved value and "Could not save: <the error>" shows under the name, or under the trigger's row, as an alert.
+- Saves of one workflow's switch, and of one workflow's trigger switches, run one at a time, in the order pressed.
+
+**The graph of the workflow's steps** draws no run. It is the plan as the workflow is saved now, parsed in the renderer from `workflow.read`'s source with the contract's parser ([ADR 0029](../adr/0029-workflow-definitions-are-stored-as-their-yaml-source.md)). The web editor's layout lays it out: slice 38 moves that layout, with dagre, into `@hercule/client-core`, so the web app and the desktop app share one copy and draw the same graph.
+
+- **A step** is a raised card: a 28px sunken lead box with AgentIcon, the action's mark, a clock or a bolt, then the step's id and what it runs. **A trigger** is a sunken card with a raised lead box, because a trigger listens rather than works. A plugin's action draws its plugin's mark as [Design system](#design-system) says, never an SVG of the plugin's own; a built-in action draws an app icon.
+- **Edges** are 1.5px lines in ink tones. A condition is a mono label on the edge, because it is code; a limit or a count, such as "≤ 3" or "1/3", is in the UI face with tabular figures. Start triggers fan out from a muted dot to the entry steps; an ink dot follows the step that ends the run. A step that waits for every edge into it carries the tag "all".
+- **Zoom:** a pill on the graph's bottom-right corner with −, the percentage, + and Fit. The graph opens fitted to the pane, never below 80%. `⌘=` or `⌘+` zooms in, `⌘-` out, `⌘0` to 100% and `⇧1` fits, as in Figma. `⌘9` is not used: Go › `⌘1` to `⌘9` opens a thread from the sidebar. A graph wider than the pane fades out over 48px on the side where it is cut, except for the scroll bar's strip.
+- **A step's card.** Each node is a button. A click opens its card beside it: the book's `.pop`, 320px wide, kept inside the window. The node's id is the title, with "Agent step", "Action step", "Start trigger" or "Signal trigger" on the right. Then one label and value row per field its definition sets, in mono for data and expressions:
+  - an agent step: Agent, Model, Access (", from the Agent" when it is the Agent's), Session ("A new one each time it runs" for a fresh session), Returns, and the Prompt as a section of its own;
+  - an action step: Action, then one row per parameter;
+  - either step: Runs if, Waits for ("Every step before it"), Ends the run ("When it completes");
+  - a start trigger: Fires on, Filter, Status ("Paused"), Next, Last fired;
+  - a signal trigger: Listens for, Matches.
+
+  A click on the same node, Escape or a click anywhere else closes the card.
+
+**The four tabs:** Runs, Triggers (with its count), Inputs (with its count) and Source.
+
+- **Runs, as List or Timeline,** picked with the `.seg` switch "Show the runs as" at the right end of the tab bar's row.
+  - **The list:** Status, Started by, Took and Started. Status is the run's mark and its words: the question while it waits on the user, "At review", "Waiting for approved", "Starting", "Completed", "Cancelled", or why it failed and where, such as "Session failed at test" or "Iteration limit at review". A cancelled or starting run has no mark, as Bureau change 3 says: its words stand in the mark's column, and in a strip or on the timeline it is a `--faint` dot the mark's size. Started by is the trigger's id with a clock or a bolt, or the actor ("You"). The list reads a page at a time and reads the next as the user scrolls to its end. It is virtualized. Empty: "No runs yet".
+  - **The timeline:** one day of runs across its hours. The axis sits where the list's column heads sit, labelling each hour, or every third hour below 900px of pane. A pill shows the time now, with a stem down to the axis and a line down the board. A run is a 4px bar from its start to its end with its mark at the end, in `--you` or `--fail` when it waits on the user or failed, and at least 7px long, so a run of a few minutes is its mark alone. A run that went on past the day's edge is cut square there, with a faint chevron pointing to the day it went on into, and no mark: its mark is drawn on the day it ends. A fire still to come is a dashed tick on the top track, its time beside it, titled "on_friday starts a run at 14:00". Empty: "No runs today", or "No runs this day".
+  - **The day stepper:** "Show the day before", the day ("Today", "Yesterday", "27 Sep"), and "Show the day after", which is disabled on today. Away from today, a quiet "Today" button leads it, as in the Mac's Calendar.
+  - **A row or a bar opens the run's page.**
+- **Triggers:** Trigger, Does ("Starts a run" or "Resumes a run"), Fires on, and State. State is the trigger's error, "Paused", "Off" while the workflow is off, "Next Fri 14:00", or "On event"; a signal trigger's is empty. **Each start trigger has its pause switch,** named "on_friday starts runs". Empty: "No triggers. Only you, an agent or another run start it."
+- **Inputs:** Input, Type (its schema's type, "github/github connection", or "JSON"), Required or Optional, and Default as JSON. Empty: "This workflow takes no inputs."
+- **Source:** the stored YAML, as the user wrote it, in a selectable code block.
+- **Below 560px of pane,** the Runs list drops Started by and Triggers drops Does.
+
+### A run's page
+
+- **The crumb,** in a `nav` named "The run's place in Workflows": Workflows › the workflow's name › the run's mark, "Run" and when it started: "Today 10:31", "Fri 14:00" within the last week, "25 Sep 14:00" before it. A workflow that is gone shows its name with "not saved" or "deleted" after it, and no link. Its button is **Cancel run…** while the run is live and **Re-run…** once it has ended.
+- **The lead:**
+  - the run's mark and its state, "Waiting on you", "Starting", "Running", "Completed", "Failed" or "Cancelled", then how long it has run or took;
+  - what it asks the user, with **Open thread**, or why it failed: "Iteration limit at count. <the message>", from the run's `failureMessage`, its failed edge's message or the failed step's error, as an alert;
+  - "Started by on_friday", or by the actor;
+  - its inputs;
+  - **the earlier-version note**, when the workflow's text changed after the run started, that is when its `updatedAt` is later than the run's `createdAt`. Turning a workflow on or off does not move `updatedAt` ([./07-workflows.md](./07-workflows.md) section 1), and the page does not parse the current source, so text changed and changed back shows the note too: "This run followed an earlier version of Ship release. Its steps are shown as they were then."
+- **The steps, as Graph or Timeline,** under the heading "Steps" with their count and the `.seg` switch "Show the steps as".
+  - **The graph** is the plan the run froze, with the run drawn on it: a 14px mark on an 18px `--surface` disc on each card's top-right corner; a `--you` ring on a step that waits on the user and a `--fail` ring on a failed one; a `--line` ring on a trigger that listens; cards the run has not reached, skipped or cancelled at half opacity; and "×2" after a step's id when the run came to it twice. Edges follow [./14-web-app.md](./14-web-app.md) §Runs: fired, active, not taken and not yet, with a failed edge in `--fail`.
+  - **The timeline:** one row per step record, then one per plan step the run has not reached, muted and with no bar, on a shared time axis, Step and Took, with a "now 29m 12s" pill while the run is live. The axis's scale changes only when its labels change; between, a tick of the age clock changes the pill's text and moves the live step's bar end by `transform`, and nothing else.
+- **A node's card on a run** is the step's card above, led by a status line with the node's mark: "Not reached in this run", "Waiting to start", "Working", "Waiting on you" with the question in `--you` ink, "Done", "Failed", "Cancelled", "Skipped: its condition was false"; for a signal trigger "Fired", "Listening for its event" or "Has not fired"; for a start trigger "Started this run" or "Did not start this run". Then:
+  - its facts: Started, Took or Running for, Input, Output, and Error in `--fail` ink;
+  - for an agent step: Model, Tokens ("41.7k", "(incomplete)" or "Not reported"), Tool calls (`Session.toolCalls`) and Cost, Cost only when the session reports one, and its Prompt;
+  - for a trigger: what it fires on and its filter, from the plan the run froze, and when it next fires, from the workflow's triggers, the one thing the plan does not hold. A trigger since removed shows no next fire;
+  - "Ran 2 times", with one row per time the run came to the step;
+  - **Open thread**, a `.line` row with a chevron, which opens the step's session at `/threads/$sessionId`.
+- **What the web app's run page shows, this page shows too** ([./14-web-app.md](./14-web-app.md) §Runs), with client-core's words:
+  - "Re-run of run X", linking to the original run, and the runs it was re-run as, each linking to its page (`describeReruns`);
+  - the runner, and whether the controller can reach it, and the workspace, with **Delete workspace** (`workspace.dispose`) when `describeRunWorkspace` offers it, and the workspace's note. Delete workspace asks first in a ConfirmDialog: "Delete the run's workspace?", the danger action Delete ("Deleting…" while it runs), and Keep it, the closing button, focused, because the delete cannot be undone. A refusal reads "Not deleted: " and the reason;
+  - why the run waits for a runner (`describeRunnerWait`);
+  - what went wrong at a failed edge;
+  - the event that started it, as the web's Triggering event card;
+  - its output, under the inputs, only when it has one.
+- **A refused Cancel, Re-run or Delete workspace** shows why in full, in `--fail` ink, as the web app's page does.
+- The book draws the run's lead, graph, timeline, cards and dialogs. The re-run links, the runner and workspace rows, the runner-wait line, the failed edge's message, the triggering event, the output and the refusals have no drawing of their own: they take the facts list's rows and the lead's type, and their words follow the web app's page ([./14-web-app.md](./14-web-app.md)).
+
+**Cancel run…** opens a confirm dialog ([Design system](#design-system)): "Cancel this run?", with the danger button "Cancel run" ("Cancelling…" while it runs) and the button that closes it, "Keep running", as the web app's dialog has. "Cancel" beside "Cancel run" could mean either. ConfirmDialog takes the closing button's label for this; every other dialog keeps "Cancel". Keep running is focused.
+
+- The body says what stops: "Its running steps stop and their sessions end, and so do the runs it started. You can re-run it afterwards." The controller cancels every unfinished run the run started, at any depth, and applies the same `keepWorkspace` to their workspaces.
+- What happens to the workspace comes from `describeRunWorkspace`, never from the dialog's own guess: a run in a project's main checkout loses nothing. When the reading's `asksOnCancel` is true, a `.choice-box` checkbox "Delete workspace", checked, follows. The reading gives no note in that case, so none shows. Unchecked, the cancel sends `keepWorkspace: true`, as the web app's does. The checkbox follows the run's own workspace only: a run in a main checkout whose child runs have workspaces of their own shows no checkbox, and their workspaces are deleted. The contract has no read of a run's child runs yet, so asking about theirs waits for one.
+- A refusal shows in the dialog: "Not cancelled: <the error>".
+
+**Re-run…** opens a confirm dialog: "Re-run with the same inputs?", with the accent button "Re-run" ("Starting…" while it runs). Re-run is focused, because it only adds a run.
+
+- The choices are client-core's `listRerunChoices`, as stacked option rows in a radio group "Re-run from": a `.choice-box` radio, its label, and its explanation under it in muted ink. "From the current workflow" is chosen when the dialog opens; "As it ran" is the other.
+- With one choice, its explanation is a paragraph instead of the radios: the workflow was never saved, or was deleted, so the new run follows this run's plan.
+- When the new run starts, the app goes to its page. A refusal shows in the dialog: "Not re-run: <the error>".
+
+### "From runs" in Waiting on you
+
+Waiting on you lists the sessions of live runs that wait on the user, below its threads and assistants, under the sub-label "From runs", a 16px line with 7px above it (its 6px margin and the section's 1px gap), indented to the rows' text.
+
+- A session qualifies when it belongs to a run (`runId` is set), it is live, and its `openRequests` is not empty.
+- Rows are ordered by their last activity, newest first, as the threads' rows are, and capped at 3, apart from the threads' cap. The hidden ones add to the section's "N more waiting on you" row, and the section's count includes them.
+- A row is led by the waiting mark, then the session's title, which for a run's step is "<workflow> · <step>" (`Session.title`), with the question under it. The session read alone draws it. Its accessible name is "<title>, waiting on you". It opens the session's thread, `/threads/$sessionId`; while the Office is open, in the Office's drawer.
+- **The Go menu does not list these rows,** and the dock badge and notifications do not count them ([Native behaviour](#native-behaviour)). They stay about the user's own threads and assistants.
+- Waiting on you shows on every screen, so its read is a shell read: the shell's loader loads it, and its query options keep it for the life of the window (AGENTS.md, web app layout rule 8).
+
+### Keys
+
+| Key | Where | Does |
+|---|---|---|
+| `⌘F` | the workflows page | focuses the search field and selects its text |
+| Esc | an open workflow | closes it, back to the table. A step's open card, an open popover or a focused text field takes Esc first |
+| Esc | a run's page | goes to the run's workflow, or to Workflows when it has none or it was deleted. An open card, popover or dialog takes Esc first |
+| `←` / `→` | a tab bar | moves to the previous or next tab and shows it. The open workflow's tabs are ARIA tabs: a `tablist` of `tab`s and their `tabpanel`. Home and End go to the first and last |
+| `←` / `→` | a `.seg` switch | moves between its two segments, as any segmented control does |
+| `⌘=` `⌘+` / `⌘-` / `⌘0` / `⇧1` | a graph | zooms in, out, to 100%, and to fit |
+| `↩` | a confirm dialog | presses the focused button, which is the closing button when the action takes something away; in a field, presses the action ([Design system](#design-system)) |
+
+### Workflows' motion
+
+Motion tells the user that something changed ([Rules](#rules), rule 2). Each motion plays once, on `transform` and `opacity` of HTML elements, within `--dur-3`, and never loops. Reduce motion turns it all off. Only a change made while the page is open plays: a row or card drawn when the page opens, or scrolled into view, stays still, and a row the virtualizer mounts outside the scroll port plays nothing. Colours and edges change in one frame, because edges are SVG, which Chromium animates on the main thread.
+
+1. **The pop, `mark-in`:** a mark whose state changed grows in from scale 0.6 and transparent, on `--ease-spring`. One keyframe, shared by every screen.
+2. **The open pane settles:** opening a workflow slides its pane in from 14px to the right and transparent, `--dur-3`, `--ease-out`. Opening another workflow plays it again; widening to full does not.
+3. **The list:** a mark whose state changed pops in, in the row's lead and in the strip. When a run joins a strip, the older marks slide left one slot (11px) on `--ease-out` while the new one pops in.
+4. **The graph, as the run moves** (a run's page): a card the run reaches brightens from half opacity; one it passes by dims to half; a ring fades in with its mark. These play together.
+5. **The ring's ping:** when the run comes to ask the user something, or fails, a copy of the ring grows about 3.5px past the card's edge and fades, once.
+6. **The timeline's arrival:** opening the timeline or stepping to a day is the user's action, so its bars arrive 30ms apart, each line sweeping from its start to its end (`scaleX`, `--dur-3`, `--ease-out`), and its mark pops in over `--dur-2`, starting `--dur-2` after its line starts. From the ninth bar on, the bars arrive as one layer: the lanes holding them fade in once, so a day of hundreds of runs animates nine layers, not hundreds, and the arrival takes 640ms at most, within the 800ms rule 2 allows. A bar that arrives or changes later only pops its mark.
+
+A row that changes group moves there in one frame. Making room for it with motion, as Intake does, is post-v1.
+
+### What the pages read
+
+| The page shows | Read with |
+|---|---|
+| The workflows | `workflow.query` |
+| Starts on, Next, a trigger in error | `trigger.query` |
+| A workflow's strip | `run.query({ workflowId, limit: 20 })`, one read per workflow; spec 11 says the workflow list is short |
+| The Running group | `run.query({ status: "running" })` and `run.query({ status: "pending" })` |
+| Needs you, and "From runs" | `session.query({ thread: false, status: <the live statuses> })`, kept where `runId` is set and `openRequests` is not empty |
+| Where a live run is | `activeStepIds` and `awaitedSignalIds` on `RunSummary`'s running variant ([#549](https://github.com/theagenticage/hercule/issues/549)) |
+| The open workflow and its graph | `workflow.read`, its source parsed in the renderer |
+| The Runs tab's list | `run.query({ workflowId })`, a page at a time |
+| One day of the timeline | `run.query({ workflowId, activeSince, until })` ([#549](https://github.com/theagenticage/hercule/issues/549)) |
+| A run's page | `run.read`; `run.query({ originalRunId })` for its re-runs; `session.query({ runId })`; the run's workspace and runner; the workflow's triggers; `workflowAction.query` for `describeRunnerWait`; `workflow.read`, whose `not_found` tells `listRerunChoices` the workflow was deleted |
+| Tool calls on a step's card | `Session.toolCalls` ([#549](https://github.com/theagenticage/hercule/issues/549)) |
+
+- **Every list read takes every page,** as the web app's queries do, except the Runs tab's list, which reads a page at a time as it scrolls.
+- **A `workflow` push reads every trigger again.** Today a push for one workflow refreshes that workflow's trigger read only, not the `trigger.query` the list reads, so slice 37 makes the push refresh both in `@hercule/client-core`'s live keys.
+- **Live:** the `workflow` and `run` topics are held while a workflow page or a run's page is mounted, as the subagents' topic is held by its screen; the shell does not hold them. A `run` push reads every run list again, within the 50ms window pushes are gathered in. While the window is hidden, the pages drop both topics, and read them again when it shows ([Rules](#rules), rule 3). "From runs" stays current on the `session` topic, which the shell holds.
+- **Times read the age clock** ([Rules](#rules), rule 4): ages, durations, the timeline's now line and a live run's bar. On the day timeline a pixel is about two minutes, so its now line and live bars move once a minute. A moment such as "10:31" is formatted against the age clock's today, and registers local midnight as its next change, so it becomes "Sun" once its day has passed. The Next column registers the time it names.
+- **Interpretation goes to `@hercule/client-core`,** each function with its own tests: the rows and their groups, the filters' counts, schedules in words, the graph model, a node's card in each state, the open workflow's rows, the timeline's tracks and bars, and a run page's lead. The prototype's files name a possible split: `workflow-rows.ts`, `schedule-text.ts`, `graph-model.ts`, `node-details.ts`, `workflow-detail-rows.ts`, `run-timeline.ts` and `run-page-rows.ts`.
+
+### What Workflows costs
+
+The plan for slices 37 to 40, each measuring its part and recording it in [Measured](#measured). The prototype measured first, with `pnpm build:desktop`, gzipped:
+
+| Cost | Expected | Measured by |
+|---|---|---|
+| Processes | none added | the perf script's process count |
+| Idle | no work: no timer of its own, no polling, no animation. Times read the age clock, the one timer the sidebar already runs. The `workflow` and `run` topics send nothing while nothing changes | the perf script's idle sample, with a workflow open |
+| The first screen's JavaScript | grows only by the Go item, the face's row, "From runs" and the routes' stubs. The prototype added 3.7 kB; slice 37 finds where it comes from and removes it | `pnpm build:desktop`'s bundle check, before and after |
+| The graph's chunk | the YAML parser (about 30 kB), the layout and the graph: 62 kB in the prototype. The layout loads the first time a workflow or a run opens, the parser the first time a workflow opens, never at launch. The list loads neither | `pnpm build:desktop`'s bundle check |
+| Memory | within the app's memory row with 50 workflows listed and one open, and with a run's page open | the perf script |
+| Lists | the workflow list and the Runs tab's list virtualized; one day of the timeline drawn whole | the perf script, with 50 workflows, and one workflow with 300 runs in a day |
+| Opening the list | one strip read per workflow, which Chromium sends six at a time. With 50 workflows: the time until the last strip draws, with the controller local and remote. Past 500ms, the strips become one read, which the contract then adds | the Network panel, once |
+| Per push | one `run` push reads again every run read on screen: each strip, the Running read, the Runs tab's loaded pages and the day, once per 50ms window. With 50 workflows and 50 live runs: within the 16ms of renderer main-thread work per nudge the thread list keeps ([Measured](#measured)). Past it, the same one read for the strips | the perf script's nudge sample |
+| "From runs" | one shell read, live sessions that are not threads, read at launch and again on each `session` push: within the same 16ms per nudge, and no more than one read added to the launch | the perf script's nudge and launch samples |
+| Motion | per pushed change, at most each changed visible row's marks (21 when a run joins a strip) and the graph's changed cards, on the compositor alone | the Performance panel, once |
+| The timeline's arrival | 640ms of compositor-only animation per arrival, nothing after | the Performance panel, once |
 
 ## Settings
 
@@ -1588,11 +1846,13 @@ These rules keep the budgets:
    - every unbounded list virtualized
      - *(Amended 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453).)* The sidebar's Assistants section is an exception: a plain list, at most 40% of the sidebar's height, that scrolls on its own. A user has a handful of assistants, so every row is drawn. Revisit this once people run many.
      - *(Amended 2026-10-09, [#494](https://github.com/theagenticage/hercule/issues/494).)* Settings › Permission profiles is another: the profile list, and the Used by list on a profile's page, are plain lists. A user keeps a handful of profiles, and each profile is carried by a handful of agents, so every row is drawn. Revisit this once people run many.
+     - *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* [Workflows](#workflows) draws two things whole that are not lists: a graph, every one of its nodes, because its author bounds it; and the Runs tab's timeline, every run of its one day. The workflow list and the Runs tab's list are virtualized.
    - token deltas flushed at most once per animation frame
    - route-level code splitting with a CI bundle budget
    - TanStack Query for every HTTP read
 2. **Nothing animates unless something is happening:**
    - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394).)* Motion may tell the user that something happened. Such motion plays once, on `transform` and `opacity` of HTML elements, at most `--dur-3`, and only on elements on screen. It never loops or repeats. [Intake](#motion)'s arriving and leaving signals are the first.
+     - *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* [Workflows' motion](#workflows-motion) is the second. A row the virtualizer mounts outside the scroll port plays no motion, because the virtualizer knows which rows are in view: a change to such a row shows still when it scrolls in. So this rule stays as written.
    - Faces are drawn still in their pose everywhere. Bureau's idle blink is left out of the first milestone, because of the measurement above. It comes back once research finds a way to draw it within the idle budget (see [Post-v1](#post-v1)).
    - Only one continuous animation is allowed: the working pose of the face of the message the open thread's agent is writing, while its turn runs. *(Amended 2026-10-09, [#504](https://github.com/theagenticage/hercule/issues/504): a face is drawn only beside text, so no face animates while the thread shows only a status line or a work divider.)* *(Amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* On an assistant's Conversation, it is the face of the newest reply, while its turn runs. The sidebar and every other list show still poses and still marks.
      - *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The one other is a spinner, and only while Hercule starts or a login waits in [the first run](#the-first-run) or the draft's Log in. Each is a wait the user started, and each ends: the start after at most 90 seconds for the command and 30 for the answer, a login when it ends or its code expires.
@@ -1609,10 +1869,12 @@ These rules keep the budgets:
    - The renderer drops the open thread's `session:<id>:tap` subscription, and the open subagent's `session:<id>:subagent:<subagentId>:tap` *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*, and the open Conversation's newest session's `:tap` *(amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448))*. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.
    - The `session` topic stays subscribed, because the dock badge and notifications depend on it. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So does the `signal` topic, because the Hercule segment's count and Now's notifications depend on it ([Intake](#what-the-screen-reads)).
    - `backgroundThrottling` stays on.
+   - *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* The Workflows pages drop the `workflow` and `run` topics, and read them again when the window is shown ([What the pages read](#what-the-pages-read)).
    - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The Office draws its frames from `requestAnimationFrame`, which Chromium stops in a hidden, minimized or covered window. The colleagues' timers count only the time the window is shown, so they pause with the frames, and the first frame after the window is shown again advances the colleagues by one frame, not by the time it was hidden. While the Office stands still, it runs no timer that repeats~~.~~ *(amended 2026-10-09, [#505](https://github.com/theagenticage/hercule/issues/505))*, except the Secretariat's clock, which moves its hands once a minute. The clock's timer counts only the time the window is shown, as the colleagues' timers do, so a hidden window gets no wakeups from it, and the hands jump to the time when the window shows again. An Office with no assistants has no clock, so it runs no clock timer either.
 4. **No polling, and no timers while idle:**
    - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. [#279](https://github.com/theagenticage/hercule/issues/279) adds the topics.)* *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The shell also subscribes to the `connection` topic, so a GitHub Connection made in the web app while the desktop app runs reaches the New project form and the starters' line without a reload. *(Amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* It also subscribes to the `assistant` topic, so the sidebar's Assistants section follows an assistant made, renamed or deleted elsewhere.
    - A label that counts time (such as `Worked for 31s`, or a Request's `10m`) runs one timer, only while the label is on screen and the window is visible.
+     - *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* That one timer is the age clock (`app/age-clock.ts`), shared by every such label. [Workflows](#workflows) adds no timer of its own: its ages, durations, the timeline's now line and a live run's bar all read the age clock.
    - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Intake runs one timer, set for the soonest snooze's `until`, because a snooze ends with no push: nothing changes on the controller when its time comes. It fires once; the app reads To do again and sets the next. It runs whether the window is visible or not, because Now's notifications must reach the user while the window is hidden. A Mac that wakes from sleep reads To do again.
    - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Two waits in [the first run](#the-first-run) poll, because nothing else can tell the app their outcome. Both are bounded waits the user started, and neither runs while the app is idle:
      - GitHub's device flow: the protocol requires the client to ask, so the renderer calls `connection.pollDeviceFlow` at the interval GitHub gives, until the flow is done, expires or is denied.
@@ -1627,7 +1889,7 @@ These rules keep the budgets:
    - Only the Latin subset of Bricolage Grotesque (131 kB) is preloaded.
    - Limelight and Recursive load the first time text uses them.
    - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Everything the first screen imports statically is built into one chunk, the first-screen chunk. Split into files, the first screen costs more bytes: each file is compressed apart, and the files import and export names from each other, which the minifier cannot shorten across a file boundary. One chunk measured 7.4 kB smaller gzipped (see [Measured](#measured)). The app's files are read from the local disk, so splitting buys no caching in return.
-   - A screen or dialog that is not on the first screen is imported with `import()`, and is a chunk of its own, loaded the first time it shows: the first run, the project picker, the New project and provider login dialogs, and the draft's starter threads. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Each section of [Settings](#settings) is a chunk of its own too. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So is [Intake](#intake).
+   - A screen or dialog that is not on the first screen is imported with `import()`, and is a chunk of its own, loaded the first time it shows: the first run, the project picker, the New project and provider login dialogs, and the draft's starter threads. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Each section of [Settings](#settings) is a chunk of its own too. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So is [Intake](#intake). *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* So are the workflow list, the open workflow and a run's page. The graph's layout loads with the first of the last two to open, and the YAML parser with the open workflow only, because a run's page draws the run's plan, which is already parsed. Neither loads at launch ([What Workflows costs](#what-workflows-costs)).
    - App code imports each icon from its own module, never from the icons folder's list of every icon, and eslint enforces it. The bundler places a module by what imports it, so an icon only a lazy screen draws then loads with that screen.
    - The V8 code cache keeps warm launches from compiling the same scripts twice.
 7. **Main does no recurring work.** Main runs nothing on a timer, and it holds no data the renderer already holds. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run's start of Hercule is the one exception, and it ends: the half-second connect check of rule 4, the 90-second limit on `hercule service install`, and the 5-second limit on reading the login shell's `PATH`.
@@ -2489,6 +2751,11 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
 35. **Inbox zero and changes from elsewhere.** ([#534](https://github.com/theagenticage/hercule/issues/534)) Intake moves when something happens. The slice adds inbox zero's arrival and its line, the motion of signals that arrive and leave without the user, bursts as one block, and nothing moving under the pointer. Records: per push with a burst of 30, and inbox zero.
 36. **Launch on the last screen.** ([#535](https://github.com/theagenticage/hercule/issues/535)) The app reopens where the user left it. The slice adds the stored last screen for each controller URL, Open on's Where I left off, and reading a stored `threads` value and an old stored thread id. It needs no other slice. Records: the launch budget, reopening a thread and reopening Intake.
 
+37. **The workflow list.** ([#550](https://github.com/theagenticage/hercule/issues/550)) *(Added 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* The user sees every workflow and how it is doing. The slice adds Go › Workflows `⌘⇧W` and the Hercule face's Workflows row; `/workflows` with the list as a table: its columns, the groups, the filters with their counts, and search; the reads behind them, with `run` and `workflow` held while the page is mounted; "From runs" in Waiting on you, a shell read; the one virtualized list the sidebar and the table share; and the list's interpretation in client-core. Blocked by the contract additions ([#549](https://github.com/theagenticage/hercule/issues/549)). Records: the first screen's JavaScript, the list's chunk, and the reads one `run` push causes with 50 live runs across 10 workflows.
+38. **The open workflow.** ([#551](https://github.com/theagenticage/hercule/issues/551)) The user opens a workflow and sees what it does and how its runs went. The slice adds `/workflows/$workflowId` with the column and full widths; the lead with the workflow's switch and the chips; the graph with no run, and a step's card; the four tabs with their keys; each start trigger's pause switch; the Runs tab's List and Timeline with the day stepper; and one graph layout both apps import. Blocked by slice 37. Records: the open workflow's chunk, with the YAML parser and the graph layout in it, and that the first screen did not grow.
+39. **A run's page.** ([#552](https://github.com/theagenticage/hercule/issues/552)) The user follows one run, answers it and starts it again. The slice adds `/runs/$runId`: the crumb, the lead and the earlier-version note; Graph and Timeline; the run on the graph and a node's card with Open thread; the Cancel and Re-run dialogs; and what the web app's run page shows besides. Blocked by slice 38. Records: the run page's chunk, and that the first screen did not grow.
+40. **Motion on Workflows.** ([#553](https://github.com/theagenticage/hercule/issues/553)) The pages move when something changes, and only then. The slice adds `mark-in`, the open pane's settle, the strip's step, the run moving on the graph with the ring's ping, and the timeline's arrival ([Workflows' motion](#workflows-motion)). Blocked by slice 39. Records: per pushed change, which elements animate and that they run on the compositor alone; the timeline's arrival.
+
 ## Testing
 
 - **Unit tests** sit next to the code they test (AGENTS.md §Source layout). They cover:
@@ -2552,7 +2819,14 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
 
 The desktop app is itself post-v1 in [./01-overview-and-scope.md](./01-overview-and-scope.md). These are what later milestones add after the first:
 
-- **The Hercule face's other screens:** ~~Intake,~~ Check-in, Tasks, Runs, Workflows~~, Fleet, Connections~~ and Notifications. Bureau adds the office to them. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#512](https://github.com/theagenticage/hercule/issues/512).)* The face and Intake are slices 24 to 35. Fleet and Connections are rows that open Settings › Machines and Settings › Connections; screens of their own come later, if ever.
+- **The Hercule face's other screens:** ~~Intake,~~ Check-in, Tasks, Runs, ~~Workflows, Fleet, Connections~~ and Notifications. Bureau adds the office to them. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#512](https://github.com/theagenticage/hercule/issues/512).)* The face and Intake are slices 24 to 35. Fleet and Connections are rows that open Settings › Machines and Settings › Connections; screens of their own come later, if ever. *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* Workflows is slices 37 to 40.
+- *(Added 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548); [#542](https://github.com/theagenticage/hercule/issues/542).)* **On Workflows:**
+  - creating and editing a workflow ([#543](https://github.com/theagenticage/hercule/issues/543));
+  - Run now, with the run form;
+  - the Runs screen: every run of every workflow, as a day board and a list;
+  - a row that changes group moving there with motion, as Intake's rows do; until then it moves in one frame;
+  - "From runs" on the dock badge, in notifications and in the Go menu;
+  - Office desks for the agents of one run ([#471](https://github.com/theagenticage/hercule/issues/471)).
 - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394).)* **On Intake:**
   - Undo, for Done, snooze and answers;
   - raising a signal to Now, the reverse of Not urgent;
@@ -2587,6 +2861,7 @@ Tickets:
 - [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448), with its prototype on branch `prototype/desktop-assistant`
 - [Web app architecture: observability-first, desktop-shell-ready (#19)](https://github.com/theagenticage/hercule/issues/19)
 - *(Added 2026-10-10.)* [Write the Intake changes and the build tickets that replace #91 (#395)](https://github.com/theagenticage/hercule/issues/395), [The desktop Intake screen in spec 17 (#394)](https://github.com/theagenticage/hercule/issues/394), [The desktop Hercule face (#512)](https://github.com/theagenticage/hercule/issues/512), and the Intake decisions they draw on: [#385](https://github.com/theagenticage/hercule/issues/385), [#386](https://github.com/theagenticage/hercule/issues/386), [#387](https://github.com/theagenticage/hercule/issues/387), [#388](https://github.com/theagenticage/hercule/issues/388), [#390](https://github.com/theagenticage/hercule/issues/390), [#391](https://github.com/theagenticage/hercule/issues/391), [#392](https://github.com/theagenticage/hercule/issues/392), [#393](https://github.com/theagenticage/hercule/issues/393), [#397](https://github.com/theagenticage/hercule/issues/397), [#398](https://github.com/theagenticage/hercule/issues/398)
+- *(Added 2026-10-11.)* [Desktop Workflows: spec 17 §Workflows and the book's pages (#548)](https://github.com/theagenticage/hercule/issues/548), with its design in [#542](https://github.com/theagenticage/hercule/issues/542) and its prototype on branch `prototype/desktop-workflows` (3a4baf01)
 
 ADRs:
 
