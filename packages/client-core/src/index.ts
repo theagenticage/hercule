@@ -178,11 +178,11 @@ export {
   canResetIntakeRow,
   describeIntakeSource,
   listIntakeSegments,
-  listPluginConnections,
   listPluginsWithIntake,
   type IntakeChange,
   type IntakeEditedLevel,
   type IntakeKindList,
+  type IntakeKindValue,
   type IntakeSegment,
 } from "./intake-settings";
 export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";

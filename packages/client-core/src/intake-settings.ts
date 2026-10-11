@@ -29,7 +29,7 @@ export type IntakeKindList = keyof IntakeOverrides;
 export type IntakeEditedLevel = Exclude<IntakeSettingLevel, "default">;
 
 /** What a row of either list holds: the kind, and the value in effect with the level it comes from. */
-interface IntakeKindValue {
+export interface IntakeKindValue {
   readonly kind: string;
   readonly on: boolean;
   readonly level: IntakeSettingLevel;
@@ -45,10 +45,15 @@ export interface IntakeChange {
   readonly on: boolean | null;
 }
 
-/** One segment of the control above a plugin's lists. */
-export type IntakeSegment =
-  | { readonly target: "plugin"; readonly label: string }
-  | { readonly target: "connection"; readonly connectionId: string; readonly label: string };
+/**
+ * One segment of the control above a plugin's lists: all the plugin's
+ * Connections when `connectionId` is `undefined`, else the one Connection it
+ * names.
+ */
+export interface IntakeSegment {
+  readonly connectionId: string | undefined;
+  readonly label: string;
+}
 
 /**
  * Returns the plugins that get a section on Settings > Intake: those that
@@ -65,7 +70,7 @@ export const listPluginsWithIntake = (
  * a Connection names its type, so the two are matched on that name. A type's
  * name is never parsed for the plugin's id.
  */
-export const listPluginConnections = (
+const listPluginConnections = (
   plugin: PluginDetail,
   connections: ReadonlyArray<Connection>,
 ): ReadonlyArray<Connection> => {
@@ -90,12 +95,8 @@ export const listIntakeSegments = (
   const own = listPluginConnections(plugin, connections);
   if (own.length === 0) return [];
   return [
-    { target: "plugin", label: `All ${plugin.displayName} connections` },
-    ...own.map(({ id, label }): IntakeSegment => ({
-      target: "connection",
-      connectionId: id,
-      label,
-    })),
+    { connectionId: undefined, label: `All ${plugin.displayName} connections` },
+    ...own.map(({ id, label }): IntakeSegment => ({ connectionId: id, label })),
   ];
 };
 
