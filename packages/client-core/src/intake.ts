@@ -388,6 +388,18 @@ export const describeBuildFailure = (
     ? null
     : `${nameSignalSource(signal, plugins, raisers)} couldn't draw this signal. Showing the event as it came in.`;
 
+/**
+ * Returns the Screening line the pane shows when a signal was raised without
+ * the Screener deciding on it, or `null` when the Screener let it through or
+ * its kind asks for no Screening. The core raises such a signal anyway, because
+ * a missed question costs more than one the user marks Done (spec 10 §9.8,
+ * "Fail open"), and this line tells the user that nothing screened it.
+ */
+export const describeNotScreened = (signal: Signal): string | null =>
+  signal.origin.type === "event" && signal.origin.notScreened !== undefined
+    ? "Not screened: no workflow screens signals"
+    : null;
+
 /** How the pane draws an answer. */
 export type SignalAnswerStyle =
   /** An action with a `field`: a text box with its button. */
@@ -537,9 +549,27 @@ export const describeSignalOutcome = (
   return {
     label: byUser ? "What you did" : "Left on its own",
     outcome: resolution.outcome,
-    by: `by ${nameActor(resolution.actor, plugins)}`,
+    by: `by ${nameResolver(signal, resolution.actor, plugins)}`,
     byUser,
   };
+};
+
+/**
+ * Returns who resolved a signal, as the middle of a sentence. The core stamps
+ * the actor `system` on an end it observed on the source, such as a review
+ * submitted on GitHub, and on a signal a newer one replaced (spec 10 §9.6).
+ * Both came from the signal's source, so a plugin's signal names its plugin
+ * rather than the core. Any other actor is named as `nameActor` does.
+ */
+const nameResolver = (
+  signal: Signal,
+  actor: string,
+  plugins: ReadonlyArray<PluginName>,
+): string => {
+  const pluginId = parseSignalPluginId(signal.kind);
+  return actor === "system" && pluginId !== null
+    ? namePlugin(pluginId, plugins)
+    : nameActor(actor, plugins);
 };
 
 /**
@@ -547,15 +577,20 @@ export const describeSignalOutcome = (
  * the user had it open, by someone or something other than this pane:
  * "Resolved elsewhere: approved #1293, by GitHub". Returns `null` while
  * the signal is open.
+ *
+ * An outcome the core observed on the source keeps its first letter as the
+ * plugin wrote it, because such an outcome can start with a name: "Marta
+ * removed the request" must not become "marta removed the request".
  */
 export const describeResolvedElsewhere = (
   signal: Signal,
   plugins: ReadonlyArray<PluginName>,
 ): string | null => {
   const outcome = describeSignalOutcome(signal, plugins);
-  return outcome === null
-    ? null
-    : `Resolved elsewhere: ${lowerFirst(outcome.outcome)}, ${outcome.by}`;
+  if (outcome === null) return null;
+  const text =
+    signal.resolution?.actor === "system" ? outcome.outcome : lowerFirst(outcome.outcome);
+  return `Resolved elsewhere: ${text}, ${outcome.by}`;
 };
 
 /** A Now signal as a native notification shows it. The shape main takes on `urgentSignals.set`. */

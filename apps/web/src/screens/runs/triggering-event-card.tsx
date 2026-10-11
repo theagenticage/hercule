@@ -6,8 +6,8 @@ import { JsonText } from "./json-text";
 
 /**
  * Renders the event that started a run, in a card framed like the inputs card:
- * the event's kind, its source, when it occurred and its position in the
- * event log, with a link to the event in its own system when it has one. An
+ * the event's title and author when the plugin gave them, its kind, its
+ * source, when it occurred and its position in the event log, with a link to the event in its own system when it has one. An
  * address that is not http or https is not linked, because a plugin or an
  * agent sets it and it could lead anywhere.
  * Below them comes the event's payload as indented JSON, because the payload
@@ -23,12 +23,26 @@ export function TriggeringEventCard({
   return (
     <div className="rounded-card border border-line-soft bg-surface">
       <dl className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 px-4 py-3">
+        {event.title === null ? null : (
+          <>
+            <dt className="text-fine text-muted">title</dt>
+            <dd className="truncate text-fine text-ink" title={event.title}>
+              {event.title}
+            </dd>
+          </>
+        )}
         <dt className="text-fine text-muted">kind</dt>
         <dd className="truncate font-mono text-fine text-ink" title={event.kind}>
           {event.kind}
         </dd>
         <dt className="text-fine text-muted">source</dt>
         <dd className="truncate font-mono text-fine text-ink">{event.source}</dd>
+        {event.author === null ? null : (
+          <>
+            <dt className="text-fine text-muted">author</dt>
+            <dd className="truncate text-fine text-ink">{event.author}</dd>
+          </>
+        )}
         <dt className="text-fine text-muted">occurred</dt>
         <dd className="font-mono text-fine text-ink tabular-nums">
           <time dateTime={event.occurredAt}>

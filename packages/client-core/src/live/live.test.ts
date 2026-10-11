@@ -143,6 +143,8 @@ const buildEvent = (id: number): Event => ({
   payload: {},
   raw: null,
   actor: "user",
+  title: `Task ${String(id)} created`,
+  author: null,
 });
 
 /** Sorts keys so they compare as sets: the tests check which keys, not their order. */

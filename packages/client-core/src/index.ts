@@ -265,6 +265,7 @@ export {
   decidePluginMark,
   describeAnswerKey,
   describeBuildFailure,
+  describeNotScreened,
   describeOrchestrationSegment,
   describeResolvedElsewhere,
   describeSignalAsker,
