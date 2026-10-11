@@ -2630,6 +2630,38 @@ The perf script's rows were measured 2026-10-11 on the reference machine, in one
 - **Opening Assistants costs two reads more,** `memory.list` and `memory.read` of `core`, and so does picking another assistant's tab. A failure of either fails the section's loader, as a failure of `assistant.query` does.
 - **The meter is one rule now.** Permission profiles drew its grant meter with rules of its own, the same as the book's `.meter`; both screens now use the shared `.meter` in `controls.css`.
 
+**Workflows: the workflow list,** measured 2026-10-11 with `pnpm build:desktop`'s size checks, on the branch base b700bd2f (Before) and on this change (After), for [#550](https://github.com/theagenticage/hercule/issues/550). Sizes are gzipped and counted the way the budget script counts them, 1,024 bytes to a kB.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| The first screen's JavaScript, gzipped | grows only by the Go item, the face's row, "From runs" and the routes' stubs | 343.4 kB | 344.9 kB across 21 chunks |
+| The workflow list's chunk, gzipped | none | - | 6.8 kB of JavaScript, 1.1 kB of CSS |
+| The open workflow's stub, gzipped | none | - | 0.05 kB |
+| Main's startup file, minified | 160 kB | 150.1 kB | 150.2 kB |
+
+- **The first screen grows by 1.5 kB, against 3.7 kB in the prototype.** What remains is what [What Workflows costs](#what-workflows-costs) allows: the Go item, the face's Workflows row, "From runs" in Waiting on you and the session read behind it, and the two routes' stubs. Built the way the prototype was, the list added 3.8 kB, because the client-core index linked the row builder, schedule text and cron words into the first screen. They are now reached only through the subpath exports `@hercule/client-core/workflow-rows` and `@hercule/client-core/list-time`, which only the list's chunk imports.
+- **`decodeWorkflowDefinition` stays where it is.** About 1.5 kB of the workflow schema is on the first screen before this change, because `HttpApi.make` builds every group of the contract. The list does not parse a workflow, so moving the function saves nothing.
+
+The perf script's rows were measured 2026-10-11 on the reference machine with `apps/desktop/scripts/perf.ts --workflows-only`. Its launch lists 50 workflows: 10 have 5 live runs each, 50 in all, and 40 have one completed run. Each push cancels one live run. Before is the same script on the branch before the strips became one read, in three runs at a one-minute load average of 12 to 17. After is one run on this change at a load average of 41.7, because other worktrees' runs shared the machine; its per-push times are therefore an upper bound.
+
+| Row of [What Workflows costs](#what-workflows-costs) | Expected | Before: a read per strip | After: one read for the strips |
+|---|---|---|---|
+| Processes | none added | 4 | 4: browser, GPU, network utility, renderer |
+| Memory, 50 workflows listed | within the app's memory row: renderer at most 100 MB, summed at most 220 MB | renderer 69 to 70 MB, summed 329 to 334 MB | renderer **60 MB**, summed **307 MB** |
+| Idle, window visible | no work | renderer 0.7 to 0.8% of a core, 1 wakeup a second; age clock fired 0 times | renderer **0.4%**, **1** wakeup a second; GPU 0; age clock fired 0 times |
+| Idle, window hidden | no work | renderer 0 wakeups; age clock fired 0 times | renderer **0** wakeups; age clock fired 0 times |
+| Opening the list, controller local | at most 500 ms until the last strip draws | 100 strip reads: the first 50 answered at 87 to 91 ms, the last at 147 to 152 ms | **2** strip reads: the first answered at 74 ms, the last at 129 ms |
+| "From runs" at launch | no more than one read added to each round of the launch's reads | 2, as many as the thread list | **2**, as many as the thread list |
+| Per push, reads | each run read on screen read once | 50 strip reads and 2 live run reads | **1** strip read and **2** live run reads |
+| Per push, renderer main thread | within 16 ms | 18 to 23 ms: **over** | **8.1 ms** |
+| Per push, renderer and controller CPU | recorded | renderer 48 to 51 ms, controller 39 to 45 ms | renderer 16 ms, controller 19 ms |
+
+- **One read per strip missed the per-push row, so the strips are one read, as [What Workflows costs](#what-workflows-costs) planned.** A profile of the Before build put the time in handling 52 responses one by one, not in React: starting the requests, decoding and storing each answer, and invalidating each query. `run.query` gained the `newestPerWorkflow` filter for it ([spec 11](./11-public-api-and-agent-surface.md)), and `invalidateWithoutCancelling` now invalidates each query without hashing every key in the cache, which saved about 2 ms a push on its own.
+- **Opening the list reads the strips twice.** The loader reads them, and the `run` subscription's first push says that every record may have changed, so the list reads them again. The shell's reads and the subagents' do the same at launch. Before this change that doubled 50 reads; now it doubles one.
+- **The seed's 90 runs fit one page.** With 20 runs for each of 50 workflows, the strips are 1,000 runs, two pages of 500 read one after the other. That case was not measured.
+- **The summed footprint is over its row, as in most entries above.** The GPU process holds 187 MB of the 307 MB, a miss that predates this change. The renderer is within its row.
+- **Opening the list against a remote controller was not measured.**
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
