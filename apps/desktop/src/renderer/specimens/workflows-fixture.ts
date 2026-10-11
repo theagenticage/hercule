@@ -478,8 +478,11 @@ export interface WorkflowsRecords {
   readonly workflows: ReadonlyArray<WorkflowSummary>;
   /** Every trigger of every workflow, as `trigger.query` lists them. */
   readonly triggers: ReadonlyArray<Trigger>;
-  /** Each workflow's newest runs, at most 20, newest first, by workflow id. */
-  readonly strips: ReadonlyMap<string, ReadonlyArray<RunSummary>>;
+  /**
+   * Every workflow's newest runs, at most 20 per workflow, each workflow's
+   * newest first, as `run.query({ newestPerWorkflow: 20 })` lists them.
+   */
+  readonly newestRuns: ReadonlyArray<RunSummary>;
   /** Every running run, as `run.query({ status: "running" })` lists them. None is pending. */
   readonly runningRuns: ReadonlyArray<RunSummary>;
   /** The live sessions that are not threads: one per run that waits on the user. */
@@ -490,7 +493,7 @@ export interface WorkflowsRecords {
 const buildWorkflowsRecords = (): WorkflowsRecords => {
   const workflows: WorkflowSummary[] = [];
   const triggers: Trigger[] = [];
-  const strips = new Map<string, ReadonlyArray<RunSummary>>();
+  const newestRuns: RunSummary[] = [];
   const runningRuns: RunSummary[] = [];
   const agentSessions: Session[] = [];
   let runNumber = 0;
@@ -544,10 +547,10 @@ const buildWorkflowsRecords = (): WorkflowsRecords => {
       }
       return run;
     });
-    strips.set(workflow.id, strip);
+    newestRuns.push(...strip);
   });
 
-  return { workflows, triggers, strips, runningRuns, agentSessions };
+  return { workflows, triggers, newestRuns, runningRuns, agentSessions };
 };
 
 export const WORKFLOWS_RECORDS: WorkflowsRecords = buildWorkflowsRecords();

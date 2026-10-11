@@ -7,17 +7,16 @@
  * - processes and memory with the list open;
  * - each process's CPU and wakeups with the list open, visible and hidden,
  *   and how often the age clock fired in each sample;
- * - opening the list: how many strip reads the launch made, and how long
- *   from spawn, and from the page's start, until the first read of every
- *   strip had answered, and until the last strip read answered, with the
- *   controller local;
+ * - opening the list: how many reads of the strips the launch made, and how
+ *   long from spawn, and from the page's start, until the first of them had
+ *   answered, and until the last answered, with the controller local;
  * - "From runs": how many reads of the live sessions that are not threads
  *   the launch made, against the thread list's reads. The launch reads every
  *   read on screen twice: once as the page loads, and again when the live
  *   connection's first pushes say every record may have changed;
  * - what one `run` push costs: how many reads it causes, by what they read
- *   (each workflow's strip, `run.query({ workflowId, limit })`; the live
- *   runs, one `run.query` for the `running` status and one for `pending`;
+ *   (the strips, `run.query({ newestPerWorkflow })`, one read for every
+ *   workflow; the live runs, one `run.query` for the `running` status and one for `pending`;
  *   any other run read; and any other read), how long after the push the
  *   last of those reads answered, and the renderer's main thread and CPU,
  *   and the controller's CPU, per push.
@@ -38,11 +37,12 @@
  * A push is one run cancelled through `run.cancel`, one live workflow after
  * another. Cancelling is one change to one run, where starting a run is two
  * (pending, then running). The 10 pushes take the live runs from 50 down to
- * 40, which changes no count of reads: each push reads every strip and the
+ * 40, which changes no count of reads: each push reads the strips and the
  * live runs once, however many runs are live.
  *
- * Each strip holds at most 5 runs, not the 20 a strip shows at most, so each
- * strip's answer is smaller than a busy workflow's would be.
+ * Each strip holds at most 5 runs, not the 20 a strip shows at most, so the
+ * strips' answer is smaller than a list of busy workflows would get. The
+ * seed's 90 runs fit one page of 500, so the strips' read is one request.
  *
  * The route's chunk and the first screen's bytes are not measured here:
  * `pnpm build:desktop`'s bundle check prints them. The remote controller's
@@ -127,7 +127,8 @@ const SHOW_SETTLE_MS = 3_000;
 /**
  * How many entries the page's resource timing buffer holds during the
  * pushes. Chromium keeps 250 by default and drops every entry after that,
- * which 10 pushes of some 50 reads each reach.
+ * which 10 pushes of a few reads each stay under, but a push that reads
+ * more than it should must still be counted.
  */
 const RESOURCE_BUFFER_SIZE = 10_000;
 
@@ -229,8 +230,8 @@ type ReadKind = "strip" | "liveRuns" | "otherRuns" | "liveSessions" | "other";
 const LIVE_RUN_READS = 2;
 
 /**
- * Returns what the read of `url` is for: a workflow's strip when it reads
- * runs of one workflow, the live runs when it reads running or pending
+ * Returns what the read of `url` is for: the strips when it reads each
+ * workflow's newest runs, the live runs when it reads running or pending
  * runs, any other run read, the live sessions that are not threads, which
  * "From runs" reads, or anything else.
  */
@@ -239,7 +240,7 @@ function classifyRead(url: URL): ReadKind {
     return "liveSessions";
   }
   if (url.pathname !== RUNS_PATH) return "other";
-  if (url.searchParams.has("workflowId")) return "strip";
+  if (url.searchParams.has("newestPerWorkflow")) return "strip";
   const status = url.searchParams.get("status");
   if (status === "running" || status === "pending") return "liveRuns";
   return "otherRuns";
@@ -265,7 +266,10 @@ const countReadsOfKind = (reads: readonly Read[], kind: ReadKind) =>
 
 /** What opening the list at launch cost. */
 interface OpeningCost {
-  /** How many strip reads the launch made. */
+  /**
+   * How many requests for the strips the launch made. Each is one page of
+   * one read; the seed's runs fit one page.
+   */
   readonly stripReads: number;
   /** How many reads of the live sessions that are not threads the launch made. */
   readonly liveSessionReads: number;
@@ -275,15 +279,12 @@ interface OpeningCost {
    * launch made.
    */
   readonly threadListReads: number;
-  /**
-   * From spawn until the first 50 strip reads to start, one per workflow,
-   * had all answered, in milliseconds.
-   */
+  /** From spawn until the first request for the strips answered, in milliseconds. */
   readonly firstStripsFromSpawnMs: number;
   /** The same, from the page's start, its navigation. */
   readonly firstStripsFromPageStartMs: number;
-  /** From the page's start until the last strip read answered, in milliseconds. */
-  readonly lastStripFromPageStartMs: number;
+  /** From the page's start until the last request for the strips answered, in milliseconds. */
+  readonly lastStripsFromPageStartMs: number;
 }
 
 /** What the run pushes cost, summed over all of them. */
@@ -331,9 +332,9 @@ export interface WorkflowWork {
  *
  * - each process's memory, 13 s after the page opened (see
  *   `readProcessMemory`);
- * - the launch's reads, 28 s after the page opened: the strip reads and the
- *   reads of the live sessions that are not threads, and when the last strip
- *   read answered;
+ * - the launch's reads, 28 s after the page opened: the reads of the
+ *   strips and of the live sessions that are not threads, and when the
+ *   first and the last read of the strips answered;
  * - each process's CPU and wakeups over 10 s with the window visible, from
  *   30 s after the page opened, and over 10 s with the window hidden, from
  *   3 s after hiding it (see `sampleIdleUse`), with the age clock's fires in
@@ -354,7 +355,7 @@ export interface WorkflowWork {
  * `perf.ts`; the pushes then share one connection. The window stays shown
  * during the pushes, because a hidden page drops the `run` topic.
  *
- * Fails when the list does not show with every strip read within 15 s, when
+ * Fails when the list does not show with its strips read within 15 s, when
  * the window is not visible or hidden as each sample expects, or when the
  * app does not quit cleanly afterwards.
  */
@@ -381,20 +382,20 @@ export async function measureWorkflowWork(
         `require("electron").BrowserWindow.getAllWindows()[0]?.${method}()`,
       );
 
-    // The list is virtualized, so its rows cannot be counted; the strip
-    // reads, one per workflow, show that every workflow is listed.
+    // The loader reads the strips before the list draws, so a drawn row
+    // and a read of the strips show that every workflow is listed.
     await pollUntil(
       async () =>
         (await evaluateInPage(
           pageSocketUrl,
           `document.querySelector(${JSON.stringify(WORKFLOW_ROW_SELECTOR)}) !== null`,
-        )) === true && countReadsOfKind(await readReads(), "strip") >= WORKFLOW_COUNT
+        )) === true && countReadsOfKind(await readReads(), "strip") >= 1
           ? true
           : undefined,
       {
         timeoutMs: 15_000,
         intervalMs: 100,
-        timeoutMessage: `the app did not open Workflows and read its ${String(WORKFLOW_COUNT)} strips`,
+        timeoutMessage: "the app did not open Workflows and read its strips",
       },
     );
 
@@ -409,14 +410,14 @@ export async function measureWorkflowWork(
     // The live connection opens after the launch's first reads, and the
     // controller answers each live topic's subscription with a push that
     // says every record may have changed. So the launch reads the strips,
-    // and every other read on screen, a second time. The first read of each
-    // workflow's strip is the one the list waits for.
+    // and every other read on screen, a second time. The first read of the
+    // strips is the one the list waits for.
     const strips = launchReads
       .filter((read) => classifyRead(new URL(read.url)) === "strip")
       .toSorted((a, b) => a.startedAt - b.startedAt);
     const findLastAnswer = (reads: readonly Read[]) =>
       Math.max(...reads.map((read) => read.answeredAt));
-    const firstStripsAnsweredAt = findLastAnswer(strips.slice(0, WORKFLOW_COUNT));
+    const firstStripsAnsweredAt = strips[0]!.answeredAt;
     const opening: OpeningCost = {
       stripReads: strips.length,
       liveSessionReads: countReadsOfKind(launchReads, "liveSessions"),
@@ -426,7 +427,7 @@ export async function measureWorkflowWork(
       }).length,
       firstStripsFromSpawnMs: firstStripsAnsweredAt - spawnedAt,
       firstStripsFromPageStartMs: firstStripsAnsweredAt - pageStart,
-      lastStripFromPageStartMs: findLastAnswer(strips) - pageStart,
+      lastStripsFromPageStartMs: findLastAnswer(strips) - pageStart,
     };
 
     await sleepUntil(VISIBLE_SAMPLE_AT_MS);
@@ -655,22 +656,22 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
       measured.firesHidden === 0,
     ],
     [
-      "Opening the list, strip reads",
-      `one per workflow: ${String(WORKFLOW_COUNT)}`,
+      "Opening the list, requests for the strips",
+      "2: the loader's read, then the first push's read again, one page each",
       String(opening.stripReads),
-      opening.stripReads <= WORKFLOW_COUNT,
+      opening.stripReads <= 2,
     ],
     [
-      `Opening the list, until the first ${String(WORKFLOW_COUNT)} strip reads answered`,
-      "controller local; past 500 ms the strips become one read",
+      "Opening the list, until the first request for the strips answered",
+      "controller local; at most 500 ms",
       `${opening.firstStripsFromPageStartMs.toFixed(0)} ms from the page's start ` +
         `(${opening.firstStripsFromSpawnMs.toFixed(0)} ms from spawn)`,
       opening.firstStripsFromPageStartMs <= 500,
     ],
     [
-      "Opening the list, until the last strip read answered",
+      "Opening the list, until the last request for the strips answered",
       "recorded; not budgeted",
-      `${opening.lastStripFromPageStartMs.toFixed(0)} ms from the page's start`,
+      `${opening.lastStripsFromPageStartMs.toFixed(0)} ms from the page's start`,
       null,
     ],
     [
@@ -680,10 +681,10 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
       opening.liveSessionReads <= opening.threadListReads,
     ],
     [
-      "Per push, strip reads",
-      `one per workflow, ${String(WORKFLOW_COUNT)} a push`,
+      "Per push, requests for the strips",
+      "1 a push: one read for every workflow, one page at this seed's 90 runs",
       formatPerPush(pushes.reads.strip),
-      pushes.reads.strip <= WORKFLOW_COUNT * PUSH_COUNT,
+      pushes.reads.strip <= PUSH_COUNT,
     ],
     [
       "Per push, live run reads",
@@ -693,9 +694,9 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
     ],
     [
       "Run reads per round of reads",
-      `${String(WORKFLOW_COUNT + LIVE_RUN_READS)}: every strip and the live runs, once`,
+      `${String(1 + LIVE_RUN_READS)}: the strips and the live runs, once`,
       rounds === 0 ? "no round" : `${(runReads / rounds).toFixed(1)} over ${String(rounds)} rounds`,
-      rounds === 0 ? null : runReads <= (WORKFLOW_COUNT + LIVE_RUN_READS) * rounds,
+      rounds === 0 ? null : runReads <= (1 + LIVE_RUN_READS) * rounds,
     ],
     [
       "Per push, other run reads",

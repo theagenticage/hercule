@@ -478,20 +478,18 @@ export const triggersQuery = (client: HerculeClient) =>
 export const STRIP_RUN_LIMIT = 20;
 
 /**
- * Reads a workflow's newest runs, newest first, for its strip in the
- * workflow list: one page of `STRIP_RUN_LIMIT` runs. Its key sits under the
- * `runs` prefix, so a push on the `run` topic reads it again.
+ * Reads every workflow's newest runs, at most `STRIP_RUN_LIMIT` per workflow,
+ * each workflow's newest first: the strips of the workflow list, in one read
+ * rather than one per workflow. Its key sits under the `runs` prefix, so a
+ * push on the `run` topic reads it again.
  */
-export const runStripQuery = (client: HerculeClient, workflowId: string) =>
+export const newestRunsQuery = (client: HerculeClient) =>
   queryOptions({
-    queryKey: queryKeys.runStrip(workflowId),
-    queryFn: async () =>
-      (await client.run.query({ query: { workflowId, limit: STRIP_RUN_LIMIT } })).items,
-    retry: isWorthRetrying,
-    // The loader already tried, so a strip whose read failed shows that at
-    // once instead of a blank row while the list reads it again. The next
-    // `run` push reads it again.
-    retryOnMount: false,
+    queryKey: queryKeys.runs({ newestPerWorkflow: STRIP_RUN_LIMIT }),
+    queryFn: () =>
+      readEveryPage((page) =>
+        client.run.query({ query: { newestPerWorkflow: STRIP_RUN_LIMIT, ...page } }),
+      ),
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
@@ -509,8 +507,8 @@ export const liveRunsQuery = (client: HerculeClient, status: "running" | "pendin
   });
 
 /**
- * Checks whether a failed read, such as a thread's records, an assistant's
- * current session or a workflow's strip, is worth trying again. Returns `true` for the first three
+ * Checks whether a failed read, such as a thread's records or an assistant's
+ * current session, is worth trying again. Returns `true` for the first three
  * failures that got no answer from the controller, such as a dropped
  * connection, and `false` for an `ApiError`.
  *

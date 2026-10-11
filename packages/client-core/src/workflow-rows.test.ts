@@ -134,7 +134,7 @@ const buildWaitingSession = (
 const buildReads = (over: Partial<WorkflowListReads>): WorkflowListReads => ({
   workflows: [],
   triggers: [],
-  strips: new Map(),
+  newestRuns: [],
   liveRuns: [],
   waitingRunSessions: [],
   ...over,
@@ -166,7 +166,7 @@ describe("buildWorkflowRows groups", () => {
   it("puts a workflow whose live run has a session waiting on the user in Needs you", () => {
     const run = buildRun("r1", "ship", 0, { status: "running", activeStepIds: ["review"] });
     const row = buildOneRow("Ship", {
-      strips: new Map([["ship", [run]]]),
+      newestRuns: [run],
       liveRuns: [run],
       waitingRunSessions: listWaitingRunSessions([
         buildWaitingSession("s1", "r1", "review", "git push"),
@@ -209,7 +209,7 @@ describe("buildWorkflowRows groups", () => {
   it("puts a workflow in Needs you when its waiting run shows only in its strip", () => {
     const run = buildRun("r1", "ship", 0, { status: "running", activeStepIds: ["review"] });
     const row = buildOneRow("Ship", {
-      strips: new Map([["ship", [run]]]),
+      newestRuns: [run],
       waitingRunSessions: listWaitingRunSessions([
         buildWaitingSession("s1", "r1", "review", "git push"),
       ]),
@@ -223,7 +223,7 @@ describe("buildWorkflowRows groups", () => {
     const live = buildRun("r1", "backup", 0, { status: "running", activeStepIds: ["copy"] });
     const failed = buildRun("r2", "backup", 10, { status: "failed", failedStepId: "compare" });
     const row = buildOneRow("Backup", {
-      strips: new Map([["backup", [failed, live]]]),
+      newestRuns: [failed, live],
       liveRuns: [live],
     });
 
@@ -237,7 +237,7 @@ describe("buildWorkflowRows groups", () => {
     const failed = buildRun("r1", "ship", 0, { status: "failed", failedStepId: "test" });
     const live = buildRun("r2", "ship", 10, { status: "running", activeStepIds: ["review"] });
     const row = buildOneRow("Ship", {
-      strips: new Map([["ship", [live, failed]]]),
+      newestRuns: [live, failed],
       liveRuns: [live],
     });
 
@@ -250,7 +250,7 @@ describe("buildWorkflowRows groups", () => {
   it("counts a live run that started after the strip was read as the newest run", () => {
     const failed = buildRun("r1", "ship", 0, { status: "failed" });
     const live = buildRun("r2", "ship", 10, { status: "pending" });
-    const row = buildOneRow("Ship", { strips: new Map([["ship", [failed]]]), liveRuns: [live] });
+    const row = buildOneRow("Ship", { newestRuns: [failed], liveRuns: [live] });
 
     assert.strictEqual(row.group, "running");
     assert.strictEqual(row.lastRunAt, at(10));
@@ -259,16 +259,10 @@ describe("buildWorkflowRows groups", () => {
   it("shows when the newest run started, or when it was created when it never started", () => {
     const created = buildRun("r1", "ship", 0, { status: "running" });
     const started = { ...created, startedAt: at(3) };
-    assert.strictEqual(
-      buildOneRow("Ship", { strips: new Map([["ship", [started]]]) }).lastRunAt,
-      at(3),
-    );
+    assert.strictEqual(buildOneRow("Ship", { newestRuns: [started] }).lastRunAt, at(3));
 
     const cancelled = buildRun("r2", "ship", 5, { status: "cancelled" });
-    assert.strictEqual(
-      buildOneRow("Ship", { strips: new Map([["ship", [cancelled]]]) }).lastRunAt,
-      at(5),
-    );
+    assert.strictEqual(buildOneRow("Ship", { newestRuns: [cancelled] }).lastRunAt, at(5));
   });
 
   it("puts a workflow with a live run older than its 20 newest runs in Running", () => {
@@ -279,7 +273,7 @@ describe("buildWorkflowRows groups", () => {
     const strip = Array.from({ length: 20 }, (_, index) =>
       buildRun(`r${String(index)}`, "nightly", 100 - index, { status: "completed" }),
     );
-    const row = buildOneRow("Nightly", { strips: new Map([["nightly", strip]]), liveRuns: [old] });
+    const row = buildOneRow("Nightly", { newestRuns: strip, liveRuns: [old] });
 
     assert.strictEqual(row.group, "running");
     assert.strictEqual(row.statusText, "Waiting for approved");
@@ -288,7 +282,7 @@ describe("buildWorkflowRows groups", () => {
   it("puts a workflow whose only live run is pending in Running, as Starting", () => {
     const pending = buildRun("r1", "ship", 0, { status: "pending" });
     const row = buildOneRow("Ship", {
-      strips: new Map([["ship", [pending]]]),
+      newestRuns: [pending],
       liveRuns: [pending],
     });
 
@@ -299,7 +293,7 @@ describe("buildWorkflowRows groups", () => {
 
   it("reads a running run with no step started yet as Starting", () => {
     const run = buildRun("r1", "ship", 0, { status: "running" });
-    const row = buildOneRow("Ship", { strips: new Map([["ship", [run]]]), liveRuns: [run] });
+    const row = buildOneRow("Ship", { newestRuns: [run], liveRuns: [run] });
 
     assert.strictEqual(row.statusText, "Starting");
     assert.deepStrictEqual(row.strip, ["starting"]);
@@ -328,7 +322,7 @@ describe("buildWorkflowRows groups", () => {
           { health: { state: "error", message: "No such key: labels", at: AT } },
         ),
       ],
-      strips: new Map([["label", [run]]]),
+      newestRuns: [run],
       liveRuns: [run],
     });
 
@@ -344,7 +338,7 @@ describe("buildWorkflowRows groups", () => {
       [[], "No runs yet"],
     ];
     for (const [strip, statusText] of cases) {
-      const row = buildOneRow("SSL", { strips: new Map([["ssl", strip]]) });
+      const row = buildOneRow("SSL", { newestRuns: strip });
       assert.strictEqual(row.group, "everythingElse");
       assert.strictEqual(row.mark, "idle");
       assert.strictEqual(row.statusText, statusText);
@@ -352,21 +346,30 @@ describe("buildWorkflowRows groups", () => {
     }
   });
 
-  it("reads nothing for a strip not read yet, and says so for a strip whose read failed", () => {
-    const unread = buildOneRow("SSL", {});
-    assert.strictEqual(unread.group, "everythingElse");
-    assert.strictEqual(unread.statusText, "");
+  it("gives each workflow the newest runs of its own, in their order, from runs of every workflow", () => {
+    const rows = buildWorkflowRows(
+      buildReads({
+        workflows: [buildWorkflow("Ship"), buildWorkflow("SSL")],
+        newestRuns: [
+          buildRun("r4", "ssl", 40, { status: "completed" }),
+          buildRun("r3", "ship", 30, { status: "failed" }),
+          buildRun("r2", "ssl", 20, { status: "cancelled" }),
+          buildRun("r1", "ship", 10, { status: "completed" }),
+        ],
+      }),
+    );
 
-    const failed = buildOneRow("SSL", { strips: new Map([["ssl", "failed"]]) });
-    assert.strictEqual(failed.group, "everythingElse");
-    assert.strictEqual(failed.statusText, "Runs could not be read");
-    assert.strictEqual(failed.statusTone, "muted");
-    assert.deepStrictEqual(failed.strip, []);
+    const ship = rows.find((row) => row.id === "ship");
+    const ssl = rows.find((row) => row.id === "ssl");
+    assert.deepStrictEqual(ship?.strip, ["done", "failed"]);
+    assert.strictEqual(ship?.statusText, "Failed");
+    assert.deepStrictEqual(ssl?.strip, ["cancelled", "done"]);
+    assert.strictEqual(ssl?.statusText, "Done");
   });
 
   it("reads Failed for a failed run that names no step", () => {
     const row = buildOneRow("SSL", {
-      strips: new Map([["ssl", [buildRun("r1", "ssl", 0, { status: "failed" })]]]),
+      newestRuns: [buildRun("r1", "ssl", 0, { status: "failed" })],
     });
 
     assert.strictEqual(row.statusText, "Failed");
@@ -401,7 +404,7 @@ describe("buildWorkflowRows off and Next", () => {
   it("keeps its group's mark for a workflow that is off but in another group", () => {
     const row = buildOneRow(
       "Prune",
-      { strips: new Map([["prune", [buildRun("r1", "prune", 0, { status: "failed" })]]]) },
+      { newestRuns: [buildRun("r1", "prune", 0, { status: "failed" })] },
       false,
     );
 
@@ -498,17 +501,12 @@ describe("buildWorkflowRows Starts on, the strip and Success", () => {
 
   it("draws the strip oldest first, a cancelled run with no mark", () => {
     const row = buildOneRow("Ship", {
-      strips: new Map([
-        [
-          "ship",
-          [
-            buildRun("r4", "ship", 40, { status: "running", activeStepIds: ["review"] }),
-            buildRun("r3", "ship", 30, { status: "cancelled" }),
-            buildRun("r2", "ship", 20, { status: "failed" }),
-            buildRun("r1", "ship", 10, { status: "completed" }),
-          ],
-        ],
-      ]),
+      newestRuns: [
+        buildRun("r4", "ship", 40, { status: "running", activeStepIds: ["review"] }),
+        buildRun("r3", "ship", 30, { status: "cancelled" }),
+        buildRun("r2", "ship", 20, { status: "failed" }),
+        buildRun("r1", "ship", 10, { status: "completed" }),
+      ],
     });
 
     assert.deepStrictEqual(row.strip, ["done", "failed", "cancelled", "working"]);
@@ -523,14 +521,14 @@ describe("buildWorkflowRows Starts on, the strip and Success", () => {
       buildRun("f2", "ship", 21, { status: "failed" }),
       buildRun("x1", "ship", 22, { status: "cancelled" }),
     ].toReversed();
-    const row = buildOneRow("Ship", { strips: new Map([["ship", strip]]) });
+    const row = buildOneRow("Ship", { newestRuns: strip });
 
     assert.strictEqual(row.successText, "85%");
   });
 
   it("leaves Success empty when no run completed or failed", () => {
     const row = buildOneRow("Ship", {
-      strips: new Map([["ship", [buildRun("x1", "ship", 0, { status: "cancelled" })]]]),
+      newestRuns: [buildRun("x1", "ship", 0, { status: "cancelled" })],
     });
 
     assert.strictEqual(row.successText, "");
@@ -540,7 +538,7 @@ describe("buildWorkflowRows Starts on, the strip and Success", () => {
     const run = buildRun("r1", "ship", 0, { status: "completed" });
     const reads = buildReads({
       workflows: [buildWorkflow("Ship")],
-      strips: new Map([["ship", [run]]]),
+      newestRuns: [run],
     });
 
     assert.deepStrictEqual(buildWorkflowRows(reads), buildWorkflowRows(reads));
@@ -561,7 +559,7 @@ const LIST_READS = (() => {
       buildWorkflow("Archive", { enabled: false }),
     ],
     triggers: [buildTrigger("audit", "monthly_audit", { schedule: "0 7 1 * *" })],
-    strips: new Map([["backup", [buildRun("f1", "backup", 0, { status: "failed" })]]]),
+    newestRuns: [buildRun("f1", "backup", 0, { status: "failed" })],
     liveRuns: [waiting, live],
     waitingRunSessions: listWaitingRunSessions([
       buildWaitingSession("s1", "w1", "review", "git push"),

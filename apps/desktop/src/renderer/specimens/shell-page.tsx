@@ -94,6 +94,7 @@ import {
   localRunnerQuery,
   memoryDocumentQuery,
   memoryIndexQuery,
+  newestRunsQuery,
   pluginsQuery,
   profilesQuery,
   projectsQuery,
@@ -102,7 +103,6 @@ import {
   resourcesQuery,
   runnersQuery,
   runningTurnQuery,
-  runStripQuery,
   senderSessionQuery,
   sessionQuery,
   settingsQuery,
@@ -459,12 +459,7 @@ const seedQueryCache = (
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
     queryClient.setQueryData(triggersQuery(client).queryKey, workflows.triggers);
-    for (const workflow of workflows.workflows) {
-      queryClient.setQueryData(
-        runStripQuery(client, workflow.id).queryKey,
-        workflows.strips.get(workflow.id) ?? [],
-      );
-    }
+    queryClient.setQueryData(newestRunsQuery(client).queryKey, workflows.newestRuns);
     queryClient.setQueryData(liveRunsQuery(client, "running").queryKey, workflows.runningRuns);
     queryClient.setQueryData(liveRunsQuery(client, "pending").queryKey, []);
     // The book's times are UTC, and so is the specimen's clock.

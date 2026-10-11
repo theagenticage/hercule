@@ -191,14 +191,6 @@ export const queryKeys = {
       ? ["conversation-messages"]
       : ["conversation-messages", conversationId],
   runs: (filter?: RunFilter): LiveQueryKey => (filter === undefined ? ["runs"] : ["runs", filter]),
-  /**
-   * A workflow's strip in the desktop app's workflow list: its newest runs,
-   * one page of `run.query({ workflowId, limit })`. Its key differs from
-   * `runs({ workflowId })`, the Runs tab's paged read of the same workflow,
-   * because the two hold different pages. It shares the `runs` prefix, so a
-   * `run` push reaches both.
-   */
-  runStrip: (workflowId: string): LiveQueryKey => ["runs", "strip", workflowId],
   run: (id?: string): LiveQueryKey => (id === undefined ? ["run"] : ["run", id]),
   /** The notification center's pages, keyed on the filter. */
   notifications: (filter?: NotificationFilter): LiveQueryKey =>

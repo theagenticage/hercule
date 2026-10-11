@@ -150,11 +150,9 @@ describe("the desktop workflow list's keys", () => {
     assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.triggers("w2"))));
   });
 
-  it("puts a workflow's strip under the runs prefix, apart from its run list", () => {
-    const strip = queryKeys.runStrip("w1");
-    assert.isTrue(buildQueryKeys("run", ["r1"]).some((key) => isPrefixOf(key, strip)));
-    assert.isFalse(isPrefixOf(queryKeys.runs({ workflowId: "w1" }), strip));
-    assert.isFalse(isPrefixOf(strip, queryKeys.runs({ workflowId: "w1" })));
+  it("reaches the strips' one read, every workflow's newest runs, on a run push", () => {
+    const strips = queryKeys.runs({ newestPerWorkflow: 20 });
+    assert.isTrue(buildQueryKeys("run", ["r1"]).some((key) => isPrefixOf(key, strips)));
   });
 
   it("reaches the live sessions of runs on a session push", () => {

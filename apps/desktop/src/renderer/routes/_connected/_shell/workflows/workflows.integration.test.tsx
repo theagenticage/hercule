@@ -8,7 +8,6 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import type { RunSummary, Session, Trigger, TriggerOn, WorkflowSummary } from "@hercule/contract";
 import {
-  buildErrorBody,
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
@@ -172,16 +171,24 @@ const WAITING: Session = {
   ],
 };
 
-/** Answers `run.query`: a workflow's strip when it names one, else the runs with the status it names. */
+/**
+ * Answers `run.query`: each workflow's newest runs, at most `newestPerWorkflow`
+ * of each, when the filter names it, else the runs with the status it names.
+ */
 const answerRunQuery = (call: Call) => {
   const params = new URLSearchParams(call.search);
-  const workflowId = params.get("workflowId");
-  const status = params.get("status");
+  const newestPerWorkflow = params.get("newestPerWorkflow");
+  if (newestPerWorkflow === null) {
+    return { body: { items: RUNS.filter((run) => run.status === params.get("status")) } };
+  }
+  const kept = new Map<string | null, number>();
   return {
     body: {
-      items: RUNS.filter((run) =>
-        workflowId === null ? run.status === status : run.workflowId === workflowId,
-      ),
+      items: RUNS.filter((run) => {
+        const count = (kept.get(run.workflowId) ?? 0) + 1;
+        kept.set(run.workflowId, count);
+        return count <= Number(newestPerWorkflow);
+      }),
     },
   };
 };
@@ -318,34 +325,6 @@ describe("the workflow list", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Workflows" })).toBeTruthy();
   });
 
-  it("says when a workflow's runs could not be read, and still draws the list", async () => {
-    const handlers: Readonly<Record<string, Handler>> = {
-      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, agentSessions: [WAITING] }),
-      "GET /api/v1/settings": { body: { controller: {}, user: { timezone: "UTC" } } },
-      "GET /api/v1/workflows": { body: { items: WORKFLOWS } },
-      "GET /api/v1/triggers": { body: { items: TRIGGERS } },
-      "GET /api/v1/runs": (call) =>
-        new URLSearchParams(call.search).get("workflowId") === REPORT.id
-          ? { status: 500, body: buildErrorBody("internal", "The disk is full.") }
-          : answerRunQuery(call),
-    };
-    stubApi(handlers);
-    await renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {
-      path: "/workflows",
-    });
-    await screen.findByRole("heading", { level: 1, name: "Workflows" });
-
-    // The page reads a failed strip again after it draws, so the row says so once that read
-    // fails as well.
-    expect(
-      await within(getList()).findByRole("link", {
-        name: "Ad hoc report",
-        description: "Runs could not be read",
-      }),
-    ).toBeTruthy();
-    expect(readCells(SYNC)[5]).toBe("Failed at test");
-  });
-
   it("says when there are no workflows", async () => {
     await openWorkflows([]);
 
@@ -428,20 +407,18 @@ describe("the workflow list's live updates", () => {
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
   };
 
-  it("read every strip and the live runs again on a run push, and the workflows and triggers on a workflow push", async () => {
+  it("read the strips and the live runs again on a run push, and the workflows and triggers on a workflow push", async () => {
     const { calls, live, context } = await openWorkflows();
     await waitForTopics(live, context.queryClient);
 
     const before = calls.length;
     act(() => live.pushInvalidation("run", [SHIP_LIVE.id]));
-    await waitFor(() => expect(listReads(calls.slice(before), "/api/v1/runs")).toHaveLength(7));
-    expect(listReads(calls.slice(before), "/api/v1/runs")).toEqual(
-      [
-        ...WORKFLOWS.map((workflow) => `?workflowId=${workflow.id}&limit=20`),
-        "?status=pending&limit=500",
-        "?status=running&limit=500",
-      ].sort(),
-    );
+    await waitFor(() => expect(listReads(calls.slice(before), "/api/v1/runs")).toHaveLength(3));
+    expect(listReads(calls.slice(before), "/api/v1/runs")).toEqual([
+      "?newestPerWorkflow=20&limit=500",
+      "?status=pending&limit=500",
+      "?status=running&limit=500",
+    ]);
 
     const beforeWorkflow = calls.length;
     act(() => live.pushInvalidation("workflow", [SHIP.id]));

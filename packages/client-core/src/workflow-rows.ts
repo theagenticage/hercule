@@ -107,9 +107,7 @@ export interface WorkflowListRow {
   readonly successText: string;
   /**
    * The status text of the last run, such as "review asks: Ship v2.4?", "At
-   * review" or "Done". When the workflow is in Everything else and its strip
-   * is not read yet, it is empty; when the strip's read failed, it is "Runs
-   * could not be read".
+   * review" or "Done", or "No runs yet".
    */
   readonly statusText: string;
   readonly statusTone: WorkflowStatusTone;
@@ -146,12 +144,11 @@ export interface WorkflowListReads {
   /** Every trigger of every workflow, from `trigger.query`. */
   readonly triggers: ReadonlyArray<Trigger>;
   /**
-   * Each workflow's newest runs, newest first, from `run.query({ workflowId,
-   * limit: 20 })`, by workflow id. A workflow whose strip is not read yet
-   * has no entry, and one whose read failed with no earlier read to show has
-   * `"failed"`.
+   * Every workflow's newest runs, at most 20 per workflow, each workflow's
+   * newest first, from `run.query({ newestPerWorkflow: 20 })`. They are each
+   * workflow's strip.
    */
-  readonly strips: ReadonlyMap<string, ReadonlyArray<RunSummary> | "failed">;
+  readonly newestRuns: ReadonlyArray<RunSummary>;
   /** Every live run, from `run.query` with `status: "running"` and with `status: "pending"`. */
   readonly liveRuns: ReadonlyArray<RunSummary>;
   /**
@@ -263,23 +260,20 @@ const describeStartTrigger = (trigger: Trigger): string =>
  * strip, so a live run older than the strip's 20 counts too.
  *
  * A session waiting on the user puts the workflow of its run in Needs you.
- * The run's workflow is read from the live runs and the strips, so a run
- * that shows in either counts.
+ * The run's workflow is read from the live runs and the newest runs, so a
+ * run that shows in either counts.
  */
 export const buildWorkflowRows = ({
   workflows,
   triggers,
-  strips,
+  newestRuns,
   liveRuns,
   waitingRunSessions,
 }: WorkflowListReads): ReadonlyArray<WorkflowListRow> => {
   const triggersByWorkflow = groupByKey(triggers, (trigger) => trigger.workflowId);
   const liveRunsByWorkflow = groupByKey(liveRuns, (run) => run.workflowId);
-  const runWorkflows = new Map(liveRuns.map((run) => [run.id, run.workflowId]));
-  for (const strip of strips.values()) {
-    if (strip === "failed") continue;
-    for (const run of strip) runWorkflows.set(run.id, run.workflowId);
-  }
+  const stripsByWorkflow = groupByKey(newestRuns, (run) => run.workflowId);
+  const runWorkflows = new Map([...liveRuns, ...newestRuns].map((run) => [run.id, run.workflowId]));
 
   // The sessions waiting on the user, by the workflow of their run, most
   // recently active first, so the last of each workflow's has waited longest.
@@ -293,8 +287,7 @@ export const buildWorkflowRows = ({
     const starts = own.filter((trigger) => trigger.kind === "start");
     const active = starts.filter((trigger) => trigger.status !== "paused");
     const brokenStart = starts.find((trigger) => trigger.health?.state === "error");
-    const stripRead = strips.get(workflow.id);
-    const strip = stripRead === undefined || stripRead === "failed" ? [] : stripRead;
+    const strip = stripsByWorkflow.get(workflow.id) ?? [];
     const live = liveRunsByWorkflow.get(workflow.id) ?? [];
     const waiting = waitingByWorkflow.get(workflow.id)?.at(-1);
     const newest = [...strip.slice(0, 1), ...live].reduce<RunSummary | undefined>(
@@ -326,11 +319,7 @@ export const buildWorkflowRows = ({
             ? describeLiveRuns(live)
             : lastEnded !== undefined
               ? describeEndedRun(lastEnded)
-              : stripRead === undefined
-                ? ""
-                : stripRead === "failed"
-                  ? "Runs could not be read"
-                  : "No runs yet";
+              : "No runs yet";
 
     const startTexts = starts.map(describeStartTrigger);
     const firstStart = starts[0];
