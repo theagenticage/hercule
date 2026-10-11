@@ -16,7 +16,7 @@
  */
 import { Schema } from "effect";
 import { closedStruct } from "../closed";
-import { EventKind } from "./event";
+import { EventKind } from "./event-record";
 import { SignalKind } from "./signal";
 
 /**

@@ -39,7 +39,7 @@ import { Actor, Id, isQualifiedId, Timestamp, TimestampWithOffset } from "../ids
 import { cursorParams, MAX_PAGE_LIMIT, page } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
-import { EventId } from "./event";
+import { EventId } from "./event-record";
 import {
   BoundAction,
   countJsonBytes,

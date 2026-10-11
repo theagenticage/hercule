@@ -29,7 +29,7 @@ import { listSchemaIssues, type Issue } from "../errors";
 import { MAX_QUOTED_LENGTH, quoteAuthorText } from "../excerpts";
 import { isId } from "../ids";
 import { atMost, bounded, Timezone } from "../strings";
-import { EventKind } from "./event";
+import { EventKind } from "./event-record";
 import {
   EphemeralSpawnWorkspace,
   MAX_SPAWN_CHECKOUTS,

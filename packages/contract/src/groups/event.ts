@@ -1,19 +1,18 @@
 /**
  * The event log, read.
  *
- * One table holds two kinds of entry in the same format: pipeline events,
- * which the event router evaluates against triggers, and audit entries, which
- * it never evaluates. `query` returns both, told apart by `kind`, because the
- * log is also the audit log, and people usually open it to read a security
- * entry next to the events around it.
+ * `query` returns pipeline events and audit entries alike, told apart by
+ * `kind`, because the log is also the audit log, and people usually open it to
+ * read a security entry next to the events around it.
  *
  * Security entries - the audit kinds of the secret, auth and user account
  * families - are returned only to a caller that also holds `event.audit`. For
  * anyone else they are left out of the page rather than rejected, and `read`
  * of one fails with not_found, so the log does not reveal what it withholds.
  *
- * An event's id is its position in the log, so it is an integer: the only
- * integer id in a system of UUIDv7s.
+ * Each event `query` returns carries the facts its handlings are worked out
+ * from: the signals, Tasks and Subscriptions it reached. A client turns them
+ * into "What came of it" with no request per row (spec 10 section 9.10).
  *
  * Two filters from spec 11, `triggerId` and `runId`, are missing here: events
  * are not linked to triggers or runs yet, and a filter that always returns an
@@ -23,114 +22,119 @@ import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
-import { ExternalRef, Id, NullableActor, Timestamp } from "../ids";
+import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { bounded } from "../strings";
+import { atMost, bounded } from "../strings";
+import {
+  EVENT_SORT_FIELDS,
+  Event,
+  EventEmitInput,
+  EventEmitted,
+  EventEnrichInput,
+  EventId,
+  EventKind,
+} from "./event-record";
+import { SignalKind, SignalStatus } from "./signal";
+import { SubscriptionHolder } from "./subscription";
+import { MAX_SEARCH_TEXT_LENGTH } from "./task";
 
 /**
- * The longest event kind. The part of a kind before its first dot is a
- * namespace, such as `github` in `github.issue.opened`. It is not always the
- * Event Source: `task.created` comes from the core.
+ * The handlings `event.query` can filter on: what came of an event in Intake,
+ * in the order "What came of it" shows them (spec 10 section 9.10).
+ *
+ * - `raised-signal`: the event raised a plugin's signal.
+ * - `ended-signal`: the event ended a signal on its source.
+ * - `evidence`: a core signal, such as triage's proposal, lists the event.
+ * - `on-task`: a Task's provenance carries the event.
+ * - `known-work`: a live Subscription received the event.
+ * - `no-action`: none of the above.
+ *
+ * Four more join later, each with what it is worked out from: `ignored` with
+ * Ignore Rules, the Screener's two with Screening, and `pending-triage` with
+ * the setting that names the triage workflow. Until then nothing could
+ * produce them, so they are not values a caller can send.
  */
-export const MAX_EVENT_KIND_LENGTH = 128;
+export const EVENT_HANDLINGS = [
+  "raised-signal",
+  "ended-signal",
+  "evidence",
+  "on-task",
+  "known-work",
+  "no-action",
+] as const;
 
-export const EventKind = bounded(1, MAX_EVENT_KIND_LENGTH);
+export const EventHandling = Schema.Literals(EVENT_HANDLINGS);
 
-/** An arbitrary JSON object: a per-kind payload, or a vendor passthrough. */
-const JsonObject = Schema.Record(Schema.String, Schema.Unknown);
+export type EventHandling = Schema.Schema.Type<typeof EventHandling>;
 
-/** An event's id: its position in the log, counted from one. */
-export const EventId = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+/**
+ * The longest `source` the filter accepts. A source is a plugin's id or a
+ * core emitter's name, both far shorter.
+ */
+export const MAX_EVENT_SOURCE_LENGTH = 128;
 
-export type EventId = Schema.Schema.Type<typeof EventId>;
+/**
+ * A signal the event raised (`origin.eventId`), or a core signal that lists
+ * the event among its evidence (`origin.eventIds`). A plugin's kind is raised
+ * only from its event, and a core kind only lists events, so `kind` tells the
+ * two apart.
+ */
+export const EventSignalFact = Schema.Struct({
+  signalId: Id,
+  kind: SignalKind,
+  status: SignalStatus,
+  title: Schema.String,
+  /** When the signal comes back to To do. Set only while it is open and snoozed. */
+  snoozedUntil: Schema.optionalKey(Timestamp),
+  /** The signal's one-line outcome, such as "Replied in Gmail". Set only once it is resolved. */
+  outcome: Schema.optionalKey(Schema.String),
+});
 
-export const Event = Schema.Struct({
-  id: EventId,
-  /** The plugin or core emitter: `github`, `gmail`, `cron`, `manual`, `platform`. */
-  source: Schema.String,
-  /** Null for core emitters, which arrive through no connection. */
-  connectionId: Schema.NullOr(Id),
-  /** The external system the event is about, which enrichment may correct. */
-  system: Schema.String,
-  kind: EventKind,
-  occurredAt: Timestamp,
-  receivedAt: Timestamp,
-  /** The emitter's idempotency key, unique per connection. */
-  dedupKey: Schema.String,
-  refs: Schema.Array(ExternalRef),
-  /** Where a person opens this event in its own system. */
-  url: Schema.NullOr(Schema.String),
-  payload: JsonObject,
-  /** The vendor payload, kept for debugging. No filter ever reads it. */
-  raw: Schema.NullOr(JsonObject),
-  /**
-   * Who caused it, or nobody. The envelope is the only place the actor lives;
-   * a platform event's payload never repeats it.
-   */
-  actor: NullableActor,
-  /**
-   * One line saying what happened, set by the emitter: "marta requested your
-   * review on #1293". Null for an event stored before sources set it, and for
-   * an event sent with `event.emit`.
-   */
+export type EventSignalFact = Schema.Schema.Type<typeof EventSignalFact>;
+
+/** A signal the event ended on its source (`resolution.eventId`). */
+export const EventResolvedSignalFact = Schema.Struct({
+  signalId: Id,
+  kind: SignalKind,
+  title: Schema.String,
+  outcome: Schema.String,
+});
+
+export type EventResolvedSignalFact = Schema.Schema.Type<typeof EventResolvedSignalFact>;
+
+/** A Task whose provenance carries the event. A deleted Task is not listed. */
+export const EventTaskFact = Schema.Struct({
+  taskId: Id,
+  title: Schema.String,
+});
+
+export type EventTaskFact = Schema.Schema.Type<typeof EventTaskFact>;
+
+/** A live Subscription that received the event, and who holds it. */
+export const EventKnownByFact = Schema.Struct({
+  subscriptionId: Id,
+  holder: SubscriptionHolder,
+  /** The holding session's title, or the name of the holding run's workflow. Null when it has none. */
   title: Schema.NullOr(Schema.String),
-  /** Who caused the event on its own system, such as a GitHub login, or null when nobody did. */
-  author: Schema.NullOr(Schema.String),
 });
 
-export type Event = Schema.Schema.Type<typeof Event>;
-
-/** The log is sorted by position only. */
-export const EVENT_SORT_FIELDS = ["id"] as const;
-
-/** The longest idempotency key an emitter may write. */
-export const MAX_DEDUP_KEY_LENGTH = 200;
-
-/** The longest system name. It is the name of a system, not a sentence. */
-export const MAX_EVENT_SYSTEM_LENGTH = 64;
-
-/** The longest source URL. It is where a person opens the event, not a document. */
-export const MAX_EVENT_URL_LENGTH = 2048;
-
-/** Re-exported from the package plugins are written against, so a plugin cuts its titles to the limit this API checks. */
-export { MAX_EVENT_TITLE_LENGTH } from "@hercule/plugin-host";
+export type EventKnownByFact = Schema.Schema.Type<typeof EventKnownByFact>;
 
 /**
- * The longest author a plugin's event may name. A signal written from the
- * event alone takes it as its asker, so it is the limit of a signal's asker
- * too.
+ * An event as `event.query` lists it: the event, and the facts its handlings
+ * are worked out from, read in the same query. Each list is empty when the
+ * event reached nothing of its kind.
  */
-export const MAX_EVENT_AUTHOR_LENGTH = 256;
-
-/** The payload of a manual emit. The core fills in every other field of the event. */
-export const EventEmitInput = Schema.Struct({
-  kind: EventKind,
-  payload: JsonObject,
-  connectionId: Schema.optionalKey(Id),
-  refs: Schema.optionalKey(Schema.Array(ExternalRef)),
-  dedupKey: Schema.optionalKey(bounded(1, MAX_DEDUP_KEY_LENGTH)),
+export const EventWithFacts = Schema.Struct({
+  ...Event.fields,
+  signals: Schema.Array(EventSignalFact),
+  resolvedSignals: Schema.Array(EventResolvedSignalFact),
+  tasks: Schema.Array(EventTaskFact),
+  knownBy: Schema.Array(EventKnownByFact),
 });
 
-export type EventEmitInput = Schema.Schema.Type<typeof EventEmitInput>;
-
-/** The id of the event a manual emit wrote. */
-export const EventEmitted = Schema.Struct({ eventId: EventId });
-
-export type EventEmitted = Schema.Schema.Type<typeof EventEmitted>;
-
-/**
- * The fields enrichment may amend. A field left out is not changed. `refs` are
- * only ever added, never removed, so a later reader of an event never finds
- * fewer refs on it than an earlier one did.
- */
-export const EventEnrichInput = Schema.Struct({
-  system: Schema.optionalKey(bounded(1, MAX_EVENT_SYSTEM_LENGTH)),
-  url: Schema.optionalKey(bounded(1, MAX_EVENT_URL_LENGTH)),
-  refs: Schema.optionalKey(Schema.Array(ExternalRef)),
-});
-
-export type EventEnrichInput = Schema.Schema.Type<typeof EventEnrichInput>;
+export type EventWithFacts = Schema.Schema.Type<typeof EventWithFacts>;
 
 export const event = HttpApiGroup.make("event")
   .add(
@@ -147,9 +151,25 @@ export const event = HttpApiGroup.make("event")
          */
         since: Schema.optionalKey(Timestamp),
         until: Schema.optionalKey(Timestamp),
+        /**
+         * `true` returns only Intake's events: those whose kind triage may read
+         * for their Connection, under today's Intake settings, and every event
+         * behind a signal. Absent or `false` returns every event.
+         */
+        intake: Schema.optionalKey(Schema.Boolean),
+        /**
+         * Words that must all appear in the event's title or author. The page
+         * stays newest first: a search narrows the log and never reorders it.
+         * An event with neither field never matches.
+         */
+        text: Schema.optionalKey(bounded(1, MAX_SEARCH_TEXT_LENGTH)),
+        /** Only events from this source: a plugin's id, or a core emitter such as `manual`. */
+        source: Schema.optionalKey(bounded(1, MAX_EVENT_SOURCE_LENGTH)),
+        /** Only events with at least one of these handlings. */
+        handling: Schema.optionalKey(atMost(EventHandling, EVENT_HANDLINGS.length)),
         ...pageParams(EVENT_SORT_FIELDS).fields,
       }),
-      success: page(Event),
+      success: page(EventWithFacts),
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     HttpApiEndpoint.get("read", "/events/:id", {

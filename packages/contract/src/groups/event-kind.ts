@@ -9,7 +9,7 @@ import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, Unauthenticated } from "../errors";
 import { Authenticated } from "../security";
-import { EventKind } from "./event";
+import { EventKind } from "./event-record";
 
 /** An event kind that the core or a running plugin declares, and that a trigger can listen for. */
 export const DeclaredEventKind = Schema.Struct({

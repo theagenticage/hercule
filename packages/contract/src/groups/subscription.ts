@@ -41,7 +41,7 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { markShorthand, markShorthandOnItself } from "../shorthand";
 import { bounded } from "../strings";
-import { EventId } from "./event";
+import { EventId } from "./event-record";
 
 /**
  * The longest id a target may hold. A target refers to one thing by its id, and

@@ -79,6 +79,7 @@ import signalSnoozes from "./0068-signal-snoozes";
 import intakeSignals from "./0069-intake-signals";
 import sessionTitleRefinement from "./0070-session-title-refinement";
 import intakeSettings from "./0071-intake-settings";
+import eventSearch from "./0072-event-search";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -152,6 +153,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [69, "intake-signals", Effect.succeed(intakeSignals)],
   [70, "session-title-refinement", Effect.succeed(sessionTitleRefinement)],
   [71, "intake-settings", Effect.succeed(intakeSettings)],
+  [72, "event-search", Effect.succeed(eventSearch)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

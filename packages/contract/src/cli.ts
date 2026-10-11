@@ -1277,11 +1277,29 @@ export const CLI = {
     examples: [
       { args: ["--kind", "task.created"] },
       { args: ["--since", "2026-09-15T00:00:00.000Z"] },
+      { args: ["--intake", "true", "--text", "dependabot"] },
+      { args: ["--intake", "true", "--handling", "raised-signal", "--handling", "evidence"] },
     ],
     fields: {
       connectionId: {
         flag: "connection",
         help: "Only events that arrived through this Connection, by its full id.",
+      },
+      intake: {
+        flag: "intake",
+        help: "true lists only Intake's events: those whose kind triage may read for their Connection, under today's Intake settings, and every event behind a signal. Without it, every event is listed.",
+      },
+      text: {
+        flag: "text",
+        help: "Words that must all appear in the event's title or author. The list stays newest first. Events with neither field, audit entries among them, never match.",
+      },
+      source: {
+        flag: "source",
+        help: "Only events from this source: a plugin's id, such as github, or a core emitter, such as manual.",
+      },
+      handling: {
+        flag: "handling",
+        help: "Only events where this came of them, repeatable for any of several: raised-signal, ended-signal, evidence (listed by a core signal such as a proposal), on-task, known-work (received by a live subscription) or no-action.",
       },
       kind: {
         flag: "kind",

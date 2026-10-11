@@ -552,6 +552,16 @@ export {
   MAX_EVENT_SYSTEM_LENGTH,
   MAX_EVENT_TITLE_LENGTH,
   MAX_EVENT_URL_LENGTH,
+} from "./groups/event-record";
+export {
+  EVENT_HANDLINGS,
+  EventResolvedSignalFact,
+  EventHandling,
+  EventKnownByFact,
+  EventSignalFact,
+  EventTaskFact,
+  EventWithFacts,
+  MAX_EVENT_SOURCE_LENGTH,
 } from "./groups/event";
 export {
   SUBSCRIPTION_SORT_FIELDS,
