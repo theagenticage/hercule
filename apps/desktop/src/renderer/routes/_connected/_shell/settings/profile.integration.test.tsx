@@ -194,6 +194,7 @@ describe("Settings > Profile", () => {
           version: "0.4.2",
           defaultRunnerId: null,
           localRunnerId: null,
+          textGeneration: { model: null, lastFailure: null },
         },
       },
     });
@@ -244,6 +245,7 @@ describe("Settings > Profile", () => {
           version: "0.4.2",
           defaultRunnerId: null,
           localRunnerId: null,
+          textGeneration: { model: null, lastFailure: null },
         },
       },
       // The controller stores the save, and the test holds its answer.

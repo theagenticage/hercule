@@ -131,6 +131,16 @@
   line-height: 1.45;
 }
 
+/* Not in the book: a quiet line under a row, such as the last failed text
+   generation. Like the error, it is a `p` inside the section, so this rule
+   sets every property the lead's rule sets. */
+.set-sec > .set-note {
+  margin: 0 0 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
 /* Not in the book: a failed create, above the section's records, such as
    Assistants' tabs and Permission profiles' list. */
 .set-col > .set-err {

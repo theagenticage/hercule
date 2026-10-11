@@ -691,3 +691,10 @@ export {
   type WorkflowDraft,
 } from "./workflow-draft";
 export { decideWorkflowHeaderStatus, type WorkflowHeaderStatus } from "./workflow-header-status";
+export {
+  describeTextGenerationFailure,
+  describeTextGenerationModel,
+  findTextGenerationChoiceKey,
+  listTextGenerationChoices,
+  type TextGenerationChoice,
+} from "./text-generation";
