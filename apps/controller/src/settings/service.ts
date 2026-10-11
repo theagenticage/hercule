@@ -42,6 +42,10 @@ const GITHUB_DEFAULT = "github.defaultConnectionId";
 
 const NOT_GITHUB = "that connection is not a GitHub connection";
 
+const TEXT_GENERATION_MODEL = "textGeneration.model";
+
+const NO_SUCH_INSTANCE = "that provider instance does not exist";
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const settings = yield* Settings;
@@ -66,6 +70,29 @@ const make = Effect.gen(function* () {
       if (Option.isNone(found) || !isGithubConnection(found.value)) {
         return yield* Effect.fail(
           createValidationError([{ path: ["user", GITHUB_DEFAULT], message: NOT_GITHUB }]),
+        );
+      }
+    });
+
+  /**
+   * Checks that `textGeneration.model`, when the patch chooses an instance, names
+   * an existing provider instance. Fails with a validation error otherwise,
+   * because a text generation set to a missing instance could never run.
+   */
+  const validateTextGenerationInstance = (
+    patch: SettingsPatch,
+  ): Effect.Effect<void, Validation | SqlError> =>
+    Effect.gen(function* () {
+      const chosen = patch.controller?.[TEXT_GENERATION_MODEL];
+      if (chosen === undefined || typeof chosen === "string") return;
+      if (!(yield* settings.hasProviderInstance(chosen.instanceId))) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: ["controller", TEXT_GENERATION_MODEL, "instanceId"],
+              message: NO_SUCH_INSTANCE,
+            },
+          ]),
         );
       }
     });
@@ -148,10 +175,11 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // Check inside the transaction that writes: a connection deleted
-            // between the check and the write would leave the setting pointing
-            // at nothing.
+            // Check inside the transaction that writes: a connection or provider
+            // instance deleted between the check and the write would leave the
+            // setting pointing at nothing.
             yield* validateGithubConnection(patch);
+            yield* validateTextGenerationInstance(patch);
             const written = [
               ...(patch.controller === undefined
                 ? []

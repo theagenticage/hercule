@@ -221,6 +221,7 @@ const buildSignedInHandlers = (records: ControllerRecords): Record<string, Handl
       version: "0.4.2",
       defaultRunnerId: null,
       localRunnerId: records.localRunner?.id ?? null,
+      textGeneration: { model: null, lastFailure: null },
     },
   }),
   "GET /api/v1/runners": () => ({

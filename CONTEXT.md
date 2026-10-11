@@ -293,11 +293,11 @@ The one unit per machine that the OS supervisor keeps running: a launchd LaunchA
 _Avoid_: daemon (that is a runner process), LaunchAgent or systemd unit as the general term, service file, supervisor (that is launchd or systemd)
 
 **Provider**:
-An adapter wrapping an interactive coding harness (Claude Code, Codex, pi). Only this; integrations like GitHub are event sources, not providers.
+An adapter wrapping a coding harness (Claude Code, Codex, pi). It drives the harness interactively for a Session, and once, non-interactively, for a Text Generation. Only this; integrations like GitHub are event sources, not providers.
 _Avoid_: harness (for the adapter itself), integration
 
 **Provider Definition**:
-A provider's static self-description: identity, config schema, declared capabilities. What a provider plugin registers; distinct from the running adapter.
+A provider's static self-description: identity, config schema, declared capabilities, and the model it suggests for Text Generation. What a provider plugin registers; distinct from the running adapter.
 
 **Provider Instance**:
 One account of a provider: a row carrying the config that provider runs under, with its own isolated provider home on every runner and its own vendor login. The instance id, never the provider id, is what placement, snapshots and the composer route on, because one provider can hold several accounts. The controller opens one per registered provider at boot.
@@ -314,6 +314,18 @@ _Avoid_: permission mode (vendor term), runtime mode
 **Capability Snapshot**:
 The merged declared-plus-probed facts about a provider instance on a specific runner: auth state, harness version, model catalog. What UI affordances derive from; never obtained by creating or mutating a provider conversation.
 _Avoid_: provider status
+
+**Text Generation**:
+One model call made on a runner: instructions, one input and an output schema go in, and a value that matches the schema comes out. It has no tools, no workspace, no transcript and no turn, and it is not a Session: it has no Session row and takes no session slot. Code inside the controller asks for one, such as for a Thread's title; agents never do.
+_Avoid_: completion, LLM call, one-shot session, prompt (for the whole call), text gen
+
+**Text Generation Model**:
+The provider instance and model every Text Generation runs on, set by one controller setting: Automatic (the first provider in a fixed order whose suggested model a logged-in instance offers), one model the user chose, or Off. A chosen model never falls back to another.
+_Avoid_: utility model, small model, cheap model, title model
+
+**Purpose**:
+What a Text Generation is for, such as `thread.title`, held qualified by its caller as `sessions/thread.title`. Only a name, written into the record: there is no registry, and the model never sees it.
+_Avoid_: use case, kind (that is an event's), task type, job
 
 **Channel**:
 A chat surface Hercule speaks through (Discord, Slack). The web channel is the built-in one: the web app's own conversation with an assistant, with no Connection or plugin behind it.

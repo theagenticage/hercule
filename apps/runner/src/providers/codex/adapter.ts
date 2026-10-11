@@ -27,18 +27,21 @@ import type {
   SessionBinding,
   SessionSpec,
   SubagentId,
+  TextGenerationOutcome,
+  TextGenerationSpec,
 } from "@hercule/protocol";
 import type { LoginCommand } from "../login";
 import type {
   AdapterTurnInput,
   ProviderAdapter,
   ProviderRunnerContext,
+  TextGenerationContext,
   UserMaterial,
 } from "../index";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
-import { runProcess, spawnAppServer, type Run } from "../process";
+import { runProcess, spawnAppServer, stopChild, type Run } from "../process";
 import { truncateMessage } from "../text";
 import { now } from "../../report";
 import { ASKED } from "./approvals";
@@ -59,6 +62,14 @@ import {
   STANDARD_TIER,
   type AppServer,
 } from "./probe";
+import {
+  decideTextGenerationOutcome,
+  buildTextGenerationThread,
+  buildTextGenerationTurn,
+  TEXT_GENERATION_PROCESS_OVERRIDES,
+  watchTextGeneration,
+  type TextGenerationWatch,
+} from "./text-generation";
 import {
   makeRpc,
   type AppServerSpawn,
@@ -106,6 +117,10 @@ export interface CodexSeam {
 interface Host extends AppServer {
   /** The one session this host serves; a probe's own app-server serves none. */
   readonly sessionId: string | undefined;
+  /** The text generation this host serves, if it serves one instead of a session. */
+  readonly textGeneration: TextGenerationWatch | undefined;
+  /** Stops the app-server and completes only once its process has exited (see `stopChild`). */
+  readonly stop: Effect.Effect<void>;
 }
 
 /** One session and every Codex thread its app-server runs. */
@@ -386,6 +401,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   const onHostGone = (host: Host): void => {
     const held = findHostSession(host);
     if (held !== undefined) exitSession(held, "process_exit");
+    host.textGeneration?.serverExited();
   };
 
   /**
@@ -420,6 +436,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     binary: string,
     sessionId: string | undefined,
     overrides: ReadonlyArray<string>,
+    textGeneration: TextGenerationWatch | undefined,
   ): Host => {
     const complaints: Array<string> = [];
     const child = seam.appServer(
@@ -479,8 +496,10 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         },
       }),
       kill: child.kill,
+      stop: stopChild(child),
       complaint: () => complaints.join("\n"),
       sessionId,
+      textGeneration,
     };
     void child.exited.then(
       () => onHostGone(host),
@@ -494,16 +513,18 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * Starts an app-server, failing with the error message if it cannot be
    * started. A home directory the runner cannot write to is an expected
    * failure, not a defect. `overrides` are more `-c` arguments for this one
-   * process; a probe has none.
+   * process; a probe has none. `textGeneration` is the watch that receives
+   * the notifications of a host that serves a text generation, not a session.
    */
   const openHost = (
     ctx: ProviderRunnerContext,
     binary: string,
     sessionId?: string,
     overrides: ReadonlyArray<string> = [],
+    textGeneration?: TextGenerationWatch,
   ): Effect.Effect<Host, string> =>
     Effect.try({
-      try: () => startHost(ctx, binary, sessionId, overrides),
+      try: () => startHost(ctx, binary, sessionId, overrides, textGeneration),
       catch: (error) => (error instanceof Error ? error.message : String(error)),
     });
 
@@ -594,6 +615,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   const onNotification = (host: Host, frame: NotificationFrame): void => {
     findHostSession(host)?.threads.receive(frame);
+    host.textGeneration?.receive(frame);
   };
 
   /** Resolves one Request under its asking thread and native RPC id. */
@@ -649,6 +671,16 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   const onServerRequest = (host: Host, frame: ServerRequestFrame): void => {
+    if (host.textGeneration !== undefined) {
+      // A text generation has no tools and nobody to ask. The request is
+      // refused so the turn does not hang, and the call is ended as failed.
+      host.textGeneration.receiveRequest(frame.method);
+      refuseRequest(host, frame, {
+        code: METHOD_NOT_FOUND,
+        message: "a text generation allows no tools and has nobody to ask",
+      });
+      return;
+    }
     if (frame.method === "item/tool/call") {
       // Hercule provides no dynamic tools to Codex, so there is nothing for a
       // user to decide: the call is declined immediately.
@@ -891,6 +923,48 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     };
   };
 
+  /**
+   * Makes one text generation on an app-server of its own and returns its
+   * outcome. Fails with a message when the app-server cannot start or a
+   * request to it fails. The app-server is stopped when the call ends,
+   * including when the runner stops the call at its deadline, and this
+   * returns only after its process has exited.
+   *
+   * It uses the instance's Codex directory for the login, like a session. The
+   * thread is ephemeral, so nothing of the call is saved there. The thread
+   * runs in the call's scratch directory, `ctx.cwd`.
+   */
+  const generateText = (
+    ctx: TextGenerationContext,
+    spec: TextGenerationSpec,
+  ): Effect.Effect<TextGenerationOutcome, string> => {
+    const watch = watchTextGeneration();
+    return Effect.acquireUseRelease(
+      openHost(ctx, ctx.binary, undefined, TEXT_GENERATION_PROCESS_OVERRIDES, watch),
+      (host) =>
+        Effect.gen(function* () {
+          // A failure is reported by the request's own error, never by the
+          // app-server's error output: the message is stored in the audit log
+          // and shown in Settings, and error output can hold a credential or
+          // quote the input.
+          yield* Effect.mapError(initializeAppServer(host), (error) => error.message);
+          const opened = yield* Effect.mapError(
+            host.rpc.request("thread/start", buildTextGenerationThread(spec, ctx.cwd)),
+            (error) => error.message,
+          );
+          yield* Effect.mapError(
+            host.rpc.request(
+              "turn/start",
+              buildTextGenerationTurn((opened as ThreadStartResponse).thread.id, spec),
+            ),
+            (error) => error.message,
+          );
+          return decideTextGenerationOutcome(spec, yield* watch.ended);
+        }),
+      (host) => host.stop,
+    );
+  };
+
   return {
     providerId: CODEX,
     binaryName: CODEX_BINARY,
@@ -1075,6 +1149,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
+    generateText: (ctx, _config, spec) => generateText(ctx, spec),
 
     /**
      * Uses the device login rather than the browser login: the machine the

@@ -12,6 +12,7 @@ export {
   type RunningIngest,
 } from "./ingest";
 export { IngestExecutor } from "./ingest-executor";
+export { deriveCatalogJsonSchema } from "./json-schema";
 export { OpenSignals } from "./open-signals";
 export type { RegisteredEventSource } from "./event-sources";
 export { summarizeCause, truncateMessage } from "./errors";

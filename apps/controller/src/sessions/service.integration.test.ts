@@ -1537,6 +1537,100 @@ describe("a report that starts a tool call", () => {
   });
 });
 
+describe("SessionService.setGeneratedTitle", () => {
+  /** Inserts a session titled `title` and applies `generated` as its generated title. */
+  const generateTitle = (title: string, generated: string, needsRefinement: boolean) => {
+    const published: Array<Change> = [];
+    const listener = Layer.succeed(AfterCommit, {
+      publish: (changes: ReadonlyArray<Change>) =>
+        Effect.sync(() => {
+          published.push(...changes);
+        }),
+    });
+    return run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const rows = yield* sessionRepository;
+        const { sessionId } = yield* insertRunningSession(mintId(), "busy", 0);
+        yield* sql`UPDATE sessions SET title = ${title} WHERE id = ${uuidFromString(sessionId)}`;
+
+        yield* sessions
+          .setGeneratedTitle(sessionId, generated, needsRefinement)
+          .pipe(Effect.provide(listener));
+
+        const [stored] = yield* sql<{ readonly needs_refinement: number | null }>`
+          SELECT needs_refinement FROM sessions WHERE id = ${uuidFromString(sessionId)}`;
+        return {
+          sessionId,
+          title: Option.getOrThrow(yield* rows.one(sessionId)).title,
+          needsRefinement: stored!.needs_refinement,
+          published,
+        };
+      }),
+    );
+  };
+
+  it("replaces the title, stores the refinement flag and announces the session", async () => {
+    const result = await generateTitle("fix the thing pls", "Fix the login redirect", true);
+
+    expect(result.title).toBe("Fix the login redirect");
+    expect(result.needsRefinement).toBe(1);
+    expect(result.published).toContainEqual(
+      expect.objectContaining({ _tag: "record", topic: "session", id: result.sessionId }),
+    );
+  });
+
+  it("stores a title that needs no refinement as 0", async () => {
+    const result = await generateTitle("a", "Rename the settings page", false);
+
+    expect(result.needsRefinement).toBe(0);
+  });
+
+  it("cleans the generated title like any other title", async () => {
+    const result = await generateTitle("a", `  Fix\nthe   build ${"x".repeat(200)}`, false);
+
+    expect(result.title).toHaveLength(80);
+    expect(result.title.startsWith("Fix the build xxx")).toBe(true);
+  });
+
+  it("does not end in a space when the cut lands after one", async () => {
+    const result = await generateTitle("a", `${"x".repeat(79)} tail`, false);
+
+    expect(result.title).toBe("x".repeat(79));
+  });
+
+  it("removes control and format characters", async () => {
+    const result = await generateTitle(
+      "a",
+      "Fix\u0000 the\u200B login \u202Ebug\u0007 \uFEFF now",
+      false,
+    );
+
+    expect(result.title).toBe("Fix the login bug now");
+  });
+
+  it("keeps the zero-width joiner and non-joiner, which scripts and emoji sequences need", async () => {
+    // Persian "mi-khahad" is spelled with a zero-width non-joiner, and the
+    // family emoji is three people joined by zero-width joiners.
+    const persian = "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u062F";
+    const family = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}";
+
+    // A zero-width space between the two parts must still be stripped.
+    const result = await generateTitle("a", `${persian} \u200B${family}`, false);
+
+    expect(result.title).toBe(`${persian} ${family}`);
+  });
+
+  it("keeps the title it has when the generated one is empty", async () => {
+    const result = await generateTitle("the first line", " \n ", true);
+
+    expect(result.title).toBe("the first line");
+    expect(result.needsRefinement).toBeNull();
+    expect(result.published).toEqual([]);
+  });
+});
+
 describe("SessionService.queryPassages", () => {
   const agentA = "0190b000-0000-7000-8000-00000000000a";
   const agentB = "0190b000-0000-7000-8000-00000000000b";

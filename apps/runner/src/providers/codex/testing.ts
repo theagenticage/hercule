@@ -206,7 +206,11 @@ const DEFAULT_ANSWERS: Answers = {
  */
 export const buildScriptedSeam = (
   answers: Answers = {},
-  options: { readonly dies?: boolean } = {},
+  options: {
+    readonly dies?: boolean;
+    /** An app-server that, once killed, exits only when this promise resolves, like one that shuts down slowly. */
+    readonly exitsAfterKill?: Promise<void>;
+  } = {},
 ): {
   readonly seam: CodexSeam;
   readonly spawns: Array<Spawn>;
@@ -278,7 +282,7 @@ export const buildScriptedSeam = (
           kills += 1;
           out.end();
           err.end();
-          resolveExited(143);
+          void (options.exitsAfterKill ?? Promise.resolve()).then(() => resolveExited(143));
         },
         exited: done,
       };

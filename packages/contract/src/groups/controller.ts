@@ -1,5 +1,6 @@
 /**
- * The controller's own identity, and the one thing a caller may set about it.
+ * The controller's own identity, what its text generation runs on, and the
+ * one thing a caller may set about it.
  *
  * `defaultRunnerId` is the runner that placement falls back to when no runner
  * is chosen. It is null rather than absent when there is none, so a client
@@ -15,6 +16,45 @@ import { closedStruct } from "../closed";
 import { Conflict, Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
 import { Authenticated } from "../security";
+import { InstanceModel } from "./settings";
+
+/** The reasons a text generation fails, the same in the record and in the status. */
+export const TextGenerationFailureReason = Schema.Literals([
+  "unavailable",
+  "timeout",
+  "invalid-output",
+]);
+
+export type TextGenerationFailureReason = Schema.Schema.Type<typeof TextGenerationFailureReason>;
+
+/**
+ * What text generation does now, so Settings can show it beside the
+ * `textGeneration.model` setting. Both fields are worked out on every read;
+ * nothing stores them.
+ */
+export const TextGenerationStatus = Schema.Struct({
+  /**
+   * The instance and model text generations run on now: the chosen one, or
+   * what `automatic` resolves to. Null when text generation is off, by the
+   * setting or because `automatic` found no match.
+   */
+  model: Schema.NullOr(InstanceModel),
+  /**
+   * Why the last text generation failed, or null when it succeeded, none has
+   * run since the controller started, or it ran on another setting value or
+   * another resolved model than `model` now (for example before the user
+   * chose a different model, or before `automatic` began to resolve to one).
+   */
+  lastFailure: Schema.NullOr(
+    Schema.Struct({
+      reason: TextGenerationFailureReason,
+      message: Schema.NonEmptyString,
+      at: Timestamp,
+    }),
+  ),
+});
+
+export type TextGenerationStatus = Schema.Schema.Type<typeof TextGenerationStatus>;
 
 export const ControllerInfo = Schema.Struct({
   id: Id,
@@ -29,6 +69,7 @@ export const ControllerInfo = Schema.Struct({
    * running child on every call; nothing stores it, so it cannot be set.
    */
   localRunnerId: Schema.NullOr(Id),
+  textGeneration: TextGenerationStatus,
 });
 
 export type ControllerInfo = Schema.Schema.Type<typeof ControllerInfo>;

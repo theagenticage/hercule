@@ -136,6 +136,14 @@ Versions are still not compared, and section 2.4 is unchanged: the only hard ref
 - **`TurnInput` gains `senderSessionId?: SessionId`**, the session whose agent sent the input. The controller sets it only when the input row's `source` is `user`, its actor is `session:<id>`, and that id is not the receiving session's own. It reads the id from the stored actor, which comes from the credential, so a caller can never supply it. A spawned session's first prompt counts: its sender is the spawning session. Every other input has none: the user's, a `run:` actor's, a subscription delivery, a heartbeat, a reminder, and a session's input to itself. What the runner does with it is in [06-providers](./06-providers.md) section 4.
 - **`PROTOCOL_VERSION` does not change.** `senderSessionId` is optional and a protocol struct drops a key it does not know when it decodes, so a runner built before it ignores it and its transcript shows no sender; a bump would refuse every runner until it upgrades, for a display feature.
 
+*(Amended 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282).)* **Text generation.** A text generation is one model call on a runner, with no session ([./06-providers.md](./06-providers.md) section 14). Two frames carry it, both in `@hercule/protocol`:
+
+- **`TextGenerationRequest { requestId, instanceId, providerId, config, secrets, spec }`**, controller to runner. Like `ProbeRequest`, it carries the instance's config and credentials, which live on the controller. `spec` is a `TextGenerationSpec { model, instructions, input, outputSchema }`. The instructions and the input are each at most 64 KiB (`MAX_TEXT_GENERATION_TEXT_LENGTH`).
+- **`TextGenerationReport { requestId, outcome }`**, runner to controller. `outcome` is `ok { value, usage }`, `invalid-output { reason }`, `timeout` or `failed { message }`. The runner always answers: it stops the harness after 60 seconds (`TEXT_GENERATION_DEADLINE_MS`) and reports `timeout`. A `failed` message never contains model output.
+- **This amends the capability list above: it also holds `textGeneration`**, `TEXT_GENERATION_CAPABILITY` in `@hercule/protocol`. Both sides list it. The controller sends a `TextGenerationRequest` only to a runner whose negotiated capabilities hold it.
+- **`PROTOCOL_VERSION` does not change.** A runner built before text generation closes the socket on a frame it does not know, and the capability keeps the frame away from it. Such a runner stays online for sessions and is simply never chosen for a text generation.
+- **Neither frame is ever replayed** (section 2.3). Like `ProbeReport`, the report is written straight to the socket. A text generation changes nothing, so a frame lost to a disconnect needs no replay. The controller stops waiting when the connection ends, the call fails, and its caller falls back as it would on any failure.
+
 ### 2.3 Sequencing, acks and the outbox
 
 - Every runner-to-controller event carries a monotonic sequence number. The controller acknowledges sequence numbers.
@@ -273,6 +281,7 @@ A run with an agent step and no workspace policy is still pinned. Its sessions h
 - A full runner queues its placements. Queued placements are visible in the UI. Work never spills to another runner.
 - A runner below its disk-space watermark (section 6.2) also stops accepting placements; they queue the same way.
 - Placements pinned to a runner that is `offline` or `unreachable` wait for its return.
+- *(Added 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282).)* A text generation is not a placement and takes no slot of this cap. It has a limit of its own, `MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER` (10) at once per runner, which the controller and the runner both enforce ([./06-providers.md](./06-providers.md) section 14.3).
 
 *(Amended 2026-09-10, [#67](https://github.com/theagenticage/hercule/issues/67).)* The queue is the Session rows in status `queued`, oldest first; there is no separate placement-queue table. One dispatch function per runner moves them to `starting` when the runner is online, active, above its watermark and has a free slot, and runs after a spawn, a session exit, the runner's `sessionsReport`, a watermark report, a cap or watermark change, and undrain. A spawn or continue pinned to an offline or unreachable runner ~~waits for its return~~ succeeds immediately as `queued`. Retiring a runner ends its queued sessions.
 
@@ -605,5 +614,6 @@ ADRs:
 - [ADR 0016 - Git credentials derive from connections](../adr/0016-git-credentials-derive-from-connections.md) (referenced)
 - [ADR 0018 - Hercule ships as one self-contained binary](../adr/0018-hercule-ships-as-one-self-contained-binary.md) (referenced)
 - [ADR 0035 - An action declares where it runs](../adr/0035-an-action-declares-where-it-runs.md) (workspace steps and their frames, run pinning)
+- [ADR 0041 - Text generation is one model call on a runner](../adr/0041-text-generation-is-one-model-call-on-a-runner.md) (the text generation frames and capability)
 
 Research: `research/provider-portability.md` (branch `research/provider-portability`).

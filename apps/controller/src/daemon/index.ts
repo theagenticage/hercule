@@ -40,6 +40,8 @@
  *   the Ingest Executor, which gives each Connection's ingest a fiber.
  * - `promotion/`: the driver that ends a promotion freeze at its token's
  *   expiry.
+ * - `text-generation/`: the `TextGeneration` service, which picks a runner for
+ *   one small model call, sends it and writes its audit entry.
  *
  * The top level holds what belongs to no single folder: the steps run once at
  * boot (`boot.ts`), the helpers every long-running loop uses (`absorbing.ts`),
@@ -119,3 +121,11 @@ export {
   WorkflowSignalsLayer,
 } from "./workflows";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./workspaces";
+export {
+  TextGeneration,
+  TextGenerationDeadline,
+  TextGenerationError,
+  TextGenerationLayer,
+  type TextGenerationCaller,
+  type TextGenerationCall,
+} from "./text-generation";

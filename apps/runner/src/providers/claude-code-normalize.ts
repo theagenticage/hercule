@@ -25,6 +25,7 @@ import {
   type ProviderEvent,
   type StreamKind,
   type StructuredResult,
+  type TextGenerationOutcome,
   type TurnState,
   type Usage,
 } from "@hercule/protocol";
@@ -860,6 +861,55 @@ const judgeTurn = (
   if (schema === undefined) return undefined;
   const answer = readHarnessAnswer(sdk, turnState);
   return answer === undefined ? undefined : judgeAnswer(schema, answer);
+};
+
+/**
+ * The SDK's result subtype for a run that was cut off at its turn limit. A
+ * text generation has no tools, so the only reason for a second turn is a
+ * retry after the model's structured output did not match the schema.
+ */
+const TURN_LIMIT_REACHED = "error_max_turns";
+
+/**
+ * Decides how a text generation ended, from the `result` message of its one
+ * query. Returns:
+ *
+ * - `ok` when the structured output matches `schema`;
+ * - `invalid-output` when the harness answered but gave no output, an output
+ *   that does not match `schema`, or ran out of retries trying;
+ * - `failed` for everything else, such as a login error or an API error. Its
+ *   message holds only what the harness reported, never text the model wrote.
+ *
+ * The usage is null when the result lists no model, because then the harness
+ * reported no token counts.
+ */
+export const decideTextGenerationOutcome = (
+  schema: OutputSchema,
+  sdk: Extract<SDKMessage, { type: "result" }>,
+): TextGenerationOutcome => {
+  const answer =
+    sdk.subtype === TURN_LIMIT_REACHED
+      ? { missing: "the harness did not produce an output that matches the schema" }
+      : readHarnessAnswer(sdk, readTurnState(sdk));
+  if (answer === undefined) {
+    // An interrupted turn's result text is what the model had written so far.
+    // A failure message is stored and shown to the user, and model output must
+    // never reach it, so that text is left out.
+    return {
+      outcome: "failed",
+      message:
+        readTurnState(sdk) === "interrupted"
+          ? "the harness stopped the turn before it answered"
+          : describeFailure(sdk),
+    };
+  }
+  const judged = judgeAnswer(schema, answer);
+  if (judged.outcome !== "ok") return { outcome: "invalid-output", reason: judged.reason };
+  return {
+    outcome: "ok",
+    value: judged.value,
+    usage: Object.keys(sdk.modelUsage).length === 0 ? null : readUsage(sdk),
+  };
 };
 
 const onResult = (

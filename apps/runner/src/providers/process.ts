@@ -4,7 +4,9 @@
  * installer) without running it.
  */
 import { readdirSync, readlinkSync, realpathSync } from "node:fs";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type { AppServerSpawn } from "./codex";
 import type { LoginChild, LoginSpawn } from "./login";
 import type { PiSpawn } from "./pi";
@@ -168,9 +170,57 @@ export interface FramedChild {
   readonly stderr: AsyncIterable<string>;
   /** Closes stdin, which ends a harness that exits at end of input. */
   readonly end: () => void;
-  readonly kill: () => void;
+  /** Sends a signal to this child only. Without an argument it sends SIGTERM. */
+  readonly kill: (signal?: StopSignal) => void;
   readonly exited: Promise<number>;
 }
+
+/** The two signals the runner sends to stop a harness: a polite request, then a certain end. */
+export type StopSignal = "SIGTERM" | "SIGKILL";
+
+/**
+ * How long a harness gets to exit after SIGTERM before `stopChild` sends it
+ * SIGKILL. A text generation finishes only after its harness has exited, and
+ * the controller holds the call's slot for 5 seconds past the 60 second
+ * deadline (`SLOT_HOLD_MS`). The runner's own deadline starts when the call
+ * arrives and the harness is stopped at the end of it, so a grace of 2 seconds
+ * keeps the whole stop, SIGTERM and then SIGKILL, well inside those 5 seconds.
+ */
+export const STOP_GRACE: Duration.Duration = Duration.seconds(2);
+
+/**
+ * Stops a child process and waits until it has exited. Sends SIGTERM, waits up
+ * to `grace` for the exit, and then sends SIGKILL to the same child and waits
+ * for the exit without a limit: SIGKILL cannot be ignored, and the caller must
+ * not count the process as gone while it runs. Never fails.
+ *
+ * A text generation uses this to release its runner slot and remove its
+ * scratch folder only after the harness is really gone. A session stops its
+ * harness in its own way (see `stopSession` in the adapters) and does not use
+ * this.
+ */
+export const stopChild = (
+  child: Pick<FramedChild, "kill" | "exited">,
+  grace: Duration.Duration = STOP_GRACE,
+): Effect.Effect<void> => {
+  const signal = (name: StopSignal): Effect.Effect<void> =>
+    Effect.sync(() => {
+      try {
+        child.kill(name);
+      } catch {
+        // The child has already exited, so there is nothing left to stop.
+      }
+    });
+  const exited = Effect.promise(() => child.exited.then(noop, noop));
+  return Effect.gen(function* () {
+    yield* signal("SIGTERM");
+    if (Option.isSome(yield* Effect.timeoutOption(exited, grace))) return;
+    yield* signal("SIGKILL");
+    yield* exited;
+  });
+};
+
+const noop = (): void => undefined;
 
 /** Spawns a line-framed harness. Shared by the Codex and pi adapters. */
 const spawnFramed = (
@@ -203,8 +253,8 @@ const spawnFramed = (
     end: () => {
       void child.stdin.end();
     },
-    kill: () => {
-      child.kill();
+    kill: (signal) => {
+      child.kill(signal);
     },
     exited: child.exited,
   };

@@ -559,7 +559,32 @@ const findNativeId = (event: ProviderEvent): string | undefined =>
 const MAX_TITLE_LENGTH = 80;
 
 /**
- * Builds a session's short title, trimmed and cut to `MAX_TITLE_LENGTH`:
+ * Trims a title and cuts it to `MAX_TITLE_LENGTH`. The cut can land right
+ * after a space, so the end is trimmed again: a title never ends in
+ * whitespace.
+ */
+const cutTitle = (title: string): string => title.trim().slice(0, MAX_TITLE_LENGTH).trimEnd();
+
+/**
+ * Cleans a title a model generated: line breaks and repeated spaces become
+ * single spaces, control and format characters are removed, and the result is
+ * cut by `cutTitle`. A model can emit zero-width or direction-changing
+ * characters, which would show up as nothing in a sidebar row but break
+ * searching and copying. The zero-width non-joiner and joiner (U+200C and
+ * U+200D) stay, because Persian and other scripts need them to shape letters,
+ * and emoji sequences need them to stay one emoji.
+ */
+const cleanGeneratedTitle = (title: string): string =>
+  cutTitle(
+    title
+      .replace(/\s+/g, " ")
+      .replace(/(?![\u200C\u200D])[\p{Cc}\p{Cf}]/gu, "")
+      // Removing a character between two spaces leaves a double space.
+      .replace(/ {2,}/g, " "),
+  );
+
+/**
+ * Builds a session's short title, trimmed and cut by `cutTitle`:
  * `chosen` when the caller chose a title, otherwise the first non-blank line
  * of the session's first prompt, otherwise the name of the prompt's first
  * image. That way a sidebar row has something to show without reading the
@@ -575,7 +600,7 @@ const buildTitle = (
     prompt.split("\n").find((line) => line.trim().length > 0) ??
     firstAttachmentName ??
     "";
-  return title.trim().slice(0, MAX_TITLE_LENGTH);
+  return cutTitle(title);
 };
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
@@ -2109,6 +2134,38 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* sessions.setModelSelection(sessionId, modelSelection);
         yield* announceSessionChangeById(sessionId);
+      }),
+
+    /**
+     * Replaces a Thread's cut-short title with one a model generated from its
+     * first message, and stores `needsRefinement`, the model's own judgement
+     * that the first message was too vague for a good title. Announces the
+     * session, so clients show the new title. Runs in its own transaction.
+     *
+     * The title is cleaned by `cleanGeneratedTitle`: line breaks and repeated
+     * spaces become single spaces, control and format characters are removed,
+     * and it is cut to `MAX_TITLE_LENGTH`. A title that is empty after
+     * cleaning changes nothing, and the cut-short title stays.
+     *
+     * No user can rename a session today, so there is no user-chosen title to
+     * protect. A system write like this one carries no actor, as with
+     * `setSelection`.
+     */
+    setGeneratedTitle: (
+      sessionId: string,
+      title: string,
+      needsRefinement: boolean,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const cleaned = cleanGeneratedTitle(title);
+        if (cleaned === "") return;
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sessions.setGeneratedTitle(sessionId, cleaned, needsRefinement);
+            yield* announceSessionChangeById(sessionId);
+          }),
+        );
       }),
 
     /**

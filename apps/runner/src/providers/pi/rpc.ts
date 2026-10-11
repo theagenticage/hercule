@@ -56,7 +56,8 @@ export const RPC_DEADLINE: Duration.Duration = Duration.seconds(5);
 /** The error `send` fails with when pi exited, or closed its output, before it responded. */
 export const PI_GONE = "pi exited or closed its output";
 
-const describeError = (error: unknown): string =>
+/** Returns the message of an error, or the text of any other thrown value. */
+export const describeError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 export const makeRpc = (

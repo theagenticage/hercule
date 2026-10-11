@@ -35,6 +35,7 @@ import {
   SessionStart,
   SessionStop,
 } from "./sessions";
+import { TextGenerationReport, TextGenerationRequest } from "./text-generation";
 import {
   CredentialAnswer,
   CredentialRequest,
@@ -58,6 +59,7 @@ export * from "./identity-port";
 export * from "./output-schema";
 export * from "./remote";
 export * from "./sessions";
+export * from "./text-generation";
 export * from "./workspace-steps";
 export * from "./workspaces";
 export {
@@ -621,6 +623,7 @@ export const RunnerToController = Schema.Union([
   CredentialRequest,
   WorkspaceStepResult,
   WorkspaceStepsReport,
+  TextGenerationReport,
   Goodbye,
 ]);
 
@@ -714,6 +717,7 @@ export const ControllerToRunner = Schema.Union([
   WorkspaceStepStart,
   WorkspaceStepSettle,
   ForwardingPointer,
+  TextGenerationRequest,
 ]);
 
 export type ControllerToRunner = Schema.Schema.Type<typeof ControllerToRunner>;
