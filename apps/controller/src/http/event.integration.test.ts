@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
-import { Event, type Task } from "@hercule/contract";
+import { EventWithFacts, type Task } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { completeSetup, get, post, send, USERNAME, withServer } from "./testing";
 
@@ -75,7 +75,7 @@ describe("the event log over HTTP", () => {
 
       // Every row decodes as the contract's Event, actor included.
       for (const item of page.items) {
-        const decoded = Schema.decodeUnknownExit(Event)(item);
+        const decoded = Schema.decodeUnknownExit(EventWithFacts)(item);
         expect(decoded._tag, JSON.stringify(item)).toBe("Success");
       }
     });
@@ -178,7 +178,7 @@ describe("the event log over HTTP", () => {
         raw: { raw: true },
         actor: null,
       });
-      expect(Schema.decodeUnknownExit(Event)(page.items[0])._tag).toBe("Success");
+      expect(Schema.decodeUnknownExit(EventWithFacts)(page.items[0])._tag).toBe("Success");
     });
   });
 
@@ -194,7 +194,8 @@ describe("the event log over HTTP", () => {
 
       const read = await get(base, `/api/v1/events/${String(id)}`, token);
       expect(read.status).toBe(200);
-      expect(await read.json()).toEqual(page.items[0]);
+      // The listing adds the facts to the event that a read of one does not carry.
+      expect(page.items[0]).toMatchObject((await read.json()) as object);
 
       const missing = await get(base, "/api/v1/events/999999", token);
       expect(missing.status).toBe(404);
@@ -267,7 +268,7 @@ describe("a failed login in the log", () => {
 
       // The contract's Event decodes the null; the row is not special-cased
       // on the way out.
-      const decoded = Schema.decodeUnknownExit(Event)(row);
+      const decoded = Schema.decodeUnknownExit(EventWithFacts)(row);
       expect(decoded._tag).toBe("Success");
 
       // Also read through the writer, so the test cannot pass just because
@@ -276,6 +277,36 @@ describe("a failed login in the log", () => {
       expect(written).toHaveLength(1);
       expect(written[0]?.actor).toBeNull();
       expect(written.map((entry) => entry.actor)).not.toContain("user");
+    });
+  });
+});
+
+describe("the Intake filters over HTTP", () => {
+  it("takes intake, text, source and a repeated handling, and returns each event with its fact lists", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      await createTask(base, token, "readable");
+
+      const all = await listEvents(base, token, "?kind=task.created");
+      expect(all.items[0]).toMatchObject({
+        signals: [],
+        resolvedSignals: [],
+        tasks: [],
+        knownBy: [],
+      });
+
+      const noAction = await listEvents(
+        base,
+        token,
+        "?source=platform&handling=no-action&handling=known-work",
+      );
+      expect(noAction.items.length).toBeGreaterThan(0);
+      // Platform events come through no Connection, so none is one of Intake's.
+      expect((await listEvents(base, token, "?intake=true")).items).toEqual([]);
+      expect((await listEvents(base, token, "?text=nothing-matches-this")).items).toEqual([]);
+
+      const refused = await get(base, "/api/v1/events?handling=ignored", token);
+      expect(refused.status).toBe(400);
     });
   });
 });

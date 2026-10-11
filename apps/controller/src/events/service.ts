@@ -36,13 +36,18 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Fragment } from "effect/unstable/sql/Statement";
 import {
+  atMost,
   bounded,
   DEFAULT_PAGE_LIMIT,
   EventEmitInput,
+  EventHandling,
+  EVENT_HANDLINGS,
   EVENT_SORT_FIELDS,
   type EventId,
   Id,
   MAX_EVENT_KIND_LENGTH,
+  MAX_EVENT_SOURCE_LENGTH,
+  MAX_SEARCH_TEXT_LENGTH,
   listDecodeIssues,
   createNotFoundError,
   type SortDirection,
@@ -51,6 +56,7 @@ import {
   createDecodeValidationError,
   type EventEmitted,
   type Event,
+  type EventWithFacts,
   type Forbidden,
   type NotFound,
   type Unauthenticated,
@@ -58,6 +64,7 @@ import {
 } from "@hercule/contract";
 import { checkActorHoldsGrant, currentStamp, requireGrant, type Actor } from "../actor";
 import {
+  buildMatchExpression,
   decodeIntegerKeyCursor,
   encodeIntegerKeyCursor,
   buildKeyset,
@@ -71,7 +78,10 @@ import {
 } from "../db";
 import { appendEvent } from "./append";
 import { SECURITY_KINDS } from "./audit-log";
+import { PluginIntake } from "../intake-settings";
 import { EventKindCatalog } from "./catalog";
+import { buildAnyHandling, NO_FACTS, readEventFacts } from "./event-facts";
+import { buildIsInIntake, readSwitchedOnEventKeys } from "./intake-events";
 import { EVENT_COLUMNS, parseEventRow, type EventRow } from "./log";
 import { isControllerSource, MANUAL_SOURCE } from "./sources";
 
@@ -81,6 +91,10 @@ const QueryInput = Schema.Struct({
   kind: Schema.optionalKey(bounded(1, MAX_EVENT_KIND_LENGTH)),
   since: Schema.optionalKey(Timestamp),
   until: Schema.optionalKey(Timestamp),
+  intake: Schema.optionalKey(Schema.Boolean),
+  text: Schema.optionalKey(bounded(1, MAX_SEARCH_TEXT_LENGTH)),
+  source: Schema.optionalKey(bounded(1, MAX_EVENT_SOURCE_LENGTH)),
+  handling: Schema.optionalKey(atMost(EventHandling, EVENT_HANDLINGS.length)),
   ...buildPageInputFields(EVENT_SORT_FIELDS),
 });
 
@@ -91,7 +105,7 @@ const decodeEmit = Schema.decodeUnknownEffect(EventEmitInput, { errors: "all" })
 
 /** One page of the log, in the contract's shape. */
 export interface EventPage {
-  readonly items: ReadonlyArray<Event>;
+  readonly items: ReadonlyArray<EventWithFacts>;
   readonly nextCursor?: string;
 }
 
@@ -161,6 +175,7 @@ interface Amendment {
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const catalog = yield* EventKindCatalog;
+  const pluginIntake = yield* PluginIntake;
 
   return {
     /**
@@ -190,6 +205,23 @@ const make = Effect.gen(function* () {
         if (decoded.kind !== undefined) where.push(sql`kind = ${decoded.kind}`);
         if (decoded.since !== undefined) where.push(sql`received_at >= ${decoded.since}`);
         if (decoded.until !== undefined) where.push(sql`received_at <= ${decoded.until}`);
+        if (decoded.source !== undefined) where.push(sql`events.source = ${decoded.source}`);
+        if (decoded.text !== undefined) {
+          // Text with no word to search for matches nothing. A page ordered
+          // by id and a search ordered by relevance cannot share a cursor, so
+          // the search only narrows the events, and the page keeps its order.
+          const match = buildMatchExpression(decoded.text);
+          if (match === undefined) return { items: [] };
+          where.push(
+            sql`events.id IN (SELECT rowid FROM events_fts WHERE events_fts MATCH ${match})`,
+          );
+        }
+        if (decoded.intake === true) {
+          where.push(buildIsInIntake(sql, yield* readSwitchedOnEventKeys(sql, pluginIntake)));
+        }
+        if (decoded.handling !== undefined && decoded.handling.length > 0) {
+          where.push(buildAnyHandling(sql, decoded.handling));
+        }
         // Filtered in the query rather than dropped from the returned page, so
         // the page is as full as requested and the cursor at its end still
         // points at the next unread row.
@@ -210,10 +242,23 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(EVENT_COLUMNS)} FROM events
           WHERE ${sql.and(where)} ${order} LIMIT ${limit + 1}
         `;
+        // The facts are read after the page, for the ids on it only, so the
+        // cost of the facts follows the page's size and not the filters'.
         const page = yield* buildPage(
           rows,
           limit,
-          (read) => Effect.succeed(read.map(parseEventRow)),
+          (read) =>
+            Effect.map(
+              readEventFacts(
+                sql,
+                read.map((row) => row.id),
+              ),
+              (facts) =>
+                read.map((row): EventWithFacts => ({
+                  ...parseEventRow(row),
+                  ...(facts.get(row.id) ?? NO_FACTS),
+                })),
+            ),
           (last) => encodeIntegerKeyCursor(scope, last.id),
         );
         return {
@@ -414,5 +459,5 @@ export class EventService extends Context.Service<EventService, Effect.Success<t
 export const EventServiceLayer: Layer.Layer<
   EventService,
   never,
-  SqlClient.SqlClient | EventKindCatalog
+  SqlClient.SqlClient | EventKindCatalog | PluginIntake
 > = Layer.effect(EventService)(make);
