@@ -512,20 +512,28 @@ const checkOwnPullRequests = (
           token,
           ...(previous?.etag === undefined ? {} : { etag: previous.etag }),
         });
+        // The search index can lag behind GitHub, so a pull request it lists
+        // as open may be closed already. Its checks are not read: a failure
+        // would raise a signal on a finished pull request, whose close was
+        // already written and cannot end it.
         const snapshot =
           response.status === 304 && previous !== undefined
             ? previous
             : yield* Effect.map(
                 decodeGithubValue(ListedPull, response.body, "a pull request"),
-                (pull) => ({
-                  repo: found.repo,
-                  number: found.number,
-                  title: pull.title,
-                  headSha: pull.head.sha,
-                  updatedAt: pull.updated_at,
-                  ...(response.etag === undefined ? {} : { etag: response.etag }),
-                }),
+                (pull) =>
+                  pull.state !== "open"
+                    ? undefined
+                    : {
+                        repo: found.repo,
+                        number: found.number,
+                        title: pull.title,
+                        headSha: pull.head.sha,
+                        updatedAt: pull.updated_at,
+                        ...(response.etag === undefined ? {} : { etag: response.etag }),
+                      },
               );
+        if (snapshot === undefined) return;
         const headKey = `${found.repo}@${snapshot.headSha}`;
         heads[headKey] = yield* checkHead(
           { repo: found.repo, token, emit },

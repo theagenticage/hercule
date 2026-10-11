@@ -367,6 +367,58 @@ describe("the checks feed", () => {
     expect(harness.events[0]!.payload).toMatchObject({ onYourPullRequest: true });
   });
 
+  it("checks nothing on an own pull request the search lists as open that GitHub says is closed", async () => {
+    const other = "other/repo";
+    const repository = buildRepository();
+    const route = (request: HttpClientRequest.HttpClientRequest): StubResponse => {
+      const { path } = readStubRequestTarget(request);
+      if (path === "/search/issues") {
+        return {
+          status: 200,
+          body: {
+            total_count: 1,
+            items: [
+              {
+                number: 7,
+                title: "Add a feature",
+                repository_url: `https://api.github.com/repos/${other}`,
+                updated_at: fromNow(-3_600_000),
+              },
+            ],
+          },
+        };
+      }
+      if (path === `/repos/${other}/pulls/7`) {
+        const { pulls } = repository;
+        return {
+          status: 200,
+          body: {
+            number: 7,
+            title: "Add a feature",
+            state: "closed",
+            user: { login: TEST_IDENTITY.login },
+            head: { sha: pulls[0]!.sha },
+            updated_at: pulls[0]!.updatedAt,
+          },
+        };
+      }
+      return answerFrom(repository, other)(request);
+    };
+    const harness = buildIngestHarness();
+    const pollOwn = async () => {
+      const stub = stubGithub(route);
+      await Effect.runPromise(
+        pollChecks("token", harness.context, [], 7, TEST_IDENTITY).pipe(Effect.provide(stub.layer)),
+      );
+    };
+    await pollOwn();
+    repository.suites["sha-a"] = [buildSuite("GitHub Actions", "completed", "success")];
+
+    await pollOwn();
+
+    expect(harness.events).toEqual([]);
+  });
+
   it("emits nothing when the check runs cannot be read, and tries again at the next poll", async () => {
     const repository = buildRepository();
     const harness = await baseline(repository);

@@ -307,6 +307,11 @@ const emitGithubEvent = (
     payload: { subject: buildSubject(number), ...fields },
   });
 
+/** The payload fields of an event found on item `number` after the item was closed. */
+const buildClosedSubject = (number: number) => ({
+  subject: { ...buildSubject(number), state: "closed" },
+});
+
 /** Emits a review request on pull request `number` to the user by name. */
 const requestReviewFromYou = (controller: GithubController, number: number) =>
   emitGithubEvent(controller, "github.pr.review-requested", number, {
@@ -591,13 +596,14 @@ describe("assignments", () => {
       { item: "issue", ...(author === undefined ? {} : { author }) },
     );
 
-  it("raises an assignment by someone else with the description and Reply, and none the user made or that names another account", async () => {
+  it("raises an assignment by someone else with the description and Reply, and none the user made, that names another account, or on a closed issue", async () => {
     await withGithubConnection(async (controller) => {
       const { reader, connectionId } = controller;
-      // The two that raise nothing come first: raises are delivered oldest
+      // The ones that raise nothing come first: raises are delivered oldest
       // event first, so once the last one's signal exists they have had their turn.
       await emitAssignment(controller, "assigned", 102, { byYou: true }, "octocat");
       await emitAssignment(controller, "assigned", 103, { assignee: "marta", toYou: false });
+      await emitAssignment(controller, "assigned", 104, buildClosedSubject(104), "marta");
       const assigned = await emitAssignment(controller, "assigned", 101, {}, "marta");
 
       const signal = await waitForSignalFrom(reader, ASSIGNED, assigned);
@@ -723,11 +729,12 @@ describe("changes requested", () => {
       { author: "marta" },
     );
 
-  it("raises changes requested on the user's pull request with the review, its comments and Reply, and none on another's pull request or for an approval", async () => {
+  it("raises changes requested on the user's pull request with the review, its comments and Reply, and none on another's pull request, for an approval, or on a closed pull request", async () => {
     await withGithubConnection(async (controller) => {
       const { reader, connectionId } = controller;
       await submitReview(controller, 112, { onYourPullRequest: false });
       await submitReview(controller, 113, { verdict: "approved" });
+      await submitReview(controller, 114, buildClosedSubject(114));
       const requested = await submitReview(controller, 111);
 
       const signal = await waitForSignalFrom(reader, CHANGES_REQUESTED, requested);
@@ -817,11 +824,12 @@ describe("failed checks", () => {
   /** The fields of a checks event whose checks all passed. */
   const PASSED = { conclusion: "success", failedChecks: [] };
 
-  it("raises failed checks on the user's pull request with the failed check's log and Re-run, and none on another's pull request or for a success", async () => {
+  it("raises failed checks on the user's pull request with the failed check's log and Re-run, and none on another's pull request, for a success, or on a closed pull request", async () => {
     await withGithubConnection(async (controller) => {
       const { reader, connectionId } = controller;
       await completeChecks(controller, 132, { onYourPullRequest: false });
       await completeChecks(controller, 133, PASSED);
+      await completeChecks(controller, 134, buildClosedSubject(134));
       const failed = await completeChecks(controller, 131);
 
       const signal = await waitForSignalFrom(reader, CHECKS_FAILED, failed);

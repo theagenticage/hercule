@@ -107,6 +107,17 @@ const buildFinishedEnd = (eventKind: string, verb: "Merged" | "Closed"): SignalE
   outcome: `event.author == null ? "${verb}" : "${verb} by " + event.author`,
 });
 
+/**
+ * CEL that is true while the item the event is about is not closed now. A
+ * feed sets `subject.state` to the item's state at the poll, so an event
+ * found on an item closed since then raises nothing: its close may have been
+ * written already, or never be emitted (an issue reopened and closed again
+ * between two polls), and then nothing would end the signal. An event with no
+ * state, such as one emitted by hand, counts as open.
+ */
+const ITEM_NOT_CLOSED =
+  '!(has(event.payload.subject.state) && event.payload.subject.state == "closed")';
+
 /** The ends every kind about a pull request has: it was merged, or closed unmerged. */
 const PULL_REQUEST_FINISHED_ENDS: ReadonlyArray<SignalEndDeclaration> = [
   buildFinishedEnd("github.pr.merged", "Merged"),
@@ -956,7 +967,7 @@ export const GITHUB_SIGNAL_KINDS: ReadonlyArray<SignalKindDeclaration> = [
     label: "Assigned",
     description: "Someone assigned you an issue or a pull request.",
     from: ["github.issue.assigned"],
-    rule: 'event.payload.toYou && !event.payload.byYou ? "yes" : "no"',
+    rule: `event.payload.toYou && !event.payload.byYou && ${ITEM_NOT_CLOSED} ? "yes" : "no"`,
     guidance:
       "An issue or a pull request was assigned to the user. Assigning it to oneself is never a signal.",
     threadRef: THREAD_REF,
@@ -981,7 +992,7 @@ export const GITHUB_SIGNAL_KINDS: ReadonlyArray<SignalKindDeclaration> = [
     label: "Changes requested",
     description: "A reviewer asked for changes on your pull request.",
     from: ["github.pr.review-submitted"],
-    rule: 'event.payload.verdict == "changes-requested" && event.payload.onYourPullRequest && !event.payload.byYou ? "yes" : "no"',
+    rule: `event.payload.verdict == "changes-requested" && event.payload.onYourPullRequest && !event.payload.byYou && ${ITEM_NOT_CLOSED} ? "yes" : "no"`,
     guidance:
       "A review on the user's own pull request asks for changes. Other verdicts, and the user's own reviews, are never this signal.",
     threadRef: THREAD_REF,
@@ -1009,7 +1020,7 @@ export const GITHUB_SIGNAL_KINDS: ReadonlyArray<SignalKindDeclaration> = [
     label: "Checks failed",
     description: "The checks on your pull request failed.",
     from: ["github.pr.checks-completed"],
-    rule: 'event.payload.conclusion == "failure" && event.payload.onYourPullRequest ? "yes" : "no"',
+    rule: `event.payload.conclusion == "failure" && event.payload.onYourPullRequest && ${ITEM_NOT_CLOSED} ? "yes" : "no"`,
     guidance:
       "The checks on the user's own pull request finished with a failure. No person asked; the asker shown is the app whose check failed.",
     threadRef: THREAD_REF,
