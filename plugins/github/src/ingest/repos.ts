@@ -25,10 +25,8 @@
  *      next poll, so the list alone looks unchanged, and the update time may
  *      not have moved either when both happened in the snapshot's own
  *      second;
- *    - the user wrote the pull request, and it asks anyone for a review or
- *      the reviewers it asks changed. This finds the user asking someone
- *      else for another review, the same reviewer again after a review
- *      between two polls included.
+ *    - the user wrote the pull request. This finds the user asking someone
+ *      else for a review, which the list of reviewers asked cannot rule out.
  *
  *    When the history holds a request or a removal to emit,
  *    `GET .../pulls/{n}` once more, after the reviews and the history, for
@@ -119,7 +117,6 @@ import {
   emitInTimeOrder,
   fetchPull,
   isAtOrAfter,
-  readAllReviewRequests,
   readReviewRequests,
   type ActivityPoll,
 } from "./activity";
@@ -162,15 +159,6 @@ const ItemSnapshot = Schema.Struct({
    * which counts as no change.
    */
   reviewRequests: Schema.optionalKey(Schema.Array(Schema.String)),
-  /**
-   * The reviews an open pull request asks of anyone: the login of each
-   * account, and `team:<org>/<slug>` for each team, sorted. For a pull
-   * request the user wrote, a change in it makes the poll read the history,
-   * which tells when the user asked someone else for a review. Absent for an
-   * issue, and for a snapshot an older version of this plugin wrote, which
-   * counts as no change.
-   */
-  allReviewRequests: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
 type ItemSnapshot = Schema.Schema.Type<typeof ItemSnapshot>;
@@ -532,7 +520,6 @@ const baselineRepo = (
           : {
               headSha: pull.head.sha,
               reviewRequests: readReviewRequests(poll, pull),
-              allReviewRequests: readAllReviewRequests(poll, pull),
             }),
         fromBaseline: true,
       });
@@ -544,14 +531,12 @@ const baselineRepo = (
 interface SnapshotExtras {
   readonly headSha?: string | undefined;
   readonly reviewRequests?: ReadonlyArray<string> | undefined;
-  readonly allReviewRequests?: ReadonlyArray<string> | undefined;
   readonly fromBaseline: boolean;
 }
 
 /**
  * Builds an item's snapshot from the listing, with the head commit and the
- * review requests (to the user and their teams, and to anyone) of a pull
- * request when they are known, marked
+ * review requests of a pull request when they are known, marked
  * `fromBaseline` when `extras.fromBaseline` is true.
  */
 const buildItemSnapshot = (issue: ListedIssue, extras: SnapshotExtras): ItemSnapshot => ({
@@ -563,9 +548,6 @@ const buildItemSnapshot = (issue: ListedIssue, extras: SnapshotExtras): ItemSnap
   ...(extras.headSha === undefined ? {} : { headSha: extras.headSha }),
   ...(extras.fromBaseline ? { fromBaseline: true } : {}),
   ...(extras.reviewRequests === undefined ? {} : { reviewRequests: extras.reviewRequests }),
-  ...(extras.allReviewRequests === undefined
-    ? {}
-    : { allReviewRequests: extras.allReviewRequests }),
 });
 
 /** Checks whether two lists of assignee logins hold different people, in any order. */
@@ -756,7 +738,6 @@ const pollRepo = (
       }
       let headSha = previous?.headSha;
       let reviewRequests = previous?.reviewRequests;
-      let allReviewRequests = previous?.allReviewRequests;
       // An item missing from the snapshot that is not new has unknown
       // assignees before, so only the history since the cursor could tell,
       // and it is not read: see `listItemChanges`.
@@ -781,22 +762,14 @@ const pollRepo = (
             readsHistory = true;
           }
           reviewRequests = now;
-          // Only the pull requests the user wrote are watched for a request
-          // to someone else, so a busy repository does not cost a history
-          // read for every reviewer change on other people's pull requests.
-          // As above, a reviewer still asked may have been asked again after
-          // their review, so the list alone cannot rule a request out.
-          const everyoneNow = readAllReviewRequests(poll, pull);
-          const everyoneBefore = previous === undefined ? [] : previous.allReviewRequests;
-          if (
-            wroteIt &&
-            (everyoneNow.length > 0 ||
-              (everyoneBefore !== undefined &&
-                haveReviewRequestsChanged(everyoneBefore, everyoneNow)))
-          ) {
-            readsHistory = true;
-          }
-          allReviewRequests = everyoneNow;
+          // Every update of a pull request the user wrote reads the history,
+          // for a request the user made to someone else. The list of
+          // reviewers asked cannot rule one out: a reviewer asked again
+          // after their review is on it at both polls, and one who answered
+          // the new request before the next poll is on it at neither. Only
+          // the user's own pull requests pay this, so a busy repository
+          // does not cost a history read for every update of other people's.
+          if (wroteIt) readsHistory = true;
         }
       }
       if (readsHistory) {
@@ -816,7 +789,6 @@ const pollRepo = (
       items[String(issue.number)] = buildItemSnapshot(issue, {
         headSha,
         reviewRequests: item.kind === "pr" ? reviewRequests : undefined,
-        allReviewRequests: item.kind === "pr" ? allReviewRequests : undefined,
         fromBaseline: unchangedSinceBaseline,
       });
     }

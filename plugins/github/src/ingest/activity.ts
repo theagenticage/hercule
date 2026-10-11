@@ -86,11 +86,25 @@ const isNewerThanStart =
 const TIE_RANKS = new WeakMap<EmittedEvent, number>();
 
 /**
+ * The kinds that close or merge an item. The feeds emit one only for an item
+ * that is closed now, so it was the item's last change of state, and it goes
+ * after every other event of its own second. Otherwise a review or an
+ * assignment of that second would raise a signal on an item that is already
+ * finished, and nothing would end it: the close is written only once.
+ */
+const CLOSING_KINDS = new Set(["github.issue.closed", "github.pr.closed", "github.pr.merged"]);
+
+/** Returns where `event` goes among the events of its own second: lower comes first. */
+const readTieRank = (event: EmittedEvent): number =>
+  CLOSING_KINDS.has(event.kind) ? 2 : (TIE_RANKS.get(event) ?? 0);
+
+/**
  * Runs `read` with a copy of `poll` whose `emit` holds events back, then
  * emits the held events through `poll.emit`, oldest `occurredAt` first.
  * Within one second, a review request the pull request still holds comes
  * after the other events, and one it no longer holds before them
- * (`TIE_RANKS`); the rest keep the order they were found in.
+ * (`TIE_RANKS`); a close or a merge comes last (`CLOSING_KINDS`); the rest
+ * keep the order they were found in.
  *
  * When `read` fails, the held events are dropped. The caller keeps its
  * stored state when `read` fails, so the next poll reads the same events
@@ -117,7 +131,7 @@ export const emitInTimeOrder = <A, E, R>(
       .sort(
         (left, right) =>
           Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||
-          (TIE_RANKS.get(left) ?? 0) - (TIE_RANKS.get(right) ?? 0),
+          readTieRank(left) - readTieRank(right),
       );
     return Effect.forEach(ordered, poll.emit, { discard: true });
   });

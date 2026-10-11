@@ -577,6 +577,57 @@ describe("the repos feed", () => {
     expect(harness.events[0]!.url).toBe(`https://github.com/${REPO}/pull/2`);
   });
 
+  it("emits a close after an assignment of the same second", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    const second = "2026-10-01T11:00:00Z";
+    repository.issues[0] = {
+      ...repository.issues[0]!,
+      state: "closed",
+      assignees: [TEST_ACCOUNT],
+      updated_at: second,
+      closed_at: second,
+    };
+    repository.history[1] = [buildAssignment(73, "assigned", TEST_ACCOUNT, second)];
+    repository.etag = '"v2"';
+
+    await poll(harness, answerFrom(repository));
+
+    expect(listEvents(harness)).toEqual([
+      `github.issue.assigned issue.assigned:73`,
+      `github.issue.closed issue.closed:${REPO}#1:${second}`,
+    ]);
+  });
+
+  it("emits a merge after a review of the same second", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    const second = "2026-10-01T11:00:00Z";
+    repository.reviews[2] = [
+      {
+        id: 310,
+        user: { login: "hubot" },
+        state: "CHANGES_REQUESTED",
+        submitted_at: second,
+      },
+    ];
+    repository.issues[1] = {
+      ...repository.issues[1]!,
+      state: "closed",
+      updated_at: second,
+      closed_at: second,
+      pull_request: { merged_at: second },
+    };
+    repository.etag = '"v2"';
+
+    await poll(harness, answerFrom(repository));
+
+    expect(listEvents(harness)).toEqual([
+      `github.pr.review-submitted pr.review-submitted:310`,
+      `github.pr.merged pr.merged:${REPO}#2`,
+    ]);
+  });
+
   it("emits changes made in the same second as the last poll's snapshot", async () => {
     const repository = buildRepository();
     const harness = await baseline(repository);
@@ -608,11 +659,12 @@ describe("the repos feed", () => {
 
     await poll(harness, answerFrom(repository));
 
+    // The merge comes last in its second: see `emitInTimeOrder`.
     expect(listEvents(harness)).toEqual([
       `github.issue.labeled issue.labeled:${REPO}#1:${time}:${computeDigest(["+triage"])}`,
-      `github.pr.merged pr.merged:${REPO}#2`,
       "github.pr.review-submitted pr.review-submitted:101",
       "github.issue.commented issue.commented:501",
+      `github.pr.merged pr.merged:${REPO}#2`,
     ]);
   });
 
@@ -781,16 +833,41 @@ describe("the repos feed", () => {
       ]);
     });
 
-    it("reads no history when nobody is asked and the reviewers asked did not change", async () => {
+    it("emits a request made again that the reviewer answered before the next poll", async () => {
       const { repository, harness } = await baselineWithPullBy(TEST_ACCOUNT);
-      repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T11:00:00Z" };
-      repository.etag = '"v2"';
+      askAtTen(repository);
+      await poll(harness, answerFrom(repository));
+      // Hubot requests changes, which drops the request: nobody is asked.
+      repository.reviews[2] = [
+        {
+          id: 300,
+          user: OUTSIDE_REVIEWER,
+          state: "CHANGES_REQUESTED",
+          submitted_at: "2026-10-01T10:30:00Z",
+        },
+      ];
+      repository.requestedReviewers[2] = [];
+      repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T10:30:00Z" };
+      repository.etag = '"v3"';
+      await poll(harness, answerFrom(repository));
+      // The user asks hubot again and hubot approves before the next poll,
+      // so nobody is asked at either poll.
+      repository.history[2]!.push(buildRequestToOutsider(6, "2026-10-01T10:50:00Z"));
+      repository.reviews[2].push({
+        id: 301,
+        user: OUTSIDE_REVIEWER,
+        state: "APPROVED",
+        submitted_at: "2026-10-01T10:55:00Z",
+      });
+      repository.issues[1] = { ...repository.issues[1], updated_at: "2026-10-01T10:55:00Z" };
+      repository.etag = '"v4"';
 
-      const { requests } = await poll(harness, answerFrom(repository));
+      await poll(harness, answerFrom(repository));
 
-      expect(requests.filter((request) => request.path.endsWith("/issues/2/events"))).toHaveLength(
-        0,
-      );
+      expect(listWrittenEvents(harness).slice(2)).toEqual([
+        `github.pr.review-requested pr.review-requested:6`,
+        `github.pr.review-submitted pr.review-submitted:301`,
+      ]);
     });
 
     it("emits nothing for a pull request someone else wrote, and reads no history", async () => {
@@ -803,36 +880,6 @@ describe("the repos feed", () => {
       expect(requests.filter((request) => request.path.endsWith("/issues/2/events"))).toHaveLength(
         0,
       );
-    });
-
-    it("counts a snapshot from before the feed kept the reviewers asked as unchanged", async () => {
-      const { repository, harness } = await baselineWithPullBy(TEST_ACCOUNT);
-      repository.requestedReviewers[2] = [OUTSIDE_REVIEWER];
-      repository.history[2] = [buildRequestToOutsider(4, "2026-10-01T09:20:00Z")];
-      repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T09:30:00Z" };
-      await poll(harness, answerFrom(repository));
-      const stored = harness.state.get(`repos/${REPO}`) as {
-        items: Record<string, Record<string, unknown>>;
-      };
-      delete stored.items["2"]!["allReviewRequests"];
-      // Hubot reviews, so the pull request asks nobody now.
-      repository.requestedReviewers[2] = [];
-      repository.issues[1] = {
-        ...repository.issues[1],
-        labels: [{ name: "ready" }],
-        updated_at: "2026-10-01T11:00:00Z",
-      };
-      repository.etag = '"v3"';
-
-      const { requests } = await poll(harness, answerFrom(repository));
-
-      expect(listEvents(harness).filter((key) => key.includes("review-requested"))).toEqual([]);
-      expect(requests.filter((request) => request.path.endsWith("/issues/2/events"))).toHaveLength(
-        0,
-      );
-      expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
-        items: { "2": { allReviewRequests: [] } },
-      });
     });
   });
 
