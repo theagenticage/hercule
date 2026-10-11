@@ -84,6 +84,7 @@ const readStoredRows = <A>(
         spec: "{}",
         modelSelection: { model: "clever", options: {} },
         parentSessionId: undefined,
+        createdBy: "user",
         at,
       });
       for (const [index, row] of rows.entries()) {

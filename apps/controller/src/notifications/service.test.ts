@@ -89,6 +89,7 @@ const buildSessionActor = (
   grants,
   profileGrants: grants,
   assistantId,
+  agentId: null,
 });
 
 const ASSISTANT_SESSION = buildSessionActor(

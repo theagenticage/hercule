@@ -2488,6 +2488,63 @@ describe("transcript.read", () => {
   });
 });
 
+/**
+ * The transcript search over HTTP: what ingest wrote is searchable, `me` is
+ * resolved from the session token, and the grant is enforced.
+ */
+describe("transcript.query", () => {
+  const queryPassages = (arranged: Arranged, token: string, query: string): Promise<Response> =>
+    get(arranged.harness.base, `/api/v1/transcripts?${query}`, token);
+
+  it("finds a reply ingest wrote, once, though it arrived as several deltas", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      await reportTranscript(arranged, session.id);
+
+      const response = await queryPassages(arranged, arranged.token, "text=hello");
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toEqual({
+        items: [{ sessionId: session.id, turnId: "t1", at, excerpt: "Hello" }],
+      });
+    });
+  });
+
+  it("resolves `me` from a session token, and refuses it from the user", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      await reportTranscript(arranged, session.id);
+      const thread = await spawnThreadWithGrants(arranged, "reader", ["session.read"]);
+
+      // The Thread created no session, so the search keeps nothing.
+      const created = await queryPassages(arranged, thread.token, "text=hello&actor=me");
+      expect(created.status, await created.clone().text()).toBe(200);
+      expect(await created.json()).toEqual({ items: [] });
+
+      // A Thread runs as no Agent, and the user is not a session.
+      for (const token of [thread.token, arranged.token]) {
+        const refused = await queryPassages(arranged, token, "text=hello&agentId=me");
+        expect(refused.status).toBe(400);
+        expect(await readErrorBody(refused)).toMatchObject({
+          code: "validation",
+          issues: [["agentId"]],
+        });
+      }
+    });
+  });
+
+  it("refuses a session that does not hold session.read", async () => {
+    await withFleet(async (arranged) => {
+      const thread = await spawnThreadWithGrants(arranged, "blind", []);
+
+      const response = await queryPassages(arranged, thread.token, "text=hello");
+
+      expect(response.status).toBe(403);
+      expect(await readErrorBody(response)).toMatchObject({ grant: "session.read" });
+    });
+  });
+});
+
 describe("session.interrupt", () => {
   it("sends the runner an interrupt for the running turn, and the turn ends as interrupted", async () => {
     await withFleet(async (arranged) => {

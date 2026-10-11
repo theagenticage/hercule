@@ -34,6 +34,7 @@ const agent: Actor = {
   grants: ["task.read", "task.create", "session.spawn"],
   profileGrants: ["task.read", "task.create", "session.spawn"],
   assistantId: null,
+  agentId: null,
 };
 
 /**

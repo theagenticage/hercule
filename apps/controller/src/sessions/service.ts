@@ -61,7 +61,11 @@ import {
   SUBAGENT_SORT_FIELDS,
   TRANSCRIPT_SORT_FIELDS,
   type Forbidden,
+  OWN_AGENT_ALIAS,
+  PASSAGE_SORT_FIELDS,
+  PassageFilter,
   type Input,
+  type Passage,
   type Session,
   type SessionRequest,
   type SessionStatus,
@@ -71,12 +75,13 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant, SYSTEM_ACTOR } from "../actor";
+import { buildSessionStamp, currentStamp, requireGrant, SYSTEM_ACTOR, type Actor } from "../actor";
 import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
 import { PluginHost } from "../plugins";
 import {
   afterCommit,
   announce,
+  buildMatchExpression,
   nowIso,
   buildPageInputFields,
   refuseCursor,
@@ -161,6 +166,13 @@ const TranscriptInput = Schema.Struct({
 
 export type TranscriptInput = Schema.Schema.Type<typeof TranscriptInput>;
 
+const PassageQueryInput = Schema.Struct({
+  ...PassageFilter.fields,
+  ...buildPageInputFields(PASSAGE_SORT_FIELDS),
+});
+
+export type PassageQueryInput = Schema.Schema.Type<typeof PassageQueryInput>;
+
 const SubagentQueryInput = Schema.Struct({
   id: Id,
   ...buildPageInputFields(SUBAGENT_SORT_FIELDS),
@@ -185,6 +197,11 @@ export interface SessionPage {
 
 export interface TranscriptPage {
   readonly items: ReadonlyArray<TranscriptRow>;
+  readonly nextCursor?: string;
+}
+
+export interface PassagePage {
+  readonly items: ReadonlyArray<Passage>;
   readonly nextCursor?: string;
 }
 
@@ -371,6 +388,7 @@ const toPageOutput = <A>(listing: Page<A>): { items: ReadonlyArray<A>; nextCurso
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeTranscript = Schema.decodeUnknownEffect(TranscriptInput);
+const decodePassageQuery = Schema.decodeUnknownEffect(PassageQueryInput);
 const decodeSubagentQuery = Schema.decodeUnknownEffect(SubagentQueryInput);
 const decodeInputQuery = Schema.decodeUnknownEffect(InputQueryInput);
 const decodeInputUpdate = Schema.decodeUnknownEffect(InputUpdate);
@@ -382,6 +400,41 @@ const DEFAULT_DIRECTION: SortDirection = "desc";
 
 /** Oldest first: a transcript is read forwards, the way it happened. */
 const TRANSCRIPT_DIRECTION: SortDirection = "asc";
+
+/** Newest first: a search of past conversations is read from the most recent. */
+const PASSAGE_DIRECTION: SortDirection = "desc";
+
+/**
+ * Returns the Agent `agentId: "me"` names: the Agent the calling session runs
+ * as. Fails with `Validation` for a session that runs as no Agent, such as a
+ * Thread, and for any caller that is not a session. The message says what to
+ * pass instead.
+ */
+const resolveOwnAgent = (actor: Actor): Effect.Effect<string, Validation> => {
+  if (actor._tag === "session" && actor.agentId !== null) return Effect.succeed(actor.agentId);
+  const message =
+    actor._tag === "session"
+      ? `"${OWN_AGENT_ALIAS}" names the Agent this session runs as, and this session runs as no Agent; name the Agent by its id`
+      : `"${OWN_AGENT_ALIAS}" names the Agent of the calling session, and only a session has one; name the Agent by its id`;
+  return Effect.fail(createValidationError([{ path: ["agentId"], message }]));
+};
+
+/**
+ * Returns the actor stamp `actor: "me"` names: the stamp of the calling
+ * session, which the sessions it created carry. Fails with `Validation` for
+ * any caller that is not a session, saying what to do instead.
+ */
+const resolveOwnStamp = (actor: Actor): Effect.Effect<string, Validation> =>
+  actor._tag === "session"
+    ? Effect.succeed(buildSessionStamp(actor.sessionId))
+    : Effect.fail(
+        createValidationError([
+          {
+            path: ["actor"],
+            message: `"${OWN_AGENT_ALIAS}" keeps the sessions the calling session created, and only a session creates sessions as itself; leave actor out`,
+          },
+        ]),
+      );
 
 /** Oldest first: a session's subagents are listed in the order they started. */
 const SUBAGENT_DIRECTION: SortDirection = "asc";
@@ -1408,6 +1461,50 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Returns a page of the messages that match a full-text search over every
+     * session's transcript, newest first by default (spec 11 section 2). Each
+     * filter narrows the search; `agentId: "me"` and `actor: "me"` are
+     * resolved from the calling session and fail with `Validation` for any
+     * other caller. Text with no word in it matches nothing, so it returns an
+     * empty page.
+     */
+    queryPassages: (input: PassageQueryInput): Effect.Effect<PassagePage, ReadError> =>
+      Effect.gen(function* () {
+        const actor = yield* requireGrant("transcript.query");
+        // The `actor` filter is renamed because `actor` already names the caller.
+        const {
+          text,
+          sessionId,
+          agentId,
+          since,
+          until,
+          limit,
+          cursor,
+          sort,
+          actor: actorFilter,
+        } = yield* Effect.mapError(decodePassageQuery(input), createDecodeValidationError);
+        const resolvedAgentId =
+          agentId === OWN_AGENT_ALIAS ? yield* resolveOwnAgent(actor) : agentId;
+        const createdBy = actorFilter === undefined ? undefined : yield* resolveOwnStamp(actor);
+        const match = buildMatchExpression(text);
+        if (match === undefined) return { items: [] };
+        const listing = yield* refuseCursor(
+          sessions.searchTranscripts({
+            match,
+            sessionId,
+            agentId: resolvedAgentId,
+            createdBy,
+            since,
+            until,
+            limit: limit ?? DEFAULT_PAGE_LIMIT,
+            cursor,
+            direction: resolveSortDirection(sort, PASSAGE_DIRECTION),
+          }),
+        );
+        return toPageOutput(listing);
+      }),
+
+    /**
      * Returns a page of the session's subagents, oldest first by `startedAt`.
      * A subagent is read through its session, so the grant is `session.read`.
      * Fails with `NotFound` when there is no such session.
@@ -1512,6 +1609,7 @@ const make = Effect.gen(function* () {
           spec: JSON.stringify(encodeSpec(open.spec)),
           modelSelection: open.spec.modelSelection,
           parentSessionId: open.parentSessionId,
+          createdBy: actor,
           at: open.at,
         });
         if (open.spec.workspaceId !== null)
@@ -2778,8 +2876,8 @@ const make = Effect.gen(function* () {
  * The session service. It has two kinds of method, and nothing else catches a
  * method wired where the other kind belongs:
  *
- * - `query`, `read`, `transcript`, `querySubagents`, `queryInputs`,
- *   `updateInput` and `cancelInput` are operations. Each checks its own
+ * - `query`, `read`, `transcript`, `queryPassages`, `querySubagents`,
+ *   `queryInputs`, `updateInput` and `cancelInput` are operations. Each checks its own
  *   grant and decodes any input object it takes, and a route handler calls
  *   it directly.
  * - Every other method changes rows or builds a frame, and checks no grant.

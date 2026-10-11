@@ -28,6 +28,7 @@ import {
   createInvalidStateError,
   createNotFoundError,
   findNearestSupportedAccessMode,
+  MEMORY_CORE,
   refuseEmptyPrompt,
   SESSION_CONTINUE_FIELDS,
   SessionSpawnInput,
@@ -44,6 +45,7 @@ import {
 import { agentRepository, type StoredAgent } from "../../agents";
 import { CurrentActor, requireGrant, type Actor } from "../../actor";
 import { mintUuid, nowIso, uuidToString, withTransaction } from "../../db";
+import { memoryRepository, renderSessionMemory } from "../../memory";
 import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../../permissions";
 import type { PluginHost } from "../../plugins";
 import {
@@ -220,6 +222,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* SessionService;
   const rows = yield* sessionRepository;
   const agents = yield* agentRepository;
+  const memory = yield* memoryRepository;
   const recordComposer = yield* sessionRecordComposer;
   const workspaces = yield* WorkspaceService;
   const resources = yield* resourceRepository;
@@ -627,7 +630,16 @@ const make = Effect.gen(function* () {
      *   effect at the next session without editing the persona;
      * - its timeouts include the idle unload, so an unused conversation
      *   frees its runner slot;
-     * - it pushes to GitHub as the user's default Connection, if one is set.
+     * - it pushes to GitHub as the user's default Connection, if one is set;
+     * - it starts with the assistant's memory, `core` in full and the index
+     *   of its topics, and with the harness's automatic compaction off,
+     *   because the controller rotates the session instead.
+     *
+     * The memory is read once, here. A resumed session keeps the spec it was
+     * placed with (`buildContinuingSpec` copies it), so it keeps the memory
+     * it started with, and the assistant's writes since then reach its
+     * sessions at the next rotation, which places a new session. The session
+     * that made the writes already knows them.
      *
      * It checks no grant: the caller is `conversation.send`, which has
      * checked its own. Fails with `InvalidState` when no runner can take the
@@ -671,6 +683,8 @@ const make = Effect.gen(function* () {
           options: agent.model?.options ?? {},
         });
         const defaults = yield* settings.allForUser(user.userId);
+        const core = yield* memory.read(agent.id, MEMORY_CORE);
+        const memoryIndex = yield* memory.list(agent.id);
 
         const spec = {
           instanceId: agent.instanceId,
@@ -678,6 +692,11 @@ const make = Effect.gen(function* () {
           modelSelection,
           accessMode,
           systemPrompt: `Your name is ${agent.name}.\n\n${agent.systemPrompt}`,
+          memory: renderSessionMemory(
+            Option.match(core, { onNone: () => "", onSome: (document) => document.body }),
+            memoryIndex,
+          ),
+          autoCompaction: false,
           ...(agent.disallowedTools.length === 0 ? {} : { disallowedTools: agent.disallowedTools }),
           timeouts: buildConversationTimeouts(yield* settings.all()),
         } satisfies SessionSpec;
