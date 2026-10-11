@@ -1067,6 +1067,21 @@ const make = Effect.gen(function* () {
       `),
 
     /**
+     * Replaces the session's title with a generated one, and stores whether
+     * the model judged that title too vague (`needs_refinement`). The column
+     * is never read back yet: it is the mark that a title was generated.
+     */
+    setGeneratedTitle: (
+      sessionId: string,
+      title: string,
+      needsRefinement: boolean,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET title = ${title}, needs_refinement = ${needsRefinement ? 1 : 0}
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
      * Sets the access mode the session asked for, the one it runs under, and
      * the permission profile its token is bound to. Only a resume calls this,
      * before the session starts again, because a running harness keeps the

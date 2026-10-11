@@ -91,6 +91,7 @@ import {
   ProviderServiceLayer,
 } from "../providers";
 import { SessionServiceLayer } from "../sessions";
+import { TextGeneration, type TextGenerationShape } from "../daemon/text-generation";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
@@ -110,7 +111,7 @@ import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../pr
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
-import { operationLayers } from "./routes";
+import { buildOperationLayers, operationLayers } from "./routes";
 import { bodyLimits, serve } from "./server";
 import type { WebBundle } from "./static";
 
@@ -129,12 +130,16 @@ const buildServices = (
   home: string,
   masterKeyBackend: MasterKeyBackend = "file",
   securityRunner?: SecurityRunner,
+  textGeneration?: TextGenerationShape,
 ) =>
   // The routes' layer includes the controller daemon, which uses the session
   // and workspace services and the plugin host. So this block's output is
   // provided to it rather than merged next to it, just as the real boot
   // provides what `withPlugins` built to the operation layers.
-  operationLayers.pipe(
+  (textGeneration === undefined
+    ? operationLayers
+    : buildOperationLayers(Layer.succeed(TextGeneration, textGeneration))
+  ).pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         PluginsLayer,
@@ -399,6 +404,12 @@ export interface ServerOptions {
   readonly masterKeyBackend?: MasterKeyBackend;
   /** The `security` CLI the keychain store runs. Required with `"keychain"`. */
   readonly securityRunner?: SecurityRunner;
+  /**
+   * The text generation the controller uses. A test passes a fake, because no
+   * test has a runner with a model behind it. Without it, the controller uses
+   * the same text generation as a real one.
+   */
+  readonly textGeneration?: TextGenerationShape;
 }
 
 /**
@@ -525,7 +536,12 @@ export const withServer = (
       }),
     ).pipe(
       Effect.provide(
-        buildServices(home, options.masterKeyBackend, options.securityRunner).pipe(
+        buildServices(
+          home,
+          options.masterKeyBackend,
+          options.securityRunner,
+          options.textGeneration,
+        ).pipe(
           // The same listener `hercule serve` builds, including the body size
           // limit. The limit is enforced by the transport, so without it the
           // tests would run a different server from the one that ships.
