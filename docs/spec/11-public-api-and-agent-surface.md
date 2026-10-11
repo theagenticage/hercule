@@ -853,12 +853,12 @@ Assistant memory is reached only through these operations ([ADR 0020](../adr/002
 
 | Operation | Behaviour |
 |---|---|
-| `list` | Returns the index: per document, name, size and gist. This is the same index injected at session start. |
-| `read <name>` | Returns the full body of `core` or one topic. |
-| `search <words>` | SQLite FTS5 over `core` and every topic; returns per matching document `{ name, snippets[] }`. The API's substitute for `grep`. |
-| `write <name> [--gist "..."] [--confirm-shrink]` | Replaces the whole body of `core` or a topic; creates the topic if absent. Content on stdin; `--gist` sets the topic's one-line gist (optional, unchanged when omitted, ignored for `core`). |
-| `append <name>` | Appends content to an existing document. Content on stdin. Never touches the gist. |
-| `delete <name>` | Removes a topic. `delete core` is refused (`core` is seeded and always injected; `write core` with an empty body clears it). |
+| `list me` | Returns the index: per document, name, size and gist. This is the same index injected at session start. |
+| `read me <name>` | Returns the full body of `core` or one topic. |
+| `search me --text <words>` | SQLite FTS5 over `core` and every topic; returns per matching document `{ name, snippets[] }`. The API's substitute for `grep`. |
+| `write me <name> [--gist "..."] [--confirm-shrink true]` | Replaces the whole body of `core` or a topic; creates the topic if absent. Content on stdin; `--gist` sets the topic's one-line gist (optional, unchanged when omitted, ignored for `core`). |
+| `append me <name>` | Appends content to an existing document. Content on stdin. Never touches the gist. |
+| `delete me <name>` | Removes a topic. `delete core` is refused (`core` is seeded and always injected; `write core` with an empty body clears it). |
 
 Enforcement at the write seam (hard rules):
 
@@ -868,6 +868,8 @@ Enforcement at the write seam (hard rules):
 - Every write is actor-stamped (section 3). Writes from a tainted session (one that has been delivered third-party lines) get provenance metadata *on* the document, set by the core, rendered by `read` as a trailing `> provenance:` line ([./12-assistants.md](./12-assistants.md) section 6.7, [./13-security.md](./13-security.md) section 10).
 
 **Scope (hard rule, the one scoped family in v1):** memory operations from a session token act on the memory of that session's assistant and on nothing else; `assistantId` (`/assistants/{id}/memory`) is honoured for user credentials only, and a session token naming another assistant gets 403 `forbidden`. A session under a profile without `memory` (the `worker` profile) reaches no memory at all. The user reaches every assistant's memory through the same operations; the web app's memory view is a client of them.
+
+*(Amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93).)* Every command names the assistant first, the way every command takes its path parameters (`/assistants/{id}/memory/{name}`) as positionals in route order: `me` from a session, an id or a tail from the user. `search` takes its words as `--text`, because a query field is never positional; `--confirm-shrink` takes `true`, because every flag takes a value. The CLI accepts `me` wherever a field holds an id and passes it to the controller unresolved. A size counts characters as Unicode code points, and `size` is stored on the document at the write seam. `delete core` is a `validation` error on `name`. `append` to a topic that does not exist is `not_found`: `write` creates topics, `append` never does. A topic name is one line of at most 64 characters with no slash and no space at either end; `search`, `.` and `..` are refused because they collide with the routes. The audit log records each memory write, append and delete with the assistant, the name and the size, never the body. A missing assistant is `not_found` before the scope check, but a missing document is `not_found` only after it, so a session cannot learn another assistant's topic names from which reads fail.
 
 There is no header convention to validate: the gist is a field (`--gist`), the body is pure content ([./12-assistants.md](./12-assistants.md) section 6.2).
 

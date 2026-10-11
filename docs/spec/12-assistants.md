@@ -209,13 +209,15 @@ Memory is an assistant's durable notes: assistant-scoped, agent-maintained, user
 Assistants read and write memory exclusively through the public API; the CLI surface is:
 
 ```
-hercule memory list
-hercule memory read <name>
-hercule memory search <words>
-hercule memory write <name>
-hercule memory append <name>
-hercule memory delete <name>
+hercule memory list me
+hercule memory read me <name>
+hercule memory search me --text <words>
+hercule memory write me <name> [--gist "<one line>"] [--confirm-shrink true]
+hercule memory append me <name>
+hercule memory delete me <name>
 ```
+
+*(Amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93).)* The assistant is named explicitly, as `me` from a session or by id from the user, because every CLI command takes its path parameters as positionals in route order (`/assistants/{id}/memory/{name}`), and `search` takes its words as `--text` because a query field is never positional ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 6.4). The earlier spelling without the assistant had no way to name one.
 
 - Nothing is materialized on runner disk. No memory file exists anywhere an agent could `grep` or `Edit`; `search` is the substitute for grep (ADR 0020).
 - The web app edits the same documents through the same operations; there is no second write path ([./14-web-app.md](./14-web-app.md)).
@@ -240,7 +242,7 @@ This section is the normative owner of the memory tiers and caps; other document
 
 Every assistant session starts with `core` in full and the topic index injected. Topic bodies are fetched on demand with `hercule memory read <name>`. Nothing else from memory is injected.
 
-**Where it lands (pinned):** in `SessionSpec.systemPrompt`, on every harness, as the *last* part of the prompt: the agent's own `systemPrompt` (persona), then the hercule-as-a-tool skill, then a `## Memory (core)` section and a `## Memory topics` index. Memory is standing context, not a message: a first user turn would show up in the conversation view as a message nobody sent, and the system prompt changes only at rotation, so it is cache-stable. The volatile part goes last for the same reason OpenClaw orders `SOUL.md` before `MEMORY.md` (stable content above the cache boundary). The per-harness mapping is in [./06-providers.md](./06-providers.md) section 9.2.
+**Where it lands (pinned):** in ~~`SessionSpec.systemPrompt`~~ the system prompt, carried as its own `SessionSpec.memory` field that every adapter appends last *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93): the runner appends the skill after `systemPrompt`, so memory placed inside `systemPrompt` could not come after the skill)*, on every harness, as the *last* part of the prompt: the agent's own `systemPrompt` (persona), then the hercule-as-a-tool skill, then a `## Memory (core)` section and a `## Memory topics` index. Memory is standing context, not a message: a first user turn would show up in the conversation view as a message nobody sent, and the system prompt changes only at rotation, so it is cache-stable. The volatile part goes last for the same reason OpenClaw orders `SOUL.md` before `MEMORY.md` (stable content above the cache boundary). The per-harness mapping is in [./06-providers.md](./06-providers.md) section 9.2.
 
 ### 6.4 Caps and the shrink guard, enforced at write
 
@@ -256,8 +258,8 @@ Memory version history stays post-v1 (decided 2026-08-28); the shrink guard is t
 
 ### 6.5 Recall
 
-- `hercule memory search <words>` is SQLite FTS5 over the assistant's own memory documents, `core` included - the same engine as task and transcript search, never a second search technology. It returns, per matching document, `{ name, snippets[] }` with a short window around each hit.
-- Transcript recall is ~~`transcript.query { text, assistantId: "me" }` (`hercule transcript query --text "..." --assistant me`)~~ `transcript.query { text, agentId: "me" }` (`hercule transcript query --text "..." --agent me`), because an assistant's id is its Agent's id *(amended 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))*: full-text search over the assistant's own conversations (all its sessions, all its conversations), returning passages ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). It is the same operation any agent with `session.read` uses over any session; ~~`assistantId: "me"`~~ `agentId: "me"` *(amended 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))* is a filter, not a boundary. No vectors, no embeddings, no LLM summarization in the retrieval path (Hermes ships FTS-only recall; Letta migrated away from vector archival memory: `research/assistant-systems.md`, sections 5 and 6).
+- ~~`hercule memory search <words>`~~ `hercule memory search me --text <words>` *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))* is SQLite FTS5 over the assistant's own memory documents, `core` included - the same engine as task and transcript search, never a second search technology. It returns, per matching document, `{ name, snippets[] }` with a short window around each hit.
+- Transcript recall is ~~`transcript.query { text, assistantId: "me" }` (`hercule transcript query --text "..." --assistant me`)~~ `transcript.query { text, agentId: "me" }` (~~`hercule transcript query --text "..." --agent me`~~ `hercule transcript list --text "..." --agent me`, because `query` is spelled `list` on the command line *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))*), because an assistant's id is its Agent's id *(amended 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))*: full-text search over the assistant's own conversations (all its sessions, all its conversations), returning passages ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). It is the same operation any agent with `session.read` uses over any session; ~~`assistantId: "me"`~~ `agentId: "me"` *(amended 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))* is a filter, not a boundary. No vectors, no embeddings, no LLM summarization in the retrieval path (Hermes ships FTS-only recall; Letta migrated away from vector archival memory: `research/assistant-systems.md`, sections 5 and 6).
 - An assistant never reads another assistant's memory (the one scoped grant family in v1, [./13-security.md](./13-security.md) section 6.1). Transcripts are ordinary session history: any session granted `session.read`, the assistant profile included, can read any session's transcript.
 
 ### 6.6 Visibility, editing, deletion
