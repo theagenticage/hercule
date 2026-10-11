@@ -319,7 +319,7 @@ describe("useSessionLive", () => {
 
     fake.pushTaps(";\n```\n\nDone");
     frames.run();
-    expect(readFinishedBlocks()).toEqual(["await retry();\n\nreturn;\n"]);
+    expect(readFinishedBlocks()).toEqual(["await retry();\n\nreturn;"]);
     expect(findOpenParagraph()?.textContent).toBe("Done");
   });
 

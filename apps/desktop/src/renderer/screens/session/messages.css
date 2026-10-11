@@ -127,6 +127,28 @@
   box-shadow: inset 0 -1px 0 var(--line-soft);
   text-align: left;
 }
+/* A column's alignment, from the table's delimiter row. The renderer sets it
+   as an attribute, never a `style`. Intake's text has no `text-align` of its
+   own, so these rules are not scoped to the messages. */
+table :is(th, td)[data-align="left"] {
+  text-align: left;
+}
+table :is(th, td)[data-align="center"] {
+  text-align: center;
+}
+table :is(th, td)[data-align="right"] {
+  text-align: right;
+}
+/* The footnotes under a message: smaller and muted, set apart from the text
+   above them. The last list's margin would add space under the message. */
+:is(.msg-body, .bubble) section {
+  color: var(--muted);
+  font-size: var(--t-13);
+}
+:is(.msg-body, .bubble) section > ol,
+:is(.msg-body, .bubble) section li > :last-child {
+  margin-bottom: 0;
+}
 /* A link in prose is underlined, because nothing else sets it apart from the
    text around it. It opens in the default browser, so it shows the hand. */
 :is(.msg-body, .bubble) a {

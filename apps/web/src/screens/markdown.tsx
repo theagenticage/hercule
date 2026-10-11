@@ -1,23 +1,27 @@
 /**
  * Prose written by an agent, a user or a notification's producer, rendered as
- * markdown: a thread's answers, a message bubble, a notification's body.
+ * markdown: a thread's answers, a message bubble, an assistant's messages, a
+ * notification's body.
  *
- * `react-markdown` builds React elements rather than an HTML string, so a
- * `<script>` from an agent is shown as plain text. This safety needs no
- * configuration; it comes from how the renderer works. A plugin that parses
- * raw HTML would remove it, so none is used.
+ * `parseMarkdown` in `@hercule/client-core` parses the text with marked's
+ * lexer into a small tree of plain data. This file only draws that tree as
+ * React elements, never as an HTML string. Raw HTML is already text in the
+ * tree, so a `<script>` from an agent is shown as characters, and nothing
+ * here can turn text into markup.
  *
  * The elements get design-language classes directly instead of a prose
  * plugin: agents emit only a small set of elements, and every class below is
  * already used elsewhere in the app.
  */
-import { Component, createElement, memo, type JSX, type ReactNode } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
-
-/** The props every component below accepts: a loose subset of the renderer's props. */
-type Dressable = { readonly node?: unknown; readonly className?: string | undefined };
+import { parseMarkdown } from "@hercule/client-core";
+import type {
+  ColumnAlignment,
+  MarkdownBlock,
+  MarkdownFootnote,
+  MarkdownInline,
+  MarkdownListItem,
+} from "@hercule/client-core";
+import { Component, Fragment, memo, useId, type JSX, type ReactNode } from "react";
 
 /** The gap between two blocks, with no gap above the first block in its container. */
 const STACKED = "mt-3 first:mt-0";
@@ -25,115 +29,323 @@ const STACKED = "mt-3 first:mt-0";
 /** A heading has more space above it than below, which groups it with the text that follows. */
 const HEADING = "mt-5 first:mt-0";
 
-/**
- * Returns a component that renders `tag` with the given classes.
- *
- * Beyond setting the classes, the component does two things:
- *
- * - It drops the hast `node` prop that `react-markdown` passes to every
- *   component, because it is not a DOM attribute.
- * - It appends its classes to any class the renderer already set, rather than
- *   replacing it. Some of those matter, such as `sr-only` on the footnote
- *   label.
- */
-const createStyledComponent =
-  (tag: string, className: string) =>
-  (props: Dressable): JSX.Element =>
-    createElement(tag, {
-      ...props,
-      node: undefined,
-      className: props.className === undefined ? className : `${props.className} ${className}`,
-    });
+// The heading sizes stay small, with the largest one step above the body
+// text: an answer is prose with sections, not a document, and the thread's
+// title is just above in the chrome. Headings stand out through the space
+// above them and their weight, not their size.
+const HEADINGS = {
+  1: `${HEADING} text-lead font-emph text-ink`,
+  2: `${HEADING} text-body font-emph text-ink`,
+  3: `${HEADING} font-emph text-ink`,
+  4: `${HEADING} font-emph text-ink`,
+  5: `${HEADING} font-emph text-ink`,
+  6: `${HEADING} font-emph text-ink`,
+} as const;
+
+const PARAGRAPH = `${STACKED} leading-relaxed`;
+
+// The agent writes the link text, and the target may not match it, so a
+// click opens a new tab and sends no referrer. A link within the page, such
+// as a footnote number and its back link, stays in this tab: opening it in
+// a new tab would open a second copy of the app.
+const LINK = "underline decoration-line underline-offset-[3px]";
+
+// Weight 500, not the browser's 700: heavier bold looks cramped in this font.
+const STRONG = "font-emph";
+
+// A translucent tint rather than an opaque chip, because inline code
+// appears both on the page and inside the user's bubble. A translucent
+// colour shows on both backgrounds; an opaque one would vanish on one of them.
+const INLINE_CODE = "rounded-control bg-line-soft px-1 py-px font-mono text-[0.92em]";
 
 /**
  * The classes for a fenced code block, the only card in the prose. It uses the
- * same tokens as the user's message bubble. The `<code>` inside it has its
- * inline-code styling removed, because the `code` rule styles every `<code>`
- * and a fenced one is already in a card.
+ * same tokens as the user's message bubble. The `<code>` inside it keeps the
+ * inline-code class, and these overrides remove its chip styling, because a
+ * fenced block is already in a card.
  */
 const FENCE =
   `${STACKED} overflow-x-auto rounded-card border border-line-soft bg-surface px-3 py-2.5 ` +
   "font-mono text-fine leading-relaxed [&_code]:rounded-none [&_code]:bg-transparent " +
   "[&_code]:px-0 [&_code]:py-0 [&_code]:text-[length:inherit]";
 
+const BULLETED_LIST = `${STACKED} list-disc space-y-1 pl-5 marker:text-faint`;
+const NUMBERED_LIST = `${STACKED} list-decimal space-y-1 pl-5 marker:text-faint`;
+
+// A nested list belongs to its list item, so it sits closer to the item
+// than two blocks of prose sit to each other.
+const LIST_ITEM = "leading-relaxed [&>ul]:mt-1 [&>ol]:mt-1";
+
+const QUOTE = `${STACKED} border-l-2 border-line-soft pl-3 text-muted`;
+
+// A wide table scrolls on its own rather than widening the column.
+const TABLE_SCROLLER = `${STACKED} overflow-x-auto`;
+
 const CELL = "border border-line-soft px-2 py-1 align-top";
 
-/**
- * Renders a table cell, with its column's alignment as a class.
- *
- * `remark-gfm` puts the alignment of `|:---|---:|` in an inline `style`. This
- * function converts the alignment to a class and drops the style, so markdown
- * written by an agent never reaches a style attribute. The controller's
- * Content-Security-Policy allows inline styles only because the workflow
- * editor needs them. The app's own markup uses classes only, so a stricter
- * policy would break nothing.
- */
-const renderTableCell = (
-  tag: "th" | "td",
-  className: string,
-  props: Dressable & { readonly style?: { readonly textAlign?: string | undefined } | undefined },
-): JSX.Element => {
-  const { style, ...rest } = props;
-  const alignment =
-    style?.textAlign === "center"
-      ? "text-center"
-      : style?.textAlign === "right"
-        ? "text-right"
-        : "text-left";
-  return createElement(tag, { ...rest, node: undefined, className: `${className} ${alignment}` });
+// A column's alignment is a class and never an inline `style`, so markdown
+// written by an agent never reaches a style attribute. The controller's
+// Content-Security-Policy allows inline styles only because the workflow
+// editor needs them. The app's own markup uses classes only, so a stricter
+// policy would break nothing. A column with no alignment reads as left.
+const ALIGNMENT = { left: "text-left", center: "text-center", right: "text-right" } as const;
+
+/** What a paragraph is drawn with besides its own text. */
+interface ParagraphExtras {
+  /** Draws the text with no `<p>` around it, as a tight list item shows it. */
+  readonly bare?: boolean;
+  /** Goes before the text, such as a task item's checkbox. */
+  readonly lead?: ReactNode;
+  /** Goes after the text, inside the same paragraph, such as a footnote's back link. */
+  readonly tail?: ReactNode;
+}
+
+/** Throws for a node type the drawing functions do not handle, so the compiler flags a new type. */
+const failUnhandled = (node: never): never => {
+  throw new Error(`Unhandled markdown node: ${JSON.stringify(node)}`);
 };
 
-const components: Components = {
-  // The heading sizes stay small, with the largest one step above the body
-  // text: an answer is prose with sections, not a document, and the thread's
-  // title is just above in the chrome. Headings stand out through the space
-  // above them and their weight, not their size.
-  h1: createStyledComponent("h1", `${HEADING} text-lead font-emph text-ink`),
-  h2: createStyledComponent("h2", `${HEADING} text-body font-emph text-ink`),
-  h3: createStyledComponent("h3", `${HEADING} font-emph text-ink`),
-  h4: createStyledComponent("h4", `${HEADING} font-emph text-ink`),
-  h5: createStyledComponent("h5", `${HEADING} font-emph text-ink`),
-  h6: createStyledComponent("h6", `${HEADING} font-emph text-ink`),
-  p: createStyledComponent("p", `${STACKED} leading-relaxed`),
-  // Weight 500, not the browser's 700: heavier bold looks cramped in this font.
-  strong: createStyledComponent("strong", "font-emph"),
-  // The agent writes the link text, and the target may not match it, so a
-  // click opens a new tab and sends no referrer. A link within the page, such
-  // as a footnote number and its back link, stays in this tab: opening it in
-  // a new tab would open a second copy of the app.
-  a: (props) =>
-    createElement("a", {
-      ...props,
-      node: undefined,
-      ...(props.href?.startsWith("#") === true ? {} : { target: "_blank", rel: "noreferrer" }),
-      className: "underline decoration-line underline-offset-[3px]",
-    }),
-  ul: createStyledComponent("ul", `${STACKED} list-disc space-y-1 pl-5 marker:text-faint`),
-  ol: createStyledComponent("ol", `${STACKED} list-decimal space-y-1 pl-5 marker:text-faint`),
-  // A nested list belongs to its list item, so it sits closer to the item
-  // than two blocks of prose sit to each other.
-  li: createStyledComponent("li", "leading-relaxed [&>ul]:mt-1 [&>ol]:mt-1"),
-  // A translucent tint rather than an opaque chip, because inline code
-  // appears both on the page and inside the user's bubble. A translucent
-  // colour shows on both backgrounds; an opaque one would vanish on one of them.
-  code: createStyledComponent(
-    "code",
-    "rounded-control bg-line-soft px-1 py-px font-mono text-[0.92em]",
-  ),
-  pre: createStyledComponent("pre", FENCE),
-  blockquote: createStyledComponent(
-    "blockquote",
-    `${STACKED} border-l-2 border-line-soft pl-3 text-muted`,
-  ),
-  hr: createStyledComponent("hr", `${STACKED} border-line`),
-  // A wide table scrolls on its own rather than widening the column.
-  table: (props) => (
-    <div className={`${STACKED} overflow-x-auto`}>
-      {createElement("table", { ...props, node: undefined, className: "w-full border-collapse" })}
-    </div>
-  ),
-  th: (props) => renderTableCell("th", `${CELL} font-emph`, props),
-  td: (props) => renderTableCell("td", CELL, props),
+/**
+ * Draws inline content. `prefix` makes the ids of footnote references unique
+ * to one message, because two messages on a screen both have a footnote 1.
+ */
+const renderInlines = (inlines: ReadonlyArray<MarkdownInline>, prefix: string): ReactNode[] =>
+  inlines.map((inline, index) => renderInline(inline, index, prefix));
+
+/** Draws one inline element, or returns its text. */
+const renderInline = (inline: MarkdownInline, key: number, prefix: string): ReactNode => {
+  switch (inline.type) {
+    case "text":
+      return inline.text;
+    case "strong":
+      return (
+        <strong key={key} className={STRONG}>
+          {renderInlines(inline.children, prefix)}
+        </strong>
+      );
+    case "emphasis":
+      return <em key={key}>{renderInlines(inline.children, prefix)}</em>;
+    case "strikethrough":
+      return <del key={key}>{renderInlines(inline.children, prefix)}</del>;
+    case "inlineCode":
+      return (
+        <code key={key} className={INLINE_CODE}>
+          {inline.text}
+        </code>
+      );
+    case "break":
+      return <br key={key} />;
+    case "link":
+      return (
+        <a
+          key={key}
+          href={inline.href}
+          {...(inline.href.startsWith("#") ? {} : { target: "_blank", rel: "noreferrer" })}
+          className={LINK}
+        >
+          {renderInlines(inline.children, prefix)}
+        </a>
+      );
+    case "image":
+      // No referrer, so reading a message does not tell the image's host which page was read.
+      return <img key={key} src={inline.src} alt={inline.alt} referrerPolicy="no-referrer" />;
+    case "footnoteReference":
+      return (
+        <sup key={key}>
+          <a
+            href={`#${prefix}fn-${inline.number}`}
+            id={inline.isFirstReference ? `${prefix}fnref-${inline.number}` : undefined}
+            aria-describedby={`${prefix}footnote-label`}
+            className={LINK}
+          >
+            {inline.number}
+          </a>
+        </sup>
+      );
+    default:
+      return failUnhandled(inline);
+  }
+};
+
+/** Draws blocks one after another, with no wrapper element. */
+const renderBlocks = (blocks: ReadonlyArray<MarkdownBlock>, prefix: string): ReactNode[] =>
+  blocks.map((block, index) => renderBlock(block, index, prefix));
+
+/** Draws one block. `extras` applies to a paragraph and is ignored for any other block. */
+const renderBlock = (
+  block: MarkdownBlock,
+  key: number,
+  prefix: string,
+  extras: ParagraphExtras = {},
+): ReactNode => {
+  switch (block.type) {
+    case "paragraph": {
+      const content = (
+        <>
+          {extras.lead}
+          {renderInlines(block.children, prefix)}
+          {extras.tail}
+        </>
+      );
+      return extras.bare === true ? (
+        <Fragment key={key}>{content}</Fragment>
+      ) : (
+        <p key={key} className={PARAGRAPH}>
+          {content}
+        </p>
+      );
+    }
+    case "heading": {
+      const Heading = `h${block.depth}` as const;
+      return (
+        <Heading key={key} className={HEADINGS[block.depth]}>
+          {renderInlines(block.children, prefix)}
+        </Heading>
+      );
+    }
+    case "list": {
+      const items = block.items.map((item, index) =>
+        renderListItem(item, index, block.loose, prefix),
+      );
+      return block.start === undefined ? (
+        <ul key={key} className={BULLETED_LIST}>
+          {items}
+        </ul>
+      ) : (
+        <ol key={key} start={block.start === 1 ? undefined : block.start} className={NUMBERED_LIST}>
+          {items}
+        </ol>
+      );
+    }
+    case "blockquote":
+      return (
+        <blockquote key={key} className={QUOTE}>
+          {renderBlocks(block.children, prefix)}
+        </blockquote>
+      );
+    case "code":
+      return (
+        <pre key={key} className={FENCE}>
+          <code className={INLINE_CODE}>{block.text}</code>
+        </pre>
+      );
+    case "table":
+      return (
+        <div key={key} className={TABLE_SCROLLER}>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                {block.header.map((cell, column) =>
+                  renderTableCell("th", column, cell, block.align[column], prefix),
+                )}
+              </tr>
+            </thead>
+            {block.rows.length > 0 && (
+              <tbody>
+                {block.rows.map((row, index) => (
+                  <tr key={index}>
+                    {row.map((cell, column) =>
+                      renderTableCell("td", column, cell, block.align[column], prefix),
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            )}
+          </table>
+        </div>
+      );
+    case "rule":
+      return <hr key={key} className={`${STACKED} border-line`} />;
+    default:
+      return failUnhandled(block);
+  }
+};
+
+/**
+ * Draws a list item. In a tight list its paragraphs are bare text, and a task
+ * item starts with its checkbox. The checkbox is disabled: the message is a
+ * record, not a form.
+ */
+const renderListItem = (
+  item: MarkdownListItem,
+  key: number,
+  loose: boolean,
+  prefix: string,
+): ReactNode => {
+  const checkbox =
+    item.checked === undefined ? null : (
+      <>
+        <input type="checkbox" checked={item.checked} disabled />{" "}
+      </>
+    );
+  return (
+    <li key={key} className={LIST_ITEM}>
+      {item.children[0]?.type === "paragraph" ? null : checkbox}
+      {item.children.map((child, index) =>
+        renderBlock(child, index, prefix, { bare: !loose, lead: index === 0 ? checkbox : null }),
+      )}
+    </li>
+  );
+};
+
+/** Draws a header or body cell, aligned by its column's alignment. */
+const renderTableCell = (
+  tag: "th" | "td",
+  key: number,
+  cell: ReadonlyArray<MarkdownInline>,
+  alignment: ColumnAlignment,
+  prefix: string,
+): ReactNode => {
+  const Cell = tag;
+  const className = `${tag === "th" ? `${CELL} font-emph` : CELL} ${ALIGNMENT[alignment ?? "left"]}`;
+  return (
+    <Cell key={key} className={className}>
+      {renderInlines(cell, prefix)}
+    </Cell>
+  );
+};
+
+/**
+ * Draws the footnotes after the blocks: a section with a visually hidden
+ * heading, and a numbered list. Each footnote ends with a link back to its
+ * first reference, inside its last paragraph when it ends with one.
+ */
+const renderFootnotes = (footnotes: ReadonlyArray<MarkdownFootnote>, prefix: string): ReactNode => {
+  const labelId = `${prefix}footnote-label`;
+  return (
+    <section aria-labelledby={labelId}>
+      <h2 id={labelId} className={`sr-only ${HEADINGS[2]}`}>
+        Footnotes
+      </h2>
+      <ol className={NUMBERED_LIST}>
+        {footnotes.map(({ number, children }) => {
+          const backLink = (
+            <>
+              {" "}
+              <a
+                href={`#${prefix}fnref-${number}`}
+                aria-label={`Back to reference ${number}`}
+                className={LINK}
+              >
+                ↩
+              </a>
+            </>
+          );
+          const endsWithParagraph = children.at(-1)?.type === "paragraph";
+          return (
+            <li key={number} id={`${prefix}fn-${number}`} className={LIST_ITEM}>
+              {children.map((child, index) =>
+                renderBlock(child, index, prefix, {
+                  tail: endsWithParagraph && index === children.length - 1 ? backLink : null,
+                }),
+              )}
+              {endsWithParagraph ? null : backLink}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
 };
 
 /**
@@ -173,6 +385,24 @@ class Legible extends Component<
 }
 
 /**
+ * Parses and draws `text`. It renders below the error boundary on purpose: the
+ * parser throws on text nested deeper than its stack, and React can overflow
+ * while drawing a very deep tree, and the boundary must catch both.
+ */
+function ParsedMarkdown({ text, breaks }: { text: string; breaks: boolean }): JSX.Element {
+  // React's ids contain characters such as ":" that are awkward in a URL
+  // fragment. The prefix keeps the footnote ids of two messages on one screen apart.
+  const prefix = `${useId().replace(/[^A-Za-z0-9_-]/g, "")}-`;
+  const { blocks, footnotes } = parseMarkdown(text, { breaks });
+  return (
+    <>
+      {renderBlocks(blocks, prefix)}
+      {footnotes.length > 0 && renderFootnotes(footnotes, prefix)}
+    </>
+  );
+}
+
+/**
  * Renders markdown prose.
  *
  * The thread rebuilds every turn from the transcript whenever a new row
@@ -198,12 +428,7 @@ export const Markdown = memo(function Markdown({
   // sibling; a wrapper here would separate it from the prose it continues.
   return (
     <Legible text={text}>
-      <ReactMarkdown
-        remarkPlugins={breaks ? [remarkGfm, remarkBreaks] : [remarkGfm]}
-        components={components}
-      >
-        {text}
-      </ReactMarkdown>
+      <ParsedMarkdown text={text} breaks={breaks} />
     </Legible>
   );
 });

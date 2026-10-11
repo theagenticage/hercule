@@ -1450,7 +1450,7 @@ describe("Thread: the assistant's prose renders markdown", () => {
     const column = await openAnsweredThread("line one\nline two");
 
     // A single typed newline is a CommonMark soft break, not a line break.
-    // Only the user's bubble uses `remark-breaks`.
+    // Only the user's bubble turns on `breaks`.
     expect(column.querySelectorAll("br")).toHaveLength(0);
     const paragraph = within(column).getByText(
       (_, element) =>
@@ -1461,7 +1461,7 @@ describe("Thread: the assistant's prose renders markdown", () => {
 });
 
 /**
- * The user's bubble renders as markdown too, with `remark-breaks`. A newline
+ * The user's bubble renders as markdown too, with line breaks on. A newline
  * the user typed stays a line break, instead of collapsing into a space the
  * way a CommonMark soft break would.
  */
