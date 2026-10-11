@@ -82,6 +82,8 @@ const make = Effect.gen(function* () {
         version: VERSION,
         defaultRunnerId: yield* settings.defaultRunnerId(),
         localRunnerId: localRunnerId.read() ?? null,
+        // Placeholder until the text generation service lands (#282).
+        textGeneration: { model: null, lastFailure: null },
       };
     });
 

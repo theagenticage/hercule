@@ -1,0 +1,101 @@
+/**
+ * The frames of a text generation: one model call on a runner, with no tools,
+ * no workspace, no transcript and no turn (spec 06 section 14). The controller
+ * sends instructions, an input and an output schema; the runner answers with
+ * a value that matches the schema, or with why it has none.
+ *
+ * A text generation is not a Session. It has no session row and takes no
+ * session slot, so none of the session frames carry it.
+ */
+import { Schema } from "effect";
+import { OutputSchema } from "./output-schema";
+import { Fact, InstanceId, InstanceSecrets } from "./primitives";
+import { MAX_MESSAGE_LENGTH, ModelSelection, Usage } from "./sessions";
+
+/**
+ * The capability for text generation. A runner lists it at hello when it
+ * answers `TextGenerationRequest`, and the controller when it sends one. A
+ * runner on an older build closes the socket on a frame it cannot read, so
+ * the controller sends a text generation only to a runner that lists this.
+ */
+export const TEXT_GENERATION_CAPABILITY = "textGeneration";
+
+/**
+ * The longest instructions, and the longest input, a text generation carries.
+ * A text generation is meant to be small and cheap; 64 KiB each is far more
+ * than a title, a summary or an extraction needs, and keeps the request well
+ * under the frame limit.
+ */
+export const MAX_TEXT_GENERATION_TEXT_LENGTH = 64 * 1024;
+
+/**
+ * How long the runner lets one text generation run before it stops the
+ * harness. The controller waits for the answer for at most as long, so a
+ * harness that hangs never outlives the caller that gave up on it.
+ */
+export const TEXT_GENERATION_DEADLINE_MS = 60_000;
+
+const Text = Schema.String.check(Schema.isMaxLength(MAX_TEXT_GENERATION_TEXT_LENGTH));
+
+const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
+
+/** What one text generation asks the model: the same for every provider. */
+export const TextGenerationSpec = Schema.Struct({
+  model: ModelSelection,
+  /** What the model is told to do. Given to the harness as its system prompt. */
+  instructions: Text,
+  /** What the model works on. Given to the harness as the one user message. */
+  input: Text,
+  /** The JSON Schema the answer must match. */
+  outputSchema: OutputSchema,
+});
+
+export type TextGenerationSpec = Schema.Schema.Type<typeof TextGenerationSpec>;
+
+/**
+ * Asks the runner to make one text generation on a provider instance. The
+ * instance's config and credentials live on the controller, so the request
+ * carries them, as `ProbeRequest` does.
+ */
+export const TextGenerationRequest = Schema.Struct({
+  _tag: Schema.Literal("textGenerationRequest"),
+  requestId: Fact,
+  instanceId: InstanceId,
+  providerId: Fact,
+  config: Schema.Json,
+  /** The instance's credentials, which its config never holds; `{}` when none. */
+  secrets: InstanceSecrets,
+  spec: TextGenerationSpec,
+});
+
+export type TextGenerationRequest = Schema.Schema.Type<typeof TextGenerationRequest>;
+
+/**
+ * How a text generation ended on the runner:
+ *
+ * - `ok`: the answer matched the output schema. `usage` is null when the
+ *   harness reported no token counts.
+ * - `invalid-output`: the harness answered, but not with a value that matches
+ *   the output schema. `reason` says what did not match.
+ * - `failed`: the call did not produce an answer at all: the harness would
+ *   not start, was not logged in, errored, or ran past its deadline.
+ */
+export const TextGenerationOutcome = Schema.Union([
+  Schema.Struct({
+    outcome: Schema.Literal("ok"),
+    value: Schema.Json,
+    usage: Schema.NullOr(Usage),
+  }),
+  Schema.Struct({ outcome: Schema.Literal("invalid-output"), reason: Message }),
+  Schema.Struct({ outcome: Schema.Literal("failed"), message: Message }),
+]);
+
+export type TextGenerationOutcome = Schema.Schema.Type<typeof TextGenerationOutcome>;
+
+export const TextGenerationReport = Schema.Struct({
+  _tag: Schema.Literal("textGenerationReport"),
+  requestId: Fact,
+  outcome: TextGenerationOutcome,
+});
+
+export type TextGenerationReport = Schema.Schema.Type<typeof TextGenerationReport>;

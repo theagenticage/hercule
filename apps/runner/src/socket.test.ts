@@ -1005,6 +1005,7 @@ describe("session frames on one connection", () => {
         binaryName: "fake-harness",
         events: Stream.fromPubSub(events),
         probe: () => Effect.die("not probed here"),
+        generateText: () => Effect.die("no text generation here"),
         listSessions: Effect.suspend(() => {
           const gate = fake.listGate;
           fake.listGate = undefined;

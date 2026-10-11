@@ -79,6 +79,26 @@ export const ThreadRows = Schema.Literals(["meta", "plain"]);
 
 export type ThreadRows = Schema.Schema.Type<typeof ThreadRows>;
 
+/**
+ * Which model makes text generations: small model calls such as naming a
+ * Thread (spec 06 section 14).
+ *
+ * - `automatic`: the first provider, in the controller's order, whose
+ *   suggested text generation model a logged-in instance offers. With no such
+ *   provider, text generation is off.
+ * - `off`: nothing makes text generations.
+ * - an instance and a model: that model on that instance, and never another.
+ *   A call that cannot run there fails rather than switching provider.
+ *
+ * Unset reads as `automatic`.
+ */
+export const TextGenerationModel = Schema.Union([
+  Schema.Literals(["automatic", "off"]),
+  closedStruct({ instanceId: Id, model: Schema.NonEmptyString }),
+]);
+
+export type TextGenerationModel = Schema.Schema.Type<typeof TextGenerationModel>;
+
 /** What every settings key holds, per scope. This is the only declaration of each key. */
 export const SETTING_VALUES = {
   controller: {
@@ -125,6 +145,8 @@ export const SETTING_VALUES = {
      * workflow, stops here instead of starting runs without end.
      */
     "run.nestingLimit": PositiveCount,
+    /** Which model makes text generations. Unset reads as `automatic`. */
+    "textGeneration.model": TextGenerationModel,
   },
   user: {
     /** The IANA zone the user reads times in, chosen during setup. */

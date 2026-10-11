@@ -31,6 +31,7 @@ import { createInternalError, createUnauthenticatedError } from "@hercule/contra
 import {
   AGENT_STEPS_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
+  TEXT_GENERATION_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   ControllerToRunner,
   GOING_AWAY_CLOSE_CODE,
@@ -97,6 +98,8 @@ const RETIRED = "this runner was retired; run `hercule runner join` to join the 
  * - `AGENT_STEPS_CAPABILITY`: this controller sends a step key on a turn's
  *   input and asks for an agent step's result. Run pinning places a run with
  *   an agent step only on a runner that negotiated it.
+ * - `TEXT_GENERATION_CAPABILITY`: this controller sends text generations, and
+ *   only to a runner that negotiated it.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
@@ -104,6 +107,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   AGENT_STEPS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
+  TEXT_GENERATION_CAPABILITY,
 ];
 
 const UNREADABLE = "that is not a message this controller can read";
@@ -270,6 +274,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           case "loginUrl":
           case "loginFailed":
           case "loginResult":
+          case "textGenerationReport":
             if (!greeted) return;
             return yield* connections.reportedAnswer(runnerId, mine, message);
           case "sessionInputResult":

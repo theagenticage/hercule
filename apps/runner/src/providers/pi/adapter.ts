@@ -1611,6 +1611,9 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
+    // Built by the provider's own slice of #282.
+    generateText: () =>
+      Effect.succeed({ outcome: "failed" as const, message: "text generation is not built yet" }),
 
     install: makePiInstall(seam.run),
   };

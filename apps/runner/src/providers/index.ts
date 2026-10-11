@@ -8,6 +8,8 @@ import type {
   ApprovalDecision,
   ExitReason,
   ProbeResult,
+  TextGenerationOutcome,
+  TextGenerationSpec,
   ProviderEvent,
   QuestionAnswers,
   SendResult,
@@ -142,6 +144,24 @@ export interface ProviderAdapter {
   ) => Effect.Effect<InstallOutcome>;
   /** Takes the binary separately, because a login needs a machine that already has the harness. */
   readonly login?: (ctx: ProviderRunnerContext, binary: string) => LoginCommand;
+
+  /**
+   * Makes one text generation: a single model call with the spec's
+   * instructions as the system prompt and its input as the one user message,
+   * answered with a value that matches the spec's output schema (spec 06
+   * section 14). The harness runs with no tools, no workspace and nothing
+   * persisted, in its own process, which exits before this returns.
+   *
+   * Never fails: every way the call can go wrong is a `failed` or an
+   * `invalid-output` outcome, so the runner always has an answer to send.
+   * `ctx.cwd` is null; the adapter runs the harness in a scratch directory of
+   * its own. The runner stops the call at `TEXT_GENERATION_DEADLINE_MS`.
+   */
+  readonly generateText: (
+    ctx: ProviderRunnerContext,
+    config: Schema.Json,
+    spec: TextGenerationSpec,
+  ) => Effect.Effect<TextGenerationOutcome>;
 
   /**
    * The adapter's single output: the normalized events of every session it

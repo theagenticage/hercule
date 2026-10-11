@@ -187,6 +187,7 @@ const createFake = (): Fake => {
       }),
       probe: () => Effect.die("not probed here"),
       listSessions: Effect.sync(() => [...held.values()]),
+      generateText: () => Effect.die("no text generation here"),
       startSession: (sessionId, _spec, ctx) =>
         Effect.suspend(() => {
           if (fake.dies) throw new Error("the harness threw where nothing declared it could");

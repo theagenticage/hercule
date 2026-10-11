@@ -1206,6 +1206,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),
+    // Built by the provider's own slice of #282.
+    generateText: () =>
+      Effect.succeed({ outcome: "failed" as const, message: "text generation is not built yet" }),
 
     // Every shipped provider's config schema is empty, so the Claude adapter
     // does not read the config and leaves out that parameter.
