@@ -4,7 +4,7 @@
  * "The filters and search").
  */
 import { useEffect, useRef, type JSX } from "react";
-import { WORKFLOW_LIST_FILTERS, type WorkflowListFilter } from "@hercule/client-core";
+import { WORKFLOW_LIST_FILTERS, type WorkflowListFilter } from "@hercule/client-core/workflow-rows";
 import { SearchIcon } from "../../icons/search";
 import "../session/floating-header.css";
 import "./workflow-list.css";

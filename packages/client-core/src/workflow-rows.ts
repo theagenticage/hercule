@@ -48,12 +48,6 @@ const WORKFLOW_GROUPS: ReadonlyArray<{ readonly group: WorkflowGroup; readonly t
 ];
 
 /**
- * How many of a workflow's newest runs its strip shows: the list reads them
- * with `run.query({ workflowId, limit: STRIP_RUN_LIMIT })`.
- */
-export const STRIP_RUN_LIMIT = 20;
-
-/**
  * The state mark that leads a row: its group's mark, or in Everything else
  * `idle`, or `paused` for a workflow that is off.
  */

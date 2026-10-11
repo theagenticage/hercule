@@ -16,13 +16,13 @@
 import { memo, useId, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type { TriggerFiresOn } from "@hercule/contract";
-import {
-  STRIP_RUN_LIMIT,
-  type StripRunState,
-  type WorkflowRowMark,
-  type WorkflowStatusTone,
-} from "@hercule/client-core";
+import type {
+  StripRunState,
+  WorkflowRowMark,
+  WorkflowStatusTone,
+} from "@hercule/client-core/workflow-rows";
 import { useListTime } from "../../app/age-clock";
+import { STRIP_RUN_LIMIT } from "../../app/queries";
 import { BoltIcon } from "../../icons/bolt";
 import { ClockIcon } from "../../icons/clock";
 import { Mark } from "../../marks";

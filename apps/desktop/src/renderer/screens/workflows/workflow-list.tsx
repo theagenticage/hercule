@@ -4,7 +4,10 @@
  * virtualized (spec 17 §Workflows, "The list").
  */
 import { useRef, type JSX } from "react";
-import { pickWorkflowFocusFallback, type WorkflowListItem } from "@hercule/client-core";
+import {
+  pickWorkflowFocusFallback,
+  type WorkflowListItem,
+} from "@hercule/client-core/workflow-rows";
 import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
 import { VirtualList } from "../virtual-list";
 import {

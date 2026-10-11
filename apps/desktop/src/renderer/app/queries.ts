@@ -24,7 +24,6 @@ import {
   queryKeys,
   readEveryPage,
   readSenderSession,
-  STRIP_RUN_LIMIT,
   type HerculeClient,
   type MessagePage,
   type MessagePages,
@@ -474,6 +473,9 @@ export const triggersQuery = (client: HerculeClient) =>
     queryFn: () => readEveryPage((page) => client.trigger.query({ query: page })),
     ...LIVE_KEPT_READ_OPTIONS,
   });
+
+/** How many of a workflow's newest runs its strip in the workflow list shows. */
+export const STRIP_RUN_LIMIT = 20;
 
 /**
  * Reads a workflow's newest runs, newest first, for its strip in the

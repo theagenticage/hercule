@@ -2,13 +2,13 @@ import { useState, type JSX } from "react";
 import { useQueries, useSuspenseQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute } from "@tanstack/react-router";
 import type { RunSummary } from "@hercule/contract";
+import { resolveDisplayTimezone } from "@hercule/client-core";
 import {
   buildWorkflowListItems,
   buildWorkflowRows,
   countWorkflowsByFilter,
-  resolveDisplayTimezone,
   type WorkflowListFilter,
-} from "@hercule/client-core";
+} from "@hercule/client-core/workflow-rows";
 import { useWorkflowsLive } from "../../../../app/live";
 import {
   liveAgentSessionsQuery,
