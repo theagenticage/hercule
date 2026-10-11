@@ -18,6 +18,7 @@ import type {
   RegistrationHost,
   WorkflowActionContribution,
 } from "@hercule/plugin-host";
+import { FINE_GRAINED_TOKEN_WARNING } from "./connection-type";
 import { github } from "./index";
 import { runAgainstStub, stubAnswer, stubHttpClient, type GithubStub } from "./testing";
 
@@ -94,8 +95,11 @@ const KINDS = [
   "github.issue.labeled",
   "github.issue.assigned",
   "github.issue.commented",
+  "github.mentioned",
   "github.pr.opened",
   "github.pr.synchronized",
+  "github.pr.review-requested",
+  "github.pr.review-request-removed",
   "github.pr.review-submitted",
   "github.pr.commented",
   "github.pr.merged",
@@ -160,6 +164,46 @@ describe("what the github plugin registers", () => {
     for (const kind of KINDS) {
       expect(sources[0]?.kinds[kind]?.description ?? "", kind).not.toBe("");
     }
+  });
+
+  it("keeps the kinds that only end a signal or would flood triage away from triage", async () => {
+    const kinds = (await collectContributions(github)).sources[0]?.kinds ?? {};
+
+    const hidden = Object.entries(kinds)
+      .filter(([, declaration]) => !declaration.availableToTriage)
+      .map(([kind]) => kind)
+      .sort();
+    expect(hidden).toEqual([
+      "github.pr.checks-completed",
+      "github.pr.labeled",
+      "github.pr.review-request-removed",
+      "github.pr.synchronized",
+    ]);
+  });
+
+  it("declares the three signal kinds, reading only the source's own event kinds", async () => {
+    const source = (await collectContributions(github)).sources[0]!;
+    const signalKinds = source.signalKinds ?? [];
+
+    expect(signalKinds.map((kind) => kind.word)).toEqual([
+      "review-requested",
+      "team-review-requested",
+      "mentioned",
+    ]);
+    for (const kind of signalKinds) {
+      for (const eventKind of [...kind.from, ...kind.ends.map((end) => end.eventKind)]) {
+        expect(source.kinds[eventKind], `${kind.word} reads ${eventKind}`).toBeDefined();
+      }
+    }
+  });
+
+  it("lets a Signal's answer run the four actions spec 05 lists, and no other", async () => {
+    const actions = (await collectContributions(github)).actions;
+
+    const answers = actions
+      .filter((action) => action.usableIn?.some((place) => place === "signal.answer") === true)
+      .map((action) => action.id);
+    expect(answers).toEqual(["issue.comment", "pr.comment", "pr.review", "pr.merge"]);
   });
 
   it("contributes the nine actions, each acting through a GitHub Connection", async () => {
@@ -243,6 +287,16 @@ describe("how the github plugin handles GitHub's response", () => {
     expect(request?.headers["authorization"]).toBe(`Bearer ${PAT}`);
     expect(request?.headers["accept"]).toBe("application/vnd.github+json");
     expect(request?.headers["user-agent"] ?? "").not.toBe("");
+  });
+
+  it("accepts a fine-grained token with a warning that names what it cannot read", async () => {
+    const stub = stubAnswer(200, { login: "octocat", id: 583231 });
+
+    const outcome = await runValidate(stub, { pat: "github_pat_11ABC" });
+
+    expect(outcome).toMatchObject({ success: { warning: FINE_GRAINED_TOKEN_WARNING } });
+    const classic = await runValidate(stub);
+    expect(Result.isSuccess(classic) && "warning" in classic.success).toBe(false);
   });
 
   it("sends the access token the device flow obtained when no token was pasted", async () => {

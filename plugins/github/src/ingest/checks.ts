@@ -20,21 +20,31 @@
  *
  * So a quiet repository costs one free 304 plus one free 304 per pull
  * request in the window, as long as no commit has more than 100 suites.
+ *
+ * After the watch list, the feed checks the user's own open pull requests in
+ * the repositories outside it, so their failed checks reach the user too.
+ * That costs one search, and per pull request in the window one
+ * `GET /repos/{o}/{r}/pulls/{n}` with its ETag, for the head commit, and the
+ * same check-suites request as above. Their state is kept under
+ * `checks-own`, outside the per-repository keys.
  */
 import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
-import type { IngestContext, PollResult } from "@hercule/plugin-host";
-import { buildItemEvent, type GithubItem } from "../subject";
+import { PluginError, type IngestContext, type PollResult } from "@hercule/plugin-host";
+import type { GithubIdentity } from "../identity";
+import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
 import { computeDigest } from "./digest";
 import { GithubCheckSuite, ListedPull } from "./feed-objects";
+import { fetchOwnOpenPullRequests } from "./own-pulls";
 import {
   decodeGithubValue,
+  fetchFeedResponse,
   fetchListing,
   readGithubObject,
   truncateRaw,
   type FeedError,
 } from "./requests";
-import { pollWatchedRepos, type RepoPoll } from "./state";
+import { pollWatchedRepos, readFeedState, type RepoPoll } from "./state";
 
 /** What the feed keeps of one open pull request, to reuse when the listing answers 304. */
 const PullRequestSnapshot = Schema.Struct({
@@ -93,6 +103,13 @@ const MAX_PULL_PAGES = 10;
  * instead of reporting from part of the list.
  */
 const MAX_SUITE_PAGES = 3;
+
+/** Returns how an event title says a rolled-up conclusion: "failed", "passed" or "finished". */
+const describeConclusion = (conclusion: string): string => {
+  if (conclusion === "failure") return "failed";
+  if (conclusion === "success") return "passed";
+  return "finished";
+};
 
 /** The conclusions that do not make a commit's checks fail. */
 const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
@@ -255,6 +272,7 @@ const checkHead = (
         ...(pullRequest.author === undefined ? {} : { author: pullRequest.author }),
         state: "open",
       };
+      const conclusion = rollUpConclusion(suites);
       yield* poll.emit(
         buildItemEvent(item, {
           kind: "github.pr.checks-completed",
@@ -262,8 +280,10 @@ const checkHead = (
           // and keep the key under the host's 200 characters.
           dedupKey: `pr.checks-completed:${poll.repo}#${String(pullRequest.number)}:${pullRequest.headSha.slice(0, 12)}:${verdict}`,
           occurredAt: completedAt,
+          title: `Checks ${describeConclusion(conclusion)} on ${buildItemPlace(item)}`,
+          author: null,
           fields: {
-            conclusion: rollUpConclusion(suites),
+            conclusion,
             suites: suites.map((suite) => ({
               name: suite.app?.name ?? "unknown",
               conclusion: suite.conclusion ?? "unknown",
@@ -322,22 +342,132 @@ const baselineRepo: Effect.Effect<ChecksState> = Effect.map(Clock.currentTimeMil
   heads: {},
 }));
 
+/** What the feed keeps of one of the user's own open pull requests outside the watch list. */
+const OwnPullRequestSnapshot = Schema.Struct({
+  repo: Schema.String,
+  number: Schema.Int,
+  title: Schema.String,
+  headSha: Schema.String,
+  updatedAt: Schema.String,
+  /** The ETag of the last `GET .../pulls/{n}`, sent back as `If-None-Match`. */
+  etag: Schema.optionalKey(Schema.String),
+});
+
+/** What the feed keeps between polls for the user's own open pull requests outside the watch list. */
+const OwnChecksState = Schema.Struct({
+  /** When the feed first checked them, as ISO 8601; checks that finished before emit nothing. */
+  watchedSince: Schema.String,
+  pullRequests: Schema.Array(OwnPullRequestSnapshot),
+  /** The head commits, keyed by `<owner>/<repo>@<sha>`. */
+  heads: Schema.Record(Schema.String, HeadState),
+});
+
+type OwnChecksState = Schema.Schema.Type<typeof OwnChecksState>;
+
+/** The key of `OwnChecksState`. It is outside `checks/`, where each watched repository's state is. */
+const OWN_CHECKS_KEY = "checks-own";
+
 /**
- * Polls the checks feed once: every repository on the watch list, in turn.
- * A repository with no state yet baselines and emits nothing. Fails as
- * `pollWatchedRepos` fails.
+ * Checks the head commit of each of the user's own open pull requests
+ * outside the watch list, updated within the window, and returns the new
+ * state. A pull request that fails with a `PluginError`, such as one in a
+ * repository deleted since, is logged as a warning and keeps its state, so
+ * it cannot set the Connection to `error`: it is not on the watch list the
+ * user set up.
+ */
+const checkOwnPullRequests = (
+  token: string,
+  emit: IngestContext["emit"],
+  stored: OwnChecksState,
+  watchList: ReadonlyArray<string>,
+  windowDays: number,
+  identity: GithubIdentity,
+): Effect.Effect<OwnChecksState, FeedError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const oldest = (yield* Clock.currentTimeMillis) - windowDays * DAY_MS;
+    const watched = new Set(watchList);
+    const own = (yield* fetchOwnOpenPullRequests(token, identity.login)).filter(
+      (pullRequest) =>
+        !watched.has(pullRequest.repo) && Date.parse(pullRequest.updatedAt) >= oldest,
+    );
+    const pullRequests: Array<Schema.Schema.Type<typeof OwnPullRequestSnapshot>> = [];
+    const heads: Record<string, HeadState> = {};
+    for (const found of own) {
+      const previous = stored.pullRequests.find(
+        (snapshot) => snapshot.repo === found.repo && snapshot.number === found.number,
+      );
+      yield* Effect.gen(function* () {
+        const response = yield* fetchFeedResponse({
+          method: "GET",
+          path: `/repos/${found.repo}/pulls/${String(found.number)}`,
+          token,
+          ...(previous?.etag === undefined ? {} : { etag: previous.etag }),
+        });
+        const snapshot =
+          response.status === 304 && previous !== undefined
+            ? previous
+            : yield* Effect.map(
+                decodeGithubValue(ListedPull, response.body, "a pull request"),
+                (pull) => ({
+                  repo: found.repo,
+                  number: found.number,
+                  title: pull.title,
+                  headSha: pull.head.sha,
+                  updatedAt: pull.updated_at,
+                  ...(response.etag === undefined ? {} : { etag: response.etag }),
+                }),
+              );
+        const headKey = `${found.repo}@${snapshot.headSha}`;
+        heads[headKey] = yield* checkHead(
+          { repo: found.repo, token, emit },
+          { ...snapshot, author: identity.login },
+          stored.heads[headKey],
+          stored.watchedSince,
+        );
+        pullRequests.push(snapshot);
+      }).pipe(
+        Effect.catchIf(
+          (error): error is PluginError => error instanceof PluginError,
+          (error) =>
+            Effect.logWarning(
+              `The GitHub checks feed could not check ${buildItemPlace(found)}, one of the user's own pull requests: ${error.message}`,
+            ),
+        ),
+      );
+    }
+    return { watchedSince: stored.watchedSince, pullRequests, heads };
+  });
+
+/**
+ * Polls the checks feed once: every repository on the watch list, in turn,
+ * then the user's own open pull requests outside it. A repository with no
+ * state yet baselines and emits nothing, and so do the user's own pull
+ * requests on the first poll. Fails as `pollWatchedRepos` fails.
  */
 export const pollChecks = (
   token: string,
   context: Pick<IngestContext, "emit" | "state">,
   watchList: ReadonlyArray<string>,
   windowDays: number,
+  identity: GithubIdentity,
 ): Effect.Effect<PollResult, FeedError, HttpClient.HttpClient> =>
-  Effect.as(
-    pollWatchedRepos("checks", context.state, watchList, ChecksState, (repo, stored) =>
+  Effect.gen(function* () {
+    yield* pollWatchedRepos("checks", context.state, watchList, ChecksState, (repo, stored) =>
       Option.isNone(stored)
         ? baselineRepo
         : pollRepo({ repo, token, emit: context.emit }, stored.value, windowDays),
-    ),
-    {},
-  );
+    );
+    const stored = yield* readFeedState(context.state, OWN_CHECKS_KEY, OwnChecksState);
+    const next = Option.isNone(stored)
+      ? { ...(yield* baselineRepo), pullRequests: [] }
+      : yield* checkOwnPullRequests(
+          token,
+          context.emit,
+          stored.value,
+          watchList,
+          windowDays,
+          identity,
+        );
+    yield* context.state.set(OWN_CHECKS_KEY, next);
+    return {};
+  });

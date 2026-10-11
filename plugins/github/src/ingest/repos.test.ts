@@ -14,6 +14,9 @@ import {
   stubGithub,
   type IngestHarness,
   type StubResponse,
+  TEST_IDENTITY,
+  answerUserRequests,
+  isUserRequest,
 } from "../testing";
 import { computeDigest } from "./digest";
 import { MAX_ITEMS_PER_REPO, MAX_REQUESTS_PER_POLL, pollRepos } from "./repos";
@@ -41,6 +44,8 @@ interface StubComment {
   id: number;
   html_url: string;
   issue_url: string;
+  user: { login: string; id: number } | null;
+  body: string;
   created_at: string;
   updated_at: string;
 }
@@ -105,6 +110,8 @@ const buildComment = (
   id,
   html_url: `https://github.com/${REPO}/${kind}/${String(number)}#issuecomment-${String(id)}`,
   issue_url: `https://api.github.com/repos/${REPO}/issues/${String(number)}`,
+  user: { login: "mona", id: 1 },
+  body: "Looks good to me.",
   created_at: time,
   updated_at: time,
 });
@@ -205,9 +212,15 @@ const poll = async (
   route: (request: HttpClientRequest.HttpClientRequest) => StubResponse,
   watchList: ReadonlyArray<string> = [REPO],
 ) => {
-  const stub = stubGithub(route);
-  const result = await runAgainstStub(pollRepos("token", harness.context, watchList), stub);
-  return { result, requests: stub.requests.map(readStubRequestTarget), sent: stub.requests };
+  const stub = stubGithub(answerUserRequests(route));
+  const result = await runAgainstStub(
+    pollRepos("token", harness.context, watchList, TEST_IDENTITY),
+    stub,
+  );
+  // The requests about the user, rather than a repository, are left out:
+  // the tests here count and read the requests for repositories.
+  const sent = stub.requests.filter((request) => !isUserRequest(request));
+  return { result, requests: sent.map(readStubRequestTarget), sent };
 };
 
 /** Returns the time `seconds` after `time`, both in GitHub's format, such as `2026-10-01T10:00:05Z`. */
@@ -275,10 +288,10 @@ describe("the repos feed", () => {
     const repository = buildRepository();
     const harness = await baseline(repository);
     await poll(harness, answerFrom(repository));
-    const stub = stubGithub(answerFrom(repository));
+    const stub = stubGithub(answerUserRequests(answerFrom(repository)));
 
     await Effect.runPromise(
-      pollRepos("token", harness.context, [REPO]).pipe(Effect.provide(stub.layer)),
+      pollRepos("token", harness.context, [REPO], TEST_IDENTITY).pipe(Effect.provide(stub.layer)),
     );
 
     expect(stub.requests[0]!.headers["if-none-match"]).toBe('"v1"');
@@ -515,6 +528,8 @@ describe("the repos feed", () => {
         id: 500,
         html_url: `https://github.com/${REPO}/pull/2#issuecomment-500`,
         issue_url: `https://api.github.com/repos/${REPO}/issues/2`,
+        user: { login: "mona", id: 1 },
+        body: "Edited since.",
         created_at: "2026-10-01T09:20:00Z",
         updated_at: "2026-10-01T10:59:00Z",
       },
@@ -522,6 +537,8 @@ describe("the repos feed", () => {
         id: 501,
         html_url: `https://github.com/${REPO}/issues/1#issuecomment-501`,
         issue_url: `https://api.github.com/repos/${REPO}/issues/1`,
+        user: { login: "mona", id: 1 },
+        body: "Can you take a look?",
         created_at: "2026-10-01T11:00:00Z",
         updated_at: "2026-10-01T11:00:00Z",
       },
@@ -529,6 +546,8 @@ describe("the repos feed", () => {
         id: 502,
         html_url: `https://github.com/${REPO}/pull/2#issuecomment-502`,
         issue_url: `https://api.github.com/repos/${REPO}/issues/2`,
+        user: { login: "mona", id: 1 },
+        body: "Thanks!",
         created_at: "2026-10-01T11:01:00Z",
         updated_at: "2026-10-01T11:01:00Z",
       },
@@ -716,8 +735,10 @@ describe("the repos feed", () => {
       "github.issue.labeled",
       "github.issue.assigned",
       "github.issue.closed",
-      "github.pr.labeled",
+      // The pull request is read before its changes are listed, because a
+      // merge's author comes from it, so its new head is emitted first.
       "github.pr.synchronized",
+      "github.pr.labeled",
     ]);
   });
 

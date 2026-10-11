@@ -68,13 +68,25 @@ const Account = Schema.Struct({ login: Schema.String, id: Schema.Number });
 const decodeAccount = Schema.decodeUnknownEffect(Account);
 
 /**
+ * The warning a Connection with a fine-grained personal access token shows.
+ * GitHub's Notifications API refuses those tokens, and they cannot read the
+ * Checks API either, so the feeds that need them get nothing.
+ */
+export const FINE_GRAINED_TOKEN_WARNING =
+  "GitHub does not let fine-grained tokens read notifications or checks, so review requests and mentions outside your watched repositories, and failed checks, raise no signal: sign in with GitHub or use a classic token to get them.";
+
+/** Checks whether a token is a fine-grained personal access token, which GitHub prefixes with `github_pat_`. */
+const isFineGrainedToken = (token: string): boolean => token.startsWith("github_pat_");
+
+/**
  * Asks GitHub who the token belongs to. The login is the account name the
  * Connections screen shows. The user id is the account id the host compares
  * on a reconnect, so that a reconnect cannot switch the connection to
  * another account.
  *
  * The host passes the pasted `pat` field, or the `accessToken` the device
- * flow obtained.
+ * flow obtained. A fine-grained token works, with a warning saying what it
+ * cannot read.
  */
 const validate: ConnectionTypeContribution["validate"] = (credentials) =>
   Effect.gen(function* () {
@@ -90,7 +102,11 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
         failValidation("GitHub's response did not include the account's login and user id."),
       ),
     );
-    return { displayName: account.login, accountId: String(account.id) };
+    return {
+      displayName: account.login,
+      accountId: String(account.id),
+      ...(isFineGrainedToken(token) ? { warning: FINE_GRAINED_TOKEN_WARNING } : {}),
+    };
   }).pipe(Effect.catchTag("GithubUnreachable", (error) => failValidation(error.message)));
 
 /**

@@ -14,7 +14,10 @@
  *    `updated_at` moving; a diff that finds nothing new emits nothing. A
  *    repository where nothing changed answers 304, which costs no quota.
  * 2. For each pull request diffed: `GET .../pulls/{n}/reviews`, for new
- *    reviews, and, when it is open, `GET .../pulls/{n}`, for its head commit.
+ *    reviews, and, when it is open or was just closed, `GET .../pulls/{n}`,
+ *    for its head commit, its review requests and who merged it. When the
+ *    review requests to the user or their teams changed,
+ *    `GET .../issues/{n}/events` too, for who asked and when.
  * 3. When the listing held any item, or the last poll's comment listing
  *    stopped at its page limit: one
  *    `GET /repos/{o}/{r}/issues/comments?since=<cursor>` for the whole
@@ -69,10 +72,18 @@
 import { Effect, Option, Schema } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import type { IngestContext, PollResult } from "@hercule/plugin-host";
-import { readReviewVerdict } from "../github-objects";
-import { buildItemEvent, type GithubItem } from "../subject";
+import { isUserAccount, type GithubIdentity } from "../identity";
+import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
+import {
+  emitCommentEvents,
+  emitReviewEvent,
+  emitReviewRequestEvents,
+  isAtOrAfter,
+  type ActivityPoll,
+} from "./activity";
 import { computeDigest } from "./digest";
 import { ListedComment, ListedIssue, ListedPull, ListedReview } from "./feed-objects";
+import { pollFollowedItems } from "./followed";
 import {
   decodeGithubValue,
   fetchFeedResponse,
@@ -81,7 +92,8 @@ import {
   truncateRaw,
   type FeedError,
 } from "./requests";
-import { pollWatchedRepos, type RepoPoll } from "./state";
+import { pollWatchedRepos } from "./state";
+import { buildTeamName, readUserTeams } from "./teams";
 
 /** What the snapshot keeps of one issue or pull request: only what a diff compares. */
 const ItemSnapshot = Schema.Struct({
@@ -98,6 +110,14 @@ const ItemSnapshot = Schema.Struct({
    * a comment or review from that second is not new.
    */
   fromBaseline: Schema.optionalKey(Schema.Boolean),
+  /**
+   * The reviews an open pull request asks of the user and their teams:
+   * `you`, and `team:<org>/<slug>` for each team, sorted. A change in it
+   * makes the poll read the pull request's history for the requests. Absent
+   * for an issue, and for a snapshot an older version of this plugin wrote,
+   * which counts as no change.
+   */
+  reviewRequests: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
 type ItemSnapshot = Schema.Schema.Type<typeof ItemSnapshot>;
@@ -157,14 +177,17 @@ export const MAX_ITEMS_PER_REPO = 50;
  *
  * - a baseline: 1 request for the newest item, then up to 50 pages each of
  *   open issues, closed issues and open pull requests, 151 in all;
- * - a later poll: up to 10 listing pages, the head commit and the reviews of
- *   each of `MAX_ITEMS_PER_REPO` pull requests, and up to 10 comment pages,
- *   120 in all when each review listing is one page.
+ * - a later poll: up to 10 listing pages; for each of `MAX_ITEMS_PER_REPO`
+ *   pull requests, the pull request, its reviews and, when its review
+ *   requests changed, its history; and up to 10 comment pages: 170 in all
+ *   when each review and history listing is one page.
  *
- * So a poll sends at most 100 + 151 = 251 requests, about 125 seconds, and
- * has room to spare for slow answers. The one count without a fixed limit is
- * the items a repository diffs past `MAX_ITEMS_PER_REPO` to finish a second,
- * and the listing's 1,000 items bound those.
+ * So the watch list costs at most 100 + 170 = 270 requests. The followed
+ * items after it cost at most about 82 more (see `followed.ts`), so a poll
+ * sends about 350 requests, about 175 seconds, and has room to spare for
+ * slow answers. The one count without a fixed limit is the items a
+ * repository diffs past `MAX_ITEMS_PER_REPO` to finish a second, and the
+ * listing's 1,000 items bound those.
  */
 export const MAX_REQUESTS_PER_POLL = 100;
 
@@ -189,6 +212,8 @@ interface ItemChange {
   readonly kind: string;
   readonly dedupKey: string;
   readonly occurredAt: string;
+  readonly title: string;
+  readonly author: string | null;
   readonly fields?: Readonly<Record<string, unknown>>;
 }
 
@@ -197,10 +222,6 @@ const listMissingFrom = (
   values: ReadonlyArray<string>,
   reference: ReadonlyArray<string>,
 ): Array<string> => values.filter((value) => !reference.includes(value)).sort();
-
-/** Checks whether ISO 8601 timestamp `time` is at or after `start`. An absent start is before everything. */
-const isAtOrAfter = (time: string, start: string | undefined): boolean =>
-  start === undefined || Date.parse(time) >= Date.parse(start);
 
 /** Checks whether ISO 8601 timestamp `time` is strictly after `start`. An absent start is before everything. */
 const isAfter = (time: string, start: string | undefined): boolean =>
@@ -274,15 +295,18 @@ const computeNewActivityStart = (
  *
  * The plugin declares no kind for a pull request that was reopened or
  * assigned, and none for an unassignment, so those changes emit nothing.
+ * `mergedBy` is the login of who merged a pull request, when it is known.
  */
 const listItemChanges = (
   repo: string,
   issue: ListedIssue,
   previous: ItemSnapshot | undefined,
   cursor: string | undefined,
+  mergedBy: string | null,
 ): ReadonlyArray<ItemChange> => {
   const kind = issue.pull_request === undefined ? "issue" : "pr";
-  const item = `${repo}#${String(issue.number)}`;
+  const noun = kind === "pr" ? "Pull request" : "Issue";
+  const item = buildItemPlace({ repo, number: issue.number });
   const isNew = isNewItem(issue, previous, cursor);
   if (previous === undefined && !isNew) {
     // `state_reason` stays `reopened` for as long as the issue is open, so an
@@ -297,6 +321,8 @@ const listItemChanges = (
             kind: "github.issue.reopened",
             dedupKey: `issue.reopened:${item}:${issue.updated_at}`,
             occurredAt: issue.updated_at,
+            title: `Issue ${item} was reopened`,
+            author: null,
           },
         ]
       : [];
@@ -316,6 +342,8 @@ const listItemChanges = (
       kind: `github.${kind}.opened`,
       dedupKey: `${kind}.opened:${item}`,
       occurredAt: issue.created_at,
+      title: `${issue.user?.login ?? "Someone"} opened ${item}: ${issue.title}`,
+      author: issue.user?.login ?? null,
     });
   }
   if (kind === "issue" && before.state === "closed" && issue.state === "open") {
@@ -323,6 +351,8 @@ const listItemChanges = (
       kind: "github.issue.reopened",
       dedupKey: `issue.reopened:${diffed}`,
       occurredAt: issue.updated_at,
+      title: `Issue ${item} was reopened`,
+      author: null,
     });
   }
   const labels = readLabels(issue);
@@ -339,6 +369,8 @@ const listItemChanges = (
       kind: `github.${kind}.labeled`,
       dedupKey: `${kind}.labeled:${diffed}:${change}`,
       occurredAt: issue.updated_at,
+      title: `Labels changed on ${item}: ${[...added.map((name) => `+${name}`), ...removed.map((name) => `-${name}`)].join(" ")}`,
+      author: null,
       fields: { added, removed },
     });
   }
@@ -348,6 +380,8 @@ const listItemChanges = (
       kind: "github.issue.assigned",
       dedupKey: `issue.assigned:${diffed}:${computeDigest(assigned)}`,
       occurredAt: issue.updated_at,
+      title: `Issue ${item} was assigned to ${assigned.join(", ")}`,
+      author: null,
     });
   }
   if (before.state === "open" && issue.state === "closed") {
@@ -359,8 +393,17 @@ const listItemChanges = (
             kind: `github.${kind}.closed`,
             dedupKey: `${kind}.closed:${item}:${closedAt}`,
             occurredAt: closedAt,
+            title: `${noun} ${item} was closed`,
+            author: null,
           }
-        : { kind: "github.pr.merged", dedupKey: `pr.merged:${item}`, occurredAt: mergedAt },
+        : {
+            kind: "github.pr.merged",
+            dedupKey: `pr.merged:${item}`,
+            occurredAt: mergedAt,
+            title:
+              mergedBy === null ? `Pull request ${item} was merged` : `${mergedBy} merged ${item}`,
+            author: mergedBy,
+          },
     );
   }
   return changes;
@@ -373,7 +416,9 @@ const listItemChanges = (
  * with the head commit of each open pull request: the same items a later
  * poll keeps, so the first poll after this one diffs like any other.
  */
-const baselineRepo = (poll: RepoPoll): Effect.Effect<RepoState, FeedError, HttpClient.HttpClient> =>
+const baselineRepo = (
+  poll: ActivityPoll,
+): Effect.Effect<RepoState, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const path = `/repos/${poll.repo}`;
     const newest = yield* fetchFeedResponse({
@@ -434,39 +479,73 @@ const baselineRepo = (poll: RepoPoll): Effect.Effect<RepoState, FeedError, HttpC
       pulls.items,
       "open pull requests",
     );
-    const headSha = new Map(heads.map((pull) => [pull.number, pull.head.sha]));
+    const openPulls = new Map(heads.map((pull) => [pull.number, pull]));
     const items: Record<string, ItemSnapshot> = {};
     for (const issue of [...issues, latest]) {
-      items[String(issue.number)] = buildItemSnapshot(issue, headSha.get(issue.number), true);
+      const pull = openPulls.get(issue.number);
+      items[String(issue.number)] = buildItemSnapshot(issue, {
+        ...(pull === undefined
+          ? {}
+          : { headSha: pull.head.sha, reviewRequests: readReviewRequests(poll, pull) }),
+        fromBaseline: true,
+      });
     }
     return { cursor: latest.updated_at, items };
   });
 
+/** What an item's snapshot keeps beside what the issue listing holds. */
+interface SnapshotExtras {
+  readonly headSha?: string | undefined;
+  readonly reviewRequests?: ReadonlyArray<string> | undefined;
+  readonly fromBaseline: boolean;
+}
+
 /**
- * Builds an item's snapshot from the listing, with its head commit when it
- * has one, marked `fromBaseline` when `fromBaseline` is true.
+ * Builds an item's snapshot from the listing, with the head commit and the
+ * review requests of a pull request when they are known, marked
+ * `fromBaseline` when `extras.fromBaseline` is true.
  */
-const buildItemSnapshot = (
-  issue: ListedIssue,
-  headSha: string | undefined,
-  fromBaseline: boolean,
-): ItemSnapshot => ({
+const buildItemSnapshot = (issue: ListedIssue, extras: SnapshotExtras): ItemSnapshot => ({
   pullRequest: issue.pull_request !== undefined,
   state: issue.state,
   labels: readLabels(issue),
   assignees: readAssignees(issue),
   updatedAt: issue.updated_at,
-  ...(headSha === undefined ? {} : { headSha }),
-  ...(fromBaseline ? { fromBaseline } : {}),
+  ...(extras.headSha === undefined ? {} : { headSha: extras.headSha }),
+  ...(extras.fromBaseline ? { fromBaseline: true } : {}),
+  ...(extras.reviewRequests === undefined ? {} : { reviewRequests: extras.reviewRequests }),
 });
+
+/**
+ * Returns the reviews a pull request asks of the user and their teams now,
+ * as the snapshot keeps them: `you`, and `team:<org>/<slug>` per team,
+ * sorted.
+ */
+const readReviewRequests = (poll: ActivityPoll, pull: ListedPull): Array<string> => {
+  const owner = poll.repo.split("/")[0]!;
+  const you = (pull.requested_reviewers ?? []).some((account) =>
+    isUserAccount(poll.identity, account),
+  );
+  const teams = (pull.requested_teams ?? [])
+    .map((team) => buildTeamName(owner, team.slug))
+    .filter((team) => poll.teams.has(team))
+    .map((team) => `team:${team}`);
+  return [...(you ? ["you"] : []), ...teams].sort();
+};
+
+/** Checks whether two sorted lists of review requests differ. */
+const haveReviewRequestsChanged = (
+  before: ReadonlyArray<string>,
+  after: ReadonlyArray<string>,
+): boolean => before.join("\n") !== after.join("\n");
 
 /**
  * Fetches a pull request's reviews and emits one `github.pr.review-submitted`
  * per review submitted at or after `start`. A pending review is not submitted
  * yet, and a dismissed one is no longer a verdict, so neither emits.
  */
-const emitNewReviews = (
-  poll: RepoPoll,
+export const emitNewReviews = (
+  poll: ActivityPoll,
   item: GithubItem,
   start: string | undefined,
 ): Effect.Effect<void, FeedError, HttpClient.HttpClient> =>
@@ -482,33 +561,20 @@ const emitNewReviews = (
     );
     for (const raw of listing.items) {
       const review = yield* decodeGithubValue(ListedReview, raw, "a review");
-      const verdict = readReviewVerdict(review.state);
-      const submittedAt = review.submitted_at ?? null;
-      if (verdict === undefined || submittedAt === null || !isAtOrAfter(submittedAt, start)) {
-        continue;
-      }
-      yield* poll.emit(
-        buildItemEvent(item, {
-          kind: "github.pr.review-submitted",
-          dedupKey: `pr.review-submitted:${String(review.id)}`,
-          occurredAt: submittedAt,
-          fields: { reviewer: review.user?.login ?? "ghost", verdict },
-          raw: truncateRaw(raw),
-        }),
-      );
+      yield* emitReviewEvent(poll, item, review, raw, start);
     }
   });
 
 /**
- * Fetches an open pull request's head commit, and emits
- * `github.pr.synchronized` when it differs from the one in the snapshot.
- * Returns the head commit, for the new snapshot.
+ * Fetches a pull request, and emits `github.pr.synchronized` when it is open
+ * and its head commit differs from the one in the snapshot. Returns the pull
+ * request, for its head commit, review requests and who merged it.
  */
-const emitNewHead = (
-  poll: RepoPoll,
+const fetchPullAndEmitNewHead = (
+  poll: ActivityPoll,
   item: GithubItem,
   previousSha: string | undefined,
-): Effect.Effect<string, FeedError, HttpClient.HttpClient> =>
+): Effect.Effect<ListedPull, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const response = yield* fetchFeedResponse({
       method: "GET",
@@ -517,7 +583,7 @@ const emitNewHead = (
     });
     const body = yield* readGithubObject(response.body, "a pull request");
     const pull = yield* decodeGithubValue(ListedPull, body, "a pull request");
-    if (previousSha !== undefined && previousSha !== pull.head.sha) {
+    if (pull.state === "open" && previousSha !== undefined && previousSha !== pull.head.sha) {
       yield* poll.emit(
         buildItemEvent(item, {
           kind: "github.pr.synchronized",
@@ -525,11 +591,13 @@ const emitNewHead = (
           // and keep the key under the host's 200 characters.
           dedupKey: `pr.synchronized:${poll.repo}#${String(item.number)}:${pull.head.sha.slice(0, 12)}`,
           occurredAt: pull.updated_at,
+          title: `New commits were pushed to ${buildItemPlace(item)}`,
+          author: null,
           raw: truncateRaw(body),
         }),
       );
     }
-    return pull.head.sha;
+    return pull;
   });
 
 /** Where one comment listing starts, and from when a comment counts as new. */
@@ -560,7 +628,7 @@ interface CommentQuery {
  * did not read.
  */
 const emitNewComments = (
-  poll: RepoPoll,
+  poll: ActivityPoll,
   query: CommentQuery,
   listed: ReadonlyMap<number, GithubItem>,
 ): Effect.Effect<PendingComments | undefined, FeedError, HttpClient.HttpClient> =>
@@ -597,14 +665,7 @@ const emitNewComments = (
       if (!isAtOrAfter(comment.created_at, start)) continue;
       const kind = /\/pull\/\d+#/.test(comment.html_url) ? "pr" : "issue";
       const item = listed.get(number) ?? { repo: poll.repo, kind, number };
-      yield* poll.emit(
-        buildItemEvent(item, {
-          kind: `github.${kind}.commented`,
-          dedupKey: `${kind}.commented:${String(comment.id)}`,
-          occurredAt: comment.created_at,
-          raw: truncateRaw(listing.items[index]!),
-        }),
-      );
+      yield* emitCommentEvents(poll, item, comment, listing.items[index]!);
     }
     const last = comments.at(-1);
     if (!listing.truncated || last === undefined) return undefined;
@@ -646,7 +707,7 @@ const countItemsToDiff = (
  * poll is read.
  */
 const pollRepo = (
-  poll: RepoPoll,
+  poll: ActivityPoll,
   stored: RepoState,
 ): Effect.Effect<RepoState, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
@@ -685,12 +746,31 @@ const pollRepo = (
       const previous = stored.items[String(issue.number)];
       const item = buildIssueItem(poll.repo, issue);
       const start = computeNewActivityStart(issue, previous, stored.cursor);
-      for (const change of listItemChanges(poll.repo, issue, previous, stored.cursor)) {
+      // A pull request that is open, or was open at the last poll, is read
+      // whole: for its head commit and review requests, or for who merged it.
+      const pull =
+        item.kind === "pr" && (issue.state === "open" || previous?.state === "open")
+          ? yield* fetchPullAndEmitNewHead(poll, item, previous?.headSha)
+          : undefined;
+      const mergedBy = pull?.merged_by?.login ?? null;
+      for (const change of listItemChanges(poll.repo, issue, previous, stored.cursor, mergedBy)) {
         yield* poll.emit(buildItemEvent(item, { ...change, raw: truncateRaw(raw) }));
       }
       let headSha = previous?.headSha;
+      let reviewRequests = previous?.reviewRequests;
       if (item.kind === "pr") {
-        if (issue.state === "open") headSha = yield* emitNewHead(poll, item, previous?.headSha);
+        if (pull !== undefined && pull.state === "open") {
+          headSha = pull.head.sha;
+          const now = readReviewRequests(poll, pull);
+          // A pull request new since the last poll has every request in its
+          // history after `start`; one the snapshot has without requests
+          // was written by an older version, and counts as unchanged.
+          const before = previous === undefined ? [] : previous.reviewRequests;
+          if (before !== undefined && haveReviewRequestsChanged(before, now)) {
+            yield* emitReviewRequestEvents(poll, item, start);
+          }
+          reviewRequests = now;
+        }
         yield* emitNewReviews(poll, item, start);
       }
       // Every diffed item arms the comment listing, not only one whose comment
@@ -704,7 +784,11 @@ const pollRepo = (
       // baseline's comments and reviews as new.
       const unchangedSinceBaseline =
         previous?.fromBaseline === true && previous.updatedAt === issue.updated_at;
-      items[String(issue.number)] = buildItemSnapshot(issue, headSha, unchangedSinceBaseline);
+      items[String(issue.number)] = buildItemSnapshot(issue, {
+        headSha,
+        reviewRequests: item.kind === "pr" ? reviewRequests : undefined,
+        fromBaseline: unchangedSinceBaseline,
+      });
     }
     const pendingComments =
       commentStarts.size > 0 || stored.pendingComments !== undefined
@@ -755,17 +839,25 @@ const evictClosedItems = (
 };
 
 /**
- * Polls the repos feed once: the repositories on the watch list in turn,
- * until the poll has sent `MAX_REQUESTS_PER_POLL` requests. A repository
- * with no state yet baselines and emits nothing. Fails as `pollWatchedRepos`
- * fails.
+ * Polls the repos feed once:
+ *
+ * 1. the repositories on the watch list in turn, until the poll has sent
+ *    `MAX_REQUESTS_PER_POLL` requests. A repository with no state yet
+ *    baselines and emits nothing;
+ * 2. then the followed items outside the watch list (`followed.ts`): the
+ *    user's own open pull requests, the items with an open signal, and the
+ *    items the notifications feed saw news on.
+ *
+ * Fails as `pollWatchedRepos` fails, and as `pollFollowedItems` fails.
  */
 export const pollRepos = (
   token: string,
-  context: Pick<IngestContext, "emit" | "state">,
+  context: Pick<IngestContext, "emit" | "state" | "openSignals">,
   watchList: ReadonlyArray<string>,
+  identity: GithubIdentity,
 ): Effect.Effect<PollResult, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
+    const teams = yield* readUserTeams(token, context.state);
     // Every request of the poll goes through this client, next pages
     // included, so the count is what GitHub received.
     let requests = 0;
@@ -780,10 +872,11 @@ export const pollRepos = (
       watchList,
       RepoState,
       (repo, stored) => {
-        const poll: RepoPoll = { repo, token, emit: context.emit };
+        const poll: ActivityPoll = { repo, token, emit: context.emit, identity, teams };
         return Option.isNone(stored) ? baselineRepo(poll) : pollRepo(poll, stored.value);
       },
       { isSpent: () => requests >= MAX_REQUESTS_PER_POLL },
     ).pipe(Effect.provideService(HttpClient.HttpClient, client));
+    yield* pollFollowedItems(token, context, watchList, identity, teams);
     return {};
   });

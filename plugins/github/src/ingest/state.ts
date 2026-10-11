@@ -75,17 +75,18 @@ export interface RepoPollBudget {
 }
 
 /**
- * Returns the watch list in the order one poll visits it: sorted by name,
- * starting with the first repository after `lastPolled`, and wrapping around.
- * Compared by name rather than by position, so a repository added to or
- * removed from the watch list since the last poll does not shift the turn.
+ * Returns names in the order one poll visits them: sorted, starting with the
+ * first name after `lastPolled`, and wrapping around. Compared by name
+ * rather than by position, so a name added or removed since the last poll
+ * does not shift the turn. The names are repositories on the watch list, or
+ * the refs of followed items.
  */
-const orderFromLastPolled = (
-  watchList: ReadonlyArray<string>,
+export const orderFromLastPolled = (
+  names: ReadonlyArray<string>,
   lastPolled: string | undefined,
 ): Array<string> => {
-  const sorted = [...watchList].sort();
-  const next = lastPolled === undefined ? -1 : sorted.findIndex((repo) => repo > lastPolled);
+  const sorted = [...names].sort();
+  const next = lastPolled === undefined ? -1 : sorted.findIndex((name) => name > lastPolled);
   return next === -1 ? sorted : [...sorted.slice(next), ...sorted.slice(0, next)];
 };
 

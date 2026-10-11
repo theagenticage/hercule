@@ -13,6 +13,13 @@
  * threads, so a thread the user read on GitHub between two polls would
  * never be emitted.
  *
+ * A notification never raises a signal by itself: GitHub keeps one reason
+ * per thread, so a thread keeps `review_requested` after the user reviewed.
+ * Instead, each thread about an issue or a pull request is passed to the
+ * `repos` feed as a hint (`followed.ts`), which reads the item and emits the
+ * precise events, such as `github.pr.review-requested`, even when the
+ * repository is not on the watch list.
+ *
  * GitHub lists the threads updated strictly after `since`. The feed adds no
  * overlap to it: `If-Modified-Since` compares whole seconds as well, so a
  * thread updated in the same second as the last one seen would get a 304
@@ -21,7 +28,8 @@
 import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { EmittedEvent, IngestContext, PollResult } from "@hercule/plugin-host";
-import { buildItemEvent, buildRepoEvent } from "../subject";
+import { buildItemEvent, buildItemPlace, buildItemRef, buildRepoEvent } from "../subject";
+import { recordFollowedHints } from "./followed";
 import { GithubNotification } from "./feed-objects";
 import {
   decodeGithubValue,
@@ -76,14 +84,18 @@ const buildNotificationEvent = (
   raw: Schema.JsonObject,
 ): EmittedEvent => {
   const repo = thread.repository.full_name;
+  const item = thread.subject.url === null ? undefined : parseSubjectUrl(thread.subject.url);
+  const place = item === undefined ? repo.toLowerCase() : buildItemPlace({ repo, ...item });
   const facts = {
     kind: "github.notification",
     dedupKey: `notification:${thread.id}:${thread.updated_at}`,
     occurredAt: thread.updated_at,
+    // A notification does not say who caused it.
+    title: `Notification (${thread.reason}) on ${place}: ${thread.subject.title}`,
+    author: null,
     fields: { reason: thread.reason },
     raw: truncateRaw(raw),
   };
-  const item = thread.subject.url === null ? undefined : parseSubjectUrl(thread.subject.url);
   if (item !== undefined) {
     return buildItemEvent({ repo, ...item, title: thread.subject.title }, facts);
   }
@@ -166,6 +178,21 @@ export const pollNotifications = (
     for (const { thread, raw } of oldestFirst) {
       yield* context.emit(buildNotificationEvent(thread, raw));
     }
+    // What made each thread change happened after the last poll's `since`.
+    yield* recordFollowedHints(
+      context.state,
+      oldestFirst.flatMap(({ thread }) => {
+        const item = thread.subject.url === null ? undefined : parseSubjectUrl(thread.subject.url);
+        return item === undefined
+          ? []
+          : [
+              {
+                ref: buildItemRef({ repo: thread.repository.full_name, ...item }),
+                since: stored.value.since,
+              },
+            ];
+      }),
+    );
 
     const lastModified = listing.firstPage.lastModified ?? stored.value.lastModified;
     const since = oldestFirst.reduce(
