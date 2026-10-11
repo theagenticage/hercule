@@ -18,6 +18,7 @@ import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import type * as Statement from "effect/unstable/sql/Statement";
 import type {
   FailedEdge,
   FailureReason,
@@ -555,6 +556,61 @@ const make = Effect.gen(function* () {
     );
   };
 
+  /**
+   * Returns the run list's source for the `activeSince` filter: the runs
+   * whose `finished_at` is NULL or at or after `activeSince`, of the workflow
+   * `workflowClauses` names or of every workflow.
+   *
+   * Written as that `OR` in the WHERE clause, SQLite walks `runs_workflow`
+   * over every run of the workflow instead, because that index also serves
+   * the sort. So the runs come from the two lookups the filter names, each on
+   * `runs_workflow_finished`, or on `runs_finished` for runs of any workflow,
+   * and `CROSS JOIN` makes SQLite read those first: it never reorders a
+   * `CROSS JOIN`.
+   */
+  const buildActiveRunsSource = (
+    workflowClauses: ReadonlyArray<Statement.Fragment>,
+    activeSince: string,
+  ): Statement.Fragment =>
+    sql`(SELECT id AS active_id FROM runs
+         WHERE ${sql.and([...workflowClauses, sql`finished_at IS NULL`])}
+         UNION ALL
+         SELECT id FROM runs
+         WHERE ${sql.and([...workflowClauses, sql`finished_at >= ${activeSince}`])})
+        CROSS JOIN runs ON id = active_id`;
+
+  /**
+   * Returns the run list's source for the `newestPerWorkflow` filter: for
+   * each stored workflow, or only for `workflowId` when it is given, its
+   * newest `perWorkflow` runs among those `filters` keep. Newest is the
+   * latest `created_at`, then the greatest id.
+   *
+   * The source starts from the `workflows` table, so it costs one short
+   * lookup per workflow, whatever the number of runs:
+   *
+   * - `CROSS JOIN` makes SQLite loop over the workflows first, because it
+   *   never reorders a `CROSS JOIN`;
+   * - for each workflow, the subquery walks `runs_workflow` from the newest
+   *   run backwards and stops after `perWorkflow` runs the filters keep.
+   *
+   * Ranking with a window function over `runs` would read every run the
+   * controller ever had. Starting from `workflows` also leaves out the runs
+   * of a deleted workflow, which keep its id in `workflow_id`, and the runs
+   * of a sent workflow, whose `workflow_id` is NULL.
+   */
+  const buildNewestRunsPerWorkflowSource = (
+    perWorkflow: number,
+    workflowId: string | undefined,
+    filters: ReadonlyArray<Statement.Fragment>,
+  ): Statement.Fragment =>
+    // The workflow id is renamed to `workflow` because `workflows` also has
+    // an `id` and a `created_at`, which the list reads from `runs` by name.
+    sql`(SELECT runs.* FROM (SELECT id AS workflow FROM workflows
+                             ${workflowId === undefined ? sql`` : sql`WHERE id = ${uuidFromString(workflowId)}`})
+         CROSS JOIN runs ON runs.id IN (
+           SELECT id FROM runs WHERE ${sql.and([sql`workflow_id = workflow`, ...filters])}
+           ORDER BY created_at DESC, id DESC LIMIT ${perWorkflow}))`;
+
   return {
     /** Inserts a pending run and a pending step record for each entry step. Returns the run's id. */
     insert: (run: NewRun, at: string): Effect.Effect<string, SqlError> =>
@@ -605,8 +661,11 @@ const make = Effect.gen(function* () {
     /**
      * Returns one page of runs, without their plans and step records, sorted
      * by when they were created. Every filter given must hold; `since`,
-     * `until` and `activeSince` are inclusive. A running run's summary says
-     * which steps are active and which signals it waits on. The runs and
+     * `until` and `activeSince` are inclusive. With `newestPerWorkflow`,
+     * only each stored workflow's newest runs among those the other filters
+     * keep are listed; `buildNewestRunsPerWorkflowSource` says which. A running
+     * run's summary says which steps are active and which signals it waits
+     * on. The runs and
      * their step records are read in one transaction, so both are from the
      * same moment: a run that ends between the two reads would otherwise
      * read as running with no active step, which looks like waiting.
@@ -633,41 +692,53 @@ const make = Effect.gen(function* () {
             request.workflowId === undefined
               ? []
               : [sql`workflow_id = ${uuidFromString(request.workflowId)}`];
-          const clauses = [keyset, ...workflowClauses];
+          const filters = [...workflowClauses];
           if (request.status !== undefined) {
-            clauses.push(sql`status = ${request.status}`);
+            filters.push(sql`status = ${request.status}`);
             // SQLite reads the partial index `runs_unfinished` only when the
             // query itself shows that the status is pending or running, and a
             // bound value shows nothing. Without this clause, listing the
             // running runs scans every run the controller ever had.
             if (request.status === "pending" || request.status === "running") {
-              clauses.push(sql`status IN ('pending', 'running')`);
+              filters.push(sql`status IN ('pending', 'running')`);
             }
           }
           if (request.originalRunId !== undefined) {
-            clauses.push(sql`original_run_id = ${uuidFromString(request.originalRunId)}`);
+            filters.push(sql`original_run_id = ${uuidFromString(request.originalRunId)}`);
           }
-          if (request.since !== undefined) clauses.push(sql`created_at >= ${request.since}`);
-          if (request.until !== undefined) clauses.push(sql`created_at <= ${request.until}`);
+          if (request.since !== undefined) filters.push(sql`created_at >= ${request.since}`);
+          if (request.until !== undefined) filters.push(sql`created_at <= ${request.until}`);
           if (request.actor !== undefined) {
-            clauses.push(sql`${sql.literal(STARTING_ACTOR)} = ${request.actor}`);
+            filters.push(sql`${sql.literal(STARTING_ACTOR)} = ${request.actor}`);
           }
-          // `activeSince` keeps the runs whose `finished_at` is NULL or at or
-          // after it. Written as that `OR` in the WHERE clause, SQLite walks
-          // `runs_workflow` over every run of the workflow instead, because
-          // that index also serves the sort. So the runs come from the two
-          // lookups the filter names, each on `runs_workflow_finished`, or on
-          // `runs_finished` for runs of any workflow, and `CROSS JOIN` makes
-          // SQLite read those first: it never reorders a `CROSS JOIN`.
-          const source =
-            request.activeSince === undefined
-              ? sql`runs`
-              : sql`(SELECT id AS active_id FROM runs
-                   WHERE ${sql.and([...workflowClauses, sql`finished_at IS NULL`])}
-                   UNION ALL
-                   SELECT id FROM runs
-                   WHERE ${sql.and([...workflowClauses, sql`finished_at >= ${request.activeSince}`])})
-                  CROSS JOIN runs ON id = active_id`;
+          // With `newestPerWorkflow`, the filters pick each workflow's newest
+          // runs inside the source, and the keyset pages through what the
+          // source returns, so a cursor never changes which runs are newest.
+          // There `activeSince` is a plain `OR`: the lookup already walks one
+          // workflow's runs only, so the two lookups of `buildActiveRunsSource`
+          // would save nothing.
+          const { source, clauses } =
+            request.newestPerWorkflow !== undefined
+              ? {
+                  source: buildNewestRunsPerWorkflowSource(
+                    request.newestPerWorkflow,
+                    request.workflowId,
+                    request.activeSince === undefined
+                      ? filters
+                      : [
+                          ...filters,
+                          sql`(finished_at IS NULL OR finished_at >= ${request.activeSince})`,
+                        ],
+                  ),
+                  clauses: [keyset],
+                }
+              : {
+                  source:
+                    request.activeSince === undefined
+                      ? sql`runs`
+                      : buildActiveRunsSource(workflowClauses, request.activeSince),
+                  clauses: [keyset, ...filters],
+                };
           const rows = yield* sql<SummaryRow>`
           SELECT id, workflow_id, json_extract(plan, '$.name') AS workflow_name, origin, status,
                  failure_reason, failed_step_id, failure_message, created_at, started_at,

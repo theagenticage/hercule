@@ -12,8 +12,10 @@
  *   signals it waits on;
  * - the `activeSince` filter, which keeps the runs that had not ended before
  *   an instant;
- * - the query plans of the run list's own SQL: a day's read and the list of
- *   running runs each search an index, never walk every run.
+ * - the `newestPerWorkflow` filter, which keeps each workflow's newest runs;
+ * - the query plans of the run list's own SQL: a day's read, the list of
+ *   running runs and each workflow's newest runs each search an index, never
+ *   walk every run.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Exit, Option } from "effect";
@@ -21,6 +23,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Statement from "effect/unstable/sql/Statement";
 import { TestDatabase } from "../db/testing";
 import type { RunFilter, RunSummary, WorkflowDefinition } from "@hercule/contract";
+import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { runRepository, StepRecordEnded, type NewRun } from "./repository";
 
 const AT = "2026-09-24T10:00:00.000Z";
@@ -358,6 +361,157 @@ describe("activeSince", () => {
 });
 
 /**
+ * Inserts a stored workflow with its id and nothing else of use, and returns
+ * the id. The run list reads only a workflow's id, so the definition stays
+ * empty.
+ */
+const insertWorkflow = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const id = uuidToString(mintUuid());
+  yield* sql`
+    INSERT INTO workflows (id, source, definition, enabled, created_at, updated_at)
+    VALUES (${uuidFromString(id)}, '', '{}', 1, ${AT}, ${AT})
+  `;
+  return id;
+});
+
+/** Inserts a run of the workflow, created at the minute after 10:00, and returns its id. */
+const insertRunAt = (workflowId: string | null, minute: number) =>
+  Effect.flatMap(runRepository, (runs) =>
+    runs.insert(
+      { ...NEW_RUN, workflowId },
+      `2026-10-09T10:${String(minute).padStart(2, "0")}:00.000Z`,
+    ),
+  );
+
+describe("newestPerWorkflow", () => {
+  it("keeps each workflow's newest runs, at most the cap each, and leaves out sent runs", async () => {
+    const [kept, listed] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const busy = yield* insertWorkflow;
+        const quiet = yield* insertWorkflow;
+        const busyRuns = [];
+        for (let minute = 0; minute < 4; minute++) busyRuns.push(yield* insertRunAt(busy, minute));
+        const quietRun = yield* insertRunAt(quiet, 1);
+        // A run of a sent workflow, newer than every other run.
+        yield* insertRunAt(null, 9);
+        const listed = yield* listRuns({ newestPerWorkflow: 2 });
+        return [[busyRuns[3], busyRuns[2], quietRun], listed] as const;
+      }).pipe(Effect.provide(TestDatabase)),
+    );
+
+    expect(listed.map((summary) => summary.id)).toEqual(kept);
+  });
+
+  it("leaves out the runs of a deleted workflow, which keep its id", async () => {
+    const listed = await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const deleted = yield* insertWorkflow;
+        yield* insertRunAt(deleted, 0);
+        yield* sql`DELETE FROM workflows WHERE id = ${uuidFromString(deleted)}`;
+        return yield* listRuns({ newestPerWorkflow: 5 });
+      }).pipe(Effect.provide(TestDatabase)),
+    );
+
+    expect(listed).toEqual([]);
+  });
+
+  it("ranks only the runs the other filters keep", async () => {
+    const [kept, listed] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const workflow = yield* insertWorkflow;
+        const other = yield* insertWorkflow;
+        const older = yield* insertRunAt(workflow, 0);
+        const newer = yield* insertRunAt(workflow, 1);
+        // The two newest runs of the workflow, both completed.
+        for (const minute of [2, 3]) {
+          const runId = yield* insertRunAt(workflow, minute);
+          yield* runs.start(runId, AT);
+          yield* runs.finish(runId, { status: "completed" }, AT);
+        }
+        yield* insertRunAt(other, 4);
+        const listed = yield* listRuns({
+          newestPerWorkflow: 2,
+          status: "pending",
+          workflowId: workflow,
+        });
+        return [[newer, older], listed] as const;
+      }).pipe(Effect.provide(TestDatabase)),
+    );
+
+    expect(listed.map((summary) => summary.id)).toEqual(kept);
+  });
+
+  it("ranks only the runs live since activeSince", async () => {
+    const [kept, listed] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const workflow = yield* insertWorkflow;
+        const live = yield* insertRunAt(workflow, 0);
+        // The newest run of the workflow, ended before the instant.
+        const ended = yield* insertRunAt(workflow, 1);
+        yield* runs.start(ended, AT);
+        yield* runs.finish(ended, { status: "completed" }, "2026-10-09T10:30:00.000Z");
+        const listed = yield* listRuns({
+          newestPerWorkflow: 1,
+          activeSince: "2026-10-09T11:00:00.000Z",
+        });
+        return [live, listed] as const;
+      }).pipe(Effect.provide(TestDatabase)),
+    );
+
+    expect(listed.map((summary) => summary.id)).toEqual([kept]);
+  });
+
+  it("breaks a tie on the creation time by the greater id", async () => {
+    const [kept, listed] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const workflow = yield* insertWorkflow;
+        const first = yield* insertRunAt(workflow, 0);
+        const second = yield* insertRunAt(workflow, 0);
+        const listed = yield* listRuns({ newestPerWorkflow: 1 });
+        return [first > second ? first : second, listed] as const;
+      }).pipe(Effect.provide(TestDatabase)),
+    );
+
+    expect(listed.map((summary) => summary.id)).toEqual([kept]);
+  });
+
+  it("pages through the same runs in both directions with a cursor", async () => {
+    const [unpaged, newestFirst, oldestFirst] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        for (let workflow = 0; workflow < 3; workflow++) {
+          const workflowId = yield* insertWorkflow;
+          for (let minute = 0; minute < 3; minute++) {
+            yield* insertRunAt(workflowId, workflow * 10 + minute);
+          }
+        }
+        const listAllPages = (direction: "asc" | "desc") =>
+          Effect.gen(function* () {
+            const ids: Array<string> = [];
+            let cursor: string | undefined;
+            do {
+              const page = yield* runs.list({ newestPerWorkflow: 2, limit: 4, cursor, direction });
+              ids.push(...page.items.map((summary) => summary.id));
+              cursor = page.nextCursor;
+            } while (cursor !== undefined);
+            return ids;
+          });
+        const unpaged = (yield* listRuns({ newestPerWorkflow: 2 })).map((summary) => summary.id);
+        return [unpaged, yield* listAllPages("desc"), yield* listAllPages("asc")] as const;
+      }).pipe(Effect.provide(TestDatabase)),
+    );
+
+    expect(unpaged).toHaveLength(6);
+    expect(newestFirst).toEqual(unpaged);
+    expect(oldestFirst).toEqual([...unpaged].reverse());
+  });
+});
+
+/**
  * Returns the query plan SQLite chooses for the first statement the run list
  * sends for `filter`: the read of the page's runs. The statement is captured
  * as the repository builds it, so the plan is the plan of the real query.
@@ -407,6 +561,17 @@ describe("the run list's query plans", () => {
     expect(plan).toContain("runs_finished (finished_at=?)");
     expect(plan).toContain("runs_finished (finished_at>?)");
     expect(plan).not.toContain("SCAN runs");
+  });
+
+  it("finds each workflow's newest runs with one short lookup per workflow on runs_workflow", async () => {
+    const plan = await explainListQuery({ newestPerWorkflow: 20 });
+
+    expect(plan).toContain("SCAN workflows");
+    expect(plan).toContain("runs_workflow (workflow_id=?)");
+    expect(plan).not.toContain("SCAN runs");
+    // One sort, of the page's runs. A second would mean each workflow's runs
+    // are sorted before the lookup stops, which reads all of them.
+    expect(plan.match(/TEMP B-TREE/g)).toHaveLength(1);
   });
 
   it("finds the running runs with runs_unfinished", async () => {

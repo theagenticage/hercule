@@ -42,7 +42,7 @@ import {
   Validation,
 } from "../errors";
 import { Actor, Id, Timestamp } from "../ids";
-import { page, pageParams } from "../pagination";
+import { MAX_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { Event, EventId } from "./event";
 import { Subscription } from "./subscription";
@@ -458,6 +458,22 @@ export const RunFilter = Schema.Struct({
   actor: Schema.optionalKey(Actor),
   /** Only the re-runs of this run. */
   originalRunId: Schema.optionalKey(Id),
+  /**
+   * Only each workflow's newest runs, at most this many per workflow, among
+   * the runs the other filters keep. Newest means the latest `createdAt`,
+   * then the greatest id, whichever way the list is sorted, and a cursor
+   * pages through those runs without changing which ones they are. Two kinds
+   * of run are left out:
+   *
+   * - a run of a sent workflow, because it belongs to no workflow;
+   * - a run of a deleted workflow, because that workflow is no longer listed.
+   *
+   * The workflow list reads every workflow's strip of recent runs with this
+   * filter, in one read instead of one read per workflow.
+   */
+  newestPerWorkflow: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
+  ),
 });
 
 export type RunFilter = Schema.Schema.Type<typeof RunFilter>;
