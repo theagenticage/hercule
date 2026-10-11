@@ -280,9 +280,14 @@ export {
 } from "./notifications";
 export { formatBlocksAsText, isKnownBlock, UNKNOWN_BLOCK_TEXT } from "./signal-blocks";
 export {
+  buildHandlingLabels,
   buildIntakeTabs,
   buildSignalAnswers,
   countToDo,
+  cutHandlingLabels,
+  describeEventHorizon,
+  EVENT_HANDLING_OPTIONS,
+  groupEventsByDay,
   decidePluginMark,
   describeAnswerKey,
   describeBuildFailure,
@@ -311,7 +316,13 @@ export {
   parseIntakeListWidth,
   fitsIntakePane,
   fitIntakeListWidth,
+  type EventDaySection,
+  type EventFacts,
+  type EventHandlingLabel,
+  type EventHandlingOption,
+  type EventHandlingTarget,
   type IntakeSection,
+  type IntakeView,
   type PluginIdentity,
   type PluginMarkDrawing,
   type PluginName,
