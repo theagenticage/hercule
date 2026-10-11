@@ -65,6 +65,15 @@ export interface GithubResponse {
   readonly rateLimitResetAt?: number;
   /** `Link: <...>; rel="next"`: the URL of the next page, when there is one. */
   readonly nextPageUrl?: string;
+  /** `Link: <...>; rel="prev"`: the URL of the page before this one, when there is one. */
+  readonly previousPageUrl?: string;
+  /** `Link: <...>; rel="last"`: the URL of the last page, when this is not the last page. */
+  readonly lastPageUrl?: string;
+  /**
+   * `X-OAuth-Scopes`: the scopes a classic token or an OAuth token was
+   * granted. GitHub sends no such header for a fine-grained token.
+   */
+  readonly oauthScopes?: ReadonlyArray<string>;
 }
 
 /** GitHub could not be reached, or its response could not be read. */
@@ -82,11 +91,14 @@ const parseWholeNumber = (value: string | undefined): number | undefined => {
   return Number(value.trim());
 };
 
-/** Returns the `rel="next"` URL of a `Link` header, or undefined when there is none. */
-const parseNextPageUrl = (link: string | undefined): string | undefined =>
+/**
+ * Returns the URL a `Link` header gives for one relation, such as `next` or
+ * `last`, or undefined when the header has none.
+ */
+const parseLinkUrl = (link: string | undefined, relation: string): string | undefined =>
   link
     ?.split(",")
-    .map((part) => /<([^>]+)>;\s*rel="next"/.exec(part)?.[1])
+    .map((part) => new RegExp(`<([^>]+)>;\\s*rel="${relation}"`).exec(part)?.[1])
     .find((url) => url !== undefined);
 
 /**
@@ -184,7 +196,10 @@ export const requestGithub = (
     const retryAfterSeconds = parseWholeNumber(header("retry-after"));
     const rateLimitRemaining = parseWholeNumber(header("x-ratelimit-remaining"));
     const rateLimitResetAt = parseWholeNumber(header("x-ratelimit-reset"));
-    const nextPageUrl = parseNextPageUrl(header("link"));
+    const nextPageUrl = parseLinkUrl(header("link"), "next");
+    const previousPageUrl = parseLinkUrl(header("link"), "prev");
+    const lastPageUrl = parseLinkUrl(header("link"), "last");
+    const scopesHeader = header("x-oauth-scopes");
     return {
       status: response.status,
       body,
@@ -195,6 +210,11 @@ export const requestGithub = (
       ...(rateLimitRemaining === undefined ? {} : { rateLimitRemaining }),
       ...(rateLimitResetAt === undefined ? {} : { rateLimitResetAt }),
       ...(nextPageUrl === undefined ? {} : { nextPageUrl }),
+      ...(previousPageUrl === undefined ? {} : { previousPageUrl }),
+      ...(lastPageUrl === undefined ? {} : { lastPageUrl }),
+      ...(scopesHeader === undefined
+        ? {}
+        : { oauthScopes: scopesHeader.split(",").map((scope) => scope.trim()) }),
     };
   });
 

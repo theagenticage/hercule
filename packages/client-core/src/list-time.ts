@@ -92,7 +92,7 @@ export const formatListTime = (
   const date = readCalendarDate(instant, timezone);
   const today = readCalendarDate(now, timezone);
   const clock = buildPartReader("clock", instant, timezone);
-  const weekday = buildPartReader("weekday", instant, timezone);
+  const weekday = buildPartReader("shortWeekday", instant, timezone);
   const day = formatDay(instant, timezone);
   if (
     date === undefined ||

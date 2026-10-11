@@ -9,3 +9,4 @@
 export { Enrichment, EnrichmentLayer } from "./enrich-event";
 export { EventRouter, EventRouterLayer } from "./event-router";
 export { EventRoutingInterval, Pipeline, PipelineLayer } from "./pipeline";
+export { SignalBuildFailuresLayer } from "./signal-build-failures";

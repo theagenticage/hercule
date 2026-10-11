@@ -14,7 +14,7 @@
  *   `PluginError`, which the host retries with backoff.
  */
 import { Clock, Effect, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClient from "effect/unstable/http/HttpClient";
 import { AuthError, PluginError } from "@hercule/plugin-host";
 import {
   computeRateLimitWaitSeconds,
@@ -38,13 +38,19 @@ export type FeedError = AuthError | PluginError | GithubRateLimited;
 const describeRequest = (request: GithubRequest): string => `${request.method} ${request.path}`;
 
 /**
- * Sends one request and returns the response when its status is 200 or 304.
- * Fails with `AuthError` on a 401, with `GithubRateLimited` on a rate limit,
- * and with a `PluginError` that names the request and GitHub's message for
- * any other status or when GitHub could not be reached.
+ * Sends one request and returns the response when its status is 200 or 304,
+ * or one of `acceptedStatuses`. Fails with `AuthError` on a 401, with
+ * `GithubRateLimited` on a rate limit, and with a `PluginError` that names
+ * the request and GitHub's message for any other status or when GitHub
+ * could not be reached.
+ *
+ * `acceptedStatuses` lets a caller act on an answer that is not an error for
+ * it, such as a 404 for an item deleted since. A 403 that is a rate limit
+ * still fails as `GithubRateLimited`.
  */
 export const fetchFeedResponse = (
   request: GithubRequest,
+  acceptedStatuses: ReadonlyArray<number> = [],
 ): Effect.Effect<GithubResponse, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const response = yield* requestGithub(request).pipe(
@@ -63,6 +69,7 @@ export const fetchFeedResponse = (
         retryAfterSeconds: computeRateLimitWaitSeconds(response, yield* Clock.currentTimeMillis),
       });
     }
+    if (acceptedStatuses.includes(response.status)) return response;
     return yield* new PluginError({
       message: `GitHub returned status ${String(response.status)} for ${describeRequest(request)}${githubDetail}`,
     });
@@ -72,7 +79,11 @@ export const fetchFeedResponse = (
 interface GithubListing {
   /** True when GitHub answered the first page with 304; `items` is then empty. */
   readonly unchanged: boolean;
-  /** The items of every page fetched, in GitHub's order. */
+  /**
+   * The items of every page fetched, in GitHub's order. Empty when the first
+   * page was answered with one of the `acceptedStatuses`, which
+   * `firstPage.status` holds.
+   */
   readonly items: ReadonlyArray<Schema.JsonObject>;
   /** The first page's response, whose `ETag`, `Last-Modified` and `X-Poll-Interval` pace the next request. */
   readonly firstPage: GithubResponse;
@@ -121,15 +132,60 @@ interface ListingOptions {
    * `{ total_count, check_suites }`. Absent when each page is an array.
    */
   readonly itemsField?: string;
+  /** Statuses of the first page returned rather than failed on, as `fetchFeedResponse` takes them. */
+  readonly acceptedStatuses?: ReadonlyArray<number>;
 }
+
+/**
+ * Returns the items of one page of a listing. Fails with a `PluginError`
+ * naming the listing when the page has neither shape `readPageItems` reads.
+ */
+const readListingPage = (
+  page: GithubResponse,
+  request: GithubRequest,
+  itemsField: string | undefined,
+): Effect.Effect<ReadonlyArray<Schema.JsonObject>, PluginError> => {
+  const items = readPageItems(page.body, itemsField);
+  if (items !== undefined) return Effect.succeed(items);
+  const expected =
+    itemsField === undefined
+      ? "a list of objects"
+      : `an object with a list of objects under \`${itemsField}\``;
+  return Effect.fail(
+    new PluginError({
+      message: `GitHub returned something other than ${expected} for ${describeRequest(request)}.`,
+    }),
+  );
+};
+
+/**
+ * Fetches a page of a listing other than the first, by the URL GitHub's
+ * `Link` header gave. The request refuses a URL outside GitHub's API, and a
+ * failure names the listing, because the URL alone does not tell the user
+ * which one it was. Fails as `fetchFeedResponse` fails.
+ */
+const fetchLinkedPage = (
+  url: string,
+  request: GithubRequest,
+): Effect.Effect<GithubResponse, FeedError, HttpClient.HttpClient> =>
+  fetchFeedResponse({ method: "GET", path: url, token: request.token }).pipe(
+    Effect.mapError((error) =>
+      error instanceof PluginError
+        ? new PluginError({
+            message: `Reading another page of ${describeRequest(request)} failed. ${error.message}`,
+          })
+        : error,
+    ),
+  );
 
 /**
  * Fetches a listing and follows its `Link` header for up to `maxPages`
  * pages. Only the first request carries the ETag or `Last-Modified`: a 304
- * on it means the whole listing is unchanged. Fails as `fetchFeedResponse` fails,
- * and with a `PluginError` when a page's body is not a JSON array of objects
- * (or, with `itemsField`, an object holding one under that field) or the
- * `Link` header points outside GitHub's API.
+ * on it means the whole listing is unchanged. A first page answered with one
+ * of `options.acceptedStatuses` is returned with no items. Fails as
+ * `fetchFeedResponse` fails, and with a `PluginError` when a page's body is
+ * not a JSON array of objects (or, with `itemsField`, an object holding one
+ * under that field) or the `Link` header points outside GitHub's API.
  */
 export const fetchListing = (
   request: GithubRequest,
@@ -137,46 +193,111 @@ export const fetchListing = (
   options: ListingOptions = {},
 ): Effect.Effect<GithubListing, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const firstPage = yield* fetchFeedResponse(request);
-    if (firstPage.status === 304) {
-      return { unchanged: true, items: [], firstPage, truncated: false };
+    const firstPage = yield* fetchFeedResponse(request, options.acceptedStatuses);
+    if (firstPage.status !== 200) {
+      return { unchanged: firstPage.status === 304, items: [], firstPage, truncated: false };
     }
     const items: Array<Schema.JsonObject> = [];
     let page = firstPage;
     let pages = 1;
     for (;;) {
-      const pageItems = readPageItems(page.body, options.itemsField);
-      if (pageItems === undefined) {
-        const expected =
-          options.itemsField === undefined
-            ? "a list of objects"
-            : `an object with a list of objects under \`${options.itemsField}\``;
-        return yield* new PluginError({
-          message: `GitHub returned something other than ${expected} for ${describeRequest(request)}.`,
-        });
-      }
-      items.push(...pageItems);
+      items.push(...(yield* readListingPage(page, request, options.itemsField)));
       if (page.nextPageUrl === undefined) break;
       if (pages === maxPages) return { unchanged: false, items, firstPage, truncated: true };
-      // The next page's URL comes from GitHub's `Link` header. The request
-      // refuses a URL outside GitHub's API, and the error names the listing,
-      // because the URL alone does not tell the user which one it was.
-      page = yield* fetchFeedResponse({
-        method: "GET",
-        path: page.nextPageUrl,
-        token: request.token,
-      }).pipe(
-        Effect.mapError((error) =>
-          error instanceof PluginError
-            ? new PluginError({
-                message: `Reading the next page of ${describeRequest(request)} failed. ${error.message}`,
-              })
-            : error,
-        ),
-      );
+      page = yield* fetchLinkedPage(page.nextPageUrl, request);
       pages += 1;
     }
     return { unchanged: false, items, firstPage, truncated: false };
+  });
+
+/** The newest items of a listing, as `fetchNewestItems` reads them. */
+interface NewestItems {
+  /** The items read, oldest first, as GitHub lists them. */
+  readonly items: ReadonlyArray<Schema.JsonObject>;
+  /** True when older items `needsOlder` asked for were left unread, because the page limit was reached. */
+  readonly truncated: boolean;
+  /** How many items the listing holds before the first one read. */
+  readonly itemsBefore: number;
+}
+
+/**
+ * Returns how many items come before the page a URL from a `Link` header
+ * points at, from its `page` and `per_page` parameters: 0 for the first
+ * page. GitHub's `Link` URLs carry both; a URL without them counts as the
+ * first page.
+ */
+const countItemsBeforePage = (url: string): number => {
+  if (!URL.canParse(url)) return 0;
+  const parameters = new URL(url).searchParams;
+  const page = Number(parameters.get("page") ?? "1");
+  const perPage = Number(parameters.get("per_page") ?? "30");
+  return Number.isInteger(page) && Number.isInteger(perPage) ? (page - 1) * perPage : 0;
+};
+
+/**
+ * Fetches the newest items of a listing GitHub sorts oldest first and offers
+ * no other order for, such as a pull request's reviews or history. Sends at
+ * most `maxPages` requests:
+ *
+ * 1. the first page. When it is the only page, it is the whole listing.
+ * 2. Otherwise the last page, then each page before it, while `needsOlder`
+ *    returns true for the items read so far, oldest first. The first page,
+ *    already read, ends the walk. A page's place in the listing comes from
+ *    the `page` and `per_page` parameters of GitHub's `Link` URLs.
+ *
+ * So a long listing costs two requests when its newest page holds all that
+ * is wanted. Fails as `fetchListing` fails, and with a `PluginError` when a
+ * listing with more than one page has no link to its last page.
+ */
+export const fetchNewestItems = (
+  request: GithubRequest,
+  maxPages: number,
+  needsOlder: (items: ReadonlyArray<Schema.JsonObject>) => boolean,
+): Effect.Effect<NewestItems, FeedError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const firstPage = yield* fetchFeedResponse(request);
+    const firstItems = yield* readListingPage(firstPage, request, undefined);
+    if (firstPage.nextPageUrl !== undefined && firstPage.lastPageUrl === undefined) {
+      // GitHub sends `last` with every page-numbered listing; one without it
+      // cannot be read from its end.
+      return yield* new PluginError({
+        message: `GitHub sent no link to the last page of ${describeRequest(request)}, so its newest items cannot be read.`,
+      });
+    }
+    let items: ReadonlyArray<Schema.JsonObject> = [];
+    let url = firstPage.lastPageUrl;
+    let pages = 1;
+    // How many items come before the oldest page read; unknown, and unused, while none is.
+    let itemsBefore = 0;
+    while (url !== undefined && countItemsBeforePage(url) > 0) {
+      if (pages === maxPages) return { items, truncated: true, itemsBefore };
+      const page = yield* fetchLinkedPage(url, request);
+      pages += 1;
+      itemsBefore = countItemsBeforePage(url);
+      items = [...(yield* readListingPage(page, request, undefined)), ...items];
+      if (!needsOlder(items)) return { items, truncated: false, itemsBefore };
+      url = page.previousPageUrl;
+    }
+    return { items: [...firstItems, ...items], truncated: false, itemsBefore: 0 };
+  });
+
+/**
+ * Runs `use` with an HTTP client that counts every request it sends, next
+ * pages included, and passes `use` a function that returns the count so far.
+ * A feed compares the count with its budget to stop before a poll runs out
+ * of time.
+ */
+export const countRequests = <A, E, R>(
+  use: (sent: () => number) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R | HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    let requests = 0;
+    const client = HttpClient.tapRequest(yield* HttpClient.HttpClient, () =>
+      Effect.sync(() => {
+        requests += 1;
+      }),
+    );
+    return yield* use(() => requests).pipe(Effect.provideService(HttpClient.HttpClient, client));
   });
 
 /**

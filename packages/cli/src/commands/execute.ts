@@ -92,50 +92,19 @@ const readAll = async (
 const nameListedThing = (listing: Command): string => listing.words.at(-2)!;
 
 /**
- * Returns the full id that the text given for a field refers to.
- *
- * A canonical id is returned as it is, and so is `me` for a field that holds
- * an id. Anything else is read against the list the field's row names, in
- * full:
- *
- * - an id equal to the text is returned. Ids a harness chooses, such as a
- *   subagent's, are not UUIDs and may be shorter than a tail;
- * - otherwise the text is a tail, and the ids that end with it are the
- *   candidates.
+ * Returns every id in the list that resolves the tails of `field`, read in
+ * full with the field's `resolvesQuery`.
  *
  * A list addressed by path parameters (a session's subagents) is read with
- * the command's own path parameters of the same names, `scope`, so the tail
- * is matched within the record the command names. Fails with:
- *
- * - a `UsageError` when the text is too short to be a tail;
- * - a `not_found` `ApiError` when no id matches;
- * - a `conflict` `ApiError` when several ids match.
- *
- * This costs extra requests and needs the list's read grant. That is the
- * price of the API never accepting a tail.
+ * the command's own path parameters of the same names, `scope`, so a tail is
+ * matched within the record the command names.
  */
-const resolveTail = async (
+const readListedIds = async (
   client: HerculeClient,
-  command: Command,
   field: Field,
-  text: string,
   scope: Record<string, string | number>,
-): Promise<string> => {
-  // `me` is resolved by the controller, which knows which session is asking.
-  if (CANONICAL_ID.test(text) || (field.holdsAnId && text === OWN_AGENT_ALIAS)) return text;
-
-  const failTooShort = (): never => {
-    throw new UsageError(
-      `${formatFieldName(field)}: ${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
-      command.spelling,
-    );
-  };
-  // A Hercule id is always canonical, so short text is wrong on the command
-  // line, and nothing is sent.
-  if (field.holdsAnId && text.length < MIN_TAIL) failTooShort();
-
+): Promise<ReadonlyArray<string>> => {
   const listing = findCommandById(field.resolves!)!;
-  const noun = nameListedThing(listing);
   const inPath = listing.positionals.filter((positional) => positional.carriedIn === "path");
   const params =
     inPath.length === 0
@@ -151,9 +120,53 @@ const resolveTail = async (
   const stable = listing.sortFields.includes("createdAt")
     ? { sort: [{ field: "createdAt", direction: "asc" }] }
     : {};
-  const ids = (await readAll(client, listing, stable, params))
+  return (await readAll(client, listing, { ...field.resolvesQuery, ...stable }, params))
     .map((item) => item["id"])
     .filter((id): id is string => typeof id === "string");
+};
+
+/**
+ * Returns the full id that the text given for a field refers to.
+ *
+ * A canonical id is returned as it is, and so is `me` for a field that holds
+ * an id. Anything else is matched against the ids `readIds` returns, which
+ * are the whole list the field's row names:
+ *
+ * - an id equal to the text is returned. Ids a harness chooses, such as a
+ *   subagent's, are not UUIDs and may be shorter than a tail;
+ * - otherwise the text is a tail, and the ids that end with it are the
+ *   candidates.
+ *
+ * Fails with:
+ *
+ * - a `UsageError` when the text is too short to be a tail;
+ * - a `not_found` `ApiError` when no id matches;
+ * - a `conflict` `ApiError` when several ids match.
+ *
+ * Reading the list costs extra requests and needs the list's read grant.
+ * That is the price of the API never accepting a tail.
+ */
+const resolveTail = async (
+  command: Command,
+  field: Field,
+  text: string,
+  readIds: () => Promise<ReadonlyArray<string>>,
+): Promise<string> => {
+  // `me` is resolved by the controller, which knows which session is asking.
+  if (CANONICAL_ID.test(text) || (field.holdsAnId && text === OWN_AGENT_ALIAS)) return text;
+
+  const failTooShort = (): never => {
+    throw new UsageError(
+      `${formatFieldName(field)}: ${text} is neither an id nor a tail: a tail is at least ${MIN_TAIL} characters`,
+      command.spelling,
+    );
+  };
+  // A Hercule id is always canonical, so short text is wrong on the command
+  // line, and nothing is sent.
+  if (field.holdsAnId && text.length < MIN_TAIL) failTooShort();
+
+  const noun = nameListedThing(findCommandById(field.resolves!)!);
+  const ids = await readIds();
   if (ids.includes(text)) return text;
   if (text.length < MIN_TAIL) failTooShort();
 
@@ -202,8 +215,9 @@ const validateWrittenId = (command: Command, field: Field, text: string): string
 
 /**
  * Resolves every tail in a command's fields to the full id, for positionals
- * and flags alike. A field whose row names a list operation may be given a
- * tail, and a tail that matches no id fails. A field whose row names none is
+ * and flags alike, and for each id of a repeated field. A field whose row
+ * names a list operation may be given a tail, and a tail that matches no id
+ * fails. A field whose row names none is
  * sent unchanged, unless it holds a Hercule id and the text looks like a tail
  * (see `validateWrittenId`). `scope` holds the command's resolved path
  * parameters, for a list that is read within one record.
@@ -218,13 +232,21 @@ const resolveTails = async (
   const resolved = { ...values };
   for (const field of fields) {
     const given = resolved[field.name];
-    // Three kinds of field are skipped: a field the caller never wrote, a numeric
-    // field and a repeated field. No tail stands for any of them.
-    if (typeof given !== "string") continue;
-    resolved[field.name] =
-      field.resolves === undefined
-        ? validateWrittenId(command, field, given)
-        : await resolveTail(client, command, field, given, scope);
+    if (given === undefined) continue;
+    // The list is read at most once per field, however many tails it was given.
+    let listed: Promise<ReadonlyArray<string>> | undefined;
+    const readIds = () => (listed ??= readListedIds(client, field, scope));
+    const resolveText = (text: unknown) =>
+      // A number holds no tail.
+      typeof text !== "string"
+        ? text
+        : field.resolves === undefined
+          ? validateWrittenId(command, field, text)
+          : resolveTail(command, field, text, readIds);
+    // Each id of a repeated field resolves the way a single one does.
+    resolved[field.name] = Array.isArray(given)
+      ? await Promise.all(given.map(resolveText))
+      : await resolveText(given);
   }
   return resolved;
 };
@@ -335,7 +357,10 @@ export const execute = async (
     // a usage error and nothing has been sent. A numeric path parameter is the
     // value itself, never a tail of a longer id: the event log numbers its
     // rows, and `42` is row 42.
-    const value = coerceFieldValue(field, args.positionals[index]!, command.spelling);
+    // A list positional is the last one and takes every word left.
+    const value = field.repeated
+      ? args.positionals.slice(index).map((text) => coerceFieldValue(field, text, command.spelling))
+      : coerceFieldValue(field, args.positionals[index]!, command.spelling);
     // A positional is a route parameter or a payload field, and is sent in
     // the part of the request its field declares.
     if (field.carriedIn === "payload") writtenPayload[field.name] = value;

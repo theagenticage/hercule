@@ -35,25 +35,21 @@ document.documentElement.setAttribute("data-bar-off", "");
 
 // The design draws parts that later tickets build, so they are removed here,
 // after the click, because the click redraws the list and the pane:
-// - the views over the list (To do, Later, Done, Everything);
+// - Everything, the fourth view over the list (#529);
 // - the hourly triage: its tab, its section and its line in the header;
 // - the "waiting" label under an asker's age;
-// - the count of asks cleared today;
-// - the Snooze… and Stop asking answers;
+// - the Stop asking answer and its M key, which spec 17 does not have;
 // - the fine print under an answer, the provider and account it acts as,
 //   which a signal's action does not carry;
 // - the pane's foot: when the signal leaves the list, and what raised it.
-findElement(document, "[data-asks-head]").remove();
+findElement(document, '[data-asks-head] [data-mode="everything"]').remove();
 findElement(document, "[data-asks-triage]").replaceChildren();
 findElement(document, '[data-asks-tabs] [data-filter="triage"]').remove();
 const triageHeading = findElement(document, '[data-flip="sec-triage"]');
 triageHeading.nextElementSibling?.remove();
 triageHeading.remove();
 for (const label of document.querySelectorAll(".ask-waiting")) label.remove();
-findElement(document, ".asks-cleared").remove();
-for (const label of ["Snooze…", "Stop asking"]) {
-  findElementByText(document, ".asks-detail .ans .btn", label).closest(".ans")?.remove();
-}
+findElementByText(document, ".asks-detail .ans .btn", "Stop asking").closest(".ans")?.remove();
 for (const fine of document.querySelectorAll(".asks-detail .ad-fine")) fine.remove();
 findElement(document, ".asks-detail .ad-foot").remove();
 
@@ -62,11 +58,11 @@ findElement(document, ".asks-detail .ad-foot").remove();
 // it here too: the fixture raised the alert 2 hours and 49 minutes ago.
 findElement(document, '.ask-row[data-id="alert"] .ask-age').textContent = "2h";
 
-// The All tab counts the triage findings removed above, so it counts only
-// the rows that are left.
-findElement(document, '[data-asks-tabs] [data-filter="all"] small').textContent = String(
-  document.querySelectorAll("[data-asks-list] .ask-row").length,
-);
+// The All tab and the To do view count the triage findings removed above,
+// so they count only the rows that are left.
+const rowCount = String(document.querySelectorAll("[data-asks-list] .ask-row").length);
+findElement(document, '[data-asks-tabs] [data-filter="all"] small').textContent = rowCount;
+findElement(document, '[data-asks-head] [data-mode="todo"] small').textContent = rowCount;
 
 // The design's clock stands at 11:20 and every specimen's at 09:41 (UTC), so
 // Marta's message, sent 2 hours and 23 minutes before, shows 07:18 in the app.
@@ -81,9 +77,10 @@ findElement(document, ".asks-detail .b-msg-head time").textContent = "07:18";
 // - the provenance line is the source's name and the kind's label, such as
 //   "GitHub · Mentioned", and the place moves to the line under the title,
 //   which names who asks, where and when;
-// - the foot lists the keys this slice has: E and H come with Done and
-//   Snooze (#525), M with Stop asking, which the spec does not have, and Esc
-//   closes the pane.
+// - the pane's foot lists Esc, which closes the pane;
+// - the count of signals cleared today says "3 left on their own", not "3 of
+//   them left on their own", and ends in "See Done." with a full stop, as the
+//   spec writes it.
 const signalsHeading = findElement(document, '[data-flip="sec-asks"]');
 signalsHeading.replaceChildren("Signals ", findElement(signalsHeading, ".count"));
 const alertSub = findElement(document, '.ask-row[data-id="alert"] .ask-sub');
@@ -101,14 +98,17 @@ askedTime.textContent = "07:18";
 asked.replaceChildren("Marta asks in payments-api #1294 · ", askedTime);
 
 const keys = findElement(document, ".asks-detail .ad-keys");
-for (const label of ["E done", "H snooze", "M stop asking"]) {
-  findElementByText(keys, "span", label).remove();
-}
+findElementByText(keys, "span", "M stop asking").remove();
 const escKey = document.createElement("span");
 const escKbd = document.createElement("kbd");
 escKbd.textContent = "Esc";
 escKey.append(escKbd, " close");
 keys.append(escKey);
+const cleared = findElement(document, ".asks-cleared");
+// The line's text before the "See Done" link is its first child.
+const clearedCount = cleared.firstChild as Text;
+clearedCount.data = clearedCount.data.replace(" of them left", " left");
+cleared.append(".");
 
 // Spec 17 draws each message's author's avatar before the name, or the
 // initials when there is none, and the design draws no avatars. The

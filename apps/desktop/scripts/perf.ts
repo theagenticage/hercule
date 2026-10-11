@@ -53,7 +53,8 @@
  *    open.
  * 4. One more plain launch, which reopens the same thread, measures a turn
  *    that streams into it at full speed (see `measureStreaming`).
- * 5. The fixture raises 200 signals, and the script opens Intake once, so
+ * 5. The fixture raises 200 signals, and one more that it snoozes for an
+ *    hour, so Intake's snooze timer is set. The script opens Intake once, so
  *    the last measured launch opens on Intake (see `openIntakeOnce`), with
  *    the Hercule face showing. Its first screen is Intake's list, and its
  *    memory and idle are read with Intake open. One more plain launch, which
@@ -207,6 +208,7 @@ import {
   measureIntakeWork,
   openIntakeOnce,
   raiseSignals,
+  raiseSnoozedSignal,
   reportIntakeWork,
 } from "./perf-intake.ts";
 import { measureSubagentLaunch, reportSubagentLaunch } from "./perf-subagents.ts";
@@ -1191,6 +1193,7 @@ async function measureLaunches(fixture: ThreadFixture, userDataDir: string) {
   );
   const streaming = await measureStreaming(userDataDir, fixture, thread);
   await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
+  await raiseSnoozedSignal(fixture);
   await measure(`500 threads, Intake open on ${String(INTAKE_SIGNALS)} signals`, 500, false, {
     opensIntake: true,
   });

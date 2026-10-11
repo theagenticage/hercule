@@ -567,6 +567,9 @@ const GITHUB_KINDS = [
   "github.pr.closed",
   "github.pr.labeled",
   "github.pr.checks-completed",
+  "github.pr.review-requested",
+  "github.pr.review-request-removed",
+  "github.mentioned",
 ] as const;
 
 /** The subject block every payload has, so a ref and a URL are derived the same way. */
@@ -633,6 +636,7 @@ const buildEventSourcePlugin = (kinds: ReadonlyArray<string>): Plugin => ({
             schema: Schema.Struct({
               subject: Schema.Struct({ repo: Schema.String, url: Schema.String }),
             }),
+            availableToTriage: true,
           },
         ]),
       ),

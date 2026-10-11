@@ -36,6 +36,7 @@ import {
   type Input,
   type Runner,
   type Session,
+  type SignalFilter,
   type Task,
   type TranscriptRow,
 } from "@hercule/contract";
@@ -423,18 +424,116 @@ export const assistantsQuery = (client: HerculeClient) =>
     ...SHELL_READ_OPTIONS,
   });
 
+/** The key of the soonest `until` on Later, which each read of To do writes. See `snoozeTimerQuery`. */
+const SNOOZE_TIMER_KEY = ["snooze-timer"] as const;
+
 /**
  * Reads Intake's To do list: every open signal that is not snoozed, read
  * whole, because every client counts it. The Hercule segment's count and
  * Intake's list both come from it, and a push on the `signal` topic reads it
  * again.
+ *
+ * Each read first reads the soonest `until` on Later and stores it for the
+ * snooze timer. Read in that order, a snooze that runs out between the two
+ * reads is missing from To do but still sets the timer, which reads To do
+ * again once it has run out. Read in the other order, or apart, that snooze
+ * could be missing from both, and To do would stay without it.
  */
 export const signalsToDoQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.signals({ view: "to-do" }),
-    queryFn: () => client.signal.query({ query: { view: "to-do" } }),
+    queryFn: async ({ client: queryClient }) => {
+      const soonest = await client.signal.query({ query: { view: "later", limit: 1 } });
+      queryClient.setQueryData(SNOOZE_TIMER_KEY, soonest.items[0]?.snooze?.until ?? null);
+      return (await client.signal.query({ query: { view: "to-do" } })).items;
+    },
     ...SHELL_READ_OPTIONS,
   });
+
+/**
+ * Reads Intake's Later list page by page, soonest snooze first: every open
+ * signal snoozed until a future time, or only those of the plugin `source`
+ * for a plugin's tab. A push on the `signal` topic reads the held pages
+ * again. Intake reads it only while it shows Later, or the Later count.
+ */
+export const signalsLaterQuery = (client: HerculeClient, source?: string) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.signals(buildPagedSignalFilter("later", source)),
+    queryFn: ({ pageParam }) =>
+      client.signal.query({ query: buildPagedSignalFilter("later", source, pageParam) }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Returns the soonest `until` on Later, or `null` when nothing is snoozed,
+ * as the last read of To do stored it (see `signalsToDoQuery`). The snooze
+ * timer waits for that time on every screen (see `SnoozeTimer`), so this is
+ * a shell read. It reads To do when To do has not been read yet, and never
+ * reads Later on its own.
+ */
+export const snoozeTimerQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: SNOOZE_TIMER_KEY,
+    queryFn: async ({ client: queryClient }): Promise<string | null> => {
+      await queryClient.fetchQuery(signalsToDoQuery(client));
+      return queryClient.getQueryData<string | null>(SNOOZE_TIMER_KEY) ?? null;
+    },
+    ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads Intake's Done list page by page, newest first: every resolved
+ * signal, or only those of the plugin `source` for a plugin's tab. A push on
+ * the `signal` topic reads the held pages again.
+ */
+export const signalsDoneQuery = (client: HerculeClient, source?: string) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.signals(buildPagedSignalFilter("done", source)),
+    queryFn: ({ pageParam }) =>
+      client.signal.query({ query: buildPagedSignalFilter("done", source, pageParam) }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads Done newest first in the largest pages the controller gives, for the
+ * count of signals cleared today under To do. The foot reads the next page
+ * only until a page reaches a signal resolved before today, so most days it
+ * takes one request. A push on the `signal` topic reads the held pages again.
+ */
+export const signalsClearedTodayQuery = (client: HerculeClient) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.signals(
+      buildPagedSignalFilter("done", undefined, undefined, MAX_PAGE_LIMIT),
+    ),
+    queryFn: ({ pageParam }) =>
+      client.signal.query({
+        query: buildPagedSignalFilter("done", undefined, pageParam, MAX_PAGE_LIMIT),
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Builds the filter of one page of the paged view `view`, `limit` signals
+ * long. The query key is built from the same filter without a cursor, so
+ * every page of one list shares one key.
+ */
+const buildPagedSignalFilter = (
+  view: "later" | "done",
+  source: string | undefined,
+  cursor?: string,
+  limit: number = DEFAULT_PAGE_LIMIT,
+): SignalFilter => ({
+  view,
+  limit,
+  ...(source === undefined ? {} : { source }),
+  ...(cursor === undefined ? {} : { cursor }),
+});
 
 /**
  * Reads every plugin, for the names Intake gives each signal's source. A push
@@ -966,6 +1065,7 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(connectionsQuery(client)),
     queryClient.ensureQueryData(userQuery(client)),
     queryClient.ensureQueryData(signalsToDoQuery(client)),
+    queryClient.ensureQueryData(snoozeTimerQuery(client)),
     queryClient.ensureQueryData(pluginsQuery(client)),
     queryClient
       .ensureQueryData(assistantsQuery(client))

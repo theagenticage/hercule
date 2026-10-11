@@ -107,7 +107,11 @@ import {
   sessionQuery,
   settingsQuery,
   signalQuery,
+  signalsClearedTodayQuery,
+  signalsDoneQuery,
+  signalsLaterQuery,
   signalsToDoQuery,
+  snoozeTimerQuery,
   startTasksQuery,
   subagentsQuery,
   threadsQuery,
@@ -169,6 +173,10 @@ export interface SidebarRecords {
   readonly connections?: ReadonlyArray<Connection>;
   /** The signals on To do, which Intake's row and the Hercule segment count. None when left out. */
   readonly signals?: ReadonlyArray<Signal>;
+  /** The signals on Later, soonest snooze first. None when left out. */
+  readonly later?: ReadonlyArray<Signal>;
+  /** The signals on Done, newest first, which Intake's foot counts. None when left out. */
+  readonly done?: ReadonlyArray<Signal>;
   /** The installed plugins, which name each signal's source. None when left out. */
   readonly plugins?: ReadonlyArray<PluginDetail>;
   /**
@@ -245,14 +253,23 @@ export interface AppearanceSettingsRecords {
 }
 
 /**
- * What Intake reads besides the shell's lists, which hold To do and the
- * plugins: the selected signal and the event it was raised from.
+ * What Intake reads besides the shell's lists, which hold To do, Later, Done
+ * and the plugins: the selected signal and the event it was raised from. It
+ * also says which view Intake opens on, and how the page answers a move.
  */
 export interface IntakeRecords {
   /** The selected signal, as the controller reads it, or `null` when none is selected. */
   readonly signal: Signal | null;
   /** The event the selected signal was raised from, or `null` for none. */
   readonly event: Event | null;
+  /** The view Intake opens on. To do when left out. */
+  readonly view?: "later" | "done";
+  /**
+   * Answers the requests that move signals, such as `signal.markDone`, for a
+   * scene that makes a move. Every other request is refused, as on every
+   * page. When left out, moves are refused too.
+   */
+  readonly answerMove?: FetchLike;
 }
 
 /** The screens a shell specimen opens beside the sidebar. It opens at most one of them. */
@@ -281,6 +298,9 @@ const refuseRequest: FetchLike = (url) =>
         "Add the record it reads to the specimen's fixture.",
     ),
   );
+
+/** Matches the address of a request that moves signals: Done, Snooze, Unsnooze or Not urgent. */
+const MOVE_PATH = /\/api\/v1\/signals\/(mark-done|snooze|unsnooze|lower-priority)$/;
 
 /** Returns an error for a bridge call the page made, naming `call`. */
 const buildBridgeCallError = (call: string): Error =>
@@ -401,6 +421,23 @@ const seedQueryCache = (
   queryClient.setQueryData(userQuery(client).queryKey, records.user);
   queryClient.setQueryData(connectionsQuery(client).queryKey, records.connections ?? []);
   queryClient.setQueryData(signalsToDoQuery(client).queryKey, records.signals ?? []);
+  // Each paged list fits on its one page.
+  queryClient.setQueryData(signalsLaterQuery(client).queryKey, {
+    pages: [{ items: records.later ?? [] }],
+    pageParams: [undefined],
+  });
+  queryClient.setQueryData(signalsDoneQuery(client).queryKey, {
+    pages: [{ items: records.done ?? [] }],
+    pageParams: [undefined],
+  });
+  queryClient.setQueryData(signalsClearedTodayQuery(client).queryKey, {
+    pages: [{ items: records.done ?? [] }],
+    pageParams: [undefined],
+  });
+  queryClient.setQueryData(
+    snoozeTimerQuery(client).queryKey,
+    records.later?.[0]?.snooze?.until ?? null,
+  );
   queryClient.setQueryData(pluginsQuery(client).queryKey, records.plugins ?? []);
   queryClient.setQueryData(liveAgentSessionsQuery(client).queryKey, records.agentSessions ?? []);
   queryClient.setQueryData(
@@ -751,7 +788,14 @@ async function mountShellSpecimen(
   unsentThreadIds: readonly string[] = [],
 ): Promise<void> {
   applySheetTheme();
-  const client = createClient({ baseUrl: CONTROLLER_URL, fetch: refuseRequest });
+  const answerMove = screens.intake?.answerMove;
+  const client = createClient({
+    baseUrl: CONTROLLER_URL,
+    fetch:
+      answerMove === undefined
+        ? refuseRequest
+        : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init)),
+  });
   const queryClient = createQueryClient();
   seedQueryCache(queryClient, client, records, screens);
   const pendingSubmissions = createPendingSubmissions();
@@ -890,9 +934,9 @@ export async function mountAppearanceSettingsSpecimen(
 
 /**
  * Applies the URL's theme and draws the shell into `#root` from `records`,
- * with Intake open: the main pane shows the app's real Intake screen, with
- * the signals on To do from `records`, and the pane of `intake.signal` when
- * it is not `null`. Returns once the list's rows, or its empty line, are in
+ * with Intake open: the main pane shows the app's real Intake screen, on
+ * `intake.view` or To do, with the signals from `records`, and the pane of
+ * `intake.signal` when it is not `null`. Returns once the list's rows, or its empty line, are in
  * the document. Fails when the page has no `#root`, draws no sidebar row, no
  * list row and no empty line, or tries to read a record the cache does not
  * hold.
@@ -901,7 +945,10 @@ export async function mountIntakeSpecimen(
   records: SidebarRecords,
   intake: IntakeRecords,
 ): Promise<void> {
-  const path = intake.signal === null ? "/intake" : `/intake?signal=${intake.signal.id}`;
+  const search = new URLSearchParams();
+  if (intake.view !== undefined) search.set("view", intake.view);
+  if (intake.signal !== null) search.set("signal", intake.signal.id);
+  const path = search.size === 0 ? "/intake" : `/intake?${search.toString()}`;
   await mountShellSpecimen(records, path, { intake });
 }
 

@@ -380,6 +380,8 @@ describe("IngestLoops failures", () => {
           occurredAt: "2026-09-01T12:00:00Z",
           payload: { title: "Shipped" },
           refs: [],
+          title: "Shipped",
+          author: null,
         }),
         {},
       );
@@ -548,7 +550,7 @@ describe("IngestLoops opening", () => {
     expect(fixture.calls).toEqual(["open"]);
   });
 
-  it("passes the Connection's id and config to open", async () => {
+  it("passes the Connection's id, config and account to open", async () => {
     const fixture = createEventSourceFixture();
 
     const connection = await run(
@@ -556,7 +558,7 @@ describe("IngestLoops opening", () => {
     );
 
     expect(fixture.opened.map((one) => one.connection)).toEqual([
-      { id: connection.id, config: {} },
+      { id: connection.id, config: {}, accountId: "acme-1", displayName: "Acme" },
     ]);
   });
 });

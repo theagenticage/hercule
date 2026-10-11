@@ -57,6 +57,7 @@ import {
   EventRouterLayer,
   PipelineLayer,
   Placement,
+  SignalBuildFailuresLayer,
   PermissionRequests,
   PermissionRequestsLayer,
   PlacementLayer,
@@ -75,7 +76,7 @@ import {
   WorkspaceStepsLayer,
 } from "../daemon";
 import { NotificationService, NotificationServiceLayer } from "../notifications";
-import { SignalService, SignalServiceLayer } from "../signals";
+import { SignalRaisesLayer, SignalService, SignalServiceLayer } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
@@ -280,7 +281,11 @@ const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
       )
       .handle("withdraw", ({ params, payload }) =>
         withApiErrors(signals.withdraw({ id: params.id, ...payload })),
-      );
+      )
+      .handle("markDone", ({ payload }) => withApiErrors(signals.markDone(payload)))
+      .handle("snooze", ({ payload }) => withApiErrors(signals.snooze(payload)))
+      .handle("unsnooze", ({ payload }) => withApiErrors(signals.unsnooze(payload)))
+      .handle("lowerPriority", ({ payload }) => withApiErrors(signals.lowerPriority(payload)));
   }),
 );
 
@@ -729,6 +734,20 @@ const PermissionRequestsDomainLayer = PermissionRequestsLayer.pipe(
 );
 
 /**
+ * The controller daemon's `BoundOperations`, which checks and runs the
+ * operation of a chosen answer. The operation can be a task, run, live
+ * session or Permission Request operation, so the port gets the run layers,
+ * which include the task service, and the Permission Request use case. The
+ * notification and signal services run answers through it, and
+ * `SignalRaises` checks a plugin's answers with it. All three are provided
+ * this one layer, so it is built once.
+ */
+const BoundOperationsDomainLayer = BoundOperationsLayer.pipe(
+  Layer.provide(RunDomainLayer),
+  Layer.provide(PermissionRequestsDomainLayer),
+);
+
+/**
  * Every service an operation uses, together with the controller daemon. The
  * listener starts the controller daemon's drivers, so they are built here
  * rather than a second time elsewhere. It is one list because otherwise a
@@ -790,20 +809,15 @@ export const operationLayers = Layer.mergeAll(
   // The inbound driver hands a workspace step's result to the run service.
   // The notification and signal services run the operation of a chosen
   // answer through their `BoundOperations` port, which the controller daemon
-  // implements. The operation can be a task, run, live session or Permission
-  // Request operation, so the port gets the run layers, which include the
-  // task service, and the Permission Request use case, and sits in this
-  // group, which provides `Live`.
+  // implements, and which sits in this group because it uses `Live`. The
+  // notification service counts a failed signal build's signals through the
+  // controller daemon's `SignalBuildFailures`.
   Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunDomainLayer)),
-    Layer.mergeAll(NotificationServiceLayer, SignalServiceLayer).pipe(
-      Layer.provide(
-        BoundOperationsLayer.pipe(
-          Layer.provide(RunDomainLayer),
-          Layer.provide(PermissionRequestsDomainLayer),
-        ),
-      ),
-    ),
+    Layer.mergeAll(
+      NotificationServiceLayer.pipe(Layer.provide(SignalBuildFailuresLayer)),
+      SignalServiceLayer,
+    ).pipe(Layer.provide(BoundOperationsDomainLayer)),
     SetupLayer,
     // The events service reads the registered event kinds from the plugins
     // domain. The plugins domain appends to the event log, so the events
@@ -815,7 +829,9 @@ export const operationLayers = Layer.mergeAll(
     // effect, and its failed filter on its health. The pipeline also starts
     // the runs of the matches, and the trigger effects start them through
     // the run service (`TriggeredRunsLayer`), so the trigger effects are
-    // provided above the run domain.
+    // provided above the run domain. The pipeline raises Intake's signals
+    // through `SignalRaises`, which checks a plugin's answers through
+    // `BoundOperations`.
     Layer.mergeAll(
       PipelineLayer,
       EnrichmentLayer.pipe(
@@ -824,6 +840,7 @@ export const operationLayers = Layer.mergeAll(
     ).pipe(
       Layer.provideMerge(EventRouterLayer),
       Layer.provide(TriggerEffectsLayer.pipe(Layer.provide(TriggeredRunsLayer))),
+      Layer.provide(SignalRaisesLayer.pipe(Layer.provide(BoundOperationsDomainLayer))),
       Layer.provide(RunDomainLayer),
     ),
   ).pipe(

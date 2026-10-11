@@ -30,6 +30,7 @@ interface Fixture {
   readonly enabled: boolean;
   readonly status: unknown;
   readonly configSchema?: Record<string, unknown>;
+  readonly markError?: string;
   readonly config: unknown;
   readonly contributions: readonly Contribution[];
 }
@@ -186,6 +187,15 @@ describe("Settings > Plugins", () => {
 
     const refused = readPageText(await findPluginCard(REFUSED));
     expect(refused).toMatch(/refused|not loaded|turned away/i);
+  });
+
+  it("says why the plugin's mark was left out", async () => {
+    const markError =
+      "The plugin's mark was left out because its paths together are larger than 4 KB.";
+    await openApp([{ ...ACTIVE, markError }, ERRORED]);
+
+    expect(readPageText(await findPluginCard(ACTIVE))).toContain(markError);
+    expect(readPageText(await findPluginCard(ERRORED))).not.toContain(markError);
   });
 
   it("shows why activation failed, and retries it", async () => {

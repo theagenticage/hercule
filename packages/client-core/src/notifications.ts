@@ -1,8 +1,9 @@
 /**
  * How the notification center shows a notification: who produced it, which
  * mark it gets, what each answer of a decision does, how a resolved decision
- * was resolved, and whether its producer is muted. Spec 10 §7 owns the
- * record; spec 14 §Notification center owns the screen.
+ * was resolved, how often a signal's build has failed, and whether its
+ * producer is muted. Spec 10 §7 owns the record; spec 14 §Notification
+ * center owns the screen.
  */
 import type {
   CoreNotificationKind,
@@ -15,6 +16,7 @@ import type {
   ResolutionOrigin,
 } from "@hercule/contract";
 import { toIdTail } from "./id-tail";
+import { formatMessageTime } from "./threads/message-time";
 
 /**
  * Returns the label that says who produced a notification. The core is shown
@@ -87,6 +89,27 @@ export const describeResolution = (resolution: Resolution): string => {
     case "withdrawn":
       return resolution.reason === undefined ? "withdrawn" : `withdrawn: ${resolution.reason}`;
   }
+};
+
+/**
+ * Returns the line a `core.signal-build-failed` notification shows under its
+ * title: how many signals of its kind failed to build since the notification
+ * was created, such as "failed 14 times since 09:12", or "failed once since
+ * 4 Sep 09:12" when it was created on another day. The time is in
+ * `timezone`, and `now` decides which day is today. Returns `undefined` for a
+ * notification with no count, which is every other kind, and leaves out
+ * "since" when the time cannot be formatted.
+ */
+export const describeFailedBuildCount = (
+  notification: Notification,
+  timezone: string,
+  now: Date,
+): string | undefined => {
+  const count = notification.failedBuildCount;
+  if (count === undefined) return undefined;
+  const times = count === 1 ? "once" : `${String(count)} times`;
+  const since = formatMessageTime(new Date(notification.createdAt), timezone, now);
+  return since === undefined ? `failed ${times}` : `failed ${times} since ${since}`;
 };
 
 /**

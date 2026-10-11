@@ -21,7 +21,8 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { shortenLibraryMessage, quoteAuthorText } from "@hercule/contract";
+import * as Struct from "effect/Struct";
+import { shortenLibraryMessage, quoteAuthorText, type Event } from "@hercule/contract";
 // This is the only module that reaches the evaluator, which is what keeps the
 // implementation swappable: `@bufbuild/cel` is the named fallback, and a
 // stored condition holds CEL source and nothing derived from it, so a swap
@@ -180,6 +181,16 @@ export type ExpressionScope = "event" | "run";
  */
 export type EvaluationContext = Readonly<Record<string, unknown>>;
 
+/**
+ * Builds the context an expression over `event` is evaluated against: the
+ * event without its raw payload. Expressions are written against the
+ * normalized fields only, because one that read the raw payload would break
+ * as soon as the source system changed its format.
+ */
+export const buildEvaluationContext = (event: Event): EvaluationContext => ({
+  event: Struct.omit(event, ["raw"]),
+});
+
 /** The variables each scope declares. All are `dyn`, as in the evaluation environment. */
 const SCOPE_VARIABLES: Record<ExpressionScope, ReadonlyArray<string>> = {
   event: ["event"],
@@ -325,6 +336,29 @@ export const validateExpression = (
   source: string,
   scope: ExpressionScope,
 ): Effect.Effect<void, ExpressionError> => Effect.asVoid(typeCheckSource(source, scope));
+
+/**
+ * Validates a source whose value must be a string, such as a signal kind's
+ * rule or the thread it is about. Fails with `ExpressionError` if the source
+ * is not valid in the scope, or if its type is known and is not `string`. A
+ * `dyn` source is accepted, because its type is known only when it is
+ * evaluated.
+ */
+export const validateTextExpression = (
+  source: string,
+  scope: ExpressionScope,
+): Effect.Effect<void, ExpressionError> =>
+  Effect.flatMap(typeCheckSource(source, scope), (type) =>
+    type === "string" || type === "dyn"
+      ? Effect.void
+      : Effect.fail(
+          new ExpressionError({
+            message:
+              `This expression evaluates to a value of type ${type}, but here it must evaluate to a string. ` +
+              "Write an expression that evaluates to a string, such as a quoted 'yes', or convert the value with string().",
+          }),
+        ),
+  );
 
 /**
  * Validates a source whose value decides yes or no, such as a filter or a
@@ -558,6 +592,18 @@ const convertToJson = (value: unknown): unknown => {
     default:
       return undefined;
   }
+};
+
+/**
+ * Formats a value an expression returned for an error message: its JSON, or
+ * the kind of value it is when it has no JSON form. Unlike `JSON.stringify`,
+ * it never throws, so a message about an integer the evaluator returned as a
+ * `BigInt` can always be written.
+ */
+export const formatExpressionValue = (value: unknown): string => {
+  if (value === undefined) return "nothing";
+  const json = convertToJson(value);
+  return json === undefined ? "a value with no JSON form" : JSON.stringify(json);
 };
 
 /**

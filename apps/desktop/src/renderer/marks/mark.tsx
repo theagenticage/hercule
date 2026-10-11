@@ -45,10 +45,10 @@ const MARK_GLYPHS: { readonly [State in MarkState]: JSX.Element } = {
 
 /**
  * Renders a state mark: the state's glyph, `size` CSS pixels square (14 by
- * default, 10 in a workflow's strip of runs), in the state's colour. The
- * mark is hidden from assistive technology, because every place that draws
- * one also names the state in words, such as a thread row's name "Fix
- * checkout, working".
+ * default, 10 in a workflow's strip of runs, 16 where the drawing sets a mark
+ * in a 28-pixel circle), in the state's colour. The mark is hidden from assistive technology, because
+ * every place that draws one also names the state in words, such as a thread
+ * row's name "Fix checkout, working".
  *
  * Nothing in a mark moves. The book fades the working mark's dots in turn;
  * the app draws them still. The app allows one continuous animation, the face
@@ -60,7 +60,7 @@ export function Mark({
   size = 14,
 }: {
   readonly state: MarkState;
-  readonly size?: number;
+  readonly size?: 10 | 14 | 16;
 }): JSX.Element {
   return (
     <span className={`mark mark--${state}`} aria-hidden="true">

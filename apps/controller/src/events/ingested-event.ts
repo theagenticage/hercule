@@ -23,6 +23,8 @@ export interface IngestedEventToAppend {
   readonly dedupKey: string;
   readonly refs: ReadonlyArray<string>;
   readonly url: string | null;
+  readonly title: string;
+  readonly author: string | null;
   readonly payload: unknown;
   readonly raw: Readonly<Record<string, unknown>> | null;
 }

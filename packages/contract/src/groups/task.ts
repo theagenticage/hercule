@@ -10,6 +10,7 @@
  * Delete is soft. Reading a deleted task fails with `not_found`, it is left
  * out of `query` and search, and there is no option to include deleted tasks.
  */
+import { TaskPriority } from "@hercule/plugin-host";
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
@@ -63,15 +64,8 @@ export const TaskStatus = Schema.Literals(TASK_STATUSES);
 
 export type TaskStatus = Schema.Schema.Type<typeof TaskStatus>;
 
-/**
- * How much this matters. Shown as bars and font weight, never as colour. The
- * list is in ranking order, so a client that shows a picker uses it as is.
- */
-export const TASK_PRIORITIES = ["urgent", "high", "normal", "low"] as const;
-
-export const TaskPriority = Schema.Literals(TASK_PRIORITIES);
-
-export type TaskPriority = Schema.Schema.Type<typeof TaskPriority>;
+/** Re-exported from the package plugins are written against, so a signal's priority and a Task's agree. */
+export { TASK_PRIORITIES, TaskPriority } from "@hercule/plugin-host";
 
 /** A label: a bare string in one flat namespace. Nothing registers it. */
 export const Label = bounded(1, MAX_LABEL_LENGTH);

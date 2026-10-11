@@ -889,6 +889,8 @@ describe("id tails", () => {
       dedupKey: "d1",
       refs: [],
       url: null,
+      title: null,
+      author: null,
       payload: {},
       raw: null,
       actor: null,

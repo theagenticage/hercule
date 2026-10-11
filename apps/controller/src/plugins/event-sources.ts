@@ -27,6 +27,7 @@ import { isCoreEventKind, type DeclaredEventKindWithConnectionType } from "../ev
 import { toPluginError, describeFieldIssues } from "./errors";
 import { deriveCatalogJsonSchema } from "./json-schema";
 import type { NewContribution } from "./repository";
+import { decodeSignalKinds, type RegisteredSignalKind } from "./signal-kinds";
 
 /**
  * An event kind a plugin registered at boot, with the id of that plugin and
@@ -51,6 +52,7 @@ export interface RegisteredEventKind extends DeclaredEventKindWithConnectionType
  * - `kinds` are the kinds it may emit, keyed by name.
  * - `resources` is whether the manifest requested the `resources` capability,
  *   which decides whether `open` receives the Connection's Resources.
+ * - `signalKinds` are the checked, qualified signal kinds its events raise.
  */
 export interface RegisteredEventSource {
   readonly id: string;
@@ -59,6 +61,7 @@ export interface RegisteredEventSource {
   readonly feeds: Readonly<Record<string, FeedDeclaration>>;
   readonly kinds: ReadonlyMap<string, RegisteredEventKind>;
   readonly resources: boolean;
+  readonly signalKinds: ReadonlyArray<RegisteredSignalKind>;
   readonly open: EventSourceContribution["open"];
 }
 
@@ -171,7 +174,8 @@ const decodeFeeds = (
  * - a name is invalid, or a kind is declared twice;
  * - the Connection type belongs to another plugin, or already has a source;
  * - a kind has the name of a core kind;
- * - a feed is invalid, as `decodeFeeds` explains.
+ * - a feed is invalid, as `decodeFeeds` explains;
+ * - a signal kind is invalid, as `decodeSignalKinds` explains.
  *
  * The collections belong to the registration pass, which passes them in for
  * this function to append to. A pass registers every plugin before anything
@@ -289,6 +293,17 @@ export const registerEventSourceContribution = (
       sourceKinds.set(kind, registered);
     }
     const feeds = yield* decodeFeeds(names.id, contribution.feeds);
+    const signalKinds = yield* decodeSignalKinds(
+      manifest,
+      id,
+      contribution.signalKinds ?? [],
+      new Set(sourceKinds.keys()),
+      new Set(
+        sources
+          .filter((source) => source.pluginId === pluginId)
+          .flatMap((source) => source.signalKinds.map((registered) => registered.kind)),
+      ),
+    );
     declared.push({
       owner: pluginId,
       extensionPoint: EVENT_SOURCE,
@@ -302,6 +317,7 @@ export const registerEventSourceContribution = (
       feeds,
       kinds: sourceKinds,
       resources: manifest.capabilities.includes("resources"),
+      signalKinds,
       open: contribution.open,
     });
   });

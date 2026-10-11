@@ -39,6 +39,8 @@ export const appendCronTickEvent = (
       dedupKey: `${payload.workflowId}/${payload.triggerId}/${payload.scheduledFor}`,
       refs: [],
       url: null,
+      title: null,
+      author: null,
       payload,
       raw: null,
       actor: null,

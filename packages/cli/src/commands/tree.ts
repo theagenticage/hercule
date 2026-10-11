@@ -51,7 +51,10 @@ export interface Field {
    * where the typed text is the value.
    */
   readonly decodeShorthand: ((text: string) => unknown) | undefined;
-  /** Whether the flag may be given more than once; the values become a list. */
+  /**
+   * Whether the field takes a list. A flag may then be given more than once,
+   * and a positional, which is always the last one, takes one or more words.
+   */
   readonly repeated: boolean;
   readonly optional: boolean;
   /** Whether the field accepts `null`, which is written `--field null` on the command line. */
@@ -76,6 +79,12 @@ export interface Field {
    * full id is accepted.
    */
   readonly resolves: OperationId | undefined;
+  /**
+   * The query sent to the list operation in `resolves`, such as `{ view:
+   * "later" }` to match a tail among the snoozed signals; empty when the
+   * listing's default holds the ids this field takes.
+   */
+  readonly resolvesQuery: Readonly<Record<string, string>>;
   readonly help: string;
 }
 
@@ -105,9 +114,15 @@ export interface Command {
   readonly payload: ReadonlyArray<Field>;
   /** The query fields other than the three paging fields, given as `--<flag>`. */
   readonly query: ReadonlyArray<Field>;
-  /** Whether the operation is paged, so `--limit`, `--cursor`, `--sort` and `--all` apply. */
+  /**
+   * Whether the operation is paged, so `--limit`, `--cursor` and `--all`
+   * apply, and `--sort` when it has sort fields.
+   */
   readonly paged: boolean;
-  /** The fields `--sort` accepts, when the operation pages. */
+  /**
+   * The fields `--sort` accepts, when the operation pages. Empty for a list
+   * with one fixed order, which takes no `--sort`.
+   */
   readonly sortFields: ReadonlyArray<string>;
   /**
    * The contract's schema for the three paging parameters, taken from the
@@ -269,6 +284,7 @@ const buildField = (
     stdin: "stdin" in row && row.stdin === true,
     uploads: "upload" in row && row.upload === true,
     resolves: "resolves" in row ? row.resolves : undefined,
+    resolvesQuery: ("resolvesQuery" in row ? row.resolvesQuery : undefined) ?? {},
     help: row.help,
   };
 };
@@ -355,10 +371,11 @@ const listErrorCodes = (errors: unknown): ReadonlyArray<ErrorCode> => {
 };
 
 /**
- * Returns the schema of the three paging parameters in an operation's query
- * schema, or `undefined` when the operation does not page. The schemas are the
- * contract's own, so the CLI checks a paging flag by the same rules as the
- * API, without restating any of them.
+ * Returns the schema of the paging parameters in an operation's query schema,
+ * or `undefined` when the operation does not page. A list with one fixed
+ * order, such as `signal.query`'s views, has `limit` and `cursor` but no
+ * `sort`. The schemas are the contract's own, so the CLI checks a paging flag
+ * by the same rules as the API, without restating any of them.
  */
 const readPageQuery = (query: unknown): Schema.Codec<unknown, unknown> | undefined => {
   // The query schema is wrapped in the codec that reads a query string, so the
@@ -368,12 +385,13 @@ const readPageQuery = (query: unknown): Schema.Codec<unknown, unknown> | undefin
       readonly schema?: { readonly fields?: Record<string, Schema.Codec<unknown, unknown>> };
     }
   )?.schema?.fields;
-  if (fields?.["sort"] === undefined) return undefined;
-  return Schema.Struct({
-    limit: fields["limit"]!,
-    cursor: fields["cursor"]!,
-    sort: fields["sort"],
-  });
+  if (fields?.["limit"] === undefined) return undefined;
+  const limit = fields["limit"];
+  const cursor = fields["cursor"]!;
+  const sort = fields["sort"];
+  return sort === undefined
+    ? Schema.Struct({ limit, cursor })
+    : Schema.Struct({ limit, cursor, sort });
 };
 
 /** Returns the `:name` path parameters of a route, in order. */
@@ -424,6 +442,21 @@ const buildCommands = (): ReadonlyArray<Command> => {
       const payload = buildFields(id, payloadSchema, row.fields, "payload");
       const query = buildFields(id, each.query, row.fields, "query");
       const inPath = listPathParams(operation.path);
+      // A route parameter the params schema does not declare is a mistake in
+      // the contract, not a string: the CLI would send a value nothing
+      // decodes. Payload positionals come after the route parameters, so a
+      // command whose only argument is its content takes it as a positional,
+      // not as a flag.
+      const positionals = [
+        ...inPath.map((name) => params.get(name)!),
+        ...payload.filter((field) => field.positional),
+      ];
+      // A list positional takes every word left, so a positional after it
+      // could never be given.
+      const early = positionals.slice(0, -1).find((field) => field.repeated);
+      if (early !== undefined) {
+        throw new Error(`${id}: ${early.name} takes a list, so it must be the last positional`);
+      }
 
       commands.push({
         id,
@@ -432,20 +465,13 @@ const buildCommands = (): ReadonlyArray<Command> => {
         requires: operation.requires,
         method: operation.method,
         path: operation.path,
-        // A route parameter the params schema does not declare is a mistake in
-        // the contract, not a string: the CLI would send a value nothing
-        // decodes. Payload positionals come after the route parameters, so a
-        // command whose only argument is its content takes it as a positional,
-        // not as a flag.
-        positionals: [
-          ...inPath.map((name) => params.get(name)!),
-          ...payload.filter((field) => field.positional),
-        ],
+        positionals,
         payload: payload.filter((field) => !field.positional),
         query,
-        // The three paging fields always come together, so the sort field alone
-        // shows that the operation is paged.
-        paged: listPropertyNames((each.query as { ast?: Ast } | undefined)?.ast).includes("sort"),
+        // `limit` and `cursor` always come together, and `sort` comes with
+        // them unless the list has one fixed order, so `limit` alone shows
+        // that the operation is paged.
+        paged: listPropertyNames((each.query as { ast?: Ast } | undefined)?.ast).includes("limit"),
         sortFields: readSortFields(each.query),
         pageQuery: readPageQuery(each.query),
         help: row.help,

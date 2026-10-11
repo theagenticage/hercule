@@ -59,6 +59,7 @@ import { summarizeCause, toPluginError } from "./errors";
 import type { RegisteredEventSource } from "./event-sources";
 import { ingestContexts } from "./ingest-context";
 import { IngestExecutor } from "./ingest-executor";
+import type { OpenSignals } from "./open-signals";
 
 /** After this many failures in a row, of one feed or of the open, the Connection is set to `error`. */
 export const FAILURES_BEFORE_ERROR = 5;
@@ -360,12 +361,18 @@ const make = Effect.gen(function* () {
         const credentialsVersion = yield* connectionTypes.readCredentialsVersion(connection.id);
         const attempt = yield* Effect.exit(
           Effect.flatMap(decodeConfig, (config) =>
-            Effect.suspend(() =>
-              source.open(
-                { id: connection.id, config },
-                contexts.buildIngestContext(source, { id: connection.id, config }),
-              ),
-            ),
+            Effect.suspend(() => {
+              const ingestConnection = {
+                id: connection.id,
+                config,
+                accountId: connection.accountId,
+                displayName: connection.displayName,
+              };
+              return source.open(
+                ingestConnection,
+                contexts.buildIngestContext(source, ingestConnection),
+              );
+            }),
           ),
         );
         if (Exit.isSuccess(attempt)) return attempt.value;
@@ -584,5 +591,5 @@ export class IngestLoops extends Context.Service<IngestLoops, Effect.Success<typ
 export const IngestLoopsLayer: Layer.Layer<
   IngestLoops,
   never,
-  SqlClient.SqlClient | ConnectionTypes | Notifier | IngestExecutor | PromotionState
+  SqlClient.SqlClient | ConnectionTypes | Notifier | IngestExecutor | OpenSignals | PromotionState
 > = Layer.effect(IngestLoops)(make);

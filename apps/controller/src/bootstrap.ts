@@ -41,6 +41,7 @@ import {
   endStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
   IngestExecutorLayer,
+  OpenSignalsLayer,
   RunServiceReferenceLayer,
   SessionObserverLayer,
   type RunServiceReference,
@@ -324,7 +325,7 @@ export const bootWith = <A, E>(
      * the host has closed every ingest at shutdown.
      */
     const catalog = PluginHostLayer.pipe(
-      Layer.provide(IngestExecutorLayer),
+      Layer.provide([IngestExecutorLayer, OpenSignalsLayer]),
       Layer.provideMerge(ConnectionTypesLayer),
       Layer.provideMerge(PluginConfigsLayer),
       Layer.provideMerge(repositories),

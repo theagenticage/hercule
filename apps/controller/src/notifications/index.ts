@@ -16,3 +16,4 @@ export {
   type QueryInput,
   type WithdrawInput,
 } from "./service";
+export { SignalBuildFailures } from "./signal-build-failures";

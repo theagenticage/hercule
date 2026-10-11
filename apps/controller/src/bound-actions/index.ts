@@ -94,10 +94,11 @@ export class BoundOperations extends Context.Service<
      *   disabled.
      *
      * `field` is the typed reply of the answer, when it has one. Its text
-     * comes only at the click, so the input must leave the field out, and a
-     * problem with the field's value is not counted. The field must be a
-     * top-level text field of a plugin action's input; a contract operation
-     * takes no typed reply.
+     * comes only at the click, so the input must leave the field out. The
+     * input is checked with some text in the field, as it will be at the
+     * click, and a problem with the field's value is not counted. The field
+     * must be a top-level text field of a plugin action's input; a contract
+     * operation takes no typed reply.
      */
     readonly check: <Place extends AnswerPlace>(
       place: Place,

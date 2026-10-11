@@ -70,22 +70,27 @@ const deleteDepartedRepoState = (
  * with them.
  */
 export interface RepoPollBudget {
-  /** Checks whether the poll has spent its budget. Asked before each repository but the first. */
+  /**
+   * Checks whether the poll has spent its budget. Asked before each
+   * repository but the first, and by a feed that can stop inside a
+   * repository, between its items.
+   */
   readonly isSpent: () => boolean;
 }
 
 /**
- * Returns the watch list in the order one poll visits it: sorted by name,
- * starting with the first repository after `lastPolled`, and wrapping around.
- * Compared by name rather than by position, so a repository added to or
- * removed from the watch list since the last poll does not shift the turn.
+ * Returns names in the order one poll visits them: sorted, starting with the
+ * first name after `lastPolled`, and wrapping around. Compared by name
+ * rather than by position, so a name added or removed since the last poll
+ * does not shift the turn. The names are repositories on the watch list, or
+ * the refs of followed items.
  */
-const orderFromLastPolled = (
-  watchList: ReadonlyArray<string>,
+export const orderFromLastPolled = (
+  names: ReadonlyArray<string>,
   lastPolled: string | undefined,
 ): Array<string> => {
-  const sorted = [...watchList].sort();
-  const next = lastPolled === undefined ? -1 : sorted.findIndex((repo) => repo > lastPolled);
+  const sorted = [...names].sort();
+  const next = lastPolled === undefined ? -1 : sorted.findIndex((name) => name > lastPolled);
   return next === -1 ? sorted : [...sorted.slice(next), ...sorted.slice(0, next)];
 };
 
@@ -93,8 +98,9 @@ const orderFromLastPolled = (
  * Polls the repositories on the watch list in turn for one per-repository
  * feed, keeping each repository's state under `<feed>/<owner>/<repo>`.
  * `pollRepo` receives the stored state, or `Option.none()` for a repository
- * polled for the first time, and returns the state to store. The state of a
- * repository that left the watch list is deleted first.
+ * polled for the first time, and returns the state to store. When it returns
+ * the stored value itself, nothing changed and nothing is written. The state
+ * of a repository that left the watch list is deleted first.
  *
  * Without a `budget`, every repository is polled, in the watch list's order.
  * With one, the poll starts with the repository after the one the last poll
@@ -136,7 +142,7 @@ export const pollWatchedRepos = <A extends Schema.Json, E, R>(
       yield* Effect.gen(function* () {
         const stored = yield* readFeedState(store, key, schema);
         const next = yield* pollRepo(repo, stored);
-        yield* store.set(key, next);
+        if (Option.isNone(stored) || next !== stored.value) yield* store.set(key, next);
       }).pipe(
         Effect.catchIf(
           (error): error is PluginError => error instanceof PluginError,

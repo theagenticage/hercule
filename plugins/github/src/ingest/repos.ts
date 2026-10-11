@@ -14,7 +14,19 @@
  *    `updated_at` moving; a diff that finds nothing new emits nothing. A
  *    repository where nothing changed answers 304, which costs no quota.
  * 2. For each pull request diffed: `GET .../pulls/{n}/reviews`, for new
- *    reviews, and, when it is open, `GET .../pulls/{n}`, for its head commit.
+ *    reviews, and, when it is open or was just closed, `GET .../pulls/{n}`,
+ *    for its head commit, its review requests and who merged it. When the
+ *    review requests to the user or their teams changed, or the pull
+ *    request asks for one of them, `GET .../issues/{n}/events` too, for who
+ *    asked and when. The second case catches a request made again after a
+ *    review between two polls: the reviewer leaves the list when they review
+ *    and is back on it by the next poll, so the list alone looks unchanged,
+ *    and the update time may not have moved either when both happened in
+ *    the snapshot's own second. When the history holds a request or a
+ *    removal to emit, `GET .../pulls/{n}` once more, after the reviews and
+ *    the history, for who is asked now (see `emitReviewRequestEvents`).
+ *    Reviews and history are read newest first, up to a page limit, and a
+ *    listing cut short logs a warning.
  * 3. When the listing held any item, or the last poll's comment listing
  *    stopped at its page limit: one
  *    `GET /repos/{o}/{r}/issues/comments?since=<cursor>` for the whole
@@ -25,19 +37,36 @@
  * twenty repositories linked at once that all need a baseline, cannot make
  * every poll run out of time and never save its progress:
  *
- * - One repository diffs a limited number of items per poll. It stops at the
- *   end of a second, after the limit is reached: the cursor and the snapshot
- *   cover only the items it diffed, and the next poll goes on from there. A
- *   poll that stopped early, or whose listing stopped at its page limit,
- *   keeps no ETag, because a 304 on the next poll would hide the items it
- *   did not reach. Comments are still read for the whole repository, so a
- *   comment on an item past the stop is emitted now, counted as new from the
- *   cursor.
+ * - One repository diffs a limited number of items per poll. It stops
+ *   before the next item once the limit is reached: the cursor and the
+ *   snapshot cover only the items it diffed, and the next poll goes on from
+ *   there. A poll that stopped early, or whose listing stopped at its page
+ *   limit, keeps no ETag, because a 304 on the next poll would hide the
+ *   items it did not reach. Comments are still read for the whole
+ *   repository, so a comment on an item past the stop is emitted now,
+ *   counted as new from the cursor.
  * - One poll sends a limited number of requests across the watch list. Once
- *   they are spent, the poll finishes the repository it is on and stops. The
- *   next poll starts with the repository after the last one polled, so every
- *   repository gets its turn. A repository that waits is polled later, not
- *   skipped: nothing it holds is lost, so the user is not told.
+ *   they are spent, the repository the poll is on stops before its next
+ *   item, as for its own limit, and the poll stops. The next poll starts
+ *   with the repository after the last one polled, so every repository gets
+ *   its turn. A repository that waits is polled later, not skipped: nothing
+ *   it holds is lost, so the user is not told.
+ *
+ * A poll can stop between two items updated in the same second, so the
+ * cursor alone cannot say where it stopped: the next listing starts with
+ * that whole second again. A poll that stopped early also keeps the numbers
+ * of the items it diffed in the cursor's second (`diffedAtCursor`), and the
+ * next poll skips them. Without that, a second holding more items than one
+ * poll can diff, such as 300 pull requests a bot labeled at once, would be
+ * diffed from its start by every poll and never finished. The kept numbers
+ * grow while the cursor stays in that second and are dropped once it moves
+ * on. The price: an item in that list that changes again within the same
+ * second is not diffed again. And a second holding more items than the
+ * listing's page limit reads still cannot be finished.
+ *
+ * The events of one repository are emitted oldest first once its poll is
+ * done (`emitInTimeOrder`), so a review and a later request for another
+ * review are routed in the order they happened.
  *
  * The snapshot holds every open item and every item updated in the seven
  * days before the cursor, so its size follows the repository's recent work,
@@ -67,13 +96,25 @@
  * missing from it, which holds the item's own `updated_at`.
  */
 import { Effect, Option, Schema } from "effect";
-import * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { IngestContext, PollResult } from "@hercule/plugin-host";
-import { readReviewVerdict } from "../github-objects";
-import { buildItemEvent, type GithubItem } from "../subject";
-import { computeDigest } from "./digest";
-import { ListedComment, ListedIssue, ListedPull, ListedReview } from "./feed-objects";
+import type { GithubIdentity } from "../identity";
+import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
 import {
+  emitCommentEvents,
+  emitNewReviews,
+  emitReviewRequestEvents,
+  emitInTimeOrder,
+  fetchReviewRequests,
+  isAtOrAfter,
+  readReviewRequests,
+  type ActivityPoll,
+} from "./activity";
+import { computeDigest } from "./digest";
+import { ListedComment, ListedIssue, ListedPull } from "./feed-objects";
+import { pollFollowedItems } from "./followed";
+import {
+  countRequests,
   decodeGithubValue,
   fetchFeedResponse,
   fetchListing,
@@ -81,7 +122,8 @@ import {
   truncateRaw,
   type FeedError,
 } from "./requests";
-import { pollWatchedRepos, type RepoPoll } from "./state";
+import { pollWatchedRepos, type RepoPollBudget } from "./state";
+import { readUserTeams } from "./teams";
 
 /** What the snapshot keeps of one issue or pull request: only what a diff compares. */
 const ItemSnapshot = Schema.Struct({
@@ -98,6 +140,14 @@ const ItemSnapshot = Schema.Struct({
    * a comment or review from that second is not new.
    */
   fromBaseline: Schema.optionalKey(Schema.Boolean),
+  /**
+   * The reviews an open pull request asks of the user and their teams:
+   * `you`, and `team:<org>/<slug>` for each team, sorted. A change in it
+   * makes the poll read the pull request's history for the requests. Absent
+   * for an issue, and for a snapshot an older version of this plugin wrote,
+   * which counts as no change.
+   */
+  reviewRequests: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
 type ItemSnapshot = Schema.Schema.Type<typeof ItemSnapshot>;
@@ -128,6 +178,12 @@ const RepoState = Schema.Struct({
   items: Schema.Record(Schema.String, ItemSnapshot),
   /** Present while comments are left to read from a listing that stopped at its page limit. */
   pendingComments: Schema.optionalKey(PendingComments),
+  /**
+   * The numbers of the items updated in the cursor's second that a poll
+   * which stopped early already diffed, so the next poll skips them. Absent
+   * when no poll stopped in the cursor's second.
+   */
+  diffedAtCursor: Schema.optionalKey(Schema.Array(Schema.Number)),
 });
 
 type RepoState = Schema.Schema.Type<typeof RepoState>;
@@ -139,32 +195,29 @@ type RepoState = Schema.Schema.Type<typeof RepoState>;
  */
 const MAX_LISTING_PAGES = 10;
 
-/**
- * How many issues and pull requests one poll diffs in one repository. A
- * repository diffs this many and then finishes the second it is in, so it
- * can diff a few more. Exported for the tests.
- */
+/** How many issues and pull requests one poll diffs in one repository. Exported for the tests. */
 export const MAX_ITEMS_PER_REPO = 50;
 
 /**
- * How many requests one poll sends to GitHub before it stops starting
- * repositories. Exported for the tests.
+ * How many requests one poll sends to GitHub for the user's teams and the
+ * watch list before it stops. Exported for the tests.
  *
  * The host stops a poll after 300 seconds, and a GitHub request takes about
- * half a second. The repository a poll is on when the budget runs out still
- * finishes, so a poll sends at most this budget plus one repository's worst
- * case:
+ * half a second. Once the budget is spent, the repository the poll is on
+ * stops after the item it is diffing, so a poll sends at most this budget
+ * plus one repository's worst case:
  *
- * - a baseline: 1 request for the newest item, then up to 50 pages each of
- *   open issues, closed issues and open pull requests, 151 in all;
- * - a later poll: up to 10 listing pages, the head commit and the reviews of
- *   each of `MAX_ITEMS_PER_REPO` pull requests, and up to 10 comment pages,
- *   120 in all when each review listing is one page.
+ * - a baseline, which cannot stop part way: 1 request for the newest item,
+ *   then up to 50 pages each of open issues, closed issues and open pull
+ *   requests, 151 in all;
+ * - a later poll: up to 10 listing pages, then one pull request's worst
+ *   case, the pull request twice, 3 pages of reviews and 10 of history, and
+ *   up to 10 comment pages: 35 in all.
  *
- * So a poll sends at most 100 + 151 = 251 requests, about 125 seconds, and
- * has room to spare for slow answers. The one count without a fixed limit is
- * the items a repository diffs past `MAX_ITEMS_PER_REPO` to finish a second,
- * and the listing's 1,000 items bound those.
+ * So the watch list costs at most about 100 + 151 = 251 requests. The
+ * followed items after it have their own budget, about 100 requests at most
+ * (`MAX_FOLLOWED_REQUESTS_PER_POLL` in `followed.ts`), so a poll sends about
+ * 350 requests, about 175 seconds, and has room to spare for slow answers.
  */
 export const MAX_REQUESTS_PER_POLL = 100;
 
@@ -176,10 +229,10 @@ export const MAX_REQUESTS_PER_POLL = 100;
 const MAX_BASELINE_PAGES = 50;
 
 /**
- * The most pages of reviews or comments one poll reads for one item or
- * repository. A comment listing that has more is resumed by the next poll.
+ * The most pages of the repository's comments one poll reads, 100 each. A
+ * comment listing that has more is resumed by the next poll.
  */
-const MAX_DETAIL_PAGES = 10;
+const MAX_COMMENT_PAGES = 10;
 
 /** How long a closed item stays in the snapshot, so a label added just after closing is still seen. */
 const CLOSED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -189,6 +242,8 @@ interface ItemChange {
   readonly kind: string;
   readonly dedupKey: string;
   readonly occurredAt: string;
+  readonly title: string;
+  readonly author: string | null;
   readonly fields?: Readonly<Record<string, unknown>>;
 }
 
@@ -198,13 +253,9 @@ const listMissingFrom = (
   reference: ReadonlyArray<string>,
 ): Array<string> => values.filter((value) => !reference.includes(value)).sort();
 
-/** Checks whether ISO 8601 timestamp `time` is at or after `start`. An absent start is before everything. */
-const isAtOrAfter = (time: string, start: string | undefined): boolean =>
-  start === undefined || Date.parse(time) >= Date.parse(start);
-
-/** Checks whether ISO 8601 timestamp `time` is strictly after `start`. An absent start is before everything. */
-const isAfter = (time: string, start: string | undefined): boolean =>
-  start === undefined || Date.parse(time) > Date.parse(start);
+/** Checks whether two ISO 8601 timestamps are the same second. An absent one matches nothing. */
+const isSameSecond = (left: string | undefined, right: string | undefined): boolean =>
+  left !== undefined && right !== undefined && Date.parse(left) === Date.parse(right);
 
 /** Returns the label names of an issue. */
 const readLabels = (issue: ListedIssue): Array<string> => issue.labels.map((label) => label.name);
@@ -274,15 +325,18 @@ const computeNewActivityStart = (
  *
  * The plugin declares no kind for a pull request that was reopened or
  * assigned, and none for an unassignment, so those changes emit nothing.
+ * `mergedBy` is the login of who merged a pull request, when it is known.
  */
 const listItemChanges = (
   repo: string,
   issue: ListedIssue,
   previous: ItemSnapshot | undefined,
   cursor: string | undefined,
+  mergedBy: string | null,
 ): ReadonlyArray<ItemChange> => {
   const kind = issue.pull_request === undefined ? "issue" : "pr";
-  const item = `${repo}#${String(issue.number)}`;
+  const noun = kind === "pr" ? "Pull request" : "Issue";
+  const item = buildItemPlace({ repo, number: issue.number });
   const isNew = isNewItem(issue, previous, cursor);
   if (previous === undefined && !isNew) {
     // `state_reason` stays `reopened` for as long as the issue is open, so an
@@ -297,6 +351,8 @@ const listItemChanges = (
             kind: "github.issue.reopened",
             dedupKey: `issue.reopened:${item}:${issue.updated_at}`,
             occurredAt: issue.updated_at,
+            title: `Issue ${item} was reopened`,
+            author: null,
           },
         ]
       : [];
@@ -316,6 +372,8 @@ const listItemChanges = (
       kind: `github.${kind}.opened`,
       dedupKey: `${kind}.opened:${item}`,
       occurredAt: issue.created_at,
+      title: `${issue.user?.login ?? "Someone"} opened ${item}: ${issue.title}`,
+      author: issue.user?.login ?? null,
     });
   }
   if (kind === "issue" && before.state === "closed" && issue.state === "open") {
@@ -323,6 +381,8 @@ const listItemChanges = (
       kind: "github.issue.reopened",
       dedupKey: `issue.reopened:${diffed}`,
       occurredAt: issue.updated_at,
+      title: `Issue ${item} was reopened`,
+      author: null,
     });
   }
   const labels = readLabels(issue);
@@ -339,6 +399,8 @@ const listItemChanges = (
       kind: `github.${kind}.labeled`,
       dedupKey: `${kind}.labeled:${diffed}:${change}`,
       occurredAt: issue.updated_at,
+      title: `Labels changed on ${item}: ${[...added.map((name) => `+${name}`), ...removed.map((name) => `-${name}`)].join(" ")}`,
+      author: null,
       fields: { added, removed },
     });
   }
@@ -348,6 +410,8 @@ const listItemChanges = (
       kind: "github.issue.assigned",
       dedupKey: `issue.assigned:${diffed}:${computeDigest(assigned)}`,
       occurredAt: issue.updated_at,
+      title: `Issue ${item} was assigned to ${assigned.join(", ")}`,
+      author: null,
     });
   }
   if (before.state === "open" && issue.state === "closed") {
@@ -359,8 +423,17 @@ const listItemChanges = (
             kind: `github.${kind}.closed`,
             dedupKey: `${kind}.closed:${item}:${closedAt}`,
             occurredAt: closedAt,
+            title: `${noun} ${item} was closed`,
+            author: null,
           }
-        : { kind: "github.pr.merged", dedupKey: `pr.merged:${item}`, occurredAt: mergedAt },
+        : {
+            kind: "github.pr.merged",
+            dedupKey: `pr.merged:${item}`,
+            occurredAt: mergedAt,
+            title:
+              mergedBy === null ? `Pull request ${item} was merged` : `${mergedBy} merged ${item}`,
+            author: mergedBy,
+          },
     );
   }
   return changes;
@@ -373,7 +446,9 @@ const listItemChanges = (
  * with the head commit of each open pull request: the same items a later
  * poll keeps, so the first poll after this one diffs like any other.
  */
-const baselineRepo = (poll: RepoPoll): Effect.Effect<RepoState, FeedError, HttpClient.HttpClient> =>
+const baselineRepo = (
+  poll: ActivityPoll,
+): Effect.Effect<RepoState, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const path = `/repos/${poll.repo}`;
     const newest = yield* fetchFeedResponse({
@@ -434,81 +509,59 @@ const baselineRepo = (poll: RepoPoll): Effect.Effect<RepoState, FeedError, HttpC
       pulls.items,
       "open pull requests",
     );
-    const headSha = new Map(heads.map((pull) => [pull.number, pull.head.sha]));
+    const openPulls = new Map(heads.map((pull) => [pull.number, pull]));
     const items: Record<string, ItemSnapshot> = {};
     for (const issue of [...issues, latest]) {
-      items[String(issue.number)] = buildItemSnapshot(issue, headSha.get(issue.number), true);
+      const pull = openPulls.get(issue.number);
+      items[String(issue.number)] = buildItemSnapshot(issue, {
+        ...(pull === undefined
+          ? {}
+          : { headSha: pull.head.sha, reviewRequests: readReviewRequests(poll, pull) }),
+        fromBaseline: true,
+      });
     }
     return { cursor: latest.updated_at, items };
   });
 
+/** What an item's snapshot keeps beside what the issue listing holds. */
+interface SnapshotExtras {
+  readonly headSha?: string | undefined;
+  readonly reviewRequests?: ReadonlyArray<string> | undefined;
+  readonly fromBaseline: boolean;
+}
+
 /**
- * Builds an item's snapshot from the listing, with its head commit when it
- * has one, marked `fromBaseline` when `fromBaseline` is true.
+ * Builds an item's snapshot from the listing, with the head commit and the
+ * review requests of a pull request when they are known, marked
+ * `fromBaseline` when `extras.fromBaseline` is true.
  */
-const buildItemSnapshot = (
-  issue: ListedIssue,
-  headSha: string | undefined,
-  fromBaseline: boolean,
-): ItemSnapshot => ({
+const buildItemSnapshot = (issue: ListedIssue, extras: SnapshotExtras): ItemSnapshot => ({
   pullRequest: issue.pull_request !== undefined,
   state: issue.state,
   labels: readLabels(issue),
   assignees: readAssignees(issue),
   updatedAt: issue.updated_at,
-  ...(headSha === undefined ? {} : { headSha }),
-  ...(fromBaseline ? { fromBaseline } : {}),
+  ...(extras.headSha === undefined ? {} : { headSha: extras.headSha }),
+  ...(extras.fromBaseline ? { fromBaseline: true } : {}),
+  ...(extras.reviewRequests === undefined ? {} : { reviewRequests: extras.reviewRequests }),
 });
 
-/**
- * Fetches a pull request's reviews and emits one `github.pr.review-submitted`
- * per review submitted at or after `start`. A pending review is not submitted
- * yet, and a dismissed one is no longer a verdict, so neither emits.
- */
-const emitNewReviews = (
-  poll: RepoPoll,
-  item: GithubItem,
-  start: string | undefined,
-): Effect.Effect<void, FeedError, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const listing = yield* fetchListing(
-      {
-        method: "GET",
-        path: `/repos/${poll.repo}/pulls/${String(item.number)}/reviews`,
-        token: poll.token,
-        query: { per_page: "100" },
-      },
-      MAX_DETAIL_PAGES,
-    );
-    for (const raw of listing.items) {
-      const review = yield* decodeGithubValue(ListedReview, raw, "a review");
-      const verdict = readReviewVerdict(review.state);
-      const submittedAt = review.submitted_at ?? null;
-      if (verdict === undefined || submittedAt === null || !isAtOrAfter(submittedAt, start)) {
-        continue;
-      }
-      yield* poll.emit(
-        buildItemEvent(item, {
-          kind: "github.pr.review-submitted",
-          dedupKey: `pr.review-submitted:${String(review.id)}`,
-          occurredAt: submittedAt,
-          fields: { reviewer: review.user?.login ?? "ghost", verdict },
-          raw: truncateRaw(raw),
-        }),
-      );
-    }
-  });
+/** Checks whether two sorted lists of review requests differ. */
+const haveReviewRequestsChanged = (
+  before: ReadonlyArray<string>,
+  after: ReadonlyArray<string>,
+): boolean => before.join("\n") !== after.join("\n");
 
 /**
- * Fetches an open pull request's head commit, and emits
- * `github.pr.synchronized` when it differs from the one in the snapshot.
- * Returns the head commit, for the new snapshot.
+ * Fetches a pull request, and emits `github.pr.synchronized` when it is open
+ * and its head commit differs from the one in the snapshot. Returns the pull
+ * request, for its head commit, review requests and who merged it.
  */
-const emitNewHead = (
-  poll: RepoPoll,
+const fetchPullAndEmitNewHead = (
+  poll: ActivityPoll,
   item: GithubItem,
   previousSha: string | undefined,
-): Effect.Effect<string, FeedError, HttpClient.HttpClient> =>
+): Effect.Effect<ListedPull, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const response = yield* fetchFeedResponse({
       method: "GET",
@@ -517,7 +570,7 @@ const emitNewHead = (
     });
     const body = yield* readGithubObject(response.body, "a pull request");
     const pull = yield* decodeGithubValue(ListedPull, body, "a pull request");
-    if (previousSha !== undefined && previousSha !== pull.head.sha) {
+    if (pull.state === "open" && previousSha !== undefined && previousSha !== pull.head.sha) {
       yield* poll.emit(
         buildItemEvent(item, {
           kind: "github.pr.synchronized",
@@ -525,11 +578,13 @@ const emitNewHead = (
           // and keep the key under the host's 200 characters.
           dedupKey: `pr.synchronized:${poll.repo}#${String(item.number)}:${pull.head.sha.slice(0, 12)}`,
           occurredAt: pull.updated_at,
+          title: `New commits were pushed to ${buildItemPlace(item)}`,
+          author: null,
           raw: truncateRaw(body),
         }),
       );
     }
-    return pull.head.sha;
+    return pull;
   });
 
 /** Where one comment listing starts, and from when a comment counts as new. */
@@ -560,7 +615,7 @@ interface CommentQuery {
  * did not read.
  */
 const emitNewComments = (
-  poll: RepoPoll,
+  poll: ActivityPoll,
   query: CommentQuery,
   listed: ReadonlyMap<number, GithubItem>,
 ): Effect.Effect<PendingComments | undefined, FeedError, HttpClient.HttpClient> =>
@@ -578,7 +633,7 @@ const emitNewComments = (
           ...(since === undefined ? {} : { since }),
         },
       },
-      MAX_DETAIL_PAGES,
+      MAX_COMMENT_PAGES,
     );
     const comments = yield* decodeGithubValue(
       Schema.Array(ListedComment),
@@ -597,14 +652,7 @@ const emitNewComments = (
       if (!isAtOrAfter(comment.created_at, start)) continue;
       const kind = /\/pull\/\d+#/.test(comment.html_url) ? "pr" : "issue";
       const item = listed.get(number) ?? { repo: poll.repo, kind, number };
-      yield* poll.emit(
-        buildItemEvent(item, {
-          kind: `github.${kind}.commented`,
-          dedupKey: `${kind}.commented:${String(comment.id)}`,
-          occurredAt: comment.created_at,
-          raw: truncateRaw(listing.items[index]!),
-        }),
-      );
+      yield* emitCommentEvents(poll, item, comment, listing.items[index]!);
     }
     const last = comments.at(-1);
     if (!listing.truncated || last === undefined) return undefined;
@@ -613,41 +661,18 @@ const emitNewComments = (
   });
 
 /**
- * Returns how many items at the start of a listing one poll diffs, given
- * the `updated_at` of each item, oldest first. The count reaches `limit`
- * and then stops at the end of a second, so items that share an
- * `updated_at` are diffed by the same poll.
- *
- * The count never stops before it has passed the second of `cursor`, the
- * last poll's cursor, and finished one second after it. The listing starts
- * with the cursor's second again, so a poll that stopped at the end of that
- * second would leave the cursor where it was, and a second holding more
- * items than the limit would be listed again forever.
- */
-const countItemsToDiff = (
-  updateTimes: ReadonlyArray<string>,
-  cursor: string | undefined,
-  limit: number,
-): number => {
-  // A poll can stop only between two items, so the earliest stop is after the first item.
-  for (let index = Math.max(limit, 1); index < updateTimes.length; index += 1) {
-    const last = updateTimes[index - 1]!;
-    const endsSecond = Date.parse(updateTimes[index]!) !== Date.parse(last);
-    if (endsSecond && isAfter(last, cursor)) return index;
-  }
-  return updateTimes.length;
-};
-
-/**
  * Polls one watched repository: lists what changed since the last poll,
- * diffs up to `MAX_ITEMS_PER_REPO` items of it as `countItemsToDiff` counts
- * them, emits an event for each change, and returns the new state. When
- * GitHub answers 304, only a comment listing left unfinished by the last
- * poll is read.
+ * diffs up to `MAX_ITEMS_PER_REPO` items of it, emits an event for each
+ * change, and returns the new state. Once `budget` is spent, the diff stops
+ * before the next item. Items the last poll diffed in the cursor's second
+ * before it stopped are skipped (see the header comment). When GitHub
+ * answers 304, only a comment listing left unfinished by the last poll is
+ * read, and with none, `stored` itself is returned.
  */
 const pollRepo = (
-  poll: RepoPoll,
+  poll: ActivityPoll,
   stored: RepoState,
+  budget: RepoPollBudget,
 ): Effect.Effect<RepoState, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const listing = yield* fetchListing(
@@ -666,6 +691,7 @@ const pollRepo = (
       },
       MAX_LISTING_PAGES,
     );
+    if (listing.unchanged && stored.pendingComments === undefined) return stored;
 
     const issues = yield* Effect.forEach(listing.items, (raw) =>
       Effect.map(decodeGithubValue(ListedIssue, raw, "an issue"), (issue) => ({ issue, raw })),
@@ -673,25 +699,57 @@ const pollRepo = (
     const listed = new Map(
       issues.map(({ issue }) => [issue.number, buildIssueItem(poll.repo, issue)] as const),
     );
-    const updateTimes = issues.map(({ issue }) => issue.updated_at);
-    const diffed = issues.slice(
-      0,
-      countItemsToDiff(updateTimes, stored.cursor, MAX_ITEMS_PER_REPO),
-    );
+    const diffedBefore = new Set(stored.diffedAtCursor ?? []);
+    const diffed: typeof issues = [];
     const items: Record<string, ItemSnapshot> = { ...stored.items };
     const commentStarts = new Map<number, string | undefined>();
 
-    for (const { issue, raw } of diffed) {
+    let stopped = false;
+    for (const { issue, raw } of issues) {
+      if (isSameSecond(issue.updated_at, stored.cursor) && diffedBefore.has(issue.number)) continue;
+      if (diffed.length >= MAX_ITEMS_PER_REPO || (diffed.length > 0 && budget.isSpent())) {
+        stopped = true;
+        break;
+      }
+      diffed.push({ issue, raw });
       const previous = stored.items[String(issue.number)];
       const item = buildIssueItem(poll.repo, issue);
       const start = computeNewActivityStart(issue, previous, stored.cursor);
-      for (const change of listItemChanges(poll.repo, issue, previous, stored.cursor)) {
+      // A pull request that is open, or was open at the last poll, is read
+      // whole: for its head commit and review requests, or for who merged it.
+      const pull =
+        item.kind === "pr" && (issue.state === "open" || previous?.state === "open")
+          ? yield* fetchPullAndEmitNewHead(poll, item, previous?.headSha)
+          : undefined;
+      const mergedBy = pull?.merged_by?.login ?? null;
+      for (const change of listItemChanges(poll.repo, issue, previous, stored.cursor, mergedBy)) {
         yield* poll.emit(buildItemEvent(item, { ...change, raw: truncateRaw(raw) }));
       }
       let headSha = previous?.headSha;
+      let reviewRequests = previous?.reviewRequests;
       if (item.kind === "pr") {
-        if (issue.state === "open") headSha = yield* emitNewHead(poll, item, previous?.headSha);
         yield* emitNewReviews(poll, item, start);
+        if (pull !== undefined && pull.state === "open") {
+          headSha = pull.head.sha;
+          const now = readReviewRequests(poll, pull);
+          // A pull request new since the last poll has every request in its
+          // history after `start`; one the snapshot has without requests
+          // was written by an older version, and counts as unchanged. The
+          // history is read too whenever the pull request asks for the user
+          // or a team, for a request made again after a review between two
+          // polls, even within the snapshot's own second (see the header
+          // comment).
+          const before = previous === undefined ? [] : previous.reviewRequests;
+          if (now.length > 0 || (before !== undefined && haveReviewRequestsChanged(before, now))) {
+            yield* emitReviewRequestEvents(
+              poll,
+              item,
+              start,
+              fetchReviewRequests(poll, item.number),
+            );
+          }
+          reviewRequests = now;
+        }
       }
       // Every diffed item arms the comment listing, not only one whose comment
       // count went up: a comment deleted and another added leave the count
@@ -704,7 +762,11 @@ const pollRepo = (
       // baseline's comments and reviews as new.
       const unchangedSinceBaseline =
         previous?.fromBaseline === true && previous.updatedAt === issue.updated_at;
-      items[String(issue.number)] = buildItemSnapshot(issue, headSha, unchangedSinceBaseline);
+      items[String(issue.number)] = buildItemSnapshot(issue, {
+        headSha,
+        reviewRequests: item.kind === "pr" ? reviewRequests : undefined,
+        fromBaseline: unchangedSinceBaseline,
+      });
     }
     const pendingComments =
       commentStarts.size > 0 || stored.pendingComments !== undefined
@@ -722,7 +784,17 @@ const pollRepo = (
     // GitHub answers 304 when the listing is the same as when it sent the
     // ETag. A poll that left listed items undiffed keeps no ETag, or the
     // next poll's 304 would skip them.
-    const stoppedEarly = diffed.length < issues.length || listing.truncated;
+    const stoppedEarly = stopped || listing.truncated;
+    const diffedAtCursor = new Set([
+      ...(isSameSecond(cursor, stored.cursor) ? diffedBefore : []),
+      ...diffed
+        .filter(({ issue }) => isSameSecond(issue.updated_at, cursor))
+        .map(({ issue }) => issue.number),
+    ]);
+    // Kept while a poll stops early, and carried while the cursor stays in
+    // that second, so a later poll does not diff the whole second again.
+    const keepDiffedAtCursor =
+      stoppedEarly || (isSameSecond(cursor, stored.cursor) && diffedBefore.size > 0);
     const etag = listing.unchanged
       ? stored.etag
       : stoppedEarly
@@ -733,6 +805,9 @@ const pollRepo = (
       ...(etag === undefined ? {} : { etag }),
       items: evictClosedItems(items, cursor),
       ...(pendingComments === undefined ? {} : { pendingComments }),
+      ...(keepDiffedAtCursor && diffedAtCursor.size > 0
+        ? { diffedAtCursor: [...diffedAtCursor].sort((left, right) => left - right) }
+        : {}),
     };
   });
 
@@ -755,35 +830,44 @@ const evictClosedItems = (
 };
 
 /**
- * Polls the repos feed once: the repositories on the watch list in turn,
- * until the poll has sent `MAX_REQUESTS_PER_POLL` requests. A repository
- * with no state yet baselines and emits nothing. Fails as `pollWatchedRepos`
- * fails.
+ * Polls the repos feed once:
+ *
+ * 1. the user's teams, read again once an hour (`teams.ts`);
+ * 2. the repositories on the watch list in turn, until the poll has sent
+ *    `MAX_REQUESTS_PER_POLL` requests, counting the teams. A repository
+ *    with no state yet baselines and emits nothing;
+ * 3. then the followed items outside the watch list (`followed.ts`), within
+ *    their own budget: the user's own open pull requests, the items with an
+ *    open signal, and the items the notifications feed saw news on.
+ *
+ * Fails as `pollWatchedRepos` fails, and as `pollFollowedItems` fails.
  */
 export const pollRepos = (
   token: string,
-  context: Pick<IngestContext, "emit" | "state">,
+  context: Pick<IngestContext, "emit" | "state" | "openSignals">,
   watchList: ReadonlyArray<string>,
+  identity: GithubIdentity,
 ): Effect.Effect<PollResult, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    // Every request of the poll goes through this client, next pages
-    // included, so the count is what GitHub received.
-    let requests = 0;
-    const client = HttpClient.tapRequest(yield* HttpClient.HttpClient, () =>
-      Effect.sync(() => {
-        requests += 1;
+    yield* countRequests((sent) =>
+      Effect.gen(function* () {
+        const teams = yield* readUserTeams(token, context.state);
+        const budget: RepoPollBudget = { isSpent: () => sent() >= MAX_REQUESTS_PER_POLL };
+        yield* pollWatchedRepos(
+          "repos",
+          context.state,
+          watchList,
+          RepoState,
+          (repo, stored) => {
+            const poll: ActivityPoll = { repo, token, emit: context.emit, identity, teams };
+            return Option.isNone(stored)
+              ? baselineRepo(poll)
+              : emitInTimeOrder(poll, (held) => pollRepo(held, stored.value, budget));
+          },
+          budget,
+        );
+        yield* pollFollowedItems(token, context, watchList, identity, teams);
       }),
     );
-    yield* pollWatchedRepos(
-      "repos",
-      context.state,
-      watchList,
-      RepoState,
-      (repo, stored) => {
-        const poll: RepoPoll = { repo, token, emit: context.emit };
-        return Option.isNone(stored) ? baselineRepo(poll) : pollRepo(poll, stored.value);
-      },
-      { isSpent: () => requests >= MAX_REQUESTS_PER_POLL },
-    ).pipe(Effect.provideService(HttpClient.HttpClient, client));
     return {};
   });

@@ -320,6 +320,20 @@ export const requireGrant = (id: OperationId): Effect.Effect<Actor, Forbidden> =
   });
 
 /**
+ * Runs the grant check for an operation that stamps its mutation with the
+ * caller, and returns the caller. Fails with `Forbidden` when the caller
+ * lacks the grant.
+ *
+ * Use it for an operation whose requirement is a grant. A caller with no
+ * actor never holds a grant, so `requireGrant` has refused it already, and
+ * reaching this point with no actor is a defect.
+ */
+export const requireActor = (id: OperationId): Effect.Effect<Exclude<Actor, NoActor>, Forbidden> =>
+  Effect.flatMap(requireGrant(id), (actor) =>
+    actor._tag === "none" ? Effect.die(`${id} reached with no actor`) : Effect.succeed(actor),
+  );
+
+/**
  * The error message for a session that holds the grant for an operation only
  * the user may call. The `Forbidden` error includes the operation's grant, so
  * the message has to say that widening the profile will not help.

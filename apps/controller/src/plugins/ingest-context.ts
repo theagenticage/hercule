@@ -6,6 +6,8 @@
  *   appends it to the event log, stamped with the Connection;
  * - `state`, the key-value store of that one Connection;
  * - `credentials`, read through the plugin's own `ConnectionsRuntime`;
+ * - `openSignals`, the signals still open on the Connection, read through
+ *   the Open Signals port;
  * - `resources`, the Resources linked to the Connection, only when the
  *   plugin's manifest requested the `resources` capability.
  */
@@ -16,7 +18,9 @@ import {
   bounded,
   ExternalRef,
   MAX_DEDUP_KEY_LENGTH,
+  MAX_EVENT_AUTHOR_LENGTH,
   MAX_EVENT_SYSTEM_LENGTH,
+  MAX_EVENT_TITLE_LENGTH,
   MAX_EVENT_URL_LENGTH,
 } from "@hercule/contract";
 import {
@@ -37,6 +41,7 @@ import { appendIngestedEvent, decodeAgainstKind } from "../events";
 import { resourceRepository, type StoredResource } from "../resources";
 import { describeFieldIssues, truncateMessage } from "./errors";
 import type { RegisteredEventSource } from "./event-sources";
+import { OpenSignals } from "./open-signals";
 
 /**
  * The fields of an emitted event that are the same for every kind. An unknown
@@ -50,6 +55,8 @@ const decodeEmittedEventFields = Schema.decodeUnknownEffect(
     url: Schema.optionalKey(bounded(1, MAX_EVENT_URL_LENGTH)),
     system: Schema.optionalKey(bounded(1, MAX_EVENT_SYSTEM_LENGTH)),
     raw: Schema.optionalKey(Schema.JsonObject),
+    title: bounded(1, MAX_EVENT_TITLE_LENGTH),
+    author: Schema.NullOr(bounded(1, MAX_EVENT_AUTHOR_LENGTH)),
   }),
   { errors: "all" },
 );
@@ -112,6 +119,7 @@ const make = Effect.gen(function* () {
   const connectionTypes = yield* ConnectionTypes;
   const connectionState = yield* connectionStateRepository;
   const resources = yield* resourceRepository;
+  const openSignals = yield* OpenSignals;
 
   /**
    * Checks one emitted event and appends it to the log in its own short
@@ -182,6 +190,8 @@ const make = Effect.gen(function* () {
               // Each ref once, as `event.emit` stores them.
               refs: [...new Set(envelope.refs)],
               url: envelope.url ?? null,
+              title: envelope.title,
+              author: envelope.author,
               payload: event.payload,
               raw: envelope.raw ?? null,
             }),
@@ -203,6 +213,7 @@ const make = Effect.gen(function* () {
       emit: (event) => emit(source, connection.id, event),
       state: connectionState.buildStore(connection.id),
       credentials: () => connectionTypes.runtimeFor(source.pluginId).credentials(connection.id),
+      openSignals: () => openSignals.listForConnection(connection.id),
       ...(source.resources
         ? {
             resources: {
