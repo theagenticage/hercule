@@ -19,7 +19,9 @@ import {
   createNotFoundError,
   createValidationError,
   PluginConfigureInput,
+  PluginUpdateIntakeInput,
   type Forbidden,
+  type IntakeSettings,
   type NotFound,
   type PluginDetail,
   type Unauthenticated,
@@ -30,6 +32,11 @@ import { nowIso, withTransaction } from "../db";
 import { currentStamp, requireGrant } from "../actor";
 import { connectionStateRepository } from "../connections";
 import { AuditLog } from "../events";
+import {
+  applyIntakeOverrides,
+  buildDefaultIntakeSettings,
+  normalizeIntakeOverrides,
+} from "../intake-settings";
 import { PluginHost } from "./host";
 import { pluginRepository, readStoredStateOrDie } from "./repository";
 
@@ -38,7 +45,8 @@ type MoveKind =
   | "plugin.disabled"
   | "plugin.configured"
   | "plugin.retried"
-  | "plugin.stateReset";
+  | "plugin.stateReset"
+  | "plugin.intakeUpdated";
 
 /**
  * The errors of a lifecycle change. The credential errors are included
@@ -51,6 +59,7 @@ type MoveError =
 type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
 
 const decodeConfigure = Schema.decodeUnknownEffect(PluginConfigureInput);
+const decodeUpdateIntake = Schema.decodeUnknownEffect(PluginUpdateIntakeInput);
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -67,13 +76,22 @@ const make = Effect.gen(function* () {
     const states = yield* repository.states();
     const contributions = yield* repository.contributions();
     return yield* Effect.forEach(loaded, (plugin) =>
-      Effect.map(readStoredStateOrDie(states.get(plugin.id), plugin.id), (state): PluginDetail => ({
-        ...plugin,
-        ...state,
-        contributions: (contributions.get(plugin.id) ?? []).map(
-          ({ extensionPoint, id, definition }) => ({ extensionPoint, id, definition }),
-        ),
-      })),
+      Effect.gen(function* () {
+        const { enabled, config, intake } = yield* readStoredStateOrDie(
+          states.get(plugin.id),
+          plugin.id,
+        );
+        const declared = yield* host.readDeclaredIntakeKinds(plugin.id);
+        return {
+          ...plugin,
+          enabled,
+          config,
+          contributions: (contributions.get(plugin.id) ?? []).map(
+            ({ extensionPoint, id, definition }) => ({ extensionPoint, id, definition }),
+          ),
+          intake: applyIntakeOverrides(buildDefaultIntakeSettings(declared), intake, "plugin"),
+        } satisfies PluginDetail;
+      }),
     );
   });
 
@@ -244,6 +262,33 @@ const make = Effect.gen(function* () {
             return yield* readPluginOrFail(id);
           }),
         );
+      }),
+
+    /**
+     * Stores the user's Intake choices for the plugin, replacing the earlier
+     * ones, and returns the value in effect at the plugin's level for every
+     * kind. An entry equal to the plugin's default is dropped. Fails with
+     * `validation`, and stores nothing, when a kind is not one the plugin
+     * declares.
+     *
+     * The plugin keeps running and is not reloaded, because only the core
+     * reads these settings. The change reaches new events at once.
+     */
+    updateIntake: (
+      id: string,
+      input: PluginUpdateIntakeInput,
+    ): Effect.Effect<IntakeSettings, MoveError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("plugin.updateIntake");
+        const { intake } = yield* Effect.mapError(
+          decodeUpdateIntake(input),
+          createDecodeValidationError,
+        );
+        yield* readPluginOrFail(id);
+        const defaults = buildDefaultIntakeSettings(yield* host.readDeclaredIntakeKinds(id));
+        const stored = yield* normalizeIntakeOverrides(intake, defaults);
+        yield* writeMove(id, "plugin.intakeUpdated", (at) => repository.setIntake(id, stored, at));
+        return applyIntakeOverrides(defaults, stored, "plugin");
       }),
 
     retry: (id: string): Effect.Effect<PluginDetail, MoveError> =>

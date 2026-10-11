@@ -29,12 +29,15 @@
  * the same transaction.
  */
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Event, SignalResolution } from "@hercule/contract";
 import { SYSTEM_ACTOR } from "../../../actor";
+import { connectionRepository } from "../../../connections";
 import { nowIso } from "../../../db";
 import { AuditLog } from "../../../events";
+import { applyIntakeOverrides, NO_INTAKE_OVERRIDES, PluginIntake } from "../../../intake-settings";
 import {
   evaluateExpression,
   formatExpressionValue,
@@ -57,9 +60,11 @@ import type { Route, RoutingTable } from "../event-router";
 export const intakeRoutingTable: Effect.Effect<
   RoutingTable,
   never,
-  SqlClient.SqlClient | PluginHost | AuditLog
+  SqlClient.SqlClient | PluginHost | PluginIntake | AuditLog
 > = Effect.gen(function* () {
   const host = yield* PluginHost;
+  const pluginIntake = yield* PluginIntake;
+  const connections = yield* connectionRepository;
   const signals = yield* signalRepository;
   const inputs = yield* inputRepository;
   const runs = yield* runRepository;
@@ -227,6 +232,27 @@ export const intakeRoutingTable: Effect.Effect<
           });
         });
 
+      /**
+       * Returns the names of the source's signal kinds that are switched on
+       * for the event's Connection: the Connection's own choice, else the
+       * plugin's, else the default. A Connection deleted since the event was
+       * ingested has no choices, so the plugin's level applies.
+       */
+      const readSwitchedOnSignalKinds = (
+        source: RegisteredEventSource,
+        event: Event & { readonly connectionId: string },
+      ): Effect.Effect<ReadonlySet<string>, SqlError> =>
+        Effect.gen(function* () {
+          const pluginLevel = yield* pluginIntake.read(source.pluginId);
+          const connection = yield* connections.one(event.connectionId);
+          const settings = applyIntakeOverrides(
+            pluginLevel,
+            Option.isSome(connection) ? connection.value.intake : NO_INTAKE_OVERRIDES,
+            "connection",
+          );
+          return new Set(settings.signalKinds.filter((kind) => kind.on).map((kind) => kind.kind));
+        });
+
       const buildRoute = (source: RegisteredEventSource): Route => ({
         admits: (event) =>
           event.source === source.pluginId &&
@@ -248,8 +274,13 @@ export const intakeRoutingTable: Effect.Effect<
                 endSignalsOnThread(kind, fromConnection, context),
               );
             }
-            for (const kind of source.signalKinds) {
-              if (!kind.from.includes(event.kind)) continue;
+            const raisable = source.signalKinds.filter((kind) => kind.from.includes(event.kind));
+            if (raisable.length === 0) return;
+            // Read for every event, never once per pass: a change to the
+            // Intake settings applies to the next event without a restart.
+            const switchedOn = yield* readSwitchedOnSignalKinds(source, fromConnection);
+            for (const kind of raisable) {
+              if (!switchedOn.has(kind.kind)) continue;
               yield* absorbExpressionError(kind, "rule", runRule(kind, fromConnection, context));
             }
           }),
