@@ -486,8 +486,10 @@ export const buildDescribe: Effect.Effect<
     /**
      * Returns the line a plugin action's own `describe` writes for its stored
      * input, followed by the plugin's name and the label of the Connection it
-     * acts through. When the action is gone, or its `describe` throws, the
-     * line names the action by its id, so a line is always written.
+     * acts through. When the action is gone, or its `describe` throws or
+     * returns nothing, the line names the action by its id and writes the
+     * whole input as JSON. The click still runs that input, so the line must
+     * show all of it.
      */
     const describePluginAction = (
       operation: PluginAnswerOperation,
@@ -504,7 +506,14 @@ export const buildDescribe: Effect.Effect<
                 () => operation.connectionId!,
               );
         return [
-          ...(own ?? [buildTextPart("Run "), buildMarkedPart(operation.op)]),
+          ...(own === undefined || own.length === 0
+            ? [
+                buildTextPart("Run "),
+                buildMarkedPart(operation.op),
+                buildTextPart(" with "),
+                buildMarkedPart(JSON.stringify(operation.input)),
+              ]
+            : own),
           ...(plugin === undefined ? [] : [buildTextPart(` · ${plugin.displayName}`)]),
           ...(connectionLabel === undefined
             ? []

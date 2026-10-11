@@ -10,6 +10,7 @@
  * - a plugin action bound as a typed reply runs with the text the user typed,
  *   outside any run, and writes the line the Done list keeps, cut to the
  *   longest outcome;
+ * - a plugin action whose `describe` throws is described by its whole input;
  * - a typed reply that makes the input too large is refused;
  * - a proposal that fits the size limit as raised, but not once Accept
  *   copies its task, is refused;
@@ -301,6 +302,38 @@ describe("a plugin action as a typed reply", () => {
         expect(forge.inputs).toEqual([{ verdict: "comment", body: "Looks good." }]);
         expect(forge.contexts[0]!.run).toBeUndefined();
         expect(forge.contexts[0]!.connection?.credentials).toEqual({ token: "a-forge-token" });
+      },
+      { plugins: [forge.plugin] },
+    );
+  });
+
+  it("writes the whole input when the action's describe throws, so the click stays informed", async () => {
+    const forge = buildForgePlugin({ describeThrows: true });
+    await withServer(
+      async ({ base }) => {
+        const token = await completeSetup(base);
+        const connectionId = await createConnection(base, token, FORGE_CONNECTION_TYPE, {
+          token: "a-forge-token",
+        });
+        const id = await raiseOrFail(base, token, {
+          ...OFFER,
+          actions: [
+            {
+              id: "review",
+              label: "Approve",
+              operation: {
+                op: FORGE_REVIEW_ACTION_ID,
+                connectionId,
+                input: { verdict: "approve", body: "Ship it" },
+              },
+            },
+          ],
+        });
+
+        const open = await readSignalOrFail(base, token, id);
+        expect(joinLine(open, "review")).toContain(
+          `Run ${FORGE_REVIEW_ACTION_ID} with {"verdict":"approve","body":"Ship it"} · Forge`,
+        );
       },
       { plugins: [forge.plugin] },
     );

@@ -261,18 +261,21 @@ export interface ForgePlugin {
  * `reviewHeldUntil` is given, every review records its call and then waits
  * for that promise before it returns, so a test can act while one runs.
  * `reviewOutcome` replaces the review's outcome line, which is
- * "Reviewed: <verdict>" by default.
+ * "Reviewed: <verdict>" by default. `describeThrows` makes the review's
+ * `describe` throw.
  */
 export const buildForgePlugin = (
   options: {
     readonly tokenUrl?: string;
     readonly reviewHeldUntil?: Promise<void>;
     readonly reviewOutcome?: string;
+    /** Makes the review action's `describe` throw, as a plugin bug would. */
+    readonly describeThrows?: boolean;
   } = {},
 ): ForgePlugin => {
   const contexts: Array<ActionContext> = [];
   const inputs: Array<unknown> = [];
-  const { tokenUrl, reviewHeldUntil, reviewOutcome } = options;
+  const { tokenUrl, reviewHeldUntil, reviewOutcome, describeThrows } = options;
   const plugin: Plugin = {
     manifest: {
       id: "forge",
@@ -306,11 +309,14 @@ export const buildForgePlugin = (
           }),
           output: Schema.Struct({ reviewed: Schema.Boolean }),
           usableIn: ["workflow.step", "signal.answer"],
-          describe: (input) => [
-            { kind: "text", text: "Submit a " },
-            { kind: "marked", text: String((input as { verdict?: unknown }).verdict) },
-            { kind: "text", text: " review" },
-          ],
+          describe: (input) => {
+            if (describeThrows === true) throw new Error("describe failed");
+            return [
+              { kind: "text", text: "Submit a " },
+              { kind: "marked", text: String((input as { verdict?: unknown }).verdict) },
+              { kind: "text", text: " review" },
+            ];
+          },
           outcome: (input) =>
             reviewOutcome ?? `Reviewed: ${String((input as { verdict?: unknown }).verdict)}`,
           execute: (input, context) =>
