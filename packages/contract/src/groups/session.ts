@@ -222,6 +222,15 @@ export const Session = Schema.Struct({
   usage: Schema.optionalKey(Usage),
   /** The known counts and their completeness; absent until usage is reported. */
   usageReport: Schema.optionalKey(UsageReport),
+  /**
+   * How many tool calls the session made over its whole life: its own
+   * agent's and every subagent's, calls on subagents included. Each stored
+   * `item.started` of a tool-call kind counts once, whichever agent reported
+   * it, so a call that starts a subagent counts once, and that subagent's own
+   * calls count too. It is counted from the stored events, not by adding up
+   * each subagent's `toolCalls`.
+   */
+  toolCalls: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   createdAt: Timestamp,
   startedAt: Schema.NullOr(Timestamp),
   /** The time of the last exit. Kept while the session is resumed, and overwritten when it exits again. */

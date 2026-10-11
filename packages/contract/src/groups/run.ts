@@ -244,7 +244,8 @@ export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
  * fields that follow from the run's status:
  *
  * - `pending`: no timestamp but `createdAt`.
- * - `running`: `startedAt`.
+ * - `running`: `startedAt`, and the fields only a running run has, which
+ *   `runningFields` holds.
  * - `completed`: `startedAt` and `finishedAt`, and the fields only a
  *   completed run has (`output`), which `completedFields` holds.
  * - `failed` at a step (`expression-error`, `step-failed`,
@@ -264,16 +265,23 @@ export type StepRecord = Schema.Schema.Type<typeof StepRecord>;
  */
 const buildRunStatusVariants = <
   const Fields extends Schema.Struct.Fields,
+  const RunningFields extends Schema.Struct.Fields,
   const CompletedFields extends Schema.Struct.Fields,
   const FailedAtStepFields extends Schema.Struct.Fields,
 >(
   fields: Fields,
+  runningFields: RunningFields,
   completedFields: CompletedFields,
   failedAtStepFields: FailedAtStepFields,
 ) =>
   [
     Schema.Struct({ ...fields, status: Schema.Literal("pending") }),
-    Schema.Struct({ ...fields, status: Schema.Literal("running"), startedAt: Timestamp }),
+    Schema.Struct({
+      ...fields,
+      ...runningFields,
+      status: Schema.Literal("running"),
+      startedAt: Timestamp,
+    }),
     Schema.Struct({
       ...fields,
       ...completedFields,
@@ -366,6 +374,7 @@ export const Run = Schema.Union(
       subscriptions: Schema.Array(Subscription),
       createdAt: Timestamp,
     },
+    {},
     {
       /**
        * The output of the terminal step that ended the run. Absent when the run
@@ -387,6 +396,11 @@ export type Run = Schema.Schema.Type<typeof Run>;
  * output, which are long. `run.read` returns them. A summary has no
  * `failedEdge` either: an edge's index means nothing without the plan it
  * indexes, so a failed summary carries only its reason and `failedStepId`.
+ *
+ * A running summary says where the run is instead, read from its step
+ * records and its plan, so a list can show "At review" or "Waiting for
+ * approved" without reading each run. A `Run` has no such fields, because it
+ * carries its step records and plan.
  */
 export const RunSummary = Schema.Union(
   buildRunStatusVariants(
@@ -398,6 +412,21 @@ export const RunSummary = Schema.Union(
       workflowName: Schema.String,
       origin: RunOrigin,
       createdAt: Timestamp,
+    },
+    {
+      /**
+       * The steps whose records are running, in the order the records were
+       * created. When none is running, the steps whose records are pending.
+       * Otherwise empty. A signal trigger that has just fired has a pending
+       * record, so its id is listed here until the run takes the signal up.
+       */
+      activeStepIds: Schema.Array(Schema.String),
+      /**
+       * The ids of the signal triggers the run waits on, in the plan's order.
+       * Not empty only when none of the run's step records is running or
+       * pending and its plan has signal triggers. See spec 07 §7.2.
+       */
+      awaitedSignalIds: Schema.Array(Schema.String),
     },
     {},
     {},
@@ -414,6 +443,13 @@ export const RunFilter = Schema.Struct({
   since: Schema.optionalKey(Timestamp),
   /** Only runs created at or before this instant. */
   until: Schema.optionalKey(Timestamp),
+  /**
+   * Only runs that had not ended before this instant: runs still pending or
+   * running, and runs that finished at or after it. With `until`, which
+   * filters on when a run was created, it gives every run that was live at
+   * some moment of a range.
+   */
+  activeSince: Schema.optionalKey(Timestamp),
   /**
    * Only runs started by this actor: `user`, `session:<id>`, `run:<id>` for
    * the runs a run's `run.start` steps started, or `system` for the runs a

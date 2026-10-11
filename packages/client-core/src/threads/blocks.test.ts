@@ -180,6 +180,7 @@ const BASE: Session = {
   status: "idle",
   resumable: false,
   resumeHeld: false,
+  toolCalls: 0,
   permissionProfileId: "profile-unrestricted",
   agentId: null,
   conversationId: null,

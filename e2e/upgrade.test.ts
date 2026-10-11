@@ -9,11 +9,14 @@
  * turns and the audit entry of its creation, the timezone first-run setup
  * persisted, a project name and a repository remote, two user settings that
  * migration 60 deletes, and the shipped permission profiles that migration
- * 65 gives the signal grants. After the upgrade the test checks that those
- * records, their content, ordering and associations survived, that the
- * session's messages are searchable, and that migration 63 read who created
- * the session from the audit entry. It is not a matrix of session states or
- * provider behaviour.
+ * 65 gives the signal grants. The session's turns hold tool calls from its
+ * own agent and from a subagent beside an item that is not a tool call, which
+ * migration 67 counts. After the upgrade the test checks that those records,
+ * their content, ordering and associations survived, that the session's
+ * messages are searchable, that migration 63 read who created the session
+ * from the audit entry, and that the session reads with the number of tool
+ * calls its stream holds. It is not a matrix of session states or provider
+ * behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
  * sits outside the two-minute added-CI budget. The session and its transcript
@@ -87,6 +90,19 @@ const TRANSCRIPT_SEARCH_MIGRATION = 63;
 /** The actor stamp on the seeded session's audit entry: another session spawned it. */
 const SESSION_CREATOR = "session:0190c000-0000-7000-8000-000000000001";
 
+/** The migration that counts each session's stored tool calls into `toolCalls`. */
+const SESSION_TOOL_CALLS_MIGRATION = 67;
+
+/**
+ * The tool calls in the seeded session's stream: a command from its own
+ * agent, the call that starts a subagent, and that subagent's file read. The
+ * assistant message beside them is not a tool call.
+ */
+const SEEDED_TOOL_CALLS = 3;
+
+/** The subagent the seeded session's last turn hands work to. */
+const SEEDED_SUBAGENT = "upgrade-fixture-subagent";
+
 /** The migration that adds `SIGNAL_GRANTS` to the `SIGNAL_PROFILES`. */
 const SIGNAL_GRANTS_MIGRATION = 65;
 
@@ -113,6 +129,8 @@ interface SeededSession {
   readonly conversationId: string | null;
   readonly agentId: string | null;
   readonly instanceId: string;
+  /** Absent before migration 67, which adds it. */
+  readonly toolCalls?: number;
 }
 
 interface SeededTranscriptRow {
@@ -238,6 +256,7 @@ function summarizeProvider(provider: SeededProvider): SeededProvider {
   return { id: provider.id, providerId: provider.providerId, name: provider.name };
 }
 
+/** Returns the session's fields that survive the upgrade unchanged. */
 function summarizeSession(session: SeededSession): SeededSession {
   return {
     id: session.id,
@@ -268,7 +287,8 @@ function uuidBlob(id: string): Buffer {
 }
 
 /**
- * Writes one exited session, a few transcript turns, and the audit entry of
+ * Writes one exited session, a few transcript turns with the
+ * `SEEDED_TOOL_CALLS` tool calls among their items, and the audit entry of
  * the session's creation by `SESSION_CREATOR` into the database the edge
  * binary created. `ids` are records that binary already persisted. Returns
  * the new session's id.
@@ -293,11 +313,27 @@ function persistRepresentativeSession(options: {
   const events: Array<Record<string, unknown>> = [
     { _tag: "session.started", eventId: "e-start", sessionId, at },
   ];
+  /** One item started in each turn, by the session's own agent unless a subagent is named. */
+  const startedItems: ReadonlyArray<{ readonly kind: string; readonly subagentId?: string }> = [
+    { kind: "command_execution" },
+    { kind: "assistant_message" },
+    { kind: "subagent" },
+  ];
   for (const [index, text] of TURNS.entries()) {
     const turnId = `turn-${String(index + 1)}`;
     const itemId = `item-${String(index + 1)}`;
     events.push(
       { _tag: "turn.started", eventId: `${turnId}-start`, sessionId, at, turnId },
+      {
+        _tag: "item.started",
+        eventId: `${turnId}-tool`,
+        sessionId,
+        at,
+        turnId,
+        itemId: `${itemId}-tool`,
+        detail: {},
+        ...startedItems[index],
+      },
       {
         _tag: "content.delta",
         eventId: `${turnId}-delta`,
@@ -318,7 +354,20 @@ function persistRepresentativeSession(options: {
       },
     );
   }
-  events.push({ _tag: "session.exited", eventId: "e-exit", sessionId, at, reason: "stopped" });
+  events.push(
+    {
+      _tag: "item.started",
+      eventId: "subagent-read",
+      sessionId,
+      at,
+      turnId: "subagent-turn",
+      itemId: "subagent-read",
+      kind: "file_read",
+      detail: { path: "README.md" },
+      subagentId: SEEDED_SUBAGENT,
+    },
+    { _tag: "session.exited", eventId: "e-exit", sessionId, at, reason: "stopped" },
+  );
 
   const database = new Database(join(options.home, "data", "hercule.db"));
   try {
@@ -348,12 +397,20 @@ function persistRepresentativeSession(options: {
         "upgrade-fixture-native",
       );
     const insertEvent = database.query(
-      `INSERT INTO session_stream (session_id, position, runner_seq, at, event)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     );
     for (const [index, event] of events.entries()) {
       const position = index + 1;
-      insertEvent.run(uuidBlob(sessionId), position, position, at, JSON.stringify(event));
+      const subagentId = typeof event["subagentId"] === "string" ? event["subagentId"] : null;
+      insertEvent.run(
+        uuidBlob(sessionId),
+        position,
+        position,
+        at,
+        JSON.stringify(event),
+        subagentId,
+      );
     }
     database
       .query(
@@ -755,10 +812,20 @@ describe("upgrading from the previous edge release", () => {
         seededMessages.map(summarizeMessage),
       );
 
-      const readSession = summarizeSession(
-        expectJson<SeededSession>(await runCli(["session", "read", sessionId, "--json"], upgraded)),
+      const upgradedSession = expectJson<SeededSession>(
+        await runCli(["session", "read", sessionId, "--json"], upgraded),
       );
-      expect(readSession).toEqual(seededSession);
+      expect(summarizeSession(upgradedSession)).toEqual(seededSession);
+      // An edge database that already ran the migration was never counted:
+      // the fixture's rows were written straight into it, past the count the
+      // controller keeps as each event is stored.
+      if (edgeVersion < SESSION_TOOL_CALLS_MIGRATION) {
+        expect(upgradedSession.toolCalls).toBe(SEEDED_TOOL_CALLS);
+      } else {
+        console.log(
+          `Skipping the session tool calls fixture: the edge database already ran migration ${String(SESSION_TOOL_CALLS_MIGRATION)}.`,
+        );
+      }
       const upgradedTranscript = (await readTranscript({ ...upgraded, id: sessionId })).map(
         summarizeRow,
       );
