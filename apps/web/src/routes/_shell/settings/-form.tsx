@@ -1,4 +1,4 @@
-import { readErrorMessage } from "@hercule/client-core";
+import { queryKeys, readErrorMessage } from "@hercule/client-core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import type { SettingsPatch } from "@hercule/contract";
@@ -10,7 +10,9 @@ import { settingsQuery } from "../../../app/queries";
  * failed.
  *
  * The response holds all settings, so it replaces the cached copy directly and
- * no screen has to refetch what it just wrote.
+ * no screen has to refetch what it just wrote. The controller's own read is
+ * marked stale, because it reports facts worked out from controller settings
+ * (such as the model text generation now uses).
  */
 export function useSaveSettings(client: HerculeClient): {
   readonly save: (patch: SettingsPatch) => void;
@@ -23,6 +25,7 @@ export function useSaveSettings(client: HerculeClient): {
     mutationFn: (patch: SettingsPatch) => client.settings.update({ payload: patch }),
     onSuccess: (updated) => {
       queryClient.setQueryData(settingsQuery(client).queryKey, updated);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.controller() });
     },
   });
 
