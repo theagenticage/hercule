@@ -80,6 +80,19 @@ const TABLE = {
   "settings.read": { requires: "settings.read", method: "GET", path: "/api/v1/settings" },
   "settings.update": { requires: "settings.write", method: "PATCH", path: "/api/v1/settings" },
 
+  // Asking for a grant is never forbidden: a session asks exactly because its
+  // profile lacks the grant. The service refuses every caller but a session.
+  "permission.request": {
+    requires: "authenticated",
+    method: "POST",
+    path: "/api/v1/permissions/request",
+  },
+  "permission.decide": {
+    requires: "permission.write",
+    method: "POST",
+    path: "/api/v1/permissions/requests/:id/decide",
+  },
+
   "profile.query": { requires: "permission.read", method: "GET", path: "/api/v1/profiles" },
   "profile.read": { requires: "permission.read", method: "GET", path: "/api/v1/profiles/:id" },
   "profile.create": { requires: "permission.write", method: "POST", path: "/api/v1/profiles" },
@@ -554,3 +567,28 @@ export const isOperationId = (id: string): id is OperationId => id in TABLE;
 
 /** Returns what a caller must hold to call the operation. */
 export const readRequirement = (id: OperationId): Requirement => TABLE[id].requires;
+
+/**
+ * Checks whether the operation's input can carry a credential or a secret
+ * value. These are the operations that need:
+ *
+ * - a grant of the `credential` or `secret` family;
+ * - a grant of the `infra` family, because a provider is created with its API
+ *   keys;
+ * - `connection.manage`, because a Connection is created with its
+ *   credentials;
+ * - no grant at all, before sign-in: `auth.login` and `setup.complete` carry
+ *   a password.
+ *
+ * Text that could hold such a value must not be copied into a record many
+ * readers see, such as a notification or an event.
+ */
+export const canCarrySecrets = (id: OperationId): boolean => {
+  const requirement = readRequirement(id);
+  return (
+    /^(credential|secret|infra)\./.test(requirement) ||
+    requirement === "connection.manage" ||
+    requirement === "unauthenticated" ||
+    requirement === "setup-token"
+  );
+};

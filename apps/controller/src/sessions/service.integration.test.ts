@@ -34,12 +34,13 @@ import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
-import { SessionTokens, SessionTokensLayer } from "../permissions";
+import { permissionRequestRepository, SessionTokens, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer } from "../secrets/masterKey";
 import { Secrets, secretsLayer, type SecretOwner } from "../secrets/repository";
 import { RunWorkspaceStepActivityLayer } from "../runs";
 import { SettingsLayer } from "../settings";
+import { subscriptionRepository } from "../subscriptions";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import type { GithubAccount } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
@@ -1189,6 +1190,61 @@ describe("SessionService.endOnLostRunners", () => {
       startingHash: null,
       idle: "exited",
       idleHash: null,
+    });
+  });
+
+  it("withdraws the open Permission Requests of every session it ends, and ends their subscriptions", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const requests = yield* permissionRequestRepository;
+        const subscriptions = yield* subscriptionRepository;
+        const runnerId = mintId();
+        // Opens a request for the session and the subscription that waits on its decision.
+        const ask = (sessionId: string) =>
+          Effect.gen(function* () {
+            const requestId = yield* requests.insert({
+              sessionId,
+              profileId: mintId(),
+              grant: "task.delete",
+              reason: "a reason",
+              operation: undefined,
+              at,
+            });
+            const target = { kind: "request", requestId } as const;
+            const subscriptionId = yield* subscriptions.insert({
+              holder: { kind: "session", id: sessionId },
+              target,
+              condition: "true",
+              at,
+              actor: `session:${sessionId}`,
+            });
+            return { requestId, subscriptionId };
+          });
+        const first = yield* ask(
+          (yield* insertRunningSession(runnerId, "busy", 2 * HOUR_MS)).sessionId,
+        );
+        const second = yield* ask(
+          (yield* insertRunningSession(runnerId, "idle", 2 * HOUR_MS)).sessionId,
+        );
+        yield* runEndOnLostRunners([]);
+        const readRequestStatus = (id: string) =>
+          Effect.map(requests.read(id), (found) => Option.getOrThrow(found).status);
+        return {
+          requests: [
+            yield* readRequestStatus(first.requestId),
+            yield* readRequestStatus(second.requestId),
+          ],
+          liveSubscriptions: [
+            Option.isSome(yield* subscriptions.readLive(first.subscriptionId)),
+            Option.isSome(yield* subscriptions.readLive(second.subscriptionId)),
+          ],
+        };
+      }),
+    );
+
+    expect(result).toEqual({
+      requests: ["withdrawn", "withdrawn"],
+      liveSubscriptions: [false, false],
     });
   });
 

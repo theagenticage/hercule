@@ -53,6 +53,7 @@ const buildSessionActor = (sessionId: string): Actor => ({
   sessionId,
   profileId: PROFILE_ID,
   grants: ["notification.read", "notification.write"],
+  profileGrants: ["notification.read", "notification.write"],
   assistantId: null,
 });
 

@@ -105,6 +105,7 @@ export const AUDIT_KINDS = [
   "notification.created",
   "notification.decided",
   "notification.withdrawn",
+  "permission.requested",
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -171,6 +172,9 @@ const RECORD_KINDS = {
   "notification.created": "created",
   "notification.decided": "updated",
   "notification.withdrawn": "updated",
+  // The record it names is the asking session, whose list of open Permission
+  // Requests gained one.
+  "permission.requested": "updated",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;

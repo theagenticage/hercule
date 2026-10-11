@@ -9,6 +9,7 @@ import { useShownRequestId } from "../../app/request-drafts";
 import type { Look } from "../../faces";
 import { ComposerFrame } from "../session/composer-frame";
 import { RequestDock } from "../session/dock";
+import { SessionPermissionRequestDock } from "../session/permission-request-dock";
 import { RequestPager } from "../session/request-pager";
 import { useSendOnMenuCommand } from "../session/send-key";
 
@@ -143,6 +144,9 @@ export function ConversationComposer({
  * While several Requests are open, the pager line above the dock pages
  * between them. Unlike a thread's, the line names no asker: a
  * Conversation has one agent, and no page of a subagent to link to.
+ *
+ * While no Request is open, the dock shows the session's Permission
+ * Requests instead, as a thread's does (`SessionPermissionRequestDock`).
  */
 function ConversationRequestDock({
   session,
@@ -155,7 +159,7 @@ function ConversationRequestDock({
   // A Conversation's session starts no subagents, so every Request is its
   // own agent's, and the line above the card is drawn only to page.
   const dock = buildRequestDock(session.openRequests, [], undefined, shownRequestId);
-  if (dock === null) return null;
+  if (dock === null) return <SessionPermissionRequestDock session={session} look={look} />;
   return (
     <>
       {dock.showsAskerLine ? (

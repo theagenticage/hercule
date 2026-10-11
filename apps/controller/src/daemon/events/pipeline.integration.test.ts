@@ -263,7 +263,7 @@ describe("the platform events in the pipeline", () => {
       expect(rows[0]!.text).toContain("task.created");
       expect(rows[0]!.text).toContain(task.id);
       expect(rows[1]!.text).toContain("task.updated");
-      expect(rows[1]!.text).toContain('"new": "done"');
+      expect(rows[1]!.text).toContain('"new":"done"');
     });
   });
 
@@ -285,7 +285,7 @@ describe("the platform events in the pipeline", () => {
       held.release();
       expect((await waitForRunToFinish(base, arranged.token, runId)).status).toBe("completed");
 
-      const frame = await waitForFrameCarrying(arranged, `"runId": "${runId}"`);
+      const frame = await waitForFrameCarrying(arranged, `"runId":"${runId}"`);
       expect(frame.sessionId).toBe(agent.session.id);
       expect(frame.input.text).toMatch(/^run\.completed\n/);
       const rows = await waitForMatchedInputRows(
@@ -318,7 +318,7 @@ describe("the platform events in the pipeline", () => {
       const response = await requestCancel(base, arranged.token, runId);
       expect(response.status, await response.clone().text()).toBe(200);
 
-      const frame = await waitForFrameCarrying(arranged, `"runId": "${runId}"`);
+      const frame = await waitForFrameCarrying(arranged, `"runId":"${runId}"`);
       expect(frame.sessionId).toBe(agent.session.id);
       expect(frame.input.text).toMatch(/^run\.cancelled\n/);
       const cancelled = await arranged.harness.platformEvents("run.cancelled");

@@ -388,8 +388,10 @@ const make = Effect.gen(function* () {
    * Checks whether this actor may spawn from an Agent with this profile.
    *
    * A session may spawn from an Agent only if the Agent's profile grants no
-   * more than the session has. The rule lets an assistant hand work to a
-   * worker with fewer grants. Without it, a session could spawn from an Agent
+   * more than the session's own profile. The rule lets an assistant hand work
+   * to a worker with fewer grants. A grant the user gave only this session,
+   * through a Permission Request decided `session`, does not count: the user
+   * gave it to this session, not to the sessions it spawns. Without it, a session could spawn from an Agent
    * with more grants and give it any prompt, which would widen what the
    * session can do. The user has every grant, so the check passes for every profile.
    *
@@ -401,7 +403,7 @@ const make = Effect.gen(function* () {
       case "user":
         return true;
       case "session":
-        return profile.grants.every((grant) => actor.grants.includes(grant));
+        return profile.grants.every((grant) => actor.profileGrants.includes(grant));
       default:
         return false;
     }

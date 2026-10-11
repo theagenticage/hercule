@@ -87,9 +87,14 @@ import {
 import { mintToken, hashToken } from "../credentials";
 import { AuditLog } from "../events";
 import { Notifier } from "../notifications";
-import { SessionTokens } from "../permissions";
+import {
+  buildPermissionRequestSubject,
+  permissionRequestRepository,
+  SessionTokens,
+} from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import type { SendOutcome } from "../runners";
+import { permissionRequestSubscriptions } from "../subscriptions";
 import { WorkspaceService, type GithubAccount } from "../workspaces";
 import {
   APPROVAL_ANSWER_IDS,
@@ -567,6 +572,8 @@ const keepsStepPromptOnExit = (
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
+  const permissionRequests = yield* permissionRequestRepository;
+  const requestSubscriptions = yield* permissionRequestSubscriptions;
   const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
   const subagents = yield* subagentRepository;
@@ -1025,6 +1032,9 @@ const make = Effect.gen(function* () {
    *   window, and `orphan` when it cannot;
    * - withdraws the approval notifications about the Requests it was
    *   waiting on;
+   * - withdraws its open Permission Requests, their notifications and the
+   *   subscriptions waiting on their decisions, with one query each for all
+   *   the ended sessions together;
    * - stops its running subagents;
    * - tells `SessionObserver` that the session exited, whether the
    *   crash-loop guard now holds it back from a resume, and which agent
@@ -1077,6 +1087,17 @@ const make = Effect.gen(function* () {
           resumeHeld: keeps && isResumeHeld(after.value),
           droppedStepIterations: cancelled?.stepIterations ?? [],
         });
+      }
+      // No decision can reach an ended session, so its open requests are
+      // withdrawn rather than left for the user to answer.
+      const endedIds = ended.map((session) => session.id);
+      const withdrawn = yield* permissionRequests.withdrawOpen(endedIds);
+      if (withdrawn.length > 0) {
+        yield* notifier.withdrawDecisionsAbout(
+          withdrawn.map(buildPermissionRequestSubject),
+          WITHDRAW_REASON_SESSION_ENDED,
+        );
+        yield* requestSubscriptions.endWithdrawn(endedIds, withdrawn);
       }
       yield* forgetSessions(ended);
     });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mintUuid, uuidFromString, uuidToString } from "./id";
+import { mintUuid, uuidFromString, uuidHexToString, uuidToString } from "./id";
 
 const CANONICAL = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -26,6 +26,18 @@ describe("Hercule ids", () => {
 
   it("throws when the input is not sixteen bytes", () => {
     expect(() => uuidToString(new Uint8Array(15))).toThrow(TypeError);
+  });
+
+  it("renders the hex SQLite gives for an id as the same string as its bytes", () => {
+    const bytes = mintUuid();
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0").toUpperCase()).join(
+      "",
+    );
+    expect(uuidHexToString(hex)).toBe(uuidToString(bytes));
+  });
+
+  it("throws when the hex is not 32 digits", () => {
+    expect(() => uuidHexToString("0192CE07")).toThrow(TypeError);
   });
 
   it("round-trips a minted id through the string form", () => {

@@ -4,8 +4,8 @@
  * "Start a run of Bugfix". This is the `describe` half of the notifications
  * domain's `BindableOperations` port.
  *
- * It reads the tasks, projects, workflows, sessions and Connections an
- * operation names, and those domains depend on the notifications domain, so
+ * It reads the tasks, projects, workflows, sessions, Connections, Permission
+ * Requests and permission profiles an operation names, and those domains depend on the notifications domain, so
  * the domain cannot read them itself. It reads their repositories rather than
  * their services: a describe line is part of reading a notification, not a
  * read of the task or session on the caller's behalf, so their grant checks do
@@ -32,6 +32,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   isId,
   type ApprovalDecision,
+  type PermissionDecisionOutcome,
   dispatchBindableOperation,
   type BindableOperation,
   type BindableOperationHandlers,
@@ -42,6 +43,11 @@ import {
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { connectionRepository } from "../../connections";
+import {
+  permissionRequestRepository,
+  PermissionProfiles,
+  type PermissionProfile,
+} from "../../permissions";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
 import { taskRepository } from "../../tasks";
@@ -160,6 +166,26 @@ const describeDecision = (
 };
 
 /**
+ * Returns the describe line of one Permission Request answer, such as "Let
+ * session «Fix the build» use «task.delete»".
+ */
+const describePermissionDecision = (
+  outcome: PermissionDecisionOutcome,
+  grant: DescribeLinePart,
+  session: DescribeLinePart,
+  profile: DescribeLinePart,
+): DescribeLine => {
+  switch (outcome) {
+    case "session":
+      return [buildTextPart("Let session "), session, buildTextPart(" use "), grant];
+    case "profile":
+      return [buildTextPart("Add "), grant, buildTextPart(" to profile "), profile];
+    case "deny":
+      return [buildTextPart("Refuse "), grant, buildTextPart(" to session "), session];
+  }
+};
+
+/**
  * Lists what each provenance entry of a task update records, such as
  * "ref «github:issue:1», run «…»". An entry holds at least one of the three.
  */
@@ -194,13 +220,15 @@ export const buildDescribe: Effect.Effect<
     operations: ReadonlyArray<BindableOperation>,
   ) => Effect.Effect<ReadonlyArray<DescribeLine>, SqlError>,
   never,
-  SqlClient.SqlClient
+  SqlClient.SqlClient | PermissionProfiles
 > = Effect.gen(function* () {
   const tasks = yield* taskRepository;
   const projects = yield* projectRepository;
   const workflows = yield* workflowRepository;
   const sessions = yield* sessionRepository;
   const connections = yield* connectionRepository;
+  const permissionRequests = yield* permissionRequestRepository;
+  const permissionProfiles = yield* PermissionProfiles;
 
   /**
    * Builds the describers for one `describe` call, each reading an entity at
@@ -255,6 +283,47 @@ export const buildDescribe: Effect.Effect<
           onSome: (session) => session.openRequests,
         }),
       })),
+    );
+
+    /** Returns a permission profile's name, or its id when it cannot be read. */
+    const readProfileName = readOncePerId((id) =>
+      Effect.map(
+        // A profile whose stored grants no longer decode still has a name,
+        // but this read returns none; the id names it instead.
+        Effect.catchTag(permissionProfiles.getById(id), "GrantsError", () =>
+          Effect.succeed(Option.none<PermissionProfile>()),
+        ),
+        Option.match({ onNone: () => id, onSome: (profile) => profile.name }),
+      ),
+    );
+
+    /**
+     * Returns the parts that name a Permission Request's grant, its session
+     * and the profile the session asked under, which the `profile` answer
+     * widens. A request that does not exist names its own id in place of all
+     * three. A request's session row is never deleted, so a request without
+     * one is a bug.
+     */
+    const readPermissionRequestParts = readOncePerId((id) =>
+      Effect.gen(function* () {
+        const found = yield* permissionRequests.read(id);
+        if (Option.isNone(found)) {
+          const missing = buildMarkedPart(id);
+          return { grant: missing, session: missing, profile: missing };
+        }
+        const request = found.value;
+        const session = yield* sessions.one(request.sessionId);
+        if (Option.isNone(session)) {
+          return yield* Effect.die(
+            `the session ${request.sessionId} of a Permission Request has no row`,
+          );
+        }
+        return {
+          grant: buildMarkedPart(request.grant),
+          session: buildMarkedPart(session.value.title),
+          profile: buildMarkedPart(yield* readProfileName(request.profileId)),
+        };
+      }),
     );
 
     /**
@@ -387,6 +456,10 @@ export const buildDescribe: Effect.Effect<
             describeOpenRequest(session.openRequests, requestId),
             session.markedName,
           ),
+        ),
+      "permission.decide": ({ requestId, outcome }) =>
+        Effect.map(readPermissionRequestParts(requestId), (parts) =>
+          describePermissionDecision(outcome, parts.grant, parts.session, parts.profile),
         ),
     } satisfies BindableOperationHandlers<Effect.Effect<DescribeLine, SqlError>>;
   };
