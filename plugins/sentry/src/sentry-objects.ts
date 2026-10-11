@@ -4,7 +4,9 @@
  * out or send as null is optional here, so an older issue never fails a poll.
  */
 import { Option, Schema } from "effect";
+import { MAX_BLOCK_URL_LENGTH } from "@hercule/plugin-host";
 import { MAX_STACK_FRAMES, type IssueBlock, type LatestEvent, type StackFrame } from "./kinds";
+import { cutName, cutText, MAX_EXCEPTION_VALUE_LENGTH, MAX_TITLE_LENGTH } from "./text";
 
 /** An organization, as `GET /api/0/organizations/` lists it. */
 export const ApiOrganization = Schema.Struct({
@@ -87,24 +89,41 @@ export const ApiIssue = Schema.Struct({
 
 export type ApiIssue = Schema.Schema.Type<typeof ApiIssue>;
 
-/** Converts an issue as Sentry returns it into the block the events carry. */
+/**
+ * Converts an issue as Sentry returns it into the block the events carry.
+ * Every text Sentry sets is cut to a length the host accepts, and an empty
+ * title becomes the short id, because a title is what the event is named by.
+ * A link that is too long becomes empty.
+ */
 export const buildIssueBlock = (issue: ApiIssue): IssueBlock => ({
   id: issue.id,
-  shortId: issue.shortId,
-  title: issue.title,
-  culprit: issue.culprit ?? "",
-  type: issue.metadata?.type ?? null,
-  level: issue.level,
-  priority: issue.priority ?? null,
-  status: issue.status,
-  substatus: issue.substatus ?? null,
-  project: issue.project,
-  assignedTo: issue.assignedTo ?? null,
+  shortId: cutName(issue.shortId),
+  title: cutText(issue.title.trim() === "" ? issue.shortId : issue.title, MAX_TITLE_LENGTH),
+  culprit: cutText(issue.culprit ?? "", MAX_TITLE_LENGTH),
+  type: issue.metadata?.type == null ? null : cutName(issue.metadata.type),
+  level: cutName(issue.level),
+  priority: issue.priority == null ? null : cutName(issue.priority),
+  status: cutName(issue.status),
+  substatus: issue.substatus == null ? null : cutName(issue.substatus),
+  project: {
+    id: issue.project.id,
+    slug: cutName(issue.project.slug),
+    name: cutName(issue.project.name),
+  },
+  assignedTo:
+    issue.assignedTo == null
+      ? null
+      : {
+          type: issue.assignedTo.type,
+          id: issue.assignedTo.id,
+          name: cutName(issue.assignedTo.name),
+        },
   firstSeen: issue.firstSeen,
   lastSeen: issue.lastSeen,
-  count: issue.count,
+  count: cutName(issue.count),
   userCount: issue.userCount,
-  permalink: issue.permalink,
+  // A cut link would point nowhere, so a link that is too long is left out.
+  permalink: issue.permalink.length > MAX_BLOCK_URL_LENGTH ? "" : issue.permalink,
 });
 
 /** Returns true when the issue is assigned to the user themselves, not to one of their teams. */
@@ -157,7 +176,7 @@ export const listRegressions = (
     .map((activity) => ({
       activityId: activity.id,
       dateCreated: activity.dateCreated,
-      ...(activity.data?.version ? { release: activity.data.version } : {}),
+      ...(activity.data?.version ? { release: cutName(activity.data.version) } : {}),
     }))
     .sort((first, second) => compareNumericIds(first.activityId, second.activityId));
 
@@ -210,12 +229,15 @@ export const ApiLatestEvent = Schema.Struct({
   ),
 });
 
+const cutOptionalName = (text: string | undefined): string | undefined =>
+  text === undefined ? undefined : cutName(text);
+
 const decodeException = Schema.decodeUnknownOption(ApiException);
 
 /** Converts one stack frame, keeping what Sentry knows of it. */
 const buildStackFrame = (frame: Schema.Schema.Type<typeof ApiStackFrame>): StackFrame => ({
-  filename: frame.filename ?? null,
-  function: frame.function ?? null,
+  filename: frame.filename == null ? null : cutName(frame.filename),
+  function: frame.function == null ? null : cutName(frame.function),
   lineNo: frame.lineNo ?? null,
   inApp: frame.inApp ?? false,
 });
@@ -236,8 +258,8 @@ export const buildLatestEvent = (
   if (id === undefined) return undefined;
   const readTag = (key: string): string | undefined =>
     event.tags?.find((tag) => tag.key === key)?.value ?? undefined;
-  const environment = readTag("environment");
-  const release = event.release?.version ?? readTag("release");
+  const environment = cutOptionalName(readTag("environment"));
+  const release = cutOptionalName(event.release?.version ?? readTag("release"));
   const exceptionEntry = event.entries?.find((entry) => entry.type === "exception");
   const exception = Option.getOrUndefined(decodeException(exceptionEntry?.data))?.values?.at(-1);
   return {
@@ -249,8 +271,9 @@ export const buildLatestEvent = (
       ? {}
       : {
           exception: {
-            type: exception.type ?? null,
-            value: exception.value ?? null,
+            type: exception.type == null ? null : cutName(exception.type),
+            value:
+              exception.value == null ? null : cutText(exception.value, MAX_EXCEPTION_VALUE_LENGTH),
             frames: (exception.stacktrace?.frames ?? [])
               .slice(-MAX_STACK_FRAMES)
               .map(buildStackFrame),

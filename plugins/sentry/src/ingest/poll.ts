@@ -182,8 +182,9 @@ const isNewRegression = (
  * Reads an issue that came back from the left memory and builds its
  * `regressed` event, with `after` saying how the issue left. The event is
  * keyed by the newest regression activity the plugin has not seen. Sentry
- * records none when an archived issue escalates, so the key then falls back to
- * the issue's last event time.
+ * records none when an archived issue escalates or a person reopens an issue,
+ * so the key then falls back to the time the issue left, which differs for
+ * every return.
  */
 const findReturned = (
   scope: PollScope,
@@ -211,9 +212,11 @@ const findReturned = (
             ...(release === undefined ? {} : { release }),
             ...buildLatestEventField(latestEvent),
           },
+          // With no new activity (an archived issue that escalated, or an issue
+          // reopened by hand) the time it left keys the event: one key per return.
           dedupKey:
             newest === undefined
-              ? `${issue.id}:regressed:${issue.lastSeen}`
+              ? `${issue.id}:regressed:${left.leftAt}`
               : `${issue.id}:regressed:${newest.activityId}`,
           occurredAt: newest === undefined ? issue.lastSeen : newest.dateCreated,
           fallbackTime: scope.pollTime,
@@ -236,7 +239,9 @@ const findReturned = (
  *   seen, oldest first, when the issue had a new event;
  * - then an `escalating` event when the issue's substatus turned `escalating`.
  *
- * Builds none when the new event was not a new regression. The `regressed`
+ * Builds none when the new event was not a new regression, and none for the
+ * regressions of an issue that was already regressed when the plugin first
+ * stored it: the newest activity becomes the one the plugin remembers. The `regressed`
  * events say the issue came back after it was resolved, because an issue that
  * stayed on the list was never seen leaving it.
  */
@@ -253,12 +258,21 @@ const findStayed = (
       budget.details -= 1;
       regressions = yield* readRegressions(scope.access, issue.id);
     }
-    const fresh = regressions.filter((regression) =>
-      isNewRegression(regression, {
-        regressionActivityId: previous.regressionActivityId,
-        lastSeen: previous.issue.lastSeen,
-      }),
-    );
+    // With no remembered activity id, an issue that was already regressed or
+    // escalating when it was stored (it joined the set that way) has its
+    // existing regressions remembered without an event. Only the activity id
+    // stored below changes then.
+    const wasRegressed =
+      previous.issue.substatus === "regressed" || previous.issue.substatus === "escalating";
+    const fresh =
+      previous.regressionActivityId === undefined && wasRegressed
+        ? []
+        : regressions.filter((regression) =>
+            isNewRegression(regression, {
+              regressionActivityId: previous.regressionActivityId,
+              lastSeen: previous.issue.lastSeen,
+            }),
+          );
     const block = buildIssueBlock(issue);
     const watched: WatchedIssue = {
       issue: block,
@@ -516,7 +530,16 @@ export const pollSentryIssues = (
       });
       return {};
     }
-    const state = stored.value;
+    // Forget the issues that left more than 90 days ago before the diff, so an
+    // issue that returns after a long pause in polling is new, not regressed.
+    const state: WatchState = {
+      ...stored.value,
+      left: Object.fromEntries(
+        Object.entries(stored.value.left).filter(
+          ([, remembered]) => Date.parse(remembered.leftAt) >= pollMillis - LEFT_MEMORY_MILLIS,
+        ),
+      ),
+    };
     const scope: PollScope = {
       access,
       userId: readUserId(identity.accountId),
@@ -576,9 +599,7 @@ export const pollSentryIssues = (
     // An issue that is in the set again is no longer remembered as left.
     const left: Record<string, LeftIssue> = {};
     for (const [id, remembered] of Object.entries(state.left)) {
-      if (Date.parse(remembered.leftAt) >= pollMillis - LEFT_MEMORY_MILLIS && !(id in issues)) {
-        left[id] = remembered;
-      }
+      if (!(id in issues)) left[id] = remembered;
     }
     for (const { id, departure } of departures) {
       if (departure.remembered !== undefined) left[id] = departure.remembered;

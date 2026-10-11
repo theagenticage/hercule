@@ -5,7 +5,13 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Effect, Result } from "effect";
-import { AuthError, PluginError, type EmittedEvent } from "@hercule/plugin-host";
+import {
+  AuthError,
+  MAX_EMITTED_FIELD_BYTES,
+  MAX_EVENT_TITLE_LENGTH,
+  PluginError,
+  type EmittedEvent,
+} from "@hercule/plugin-host";
 import type { SentryConnectionConfig } from "../connection-type";
 import {
   buildFakeIssue,
@@ -665,17 +671,25 @@ describe("the issues feed", () => {
       expect(summarize(await tape.poll())).toEqual([
         ["sentry.issue.resolved", `1001:resolved:${firstStay}`],
       ]);
+      const firstLeft = tape.lastPollTime;
 
       // Somebody reopens it by hand. There is no new event, so Sentry reports no new regression.
       reopen(issue);
       expect(summarize(await tape.poll())).toEqual([
-        ["sentry.issue.regressed", `1001:regressed:${issue.lastSeen}`],
+        ["sentry.issue.regressed", `1001:regressed:${firstLeft}`],
       ]);
       const secondStay = tape.lastPollTime;
 
       resolve(issue);
       expect(summarize(await tape.poll())).toEqual([
         ["sentry.issue.resolved", `1001:resolved:${secondStay}`],
+      ]);
+      const secondLeft = tape.lastPollTime;
+
+      // The second return has no new activity either, and still raises an event of its own.
+      reopen(issue);
+      expect(summarize(await tape.poll())).toEqual([
+        ["sentry.issue.regressed", `1001:regressed:${secondLeft}`],
       ]);
     });
 
@@ -705,20 +719,20 @@ describe("the issues feed", () => {
       const issue = findIssue(tape, "1001");
       resolve(issue);
       await tape.poll();
+      const left = tape.lastPollTime;
 
       reopen(issue);
       const events = await tape.poll();
 
-      expect(summarize(events)).toEqual([
-        ["sentry.issue.regressed", `1001:regressed:${issue.lastSeen}`],
-      ]);
+      expect(summarize(events)).toEqual([["sentry.issue.regressed", `1001:regressed:${left}`]]);
     });
 
     it("emits a second regression between two polls once an activity id is stored", async () => {
-      const tape = buildTape([buildFakeIssue("1001", { substatus: "regressed" })]);
+      const tape = buildTape([buildFakeIssue("1001")]);
       await tape.poll();
       const issue = findIssue(tape, "1001");
 
+      issue.substatus = "regressed";
       issue.lastSeen = stampAt(-1);
       issue.activity = [buildRegression("9001", 1, "webshop@2.5.0")];
       expect(summarize(await tape.poll())).toEqual([
@@ -743,7 +757,7 @@ describe("the issues feed", () => {
     });
 
     it("emits both the regression and the escalation of an issue that did both between two polls", async () => {
-      const tape = buildTape([buildFakeIssue("1001", { substatus: "regressed" })]);
+      const tape = buildTape([buildFakeIssue("1001")]);
       await tape.poll();
       const issue = findIssue(tape, "1001");
 
@@ -798,26 +812,148 @@ describe("the issues feed", () => {
       ]);
       const archivedStay = tape.lastPollTime;
 
-      // It escalates: back in the set with no regression activity.
+      // It escalates: back in the set with no regression activity, so the time it left keys the event.
       issue.status = "unresolved";
       issue.substatus = "escalating";
-      issue.lastSeen = stampAt(0);
+      issue.lastSeen = stampAt(3);
       const back = await tape.poll();
       expect(summarize(back)).toEqual([
-        ["sentry.issue.regressed", `1001:regressed:${issue.lastSeen}`],
+        ["sentry.issue.regressed", `1001:regressed:${archivedStay}`],
       ]);
       expect(back[0]?.payload).toMatchObject({ after: "archived" });
-      expect(archivedStay).not.toBe(tape.lastPollTime);
       expect(await tape.poll()).toEqual([]);
     });
   });
 
+  describe("the regression watermark", () => {
+    it("remembers the regressions of an issue that was regressed when it was stored, and emits none", async () => {
+      const tape = buildTape([buildFakeIssue("1001", { substatus: "regressed" })]);
+      const issue = findIssue(tape, "1001");
+      // Sentry records the regression a few seconds after the issue's last event.
+      issue.activity = [
+        {
+          ...buildRegression("9001", 0),
+          dateCreated: new Date(Date.parse(issue.lastSeen) + 5000).toISOString(),
+        },
+      ];
+      await tape.poll();
+
+      // An ordinary event moves lastSeen. The detail is read, and the old regression is not news.
+      issue.lastSeen = stampAt(-1);
+      expect(await tape.poll()).toEqual([]);
+      const watched = tape.harness.state.get("watched") as {
+        issues: Record<string, { regressionActivityId?: string }>;
+      };
+      expect(watched.issues["1001"]?.regressionActivityId).toBe("9001");
+
+      // A regression after that is news.
+      issue.lastSeen = stampAt(0);
+      issue.activity.push(buildRegression("9002", 0));
+      expect(summarize(await tape.poll())).toEqual([
+        ["sentry.issue.regressed", "1001:regressed:9002"],
+      ]);
+    });
+
+    it("emits a regression of an issue that was ongoing when it was stored, and skips an older one", async () => {
+      const tape = buildTape([buildFakeIssue("1001")]);
+      const issue = findIssue(tape, "1001");
+      issue.activity = [buildRegression("8000", 100)];
+      await tape.poll();
+
+      issue.substatus = "regressed";
+      issue.lastSeen = stampAt(-1);
+      issue.activity.push(buildRegression("9001", 1));
+      const events = await tape.poll();
+
+      expect(summarize(events)).toEqual([["sentry.issue.regressed", "1001:regressed:9001"]]);
+    });
+  });
+
+  describe("the bounds of a payload", () => {
+    const HUGE = 300 * 1024;
+
+    it("emits an issue whose texts are far over the limits, cut to fixed lengths", async () => {
+      const tape = buildTape();
+      await tape.poll();
+      const issue = buildFakeIssue("1001", {
+        title: "t".repeat(HUGE),
+        culprit: "c".repeat(HUGE),
+        errorType: "e".repeat(HUGE),
+        assignedTo: { type: "user", id: "88", name: "n".repeat(HUGE) },
+        latestEvent: {
+          eventID: "abc123",
+          dateCreated: stampAt(-1),
+          release: "r".repeat(HUGE),
+          environment: "p".repeat(HUGE),
+          frames: Array.from({ length: 30 }, (_, index) => ({
+            filename: "f".repeat(HUGE),
+            function: "g".repeat(HUGE),
+            lineNo: index,
+            inApp: true,
+          })),
+          type: "T".repeat(HUGE),
+          value: "é".repeat(HUGE),
+        },
+      });
+      tape.world.issues.push(issue);
+
+      const events = await tape.poll();
+
+      expect(events).toHaveLength(1);
+      const event = events[0]!;
+      expect(new TextEncoder().encode(JSON.stringify(event.payload)).length).toBeLessThan(
+        MAX_EMITTED_FIELD_BYTES,
+      );
+      expect(event.title.length).toBeLessThanOrEqual(MAX_EVENT_TITLE_LENGTH);
+      const payload = event.payload as {
+        issue: { title: string; culprit: string };
+        latestEvent: {
+          exception: { value: string; frames: Array<{ filename: string; function: string }> };
+        };
+      };
+      expect(payload.issue.title).toHaveLength(512);
+      expect(payload.issue.culprit).toHaveLength(512);
+      expect(payload.latestEvent.exception.value).toHaveLength(4096);
+      expect(payload.latestEvent.exception.frames[0]?.filename).toHaveLength(256);
+      expect(payload.latestEvent.exception.frames[0]?.function).toHaveLength(256);
+    });
+
+    it("names an issue with an empty title by its short id", async () => {
+      const tape = buildTape();
+      await tape.poll();
+      tape.world.issues.push(buildFakeIssue("1001", { title: "" }));
+
+      const events = await tape.poll();
+
+      expect(events[0]?.title).toBe("WEBSHOP-1001 WEBSHOP-1001");
+    });
+  });
+
+  describe("the memory of what left", () => {
+    it("takes an issue that returns after more than 90 days without a poll for a new one", async () => {
+      const tape = buildTape([buildFakeIssue("1001")]);
+      await tape.poll();
+      const issue = findIssue(tape, "1001");
+      resolve(issue);
+      await tape.poll();
+
+      advanceClock(91 * 24 * 60);
+      reopen(issue);
+      issue.lastSeen = stampAt(-1);
+      const events = await tape.poll();
+
+      expect(summarize(events)).toEqual([
+        ["sentry.issue.entered", `1001:entered:${issue.lastSeen}`],
+      ]);
+    });
+  });
+
   describe("the read budget", () => {
-    /** Builds `count` regressed issues from id 2001 on. A higher id was seen longer ago. */
+    /** Builds `count` ongoing issues from id 2001 on, which `regressAgain` regresses. A higher id was seen longer ago. */
     const buildRegressedIssues = (count: number): Array<FakeIssue> =>
       Array.from({ length: count }, (_, index) =>
         buildFakeIssue(String(2001 + index), {
-          substatus: "regressed",
+          substatus: "ongoing",
           lastSeen: stampAt(-500 - index),
         }),
       );
@@ -825,6 +961,7 @@ describe("the issues feed", () => {
     /** Gives every issue a new event and a new regression, as if each came back once more. */
     const regressAgain = (tape: ReturnType<typeof buildTape>, activityId: string): void => {
       for (const issue of tape.world.issues) {
+        issue.substatus = "regressed";
         issue.lastSeen = stampAt(-1);
         issue.activity.push(buildRegression(`${activityId}${issue.id}`, 1));
       }

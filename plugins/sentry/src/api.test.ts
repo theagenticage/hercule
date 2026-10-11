@@ -30,6 +30,22 @@ const link = (previous: boolean, next: boolean, cursor: string): string =>
   `<https://us.sentry.io/x?cursor=0>; rel="previous"; results="${String(previous)}"; cursor="0", ` +
   `<https://us.sentry.io/x?cursor=${cursor}>; rel="next"; results="${String(next)}"; cursor="${cursor}"`;
 
+/** Builds a client that answers with `status` and headers, and a body that fails when it is read. */
+const buildBrokenBodyStub = (status: number, headers: Record<string, string> = {}) =>
+  stubHttpClient((request) =>
+    Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        new Response(
+          new ReadableStream({
+            start: (controller) => controller.error(new Error("the connection was reset")),
+          }),
+          { status, headers },
+        ),
+      ),
+    ),
+  );
+
 /** Builds a client that answers every request with a proxy's HTML page and `status`. */
 const buildHtmlStub = (status: number, rateLimitResetAt?: string) =>
   stubHttpClient((request) =>
@@ -192,6 +208,29 @@ describe("callSentry", () => {
       expect(result.failure.retryAfterSeconds).toBeGreaterThanOrEqual(24);
       expect(result.failure.retryAfterSeconds).toBeLessThanOrEqual(25);
     }
+  });
+
+  it("fails with an AuthError on a 401 whose body cannot be read", async () => {
+    const result = await runAgainstStub(callSentry(REQUEST), buildBrokenBodyStub(401));
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(AuthError);
+  });
+
+  it("fails with the wait Sentry asked for on a 429 whose body cannot be read", async () => {
+    const reset = String(Math.floor(Date.now() / 1000) + 25);
+
+    const result = await runAgainstStub(
+      callSentry(REQUEST),
+      buildBrokenBodyStub(429, { "x-sentry-rate-limit-reset": reset }),
+    );
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(SentryRateLimited);
+  });
+
+  it("fails as unreachable, not as a success, when the body of a 200 cannot be read", async () => {
+    const result = await runAgainstStub(callSentry(REQUEST), buildBrokenBodyStub(200));
+
+    expect(Result.isFailure(result) && result.failure.message).toContain("could not be read");
   });
 
   it("waits a minute after a 429 that says nothing about the window", async () => {

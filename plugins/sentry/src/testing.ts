@@ -18,6 +18,7 @@ import type * as HttpClientError from "effect/unstable/http/HttpClientError";
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import {
+  MAX_EMITTED_FIELD_BYTES,
   PluginError,
   type EmittedEvent,
   type IngestContext,
@@ -648,13 +649,22 @@ const EventEnvelope = Schema.Struct({
 /**
  * Checks one emitted event the way the host does before it writes it. Fails
  * with a `PluginError` when the kind is not one the plugin declares, when a
- * common field breaks the host's limits, or when the payload does not match
+ * common field breaks the host's limits, when the payload is over
+ * `MAX_EMITTED_FIELD_BYTES`, or when the payload does not match
  * the kind's schema exactly.
  */
 const checkEmittedEvent = (event: EmittedEvent): Effect.Effect<void, PluginError> => {
   const declaration = SENTRY_EVENT_KINDS[event.kind];
   if (declaration === undefined) {
     return Effect.fail(new PluginError({ message: `Undeclared kind ${event.kind}` }));
+  }
+  const payloadBytes = new TextEncoder().encode(JSON.stringify(event.payload)).length;
+  if (payloadBytes > MAX_EMITTED_FIELD_BYTES) {
+    return Effect.fail(
+      new PluginError({
+        message: `${event.kind}: the payload is ${String(payloadBytes)} bytes, over the limit of ${String(MAX_EMITTED_FIELD_BYTES)}`,
+      }),
+    );
   }
   return Effect.andThen(
     Schema.decodeUnknownEffect(EventEnvelope)(event),

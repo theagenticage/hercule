@@ -32,7 +32,12 @@ export const normalizeTimestamp = (time: string, fallback: string): string => {
   return Number.isNaN(millis) ? fallback : new Date(millis).toISOString();
 };
 
-/** Builds the event of one kind about one issue. */
+/**
+ * Builds the event of one kind about one issue. The envelope respects the
+ * limits the host checks, because an event the host refuses would fail on
+ * every replay of the outbox: the title is cut, and the link is left out when
+ * the issue has none.
+ */
 export const buildIssueEvent = (input: IssueEventInput): EmittedEvent => {
   const { organization, issue } = input;
   return {
@@ -43,7 +48,7 @@ export const buildIssueEvent = (input: IssueEventInput): EmittedEvent => {
       `sentry:issue:${organization.id}/${issue.id}`,
       `sentry:project:${organization.id}/${issue.project.id}`,
     ],
-    url: issue.permalink,
+    ...(issue.permalink === "" ? {} : { url: issue.permalink }),
     system: SENTRY_SYSTEM,
     title: cutText(`${issue.shortId} ${issue.title}`, MAX_EVENT_TITLE_LENGTH),
     author: null,

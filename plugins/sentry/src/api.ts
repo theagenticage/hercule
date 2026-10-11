@@ -119,12 +119,14 @@ const parseWholeNumber = (value: string | undefined): number | undefined =>
  * page cursor and rate-limit reset. Any status is returned as it is: the
  * caller decides what a 403 or a 404 means for it. Fails with:
  *
- * - `SentryUnreachable` when no response arrived, or the whole response did
- *   not arrive within `SENTRY_REQUEST_TIMEOUT`;
+ * - `SentryUnreachable` when no response arrived, the body of a 2xx response
+ *   could not be read, or the whole response did not arrive within
+ *   `SENTRY_REQUEST_TIMEOUT`;
  * - a `PluginError` when the host is not on `sentry.io`, so the request is not
  *   sent at all, or when the body of a 2xx response was not JSON. The body of
- *   any other status is returned as null when it is not JSON, so the caller
- *   can still tell a 401 or a 429 from the status alone.
+ *   any other status is returned as null when it is not JSON or cannot be
+ *   read, so the caller can still tell a 401 or a 429 from the status and
+ *   headers alone.
  *
  * The `HttpClient` stays a requirement: the plugin provides the fetch client
  * only where the host calls in, so a test can drive any function below that
@@ -164,12 +166,19 @@ export const requestSentry = (
             new SentryUnreachable({ message: `Sentry could not be reached: ${error.message}` }),
         ),
       );
+      // A response that is not a success is classified from its status and
+      // headers alone, so a body that cannot be read is no body: a 401 is
+      // still a refused token and a 429 still a rate limit.
+      const isSuccess = response.status >= 200 && response.status < 300;
       const text = yield* response.text.pipe(
-        Effect.mapError(
-          (error) =>
-            new SentryUnreachable({
-              message: `Sentry's response could not be read: ${error.message}`,
-            }),
+        Effect.catch((error) =>
+          isSuccess
+            ? Effect.fail(
+                new SentryUnreachable({
+                  message: `Sentry's response could not be read: ${error.message}`,
+                }),
+              )
+            : Effect.succeed(""),
         ),
       );
       return { response, text };
