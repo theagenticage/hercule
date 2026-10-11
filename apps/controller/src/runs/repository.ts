@@ -579,24 +579,34 @@ const make = Effect.gen(function* () {
          WHERE ${sql.and([...workflowClauses, sql`finished_at >= ${activeSince}`])})
         CROSS JOIN runs ON id = active_id`;
 
+  /** Returns the WHERE clause that keeps only `workflowId` of the `workflows` table, or nothing. */
+  const buildStoredWorkflowCondition = (workflowId: string | undefined): Statement.Fragment =>
+    workflowId === undefined ? sql`` : sql`WHERE id = ${uuidFromString(workflowId)}`;
+
   /**
-   * Returns the run list's source for the `newestPerWorkflow` filter: for
-   * each stored workflow, or only for `workflowId` when it is given, its
-   * newest `perWorkflow` runs among those `filters` keep. Newest is the
-   * latest `created_at`, then the greatest id.
+   * Returns the run list's source for the `newestPerWorkflow` filter when no
+   * filter narrows the runs through an index of its own: for each stored
+   * workflow, or only for `workflowId` when it is given, its newest
+   * `perWorkflow` runs among those `filters` keep. Newest is the latest
+   * `created_at`, then the greatest id.
    *
-   * The source starts from the `workflows` table, so it costs one short
-   * lookup per workflow, whatever the number of runs:
+   * The source loops over the `workflows` table and makes one lookup per
+   * workflow:
    *
    * - `CROSS JOIN` makes SQLite loop over the workflows first, because it
    *   never reorders a `CROSS JOIN`;
    * - for each workflow, the subquery walks `runs_workflow` from the newest
    *   run backwards and stops after `perWorkflow` runs the filters keep.
    *
-   * Ranking with a window function over `runs` would read every run the
-   * controller ever had. Starting from `workflows` also leaves out the runs
-   * of a deleted workflow, which keep its id in `workflow_id`, and the runs
-   * of a sent workflow, whose `workflow_id` is NULL.
+   * With no filters, or with `since` and `until`, which `runs_workflow` reads
+   * as a range, each lookup reads `perWorkflow` runs. Any other filter is
+   * checked run by run, so a workflow with many runs the filter refuses is
+   * read further back, as far as the run list without this filter would read.
+   *
+   * Ranking with a window function over `runs` instead would read every run
+   * the controller ever had. Starting from `workflows` also leaves out the
+   * runs of a deleted workflow, which keep its id in `workflow_id`, and the
+   * runs of a sent workflow, whose `workflow_id` is NULL.
    */
   const buildNewestRunsPerWorkflowSource = (
     perWorkflow: number,
@@ -606,10 +616,40 @@ const make = Effect.gen(function* () {
     // The workflow id is renamed to `workflow` because `workflows` also has
     // an `id` and a `created_at`, which the list reads from `runs` by name.
     sql`(SELECT runs.* FROM (SELECT id AS workflow FROM workflows
-                             ${workflowId === undefined ? sql`` : sql`WHERE id = ${uuidFromString(workflowId)}`})
+                             ${buildStoredWorkflowCondition(workflowId)})
          CROSS JOIN runs ON runs.id IN (
            SELECT id FROM runs WHERE ${sql.and([sql`workflow_id = workflow`, ...filters])}
            ORDER BY created_at DESC, id DESC LIMIT ${perWorkflow}))`;
+
+  /**
+   * Returns the run list's source for the `newestPerWorkflow` filter when a
+   * filter narrows the runs through an index of its own: the same runs as
+   * `buildNewestRunsPerWorkflowSource` returns, read the other way round.
+   *
+   * `candidates` is the source the run list reads without this filter, so
+   * the runs `filters` keep are found through the same index: pending and
+   * running runs through `runs_unfinished`, the runs live since an instant
+   * through the `finished_at` indexes, a run's re-runs through
+   * `runs_original_run_id`. Only those runs are ranked, by a window function
+   * per workflow. A lookup per workflow on `runs_workflow` would instead read
+   * every run of a workflow whose history holds many runs the filters refuse.
+   * Without a narrowing filter, ranking this way would rank every run the
+   * controller ever had, which is why that case has a source of its own.
+   */
+  const buildNewestNarrowedRunsPerWorkflowSource = (
+    perWorkflow: number,
+    workflowId: string | undefined,
+    candidates: Statement.Fragment,
+    filters: ReadonlyArray<Statement.Fragment>,
+  ): Statement.Fragment =>
+    sql`(SELECT runs.* FROM (
+           SELECT id AS ranked_id, workflow_id AS ranked_workflow,
+                  ROW_NUMBER() OVER (PARTITION BY workflow_id
+                                     ORDER BY created_at DESC, id DESC) AS newness
+           FROM ${candidates} WHERE ${sql.and(filters)})
+         CROSS JOIN runs ON runs.id = ranked_id
+         WHERE newness <= ${perWorkflow}
+           AND ranked_workflow IN (SELECT id FROM workflows ${buildStoredWorkflowCondition(workflowId)}))`;
 
   return {
     /** Inserts a pending run and a pending step record for each entry step. Returns the run's id. */
@@ -711,33 +751,37 @@ const make = Effect.gen(function* () {
           if (request.actor !== undefined) {
             filters.push(sql`${sql.literal(STARTING_ACTOR)} = ${request.actor}`);
           }
+          const unranked =
+            request.activeSince === undefined
+              ? sql`runs`
+              : buildActiveRunsSource(workflowClauses, request.activeSince);
+          // A filter that SQLite answers from an index of its own narrows the
+          // runs before they are ranked; see the two sources for why.
+          const narrows =
+            request.status === "pending" ||
+            request.status === "running" ||
+            request.activeSince !== undefined ||
+            request.originalRunId !== undefined;
           // With `newestPerWorkflow`, the filters pick each workflow's newest
           // runs inside the source, and the keyset pages through what the
           // source returns, so a cursor never changes which runs are newest.
-          // There `activeSince` is a plain `OR`: the lookup already walks one
-          // workflow's runs only, so the two lookups of `buildActiveRunsSource`
-          // would save nothing.
           const { source, clauses } =
-            request.newestPerWorkflow !== undefined
-              ? {
-                  source: buildNewestRunsPerWorkflowSource(
-                    request.newestPerWorkflow,
-                    request.workflowId,
-                    request.activeSince === undefined
-                      ? filters
-                      : [
-                          ...filters,
-                          sql`(finished_at IS NULL OR finished_at >= ${request.activeSince})`,
-                        ],
-                  ),
-                  clauses: [keyset],
-                }
+            request.newestPerWorkflow === undefined
+              ? { source: unranked, clauses: [keyset, ...filters] }
               : {
-                  source:
-                    request.activeSince === undefined
-                      ? sql`runs`
-                      : buildActiveRunsSource(workflowClauses, request.activeSince),
-                  clauses: [keyset, ...filters],
+                  source: narrows
+                    ? buildNewestNarrowedRunsPerWorkflowSource(
+                        request.newestPerWorkflow,
+                        request.workflowId,
+                        unranked,
+                        filters,
+                      )
+                    : buildNewestRunsPerWorkflowSource(
+                        request.newestPerWorkflow,
+                        request.workflowId,
+                        filters,
+                      ),
+                  clauses: [keyset],
                 };
           const rows = yield* sql<SummaryRow>`
           SELECT id, workflow_id, json_extract(plan, '$.name') AS workflow_name, origin, status,

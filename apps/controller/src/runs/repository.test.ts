@@ -465,6 +465,26 @@ describe("newestPerWorkflow", () => {
     expect(listed.map((summary) => summary.id)).toEqual([kept]);
   });
 
+  it("finds a workflow's running run behind a long history of ended runs", async () => {
+    const [kept, listed] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const busy = yield* insertWorkflow;
+        const running = yield* insertRunAt(busy, 0);
+        yield* runs.start(running, AT);
+        for (let minute = 1; minute < 60; minute++) {
+          const ended = yield* insertRunAt(busy, minute);
+          yield* runs.start(ended, AT);
+          yield* runs.finish(ended, { status: "completed" }, "2026-10-09T11:00:00.000Z");
+        }
+        const listed = yield* listRuns({ newestPerWorkflow: 2, status: "running" });
+        return [running, listed] as const;
+      }).pipe(Effect.provide(TestDatabase)),
+    );
+
+    expect(listed.map((summary) => summary.id)).toEqual([kept]);
+  });
+
   it("breaks a tie on the creation time by the greater id", async () => {
     const [kept, listed] = await Effect.runPromise(
       Effect.gen(function* () {
@@ -573,6 +593,43 @@ describe("the run list's query plans", () => {
     // are sorted before the lookup stops, which reads all of them.
     expect(plan.match(/TEMP B-TREE/g)).toHaveLength(1);
   });
+
+  it("reads since and until as a range of runs_workflow in each workflow's lookup", async () => {
+    const plan = await explainListQuery({
+      newestPerWorkflow: 20,
+      since: "2026-10-09T00:00:00.000Z",
+      until: "2026-10-09T23:59:59.999Z",
+    });
+
+    expect(plan).toContain("runs_workflow (workflow_id=? AND created_at>? AND created_at<?)");
+    expect(plan).not.toContain("SCAN runs");
+  });
+
+  // Each of these filters has an index of its own. A lookup per workflow on
+  // runs_workflow would instead read every run of a workflow with a long
+  // history of runs the filter refuses.
+  it.each([
+    ["running runs", { status: "running" }, "runs_unfinished (status=?)"],
+    [
+      "runs live since an instant",
+      { activeSince: "2026-10-09T00:00:00.000Z" },
+      "runs_finished (finished_at>?)",
+    ],
+    [
+      "re-runs",
+      { originalRunId: "0190c000-0000-7000-8000-000000000001" },
+      "runs_original_run_id (original_run_id=?)",
+    ],
+  ] as const)(
+    "finds each workflow's newest %s through the filter's own index, not runs_workflow",
+    async (_, filter, index) => {
+      const plan = await explainListQuery({ ...filter, newestPerWorkflow: 20 });
+
+      expect(plan).toContain(index);
+      expect(plan).not.toContain("runs_workflow");
+      expect(plan).not.toContain("SCAN runs");
+    },
+  );
 
   it("finds the running runs with runs_unfinished", async () => {
     const plan = await explainListQuery({ status: "running" });
