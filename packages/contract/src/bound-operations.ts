@@ -163,11 +163,13 @@ export const decodeAnswerOperation = <Place extends AnswerPlace>(
   const { op, input } = operation;
   if (!isUsableIn(place, op)) {
     const record = nameAnswerRecord(place);
+    // The plugin host lets a plugin action list signal.answer only, so only a
+    // signal's refusal offers one.
     return Effect.fail(
       createValidationError([
         {
           path: [...path, "op"],
-          message: `An answer on a ${record} cannot run ${op}. An answer on a ${record} can run one of: ${listAnswerOperations(place).join(", ")}, or a plugin action that lists ${place} in its usableIn.`,
+          message: `An answer on a ${record} cannot run ${op}. An answer on a ${record} can run one of: ${listAnswerOperations(place).join(", ")}${place === "signal.answer" ? ", or a plugin action that lists signal.answer in its usableIn" : ""}.`,
         },
       ]),
     );

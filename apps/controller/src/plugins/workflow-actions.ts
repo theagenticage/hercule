@@ -294,6 +294,17 @@ export const registerWorkflowActionContribution = (
       toPluginError,
     );
     const id = `${pluginId}/${names.id}`;
+    // TypeScript refuses this place, but a plugin that casts its contribution
+    // gets past that, and the schema's own message would not say why.
+    if (
+      (contribution.usableIn as ReadonlyArray<string> | undefined)?.includes("notification.answer")
+    ) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the workflow action ${id} is invalid: it lists notification.answer in usableIn. A plugin action cannot answer a decision Notification, because the answer's operation runs in the same transaction as its resolution and a plugin action runs outside it. List signal.answer to let the user run it from a Signal instead`,
+        }),
+      );
+    }
     const header = yield* Effect.mapError(
       decodeWorkflowActionHeader({
         description: contribution.description,

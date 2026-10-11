@@ -125,7 +125,7 @@ describe("decodeAnswerOperation", () => {
     expect(issues).toEqual([
       {
         path: [...PATH, "op"],
-        message: `An answer on a notification cannot run secret.set. An answer on a notification can run one of: ${NOTIFICATION_OPERATIONS.join(", ")}, or a plugin action that lists notification.answer in its usableIn.`,
+        message: `An answer on a notification cannot run secret.set. An answer on a notification can run one of: ${NOTIFICATION_OPERATIONS.join(", ")}.`,
       },
     ]);
   });

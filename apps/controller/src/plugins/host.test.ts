@@ -772,6 +772,27 @@ describe("the workflow action catalog", () => {
     expect(readErroredMessage(statuses.owned)).toBeUndefined();
   });
 
+  it("marks a plugin errored if an action lists notification.answer", async () => {
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          // A cast gets past TypeScript, which refuses the place.
+          buildActionPlugin("noticed", {
+            ...NOTE_APPEND_ACTION,
+            usableIn: ["notification.answer"],
+            describe: () => [{ kind: "text", text: "Append a note" }],
+          } as unknown as WorkflowActionContribution),
+        ]);
+        return yield* host.status("noticed");
+      }),
+    );
+
+    expect(readErroredMessage(status)).toContain(
+      "it lists notification.answer in usableIn. A plugin action cannot answer a decision Notification",
+    );
+  });
+
   it("marks a plugin errored if an action the user's answer may run has no describe, and keeps one that has it", async () => {
     const found = await run(
       Effect.gen(function* () {

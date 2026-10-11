@@ -361,7 +361,7 @@ export interface ActionContext {
  *
  * - `workflow.step`: called by an action step of a workflow.
  * - `notification.answer`: run by a Bound Action on a decision Notification,
- *   when the user takes it.
+ *   when the user takes it. A plugin action may not list it (`AnswerAction`).
  * - `signal.answer`: run by a Bound Action on a Signal, when the user takes it.
  */
 export const BINDING_PLACES = ["workflow.step", "notification.answer", "signal.answer"] as const;
@@ -369,6 +369,9 @@ export const BINDING_PLACES = ["workflow.step", "notification.answer", "signal.a
 export const BindingPlace = Schema.Literals(BINDING_PLACES);
 
 export type BindingPlace = Schema.Schema.Type<typeof BindingPlace>;
+
+/** A place where a plugin's workflow action may be bound: every place but `notification.answer`. */
+type PluginBindingPlace = Exclude<BindingPlace, "notification.answer">;
 
 /** A place where the user's answer runs a bound operation: every place but a workflow step. */
 export type AnswerPlace = Exclude<BindingPlace, "workflow.step">;
@@ -427,8 +430,10 @@ export interface WorkflowStepAction extends WorkflowActionFields {
 }
 
 /**
- * A workflow action that the user's answer may run, on a decision
- * Notification, on a Signal, or both. It may list `workflow.step` too.
+ * A workflow action that the user's answer may run, on a Signal. It may list
+ * `workflow.step` too. It may not list `notification.answer`: taking a
+ * decision Notification's answer runs its operation in the same transaction
+ * as the resolution, and a plugin action runs outside any transaction.
  *
  * - `describe` returns the describe line for one frozen input. It must be
  *   pure: it reads only `input`. The plugin writes the line, so the producer
@@ -441,7 +446,7 @@ export interface WorkflowStepAction extends WorkflowActionFields {
  *   core writes the line from the answer's label.
  */
 export interface AnswerAction extends WorkflowActionFields {
-  readonly usableIn: readonly [BindingPlace, ...ReadonlyArray<BindingPlace>];
+  readonly usableIn: readonly [PluginBindingPlace, ...ReadonlyArray<PluginBindingPlace>];
   readonly describe: (input: unknown) => ReadonlyArray<DescribeLinePart>;
   readonly outcome?: (input: unknown) => string;
 }
