@@ -331,6 +331,38 @@ export const setVisibility = (state: DocumentVisibilityState): void => {
 };
 
 /**
+ * Replaces `ResizeObserver` with one whose callbacks the test calls, and
+ * returns a function that calls them, as a resize would. Given an element,
+ * the function calls only the observers watching it, so an observer that
+ * reads sizes jsdom cannot give, such as a virtualized list's, is left out.
+ */
+export const stubResizeObserver = (): ((target?: Element) => void) => {
+  const observed = new Map<() => void, Set<Element>>();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      readonly callback: () => void;
+      constructor(callback: () => void) {
+        this.callback = callback;
+      }
+      observe(element: Element): void {
+        const elements = observed.get(this.callback) ?? new Set();
+        observed.set(this.callback, elements.add(element));
+      }
+      unobserve(): void {}
+      disconnect(): void {
+        observed.delete(this.callback);
+      }
+    },
+  );
+  return (target) => {
+    for (const [callback, elements] of observed) {
+      if (target === undefined || elements.has(target)) callback();
+    }
+  };
+};
+
+/**
  * Makes every element measure `width` by `height` CSS pixels, until
  * `vi.restoreAllMocks` runs. jsdom lays nothing out, so every element would
  * measure 0, and a virtualized list, which reads its own size to know how

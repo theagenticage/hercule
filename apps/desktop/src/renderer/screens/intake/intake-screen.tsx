@@ -174,6 +174,22 @@ export function IntakeScreen({
     (row ?? listRef.current)?.focus();
   };
 
+  // When the pane closes, by Esc, by the toggle or because the window grew
+  // too narrow for it, the closing pane turns inert, and the focus inside it
+  // would fall to the page's body, outside the screen's keys. The focus goes
+  // to the list instead. Focus outside the split, such as on the toggle that
+  // closed the pane, stays where it is.
+  useLayoutEffect(() => {
+    if (paneShown) return;
+    const focused = document.activeElement;
+    const inPane =
+      (splitRef.current?.contains(focused) ?? false) &&
+      !(listRef.current?.contains(focused) ?? false);
+    if (inPane || focused === null || focused === document.body) focusSelected();
+    // Runs only when the pane closes; `focusSelected` is a new function on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paneShown]);
+
   const moveSelection = (step: 1 | -1): void => {
     const next = moveSignalSelection(sections, selectedId, step);
     if (next === null || next === selectedId) return;
@@ -185,9 +201,7 @@ export function IntakeScreen({
 
   const stepBack = (): void => {
     if (paneShown) {
-      const focusInPane = !(listRef.current?.contains(document.activeElement) ?? true);
       setDismissed(true);
-      if (focusInPane) focusSelected();
       return;
     }
     if (selectedId !== null) {

@@ -18,6 +18,7 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   stubElementSize,
+  stubResizeObserver,
   type Call,
   type Handler,
 } from "../../../app/testing";
@@ -549,6 +550,22 @@ describe("Intake's keys", () => {
     // The signal has left To do, so it has no row to take the focus back,
     // and the list takes it: the closing pane is inert and would drop it.
     expect(document.activeElement).toBe(getList());
+    await userEvent.keyboard("{Escape}");
+    expect(readSelected(router.state.location.search)).toBeUndefined();
+  });
+  it("keep working when the window grows too narrow for the pane while the focus is in it", async () => {
+    const resize = stubResizeObserver();
+    const { router } = await openIntake(`/intake?signal=${MENTION.id}`);
+    const pane = await findPane();
+    within(pane).getByRole("textbox", { name: "Reply" }).focus();
+
+    stubElementSize(700, 800);
+    act(() => {
+      resize(getList().parentElement!);
+    });
+    expect(isPaneShown()).toBe(false);
+    // The closing pane is inert and would drop the focus, so the selected row takes it.
+    expect(document.activeElement).toBe(getRow(MENTION));
     await userEvent.keyboard("{Escape}");
     expect(readSelected(router.state.location.search)).toBeUndefined();
   });
