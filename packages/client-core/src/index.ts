@@ -172,6 +172,18 @@ export {
   RequestError,
 } from "./errors";
 export { toIdTail } from "./id-tail";
+export {
+  applyIntakeChange,
+  buildIntakeOverrides,
+  canResetIntakeRow,
+  describeIntakeSource,
+  listIntakeSegments,
+  listPluginsWithIntake,
+  type IntakeChange,
+  type IntakeKindList,
+  type IntakeKindValue,
+  type IntakeSegment,
+} from "./intake-settings";
 export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
 export { isWebLink } from "./web-link";
 export {

@@ -6,6 +6,7 @@
  * Each finder fails rather than returning nothing, because an edit that
  * silently misses its element would only show up as differing pixels.
  */
+import { INTAKE_ICON_OUTLINES } from "../icons/intake-outlines";
 
 /** Returns the first element inside `scope` that matches `selector`. Fails when there is none. */
 export function findElement(scope: ParentNode, selector: string): Element {
@@ -45,4 +46,27 @@ export function findElementByText(scope: ParentNode, selector: string, text: str
  */
 export function replaceTextAfterIcon(control: Element, text: string): void {
   control.replaceChildren(findElement(control, "svg"), text);
+}
+
+/**
+ * Adds an Intake row after Threads in the book's settings list. The book
+ * predates Settings > Intake, so its list has no such row, and the app's
+ * list does. The new row is a copy of the Threads row with its own label
+ * and icon, so it is laid out the way the book lays out every row. Fails
+ * when the book's list has no Threads row.
+ */
+export function insertIntakeSettingsRow(scope: ParentNode): void {
+  const threads = findElementByText(scope, ".set-nav .nav-row", "Threads");
+  const row = threads.cloneNode(true) as Element;
+  findElement(row, "svg").replaceChildren(
+    ...INTAKE_ICON_OUTLINES.map((outline) => {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", outline);
+      return path;
+    }),
+  );
+  findElement(row, "span").textContent = "Intake";
+  row.classList.remove("is-on");
+  row.setAttribute("href", "#");
+  threads.after(row);
 }

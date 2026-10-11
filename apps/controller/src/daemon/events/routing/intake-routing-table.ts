@@ -29,12 +29,15 @@
  * the same transaction.
  */
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Event, SignalResolution } from "@hercule/contract";
 import { SYSTEM_ACTOR } from "../../../actor";
+import { connectionRepository } from "../../../connections";
 import { nowIso } from "../../../db";
 import { AuditLog } from "../../../events";
+import { applyIntakeOverrides, NO_INTAKE_OVERRIDES, PluginIntake } from "../../../intake-settings";
 import {
   evaluateExpression,
   formatExpressionValue,
@@ -57,18 +60,20 @@ import type { Route, RoutingTable } from "../event-router";
 export const intakeRoutingTable: Effect.Effect<
   RoutingTable,
   never,
-  SqlClient.SqlClient | PluginHost | AuditLog
+  SqlClient.SqlClient | PluginHost | PluginIntake | AuditLog
 > = Effect.gen(function* () {
   const host = yield* PluginHost;
+  const pluginIntake = yield* PluginIntake;
+  const connections = yield* connectionRepository;
   const signals = yield* signalRepository;
   const inputs = yield* inputRepository;
   const runs = yield* runRepository;
   const audit = yield* AuditLog;
 
   /**
-   * Returns the routes for one pass. The compiled expressions and the logged
-   * failures live as long as the pass, so each expression is parsed once per
-   * pass and each failure is logged once per pass, not once per event.
+   * Returns the routes for one pass. The compiled expressions, the logged
+   * failures and the Intake settings read for each Connection live as long as
+   * the pass, so each is worked out once per pass, not once per event.
    */
   const prepare = (): Effect.Effect<ReadonlyArray<Route>, SqlError> =>
     Effect.gen(function* () {
@@ -227,6 +232,41 @@ export const intakeRoutingTable: Effect.Effect<
           });
         });
 
+      const switchedOnKinds = new Map<string, ReadonlySet<string>>();
+
+      /**
+       * Returns the names of the source's signal kinds that are switched on
+       * for the event's Connection: the Connection's own choice, else the
+       * plugin's, else the default. A Connection deleted since the event was
+       * ingested has no choices, so the plugin's level applies.
+       *
+       * The answer is read once per plugin and Connection in a pass and kept
+       * for the rest of it. The pass is one transaction, so no settings change
+       * can land in the middle of it. The next pass reads again, so a change
+       * applies from the next pass without a restart.
+       */
+      const readSwitchedOnSignalKinds = (
+        source: RegisteredEventSource,
+        event: Event & { readonly connectionId: string },
+      ): Effect.Effect<ReadonlySet<string>, SqlError> =>
+        Effect.gen(function* () {
+          const key = JSON.stringify([source.pluginId, event.connectionId]);
+          const known = switchedOnKinds.get(key);
+          if (known !== undefined) return known;
+          const pluginLevel = yield* pluginIntake.read(source.pluginId);
+          const connection = yield* connections.one(event.connectionId);
+          const settings = applyIntakeOverrides(
+            pluginLevel,
+            Option.isSome(connection) ? connection.value.intake : NO_INTAKE_OVERRIDES,
+            "connection",
+          );
+          const switchedOn = new Set(
+            settings.signalKinds.filter((kind) => kind.on).map((kind) => kind.kind),
+          );
+          switchedOnKinds.set(key, switchedOn);
+          return switchedOn;
+        });
+
       const buildRoute = (source: RegisteredEventSource): Route => ({
         admits: (event) =>
           event.source === source.pluginId &&
@@ -248,8 +288,11 @@ export const intakeRoutingTable: Effect.Effect<
                 endSignalsOnThread(kind, fromConnection, context),
               );
             }
-            for (const kind of source.signalKinds) {
-              if (!kind.from.includes(event.kind)) continue;
+            const raisable = source.signalKinds.filter((kind) => kind.from.includes(event.kind));
+            if (raisable.length === 0) return;
+            const switchedOn = yield* readSwitchedOnSignalKinds(source, fromConnection);
+            for (const kind of raisable) {
+              if (!switchedOn.has(kind.kind)) continue;
               yield* absorbExpressionError(kind, "rule", runRule(kind, fromConnection, context));
             }
           }),

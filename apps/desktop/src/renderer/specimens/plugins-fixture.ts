@@ -16,6 +16,7 @@ export const buildPlugin = (id: string, displayName: string, mark?: PluginMark):
   status: { _tag: "active" },
   config: {},
   contributions: [],
+  intake: { eventKinds: [], signalKinds: [] },
 });
 
 /**

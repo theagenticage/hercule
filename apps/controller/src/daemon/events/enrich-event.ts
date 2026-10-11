@@ -28,6 +28,7 @@ import { withTransaction } from "../../db";
 import { AuditLog, EventService } from "../../events";
 import { SessionService } from "../../sessions";
 import type { Notifier } from "../../notifications";
+import type { PluginIntake } from "../../intake-settings";
 import type { PluginHost } from "../../plugins";
 import type { RunService } from "../../runs";
 import type { TriggerEffects, TriggerHealth } from "../../workflows";
@@ -119,4 +120,5 @@ export const EnrichmentLayer: Layer.Layer<
   | TriggerEffects
   | RunService
   | PluginHost
+  | PluginIntake
 > = Layer.effect(Enrichment)(make);

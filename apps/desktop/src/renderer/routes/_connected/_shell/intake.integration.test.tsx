@@ -54,6 +54,7 @@ const GITHUB: PluginDetail = {
   status: { _tag: "active" },
   config: {},
   contributions: [],
+  intake: { eventKinds: [], signalKinds: [] },
 };
 
 const CONNECTION_ID = "01a06d02-7200-7000-8000-0000000000c1";
@@ -355,6 +356,47 @@ describe("Intake's list", () => {
     ]);
     expect(marks.map((mark) => mark?.getAttribute("width"))).toEqual(["14", "16", "14"]);
     expect(pane.querySelector(".ad-kind .src")!.textContent).toBe("GitHub · Review requested");
+  });
+
+  it("links a plugin signal's provenance line to its kind on Settings > Intake, on the Connection it came from", async () => {
+    await openIntake(`/intake?signal=${REVIEW.id}`);
+    const pane = await findPane();
+
+    const link = pane.querySelector(".ad-kind a.src")!;
+    const href = new URL(link.getAttribute("href")!, "http://app.test");
+    expect(href.pathname).toBe("/settings/intake");
+    expect(Object.fromEntries(href.searchParams)).toEqual({
+      kind: "github/review-requested",
+      connection: CONNECTION_ID,
+    });
+  });
+
+  it("links a plugin signal raised through the API to its kind only", async () => {
+    const byApi = buildSignal("01a06d02-7a00-7000-8000-000000000013", 0, "12:00", {
+      title: "Raised through the API",
+      origin: { type: "api", actor: "user", eventIds: [], reason: "Seen twice" },
+    });
+    await openIntake(`/intake?signal=${byApi.id}`, storeSignals([byApi]).handlers);
+    const pane = await findPane();
+
+    const href = new URL(
+      pane.querySelector(".ad-kind a.src")!.getAttribute("href")!,
+      "http://app.test",
+    );
+    expect(Object.fromEntries(href.searchParams)).toEqual({ kind: "github/review-requested" });
+  });
+
+  it("draws the provenance line of a core signal as plain text", async () => {
+    const core = buildSignal("01a06d02-7a00-7000-8000-000000000014", 0, "12:01", {
+      kind: "proposal",
+      title: "A proposal",
+      origin: { type: "api", actor: "user", eventIds: [], reason: "Seen twice" },
+    });
+    await openIntake(`/intake?signal=${core.id}`, storeSignals([core]).handlers);
+    const pane = await findPane();
+
+    expect(pane.querySelector(".ad-kind a")).toBeNull();
+    expect(pane.querySelector(".ad-kind span.src")!.textContent).toBe("You · Proposal");
   });
 
   it("names the workflow or the assistant that raised a core signal", async () => {

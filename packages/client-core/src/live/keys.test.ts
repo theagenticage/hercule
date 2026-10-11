@@ -36,6 +36,11 @@ describe("signal pushes", () => {
     }
   });
 
+  it("invalidates every Connection's own page on a plugin push, which resolves the plugin's Intake settings", () => {
+    const keys = buildQueryKeys("plugin", ["github"]);
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.connection("any"))));
+  });
+
   it("invalidates every signal after reconnect", () => {
     assert.deepStrictEqual(buildQueryKeys("signal", []), [queryKeys.signals(), queryKeys.signal()]);
   });

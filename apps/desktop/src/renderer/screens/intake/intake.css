@@ -640,6 +640,13 @@
   color: var(--ink);
   font-weight: var(--w-medium);
 }
+/* The line of a plugin's signal is a link to that kind's switches on Settings >
+   Intake. It keeps the look of the plain line; hovering it underlines the text,
+   as the app's other text links do (`.link`). */
+.ad-kind a.src:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 /* The drawing's system.css softens a source's mark the same way. */
 .ad-kind .src .br,
 .ad-kind .src .ic,

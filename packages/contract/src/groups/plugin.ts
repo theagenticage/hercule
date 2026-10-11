@@ -12,6 +12,7 @@ import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { closedStruct } from "../closed";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
 import { Authenticated } from "../security";
+import { IntakeOverrides, IntakeSettings } from "./intake-settings";
 
 /**
  * Text a plugin writes has no limit of its own, but it is returned in every
@@ -86,6 +87,10 @@ export type PluginContribution = Schema.Schema.Type<typeof PluginContribution>;
  * the core's check; the apps then draw the plugin's initial. `markError`
  * holds the reason the core dropped the plugin's mark, which Settings >
  * Plugins shows.
+ *
+ * `intake` is the value in effect at the plugin's level for every event kind
+ * and signal kind it declares: its own default, or the user's choice for all
+ * its Connections.
  */
 export const PluginDetail = Schema.Struct({
   id: PluginId,
@@ -99,6 +104,7 @@ export const PluginDetail = Schema.Struct({
   configSchema: Schema.optionalKey(PluginConfigSchema),
   config: Schema.Json,
   contributions: Schema.Array(PluginContribution),
+  intake: IntakeSettings,
 });
 
 export type PluginDetail = Schema.Schema.Type<typeof PluginDetail>;
@@ -110,6 +116,14 @@ export type PluginDetail = Schema.Schema.Type<typeof PluginDetail>;
 export const PluginConfigureInput = closedStruct({ config: Schema.Json });
 
 export type PluginConfigureInput = Schema.Schema.Type<typeof PluginConfigureInput>;
+
+/**
+ * The payload of `plugin.updateIntake`: the user's choices for every
+ * Connection of the plugin that sets nothing of its own, replaced whole.
+ */
+export const PluginUpdateIntakeInput = closedStruct({ intake: IntakeOverrides });
+
+export type PluginUpdateIntakeInput = Schema.Schema.Type<typeof PluginUpdateIntakeInput>;
 
 /** A plugin id in a route. Not a UUID: a plugin's id comes from its manifest. */
 const params = { id: PluginId };
@@ -149,6 +163,14 @@ export const plugin = HttpApiGroup.make("plugin")
       params,
       payload: PluginConfigureInput,
       success: PluginDetail,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    // Not a field of `configure`: a config change restarts the plugin, and an
+    // intake change must not, because only the core reads intake settings.
+    HttpApiEndpoint.put("updateIntake", "/plugins/:id/intake", {
+      params,
+      payload: PluginUpdateIntakeInput,
+      success: IntakeSettings,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
   )

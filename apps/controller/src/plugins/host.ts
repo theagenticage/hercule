@@ -41,6 +41,8 @@ import {
 } from "@hercule/plugin-host";
 import {
   createDecodeValidationError,
+  type IntakeOverrides,
+  type IntakeSettings,
   type PluginRefusalReason,
   type PluginStatus,
   type Validation,
@@ -65,6 +67,7 @@ import {
   type RegisteredEventKind,
   type RegisteredEventSource,
 } from "./event-sources";
+import { applyIntakeOverrides, createPluginNotLoadedError, PluginIntake } from "../intake-settings";
 import type { RegisteredSignalKind } from "./signal-kinds";
 import { checkPluginMark } from "./mark";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
@@ -136,6 +139,12 @@ interface Entry extends LoadedPlugin {
    * restart.
    */
   readonly startable: boolean;
+  /**
+   * Whether `register` ran to the end. False for a `refused` plugin, whose
+   * code never ran, and for a plugin whose `register` failed. Neither has a
+   * registered event source, so its kinds are unknown.
+   */
+  readonly registered: boolean;
 }
 
 const toLoadedPlugin = (entry: Entry): LoadedPlugin => ({
@@ -774,6 +783,39 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  /**
+   * Returns the Intake settings a plugin gives before the user chooses
+   * anything: each event kind is as available to triage as the plugin
+   * declared it, and every signal kind is on. Kinds are in the order the
+   * plugin declares them, whatever the status of the plugin: the Intake
+   * settings of a disabled plugin are still shown and still written. Both
+   * lists are empty for a plugin whose registration failed or was refused,
+   * because none of its sources was registered.
+   */
+  const readDefaultIntakeSettings = (pluginId: string): Effect.Effect<IntakeSettings> =>
+    Effect.map(Ref.get(eventSources), (sources) => {
+      const own = sources.filter((source) => source.pluginId === pluginId);
+      return {
+        eventKinds: own.flatMap((source) =>
+          [...source.kinds.values()].map(({ kind, description, availableToTriage }) => ({
+            kind,
+            description,
+            on: availableToTriage,
+            level: "default" as const,
+          })),
+        ),
+        signalKinds: own.flatMap((source) =>
+          source.signalKinds.map(({ kind, label, description }) => ({
+            kind,
+            label,
+            description,
+            on: true,
+            level: "default" as const,
+          })),
+        ),
+      };
+    });
+
   return {
     /**
      * Loads the registry in four steps: check each manifest, register, write
@@ -821,6 +863,7 @@ const make = Effect.gen(function* () {
             manifest,
             deactivate: undefined,
             startable: true,
+            registered: false,
             id: manifest.id,
             displayName: manifest.displayName,
             hostApi: manifest.hostApi,
@@ -874,6 +917,7 @@ const make = Effect.gen(function* () {
           booted.set(manifest.id, {
             ...facts,
             startable: registered,
+            registered,
             configSchema: inspected.success,
             status,
           });
@@ -939,6 +983,31 @@ const make = Effect.gen(function* () {
       Effect.map(Effect.zip(Ref.get(eventSources), listActivePluginIds), ([sources, active]) =>
         sources.filter((source) => active.has(source.pluginId)),
       ),
+
+    readDefaultIntakeSettings,
+
+    /**
+     * Returns the Intake settings in effect at the plugin's level: the
+     * plugin's defaults with the user's choices for the plugin on top. The
+     * caller passes the stored choices, so a caller that already holds them
+     * does not read them twice.
+     */
+    readPluginIntakeSettings: (
+      pluginId: string,
+      overrides: IntakeOverrides,
+    ): Effect.Effect<IntakeSettings> =>
+      Effect.map(readDefaultIntakeSettings(pluginId), (defaults) =>
+        applyIntakeOverrides(defaults, overrides, "plugin"),
+      ),
+
+    /**
+     * Returns whether the plugin's `register` ran to the end in this process.
+     * It is false for a `refused` plugin, for a plugin whose `register`
+     * failed, and for an id this boot did not load. Such a plugin has no
+     * registered kinds.
+     */
+    isRegistered: (pluginId: string): Effect.Effect<boolean> =>
+      Effect.map(Ref.get(entries), (booted) => booted.get(pluginId)?.registered ?? false),
 
     /**
      * Returns the signal kind with this qualified name, such as
@@ -1027,12 +1096,45 @@ export class PluginHost extends Context.Service<PluginHost, Effect.Success<typeo
 ) {}
 
 /**
- * Provides the plugin host and the ingest loops it closes when a plugin stops.
- * The ingest loops need an Ingest Executor, which the controller daemon
- * provides.
+ * Provides the plugins domain's `PluginIntake` service: a plugin's declared
+ * kinds from the host, with the user's choices for the plugin on top. The
+ * interface is declared in the intake settings domain, so the connections
+ * domain does not import this one.
+ */
+const PluginIntakeLayer: Layer.Layer<PluginIntake, never, SqlClient.SqlClient | PluginHost> =
+  Layer.effect(PluginIntake)(
+    Effect.gen(function* () {
+      const host = yield* PluginHost;
+      const repository = yield* pluginRepository;
+      const read = (pluginId: string) =>
+        Effect.gen(function* () {
+          const { intake } = yield* Effect.catchTag(
+            repository.state(pluginId),
+            "SchemaError",
+            Effect.die,
+          );
+          return yield* host.readPluginIntakeSettings(pluginId, intake);
+        });
+      return {
+        read,
+        readBeforeWrite: (pluginId: string) =>
+          Effect.gen(function* () {
+            if (!(yield* host.isRegistered(pluginId))) {
+              return yield* Effect.fail(createPluginNotLoadedError(pluginId));
+            }
+            return yield* read(pluginId);
+          }),
+      };
+    }),
+  );
+
+/**
+ * Provides the plugin host, the ingest loops it closes when a plugin stops,
+ * and the `PluginIntake` service that reads from the host. The ingest loops
+ * need an Ingest Executor, which the controller daemon provides.
  */
 export const PluginHostLayer: Layer.Layer<
-  PluginHost | IngestLoops,
+  PluginHost | IngestLoops | PluginIntake,
   never,
   | SqlClient.SqlClient
   | Secrets
@@ -1042,7 +1144,9 @@ export const PluginHostLayer: Layer.Layer<
   | IngestExecutor
   | OpenSignals
   | PromotionState
-> = Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer));
+> = PluginIntakeLayer.pipe(
+  Layer.provideMerge(Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer))),
+);
 
 /**
  * Provides the connections domain's `PluginConfigs` service, which reads a

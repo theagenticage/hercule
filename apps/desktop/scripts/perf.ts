@@ -237,7 +237,7 @@ const LONG_THREAD_ROWS = 500;
  * open, by the name that the section's row in the Settings list and its
  * header title show.
  */
-const SETTINGS_SECTIONS = ["Profile", "Assistants"] as const;
+const SETTINGS_SECTIONS = ["Profile", "Assistants", "Intake"] as const;
 
 type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 

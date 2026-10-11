@@ -1,0 +1,104 @@
+/* Settings > Intake. Not drawn by the book, so these rules build on its
+   `set-sec`, `set-row` and `seg`, which settings.css and controls.css hold. */
+
+/* The control that picks the plugin's level or one of its Connections, under
+   the plugin's heading. Many Connections wrap onto a second line rather than
+   push the section wider than the window. */
+.set-sec > .intake-segments {
+  display: flex;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 10px;
+}
+/* A Connection's label has no length limit, and may be one long word. The
+   button shrinks to the control's width and its label is cut with an
+   ellipsis, so nothing runs past the column at the smallest window. */
+.intake-segments button {
+  min-width: 0;
+  max-width: 100%;
+}
+.intake-segments button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The heading of one list, under the control: Signals, and Events available to
+   triage. Quieter than the plugin's heading, and set as the book sets the head
+   of a table (`.tbl-h`): small, faint and medium. */
+.set-sec > .intake-list-head {
+  margin: 22px 0 0;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.set-sec > .intake-list-head + .set-row {
+  margin-top: 6px;
+}
+
+/* A line of the section that says why there is nothing to edit, such as while
+   a Connection's settings are being read. */
+.set-sec > .intake-status {
+  margin: 14px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.set-sec > .set-err.intake-status {
+  margin: 14px 0 0;
+  color: var(--fail-ink);
+  line-height: 1.45;
+}
+
+/* The lead line at the top of the section, above the first plugin. The book's
+   Settings pages set it inline: no margin, in the muted ink. */
+.set-col > .intake-lead {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* A row of this section tints with the selected wash when a link points at it
+   (spec 17 §Settings, Intake), and the tint fades over `--dur-3` when
+   `.is-pointed` goes away. The tint reaches 8px beyond the text on both
+   sides, with rounded corners, so it does not sit hard against the letters. The
+   hairline above the row is drawn by `::before` for the reason the
+   permission profiles' rows give: a border would curve down at the corners. */
+.set-row.intake-row {
+  position: relative;
+  margin-inline: -8px;
+  padding-inline: 8px;
+  border-top: 0;
+  border-radius: var(--r-md);
+  transition: background var(--dur-3) var(--ease-out);
+}
+.intake-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 8px auto;
+  border-top: 1px solid var(--line-soft);
+}
+.set-row.intake-row.is-pointed {
+  background: var(--selected);
+}
+
+/* The line under a row's hint that says where its value comes from. */
+.set-label > .intake-source {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+
+/* Reset, then the switch, at the row's right end. */
+.intake-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+/* A narrow window: the row stacks (settings.css), and the controls stay at its start. */
+@container (width < 520px) {
+  .intake-controls {
+    align-self: flex-start;
+  }
+}

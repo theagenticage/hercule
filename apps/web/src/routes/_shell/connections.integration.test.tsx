@@ -31,6 +31,9 @@ interface Contribution {
   readonly definition: unknown;
 }
 
+/** The Intake settings of a plugin that declares no event kinds and no signal kinds. */
+const NO_INTAKE = { eventKinds: [], signalKinds: [] };
+
 interface Plugin {
   readonly id: string;
   readonly displayName: string;
@@ -40,6 +43,7 @@ interface Plugin {
   readonly status: unknown;
   readonly config: unknown;
   readonly contributions: readonly Contribution[];
+  readonly intake: unknown;
 }
 
 interface Connection {
@@ -134,6 +138,7 @@ const buildPlugin = (id: string, definition: { type: string; displayName: string
   status: { _tag: "active" },
   config: {},
   contributions: [{ extensionPoint: "connection-type", id: definition.type, definition }],
+  intake: NO_INTAKE,
 });
 
 /** A plugin that is installed but contributes no connection type. */
@@ -146,6 +151,7 @@ const BYSTANDER: Plugin = {
   status: { _tag: "active" },
   config: {},
   contributions: [{ extensionPoint: "provider", id: "acme", definition: {} }],
+  intake: NO_INTAKE,
 };
 
 /**

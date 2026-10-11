@@ -68,7 +68,9 @@
  *     here. The browser draws an input's text one screen pixel higher or
  *     lower than the same text in a box at some fractional positions, so
  *     the book's text would differ from the app's wherever the rows above
- *     a field happen to put it at such a position.
+ *     a field happen to put it at such a position;
+ * 15. adds an Intake row after Threads in the settings list: the book
+ *     predates Settings > Intake, and the app's list has the row.
  *
  * An edit that finds nothing to edit fails, because the book has changed and
  * the comparison would no longer compare what it claims to.
@@ -80,7 +82,7 @@ import {
 } from "@hercule/client-core";
 import { buildAssistantLook } from "../faces/look";
 import { ADA, JUNO, MILO } from "./assistant-states-fixture";
-import { findElement, findElementByText, findElements } from "./book-page";
+import { findElement, findElementByText, findElements, insertIntakeSettingsRow } from "./book-page";
 import { drawBookFace, markSheetReady, stillBookPage } from "./sheet-page";
 import { ADA_CORE_NOTE, ADA_MEMORY, SETTINGS_ADA } from "./settings-assistants-fixture";
 
@@ -132,6 +134,9 @@ function findSection(scope: ParentNode, heading: string): HTMLElement {
 }
 
 stillBookPage();
+
+// 15. The Intake row.
+insertIntakeSettingsRow(document);
 
 // The app's rules for what the book does not draw: a row that stacks its
 // label over a text area, and the text area itself (settings.css), a

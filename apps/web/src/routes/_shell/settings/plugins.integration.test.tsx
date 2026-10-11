@@ -22,6 +22,9 @@ interface Contribution {
   readonly definition: unknown;
 }
 
+/** The Intake settings of a plugin that declares no event kinds and no signal kinds. */
+const NO_INTAKE = { eventKinds: [], signalKinds: [] };
+
 interface Fixture {
   readonly id: string;
   readonly displayName: string;
@@ -33,6 +36,7 @@ interface Fixture {
   readonly markError?: string;
   readonly config: unknown;
   readonly contributions: readonly Contribution[];
+  readonly intake: unknown;
 }
 
 const EMPTY_SCHEMA = {
@@ -53,6 +57,7 @@ const ACTIVE: Fixture = {
   configSchema: EMPTY_SCHEMA,
   config: {},
   contributions: [{ extensionPoint: "provider", id: "acme", definition: {} }],
+  intake: NO_INTAKE,
 };
 
 const ACTIVATION_FAILURE = "the socket at /var/run/borked.sock refused the connection";
@@ -68,6 +73,7 @@ const ERRORED: Fixture = {
   configSchema: EMPTY_SCHEMA,
   config: {},
   contributions: [{ extensionPoint: "channel", id: "chatter", definition: {} }],
+  intake: NO_INTAKE,
 };
 
 /** A plugin built for a host API this controller does not support, so it was never loaded. */
@@ -80,6 +86,7 @@ const REFUSED: Fixture = {
   status: { _tag: "refused", reason: { kind: "hostApi", expected: 1, actual: 2 } },
   config: {},
   contributions: [],
+  intake: NO_INTAKE,
 };
 
 /** A plugin with one config field of every kind the generated form renders, all set. */
@@ -110,6 +117,7 @@ const CONFIGURABLE: Fixture = {
     tags: ["alpha", "beta"],
   },
   contributions: [{ extensionPoint: "provider", id: "notes", definition: {} }],
+  intake: NO_INTAKE,
 };
 
 const buildWriteRoutes = (plugin: Fixture): Readonly<Record<string, Handler>> => ({
