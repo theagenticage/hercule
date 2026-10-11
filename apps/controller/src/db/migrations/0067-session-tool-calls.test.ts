@@ -93,9 +93,9 @@ describe("the session tool calls migration", () => {
   });
 
   it("counts the kinds the sessions domain counts today", () => {
-    // A kind added to `TOOL_CALL_KINDS` later fails this test. The migration
-    // must not change, so the sessions stored before the new kind need a new
-    // migration that counts it, and this test then compares against that one.
+    // A tripwire: adding a kind to `TOOL_CALL_KINDS` fails this test on
+    // purpose. The migration is frozen, so the sessions stored before the new
+    // kind need a new migration that counts it; point this test at that one.
     expect(new Set(MIGRATED_TOOL_CALL_KINDS)).toEqual(TOOL_CALL_KINDS);
   });
 });

@@ -11,10 +11,14 @@
  * - where a running run's summary says the run is: its active steps and the
  *   signals it waits on;
  * - the `activeSince` filter, which keeps the runs that had not ended before
- *   an instant.
+ *   an instant;
+ * - the query plans of the run list's own SQL: a day's read and the list of
+ *   running runs each search an index, never walk every run.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Exit, Option } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Statement from "effect/unstable/sql/Statement";
 import { TestDatabase } from "../db/testing";
 import type { RunFilter, RunSummary, WorkflowDefinition } from "@hercule/contract";
 import { runRepository, StepRecordEnded, type NewRun } from "./repository";
@@ -293,5 +297,122 @@ describe("activeSince", () => {
     );
 
     expect(listed.map((summary) => summary.id)).toEqual(kept);
+  });
+
+  it("keeps a run that ended exactly at the instant", async () => {
+    const [runId, listed] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const runId = yield* runs.insert(NEW_RUN, "2026-10-08T09:00:00.000Z");
+        yield* runs.start(runId, "2026-10-08T09:00:00.000Z");
+        yield* runs.finish(runId, { status: "completed" }, "2026-10-09T00:00:00.000Z");
+        return [runId, yield* listRuns({ activeSince: "2026-10-09T00:00:00.000Z" })] as const;
+      }).pipe(Effect.provide(TestDatabase)),
+    );
+
+    expect(listed.map((summary) => summary.id)).toEqual([runId]);
+  });
+
+  it("pages through the kept runs in both directions with a cursor", async () => {
+    const [kept, newestFirst, oldestFirst] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const kept: Array<string> = [];
+        for (let minute = 0; minute < 5; minute++) {
+          const at = `2026-10-09T10:0${minute}:00.000Z`;
+          const runId = yield* runs.insert(NEW_RUN, at);
+          // Every other run stays live; the rest end within the day.
+          if (minute % 2 === 1) {
+            yield* runs.start(runId, at);
+            yield* runs.finish(runId, { status: "completed" }, "2026-10-09T11:00:00.000Z");
+          }
+          kept.push(runId);
+        }
+        // Ended before the instant, so never on any page.
+        const ended = yield* runs.insert(NEW_RUN, "2026-10-08T10:00:00.000Z");
+        yield* runs.start(ended, "2026-10-08T10:00:00.000Z");
+        yield* runs.finish(ended, { status: "completed" }, "2026-10-08T11:00:00.000Z");
+        const listAllPages = (direction: "asc" | "desc") =>
+          Effect.gen(function* () {
+            const ids: Array<string> = [];
+            let cursor: string | undefined;
+            do {
+              const page = yield* runs.list({
+                activeSince: "2026-10-09T00:00:00.000Z",
+                limit: 2,
+                cursor,
+                direction,
+              });
+              ids.push(...page.items.map((summary) => summary.id));
+              cursor = page.nextCursor;
+            } while (cursor !== undefined);
+            return ids;
+          });
+        return [kept, yield* listAllPages("desc"), yield* listAllPages("asc")] as const;
+      }).pipe(Effect.provide(TestDatabase)),
+    );
+
+    expect(newestFirst).toEqual([...kept].reverse());
+    expect(oldestFirst).toEqual(kept);
+  });
+});
+
+/**
+ * Returns the query plan SQLite chooses for the first statement the run list
+ * sends for `filter`: the read of the page's runs. The statement is captured
+ * as the repository builds it, so the plan is the plan of the real query.
+ * An empty database is enough: with no statistics gathered by `ANALYZE`,
+ * SQLite chooses a plan without regard to how many rows a table holds.
+ */
+const explainListQuery = (filter: RunFilter) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const runs = yield* runRepository;
+      const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+      yield* runs.list({ ...filter, limit: 50, cursor: undefined, direction: "desc" }).pipe(
+        Effect.provideService(Statement.CurrentTransformer, (statement) =>
+          Effect.sync(() => {
+            statements.push(statement.compile());
+            return statement;
+          }),
+        ),
+      );
+      const [text, params] = statements.find(([text]) => text.includes("FROM")) ?? ["", []];
+      const plan = yield* sql.unsafe<{ readonly detail: string }>(
+        `EXPLAIN QUERY PLAN ${text}`,
+        params,
+      );
+      return plan.map((row) => row.detail).join(" / ");
+    }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+  );
+
+describe("the run list's query plans", () => {
+  const DAY = { activeSince: "2026-10-09T00:00:00.000Z", until: "2026-10-09T23:59:59.999Z" };
+
+  it("finds one workflow's runs live during a day with two lookups on runs_workflow_finished", async () => {
+    const plan = await explainListQuery({
+      ...DAY,
+      workflowId: "0190c000-0000-7000-8000-000000000001",
+    });
+
+    expect(plan).toContain("runs_workflow_finished (workflow_id=? AND finished_at=?)");
+    expect(plan).toContain("runs_workflow_finished (workflow_id=? AND finished_at>?)");
+    expect(plan).not.toMatch(/runs_workflow\b(?!_finished)/);
+  });
+
+  it("finds the runs of every workflow live during a day with two lookups on runs_finished", async () => {
+    const plan = await explainListQuery(DAY);
+
+    expect(plan).toContain("runs_finished (finished_at=?)");
+    expect(plan).toContain("runs_finished (finished_at>?)");
+    expect(plan).not.toContain("SCAN runs");
+  });
+
+  it("finds the running runs with runs_unfinished", async () => {
+    const plan = await explainListQuery({ status: "running" });
+
+    expect(plan).toContain("runs_unfinished (status=?)");
+    expect(plan).not.toContain("SCAN runs");
   });
 });

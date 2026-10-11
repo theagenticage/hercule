@@ -73,7 +73,7 @@ import assistantMemory from "./0062-assistant-memory";
 import transcriptSearch from "./0063-transcript-search";
 import signals from "./0064-signals";
 import signalGrants from "./0065-signal-grants";
-import runListIndexes from "./0066-run-list-indexes";
+import runsByFinish from "./0066-runs-by-finish";
 import sessionToolCalls from "./0067-session-tool-calls";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
@@ -142,7 +142,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [63, "transcript-search", Effect.succeed(transcriptSearch)],
   [64, "signals", Effect.succeed(signals)],
   [65, "signal-grants", Effect.succeed(signalGrants)],
-  [66, "run-list-indexes", Effect.succeed(runListIndexes)],
+  [66, "runs-by-finish", Effect.succeed(runsByFinish)],
   [67, "session-tool-calls", Effect.succeed(sessionToolCalls)],
 ];
 

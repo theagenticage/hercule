@@ -2907,7 +2907,7 @@ export const CLI = {
   },
   "session.read": {
     command: "session read",
-    help: "Reads one session: its status, what it runs under, and whether it can be resumed. The Requests its agents are parked on come with it, oldest first, each naming the subagent that asked when it was not the session's own agent; decide an approval with `hercule session respond-to-approval-request`, and answer a question with `hercule session respond-to-question`. The Token Usage of the whole session comes with it too, once the harness has reported any, and `toolCalls`, how many tools its own agent and its subagents have called.",
+    help: "Reads one session: its status, what it runs under, and whether it can be resumed. The Requests its agents are parked on come with it, oldest first, each naming the subagent that asked when it was not the session's own agent; decide an approval with `hercule session respond-to-approval-request`, and answer a question with `hercule session respond-to-question`. The Token Usage of the whole session comes with it too, once the harness has reported any, and `toolCalls`, how many tool calls its own agent and its subagents have made.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {

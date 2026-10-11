@@ -75,7 +75,7 @@ describe("the pace of record changes", () => {
             id: "usage",
             conversationId: null,
             kind: "updated",
-            usageOnly: true,
+            countsOnly: true,
           },
           { _tag: "record", topic: "session", id: "status", conversationId: null, kind: "updated" },
         ]);

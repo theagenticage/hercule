@@ -881,9 +881,11 @@ const make = Effect.gen(function* () {
      * `TOOL_CALL_KINDS`, from any of the session's agents) also adds one to
      * the session's `tool_calls`. Only a row actually written counts, so a
      * replayed frame does not count twice. Every caller runs this inside its
-     * own transaction, so the row and the count commit together.
+     * own transaction, so the row and the count commit together. Returns
+     * whether the row was written and counted as a tool call, so the caller
+     * knows the session changed.
      */
-    append: (sessionId: string, row: StreamRow): Effect.Effect<void, SqlError> =>
+    append: (sessionId: string, row: StreamRow): Effect.Effect<boolean, SqlError> =>
       Effect.gen(function* () {
         const id = uuidFromString(sessionId);
         const written = yield* sql<{ readonly position: number }>`
@@ -896,9 +898,9 @@ const make = Effect.gen(function* () {
         `;
         const startsToolCall =
           row.event._tag === "item.started" && TOOL_CALL_KINDS.has(row.event.kind);
-        if (written.length > 0 && startsToolCall) {
-          yield* sql`UPDATE sessions SET tool_calls = tool_calls + 1 WHERE id = ${id}`;
-        }
+        if (written.length === 0 || !startsToolCall) return false;
+        yield* sql`UPDATE sessions SET tool_calls = tool_calls + 1 WHERE id = ${id}`;
+        return true;
       }),
 
     /**

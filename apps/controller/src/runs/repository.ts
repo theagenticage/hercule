@@ -460,7 +460,7 @@ const parseRunRow = (
  * `@hercule/client-core`, which reads it from a whole `Run`; the controller
  * cannot import the client library.
  */
-const locateRunningRun = (
+const buildRunningFields = (
   records: ReadonlyArray<ActiveStepRow>,
   triggers: WorkflowDefinition["triggers"],
 ): {
@@ -482,7 +482,7 @@ const locateRunningRun = (
 
 /**
  * Parses a summary row into a `RunSummary`. A running run's summary also
- * says where the run is (see `locateRunningRun`), from `activeRecords`: its
+ * says where the run is (see `buildRunningFields`), from `activeRecords`: its
  * running and pending step records, in the order they were created.
  */
 const parseSummaryRow = (
@@ -502,7 +502,7 @@ const parseSummaryRow = (
     row.triggers === null
       ? undefined
       : (JSON.parse(row.triggers) as WorkflowDefinition["triggers"]);
-  return { ...fields, ...status, ...locateRunningRun(activeRecords, triggers) };
+  return { ...fields, ...status, ...buildRunningFields(activeRecords, triggers) };
 };
 
 const make = Effect.gen(function* () {
@@ -527,15 +527,14 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Returns the running and pending step records of the running runs among
-   * `rows`, by run id, each run's in the order they were created. Reads them
-   * in one query, and reads nothing when no row is running, so a page of
+   * Returns the running and pending step records of the runs `runIds`
+   * names, by run id, each run's in the order they were created. Reads them
+   * in one query, and reads nothing when `runIds` is empty, so a page of
    * ended runs costs no more than before.
    */
   const listActiveStepRecords = (
-    rows: ReadonlyArray<SummaryRow>,
+    runIds: ReadonlyArray<Uint8Array>,
   ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<ActiveStepRow>>, SqlError> => {
-    const runIds = rows.filter((row) => row.status === "running").map((row) => row.id);
     if (runIds.length === 0) return Effect.succeed(new Map());
     return Effect.map(
       sql<ActiveStepRow>`
@@ -607,55 +606,69 @@ const make = Effect.gen(function* () {
      * Returns one page of runs, without their plans and step records, sorted
      * by when they were created. Every filter given must hold; `since`,
      * `until` and `activeSince` are inclusive. A running run's summary says
-     * which steps are active and which signals it waits on.
+     * which steps are active and which signals it waits on. The runs and
+     * their step records are read in one transaction, so both are from the
+     * same moment: a run that ends between the two reads would otherwise
+     * read as running with no active step, which looks like waiting.
      */
     list: (request: RunPageRequest): Effect.Effect<Page<RunSummary>, CursorError | SqlError> =>
-      Effect.gen(function* () {
-        const scope: CursorScope = {
-          op: "run.query",
-          sort: [{ field: "createdAt", direction: request.direction }],
-        };
-        const after =
-          request.cursor === undefined
-            ? undefined
-            : yield* decodeCursor(request.cursor, scope, ["string"]);
-        const { keyset, order } = buildKeyset(
-          sql,
-          [{ column: "created_at", direction: request.direction }],
-          ["id"],
-          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
-        );
-        const workflowClauses =
-          request.workflowId === undefined
-            ? []
-            : [sql`workflow_id = ${uuidFromString(request.workflowId)}`];
-        const clauses = [keyset, ...workflowClauses];
-        if (request.status !== undefined) clauses.push(sql`status = ${request.status}`);
-        if (request.originalRunId !== undefined) {
-          clauses.push(sql`original_run_id = ${uuidFromString(request.originalRunId)}`);
-        }
-        if (request.since !== undefined) clauses.push(sql`created_at >= ${request.since}`);
-        if (request.until !== undefined) clauses.push(sql`created_at <= ${request.until}`);
-        if (request.actor !== undefined) {
-          clauses.push(sql`${sql.literal(STARTING_ACTOR)} = ${request.actor}`);
-        }
-        // `activeSince` keeps the runs whose `finished_at` is NULL or at or
-        // after it. Written as that `OR` in the WHERE clause, SQLite walks
-        // `runs_workflow` over every run of the workflow instead, because
-        // that index also serves the sort. So the runs come from the two
-        // lookups the filter names, each on `runs_workflow_finished`, or on
-        // `runs_finished` for runs of any workflow, and `CROSS JOIN` makes
-        // SQLite read those first: it never reorders a `CROSS JOIN`.
-        const source =
-          request.activeSince === undefined
-            ? sql`runs`
-            : sql`(SELECT id AS active_id FROM runs
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const scope: CursorScope = {
+            op: "run.query",
+            sort: [{ field: "createdAt", direction: request.direction }],
+          };
+          const after =
+            request.cursor === undefined
+              ? undefined
+              : yield* decodeCursor(request.cursor, scope, ["string"]);
+          const { keyset, order } = buildKeyset(
+            sql,
+            [{ column: "created_at", direction: request.direction }],
+            ["id"],
+            after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
+          );
+          const workflowClauses =
+            request.workflowId === undefined
+              ? []
+              : [sql`workflow_id = ${uuidFromString(request.workflowId)}`];
+          const clauses = [keyset, ...workflowClauses];
+          if (request.status !== undefined) {
+            clauses.push(sql`status = ${request.status}`);
+            // SQLite reads the partial index `runs_unfinished` only when the
+            // query itself shows that the status is pending or running, and a
+            // bound value shows nothing. Without this clause, listing the
+            // running runs scans every run the controller ever had.
+            if (request.status === "pending" || request.status === "running") {
+              clauses.push(sql`status IN ('pending', 'running')`);
+            }
+          }
+          if (request.originalRunId !== undefined) {
+            clauses.push(sql`original_run_id = ${uuidFromString(request.originalRunId)}`);
+          }
+          if (request.since !== undefined) clauses.push(sql`created_at >= ${request.since}`);
+          if (request.until !== undefined) clauses.push(sql`created_at <= ${request.until}`);
+          if (request.actor !== undefined) {
+            clauses.push(sql`${sql.literal(STARTING_ACTOR)} = ${request.actor}`);
+          }
+          // `activeSince` keeps the runs whose `finished_at` is NULL or at or
+          // after it. Written as that `OR` in the WHERE clause, SQLite walks
+          // `runs_workflow` over every run of the workflow instead, because
+          // that index also serves the sort. So the runs come from the two
+          // lookups the filter names, each on `runs_workflow_finished`, or on
+          // `runs_finished` for runs of any workflow, and `CROSS JOIN` makes
+          // SQLite read those first: it never reorders a `CROSS JOIN`.
+          const source =
+            request.activeSince === undefined
+              ? sql`runs`
+              : sql`(SELECT id AS active_id FROM runs
                    WHERE ${sql.and([...workflowClauses, sql`finished_at IS NULL`])}
                    UNION ALL
                    SELECT id FROM runs
                    WHERE ${sql.and([...workflowClauses, sql`finished_at >= ${request.activeSince}`])})
                   CROSS JOIN runs ON id = active_id`;
-        const rows = yield* sql<SummaryRow>`
+          const rows = yield* sql<SummaryRow>`
           SELECT id, workflow_id, json_extract(plan, '$.name') AS workflow_name, origin, status,
                  failure_reason, failed_step_id, failure_message, created_at, started_at,
                  finished_at,
@@ -663,16 +676,21 @@ const make = Effect.gen(function* () {
           FROM ${source} WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}
         `;
-        return yield* buildPage(
-          rows,
-          request.limit,
-          (page) =>
-            Effect.map(listActiveStepRecords(page), (records) =>
-              page.map((row) => parseSummaryRow(row, records.get(uuidToString(row.id)) ?? [])),
-            ),
-          (last) => encodeCursor(scope, [last.createdAt], last.id),
-        );
-      }),
+          return yield* buildPage(
+            rows,
+            request.limit,
+            (page) =>
+              Effect.map(
+                listActiveStepRecords(
+                  page.filter((row) => row.status === "running").map((row) => row.id),
+                ),
+                (records) =>
+                  page.map((row) => parseSummaryRow(row, records.get(uuidToString(row.id)) ?? [])),
+              ),
+            (last) => encodeCursor(scope, [last.createdAt], last.id),
+          );
+        }),
+      ),
 
     /** Checks whether a run of the workflow is pending or running. */
     hasUnfinishedRun: (workflowId: string): Effect.Effect<boolean, SqlError> =>

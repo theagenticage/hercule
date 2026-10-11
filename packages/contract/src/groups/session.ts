@@ -224,7 +224,7 @@ export const Session = Schema.Struct({
   usageReport: Schema.optionalKey(UsageReport),
   /**
    * How many tool calls the session made over its whole life: its own
-   * agent's and every subagent's, calls on subagents included. Each stored
+   * agent's and every subagent's, calls that start a subagent included. Each stored
    * `item.started` of a tool-call kind counts once, whichever agent reported
    * it, so a call that starts a subagent counts once, and that subagent's own
    * calls count too. It is counted from the stored events, not by adding up

@@ -2594,7 +2594,10 @@ const make = Effect.gen(function* () {
         // but changes nothing else: no Request, no subagent, no usage.
         const sessionAcceptsChanges = before !== "exited";
         const at = yield* nowIso;
-        for (const row of folded.rows) yield* sessions.append(id, row);
+        let toolCallsChanged = false;
+        for (const row of folded.rows) {
+          if (yield* sessions.append(id, row)) toolCallsChanged = true;
+        }
         // Each agent has its own transcript topic, so each agent whose
         // transcript grew is announced once.
         const grown = new Set(folded.rows.map((row) => attributeEvent(row.event)));
@@ -2695,19 +2698,20 @@ const make = Effect.gen(function* () {
           //
           // - a Request opening or closing changes no status, but the user
           //   has to see the request card;
-          // - the session's own Token Usage changing is announced at the
-          //   slow pace, because it changes with almost every turn.
+          // - the session's own Token Usage or its tool call count changing
+          //   is announced at the slow pace, because one of them changes
+          //   with almost every turn.
           yield* sessions.touched(id, at);
           if (requestsChanged) {
             yield* announceSessionChange(session);
-          } else if (usageChanged) {
+          } else if (usageChanged || toolCallsChanged) {
             yield* announce({
               _tag: "record",
               topic: "session",
               id,
               conversationId: session.conversationId,
               kind: "updated",
-              usageOnly: true,
+              countsOnly: true,
             });
           }
         }

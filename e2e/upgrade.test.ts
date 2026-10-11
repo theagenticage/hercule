@@ -816,9 +816,8 @@ describe("upgrading from the previous edge release", () => {
         await runCli(["session", "read", sessionId, "--json"], upgraded),
       );
       expect(summarizeSession(upgradedSession)).toEqual(seededSession);
-      // An edge database that already ran the migration was never counted:
-      // the fixture's rows were written straight into it, past the count the
-      // controller keeps as each event is stored.
+      // When the edge binary already has migration 67, the fixture's rows
+      // were inserted directly, so nothing counted them.
       if (edgeVersion < SESSION_TOOL_CALLS_MIGRATION) {
         expect(upgradedSession.toolCalls).toBe(SEEDED_TOOL_CALLS);
       } else {

@@ -418,7 +418,7 @@ export const RunSummary = Schema.Union(
        * The steps whose records are running, in the order the records were
        * created. When none is running, the steps whose records are pending.
        * Otherwise empty. A signal trigger that has just fired has a pending
-       * record, so its id is listed here until the run takes the signal up.
+       * record, so its id is listed here until the run fires its edges.
        */
       activeStepIds: Schema.Array(Schema.String),
       /**
