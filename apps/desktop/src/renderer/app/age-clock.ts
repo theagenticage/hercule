@@ -1,6 +1,6 @@
 /**
  * The age clock: the one timer behind every label on screen that counts the
- * time since or until a moment. There are three kinds of such labels:
+ * time since or until a moment. There are four kinds of such labels:
  *
  * - an age, such as a thread row's "20m" or the "10m" a thread has waited on
  *   the user (`useAgeLabel`), which changes minutes or hours apart
@@ -8,6 +8,10 @@
  * - a duration, such as a live turn's "Working for 12s"
  *   (`useDurationText`), which changes every second under an hour
  *   (`findNextDurationChange`);
+ * - a moment in a list, such as a workflow's last run "10:31", "Sun" or
+ *   "1 Oct" (`useListTime`, in the workflow screens' own module so it loads
+ *   with them), which changes at local midnight, or when a future moment
+ *   comes (`findNextListTimeChange`);
  * - the minutes a one-time code has left, such as "The code expires in 12
  *   minutes." (`useMinutesLeft`), which change once a minute until the code
  *   expires (`computeNextMinuteTick`).
@@ -69,7 +73,9 @@ export interface AgeClock {
   /**
    * Registers a label while it is on screen. `findNextChange` returns the
    * first moment after `now` at which the label's text changes, such as
-   * `findNextAgeChange` for the label's own moment.
+   * `findNextAgeChange` for the label's own moment. It must return the same
+   * moment for every `now` before that moment, because the clock finds it
+   * again only once the time reaches it.
    *
    * Reads the time, so a label that appears is never out of date, and sets
    * the timer. `onChange` is called whenever the clock reads a time at which
@@ -83,40 +89,62 @@ export interface AgeClock {
   refresh(): void;
 }
 
+/** A label the clock watches: how to find its next change, and the one last found. */
+interface WatchedLabel {
+  readonly findNextChange: (now: Date) => Date;
+  /** The label's next change, in milliseconds, found at a time before it. */
+  change: number;
+}
+
 /** Creates an age clock. Exported for tests; the app uses `ageClock`. */
 export const createAgeClock = (): AgeClock => {
   let now = new Date();
-  /** Each registered label's `onChange`, and the function that finds its next change. */
-  const watched = new Map<() => void, (now: Date) => Date>();
-  /** The earliest moment, in milliseconds, at which a registered label's text changes. */
+  /** Each registered label, by its `onChange`. */
+  const watched = new Map<() => void, WatchedLabel>();
+  /**
+   * The earliest moment, in milliseconds, at which a registered label's text
+   * changes: the smallest `change` of the labels, or null with no label.
+   */
   let nextChange: number | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  /**
-   * Finds the next change among the registered labels, and sets the one timer
-   * for it unless the window is hidden. Clears any earlier timer first.
-   */
-  const schedule = (): void => {
+  /** Sets the one timer for `nextChange` unless the window is hidden. Clears any earlier timer first. */
+  const setTimer = (): void => {
     clearTimeout(timer);
     timer = undefined;
-    nextChange = null;
-    for (const findNextChange of watched.values()) {
-      const change = findNextChange(now).getTime();
-      if (nextChange === null || change < nextChange) nextChange = change;
-    }
     if (nextChange === null || document.visibilityState === "hidden") return;
     timer = setTimeout(fire, Math.min(MAX_TIMER_DELAY_MS, Math.max(0, nextChange - Date.now())));
   };
 
+  /** Returns the smallest `change` among the registered labels, or null with no label. */
+  const findEarliestChange = (): number | null => {
+    let earliest: number | null = null;
+    for (const { change } of watched.values()) {
+      if (earliest === null || change < earliest) earliest = change;
+    }
+    return earliest;
+  };
+
   /**
-   * Stores `time` as the time the labels are drawn at, sets the timer again,
-   * and tells the labels when one of them has a new text.
+   * Stores `time` as the time the labels are drawn at, and sets the timer
+   * again.
+   *
+   * While `time` is before `nextChange`, no label's text has changed since
+   * each label's next change was found, so those changes still hold and
+   * nothing is found again. Once `time` reaches `nextChange`, the clock finds
+   * every label's next change again and tells every label, and each label
+   * compares its own text.
    */
   const moveTo = (time: Date): void => {
     now = time;
-    const changed = nextChange !== null && now.getTime() >= nextChange;
-    schedule();
-    if (changed) for (const onChange of [...watched.keys()]) onChange();
+    if (nextChange === null || now.getTime() < nextChange) {
+      setTimer();
+      return;
+    }
+    for (const label of watched.values()) label.change = label.findNextChange(now).getTime();
+    nextChange = findEarliestChange();
+    setTimer();
+    for (const onChange of [...watched.keys()]) onChange();
   };
 
   const refresh = (): void => {
@@ -133,7 +161,7 @@ export const createAgeClock = (): AgeClock => {
   };
 
   const followVisibility = (): void => {
-    if (document.visibilityState === "hidden") schedule();
+    if (document.visibilityState === "hidden") setTimer();
     else refresh();
   };
 
@@ -144,15 +172,28 @@ export const createAgeClock = (): AgeClock => {
         document.addEventListener("visibilitychange", followVisibility);
         window.addEventListener("focus", refresh);
       }
-      watched.set(onChange, findNextChange);
+      // Reading the time first brings the labels already watched up to date.
+      // The new label's next change is then the only one to find, so a list
+      // that mounts n labels finds n changes, not n² of them.
       refresh();
+      const label: WatchedLabel = { findNextChange, change: findNextChange(now).getTime() };
+      watched.set(onChange, label);
+      if (nextChange === null || label.change < nextChange) {
+        nextChange = label.change;
+        setTimer();
+      }
       return () => {
         watched.delete(onChange);
         if (watched.size === 0) {
           document.removeEventListener("visibilitychange", followVisibility);
           window.removeEventListener("focus", refresh);
         }
-        schedule();
+        // Removing a label can only move the next change later, and only when
+        // the label was the one it was set for.
+        if (label.change === nextChange) {
+          nextChange = findEarliestChange();
+          setTimer();
+        }
       };
     },
     refresh,
@@ -167,14 +208,15 @@ export const ageClock = createAgeClock();
  * calling component again whenever that value changes. `findNextChange` finds
  * when the value of a label counting from or to `moment` changes next, and is
  * one of the stable functions `findNextAgeChange`, `findNextDurationChange`
- * and `findNextMinuteLeftChange`.
+ * and `findNextMinuteLeftChange`, or `findNextListTimeChange` wrapped in a
+ * memoized callback.
  *
  * The label registers with the clock only while `counting` is true. Otherwise
  * it keeps the value it had, and reads a fresh one as soon as it counts again.
  * The value is a string or a number, so that an unchanged value compares equal
  * and draws nothing.
  */
-const useClockValue = <Value extends string | number | null>(
+export const useClockValue = <Value extends string | number | null>(
   moment: string,
   counting: boolean,
   findNextChange: (moment: string, now: Date) => Date,

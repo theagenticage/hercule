@@ -1,10 +1,14 @@
 /**
+ * Groups of session statuses, and checks on a session's status, that more
+ * than one screen asks about.
+ */
+import type { Session, SessionStatus } from "@hercule/contract";
+
+/**
  * The session statuses that count as still in progress: a turn is running, or
  * the session is still being placed. Shared because a sidebar row's marker and
  * a lane's bucket both depend on the same question.
  */
-import type { Session, SessionStatus } from "@hercule/contract";
-
 export const WORKING_STATUSES: ReadonlySet<SessionStatus> = new Set(["busy", "starting", "queued"]);
 
 /**

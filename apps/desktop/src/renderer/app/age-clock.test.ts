@@ -126,6 +126,34 @@ describe("the age clock", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("finds only the new label's next change when a label is watched", () => {
+    const clock = createAgeClock();
+    const findNextChange = vi.fn((now: Date) => findNextAgeChange(AN_HOUR_AGO, now));
+    for (let index = 0; index < 40; index++) {
+      unwatches.push(clock.watch(findNextChange, () => {}));
+    }
+    expect(findNextChange).toHaveBeenCalledTimes(40);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("moves the timer to the next label's change when the earliest label stops watching", () => {
+    const mark = vi.spyOn(performance, "mark");
+    const clock = createAgeClock();
+    const onHourChange = vi.fn();
+    watchLabel(clock, AN_HOUR_AGO, onHourChange);
+    const unwatchMinute = watchLabel(clock, HALF_A_MINUTE_AGO, () => {});
+
+    unwatchMinute();
+
+    // The half-a-minute label's change at 09:00:30 no longer wakes the clock;
+    // the hour label's at 10:00:00 does.
+    vi.advanceTimersByTime(30_000);
+    expect(mark).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(60 * 60_000 - 30_000);
+    expect(mark).toHaveBeenCalledOnce();
+    expect(onHourChange).toHaveBeenCalledOnce();
+  });
+
   it("clears the timer while the window is hidden, and reads the time again when it is shown", () => {
     const clock = createAgeClock();
     const onChange = vi.fn();

@@ -15,6 +15,7 @@
 export { IconFrame, type IconProps } from "./icon-frame";
 export { AlarmIcon } from "./alarm";
 export { ArrowIcon } from "./arrow";
+export { BoltIcon } from "./bolt";
 export { BoundIcon } from "./bound";
 export { BranchIcon } from "./branch";
 export { ChatIcon } from "./chat";
@@ -64,4 +65,5 @@ export { TerminalIcon } from "./terminal";
 export { ThreadsIcon } from "./threads";
 export { UndoIcon } from "./undo";
 export { UserIcon } from "./user";
+export { WorkflowsIcon } from "./workflows";
 export { WorkspaceIcon } from "./workspace";

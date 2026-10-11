@@ -395,6 +395,8 @@ export interface SidebarRecords {
   readonly signals?: readonly Signal[];
   /** The installed plugins. None when absent. */
   readonly plugins?: readonly PluginDetail[];
+  /** The live sessions that are not threads, such as a run's agent steps'. None when absent. */
+  readonly agentSessions?: readonly Session[];
 }
 
 /** An assistant as the stubbed controller holds it. */
@@ -416,14 +418,20 @@ export const NO_SIDEBAR_RECORDS: SidebarRecords = {
 };
 
 /**
- * Answers a session listing from `records`. A listing filtered to one
- * conversation, which is how the app reads an assistant's current session,
- * gets that assistant's session, or no session. Any other listing gets the
- * threads.
+ * Answers a session listing from `records`:
+ *
+ * - a listing filtered to one conversation, which is how the app reads an
+ *   assistant's current session, gets that assistant's session, or none;
+ * - a listing of the sessions that are not threads gets `agentSessions`;
+ * - any other listing gets the threads.
  */
 const answerSessionQuery = (records: SidebarRecords, call: Call): Answer => {
-  const conversationId = new URLSearchParams(call.search).get("conversationId");
-  if (conversationId === null) return { body: { items: records.threads } };
+  const params = new URLSearchParams(call.search);
+  const conversationId = params.get("conversationId");
+  if (conversationId === null) {
+    if (params.get("thread") === "false") return { body: { items: records.agentSessions ?? [] } };
+    return { body: { items: records.threads } };
+  }
   const session = records.assistants?.find(
     ({ assistant }) => assistant.mainConversationId === conversationId,
   )?.session;

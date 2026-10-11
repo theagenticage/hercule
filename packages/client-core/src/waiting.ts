@@ -14,6 +14,11 @@
  *   the Office do;
  * - the notification shows the newest, the one that just opened, and counts
  *   the others.
+ *
+ * The sessions of runs that wait on the user are a list of their own
+ * (`listWaitingRunSessions`). Waiting on you shows them under "From runs",
+ * but the badge, the notifications and the Go menu leave them out (spec 17
+ * §Native behaviour), so they are not entries of this list.
  */
 import type { Session, SessionRequest } from "@hercule/contract";
 import type { AssistantRow } from "./assistants/rows";
@@ -135,3 +140,52 @@ export const listWaiting = (
       { activityAt: b.activityAt, id: b.sessionId },
     ),
   );
+
+/** A run's session waiting on the user: an agent step that asks something. */
+export interface WaitingRunSession {
+  readonly sessionId: string;
+  /** The run whose agent step started the session. */
+  readonly runId: string;
+  /** The agent step that started the session, or null for a session that is no step's. */
+  readonly stepId: string | null;
+  /** The session's title, "<workflow name> · <step id>". */
+  readonly title: string;
+  /** What the oldest open Request asks, in one line, such as "Run git push?". */
+  readonly question: string;
+  /** When the session was last active. */
+  readonly activityAt: string;
+}
+
+/**
+ * Returns every session in `sessions` that belongs to a run and has an open
+ * Request, with the question of its oldest Request. Sessions of no run, such
+ * as an assistant's, are left out.
+ *
+ * The list is sorted with the most recently active first, and two sessions
+ * active at the same moment by session id, as `listWaiting` sorts.
+ * `sessions` is expected to hold live sessions only: the read that feeds it
+ * asks the controller for those.
+ */
+export const listWaitingRunSessions = (sessions: readonly Session[]): WaitingRunSession[] =>
+  sessions
+    .flatMap((session): WaitingRunSession[] => {
+      const oldest = findOldestOpenRequest(session);
+      return session.runId === null || oldest === null
+        ? []
+        : [
+            {
+              sessionId: session.id,
+              runId: session.runId,
+              stepId: session.stepId,
+              title: session.title,
+              question: formatRequestQuestion(oldest),
+              activityAt: session.lastActivityAt,
+            },
+          ];
+    })
+    .sort((a, b) =>
+      compareNewestFirst(
+        { activityAt: a.activityAt, id: a.sessionId },
+        { activityAt: b.activityAt, id: b.sessionId },
+      ),
+    );

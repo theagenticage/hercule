@@ -1782,6 +1782,7 @@ export const CLI = {
           "2026-10-09T23:59:59.999Z",
         ],
       },
+      { args: ["--newest-per-workflow", "5", "--status", "failed"] },
     ],
     fields: {
       workflowId: {
@@ -1813,6 +1814,10 @@ export const CLI = {
         flag: "original-run",
         help: "Only the re-runs of this run, by its id or a tail of eight or more characters.",
         resolves: "run.query",
+      },
+      newestPerWorkflow: {
+        flag: "newest-per-workflow",
+        help: "Only each workflow's newest runs, at most this many per workflow, among the runs the other flags keep. Leaves out the runs of a sent workflow and of a deleted workflow.",
       },
     },
   },

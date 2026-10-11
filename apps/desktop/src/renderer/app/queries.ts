@@ -30,6 +30,7 @@ import {
 } from "@hercule/client-core";
 import {
   DEFAULT_PAGE_LIMIT,
+  LIVE_SESSION_STATUSES,
   MAX_PAGE_LIMIT,
   type ConversationMessage,
   type Input,
@@ -166,6 +167,24 @@ export const threadsQuery = (client: HerculeClient) =>
       readEveryPage((page) => client.session.query({ query: { thread: true, ...page } })),
     ...SHELL_READ_OPTIONS,
   });
+
+/**
+ * Reads every live session an Agent spawned: the sessions of runs'
+ * agent steps, the assistants' and any other that is not a thread. "From
+ * runs" in Waiting on you, and the workflow list's Needs you, keep those of
+ * a run that wait on the user (`listWaitingRunSessions`). The controller has
+ * no filter for that, so the client keeps them. The read follows the cursor
+ * to the last page, and its key sits under the `sessions` prefix, so a push
+ * on the `session` topic invalidates it.
+ */
+export const liveAgentSessionsQuery = (client: HerculeClient) => {
+  const filter = { thread: false, status: LIVE_SESSION_STATUSES } as const;
+  return queryOptions({
+    queryKey: queryKeys.sessions(filter),
+    queryFn: () => readEveryPage((page) => client.session.query({ query: { ...filter, ...page } })),
+    ...SHELL_READ_OPTIONS,
+  });
+};
 
 /** Reads every project, for the sidebar's project headers. */
 export const projectsQuery = (client: HerculeClient) =>
@@ -528,10 +547,12 @@ export const pluginsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads every workflow, for the name Intake gives a signal a workflow's run
- * raised. The shell subscribes to no `workflow` topic, because the controller
- * pushes on it at every cron fire, so Intake reads it each time it opens, see
- * `readOnOpen`.
+ * Reads every workflow: the workflow list's rows, and the name Intake gives a
+ * signal a workflow's run raised. The shell holds no `workflow` topic,
+ * because the controller pushes on it at every cron fire. The workflows page
+ * holds it while it is mounted and the window is visible (`useWorkflowsLive`),
+ * so a push reads the list again there. Intake holds no topic, so it reads
+ * the list each time it opens, see `readOnOpen`.
  */
 export const workflowsQuery = (client: HerculeClient) =>
   queryOptions({
@@ -541,7 +562,51 @@ export const workflowsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Checks whether a failed read of a thread's records, or of an assistant's
+ * Reads every trigger of every workflow, for the workflow list's Starts on,
+ * Next, and a trigger in error. A trigger is part of its workflow, so a push
+ * on the `workflow` topic reads it again.
+ */
+export const triggersQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.triggers(),
+    queryFn: () => readEveryPage((page) => client.trigger.query({ query: page })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/** How many of a workflow's newest runs its strip in the workflow list shows. */
+export const STRIP_RUN_LIMIT = 20;
+
+/**
+ * Reads every workflow's newest runs, at most `STRIP_RUN_LIMIT` per workflow,
+ * each workflow's newest first: the strips of the workflow list, in one read
+ * rather than one per workflow. Its key sits under the `runs` prefix, so a
+ * push on the `run` topic reads it again.
+ */
+export const newestRunsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.runs({ newestPerWorkflow: STRIP_RUN_LIMIT }),
+    queryFn: () =>
+      readEveryPage((page) =>
+        client.run.query({ query: { newestPerWorkflow: STRIP_RUN_LIMIT, ...page } }),
+      ),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads every run with the status `status`. The workflow list reads the
+ * `running` runs and the `pending` ones, which are its Running group: the
+ * filter takes one status, so it takes two reads. Its key sits under the
+ * `runs` prefix, so a push on the `run` topic reads it again.
+ */
+export const liveRunsQuery = (client: HerculeClient, status: "running" | "pending") =>
+  queryOptions({
+    queryKey: queryKeys.runs({ status }),
+    queryFn: () => readEveryPage((page) => client.run.query({ query: { status, ...page } })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Checks whether a failed read, such as a thread's records or an assistant's
  * current session, is worth trying again. Returns `true` for the first three
  * failures that got no answer from the controller, such as a dropped
  * connection, and `false` for an `ApiError`.
@@ -964,8 +1029,9 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
 
 /**
  * Reads everything the shell shows into `queryClient`: the sidebar's records,
- * the assistants and the current session of each one's main conversation,
- * the Connections, the signed-in user, Intake's To do list, whose count the
+ * the live sessions an Agent spawned, for "From runs" in Waiting on you, the
+ * assistants and the current session of each one's main conversation, the
+ * Connections, the signed-in user, Intake's To do list, whose count the
  * Hercule segment shows, and the plugins that name each signal's source.
  * Resolves once every read is cached,
  * and fails with the first read that fails.
@@ -990,6 +1056,7 @@ export const ensureShellData = async (
 ): Promise<void> => {
   await Promise.all([
     queryClient.ensureQueryData(threadsQuery(client)),
+    queryClient.ensureQueryData(liveAgentSessionsQuery(client)),
     queryClient.ensureQueryData(projectsQuery(client)),
     queryClient.ensureQueryData(workspacesQuery(client)),
     queryClient.ensureQueryData(resourcesQuery(client)),

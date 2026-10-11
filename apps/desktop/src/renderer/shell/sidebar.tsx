@@ -17,7 +17,7 @@ import {
 } from "../app/queries";
 import { useRelatedReads } from "../app/related-reads";
 import { useSendOnChange } from "../app/send-on-change";
-import { useWaiting } from "../app/waiting";
+import { useWaiting, useWaitingRunSessions } from "../app/waiting";
 import { ComposeIcon } from "../icons/compose";
 import { OfficeIcon } from "../icons/office";
 import { SearchIcon } from "../icons/search";
@@ -65,7 +65,8 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * While the Office is open, the row of a thread with a colleague in the
  * Office opens the thread in the Office's drawer instead of on its own
  * screen, so the user stays in the Office. An asleep or away thread has no
- * colleague, so its row still opens its own screen.
+ * colleague, so its row still opens its own screen. A run's waiting session,
+ * under "From runs", opens in the drawer too.
  *
  * The lists it reads are in the cache before the shell renders, because the
  * shell's loader reads them, so nothing here waits in practice. A live push
@@ -73,7 +74,8 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *
  * It also sends main the threads and the waiting assistants the threads face
  * shows, top to bottom, for the Go menu, each time they or their titles
- * change, whichever face is showing.
+ * change, whichever face is showing. The runs' waiting sessions are not sent:
+ * the Go menu does not list them.
  */
 export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): JSX.Element {
   const { bridge, controller } = useRouteContext({ from: "/_connected" });
@@ -91,6 +93,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   }).data;
   const assistantRows = useAssistantRows();
   const waiting = useWaiting();
+  const waitingRunSessions = useWaitingRunSessions();
   const unsentKeys = useUnsentKeys(controller.pendingSubmissions);
   useRelatedReads(threads, projects, workspaces);
   // The Draft Thread the new-thread screen shows, while that screen is open.
@@ -145,6 +148,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   const { items, counts } = buildSidebar({
     threads,
     waiting,
+    waitingRunSessions,
     projects,
     workspaces,
     resources,

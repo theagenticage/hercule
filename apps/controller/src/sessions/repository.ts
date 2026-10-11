@@ -21,7 +21,6 @@ import type {
 } from "@hercule/protocol";
 import {
   createNotFoundError,
-  SESSION_STATUSES,
   type NotFound,
   type Passage,
   type PermissionRequest,
@@ -194,16 +193,6 @@ export interface SessionAccess {
   readonly accessMode: AccessMode;
   readonly permissionProfileId: string;
 }
-
-/**
- * Every session status except `exited`. A live session still uses what it was
- * spawned with (a runner, a workspace, and a token limited to the grants it
- * copied), so those cannot be deleted while it runs. The list is derived from
- * `SESSION_STATUSES`, so a status added later counts as live.
- */
-export const LIVE_SESSION_STATUSES: ReadonlyArray<SessionStatus> = SESSION_STATUSES.filter(
-  (status) => status !== "exited",
-);
 
 export interface SessionPageRequest {
   readonly limit: number;

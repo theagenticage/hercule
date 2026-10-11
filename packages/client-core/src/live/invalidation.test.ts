@@ -120,6 +120,28 @@ describe("invalidateWithoutCancelling", () => {
     query.stop();
   });
 
+  it("reads each query under the key once, and no query outside it", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const reads = new Map<string, number>();
+    const unsubscribes = [["runs", "a"], ["runs", "b"], ["tasks"]].map((queryKey) =>
+      new QueryObserver(queryClient, {
+        queryKey,
+        queryFn: () => {
+          const name = queryKey.join("/");
+          reads.set(name, (reads.get(name) ?? 0) + 1);
+          return Promise.resolve(name);
+        },
+      }).subscribe(() => {}),
+    );
+    await settle();
+
+    invalidateWithoutCancelling(queryClient, ["runs"]);
+    await settle();
+
+    expect(Object.fromEntries(reads)).toEqual({ "runs/a": 2, "runs/b": 2, tasks: 1 });
+    for (const unsubscribe of unsubscribes) unsubscribe();
+  });
+
   it("reads every page again when loading the next page cancels the push's read", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     let version = 0;
