@@ -1,0 +1,222 @@
+/* The workflow graph: steps and triggers as cards with hairline edges between
+   them, as the Bureau book's "Workflow graph" draws it. It draws no run yet:
+   the run's states (marks, rings, edge tones) come with the run's page. */
+
+/* The frame reaches 12px past the text on each side, the pane's padding, so
+   the cards line up with the text above and below. */
+.graph {
+  position: relative;
+  margin: 8px -12px 20px;
+}
+/* The pane scrolls a graph zoomed wider than itself, and takes the zoom keys
+   while it or a card in it has focus. */
+.graph-pane {
+  /* The width of a classic scroll bar on macOS, as the book sets it. */
+  --classic-scrollbar-width: 15px;
+  position: relative;
+  overflow: auto;
+  border-radius: var(--r-lg);
+  outline: none;
+}
+.graph-pane:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+/* The room the scaled graph takes, with the pane's padding around it, so the
+   pane scrolls across all of it. */
+.graph-room {
+  position: relative;
+}
+/* A graph cut off at the pane's edge fades out over 48px on that side, so no
+   card looks broken; the scroll bar's strip stays unmasked. */
+.graph-pane:is(.is-cut-left, .is-cut-right) {
+  mask-image:
+    linear-gradient(
+      to right,
+      var(--cut-left-edge, #000),
+      #000 48px,
+      #000 calc(100% - 48px),
+      var(--cut-right-edge, #000)
+    ),
+    linear-gradient(#000 0 0);
+  mask-size:
+    100% 100%,
+    100% var(--classic-scrollbar-width);
+  mask-position: bottom;
+  mask-repeat: no-repeat;
+}
+.graph-pane.is-cut-left {
+  --cut-left-edge: transparent;
+}
+.graph-pane.is-cut-right {
+  --cut-right-edge: transparent;
+}
+/* The drawing at its own size: the pane scales it as one piece, so a zoom
+   never lays it out again. */
+.graph-draw {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.graph-edges {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+/* An edge is a 1.5px line in an ink tone. */
+.edge {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  color: var(--line);
+}
+/* From the step a signal trigger matches on to the trigger: the run follows
+   no such edge, it only listens. */
+.edge--signal {
+  stroke-dasharray: 2 3;
+}
+.arrow {
+  fill: var(--line);
+}
+/* The dot the start triggers fan out from, and the dot after the step that
+   ends the run. */
+.bus {
+  fill: var(--muted);
+}
+.graph-end {
+  fill: var(--ink);
+}
+/* An edge's condition, in the mono face because it is code. */
+.edge-label {
+  position: absolute;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  background: var(--surface);
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+  line-height: 15px;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+}
+/* A limit is a number, not code, so it takes the UI face with even-width
+   digits, on its own label or after a condition. */
+.edge-label--count {
+  font-family: var(--font-ui);
+  font-variation-settings: normal;
+  font-variant-numeric: tabular-nums;
+}
+/* A step is a raised card and a trigger a sunken one, because a trigger
+   listens rather than works. Hover and open each change one of fill, rim and
+   lift. */
+.node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 176px;
+  height: 48px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--r-lg);
+  background: var(--node-fill);
+  box-shadow:
+    inset 0 0 0 1px var(--node-rim),
+    var(--node-lift);
+  text-align: left;
+  transition:
+    background var(--dur-1),
+    box-shadow var(--dur-1);
+}
+.node--step {
+  --node-fill: var(--raised);
+  --node-rim: var(--line-soft);
+  --node-lift: var(--shadow-1);
+}
+.node--trigger {
+  --node-fill: var(--sunken);
+  --node-rim: var(--line-soft);
+  --node-lift: 0 0 #0000;
+}
+.node:hover {
+  background: color-mix(in oklab, var(--ink) 5%, var(--node-fill));
+}
+.node.is-open {
+  --node-rim: var(--line);
+  --node-lift: var(--shadow-2);
+}
+/* The box at the card's left that shows what it is: an Agent, an action, a
+   schedule or an event. */
+.node-lead {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--muted);
+}
+.node--trigger .node-lead {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.node-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+.node-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.node-title b {
+  overflow: hidden;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node--trigger .node-title b {
+  font-weight: var(--w-medium);
+}
+.node-detail {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The tag "all" on a step that waits for every edge into it. Its rim is in
+   faint ink, not a hairline, so the box reads on both the page and the card. */
+.node-join {
+  position: absolute;
+  top: -8px;
+  left: 10px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--faint);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  line-height: 15px;
+}
+/* The zoom controls on the frame's bottom-right corner, in room the pane
+   keeps under the graph, so they never cover a card. */
+.zoom {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+}
+.zoom output {
+  min-width: 42px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}

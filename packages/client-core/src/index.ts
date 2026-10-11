@@ -283,6 +283,7 @@ export {
   type BoundActionRow,
   type NotificationMark,
 } from "./notifications";
+export { parsePluginId } from "./plugin-id";
 export { formatBlocksAsText, isKnownBlock, UNKNOWN_BLOCK_TEXT } from "./signal-blocks";
 export {
   buildIntakeTabs,
@@ -307,7 +308,6 @@ export {
   listUrgentSignals,
   moveSignalSelection,
   nameSignalSource,
-  parseSignalPluginId,
   buildInitials,
   trimAnswerEllipsis,
   DEFAULT_INTAKE_LIST_WIDTH,

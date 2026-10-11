@@ -2481,3 +2481,11 @@ describe("Composer: images", () => {
     );
   });
 });
+
+describe("the draft's search params", () => {
+  it("drops a project and a workspace that are not strings", async () => {
+    const { router } = await openDraftAt("/threads/new?project=42&workspace=true");
+
+    expect(router.state.matches.at(-1)!.search).toEqual({});
+  });
+});

@@ -21,6 +21,7 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   stubElementSize,
+  stubIntersectionObserver,
   THREAD_FIXTURES,
 } from "../../../../../app/testing";
 import {
@@ -64,49 +65,12 @@ const WIDTH_KEY = "hercule.side-pane.width";
 /** The width of the split the two panes share, and so the right edge of the side pane. */
 const SPLIT_WIDTH = 1400;
 
-/** The callback of each element the fake IntersectionObserver watches. */
-const intersectionCallbacks = new Map<Element, IntersectionObserverCallback>();
-
-/**
- * Stands in for IntersectionObserver, which jsdom lacks. It reports each
- * element on screen as soon as it is watched, as a browser does for a row
- * in view, until `reportOnScreen` says otherwise.
- */
-class FakeIntersectionObserver {
-  private readonly callback: IntersectionObserverCallback;
-  constructor(callback: IntersectionObserverCallback) {
-    this.callback = callback;
-  }
-  observe(element: Element): void {
-    intersectionCallbacks.set(element, this.callback);
-    // The row watches from an effect, which already runs inside `act`.
-    this.callback([buildEntry(element, true)], this as unknown as IntersectionObserver);
-  }
-  unobserve(element: Element): void {
-    intersectionCallbacks.delete(element);
-  }
-  disconnect(): void {
-    intersectionCallbacks.clear();
-  }
-}
-
-/** Builds the part of an IntersectionObserver entry the surface reads. */
-const buildEntry = (element: Element, onScreen: boolean): IntersectionObserverEntry =>
-  ({ target: element, isIntersecting: onScreen }) as IntersectionObserverEntry;
-
-/** Reports `element` inside or outside the visible part of its scroller, as a scroll would. */
-const reportOnScreen = (element: Element, onScreen: boolean): void => {
-  act(() => {
-    intersectionCallbacks.get(element)?.(
-      [buildEntry(element, onScreen)],
-      {} as IntersectionObserver,
-    );
-  });
-};
+/** Reports a row inside or outside the visible part of its scroller; set in `beforeEach`. */
+let reportOnScreen: (element: Element, onScreen: boolean) => void;
 
 beforeEach(() => {
   stubElementSize(800, 800);
-  vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
+  reportOnScreen = stubIntersectionObserver();
   // jsdom lays nothing out, so the split and the pane measure what a
   // 1400px wide main area with the default 420px pane would.
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
@@ -133,7 +97,6 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  intersectionCallbacks.clear();
   setVisibility("visible");
 });
 

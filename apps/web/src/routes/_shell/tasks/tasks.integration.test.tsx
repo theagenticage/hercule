@@ -777,3 +777,12 @@ describe("Tasks > live", () => {
     });
   });
 });
+
+describe("Tasks' search params", () => {
+  it("drops a task that is not a string", async () => {
+    const api = stubApi(buildController([]));
+    const { router } = await renderApp({ path: "/tasks?task=42", api: api.fetch, token: "held" });
+
+    expect(router.state.matches.at(-1)!.search).toEqual({});
+  });
+});

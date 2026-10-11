@@ -39,7 +39,7 @@ import {
   hasDoneAction,
   nameSignalSource,
   readErrorMessage,
-  parseSignalPluginId,
+  parsePluginId,
   planSignalMove,
 } from "@hercule/client-core";
 import {
@@ -187,7 +187,7 @@ function SignalDetail({
   const [event] = useQueries({ queries: eventReads });
   const sourceUrl = event?.data?.url ?? null;
   const sourceName = nameSignalSource(signal, plugins, raisers);
-  const sourcePluginId = parseSignalPluginId(signal.kind);
+  const sourcePluginId = parsePluginId(signal.kind);
   const provenance = (
     <>
       <SourceMark pluginId={sourcePluginId} plugins={plugins} size={14} />
@@ -346,11 +346,7 @@ function SignalDetail({
                   ) : signal.resolution?.kind === "withdrawn" ? (
                     <Mark state="idle" size={16} />
                   ) : (
-                    <SourceMark
-                      pluginId={parseSignalPluginId(signal.kind)}
-                      plugins={plugins}
-                      size={16}
-                    />
+                    <SourceMark pluginId={parsePluginId(signal.kind)} plugins={plugins} size={16} />
                   )}
                 </span>
                 <span className="b-work-text">

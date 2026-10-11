@@ -1,8 +1,8 @@
 /**
- * The desktop perf script's workflow list scenario: one plain launch of the
- * app on Workflows, with 50 workflows listed and 50 live runs across 10 of
- * them, which measures the rows of spec 17 §What Workflows costs that a
- * script can measure:
+ * The desktop perf script's Workflows scenarios, on 50 workflows listed and
+ * 50 live runs across 10 of them. Two plain launches measure the rows of
+ * spec 17 §What Workflows costs that a script can measure. The first opens
+ * the workflow list alone:
  *
  * - processes and memory with the list open;
  * - each process's CPU and wakeups with the list open, visible and hidden,
@@ -21,6 +21,21 @@
  *   last of those reads answered, and the renderer's main thread and CPU,
  *   and the controller's CPU, per push.
  *
+ * The second opens the last workflow beside the list (see
+ * `measureOpenWorkflowWork`), and measures:
+ *
+ * - processes and memory with the list and the open workflow;
+ * - each process's CPU and wakeups with the workflow open, visible for 70 s
+ *   and hidden, and the age clock's fires in each, and again visible for
+ *   70 s on today's timeline, where the time now moves once a minute;
+ * - how many nodes the graph drew, and how many rows of the Runs list are
+ *   mounted against how many it has read;
+ * - what one `run` push costs with the Runs tab on its list, then on the
+ *   timeline of the day that holds the workflow's 300 runs, read as for the
+ *   list launch, with the open workflow's own reads counted apart;
+ * - how many of those 300 runs the timeline draws, on how many tracks, and
+ *   the renderer main thread's time from asking for the day until it shows.
+ *
  * The seed (see `seedWorkflows`):
  *
  * - 50 workflows, each with one start trigger: half on a schedule, half on
@@ -30,21 +45,28 @@
  * - 5 runs of each of the first 10 workflows, 50 in all. Their one step is
  *   the built-in `wait` action for a day, so every run stays `running` with
  *   no runner and no provider, until it is cancelled;
- * - one run of each of the other 40, whose step waits 1 s, the least the
+ * - one run of each of the next 39, whose step waits 1 s, the least the
  *   `wait` action allows, so the run has completed before the app launches.
- *   No seeded run fails, so the list's Failing group is empty.
+ *   No seeded run fails, so the list's Failing group is empty;
+ * - 300 runs of the last workflow, the open one, whose three steps each
+ *   wait 1 s, two of them after the first. The runs complete, and the
+ *   fixture then spreads them evenly over yesterday, in the user's
+ *   timezone, as a busy workflow's day would be. The controller stamps a
+ *   run's times with its own clock, so only the database can move them.
  *
  * A push is one run cancelled through `run.cancel`, one live workflow after
  * another. Cancelling is one change to one run, where starting a run is two
- * (pending, then running). The 10 pushes take the live runs from 50 down to
- * 40, which changes no count of reads: each push reads the strips and the
- * live runs once, however many runs are live.
+ * (pending, then running). Each round of 10 pushes cancels each live
+ * workflow's next run, so the three rounds take the live runs from 50 down
+ * to 20. That changes no count of reads: each push reads every run read on
+ * screen once, however many runs are live. No push changes a run of the
+ * open workflow, so the open workflow's reads answer the same each time.
  *
- * Each strip holds at most 5 runs, not the 20 a strip shows at most, so the
- * strips' answer is smaller than a list of busy workflows would get. The
- * seed's 90 runs fit one page of 500, so the strips' read is one request.
+ * Each strip holds at most 20 runs, as a strip shows at most. The seed's
+ * 339 finished runs and 50 live ones make the strips' answer at most 109
+ * runs, one page of 500, so the strips' read is one request.
  *
- * The route's chunk and the first screen's bytes are not measured here:
+ * The routes' chunks and the first screen's bytes are not measured here:
  * `pnpm build:desktop`'s bundle check prints them. The remote controller's
  * opening time is not measured either: the script's controller is local.
  *
@@ -63,6 +85,7 @@ import type {
 import {
   assertExitedCleanly,
   connectInspector,
+  type Inspector,
   evaluateInMain,
   formatTable,
   launchPlainApp,
@@ -73,6 +96,7 @@ import {
   BUDGET,
   HIDDEN_SETTLE_MS,
   MEMORY_READ_AT_MS,
+  SAMPLE_MS,
   VISIBLE_SAMPLE_AT_MS,
   evaluateInPage,
   findProcessUse,
@@ -98,14 +122,30 @@ const LIVE_WORKFLOW_COUNT = 10;
 const LIVE_RUNS_PER_WORKFLOW = 5;
 const LIVE_RUNS = LIVE_WORKFLOW_COUNT * LIVE_RUNS_PER_WORKFLOW;
 
-/** How many completed runs the seed leaves: one for each workflow without live runs. */
-const COMPLETED_RUNS = WORKFLOW_COUNT - LIVE_WORKFLOW_COUNT;
+/** How many runs the open workflow has, all of them on one day. */
+const OPEN_WORKFLOW_RUNS = 300;
+
+/**
+ * How many finished runs the seed leaves: one for each workflow without live
+ * runs but the open one, and the open workflow's.
+ */
+const COMPLETED_RUNS = WORKFLOW_COUNT - LIVE_WORKFLOW_COUNT - 1 + OPEN_WORKFLOW_RUNS;
+
+/** How many nodes the open workflow's graph draws: its trigger and its three steps. */
+const OPEN_WORKFLOW_NODES = 4;
 
 /** How long a live run waits, in seconds: the longest the `wait` action allows, one day. */
 const LIVE_WAIT_SECONDS = 86_400;
 
 /** How long a run that completes waits, in seconds: the least the `wait` action allows. */
 const COMPLETED_WAIT_SECONDS = 1;
+
+/**
+ * How far inside yesterday the open workflow's runs start, at each end. Two
+ * hours keep every run on that day even when the clocks changed between
+ * yesterday and now, which moves the day's start by an hour.
+ */
+const DAY_MARGIN_MS = 2 * 3_600_000;
 
 /** How many runs are cancelled one at a time, and how far apart. */
 const PUSH_COUNT = 10;
@@ -125,6 +165,12 @@ const LAUNCH_READS_AT_MS = 28_000;
 const SHOW_SETTLE_MS = 3_000;
 
 /**
+ * How long the open workflow's visible idle samples last: over a minute, so
+ * a clock that ticks once a minute fires at least once in each.
+ */
+const OPEN_WORKFLOW_VISIBLE_SAMPLE_MS = 70_000;
+
+/**
  * How many entries the page's resource timing buffer holds during the
  * pushes. Chromium keeps 250 by default and drops every entry after that,
  * which 10 pushes of a few reads each stay under, but a push that reads
@@ -137,6 +183,40 @@ const RUNS_PATH = "/api/v1/runs";
 
 /** The path every session read goes to; "From runs" reads it with `thread=false`. */
 const SESSIONS_PATH = "/api/v1/sessions";
+
+/**
+ * Builds the definition of the open workflow, the seed's last, numbered
+ * `number`: its event trigger starts a fetch step, after which two steps run
+ * side by side. Each step waits 1 s, so a run completes in a few seconds,
+ * and the graph has a fork to lay out.
+ */
+function buildOpenWorkflowDefinition(number: number): WorkflowDefinition {
+  const wait = {
+    kind: "action",
+    action: "wait",
+    params: { seconds: COMPLETED_WAIT_SECONDS },
+  } as const;
+  return {
+    name: `Workflow ${String(number)}`,
+    description: "Fetches the night's orders, then checks them and sends the summary.",
+    triggers: [
+      {
+        id: "start",
+        kind: "start",
+        on: { kind: "task.created", filter: 'event.payload.task.title == "never"' },
+      },
+    ],
+    steps: [
+      { id: "fetch", ...wait },
+      { id: "check", ...wait },
+      { id: "notify", ...wait },
+    ],
+    edges: [
+      { from: "fetch", to: "check" },
+      { from: "fetch", to: "notify" },
+    ],
+  };
+}
 
 /**
  * Builds the definition of the seeded workflow `number`, counting from 1,
@@ -168,50 +248,130 @@ const listRuns = async (
     )
   ).items;
 
+/** What `seedWorkflows` made. */
+export interface SeededWorkflows {
+  /** The ids of the live runs, grouped by workflow, in the order each was started. */
+  readonly liveRunIds: readonly (readonly string[])[];
+  /** The id of the workflow with 300 runs, which the second launch opens. */
+  readonly openWorkflowId: string;
+}
+
 /**
- * Creates the 50 workflows and starts their runs: 5 live runs of each of the
- * first 10, and one run of each of the other 40 that completes within a
- * second. Returns the ids of the live runs, grouped by workflow, once all 50
- * are `running` and the other 40 have completed. Fails when the controller
- * refuses a workflow or a run, or when the runs have not settled within 30 s.
+ * Returns the instants yesterday started and ended in the IANA zone
+ * `timezone`, as seen from `now`. The start is found with the zone's offset
+ * at `now`, so it is an hour off when the clocks changed since; the caller
+ * keeps clear of the day's edges.
+ */
+function findYesterday(timezone: string, now: Date): { start: Date; end: Date } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+  }).formatToParts(now);
+  const readPart = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)!.value);
+  const year = readPart("year");
+  const month = readPart("month") - 1;
+  const day = readPart("day");
+  const wallClockMs = Date.UTC(
+    year,
+    month,
+    day,
+    readPart("hour"),
+    readPart("minute"),
+    readPart("second"),
+  );
+  const offsetMs = wallClockMs - Math.floor(now.getTime() / 1_000) * 1_000;
+  const startMs = Date.UTC(year, month, day - 1) - offsetMs;
+  return { start: new Date(startMs), end: new Date(startMs + 86_400_000) };
+}
+
+/**
+ * Creates the 50 workflows and starts their runs, as the top of this file
+ * describes. The finished runs come first. Once they have completed, the
+ * fixture restarts the controller and spreads the open workflow's 300 runs
+ * over yesterday (see `ThreadFixture.prepareLaunch`). The live runs start
+ * only after that restart, so the controller never restarts under them.
+ * Returns once all 50 live runs are `running`.
+ *
+ * Fails when the controller refuses a workflow or a run, or when the runs
+ * have not settled within 60 s.
  *
  * The runs settle before the app launches, so no run's change reaches the
  * launch and adds reads to it.
  */
-export async function seedWorkflows(fixture: ThreadFixture): Promise<string[][]> {
-  const runIds: string[][] = [];
+export async function seedWorkflows(fixture: ThreadFixture): Promise<SeededWorkflows> {
+  const workflowIds: string[] = [];
   for (let number = 1; number <= WORKFLOW_COUNT; number += 1) {
     const live = number <= LIVE_WORKFLOW_COUNT;
     const { workflow } = await fixture.call<WorkflowSaveResult>("POST", "/workflows", {
-      definition: buildWorkflowDefinition(
-        number,
-        live ? LIVE_WAIT_SECONDS : COMPLETED_WAIT_SECONDS,
-      ),
+      definition:
+        number === WORKFLOW_COUNT
+          ? buildOpenWorkflowDefinition(number)
+          : buildWorkflowDefinition(number, live ? LIVE_WAIT_SECONDS : COMPLETED_WAIT_SECONDS),
     });
-    const ids: string[] = [];
-    for (let run = 0; run < (live ? LIVE_RUNS_PER_WORKFLOW : 1); run += 1) {
-      const { runId } = await fixture.call<RunStarted>("POST", "/runs/start", {
-        workflowId: workflow.id,
-      });
-      ids.push(runId);
-    }
-    if (live) runIds.push(ids);
+    workflowIds.push(workflow.id);
   }
-  await pollUntil(
-    async () =>
-      (await listRuns(fixture, "running")).length === LIVE_RUNS &&
-      (await listRuns(fixture, "pending")).length === 0 &&
-      (await listRuns(fixture, "completed")).length === COMPLETED_RUNS
-        ? true
-        : undefined,
-    {
-      timeoutMs: 30_000,
-      intervalMs: 200,
-      timeoutMessage: `the seeded runs were not ${String(LIVE_RUNS)} running and ${String(COMPLETED_RUNS)} completed within 30 s`,
-    },
+  const startRun = async (workflowId: string): Promise<string> =>
+    (await fixture.call<RunStarted>("POST", "/runs/start", { workflowId })).runId;
+  const waitForRuns = (running: number, completed: number) =>
+    pollUntil(
+      async () =>
+        (await listRuns(fixture, "running")).length === running &&
+        (await listRuns(fixture, "pending")).length === 0 &&
+        (await listRuns(fixture, "completed")).length === completed
+          ? true
+          : undefined,
+      {
+        timeoutMs: 60_000,
+        intervalMs: 200,
+        timeoutMessage: `the seeded runs were not ${String(running)} running and ${String(completed)} completed within 60 s`,
+      },
+    );
+
+  const openWorkflowId = workflowIds.at(-1)!;
+  for (const workflowId of workflowIds.slice(LIVE_WORKFLOW_COUNT, -1)) await startRun(workflowId);
+  for (let run = 0; run < OPEN_WORKFLOW_RUNS; run += 1) await startRun(openWorkflowId);
+  await waitForRuns(0, COMPLETED_RUNS);
+
+  const { user } = await fixture.call<{ readonly user: { readonly timezone: string } }>(
+    "GET",
+    "/settings",
   );
-  return runIds;
+  const yesterday = findYesterday(user.timezone, new Date());
+  await fixture.prepareLaunch({
+    twoMinuteRow: false,
+    spreadRuns: {
+      workflowId: openWorkflowId,
+      from: new Date(yesterday.start.getTime() + DAY_MARGIN_MS),
+      to: new Date(yesterday.end.getTime() - DAY_MARGIN_MS),
+    },
+  });
+
+  const liveRunIds: string[][] = [];
+  for (const workflowId of workflowIds.slice(0, LIVE_WORKFLOW_COUNT)) {
+    const ids: string[] = [];
+    for (let run = 0; run < LIVE_RUNS_PER_WORKFLOW; run += 1) ids.push(await startRun(workflowId));
+    liveRunIds.push(ids);
+  }
+  await waitForRuns(LIVE_RUNS, COMPLETED_RUNS);
+  return { liveRunIds, openWorkflowId };
 }
+
+/**
+ * Returns the live runs that the push round `round`, counting from 0,
+ * cancels: the run at position `round` of each live workflow, in workflow
+ * order.
+ */
+export const pickPushRound = (
+  liveRunIds: readonly (readonly string[])[],
+  round: number,
+): string[] => liveRunIds.map((ids) => ids[round]!);
 
 /**
  * Opens Workflows once in the signed-in app on `userDataDir`, so the app
@@ -223,17 +383,48 @@ export const openWorkflowsOnce = (userDataDir: string): Promise<void> =>
     page.locator(WORKFLOW_ROW_SELECTOR).first().waitFor(),
   );
 
+/**
+ * An expression that evaluates, in the page, to whether the open workflow
+ * has drawn: every node of its graph, and a row of its Runs list.
+ */
+const OPEN_WORKFLOW_DRAWN = `document.querySelectorAll(".open-pane .graph .node").length >= ${String(OPEN_WORKFLOW_NODES)} &&
+  document.querySelector('.open-pane [role="list"] > *') !== null`;
+
+/**
+ * Opens the workflow `workflowId` once in the signed-in app on
+ * `userDataDir`, so the app opens it again, beside the list, at its next
+ * launch (see `openScreenOnce`). Fails when its graph and its Runs list do
+ * not show.
+ */
+export const openWorkflowOnce = (userDataDir: string, workflowId: string): Promise<void> =>
+  openScreenOnce(userDataDir, `/workflows/${workflowId}`, async (page: Page) => {
+    // The page's content security policy refuses code passed as a string,
+    // so the wait reads the page through locators.
+    await page
+      .locator(".open-pane .graph .node")
+      .nth(OPEN_WORKFLOW_NODES - 1)
+      .waitFor();
+    await page.locator('.open-pane [role="list"] > *').first().waitFor();
+  });
+
 /** What a read is for, by its URL. */
-type ReadKind = "strip" | "liveRuns" | "otherRuns" | "liveSessions" | "other";
+type ReadKind =
+  "strip" | "liveRuns" | "workflowRuns" | "dayRuns" | "otherRuns" | "liveSessions" | "other";
 
 /** The reads of the live runs in one round: the `running` runs and the `pending` ones. */
 const LIVE_RUN_READS = 2;
 
 /**
- * Returns what the read of `url` is for: the strips when it reads each
- * workflow's newest runs, the live runs when it reads running or pending
- * runs, any other run read, the live sessions that are not threads, which
- * "From runs" reads, or anything else.
+ * Returns what the read of `url` is for:
+ *
+ * - the strips, when it reads each workflow's newest runs;
+ * - the live runs, when it reads running or pending runs;
+ * - a page of the open workflow's Runs list, when it reads one workflow's
+ *   runs;
+ * - the timeline's day, when it reads one workflow's runs live in a span;
+ * - any other run read;
+ * - the live sessions that are not threads, which "From runs" reads;
+ * - or anything else.
  */
 function classifyRead(url: URL): ReadKind {
   if (url.pathname === SESSIONS_PATH && url.searchParams.get("thread") === "false") {
@@ -243,6 +434,9 @@ function classifyRead(url: URL): ReadKind {
   if (url.searchParams.has("newestPerWorkflow")) return "strip";
   const status = url.searchParams.get("status");
   if (status === "running" || status === "pending") return "liveRuns";
+  if (url.searchParams.has("workflowId")) {
+    return url.searchParams.has("activeSince") ? "dayRuns" : "workflowRuns";
+  }
   return "otherRuns";
 }
 
@@ -307,22 +501,182 @@ interface PushCost {
   readonly settleMs: ReadonlyArray<number | null>;
 }
 
-/** What the workflow list scenario measured. */
-export interface WorkflowWork {
+/** Each process's use with the window visible and hidden, and when each sample ran. */
+interface IdleSamples {
+  /** Each process's use with the window visible, over the length the caller asked for. */
+  readonly visible: readonly ProcessUse[];
+  /** Each process's use over 10 s with the window hidden, from 3 s after it was hidden. */
+  readonly hidden: readonly ProcessUse[];
+  /** When the visible sample started and ended, in milliseconds since the epoch. */
+  readonly visibleFrom: number;
+  readonly visibleTo: number;
+  /** When the window was hidden, and when the hidden sample ended. */
+  readonly hiddenFrom: number;
+  readonly hiddenTo: number;
+}
+
+/** What one launch measured at rest: memory, and the idle samples with the age clock's fires. */
+interface LaunchAtRest {
   /** The machine's load average over the minute before the app was spawned. */
   readonly loadAtSpawn: number;
   /** Each process's memory, 13 s after the page opened. */
   readonly memory: readonly ProcessMemory[];
-  /** Each process's use over 10 s with the window visible, from 30 s after the page opened. */
+  /** Each process's use with the window visible, over `visibleMs`, from 30 s after the page opened. */
   readonly visible: readonly ProcessUse[];
+  /** How long the visible sample lasted, in milliseconds. */
+  readonly visibleMs: number;
   /** Each process's use over 10 s with the window hidden, from 3 s after it was hidden. */
   readonly hidden: readonly ProcessUse[];
   /** How often the age clock fired during the visible sample. */
   readonly firesVisible: number;
   /** How often the age clock fired from hiding the window to the end of the hidden sample. */
   readonly firesHidden: number;
+}
+
+/** What the workflow list scenario measured. */
+export interface WorkflowWork extends LaunchAtRest {
   readonly opening: OpeningCost;
   readonly pushes: PushCost;
+}
+
+/** Calls `method` on the app's one window, through main's inspector at `inspectorUrl`. */
+const callWindow = (inspectorUrl: string, method: "hide" | "showInactive" | "isVisible") =>
+  evaluateInMain(inspectorUrl, `require("electron").BrowserWindow.getAllWindows()[0]?.${method}()`);
+
+/**
+ * Samples each process's use over `visibleMs` with the window visible, hides
+ * the window, samples again over 10 s from 3 s after hiding it (see
+ * `sampleIdleUse`), and shows the window again, without taking the focus.
+ * Returns once the window has been shown for 3 s, so the page has read again
+ * what it dropped while hidden. Fails when the window is not visible or
+ * hidden as each sample expects.
+ */
+async function sampleVisibleAndHidden(
+  inspectorUrl: string,
+  visibleMs: number,
+): Promise<IdleSamples> {
+  const visibleFrom = Date.now();
+  const visible = await sampleIdleUse(inspectorUrl, visibleMs);
+  const visibleTo = Date.now();
+  if ((await callWindow(inspectorUrl, "isVisible")) !== true) {
+    throw new Error("the window was not visible while sampled");
+  }
+  await callWindow(inspectorUrl, "hide");
+  const hiddenFrom = Date.now();
+  await sleep(HIDDEN_SETTLE_MS);
+  const hidden = await sampleIdleUse(inspectorUrl);
+  const hiddenTo = Date.now();
+  if ((await callWindow(inspectorUrl, "isVisible")) !== false) {
+    throw new Error("the window was not hidden while sampled");
+  }
+  // `showInactive` leaves the focus where it is, so the run does not take
+  // the keyboard from whoever is using the machine.
+  await callWindow(inspectorUrl, "showInactive");
+  await sleep(SHOW_SETTLE_MS);
+  return { visible, hidden, visibleFrom, visibleTo, hiddenFrom, hiddenTo };
+}
+
+/**
+ * An expression that evaluates, in the page, to when the age clock fired,
+ * each in milliseconds since the epoch. The clock marks each fire with
+ * `performance.mark("age-clock-fire")`.
+ */
+const READ_AGE_CLOCK_FIRES = `performance.getEntriesByName("age-clock-fire").map((entry) => performance.timeOrigin + entry.startTime)`;
+
+/**
+ * Returns how often the age clock fired in `samples`' visible sample, and
+ * from hiding the window to the end of the hidden one, read from the page
+ * `page`. The clock marks each fire with `performance.mark("age-clock-fire")`.
+ */
+async function countAgeClockFires(
+  page: Inspector,
+  samples: IdleSamples,
+): Promise<{ firesVisible: number; firesHidden: number }> {
+  const fires = (await page.evaluate("Runtime.evaluate", {
+    expression: READ_AGE_CLOCK_FIRES,
+    returnByValue: true,
+  })) as number[];
+  const countFires = (from: number, to: number) =>
+    fires.filter((at) => at >= from && at < to).length;
+  return {
+    firesVisible: countFires(samples.visibleFrom, samples.visibleTo),
+    firesHidden: countFires(samples.hiddenFrom, samples.hiddenTo),
+  };
+}
+
+/**
+ * Returns the time the renderer's main thread of `page` has spent running
+ * tasks so far, in milliseconds, from its DevTools performance metrics.
+ * `Performance.enable` must have been sent to `page` first.
+ */
+async function readMainThreadMs(page: Inspector): Promise<number> {
+  const { metrics } = (await page.send("Performance.getMetrics")) as {
+    metrics: { name: string; value: number }[];
+  };
+  const seconds = metrics.find((metric) => metric.name === "TaskDuration")?.value;
+  if (seconds === undefined) throw new Error("the page reports no TaskDuration metric");
+  return seconds * 1_000;
+}
+
+/**
+ * Cancels each run of `pushRunIds`, one a second, with the app's page
+ * `page` open, and returns what those pushes cost, over the time from the
+ * first cancel to 2 s after the last. The controller's (`controllerPid`)
+ * and the renderer's (`rendererPid`) CPU time come from `ps`, and the
+ * renderer main thread's time from the page's DevTools performance metrics.
+ * Each also holds whatever the process did while idle in that time, so the
+ * numbers err high. The page's reads come from its resource timing entries,
+ * each counted to the push before it started. A push's settle time ends with
+ * the last run read that answered, so it holds the controller's work on the
+ * cancel, the push reaching the app, the 50 ms the app gathers pushes in,
+ * and the reads.
+ *
+ * The page's resource timing buffer is cleared first, so reads made before
+ * the call are not counted. `Performance.enable` must have been sent to
+ * `page` first.
+ */
+async function measurePushes(
+  page: Inspector,
+  fixture: ThreadFixture,
+  rendererPid: number,
+  pushRunIds: readonly string[],
+): Promise<PushCost> {
+  const evaluate = (expression: string) =>
+    page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
+  const controllerPid = fixture.readControllerPid();
+  await evaluate(`performance.setResourceTimingBufferSize(${String(RESOURCE_BUFFER_SIZE)});
+    performance.clearResourceTimings();`);
+  const before = {
+    controller: await readCpuMs(controllerPid),
+    renderer: await readCpuMs(rendererPid),
+    mainThread: await readMainThreadMs(page),
+  };
+  const pushedAt: number[] = [];
+  for (const runId of pushRunIds) {
+    pushedAt.push(Date.now());
+    await fixture.call("POST", `/runs/${runId}/cancel`, {});
+    await sleep(Math.max(0, pushedAt.at(-1)! + PUSH_INTERVAL_MS - Date.now()));
+  }
+  await sleep(PUSH_SETTLE_MS);
+  const after = {
+    controller: await readCpuMs(controllerPid),
+    renderer: await readCpuMs(rendererPid),
+    mainThread: await readMainThreadMs(page),
+  };
+  const reads = (await evaluate(READ_READS)) as Read[];
+  return {
+    controllerCpuMs: after.controller - before.controller,
+    rendererCpuMs: after.renderer - before.renderer,
+    rendererMainThreadMs: after.mainThread - before.mainThread,
+    ...countPushReads(reads, pushedAt),
+  };
+}
+
+/** Returns the renderer's process id in `memory`, and fails when there is no renderer. */
+function findRendererPid(memory: readonly ProcessMemory[]): number {
+  const pid = memory.find((sample) => sample.label === "Tab")?.pid;
+  if (pid === undefined) throw new Error("the app has no renderer process");
+  return pid;
 }
 
 /**
@@ -336,20 +690,10 @@ export interface WorkflowWork {
  *   strips and of the live sessions that are not threads, and when the
  *   first and the last read of the strips answered;
  * - each process's CPU and wakeups over 10 s with the window visible, from
- *   30 s after the page opened, and over 10 s with the window hidden, from
- *   3 s after hiding it (see `sampleIdleUse`), with the age clock's fires in
- *   each;
- * - with the window shown again, what 10 pushes cost: one live run of
- *   `runIds` cancelled every second, each from the next workflow, over the
- *   12 s from the first cancel to 2 s after the last. The controller's and
- *   the renderer's CPU time come from `ps`, and the renderer main thread's
- *   time from the page's DevTools performance metrics. Each also holds
- *   whatever the process did while idle in that time, so the numbers err
- *   high. The page's reads come from its resource timing entries, each
- *   counted to the push before it started. A push's settle time ends with
- *   the last run read that answered, so it holds the controller's work on
- *   the cancel, the push reaching the app, the 50 ms the app gathers pushes
- *   in, and the reads.
+ *   30 s after the page opened, and over 10 s with the window hidden (see
+ *   `sampleVisibleAndHidden`), with the age clock's fires in each;
+ * - with the window shown again, what the 10 pushes of `pushRunIds` cost
+ *   (see `measurePushes`).
  *
  * Nothing stays attached to the page until the idle samples are over, as in
  * `perf.ts`; the pushes then share one connection. The window stays shown
@@ -362,7 +706,7 @@ export interface WorkflowWork {
 export async function measureWorkflowWork(
   userDataDir: string,
   fixture: ThreadFixture,
-  runIds: readonly (readonly string[])[],
+  pushRunIds: readonly string[],
 ): Promise<WorkflowWork> {
   await warmUpApp(userDataDir);
   const loadAtSpawn = loadavg()[0]!;
@@ -376,11 +720,6 @@ export async function measureWorkflowWork(
     const sleepUntil = (msAfterOpen: number) =>
       sleep(Math.max(0, pageOpenedAt + msAfterOpen - Date.now()));
     const readReads = async () => (await evaluateInPage(pageSocketUrl, READ_READS)) as Read[];
-    const callWindow = (method: "hide" | "showInactive" | "isVisible") =>
-      evaluateInMain(
-        inspectorUrl,
-        `require("electron").BrowserWindow.getAllWindows()[0]?.${method}()`,
-      );
 
     // The loader reads the strips before the list draws, so a drawn row
     // and a read of the strips show that every workflow is listed.
@@ -401,8 +740,7 @@ export async function measureWorkflowWork(
 
     await sleepUntil(MEMORY_READ_AT_MS);
     const memory = await readProcessMemory(app.process.pid!);
-    const rendererPid = memory.find((sample) => sample.label === "Tab")?.pid;
-    if (rendererPid === undefined) throw new Error("the app has no renderer process");
+    const rendererPid = findRendererPid(memory);
 
     await sleepUntil(LAUNCH_READS_AT_MS);
     const launchReads = await readReads();
@@ -431,89 +769,229 @@ export async function measureWorkflowWork(
     };
 
     await sleepUntil(VISIBLE_SAMPLE_AT_MS);
-    const visibleFrom = Date.now();
-    const visible = await sampleIdleUse(inspectorUrl);
-    const visibleTo = Date.now();
-    if ((await callWindow("isVisible")) !== true) {
-      throw new Error("the window was not visible while sampled");
+    const samples = await sampleVisibleAndHidden(inspectorUrl, SAMPLE_MS);
+
+    const page = await connectInspector(pageSocketUrl);
+    try {
+      const fires = await countAgeClockFires(page, samples);
+      await page.send("Performance.enable");
+      // Showing the window again read every list again, so `measurePushes`
+      // clears the reads only now, and those reads are not counted as the
+      // first push's.
+      const pushes = await measurePushes(page, fixture, rendererPid, pushRunIds);
+      measured = {
+        loadAtSpawn,
+        memory,
+        visible: samples.visible,
+        visibleMs: samples.visibleTo - samples.visibleFrom,
+        hidden: samples.hidden,
+        ...fires,
+        opening,
+        pushes,
+      };
+    } finally {
+      page.close();
     }
-    await callWindow("hide");
-    const hiddenFrom = Date.now();
-    await sleep(HIDDEN_SETTLE_MS);
-    const hidden = await sampleIdleUse(inspectorUrl);
-    const hiddenTo = Date.now();
-    if ((await callWindow("isVisible")) !== false) {
-      throw new Error("the window was not hidden while sampled");
-    }
-    // `showInactive` leaves the focus where it is, so the run does not take
-    // the keyboard from whoever is using the machine.
-    await callWindow("showInactive");
-    await sleep(SHOW_SETTLE_MS);
+  } finally {
+    await stopPlainApp(app);
+  }
+  assertExitedCleanly(app.process);
+  return measured;
+}
+
+/** What the open workflow scenario measured. */
+export interface OpenWorkflowWork extends LaunchAtRest {
+  /** How many nodes the graph drew. */
+  readonly graphNodes: number;
+  /** How many rows of the Runs list were mounted, with the list at its top. */
+  readonly mountedRows: number;
+  /** How many rows the Runs list had read, from the height its virtualizer gave it. */
+  readonly listedRows: number;
+  /** What the pushes cost with the Runs tab on its list. */
+  readonly listPushes: PushCost;
+  /** The renderer main thread's time from asking for the 300-run day until all of it showed, in milliseconds. */
+  readonly dayDrawMainThreadMs: number;
+  /** How many bars the timeline drew for that day, and on how many tracks. */
+  readonly dayBars: number;
+  readonly dayTracks: number;
+  /** What the pushes cost with the Runs tab on the timeline of that day. */
+  readonly timelinePushes: PushCost;
+  /** Each process's use with the window visible and the Runs tab on today's timeline, over `todayVisibleMs`. */
+  readonly todayVisible: readonly ProcessUse[];
+  readonly todayVisibleMs: number;
+  /** How often the age clock fired during that sample. */
+  readonly firesTodayVisible: number;
+}
+
+/** The fields of `OpenWorkflowWork` read on today's timeline, last. */
+type TodayTimelineFields = "todayVisible" | "todayVisibleMs" | "firesTodayVisible";
+
+/** The open workflow's "Show the day after" button, which is disabled on today. */
+const DAY_AFTER_BUTTON = `document.querySelector('.open-pane button[aria-label="Show the day after"]')`;
+
+/** An expression that evaluates, in the page, to how many bars the open workflow's timeline draws. */
+const COUNT_DAY_BARS = `document.querySelectorAll(".open-pane .lanes .run-bar").length`;
+
+/**
+ * Starts the signed-in app on `userDataDir` as a plain process, warm (see
+ * `warmUpApp`), where it opens the workflow with 300 runs again beside the
+ * list, on its Runs tab's list, and measures it. Returns, read in this order:
+ *
+ * - each process's memory, 13 s after the page opened;
+ * - how many nodes the graph drew, and how many rows of the Runs list are
+ *   mounted against how many it has read, with the list at its top;
+ * - each process's CPU and wakeups over 70 s with the window visible, from
+ *   30 s after the page opened, and over 10 s with the window hidden, with
+ *   the age clock's fires in each;
+ * - with the window shown again, what the pushes of `listPushRunIds` cost
+ *   with the Runs tab on its list (see `measurePushes`);
+ * - the renderer main thread's time to show the timeline, step back to
+ *   yesterday, and draw its 300 runs, from the press until 1 s after every
+ *   bar is in the page, so the bars' arrival is in it; how many bars the
+ *   day drew, and on how many tracks;
+ * - 3 s later, once the day has settled, what the pushes of
+ *   `timelinePushRunIds` cost on that day;
+ * - each process's CPU and wakeups over 70 s with the window visible, from
+ *   3 s after stepping on to today's timeline, with the age clock's fires.
+ *   Today's timeline draws the time now, which moves once a minute.
+ *
+ * Fails when the workflow does not show within 15 s, when the day does not
+ * draw its 300 runs within 15 s, when the timeline does not step on to
+ * today within 15 s, when the window is not visible or hidden
+ * as each sample expects, or when the app does not quit cleanly afterwards.
+ */
+export async function measureOpenWorkflowWork(
+  userDataDir: string,
+  fixture: ThreadFixture,
+  listPushRunIds: readonly string[],
+  timelinePushRunIds: readonly string[],
+): Promise<OpenWorkflowWork> {
+  await warmUpApp(userDataDir);
+  const loadAtSpawn = loadavg()[0]!;
+  const app = await launchPlainApp(userDataDir);
+  const { inspectorUrl } = app;
+  let measured: OpenWorkflowWork;
+  try {
+    const pageSocketUrl = await waitForPageSocketUrl(app.endpoint);
+    const pageOpenedAt = Date.now();
+    const sleepUntil = (msAfterOpen: number) =>
+      sleep(Math.max(0, pageOpenedAt + msAfterOpen - Date.now()));
+    let measuredBeforeToday: Omit<OpenWorkflowWork, TodayTimelineFields>;
+    await pollUntil(
+      async () =>
+        (await evaluateInPage(pageSocketUrl, OPEN_WORKFLOW_DRAWN)) === true ? true : undefined,
+      {
+        timeoutMs: 15_000,
+        intervalMs: 100,
+        timeoutMessage: "the app did not open the workflow with its graph and its Runs list",
+      },
+    );
+
+    await sleepUntil(MEMORY_READ_AT_MS);
+    const memory = await readProcessMemory(app.process.pid!);
+    const rendererPid = findRendererPid(memory);
+    const { graphNodes, mountedRows, listedRows } = (await evaluateInPage(
+      pageSocketUrl,
+      `(() => {
+        const list = document.querySelector('.open-pane [role="list"]');
+        return {
+          graphNodes: document.querySelectorAll(".open-pane .graph .node").length,
+          mountedRows: list.children.length,
+          listedRows: Math.round(
+            parseFloat(list.style.height) / list.firstElementChild.getBoundingClientRect().height,
+          ),
+        };
+      })()`,
+    )) as { graphNodes: number; mountedRows: number; listedRows: number };
+
+    await sleepUntil(VISIBLE_SAMPLE_AT_MS);
+    const samples = await sampleVisibleAndHidden(inspectorUrl, OPEN_WORKFLOW_VISIBLE_SAMPLE_MS);
 
     const page = await connectInspector(pageSocketUrl);
     try {
       const evaluate = (expression: string) =>
         page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
-      const fires = (await evaluate(
-        `performance.getEntriesByName("age-clock-fire").map((entry) => performance.timeOrigin + entry.startTime)`,
-      )) as number[];
-      const countFires = (from: number, to: number) =>
-        fires.filter((at) => at >= from && at < to).length;
-
-      const controllerPid = fixture.readControllerPid();
+      const fires = await countAgeClockFires(page, samples);
       await page.send("Performance.enable");
-      const readMainThreadMs = async () => {
-        const { metrics } = (await page.send("Performance.getMetrics")) as {
-          metrics: { name: string; value: number }[];
-        };
-        const seconds = metrics.find((metric) => metric.name === "TaskDuration")?.value;
-        if (seconds === undefined) throw new Error("the page reports no TaskDuration metric");
-        return seconds * 1_000;
-      };
+      const listPushes = await measurePushes(page, fixture, rendererPid, listPushRunIds);
 
-      // Showing the window again read every list again, so the buffer is
-      // cleared only after that, and those reads are not counted as the
-      // first push's.
-      await evaluate(`performance.setResourceTimingBufferSize(${String(RESOURCE_BUFFER_SIZE)});
-        performance.clearResourceTimings();`);
-      const before = {
-        controller: await readCpuMs(controllerPid),
-        renderer: await readCpuMs(rendererPid),
-        mainThread: await readMainThreadMs(),
-      };
-      const pushedAt: number[] = [];
-      for (let push = 0; push < PUSH_COUNT; push += 1) {
-        const workflowRuns = runIds[push % runIds.length]!;
-        const runId = workflowRuns[Math.floor(push / runIds.length)]!;
-        pushedAt.push(Date.now());
-        await fixture.call("POST", `/runs/${runId}/cancel`, {});
-        await sleep(Math.max(0, pushedAt.at(-1)! + PUSH_INTERVAL_MS - Date.now()));
-      }
-      await sleep(PUSH_SETTLE_MS);
-      const after = {
-        controller: await readCpuMs(controllerPid),
-        renderer: await readCpuMs(rendererPid),
-        mainThread: await readMainThreadMs(),
-      };
-      const reads = (await evaluate(READ_READS)) as Read[];
-      measured = {
+      // Picking the timeline shows today, which holds none of the runs, so
+      // the day before is asked for once today's lanes are drawn.
+      const drawStartMs = await readMainThreadMs(page);
+      await evaluate(`document.querySelector('.open-pane [data-view="timeline"]').click()`);
+      await pollUntil(
+        async () =>
+          (await evaluate(`document.querySelector(".open-pane .lanes") !== null`)) === true
+            ? true
+            : undefined,
+        { timeoutMs: 15_000, intervalMs: 50, timeoutMessage: "the timeline did not show" },
+      );
+      await evaluate(
+        `document.querySelector('.open-pane button[aria-label="Show the day before"]').click()`,
+      );
+      await pollUntil(
+        async () => ((await evaluate(COUNT_DAY_BARS)) === OPEN_WORKFLOW_RUNS ? true : undefined),
+        {
+          timeoutMs: 15_000,
+          intervalMs: 50,
+          timeoutMessage: `the timeline did not draw yesterday's ${String(OPEN_WORKFLOW_RUNS)} runs`,
+        },
+      );
+      await sleep(1_000);
+      const dayDrawMainThreadMs = (await readMainThreadMs(page)) - drawStartMs;
+      const dayTracks = Number(
+        await evaluate(
+          `document.querySelector(".open-pane .lanes").style.getPropertyValue("--tracks")`,
+        ),
+      );
+      await sleep(SHOW_SETTLE_MS);
+      const timelinePushes = await measurePushes(page, fixture, rendererPid, timelinePushRunIds);
+      measuredBeforeToday = {
         loadAtSpawn,
         memory,
-        visible,
-        hidden,
-        firesVisible: countFires(visibleFrom, visibleTo),
-        firesHidden: countFires(hiddenFrom, hiddenTo),
-        opening,
-        pushes: {
-          controllerCpuMs: after.controller - before.controller,
-          rendererCpuMs: after.renderer - before.renderer,
-          rendererMainThreadMs: after.mainThread - before.mainThread,
-          ...countPushReads(reads, pushedAt),
-        },
+        visible: samples.visible,
+        visibleMs: samples.visibleTo - samples.visibleFrom,
+        hidden: samples.hidden,
+        ...fires,
+        graphNodes,
+        mountedRows,
+        listedRows,
+        listPushes,
+        dayDrawMainThreadMs,
+        dayBars: (await evaluate(COUNT_DAY_BARS)) as number,
+        dayTracks,
+        timelinePushes,
       };
     } finally {
       page.close();
     }
+
+    // Nothing stays attached to the page during this sample either.
+    await evaluateInPage(pageSocketUrl, `${DAY_AFTER_BUTTON}.click()`);
+    await pollUntil(
+      async () =>
+        (await evaluateInPage(
+          pageSocketUrl,
+          `${DAY_AFTER_BUTTON}.getAttribute("aria-disabled") === "true"`,
+        )) === true
+          ? true
+          : undefined,
+      { timeoutMs: 15_000, intervalMs: 50, timeoutMessage: "the timeline did not show today" },
+    );
+    await sleep(SHOW_SETTLE_MS);
+    const todayFrom = Date.now();
+    const todayVisible = await sampleIdleUse(inspectorUrl, OPEN_WORKFLOW_VISIBLE_SAMPLE_MS);
+    const todayTo = Date.now();
+    if ((await callWindow(inspectorUrl, "isVisible")) !== true) {
+      throw new Error("the window was not visible while sampled on today's timeline");
+    }
+    const fires = (await evaluateInPage(pageSocketUrl, READ_AGE_CLOCK_FIRES)) as number[];
+    measured = {
+      ...measuredBeforeToday,
+      todayVisible,
+      todayVisibleMs: todayTo - todayFrom,
+      firesTodayVisible: fires.filter((at) => at >= todayFrom && at < todayTo).length,
+    };
   } finally {
     await stopPlainApp(app);
   }
@@ -534,6 +1012,8 @@ function countPushReads(
   const counts: Record<ReadKind, number> = {
     strip: 0,
     liveRuns: 0,
+    workflowRuns: 0,
+    dayRuns: 0,
     otherRuns: 0,
     liveSessions: 0,
     other: 0,
@@ -573,9 +1053,16 @@ const formatUse = (sample: ProcessUse | undefined): string[] =>
     ? ["-", "-"]
     : [sample.cpuPercent.toFixed(1), sample.wakeupsPerSecond.toFixed(1)];
 
-/** Prints what the workflow list scenario measured, against the limits spec 17 sets. */
-export function reportWorkflowWork(measured: WorkflowWork): void {
-  const { memory, visible, hidden, opening, pushes } = measured;
+/** A row of a budget table: the budget, its limit, what was measured, and whether that is within the limit, or null for a measure with no budget. */
+type BudgetRow = [string, string, string, boolean | null];
+
+/**
+ * Builds the budget rows every Workflows launch shares from `measured`: the
+ * processes, the memory, and the idle samples with the age clock's fires.
+ * `agesText` says why the age clock may fire while visible.
+ */
+function buildAtRestRows(measured: LaunchAtRest, agesText: string): BudgetRow[] {
+  const { memory, visible, hidden } = measured;
   const summedMb = memory.reduce((sum, sample) => sum + sample.workingSetMb, 0);
   const summedFootprintMb = memory.reduce((sum, sample) => sum + sample.footprintMb, 0);
   const renderer = memory.find((sample) => sample.label === "Tab");
@@ -594,17 +1081,7 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
   const rendererVisible = readUse(visible, "Tab");
   const rendererHidden = readUse(hidden, "Tab");
   const gpuVisible = readUse(visible, "GPU");
-
-  const settled = pushes.settleMs.filter((ms) => ms !== null).toSorted((a, b) => a - b);
-  const otherPaths = [...pushes.otherPaths]
-    .map(([path, count]) => `${path} ${String(count)}`)
-    .join(", ");
-  const mainThreadPerPushMs = pushes.rendererMainThreadMs / PUSH_COUNT;
-  const rounds = pushes.reads.liveRuns / LIVE_RUN_READS;
-  const runReads = pushes.reads.strip + pushes.reads.liveRuns + pushes.reads.otherRuns;
-  // Budget, limit, measured, and whether the measurement is within the
-  // limit, or null for a measure that is recorded but has no budget.
-  const budgets: [string, string, string, boolean | null][] = [
+  return [
     [
       "Processes",
       `none added: ${String(BUDGET.processes)}`,
@@ -638,8 +1115,8 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
       gpuVisible.wakeups <= BUDGET.gpuWakeupsVisible,
     ],
     [
-      "Idle visible, age clock over 10 s",
-      "recorded; the seeded runs are under an hour old, so their ages change",
+      `Idle visible, age clock over ${(measured.visibleMs / 1_000).toFixed(0)} s`,
+      agesText,
       String(measured.firesVisible),
       null,
     ],
@@ -655,63 +1132,54 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
       String(measured.firesHidden),
       measured.firesHidden === 0,
     ],
+  ];
+}
+
+/**
+ * Builds the budget rows of one round of pushes, `pushes`, each row's name
+ * starting with `prefix`. `expected` lists the run reads one push should
+ * cause, by kind; a kind it leaves out should cause none.
+ */
+function buildPushRows(
+  prefix: string,
+  pushes: PushCost,
+  expected: Partial<Record<ReadKind, { readonly count: number; readonly text: string }>>,
+): BudgetRow[] {
+  const settled = pushes.settleMs.filter((ms) => ms !== null).toSorted((a, b) => a - b);
+  const otherPaths = [...pushes.otherPaths]
+    .map(([path, count]) => `${path} ${String(count)}`)
+    .join(", ");
+  const mainThreadPerPushMs = pushes.rendererMainThreadMs / PUSH_COUNT;
+  const runKinds: { kind: ReadKind; name: string }[] = [
+    { kind: "strip", name: "requests for the strips" },
+    { kind: "liveRuns", name: "live run reads" },
+    { kind: "workflowRuns", name: "reads of the Runs list's pages" },
+    { kind: "dayRuns", name: "reads of the timeline's day" },
+  ];
+  return [
+    ...runKinds.map(({ kind, name }): BudgetRow => {
+      const want = expected[kind] ?? { count: 0, text: "none" };
+      return [
+        `${prefix}, ${name}`,
+        want.text,
+        formatPerPush(pushes.reads[kind]),
+        pushes.reads[kind] <= want.count * PUSH_COUNT,
+      ];
+    }),
     [
-      "Opening the list, requests for the strips",
-      "2: the loader's read, then the first push's read again, one page each",
-      String(opening.stripReads),
-      opening.stripReads <= 2,
-    ],
-    [
-      "Opening the list, until the first request for the strips answered",
-      "controller local; at most 500 ms",
-      `${opening.firstStripsFromPageStartMs.toFixed(0)} ms from the page's start ` +
-        `(${opening.firstStripsFromSpawnMs.toFixed(0)} ms from spawn)`,
-      opening.firstStripsFromPageStartMs <= 500,
-    ],
-    [
-      "Opening the list, until the last request for the strips answered",
-      "recorded; not budgeted",
-      `${opening.lastStripsFromPageStartMs.toFixed(0)} ms from the page's start`,
-      null,
-    ],
-    [
-      '"From runs", reads at launch',
-      "one read added to each round of the launch's shell reads, as many as the thread list's",
-      `${String(opening.liveSessionReads)} (thread list ${String(opening.threadListReads)})`,
-      opening.liveSessionReads <= opening.threadListReads,
-    ],
-    [
-      "Per push, requests for the strips",
-      "1 a push: one read for every workflow, one page at this seed's 90 runs",
-      formatPerPush(pushes.reads.strip),
-      pushes.reads.strip <= PUSH_COUNT,
-    ],
-    [
-      "Per push, live run reads",
-      "two a push, running and pending; each pair is one round of reads",
-      formatPerPush(pushes.reads.liveRuns),
-      pushes.reads.liveRuns <= LIVE_RUN_READS * PUSH_COUNT,
-    ],
-    [
-      "Run reads per round of reads",
-      `${String(1 + LIVE_RUN_READS)}: the strips and the live runs, once`,
-      rounds === 0 ? "no round" : `${(runReads / rounds).toFixed(1)} over ${String(rounds)} rounds`,
-      rounds === 0 ? null : runReads <= (1 + LIVE_RUN_READS) * rounds,
-    ],
-    [
-      "Per push, other run reads",
+      `${prefix}, other run reads`,
       "recorded; not budgeted",
       formatPerPush(pushes.reads.otherRuns),
       null,
     ],
     [
-      "Per push, other reads",
+      `${prefix}, other reads`,
       "recorded; not budgeted",
       `${formatPerPush(pushes.reads.other + pushes.reads.liveSessions)}${otherPaths === "" ? "" : `: ${otherPaths}`}`,
       null,
     ],
     [
-      "Per push, until the last run read answered",
+      `${prefix}, until the last run read answered`,
       "recorded; not budgeted",
       settled.length === 0
         ? "no run read followed a push"
@@ -721,34 +1189,39 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
       null,
     ],
     [
-      "Per push, renderer main thread",
+      `${prefix}, renderer main thread`,
       `at most ${String(BUDGET.rendererMainThreadPerNudgeMs)} ms, the thread list's nudge limit`,
       formatMsPerPush(pushes.rendererMainThreadMs),
       mainThreadPerPushMs <= BUDGET.rendererMainThreadPerNudgeMs,
     ],
     [
-      "Per push, renderer CPU",
+      `${prefix}, renderer CPU`,
       "recorded; not budgeted",
       formatMsPerPush(pushes.rendererCpuMs),
       null,
     ],
     [
-      "Per push, controller CPU",
+      `${prefix}, controller CPU`,
       "recorded; not budgeted",
       formatMsPerPush(pushes.controllerCpuMs),
       null,
     ],
   ];
+}
 
+/**
+ * Prints one Workflows launch under the heading `heading`: the load
+ * average, each process's memory, CPU and wakeups, and `budgets`.
+ */
+function printLaunch(heading: string, measured: LaunchAtRest, budgets: readonly BudgetRow[]): void {
+  const { memory, visible, hidden } = measured;
+  const summedMb = memory.reduce((sum, sample) => sum + sample.workingSetMb, 0);
+  const summedFootprintMb = memory.reduce((sum, sample) => sum + sample.footprintMb, 0);
   // A process that started or exited between the two samples is in one of
   // them only, so the table lists every process either sample saw.
   const seen = [...new Map([...visible, ...hidden].map((sample) => [sample.pid, sample.label]))];
 
-  console.log(
-    `## Workflows at work, ${String(WORKFLOW_COUNT)} workflows listed, ` +
-      `${String(LIVE_RUNS)} live runs across ${String(LIVE_WORKFLOW_COUNT)} of them, ` +
-      `one run cancelled a push`,
-  );
+  console.log(heading);
   console.log();
   console.log(`Load average over the minute before the launch: ${measured.loadAtSpawn.toFixed(2)}`);
   console.log();
@@ -769,7 +1242,8 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
   );
   console.log();
   console.log(
-    "CPU and wakeups over 10 s: visible from 30 s after the page opened, hidden from 3 s after hiding:",
+    `CPU and wakeups: visible over ${(measured.visibleMs / 1_000).toFixed(0)} s from 30 s after ` +
+      "the page opened, hidden over 10 s from 3 s after hiding:",
   );
   console.log(
     formatTable(
@@ -802,4 +1276,148 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
     ),
   );
   console.log();
+}
+
+/** The run reads one push causes on any Workflows screen: the strips once and the live runs once. */
+const LIST_PUSH_READS = {
+  strip: { count: 1, text: "1 a push: one read for every workflow, one page at this seed" },
+  liveRuns: {
+    count: LIVE_RUN_READS,
+    text: "two a push, running and pending; each pair is one round of reads",
+  },
+} as const;
+
+/** Prints what the workflow list scenario measured, against the limits spec 17 sets. */
+export function reportWorkflowWork(measured: WorkflowWork): void {
+  const { opening, pushes } = measured;
+  const rounds = pushes.reads.liveRuns / LIVE_RUN_READS;
+  const runReads = pushes.reads.strip + pushes.reads.liveRuns + pushes.reads.otherRuns;
+  const budgets: BudgetRow[] = [
+    ...buildAtRestRows(
+      measured,
+      "recorded; the seeded runs are under an hour old, so their ages change",
+    ),
+    [
+      "Opening the list, requests for the strips",
+      "2: the loader's read, then the first push's read again, one page each",
+      String(opening.stripReads),
+      opening.stripReads <= 2,
+    ],
+    [
+      "Opening the list, until the first request for the strips answered",
+      "controller local; at most 500 ms",
+      `${opening.firstStripsFromPageStartMs.toFixed(0)} ms from the page's start ` +
+        `(${opening.firstStripsFromSpawnMs.toFixed(0)} ms from spawn)`,
+      opening.firstStripsFromPageStartMs <= 500,
+    ],
+    [
+      "Opening the list, until the last request for the strips answered",
+      "recorded; not budgeted",
+      `${opening.lastStripsFromPageStartMs.toFixed(0)} ms from the page's start`,
+      null,
+    ],
+    [
+      '"From runs", reads at launch',
+      "one read added to each round of the launch's shell reads, as many as the thread list's",
+      `${String(opening.liveSessionReads)} (thread list ${String(opening.threadListReads)})`,
+      opening.liveSessionReads <= opening.threadListReads,
+    ],
+    [
+      "Run reads per round of reads",
+      `${String(1 + LIVE_RUN_READS)}: the strips and the live runs, once`,
+      rounds === 0 ? "no round" : `${(runReads / rounds).toFixed(1)} over ${String(rounds)} rounds`,
+      rounds === 0 ? null : runReads <= (1 + LIVE_RUN_READS) * rounds,
+    ],
+    ...buildPushRows("Per push", pushes, LIST_PUSH_READS),
+  ];
+  printLaunch(
+    `## Workflows at work, ${String(WORKFLOW_COUNT)} workflows listed, ` +
+      `${String(LIVE_RUNS)} live runs across ${String(LIVE_WORKFLOW_COUNT)} of them, ` +
+      `one run cancelled a push`,
+    measured,
+    budgets,
+  );
+}
+
+/**
+ * Builds the budget rows of the visible idle sample on today's timeline in
+ * `measured`: the renderer's and the GPU's use, and the age clock's fires.
+ */
+function buildTodayTimelineRows(measured: OpenWorkflowWork): BudgetRow[] {
+  const renderer = findProcessUse(measured.todayVisible, "Tab");
+  const gpu = findProcessUse(measured.todayVisible, "GPU");
+  const formatProcessUse = (use: ProcessUse | undefined) =>
+    use === undefined
+      ? "-"
+      : `${use.cpuPercent.toFixed(1)}% CPU, ${use.wakeupsPerSecond.toFixed(1)} wakeups/s`;
+  const seconds = (measured.todayVisibleMs / 1_000).toFixed(0);
+  return [
+    [
+      `Idle visible on today's timeline, renderer over ${seconds} s`,
+      `no wakeups from the app (at most ${String(BUDGET.rendererWakeups)}/s)`,
+      formatProcessUse(renderer),
+      (renderer?.wakeupsPerSecond ?? 0) <= BUDGET.rendererWakeups,
+    ],
+    [
+      `Idle visible on today's timeline, GPU over ${seconds} s`,
+      `at most ${String(BUDGET.gpuWakeupsVisible)} wakeups/s`,
+      formatProcessUse(gpu),
+      (gpu?.wakeupsPerSecond ?? 0) <= BUDGET.gpuWakeupsVisible,
+    ],
+    [
+      `Idle visible on today's timeline, age clock over ${seconds} s`,
+      "recorded; the time now moves once a minute",
+      String(measured.firesTodayVisible),
+      null,
+    ],
+  ];
+}
+
+/** Prints what the open workflow scenario measured, against the limits spec 17 sets. */
+export function reportOpenWorkflowWork(measured: OpenWorkflowWork): void {
+  const budgets: BudgetRow[] = [
+    ...buildAtRestRows(
+      measured,
+      "recorded; the list's live runs are under an hour old, so their ages change",
+    ),
+    [
+      "The graph, nodes drawn",
+      `${String(OPEN_WORKFLOW_NODES)}: the trigger and the three steps`,
+      String(measured.graphNodes),
+      measured.graphNodes === OPEN_WORKFLOW_NODES,
+    ],
+    [
+      "The Runs list, rows mounted",
+      "virtualized: the rows in view and 8 on each side, fewer than the rows read",
+      `${String(measured.mountedRows)} of ${String(measured.listedRows)} read`,
+      measured.mountedRows < measured.listedRows,
+    ],
+    ...buildPushRows("Per push, Runs list", measured.listPushes, {
+      ...LIST_PUSH_READS,
+      workflowRuns: { count: 1, text: "1 a push: the one page the list has read" },
+    }),
+    [
+      "The 300-run day, bars drawn",
+      `the day drawn whole: ${String(OPEN_WORKFLOW_RUNS)}`,
+      `${String(measured.dayBars)}, on ${String(measured.dayTracks)} tracks`,
+      measured.dayBars === OPEN_WORKFLOW_RUNS,
+    ],
+    [
+      "The 300-run day, renderer main thread to show it",
+      "recorded; not budgeted",
+      `${measured.dayDrawMainThreadMs.toFixed(0)} ms, from picking the timeline until 1 s after the day showed`,
+      null,
+    ],
+    ...buildPushRows("Per push, timeline", measured.timelinePushes, {
+      ...LIST_PUSH_READS,
+      dayRuns: { count: 1, text: "1 a push: the day, one page of 500" },
+    }),
+    ...buildTodayTimelineRows(measured),
+  ];
+  printLaunch(
+    `## The open workflow, ${String(OPEN_WORKFLOW_RUNS)} runs yesterday, beside ` +
+      `${String(WORKFLOW_COUNT)} workflows listed, one run of another workflow cancelled a push`,
+    measured,
+    budgets,
+  );
 }

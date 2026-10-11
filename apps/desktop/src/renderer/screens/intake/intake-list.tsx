@@ -24,7 +24,7 @@ import {
   describeSignalRow,
   formatClock,
   isBackFromSnooze,
-  parseSignalPluginId,
+  parsePluginId,
   SIGNAL_MOVE_LABELS,
   type IntakeSection,
   type PluginIdentity,
@@ -377,7 +377,7 @@ const SignalRow = memo(function SignalRow({
         }}
       >
         <span className="ask-mark">
-          <SourceMark pluginId={parseSignalPluginId(signal.kind)} plugins={plugins} size={16} />
+          <SourceMark pluginId={parsePluginId(signal.kind)} plugins={plugins} size={16} />
         </span>
         <span className="ask-text">
           <span className="ask-title">{signal.title}</span>

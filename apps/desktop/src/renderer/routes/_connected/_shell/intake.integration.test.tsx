@@ -1102,3 +1102,11 @@ describe("Intake's moves", () => {
     expect(getRow(REVIEW)).not.toBeNull();
   });
 });
+
+describe("Intake's search params", () => {
+  it("drops a view and a signal it does not know", async () => {
+    const { router } = await openIntake("/intake?view=archived&signal=not-an-id");
+
+    expect(router.state.matches.at(-1)!.search).toEqual({});
+  });
+});

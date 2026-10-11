@@ -1,7 +1,8 @@
 /**
  * Tests the workflow list: its groups and rows, the filters and the search,
- * ⌘F, the empty list, and how the `workflow` and `run` topics keep it
- * current while the window is visible.
+ * ⌘F, the empty list, its three widths, the header over an open workflow,
+ * Esc, and how the `workflow` and `run` topics keep it current while the
+ * window is visible.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -193,27 +194,53 @@ const answerRunQuery = (call: Call) => {
   };
 };
 
-/** Opens the app at the workflow list, with `workflows` and the fixture's triggers and runs. */
-const openWorkflows = async (workflows: readonly WorkflowSummary[] = WORKFLOWS) => {
+/**
+ * Opens the app at `path`, the workflow list by default, with `workflows` and
+ * the fixture's triggers and runs, and waits for the floating header to show.
+ */
+const openWorkflows = async (
+  workflows: readonly WorkflowSummary[] = WORKFLOWS,
+  path = "/workflows",
+) => {
   const handlers: Readonly<Record<string, Handler>> = {
     ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, agentSessions: [WAITING] }),
     "GET /api/v1/settings": { body: { controller: {}, user: { timezone: "UTC" } } },
     "GET /api/v1/workflows": { body: { items: workflows } },
     "GET /api/v1/triggers": { body: { items: TRIGGERS } },
     "GET /api/v1/runs": answerRunQuery,
+    // What an open workflow reads besides the list: the workflow itself,
+    // with one step, and the Agents and workflow actions that name steps.
+    ...Object.fromEntries(
+      workflows.map((workflow): [string, Handler] => [
+        `GET /api/v1/workflows/${workflow.id}`,
+        {
+          body: {
+            id: workflow.id,
+            enabled: workflow.enabled,
+            source: `name: ${workflow.name}\nsteps:\n  - id: review\n    kind: agent\n    agent: 01a06d02-7b00-7000-8000-000000000001\n    prompt: Review.\n`,
+            createdAt: AT,
+            updatedAt: AT,
+          },
+        },
+      ]),
+    ),
+    "GET /api/v1/agents": { body: { items: [] } },
+    "GET /api/v1/workflow-actions": { body: [] },
   };
   const calls = stubApi(handlers);
   const app = await renderApp(
     createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
-    { path: "/workflows" },
+    { path },
   );
-  await screen.findByRole("heading", { level: 1, name: "Workflows" });
+  // The header's pill: the filters over the table, the back tab over an open workflow.
+  await screen.findByRole("navigation", { name: /^(Filter workflows|Workflow list)$/ });
   return { calls, ...app };
 };
 
 const getList = () => screen.getByRole("navigation", { name: "Workflows" });
 const getFilters = () => screen.getByRole("navigation", { name: "Filter workflows" });
 const getSearch = () => screen.getByRole("searchbox", { name: "Search workflows" });
+const getHeader = () => screen.getByRole("navigation", { name: "Workflow list" });
 
 /** Returns the text of each cell of `workflow`'s row, in column order. */
 const readCells = (workflow: WorkflowSummary): string[] => {
@@ -318,11 +345,34 @@ describe("the workflow list", () => {
     await userEvent.click(row);
 
     await waitFor(() => expect(router.state.location.pathname).toBe(`/workflows/${SYNC.id}`));
-    expect(row.getAttribute("aria-current")).toBe("page");
+    // The list stays, as the column, with the open workflow's row selected.
+    const selected = within(getList()).getByRole("link", { name: "Nightly sync" });
+    expect(selected.getAttribute("aria-current")).toBe("page");
     // The selected row is drawn with the selection's fill, which only its class shows.
-    expect(row.classList.contains("is-on")).toBe(true);
-    // The list stays, with its heading.
-    expect(screen.getByRole("heading", { level: 1, name: "Workflows" })).toBeTruthy();
+    expect(selected.classList.contains("is-on")).toBe(true);
+  });
+
+  it("keeps the focus on the open workflow's row while the list changes width", async () => {
+    const { router } = await openWorkflows();
+    act(() => within(getList()).getByRole("link", { name: "Nightly sync" }).focus());
+
+    await userEvent.keyboard("{Enter}");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/workflows/${SYNC.id}`));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(getList()).getByRole("link", { name: "Nightly sync" }),
+      ),
+    );
+
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/workflows"));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(getList()).getByRole("link", { name: "Nightly sync" }),
+      ),
+    );
   });
 
   it("says when there are no workflows", async () => {
@@ -384,6 +434,196 @@ describe("the workflow list's filters and search", () => {
     const search = getSearch() as HTMLInputElement;
     expect(document.activeElement).toBe(search);
     expect([search.selectionStart, search.selectionEnd]).toEqual([0, 4]);
+  });
+});
+
+describe("the workflow list's widths", () => {
+  it("draws the table while no workflow is open, with the filters, the search and the column heads", async () => {
+    await openWorkflows();
+
+    expect(screen.getByRole("heading", { level: 1, name: "Workflows" })).toBeTruthy();
+    expect(getFilters()).toBeTruthy();
+    expect(within(getList()).getByText("Starts on")).toBeTruthy();
+    // The search sits in the header, not in the list.
+    expect(within(getList()).queryByRole("searchbox")).toBeNull();
+    expect(getSearch()).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Workflow list" })).toBeNull();
+    expect(getList().classList.contains("workflow-list--table")).toBe(true);
+  });
+
+  it("draws the list as a column beside an open workflow, with the search at its top", async () => {
+    await openWorkflows(WORKFLOWS, `/workflows/${SYNC.id}`);
+
+    expect(getList().classList.contains("workflow-list--column")).toBe(true);
+    expect(within(getList()).getByRole("searchbox", { name: "Search workflows" })).toBeTruthy();
+    // No column heads and no filters: the header holds the back tab.
+    expect(within(getList()).queryByText("Starts on")).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Filter workflows" })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 1, name: "Workflows" })).toBeNull();
+    // A row is the mark, the name over the status, and the time.
+    const sync = within(getList()).getByRole("link", {
+      name: "Nightly sync",
+      description: "Failed at test",
+    });
+    expect([...sync.children].map((part) => part.textContent)).toEqual([
+      "",
+      "Nightly syncFailed at test",
+      "08:15",
+    ]);
+    expect(sync.getAttribute("aria-current")).toBe("page");
+    expect(sync.classList.contains("is-on")).toBe(true);
+    expect(
+      within(getList()).getByRole("link", { name: "Ship release" }).getAttribute("aria-current"),
+    ).toBeNull();
+    // The same groups and rows as the table.
+    expect(readList()).toEqual([
+      "Needs you 1",
+      "Ship release",
+      "Failing 1",
+      "Nightly sync",
+      "Running 1",
+      "Triage issues",
+      "Everything else 2",
+      "Ad hoc report",
+      "Old cleanup",
+    ]);
+  });
+
+  it("hides the list while the open workflow fills the pane", async () => {
+    await openWorkflows(WORKFLOWS, `/workflows/${SYNC.id}?full=true`);
+
+    expect(screen.queryByRole("navigation", { name: "Workflows" })).toBeNull();
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(within(getHeader()).getByRole("button", { name: "Show the list" })).toBeTruthy();
+  });
+
+  it("hides the list and shows it again from the header's button, keeping the other search params", async () => {
+    const { router } = await openWorkflows(
+      WORKFLOWS,
+      `/workflows/${SYNC.id}?runsView=timeline&daysBack=2`,
+    );
+
+    await userEvent.click(within(getHeader()).getByRole("button", { name: "Hide the list" }));
+
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({
+        runsView: "timeline",
+        daysBack: 2,
+        full: true,
+      }),
+    );
+    expect(screen.queryByRole("navigation", { name: "Workflows" })).toBeNull();
+
+    await userEvent.click(within(getHeader()).getByRole("button", { name: "Show the list" }));
+
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ runsView: "timeline", daysBack: 2 }),
+    );
+    expect(router.state.location.pathname).toBe(`/workflows/${SYNC.id}`);
+    expect(
+      within(getList()).getByRole("link", { name: "Nightly sync" }).getAttribute("aria-current"),
+    ).toBe("page");
+  });
+
+  // Below 800px of pane the open workflow fills the pane and the header's
+  // list button is hidden. That is a container query on `.workflows-page`
+  // (workflow-list.css), which jsdom does not evaluate, so no test here
+  // covers it.
+});
+
+describe("the header over an open workflow", () => {
+  it("leads back to the table from the page's name, with the count of All", async () => {
+    const { router } = await openWorkflows(WORKFLOWS, `/workflows/${SYNC.id}`);
+    const back = within(getHeader()).getByRole("link", { name: "Workflows 5" });
+    expect(back.getAttribute("href")).toBe("/workflows");
+    expect(back.getAttribute("aria-current")).toBeNull();
+
+    await userEvent.click(back);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/workflows"));
+    expect(getList().classList.contains("workflow-list--table")).toBe(true);
+  });
+
+  it("shows the filter beside the back tab, and keeps the filter and the search while workflows open and close", async () => {
+    const { router } = await openWorkflows();
+    await userEvent.click(within(getFilters()).getByRole("button", { name: "Failing 1" }));
+    await userEvent.type(getSearch(), "sync");
+
+    await userEvent.click(within(getList()).getByRole("link", { name: "Nightly sync" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/workflows/${SYNC.id}`));
+    expect(within(getHeader()).getByRole("link", { name: "Workflows 5" })).toBeTruthy();
+    expect(within(getHeader()).getByText("Failing").textContent).toBe("Failing 1");
+    expect(within(getList()).getByRole<HTMLInputElement>("searchbox").value).toBe("sync");
+    expect(readList()).toEqual(["Failing 1", "Nightly sync"]);
+
+    await userEvent.click(within(getHeader()).getByRole("link", { name: "Workflows 5" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/workflows"));
+    expect(
+      within(getFilters()).getByRole("button", { name: "Failing 1" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect((getSearch() as HTMLInputElement).value).toBe("sync");
+  });
+
+  it("shows no filter beside the back tab while the filter is All", async () => {
+    await openWorkflows(WORKFLOWS, `/workflows/${SYNC.id}`);
+
+    expect(within(getHeader()).getAllByRole("link")).toHaveLength(1);
+    expect(getHeader().textContent).toBe("Workflows 5");
+  });
+});
+
+describe("Esc on an open workflow", () => {
+  it("closes the workflow, back to the table", async () => {
+    const { router } = await openWorkflows(WORKFLOWS, `/workflows/${SYNC.id}?full=true`);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/workflows"));
+    expect(router.state.location.search).toEqual({});
+  });
+
+  it("is left to a focused text field", async () => {
+    const { router } = await openWorkflows(WORKFLOWS, `/workflows/${SYNC.id}`);
+    const search = within(getList()).getByRole("searchbox");
+    act(() => search.focus());
+
+    fireEvent.keyDown(search, { key: "Escape" });
+
+    expect(router.state.location.pathname).toBe(`/workflows/${SYNC.id}`);
+  });
+
+  it("is left to whatever handled it first", async () => {
+    const { router } = await openWorkflows(WORKFLOWS, `/workflows/${SYNC.id}`);
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    event.preventDefault();
+
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+
+    expect(router.state.location.pathname).toBe(`/workflows/${SYNC.id}`);
+  });
+
+  it("is left to an open dialog, which the browser closes on Esc", async () => {
+    const { router } = await openWorkflows(WORKFLOWS, `/workflows/${SYNC.id}`);
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "");
+    document.body.append(dialog);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    expect(router.state.location.pathname).toBe(`/workflows/${SYNC.id}`);
+    dialog.remove();
+  });
+
+  it("does nothing on the table", async () => {
+    const { router } = await openWorkflows();
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    expect(router.state.location.pathname).toBe("/workflows");
   });
 });
 

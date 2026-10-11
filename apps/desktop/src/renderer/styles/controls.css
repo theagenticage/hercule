@@ -115,6 +115,17 @@
   background: var(--hover);
   color: var(--ink);
 }
+/* Not in the book, whose disabled icon buttons have no style of their own.
+   An icon button that cannot act, such as the timeline's step on while it
+   shows today, is drawn at half opacity and takes no hover, as `.btn` is.
+   One that must keep the focus is `aria-disabled` with `data-unready`, as
+   for `.btn`. `aria-disabled` alone does not dim it, so the icon buttons that
+   already use it, such as the sidebar's Search, keep their look. */
+.icon-btn:disabled,
+.icon-btn[data-unready] {
+  opacity: 0.5;
+  pointer-events: none;
+}
 .icon-btn--sm {
   width: 22px;
   height: 22px;

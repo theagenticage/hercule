@@ -17,6 +17,7 @@ const crew = readCrew();
 
 // The icons the book names differently from the app. Every other icon has the same name in both.
 const BOOK_ICON_NAMES: Partial<Record<IconName, string>> = {
+  "chevron-left": "chev-l",
   "chevron-right": "chev-r",
   workspace: "worktree",
 };

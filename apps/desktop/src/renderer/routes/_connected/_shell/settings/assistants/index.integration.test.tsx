@@ -103,10 +103,13 @@ const storeAssistants = (): Readonly<Record<string, (call: Call) => Answer>> => 
 };
 
 /**
- * Opens Settings > Assistants with Ada and Milo, the fixture provider
- * instance and two permission profiles, and `handlers` on top.
+ * Opens Settings > Assistants at `path` with Ada and Milo, the fixture
+ * provider instance and two permission profiles, and `handlers` on top.
  */
-const openAssistants = async (handlers: Readonly<Record<string, Handler>> = {}) => {
+const openAssistants = async (
+  handlers: Readonly<Record<string, Handler>> = {},
+  path = "/settings/assistants",
+) => {
   const calls = stubApi({
     ...buildSidebarHandlers({
       ...SIDEBAR_FIXTURE,
@@ -122,7 +125,7 @@ const openAssistants = async (handlers: Readonly<Record<string, Handler>> = {}) 
     ...handlers,
   });
   const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
-  const app = await renderApp(fake, { path: "/settings/assistants" });
+  const app = await renderApp(fake, { path });
   await screen.findByRole("heading", { level: 1, name: "Assistants" });
   return { calls, ...app };
 };
@@ -513,5 +516,13 @@ describe("Settings > Assistants, Memory", () => {
 
     expect((await screen.findByRole("alert")).textContent).toBe(`Could not create: ${message}`);
     expect(screen.getByRole("dialog", { name: "New topic" })).toBeTruthy();
+  });
+});
+
+describe("Settings > Assistants' search params", () => {
+  it("drops an assistant that is not an id", async () => {
+    const { router } = await openAssistants({}, "/settings/assistants?assistant=not-an-id");
+
+    expect(router.state.matches.at(-1)!.search).toEqual({});
   });
 });

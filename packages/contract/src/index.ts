@@ -577,19 +577,18 @@ export {
 export {
   ANY_CONNECTION,
   collectReachableSteps,
-  decodeWorkflowDefinition,
   EventSelector,
   isSchedule,
   Schedule,
   TriggerFiresOn,
   TriggerOn,
-  truncateIssues,
   listEntrySteps,
   readFieldNotation,
   WorkflowDefinition,
   WorkspacePolicy,
   type FieldNotation,
 } from "./groups/workflow-definition";
+export { decodeWorkflowDefinition, truncateIssues } from "./groups/workflow-definition-decode";
 export {
   parseWorkflowDocument,
   parseWorkflowSource,

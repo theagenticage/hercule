@@ -32,11 +32,7 @@ import {
 } from "../office-store";
 import type { Pose } from "@hercule/client-core";
 import type { Colleague, World } from "../world/types";
-
-/** Returns true when `target`, the keyboard's focus, is a field, where keys type text. */
-const isTyping = (target: EventTarget | null): boolean =>
-  target instanceof HTMLElement &&
-  (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+import { isTextField } from "../../app/text-field";
 
 /**
  * Returns the colleagues of `world` in `pose` now, as `states` holds them,
@@ -112,7 +108,7 @@ export function useOfficeKeys(world: World): void {
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
-      if (isTyping(event.target)) return;
+      if (isTextField(event.target)) return;
       if (event.target !== document.body && !isInside(event.target, ".office")) return;
       const state = readOffice();
       switch (event.key) {

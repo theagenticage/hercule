@@ -1,12 +1,12 @@
 import { listEntrySteps, type WorkflowDefinition } from "@hercule/contract";
 
-/** A trigger kind (`start`, `signal`) or a step kind (`action`, `agent`). */
-type WorkflowGraphNodeKind = "start" | "signal" | "action" | "agent";
+/** The kinds of node on a workflow's graph: a trigger kind (`start`, `signal`) or a step kind (`action`, `agent`). */
+export type NodeKind = "start" | "signal" | "action" | "agent";
 
 export interface WorkflowGraphNode {
   /** The trigger's or step's id. */
   readonly id: string;
-  readonly kind: WorkflowGraphNodeKind;
+  readonly kind: NodeKind;
   /** Set on a terminal step, which ends the run when it completes. */
   readonly terminal?: true;
 }
