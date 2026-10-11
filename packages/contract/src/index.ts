@@ -146,6 +146,7 @@ export {
   SettingsPatch,
   SettingsState,
   ThreadRows,
+  TextGenerationModel,
   ThreadWorkspace,
   TimeOfDay,
   UserSettings,
@@ -330,7 +331,13 @@ export {
   MAX_CONNECTION_LABEL_LENGTH,
   MAX_FEED_INTERVAL_SECONDS,
 } from "./groups/connection";
-export { ControllerInfo, ControllerUpdateInput, MintedPromotionToken } from "./groups/controller";
+export {
+  ControllerInfo,
+  ControllerUpdateInput,
+  MintedPromotionToken,
+  TextGenerationFailureReason,
+  TextGenerationStatus,
+} from "./groups/controller";
 export {
   IDENTITY_PORT,
   IDENTITY_PORT_COUNT,

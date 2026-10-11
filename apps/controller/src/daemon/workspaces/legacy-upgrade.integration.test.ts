@@ -254,18 +254,21 @@ const withLegacyController = async (
       expect(reader.query("SELECT * FROM controller_identity").all()).toEqual(
         fixture.before.identity,
       );
-      // The only changes to a session row are two added columns:
+      // The only changes to a session row are three added columns:
       //
       // - who created it: these rows were written with no audit entry of
       //   their creation, so nobody can tell any more, and the column stays
       //   null;
       // - how many tool calls it made: each stream holds only its
-      //   `session.started`, so the count is 0.
+      //   `session.started`, so the count is 0;
+      // - whether a generated title needs refinement: no title was generated
+      //   for these sessions, so it stays null.
       expect(reader.query("SELECT * FROM sessions ORDER BY id").all()).toEqual(
         fixture.before.sessions.map((row) => ({
           ...(row as object),
           created_by: null,
           tool_calls: 0,
+          needs_refinement: null,
         })),
       );
       expect(reader.query("SELECT * FROM session_stream ORDER BY session_id").all()).toEqual(

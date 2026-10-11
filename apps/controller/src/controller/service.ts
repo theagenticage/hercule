@@ -2,12 +2,15 @@
  * `controller.read` and `controller.update`: information about this
  * controller, and the one field a caller may change.
  *
- * `controller.read` returns four values today:
+ * `controller.read` returns five values today:
  *
  * - the identity the runners verify against;
  * - the version built into the binary;
  * - the default runner, which placement falls back to;
- * - the local runner, which this controller started on its own machine.
+ * - the local runner, which this controller started on its own machine;
+ * - the text generation status: the model text generations run on now, and
+ *   why the last one failed, if it did. Both are worked out on every read;
+ *   the last failure is held in memory only.
  *
  * The local runner's id is not stored anywhere. It is read from the running
  * child on every call, through `LocalRunnerId`, so it is null until the child
@@ -54,6 +57,7 @@ import { AuditLog } from "../events";
 import { ControllerIdentity } from "../identity";
 import { LocalRunnerId, RETIRED, runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
+import { LastTextGenerationFailure, TextGenerationModels } from "../text-generation";
 
 const decodeUpdate = Schema.decodeUnknownEffect(ControllerUpdateInput);
 
@@ -72,16 +76,26 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const audit = yield* AuditLog;
   const localRunnerId = yield* LocalRunnerId;
+  const textGenerationModels = yield* TextGenerationModels;
+  const lastTextGenerationFailure = yield* LastTextGenerationFailure;
 
   const readControllerInfo = (): Effect.Effect<ControllerInfo, SettingError | SqlError> =>
     Effect.gen(function* () {
       const record = yield* identity.readOrDie;
+      const target = yield* textGenerationModels.resolve();
       return {
         id: record.id,
         publicKey: Buffer.from(record.publicKey).toString("base64"),
         version: VERSION,
         defaultRunnerId: yield* settings.defaultRunnerId(),
         localRunnerId: localRunnerId.read() ?? null,
+        textGeneration: {
+          model:
+            target._tag === "resolved"
+              ? { instanceId: target.instance.id, model: target.model }
+              : null,
+          lastFailure: yield* lastTextGenerationFailure.read(target.failureKey),
+        },
       };
     });
 
@@ -156,5 +170,11 @@ export class Controller extends Context.Service<Controller, Effect.Success<typeo
 export const ControllerLayer: Layer.Layer<
   Controller,
   never,
-  SqlClient.SqlClient | ControllerIdentity | Settings | AuditLog | LocalRunnerId
+  | SqlClient.SqlClient
+  | ControllerIdentity
+  | Settings
+  | AuditLog
+  | LocalRunnerId
+  | TextGenerationModels
+  | LastTextGenerationFailure
 > = Layer.effect(Controller)(make);

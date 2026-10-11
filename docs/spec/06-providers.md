@@ -1,13 +1,13 @@
 # Providers
 
-A provider wraps one interactive coding harness (Claude Code via the Agent SDK, Codex via `codex app-server`, pi via its RPC mode) behind two surfaces: a **ProviderDefinition** on the controller (static self-description, registered by the provider plugin) and a **ProviderAdapter** on the runner (execution: probe plus five session methods, one normalized event stream). The controller authors a `SessionSpec` that names ids, never paths; the runner resolves it and drives the adapter; the adapter normalizes vendor traffic into one event vocabulary at the runner, with a tagged raw passthrough. Degradation is declared, never silent: per-mode and per-feature support are pure facts on the definition, and the controller substitutes an unsupported access mode by a hardcoded, strictly downward fallback before the session starts. Rationale lives in [ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md).
+A provider wraps one interactive coding harness (Claude Code via the Agent SDK, Codex via `codex app-server`, pi via its RPC mode) behind two surfaces: a **ProviderDefinition** on the controller (static self-description, registered by the provider plugin) and a **ProviderAdapter** on the runner (execution: ~~probe plus five session methods, one normalized event stream~~ the probe, install and login, six session methods with one normalized event stream, and a one-shot `generateText` for text generation, section 14 *(amended 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282))*). The controller authors a `SessionSpec` that names ids, never paths; the runner resolves it and drives the adapter; the adapter normalizes vendor traffic into one event vocabulary at the runner, with a tagged raw passthrough. Degradation is declared, never silent: per-mode and per-feature support are pure facts on the definition, and the controller substitutes an unsupported access mode by a hardcoded, strictly downward fallback before the session starts. Rationale lives in [ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md).
 
 ## 1. Shape
 
 | Surface | Where | Registered by | Owns |
 |---|---|---|---|
 | ProviderDefinition | controller | provider plugin, into the `provider` extension point ([./05-plugins.md](./05-plugins.md)) | identity, config schema, declared capabilities |
-| ProviderAdapter | runner | built-in runner code in v1, written plugin-shaped (one narrow interface per provider, no cross-provider leakage); lifted into the plugin post-v1 | probing, session execution, event normalization |
+| ProviderAdapter | runner | built-in runner code in v1, written plugin-shaped (one narrow interface per provider, no cross-provider leakage); lifted into the plugin post-v1 | probing, session execution, event normalization, text generation (section 14, *added 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282)*) |
 
 A **provider instance** is a definition plus decoded config (t3-code's driver/instance split). The instance id, not the provider id, is the routing key everywhere: snapshots, session specs, placement. `supportsMultipleInstances` providers get multi-account by config-dir isolation (one login per instance).
 
@@ -25,6 +25,7 @@ interface ProviderDefinition {
   configSchema: Schema                        // per-instance logical settings, in Effect Schema: env, model defaults - never paths (§2.1)
   defaultConfig: unknown                      // a plain JSON value, not a function (2026-09-06)
   declared: DeclaredCapabilities              // static facts of the pinned adapter version
+  suggestedTextGenerationModel?: string       // added 2026-10-11, #282: a small, cheap model slug for text generation (section 14)
 }
 
 interface DeclaredCapabilities {
@@ -146,6 +147,9 @@ The composer reads `imageInput` to disable Attach and refuse pasted or too-large
 interface ProviderAdapter {
   providerId: string
   probe(config: InstanceConfig): Effect<ProbeResult>
+  install?(env: Environment): Effect<InstallOutcome>                     // per machine, not per instance
+  login?(ctx: ProviderRunnerContext, binary: string): LoginCommand      // the harness's own headless login
+  generateText(ctx: ProviderRunnerContext, config: InstanceConfig, spec: TextGenerationSpec): Effect<TextGenerationOutcome>   // added 2026-10-11, #282: section 14; never fails
   startSession(spec: SessionSpec, ctx: ProviderRunnerContext): Effect<SessionBinding>
   sendInput(sessionId: string, input: TurnInput): Effect<SendResult>
   interrupt(sessionId: string, subagentId?: string): Effect<void>   // subagentId added 2026-10-05, #355: section 13.4
@@ -851,6 +855,102 @@ The meaning is section 6.6's. Per harness:
 - **A failed subagent needs nothing new.** Its parent sees the failure as the result of its tool call, its record is `failed`, and its Requests are announced like any other.
 - **A Hercule session another session spawns is not a subagent.** It would be a Session of its own with a link to the session that spawned it, left open here; a client could later list it beside the subagents by merging `session.querySubagents` with `session.query { actor }`.
 
+## 14. Text generation
+
+*(Added 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282).)* A **text generation** is one model call: instructions, one input and an output schema go in, and a value that matches the schema comes out. It has no tools, no workspace, no transcript and no turn. It is not a Session: it has no Session row, takes no session slot, and emits no events. Work that needs tools stays an agent step. The reasons are in [ADR 0041](../adr/0041-text-generation-is-one-model-call-on-a-runner.md).
+
+### 14.1 Who calls it
+
+- **The controller's `TextGeneration` service** is the one entry point. Its `generate` method takes a caller, a purpose, the instructions, the input and an output schema in Effect Schema, and returns the decoded value or a `TextGenerationError`.
+- **The caller** is `core:<domain>` for a domain of the controller, such as `core:sessions`, or `plugin:<id>` for a plugin. Plugins reach the service later, through a host capability ([#285](https://github.com/theagenticage/hercule/issues/285)), under the usage rule in [./05-plugins.md](./05-plugins.md) section 8. Agents and sessions never call it: they are already model calls. It is not a public operation in v1 ([#287](https://github.com/theagenticage/hercule/issues/287)).
+- **The purpose** names what the call is for, such as `thread.title`. The service qualifies it with the caller's domain or plugin id, so the record shows `sessions/thread.title`, and one caller cannot claim another's purpose. The model never sees it. There is no registry of purposes.
+
+### 14.2 The text generation model
+
+The controller setting `textGeneration.model` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2) picks the provider instance and model every text generation runs on. It has three values:
+
+- **`automatic`**, the default, and what an unset key reads as. The controller walks a fixed order of providers, Codex, then pi, then Claude Code, and picks the first one whose `suggestedTextGenerationModel` (section 2) is in the model catalog of an instance that is logged in on a runner that could take the call (section 14.3). Today the suggestions are Codex `gpt-6-luna`, pi `glm-5.3-flash`, and the Haiku model the Claude Code definition names. A provider with no suggestion is skipped. With no match, text generation is off and every call fails as `unavailable`. The order is a controller constant, not a setting.
+- **`{ instanceId, model }`**, a model the user chose. `model` is the name the instance's model list gives it, at most 512 characters. Every call runs there. A call that cannot run there fails; it never falls back to another instance or provider.
+- **`off`.** Every call fails at once as `unavailable`. Nothing is recorded and the last failure (section 14.5) is not changed, because nothing was tried.
+
+The adapter runs the model at its provider's cheapest reasoning setting: lowest effort, or thinking off. The controller sends no model options.
+
+### 14.3 Where it runs
+
+The controller holds no provider login ([./13-security.md](./13-security.md) section 8), so every text generation runs on a runner. The runner is chosen per call, in this order:
+
+1. the controller's local runner, when it could take the call;
+2. otherwise any other runner that could.
+
+A runner could take the call when it is placeable, is not reserved, has negotiated the `textGeneration` capability, has the instance logged in, and lists the model among the instance's models. A reserved runner is never chosen ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 5.5): nobody placed this work on it. A runner whose negotiated capabilities lack `textGeneration` is never chosen ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). `automatic` and the runner choice use this one rule, so `automatic` never picks a model that no runner could run.
+
+**At most 10 text generations run at once on one runner.** The limit is the protocol constant `MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER` in `@hercule/protocol`, and both sides enforce it. It only guards against a burst, such as 50 events arriving together; normal use never reaches it. It is separate from `maxConcurrentSessions` ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 5.3): a text generation takes no session slot, and a full runner's session queue does not hold one back.
+
+- **The controller queues.** A call over the limit waits in the controller until a slot on that runner is free. The wait counts against the caller's timeout (section 14.5).
+- **The runner refuses.** A runner that already runs 10 calls answers an 11th as `failed` at once. The controller never sends one, so this only guards against a controller that does.
+
+**A slot is held until the runner answers**, not until the caller stops waiting. The runner always answers within its own deadline of 60 seconds (`TEXT_GENERATION_DEADLINE_MS`), or its connection ends. The runner in turn frees its own slot only after the harness process has exited (section 14.4). If the caller's timeout freed the slot first, a burst during a provider outage would start new harnesses on a runner whose earlier harnesses still run, and the limit would not hold. The controller also stops holding a slot 10 seconds after that deadline, so a runner that never answers cannot keep a slot for good. A caller that gives up while still waiting for a slot never sends its call.
+
+### 14.4 The adapter's one-shot method
+
+`generateText(ctx, config, spec)` on the `ProviderAdapter` (section 4) makes the call. `spec` is a `TextGenerationSpec`: the model name, a string as the instance's model list gives it (a text generation takes no model options), the instructions, the input and the output schema as JSON Schema ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2).
+
+- **One harness process per call.** It starts, answers and exits before the method returns. Starting takes about 0.5 to 2 seconds, and Claude Code uses about 1 GiB of memory while it runs. A warm process per runner is an optimization to make only after measuring.
+- **The instructions are the system prompt and the input is the one user message.**
+- **No workspace.** The runner makes a scratch folder for each call under `<runner storage>/scratch`, readable by its user only (mode 0700), and passes it to the adapter as `ctx.cwd`. The adapter runs the harness there, so no repository's instructions or settings reach the call. The runner removes the folder on every path, whatever the outcome, and wipes the whole `scratch` folder when it starts, so a crash leaves nothing behind.
+- **The runner owns the deadline and the limit.** `answerTextGeneration` (`apps/runner/src/socket.ts`) handles the request frame and calls the runner's text generator, `makeTextGenerator` (`apps/runner/src/text-generation.ts`).
+  - It stops a call that runs past 60 seconds and answers `timeout`.
+  - It catches any error once and answers `failed` with a message that is never empty. A failure message never contains model output or the harness's error output, because the controller stores and shows it, and error output can hold a credential or quote the input. A harness that exits early is reported by its exit code, or by a fixed sentence.
+  - It runs at most `MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER` (10) calls at once and answers an 11th `failed` at once. The controller never sends an 11th (section 14.3), so this only guards against a controller that does.
+  - **It releases a slot only after the harness has exited.** When a call ends, the runner waits for the harness process to exit before the slot is free for the next call. The wait is bounded. Codex and pi get SIGTERM, then 2 seconds to exit, then SIGKILL. Claude Code gets the SDK's own close first, which closes its input and waits about 2 seconds for the exit, and then the same SIGTERM, 2 seconds and SIGKILL. The runner starts the Claude Code process itself, through the SDK's `spawnClaudeCodeProcess` option, so that it stops and awaits that exact process: the SDK's close returns after its 2 second wait whether or not the process has exited, and the SDK's own SIGKILL comes only after about 7 seconds. So the runner can answer up to about 64 seconds after the request, which is why the controller holds a slot for up to 70. This keeps the count of 10 a count of live harness processes, not of calls.
+- **Nothing persisted.** The harness writes no session or transcript into the instance home.
+- **The output schema** follows the strict subset of section 7, so it works on every provider.
+- **It can fail.** `generateText` returns an Effect that can fail with an error, for example when the harness cannot be started, and the runner turns that into `failed` as above. When the harness runs, it returns one outcome:
+  - `ok` with the value, re-validated against the schema by the runner as in section 7, and `usage` when the harness reported it: token counts, and cost when the provider reports cost;
+  - `invalid-output` with a reason, when the harness answered with no value that matches the schema;
+  - `timeout`, when the harness ran past the runner's deadline of 60 seconds (`TEXT_GENERATION_DEADLINE_MS`) and the runner stopped it;
+  - `failed` with a message, when there was no answer: the harness would not start, was not logged in, or errored.
+
+How each provider makes a call with no tools, nothing persisted and a structured answer:
+
+- **Claude Code.** One `query()` with the input as the prompt and these options: `systemPrompt` set to the instructions, `tools: []`, `outputFormat: { type: "json_schema", schema }`, `persistSession: false`, `settingSources: []`, `cwd` set to the scratch folder, and the binary and environment of the probe (section 10.1). The value is `structured_output` on the `result` message. Usage and `total_cost_usd` come from the same message.
+
+  **Verified at build time** *(2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282))*: yes, `outputFormat` works with `tools: []`. The CLI's init message then lists exactly one tool, `StructuredOutput`, and the result carries a valid `structured_output`. The adapter also sets `thinking` disabled, `effort: "low"` and `maxTurns: 2`; the second turn only exists so the SDK can retry one structured output that did not match. A retry cut short ends as `error_max_turns`, which the adapter reports as `invalid-output`. No session file was written. The suggested model is the `haiku` alias, which the probe lists and which follows the newest Haiku. Haiku 5.5 still spends about 100 to 140 thinking tokens with both settings; neither switches it off alone. Proven on CLI 2.1.296, not the 2.1.263 the SDK pins: the SDK bundles no CLI and runs the machine's own `claude`.
+
+- **Codex.** A `codex app-server` of its own. `thread/start` with `ephemeral: true`, `cwd` set to the scratch folder, and the built-in tools turned off through config. Then one `turn/start` with the input and `outputSchema`. The value is the text of the turn's final `agentMessage` item, parsed as JSON. Usage comes from `thread/tokenUsage/updated`; Codex reports no cost (section 12).
+
+  **Verified at build time** *(2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282))*, on the pinned 0.154.0: only partly. The thread config turns off `features.shell_tool`, `features.view_image`, `features.multi_agent`, `features.apps`, `features.plugins`, `features.image_generation`, `web_search`, `skills.bundled.enabled` and `include_environment_context`. Four `-c` process overrides (`features.plugins`, `features.shell_snapshot`, `features.memories`, `skills.bundled.enabled`) stop what Codex writes while it starts, before any thread exists. Four tools cannot be turned off: `apply_patch` and `request_user_input` have no setting, and `exec` and `wait` come from the model's own catalog entry (`tool_mode: code_mode_only`). With the shell off, `exec` runs JavaScript with no file system, network or shell. The adapter therefore fails a call on any item other than a user message, an agent message or reasoning, and refuses every server request, in a read-only sandbox that never asks. With `ephemeral: true` no session or rollout file is written. `gpt-6-luna` is listed by Codex 0.162 and later but not by 0.154.0, so on the pinned release `automatic` passes over Codex; the proof ran on `gpt-5.6-luna`.
+
+- **pi.** One `pi --mode rpc` process started with `--no-session --no-builtin-tools`, the system prompt set to the instructions, and the Hercule extension file loaded for `submit_result` (section 7). The extension file also registers `bash` and, when `HERCULE_SUBAGENTS` is set, `subagent` (section 10.3). The call passes `--exclude-tools bash` and leaves `HERCULE_SUBAGENTS` unset, so `submit_result` is the only tool the model can call. `--no-tools` is not used: it would remove `submit_result` too. The call runs under `approval-required`, and the adapter fails the call at once on any tool other than `submit_result`, or on any approval dialog. The value is the arguments of the `submit_result` call. Usage and cost come from `get_session_stats`.
+
+  **Verified at build time** *(2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282))*, on the pinned 0.85.1: pi's active tools were `["submit_result"]` and only that tool was sent to the model. No session file was written. pi still writes `models-store.json` and an empty `auth.json` into its agent directory with `--no-session`, so the adapter points `PI_CODING_AGENT_DIR` at the scratch folder (`ctx.cwd`). `--thinking off` is clamped to the lowest level the model supports, which is `low` for `glm-5.3-flash`. The turn is aborted after three answers that do not match the schema, which ends as `invalid-output`.
+
+### 14.5 How a call ends
+
+The caller waits for at most 60 seconds in all, counting the wait for a free slot (section 14.3). It gets the value, or fails with one of three reasons:
+
+- **`unavailable`**: no runner can take the call, or the harness gave no answer. This covers the setting `off`, `automatic` with no match, a chosen instance that is logged in on no runner that could take the call, every `failed` outcome from the runner, whatever its message, and a runner whose connection ended before it answered.
+- **`timeout`**: the caller's wait ran out before an answer came, or the runner reported that it stopped the harness at its own deadline. The slot of a call whose caller gave up stays held until the runner answers (section 14.3).
+- **`invalid-output`**: the harness answered, but the value does not match the schema, by the runner's check or by the controller's decode.
+
+The error carries a message a user can act on, such as "No runner has Codex logged in." It never holds the prompt or the output.
+
+The caller decides its own fallback. Nothing is retried, and no call is kept anywhere that survives a restart. A call waits in memory for a free slot (section 14.3), so a controller restart that loses a call in flight leaves nothing to clean up.
+
+**The last failure** is held in memory: its reason, its message and when it happened. Its message is trimmed and never empty. It is kept with two things: the value of `textGeneration.model` the call started under, and the target it actually ran on, which is the instance and model, or none when no target was found. The next call that succeeds clears it, and a controller restart forgets it. `controller.read` returns it only when both still match what the setting and its resolution are now. So a failure of the previous model never shows beside the new one, whether the user chose another model, or `automatic` began to resolve to another instance or model (for example because a login expired). A failure that ends after such a change is kept under the values it started with, so it stays hidden too. `controller.read` returns it beside the model `automatic` resolves to now ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)), so Settings can show "Automatic - currently Codex gpt-6-luna" and why the last call failed ([./14-web-app.md](./14-web-app.md)). Nothing switches provider silently: `automatic` is a choice the user can see, not a hidden fallback.
+
+**The record.** Every call except one refused by `off` writes an audit entry, `textGeneration.completed` or `textGeneration.failed`. It is never routed and never holds the prompt or the output ([./13-security.md](./13-security.md) section 11).
+
+### 14.6 Thread titles
+
+Thread titles are the first use. The title rules are in [./02-domain-model.md](./02-domain-model.md) (the Session's `title`). For the call itself:
+
+- **Caller and purpose:** `core:sessions`, `thread.title`.
+- **When:** at a Thread's first submission, in the background, beside the turn rather than after it.
+- **Input:** the first message only.
+- **Output:** `{ title, needsRefinement }`. `needsRefinement` is true when the subject is still unclear from the first message alone, such as "pick this up" with an issue URL, or "fix this".
+- **On failure:** the cut-short title stays. The failure shows in the setting's status and in the record, never as an error in the Thread.
+
 ## Post-v1
 
 - Runner-side provider execution lifted into the provider plugin (v1: built-in, plugin-shaped).
@@ -884,7 +984,8 @@ Tickets:
 - [Research: Bun compile feasibility (#34)](https://github.com/theagenticage/hercule/issues/34)
 - [Runner substrate details (#43)](https://github.com/theagenticage/hercule/issues/43): `ProviderRunnerContext`, instance config vs paths, `provider-instance` secrets, pi RPC posture, harness delivery and version policy
 - [Subagents: see and steer every subagent of a session (#345)](https://github.com/theagenticage/hercule/issues/345): section 13, decided by [#350](https://github.com/theagenticage/hercule/issues/350), [#351](https://github.com/theagenticage/hercule/issues/351), [#352](https://github.com/theagenticage/hercule/issues/352), [#353](https://github.com/theagenticage/hercule/issues/353), [#377](https://github.com/theagenticage/hercule/issues/377) and written by [#355](https://github.com/theagenticage/hercule/issues/355)
+- [Text generation: one small model call, run on a runner, with Thread titles as the first use (#282)](https://github.com/theagenticage/hercule/issues/282): section 14
 
-ADRs: [0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0003](../adr/0003-sessions-run-as-bare-processes.md), [0018](../adr/0018-hercule-ships-as-one-self-contained-binary.md), [0031](../adr/0031-the-backend-is-written-on-effect.md), [0038](../adr/0038-a-subagent-is-part-of-its-session-not-a-session.md).
+ADRs: [0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0003](../adr/0003-sessions-run-as-bare-processes.md), [0018](../adr/0018-hercule-ships-as-one-self-contained-binary.md), [0031](../adr/0031-the-backend-is-written-on-effect.md), [0038](../adr/0038-a-subagent-is-part-of-its-session-not-a-session.md), [0041](../adr/0041-text-generation-is-one-model-call-on-a-runner.md).
 
 Research: `research/claude-agent-sdk.md` (branch `research/claude-agent-sdk`), `research/codex-app-server.md` (branch `research/codex-app-server`), `research/pi-sdk.md` (branch `research/pi-sdk`), `research/pi-approval-parking.md` (branch `research/pi-approval-parking`), `research/event-taxonomy-matrix.md` (branch `research/event-taxonomy-matrix`), `research/structured-output.md` (branch `research/structured-output`), `research/t3code.md` (branch `research/t3code`), `research/provider-portability.md` (branch `research/provider-portability`), `research/bun-compile.md` (branch `research/bun-compile`), `docs/research/subagents-claude-code.md` (branch `research/subagents-claude-code`), `docs/research/subagents-codex.md` (branch `research/subagents-codex`), `docs/research/subagents-pi.md` (branch `research/subagents-pi`).

@@ -33,6 +33,10 @@ const definition: ProviderDefinition = {
     disallowedTools: "unsupported",
     structuredOutput: "supported",
   },
+  // Codex lists this model from release 0.162 on. On an older release it is
+  // not in the instance's model list, so Automatic passes over Codex rather
+  // than ask for a model that is not there.
+  suggestedTextGenerationModel: "gpt-6-luna",
 };
 
 export const codex: Plugin = {

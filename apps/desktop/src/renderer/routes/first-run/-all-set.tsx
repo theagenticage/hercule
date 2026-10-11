@@ -1,8 +1,9 @@
 import type { JSX } from "react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
   buildAllSetRecap,
+  describeTextGenerationRecap,
   findNextOnboardingStep,
   ONBOARDING_STEPS,
   readErrorMessage,
@@ -11,7 +12,13 @@ import {
   type FirstRunStep,
   type HerculeClient,
 } from "@hercule/client-core";
-import { firstRunQuery, resourcesQuery, settingsQuery, userQuery } from "../../app/queries";
+import {
+  controllerQuery,
+  firstRunQuery,
+  resourcesQuery,
+  settingsQuery,
+  userQuery,
+} from "../../app/queries";
 import { AllSet } from "../../screens/first-run";
 import { pickProjectTint } from "../../screens/project-tile";
 
@@ -20,6 +27,13 @@ import { pickProjectTint } from "../../screens/project-tile";
  * buttons, ends the first run: main forgets it, and the app opens the New
  * thread draft in the first project. Without a logged-in provider, the
  * draft's Log in button is where the user logs in.
+ *
+ * The recap names the model that makes text generations. The controller works
+ * it out when it answers, and the user may have logged in since the first run
+ * read the controller's record, so All set reads the record again each time
+ * it opens and leaves the row out until that read answers. The first run is
+ * one route and All set is a card in it, so no route loader runs when All set
+ * opens and the card makes the read itself.
  *
  * Before the first run ends, leaving marks the web app's onboarding steps
  * done when the settings still lack any of them. The account step marks them
@@ -45,6 +59,11 @@ export function AllSetCard({
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
   const recap = buildAllSetRecap({ ...reads, resources });
+  const controller = useQuery({ ...controllerQuery(client), refetchOnMount: "always" });
+  const textGeneration =
+    controller.isFetching || controller.data === undefined
+      ? null
+      : describeTextGenerationRecap(reads.instances, controller.data.textGeneration);
   const { project } = recap;
 
   const endFirstRun = useMutation({
@@ -73,6 +92,7 @@ export function AllSetCard({
       username={username}
       timezone={resolveDisplayTimezone(settings.user.timezone)}
       recap={recap}
+      textGeneration={textGeneration}
       tint={project === null ? null : pickProjectTint(project.id, reads.projects)}
       error={endFirstRun.isError ? readErrorMessage(endFirstRun.error) : null}
       onDoItNow={onDoItNow}

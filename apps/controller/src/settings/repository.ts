@@ -288,6 +288,21 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns whether a provider instance with this id exists. Used to check a
+     * setting that names an instance. The query is here, not in the providers
+     * domain, because the providers domain imports the runners domain, which
+     * imports settings, so settings cannot import the provider repository
+     * without a cycle.
+     */
+    hasProviderInstance: (instanceId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly one: number }>`
+          SELECT 1 AS one FROM provider_instances WHERE id = ${uuidFromString(instanceId)}
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
      * Returns the timezone setting of the controller's user, or `None` when it
      * is not set. For code that acts for no caller, such as the Scheduler.
      * Only one user exists, so the oldest user is that user; a second user

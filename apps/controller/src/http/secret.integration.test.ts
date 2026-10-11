@@ -153,6 +153,7 @@ describe("controller.read", () => {
         "id",
         "localRunnerId",
         "publicKey",
+        "textGeneration",
         "version",
       ]);
       expect(body["version"]).toBe(VERSION);

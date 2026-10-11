@@ -29,6 +29,7 @@ import {
   type ControllerToRunner,
   type SessionInput,
   type SessionInputResult,
+  type TextGenerationRequest,
 } from "@hercule/protocol";
 import { hashToken } from "../credentials";
 import { nowIso } from "../db";
@@ -251,6 +252,53 @@ it("refuses inspection immediately on the current unsupported connection", async
   );
   expect(written).toEqual([]);
   expect(Option.isNone(answer)).toBe(true);
+});
+
+it("reports a text generation request as not sent when the runner is not connected or lacks the capability", async () => {
+  const written: Array<ControllerToRunner> = [];
+  const request: TextGenerationRequest = {
+    _tag: "textGenerationRequest",
+    requestId: "text-generation-request",
+    instanceId: "instance",
+    providerId: "codex",
+    config: {},
+    secrets: {},
+    spec: {
+      model: "model",
+      instructions: "Name the thread.",
+      input: "Fix the login bug",
+      outputSchema: { type: "object" },
+    },
+  };
+  const outcomes = await Effect.runPromise(
+    Effect.gen(function* () {
+      const connections = yield* RunnerConnections;
+      const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+      const notConnected = yield* connections.sendRequest(runner!.id, request, Duration.infinity);
+      yield* connections.greeted(
+        runner!.id,
+        mintConnection(),
+        { ...HELD, ask: (frame) => Effect.sync(() => written.push(frame)) },
+        {
+          binaryVersion: "0.1.0",
+          protocolVersion: PROTOCOL_VERSION,
+          negotiatedCapabilities: [],
+          facts: FACTS,
+        },
+      );
+      const withoutCapability = yield* connections.sendRequest(
+        runner!.id,
+        request,
+        Duration.infinity,
+      );
+      return { notConnected, withoutCapability };
+    }).pipe(Effect.provide(layer)),
+  );
+  expect(outcomes).toEqual({
+    notConnected: { _tag: "notSent" },
+    withoutCapability: { _tag: "notSent" },
+  });
+  expect(written).toEqual([]);
 });
 
 it("refuses attachment frames when a capable runner reconnects with an older binary", async () => {

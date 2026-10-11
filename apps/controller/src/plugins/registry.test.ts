@@ -54,6 +54,7 @@ const SHIPPED = [
         disallowedTools: "native",
         structuredOutput: "supported",
       },
+      suggestedTextGenerationModel: "haiku",
     },
   },
   {
@@ -80,6 +81,7 @@ const SHIPPED = [
         disallowedTools: "unsupported",
         structuredOutput: "supported",
       },
+      suggestedTextGenerationModel: "gpt-6-luna",
     },
   },
   {
@@ -108,6 +110,7 @@ const SHIPPED = [
         additionalProperties: false,
       },
       defaultConfig: {},
+      suggestedTextGenerationModel: "glm-5.3-flash",
       declared: {
         steering: "native",
         fork: "native",

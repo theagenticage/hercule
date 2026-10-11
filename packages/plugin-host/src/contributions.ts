@@ -75,6 +75,14 @@ export const ProviderDefinition = Schema.Struct({
   configSchema: SchemaValue,
   defaultConfig: Schema.Json,
   declared: DeclaredCapabilities,
+  /**
+   * The model slug this provider suggests for text generation: a small, cheap
+   * model from its catalog. The controller's `Automatic` text generation
+   * model picks the first provider, in its own order, whose suggested model
+   * a logged-in instance offers (spec 06 section 14). Absent when the
+   * provider suggests none.
+   */
+  suggestedTextGenerationModel: Schema.optionalKey(Schema.NonEmptyString),
 });
 
 export type ProviderDefinition = Schema.Schema.Type<typeof ProviderDefinition>;

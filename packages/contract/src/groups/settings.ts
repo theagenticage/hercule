@@ -21,7 +21,7 @@
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import { AccessMode } from "@hercule/protocol";
+import { AccessMode, MAX_FACT_LENGTH } from "@hercule/protocol";
 import { closedStruct, optional } from "../closed";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
@@ -79,6 +79,38 @@ export const ThreadRows = Schema.Literals(["meta", "plain"]);
 
 export type ThreadRows = Schema.Schema.Type<typeof ThreadRows>;
 
+/**
+ * A model on a provider instance: the instance and the model's slug in that
+ * instance's model list. The slug is at most as long as the protocol allows a
+ * model name to be, so a name that fits here can always be sent to a runner.
+ */
+export const InstanceModel = closedStruct({
+  instanceId: Id,
+  model: Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH)),
+});
+
+export type InstanceModel = Schema.Schema.Type<typeof InstanceModel>;
+
+/**
+ * Which model makes text generations: small model calls such as naming a
+ * Thread (spec 06 section 14).
+ *
+ * - `automatic`: the first provider, in the controller's order, whose
+ *   suggested text generation model a logged-in instance offers. With no such
+ *   provider, text generation is off.
+ * - `off`: nothing makes text generations.
+ * - an instance and a model: that model on that instance, and never another.
+ *   A call that cannot run there fails rather than switching provider.
+ *
+ * Unset reads as `automatic`.
+ */
+export const TextGenerationModel = Schema.Union([
+  Schema.Literals(["automatic", "off"]),
+  InstanceModel,
+]);
+
+export type TextGenerationModel = Schema.Schema.Type<typeof TextGenerationModel>;
+
 /** What every settings key holds, per scope. This is the only declaration of each key. */
 export const SETTING_VALUES = {
   controller: {
@@ -125,6 +157,8 @@ export const SETTING_VALUES = {
      * workflow, stops here instead of starting runs without end.
      */
     "run.nestingLimit": PositiveCount,
+    /** Which model makes text generations. Unset reads as `automatic`. */
+    "textGeneration.model": TextGenerationModel,
   },
   user: {
     /** The IANA zone the user reads times in, chosen during setup. */

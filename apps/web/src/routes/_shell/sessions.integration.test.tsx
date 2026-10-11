@@ -118,6 +118,7 @@ const buildController = (
       version: "0.4.2",
       defaultRunnerId: null,
       localRunnerId: null,
+      textGeneration: { model: null, lastFailure: null },
     },
   },
   "GET /api/v1/runners": { body: { items: runners } },
@@ -190,6 +191,21 @@ describe("Sessions", () => {
     });
     expect(screen.getByRole("button", { name: /log in/i })).toBeDefined();
     expect(getNewThreadControl().hasAttribute("disabled")).toBe(true);
+  });
+
+  it("tells a user setting up providers that background tasks use a text generation model, and links to where to change it", async () => {
+    await openApp({
+      runners: [MOSS],
+      instances: [buildClaudeCodeInstance([NOT_LOGGED_IN])],
+      local: MOSS.id,
+    });
+
+    const link = await screen.findByRole("link", { name: "Settings > System" });
+
+    expect(link.getAttribute("href")).toBe("/settings/system");
+    expect(readPageText(link.parentElement)).toContain(
+      "Small background tasks like naming a thread use a text generation model - change it in Settings > System.",
+    );
   });
 
   it("is ready once the harness on this machine is logged in", async () => {

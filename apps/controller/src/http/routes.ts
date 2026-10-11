@@ -65,6 +65,7 @@ import {
   ProfileRemovalLayer,
   Provisioning,
   ProvisioningLayer,
+  TextGenerationLayer,
   Retirement,
   RetirementLayer,
   RunExecutorLayer,
@@ -83,6 +84,7 @@ import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
+import { LastTextGenerationFailureLayer, TextGenerationModelsLayer } from "../text-generation";
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ResourceService, ResourceServiceLayer } from "../resources";
 import { WorkspaceService } from "../workspaces";
@@ -734,6 +736,18 @@ const PermissionRequestsDomainLayer = PermissionRequestsLayer.pipe(
 );
 
 /**
+ * What text generation resolves and remembers: which model the setting means
+ * now, and the last failure. The controller service shows both in
+ * `ControllerInfo`, and the `TextGeneration` service in the controller daemon
+ * writes the failure, so both are provided this one layer. A layer is built
+ * once however many times it is provided, so they share one last failure.
+ */
+const TextGenerationStatusLayer = Layer.mergeAll(
+  TextGenerationModelsLayer,
+  LastTextGenerationFailureLayer,
+);
+
+/**
  * The controller daemon's `BoundOperations`, which checks and runs the
  * operation of a chosen answer. The operation can be a task, run, live
  * session or Permission Request operation, so the port gets the run layers,
@@ -760,8 +774,11 @@ const BoundOperationsDomainLayer = BoundOperationsLayer.pipe(
  * built. A second instance would have no plugins, no connections, none of the
  * state a session's stream is coalesced in, and no promotion phase, and would
  * write over the same rows the drivers use. The handlers get them from the boot.
+ *
+ * The text generation status is provided once, around the whole list, so
+ * `controller.read` reads the last failure the text generation service writes.
  */
-export const operationLayers = Layer.mergeAll(
+const operationServices = Layer.mergeAll(
   AuthLayer,
   ApiKeysLayer,
   UserLayer,
@@ -868,6 +885,12 @@ export const operationLayers = Layer.mergeAll(
   LiveTopicsLayer,
   WsTicketsLayer,
   AttachmentServiceLayer,
+);
+
+/** Every service an operation uses. */
+export const operationLayers = operationServices.pipe(
+  Layer.provideMerge(TextGenerationLayer),
+  Layer.provide(TextGenerationStatusLayer),
 );
 
 /** The handlers of every group, which `HttpApiBuilder.layer(api)` needs to build routes. */

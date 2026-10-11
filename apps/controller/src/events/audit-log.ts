@@ -116,6 +116,8 @@ export const AUDIT_KINDS = [
   "signal.unsnoozed",
   "signal.priorityLowered",
   "permission.requested",
+  "textGeneration.completed",
+  "textGeneration.failed",
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
