@@ -17,8 +17,8 @@ import { ProviderLogo } from "../thread/provider-logo";
  * Renders All set for `username` in `timezone`, from `recap`. `tint` is the
  * project's tint. `textGeneration` is the name of the model that makes text
  * generations, or "no model available" when none can; it is null while the
- * controller has not said yet, and then the row is left out. A step with nothing to show links back to it with Do it
- * now, through `onDoItNow`. Every other button calls `onLeave`, which opens
+ * controller has not answered yet, and then the row is left out. A step with
+ * nothing to show links back to it with Do it now, through `onDoItNow`. Every other button calls `onLeave`, which opens
  * the new project's draft. `error` is why the last leave failed, or null.
  *
  * Without a logged-in provider, no agent can take a desk, so the main button

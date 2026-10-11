@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tansta
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
   buildAllSetRecap,
-  describeTextGenerationModel,
+  describeTextGenerationRecap,
   findNextOnboardingStep,
   ONBOARDING_STEPS,
   readErrorMessage,
@@ -30,8 +30,10 @@ import { pickProjectTint } from "../../screens/project-tile";
  *
  * The recap names the model that makes text generations. The controller works
  * it out when it answers, and the user may have logged in since the first run
- * read the controller's record, so All set reads the record again when it
- * opens and leaves the row out until that read answers.
+ * read the controller's record, so All set reads the record again each time
+ * it opens and leaves the row out until that read answers. The first run is
+ * one route and All set is a card in it, so no route loader runs when All set
+ * opens and the card makes the read itself.
  *
  * Before the first run ends, leaving marks the web app's onboarding steps
  * done when the settings still lack any of them. The account step marks them
@@ -57,18 +59,11 @@ export function AllSetCard({
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
   const recap = buildAllSetRecap({ ...reads, resources });
-  const controller = useQuery({
-    ...controllerQuery(client),
-    staleTime: 0,
-    refetchOnMount: "always",
-  });
-  const model = controller.isFetching ? undefined : controller.data?.textGeneration.model;
+  const controller = useQuery({ ...controllerQuery(client), refetchOnMount: "always" });
   const textGeneration =
-    model === undefined
+    controller.isFetching || controller.data === undefined
       ? null
-      : model === null
-        ? "no model available"
-        : describeTextGenerationModel(reads.instances, model);
+      : describeTextGenerationRecap(reads.instances, controller.data.textGeneration);
   const { project } = recap;
 
   const endFirstRun = useMutation({
