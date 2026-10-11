@@ -610,6 +610,22 @@ describe("describeSignalOutcome and describeResolvedElsewhere", () => {
     });
     expect(describeSignalOutcome(resolvedByCore, PLUGINS)?.by).toBe("by Hercule");
   });
+
+  it("names the core for a plugin's signal a newer one replaced", () => {
+    const replaced = buildSignal("a", {
+      kind: "github/review-requested",
+      status: "resolved",
+      replacedBy: "b",
+      resolution: {
+        kind: "withdrawn",
+        outcome: "Replaced by a newer one",
+        actor: "system",
+        origin: "core",
+        at: "2026-10-10T10:00:00.000Z",
+      },
+    });
+    expect(describeSignalOutcome(replaced, PLUGINS)?.by).toBe("by Hercule");
+  });
 });
 
 describe("listUrgentSignals", () => {

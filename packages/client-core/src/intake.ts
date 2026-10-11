@@ -557,9 +557,10 @@ export const describeSignalOutcome = (
 /**
  * Returns who resolved a signal, as the middle of a sentence. The core stamps
  * the actor `system` on an end it observed on the source, such as a review
- * submitted on GitHub, and on a signal a newer one replaced (spec 10 §9.6).
- * Both came from the signal's source, so a plugin's signal names its plugin
- * rather than the core. Any other actor is named as `nameActor` does.
+ * submitted on GitHub, so a plugin's signal names its plugin there. It also
+ * stamps `system` on a signal a newer one replaced, but that is the core's
+ * own move (spec 10 §9.6), so a replaced signal names the core. Any other
+ * actor is named as `nameActor` does.
  */
 const nameResolver = (
   signal: Signal,
@@ -567,7 +568,7 @@ const nameResolver = (
   plugins: ReadonlyArray<PluginName>,
 ): string => {
   const pluginId = parseSignalPluginId(signal.kind);
-  return actor === "system" && pluginId !== null
+  return actor === "system" && pluginId !== null && signal.replacedBy === undefined
     ? namePlugin(pluginId, plugins)
     : nameActor(actor, plugins);
 };
