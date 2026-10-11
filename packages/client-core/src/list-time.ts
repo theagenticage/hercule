@@ -1,13 +1,22 @@
 /**
  * Formats the times in a list's time column, the way a mail app dates its
  * rows ("10:31", "Sun", "1 Oct"), and finds when such a text must be read
- * again. The workflow list is the one screen that shows them.
+ * again. The workflow list is the one screen that shows them. Also formats
+ * when a run or a step started, with its day and its clock time ("Today
+ * 10:31"), which changes at the same moments.
  *
  * This module is the subpath `@hercule/client-core/list-time`, not part of
  * the index, so that its code stays off the desktop app's first screen: it
  * loads in the chunk of the Workflows route, which imports it.
  */
-import { buildPartReader, computeMinutesOfDay, formatDay, readCalendarDate } from "./time-context";
+import {
+  buildPartReader,
+  computeMinutesOfDay,
+  countCalendarDaysBetween,
+  formatDay,
+  formatShortMoment,
+  readCalendarDate,
+} from "./time-context";
 
 /** The length of a minute, in milliseconds. */
 const MINUTE_MS = 60_000;
@@ -155,4 +164,20 @@ export const findNextListTimeChange = (
     instant.getTime() < tomorrowStart.getTime()
     ? instant
     : tomorrowStart;
+};
+
+/**
+ * Formats when a run or a step started, in `timezone` and relative to `now`:
+ * "Today 10:31", "Fri 14:00" within the six days before, and "25 Sep 14:00"
+ * before that. The text changes only at local midnight, so a screen keeps it
+ * current with `findNextListTimeChange(instant, timezone, now, "past")`.
+ * Returns `undefined` when the instant is not a valid date or the zone
+ * cannot be formatted.
+ */
+export const formatStartTime = (instant: Date, timezone: string, now: Date): string | undefined => {
+  const moment = formatShortMoment(instant, now, timezone);
+  // A moment today is the clock alone, which would leave the text without a day.
+  return moment !== undefined && countCalendarDaysBetween(now, instant, timezone) === 0
+    ? `Today ${moment}`
+    : moment;
 };

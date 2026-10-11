@@ -79,6 +79,8 @@ export interface RunGraphNode extends WorkflowGraphNode {
 export type EdgeTravel = "fired" | "active" | "notTaken" | "notYet";
 
 export interface RunGraphEdge extends WorkflowGraphEdge {
+  /** The edge's index in the plan's `edges`, or `undefined` for an edge from a start trigger, which is not in them. */
+  readonly planEdgeIndex: number | undefined;
   readonly travel: EdgeTravel;
   /**
    * How often the run followed an edge with `maxTraversals`, out of that
@@ -195,6 +197,7 @@ export const buildRunGraph = (run: Run): RunGraph => {
       const isFailedEdge = planEdgeIndex !== undefined && planEdgeIndex === failedEdgeIndex;
       return {
         ...edge,
+        planEdgeIndex,
         travel: decideTravel(edge, traversals),
         traversalBadge:
           edge.maxTraversals === undefined
@@ -449,6 +452,38 @@ const buildTimeAxis = (spanMs: number, axisWidth: number): ReadonlyArray<Timelin
     if (areLabelsApart((step / spanMs) * axisWidth, longestLabel)) return ticks;
   }
   return [{ position: 0, label: formatTickLabel(0) }];
+};
+
+/** The time axis of a live run: how long it is, and its ticks. */
+export interface LiveTimeAxis {
+  /** The axis's length in milliseconds, a whole number of tick steps. */
+  readonly spanMs: number;
+  readonly ticks: ReadonlyArray<TimelineTick>;
+}
+
+/**
+ * Builds the time axis of a run that is live and has run `elapsedMs`, on an
+ * axis `axisWidth` characters wide. The axis is longer than the run: it ends
+ * at the first tick at or after now, so its ticks stay where they are while
+ * the run goes on, and the axis changes only when now passes its end. The
+ * ticks follow the rules of `buildTimeAxis`.
+ *
+ * When no step keeps the labels apart, the axis has only the tick at 0, and
+ * it is as long as the longest step the axis could use.
+ */
+export const buildLiveTimeAxis = (elapsedMs: number, axisWidth: number): LiveTimeAxis => {
+  // A run that has just started still needs an axis with a length.
+  const elapsed = Math.max(1, elapsedMs);
+  const steps = listTickSteps(elapsed);
+  for (const step of steps) {
+    const spanMs = Math.ceil(elapsed / step) * step;
+    if (spanMs / step > MAX_TICKS) continue;
+    const ticks = buildTicks(step, spanMs);
+    const longestLabel = Math.max(...ticks.map((tick) => [...tick.label].length));
+    if (areLabelsApart((step / spanMs) * axisWidth, longestLabel)) return { spanMs, ticks };
+  }
+  // The last step is at least `elapsed`, so the axis still reaches now.
+  return { spanMs: steps.at(-1)!, ticks: [{ position: 0, label: formatTickLabel(0) }] };
 };
 
 /**

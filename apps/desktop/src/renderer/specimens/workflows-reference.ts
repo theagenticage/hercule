@@ -8,7 +8,7 @@
  * It stops every animation, so Fix bug's stepped strip and the running marks
  * show the frame the app draws, and it stops the graph's fade at its cut
  * edge, which Chromium draws differently from one capture to the next (see
- * `stillGraphFade`).
+ * `stillGraphPane`).
  *
  * With `&runs=timeline`, it also moves the day's hour axis from the top of
  * the timeline into the tab band, under the tabs. Spec 17 puts the axis in
@@ -24,11 +24,11 @@
  * every action.
  */
 import { findElement } from "./book-page";
-import { markSheetReady, readCrew, stillBookPage, stillGraphFade } from "./sheet-page";
+import { markSheetReady, readCrew, stillBookPage, stillGraphPane } from "./sheet-page";
 
 const params = new URLSearchParams(location.search);
 stillBookPage();
-stillGraphFade();
+stillGraphPane();
 
 if (params.get("view") === "split" || params.get("view") === "full") {
   const lead = findElement(document, '[data-node="open_pr"] > .node-lead');

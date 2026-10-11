@@ -31,6 +31,32 @@
   flex: none;
   color: var(--muted);
 }
+/* Where the run is at the node, with what the session asks the user under
+   it. The status is bold, in marigold while the step waits on the user and
+   in fail ink once it failed; the question is in ink. */
+.node-status .grow {
+  white-space: normal;
+}
+.node-status .grow b {
+  font-weight: var(--w-bold);
+}
+.node-status.is-you .grow b {
+  color: var(--you-ink);
+}
+.node-status.is-fail .grow b {
+  color: var(--fail-ink);
+}
+.node-status .grow small {
+  color: var(--ink);
+  font-size: var(--t-12);
+  white-space: normal;
+}
+/* A state with no mark keeps the mark's room, so its words start where they
+   would after one. */
+.node-pop .no-mark {
+  flex: none;
+  width: 14px;
+}
 /* The rows: a label column, then the value, wrapped once and then cut short.
    Data and expressions are in mono. */
 .node-facts {
@@ -62,6 +88,9 @@
   font-size: var(--t-11);
   line-height: 18px;
 }
+.node-facts dd.is-fail {
+  color: var(--fail-ink);
+}
 /* An agent step's prompt as written: its first three lines. */
 .node-prompt {
   display: -webkit-box;
@@ -73,4 +102,9 @@
   white-space: pre-line;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+}
+/* The chevron that ends a row which opens a thread. */
+.node-pop .line > .ic:last-child {
+  flex: none;
+  color: var(--faint);
 }

@@ -4,9 +4,9 @@
  * open workflow"). It builds on `buildIndexedWorkflowGraph`, which lists the
  * nodes and edges, and adds what a card and an edge's label show.
  *
- * The model draws no run. A run's page draws one on top of it: every node
- * and edge has an id that stays the same for every run of the definition, so
- * the run's state can be added to each by id.
+ * The drawing holds no run. A run's page draws one on top of it with
+ * `buildRunOverlay`: every node and edge has an id that stays the same for
+ * every run of the definition, so the run's state is looked up by id.
  *
  * This module is the subpath `@hercule/client-core/graph-model`, not part of
  * the index, so that it stays off the desktop app's first screen.
@@ -14,11 +14,15 @@
 import {
   isSchedule,
   type Agent,
+  type Run,
+  type Session,
   type TriggerFiresOn,
   type WorkflowAction,
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { parsePluginId } from "./plugin-id";
+import { isRunLive, listAwaitedSignals, type WorkState } from "./run-display";
+import { buildRunGraph, type EdgeTravel } from "./run-graph";
 import { describeSchedule } from "./schedule-text";
 import { decideFiresOn } from "./trigger-display";
 import {
@@ -117,6 +121,12 @@ const listCorrelatedSteps = (expression: string): ReadonlyArray<string> => [
   ),
 ];
 
+/** Returns the id of the edge from a start trigger to an entry step, when the two connect directly. */
+const buildStartEdgeId = (from: string, to: string): string => `start ${from} ${to}`;
+
+/** Returns the id of the edge at `planEdgeIndex` in the definition's `edges`. */
+const buildPlanEdgeId = (planEdgeIndex: number): string => `plan ${String(planEdgeIndex)}`;
+
 /** Builds an edge with no condition and no limit, such as one into or out of the junction. */
 const buildPlainEdge = (id: string, from: string, to: string): GraphEdge => ({
   id,
@@ -182,13 +192,16 @@ export const buildGraphDrawing = (
         ...entryStepIds.map((to) => buildPlainEdge(`bus out ${to}`, BUS_ID, to)),
       ]
     : startEdges.map(({ edge }) =>
-        buildPlainEdge(`start ${edge.from} ${edge.to}`, edge.from, edge.to),
+        buildPlainEdge(buildStartEdgeId(edge.from, edge.to), edge.from, edge.to),
       );
 
-  const buildPlanEdge = ({ edge, planEdgeIndex }: IndexedWorkflowGraphEdge): GraphEdge => {
+  const buildPlanEdge = (
+    edge: IndexedWorkflowGraphEdge["edge"],
+    planEdgeIndex: number,
+  ): GraphEdge => {
     const abbreviated = abbreviateEdgeCondition(edge);
     return {
-      id: `plan ${String(planEdgeIndex)}`,
+      id: buildPlanEdgeId(planEdgeIndex),
       kind: "plan",
       from: edge.from,
       to: edge.to,
@@ -198,9 +211,9 @@ export const buildGraphDrawing = (
       maxTraversals: edge.maxTraversals,
     };
   };
-  const planEdges = indexed.edges
-    .filter(({ planEdgeIndex }) => planEdgeIndex !== undefined)
-    .map(buildPlanEdge);
+  const planEdges = indexed.edges.flatMap(({ edge, planEdgeIndex }) =>
+    planEdgeIndex === undefined ? [] : [buildPlanEdge(edge, planEdgeIndex)],
+  );
 
   const correlationEdges = (definition.triggers ?? []).flatMap((trigger) =>
     trigger.kind === "signal"
@@ -225,5 +238,202 @@ export const buildGraphDrawing = (
     nodes,
     edges: [...startGraphEdges, ...planEdges, ...correlationEdges],
     busId: usesBus ? BUS_ID : undefined,
+  };
+};
+
+/**
+ * Where a run is at one node of its graph.
+ *
+ * A step's state follows its current step record (see `buildRunGraph`):
+ * `unreached` with none, `working` while it runs, `waiting` while it runs and
+ * its session has an open Request, `done` once it completed, and the record's
+ * own status otherwise.
+ *
+ * A trigger has no state of its own, so its state says how the run relates
+ * to it:
+ *
+ * - `fired`: the start trigger that started the run, or a signal that fired;
+ * - `listening`: a signal the run waits for now;
+ * - `quiet`: a start trigger that did not start the run, or a signal that has
+ *   not fired.
+ */
+export type NodeRunState =
+  | "unreached"
+  | "pending"
+  | "working"
+  | "waiting"
+  | "done"
+  | "failed"
+  | "cancelled"
+  | "skipped"
+  | "fired"
+  | "listening"
+  | "quiet";
+
+/** Where a run is at one node of its graph. */
+export interface NodeOnRun {
+  readonly state: NodeRunState;
+  /** `×2` after the id of a step the run came to twice, or of a signal that fired twice. `undefined` for at most once. */
+  readonly iterationLabel: string | undefined;
+}
+
+/** How far a run came along one edge of its graph. */
+export interface EdgeOnRun {
+  readonly travel: EdgeTravel;
+  /** Whether the run failed at this edge, on its limit or on its condition. */
+  readonly isFailedEdge: boolean;
+  /**
+   * How often the run followed an edge with a limit, out of that limit, such
+   * as `1/3`, which the label shows in place of `≤ 3`. `undefined` for an
+   * edge with no limit.
+   */
+  readonly traversalBadge: string | undefined;
+}
+
+/** A run drawn on top of its graph: its state at every node and edge, by their ids. */
+export interface RunOverlay {
+  /** By `GraphNode.id`. Every node of the drawing has an entry. */
+  readonly nodes: ReadonlyMap<string, NodeOnRun>;
+  /** By `GraphEdge.id`, including the edges through the junction and the correlation edges. Every edge of the drawing has an entry. */
+  readonly edges: ReadonlyMap<string, EdgeOnRun>;
+  /**
+   * How far the run came along the stub from each terminal step to the end,
+   * by the step's id: `fired` once the step is done, `notYet` while the run
+   * is live, and `notTaken` once the run ended without the step being done.
+   */
+  readonly endStubs: ReadonlyMap<string, EdgeTravel>;
+}
+
+/**
+ * Returns where a step stands, from the `state` of one of its records and
+ * whether that record's session waits on the user (`isAsking`). A running
+ * record whose session asks is `waiting`; `isAsking` means nothing for a
+ * record in any other state.
+ */
+export const decideStepRunState = (state: WorkState, isAsking: boolean): NodeRunState => {
+  switch (state) {
+    case "running":
+      return isAsking ? "waiting" : "working";
+    case "completed":
+      return "done";
+    case "unreached":
+    case "pending":
+    case "failed":
+    case "cancelled":
+    case "skipped":
+      return state;
+  }
+};
+
+/** The order in which an edge through the junction takes the furthest travel of the edges it stands for. */
+const TRAVEL_RANK: Readonly<Record<EdgeTravel, number>> = {
+  notTaken: 0,
+  notYet: 1,
+  fired: 2,
+  active: 3,
+};
+
+/** Returns the furthest travel of `travels`, or `notTaken` for none. */
+const findFurthestTravel = (travels: ReadonlyArray<EdgeTravel>): EdgeTravel =>
+  travels.reduce<EdgeTravel>(
+    (furthest, travel) => (TRAVEL_RANK[travel] > TRAVEL_RANK[furthest] ? travel : furthest),
+    "notTaken",
+  );
+
+/**
+ * Builds `run`'s state at every node and edge of `drawing`, which was built
+ * from `run.plan`. `sessions` are the run's sessions: a running step whose
+ * session has an open Request is `waiting` (see `NodeRunState`).
+ *
+ * Each edge of the definition, and each edge from a start trigger, takes the
+ * run's reading of it from `buildRunGraph`. An edge into or out of the start
+ * triggers' junction stands for several edges from start triggers, and takes
+ * the furthest travel among them. A correlation edge is `fired` once its step
+ * has completed, because the run then listens for the signal; until then it
+ * is `notYet` while the run is live and `notTaken` once it has ended.
+ */
+export const buildRunOverlay = (
+  drawing: WorkflowGraphDrawing,
+  run: Run,
+  sessions: ReadonlyArray<Session>,
+): RunOverlay => {
+  const runGraph = buildRunGraph(run);
+  const isLive = isRunLive(run.status);
+  const askingSessionIds = new Set(
+    sessions.filter((session) => session.openRequests.length > 0).map((session) => session.id),
+  );
+  const askingStepIds = new Set(
+    run.steps
+      .filter(
+        (record) => record.status === "running" && askingSessionIds.has(record.sessionId ?? ""),
+      )
+      .map((record) => record.stepId),
+  );
+  const awaitedSignalIds = new Set(listAwaitedSignals(run));
+  const startingTriggerId = run.origin.kind === "trigger" ? run.origin.triggerId : undefined;
+
+  const decideNodeState = (node: (typeof runGraph.nodes)[number]): NodeRunState => {
+    if (node.progress !== undefined) {
+      return decideStepRunState(node.progress.state, askingStepIds.has(node.id));
+    }
+    if (node.kind === "start") return node.id === startingTriggerId ? "fired" : "quiet";
+    if (awaitedSignalIds.has(node.id)) return "listening";
+    return node.iterationCount > 0 ? "fired" : "quiet";
+  };
+  const runNodes = new Map(
+    runGraph.nodes.map((node): [string, NodeOnRun] => [
+      node.id,
+      { state: decideNodeState(node), iterationLabel: node.iterationLabel },
+    ]),
+  );
+
+  const runEdges = new Map(
+    runGraph.edges.map((edge) => [
+      edge.planEdgeIndex === undefined
+        ? buildStartEdgeId(edge.from, edge.to)
+        : buildPlanEdgeId(edge.planEdgeIndex),
+      edge,
+    ]),
+  );
+  const startEdges = runGraph.edges.filter((edge) => edge.planEdgeIndex === undefined);
+  const hasCompleted = (stepId: string): boolean =>
+    run.steps.some((record) => record.stepId === stepId && record.status === "completed");
+
+  const decideEdgeOnRun = (edge: GraphEdge): EdgeOnRun => {
+    if (edge.kind === "correlation") {
+      const travel = hasCompleted(edge.from) ? "fired" : isLive ? "notYet" : "notTaken";
+      return { travel, isFailedEdge: false, traversalBadge: undefined };
+    }
+    if (edge.from === drawing.busId || edge.to === drawing.busId) {
+      // An edge into the junction shares its start trigger with the edges it
+      // stands for, and an edge out of it shares its entry step.
+      const travel = findFurthestTravel(
+        startEdges
+          .filter((each) => each.from === edge.from || each.to === edge.to)
+          .map((each) => each.travel),
+      );
+      return { travel, isFailedEdge: false, traversalBadge: undefined };
+    }
+    const { travel, isFailedEdge, traversalBadge } = runEdges.get(edge.id)!;
+    return { travel, isFailedEdge, traversalBadge };
+  };
+
+  const nodes = new Map(
+    drawing.nodes.map((node): [string, NodeOnRun] => [
+      node.id,
+      runNodes.get(node.id) ?? { state: "unreached", iterationLabel: undefined },
+    ]),
+  );
+  return {
+    nodes,
+    edges: new Map(drawing.edges.map((edge) => [edge.id, decideEdgeOnRun(edge)])),
+    endStubs: new Map(
+      drawing.nodes
+        .filter((node) => node.terminal)
+        .map((node): [string, EdgeTravel] => [
+          node.id,
+          nodes.get(node.id)?.state === "done" ? "fired" : isLive ? "notYet" : "notTaken",
+        ]),
+    ),
   };
 };

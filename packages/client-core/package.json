@@ -11,6 +11,7 @@
     "./list-time": "./src/list-time.ts",
     "./node-details": "./src/node-details.ts",
     "./run-marks": "./src/run-marks.ts",
+    "./run-page-rows": "./src/run-page-rows.ts",
     "./run-timeline": "./src/run-timeline.ts",
     "./timeline-limit": "./src/timeline-limit.ts",
     "./workflow-detail-rows": "./src/workflow-detail-rows.ts",

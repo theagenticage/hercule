@@ -20,6 +20,7 @@ const edge = (from: string, to: string, travel: RunGraphEdge["travel"]): RunGrap
   from,
   to,
   travel,
+  planEdgeIndex: undefined,
   traversalBadge: undefined,
   isFailedEdge: false,
   isOverLimit: false,

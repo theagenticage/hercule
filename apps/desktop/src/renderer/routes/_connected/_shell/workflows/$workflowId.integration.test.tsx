@@ -611,7 +611,7 @@ describe("the Runs tab", () => {
     const lanes = await within(getPanel()).findByRole("group", { name: "Runs, Today" });
     expect(
       within(lanes)
-        .getAllByRole("img")
+        .getAllByRole("link")
         .map((bar) => bar.getAttribute("aria-label")),
     ).toEqual([expect.stringMatching(/^At review/)]);
 

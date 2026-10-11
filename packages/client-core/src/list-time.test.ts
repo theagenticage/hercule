@@ -1,6 +1,11 @@
-/** Tests the list time column's texts and when they change. */
+/** Tests the list time column's texts, when they change, and the start times of a run's page. */
 import { assert, describe, it } from "vitest";
-import { computeDayStart, findNextListTimeChange, formatListTime } from "./list-time";
+import {
+  computeDayStart,
+  findNextListTimeChange,
+  formatListTime,
+  formatStartTime,
+} from "./list-time";
 
 describe("computeDayStart", () => {
   const readStart = (instant: string, timezone: string): string | undefined =>
@@ -212,5 +217,38 @@ describe("findNextListTimeChange", () => {
       findChange("2026-10-07T08:31:00Z", "2026-10-07T21:10:00Z", "past", "Europe/Nowhere"),
       "+275760-09-13T00:00:00.000Z",
     );
+  });
+});
+
+describe("formatStartTime", () => {
+  // A Friday afternoon in Amsterdam, two hours ahead of UTC.
+  const NOW = new Date("2026-09-25T12:00:00.000Z");
+  const ZONE = "Europe/Amsterdam";
+
+  it("says Today for a start on the same local date", () => {
+    assert.strictEqual(
+      formatStartTime(new Date("2026-09-25T08:31:00.000Z"), ZONE, NOW),
+      "Today 10:31",
+    );
+    // Half past ten on Thursday in UTC is already Friday in Amsterdam.
+    assert.strictEqual(
+      formatStartTime(new Date("2026-09-24T22:30:00.000Z"), ZONE, NOW),
+      "Today 00:30",
+    );
+  });
+
+  it("gives the weekday within the week before, and the date before that", () => {
+    assert.strictEqual(
+      formatStartTime(new Date("2026-09-22T12:00:00.000Z"), ZONE, NOW),
+      "Tue 14:00",
+    );
+    assert.strictEqual(
+      formatStartTime(new Date("2026-09-11T12:00:00.000Z"), ZONE, NOW),
+      "11 Sep 14:00",
+    );
+  });
+
+  it("returns undefined for an instant that is not a date", () => {
+    assert.isUndefined(formatStartTime(new Date(Number.NaN), ZONE, NOW));
   });
 });

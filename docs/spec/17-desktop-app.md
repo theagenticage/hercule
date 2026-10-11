@@ -2772,6 +2772,45 @@ The perf script's rows were measured 2026-10-11 on the reference machine with `a
 - **The perf rows were measured before a timeline bar counted its time only while on screen.** That change only removes age clock subscriptions, for bars scrolled out of view, so the timeline's rows are an upper bound.
 - **Not measured:** opening a workflow against a remote controller; memory with a run's page open, which is a later slice; the timeline's arrival, which the Performance panel measures once by hand. Motion is not measured, because it left this slice for [#553](https://github.com/theagenticage/hercule/issues/553).
 
+**Workflows: a run's page,** measured 2026-10-12 with `pnpm build:desktop`'s size checks, on the branch base 7598415d (Before) and on this change (After), for [#552](https://github.com/theagenticage/hercule/issues/552). JavaScript sizes are gzipped and counted the way the budget script counts them, 1,024 bytes to a kB. CSS sizes are Vite's gzipped figures, 1,000 bytes to a kB, which is how the #551 entry's 2.5 kB was counted.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| The first screen's JavaScript, gzipped | does not grow (the ticket) | 320.0 kB across 22 chunks, of 69 built | 320.4 kB across 22 chunks, of 76 built: over, by 0.4 kB |
+| The run page's chunk, gzipped | none; no YAML parser | - | 12.3 kB of JavaScript, 1.3 kB of CSS |
+| The graph's chunk, shared by the run page and the open workflow, gzipped | none | - | 29.4 kB of JavaScript, 3.1 kB of CSS |
+| The list's times, shared by the list, the open workflow and the run page, gzipped | none | in the open workflow's chunk | 3.0 kB of JavaScript |
+| The open workflow's own chunk, gzipped | none | 68.3 kB of JavaScript, 2.5 kB of CSS | 45.3 kB of JavaScript, no CSS of its own |
+| Main's startup file, minified | 160 kB | 150.2 kB | 150.2 kB |
+
+- **The first screen grows by 0.4 kB, so it misses the ticket's budget.** The first-screen chunk grows from 268.8 to 269.3 kB, and the thread route's chunk shrinks by 0.1 kB. The growth has two parts, measured by building with and without the second:
+  - 0.2 kB for the run page's route. That is its three reads in `app/queries.ts` (`runQuery`, `runSessionsQuery` and `rerunsQuery`), which the first-screen chunk holds because the shell imports that module; the route's stub, with its search check, its title and the lazy import of its chunk, which the router needs before the chunk loads; and the `runId` check in `app/last-screen.ts`. The route's loader and component are already in the run page's chunk. The reads could move into that chunk only by leaving `app/`, where the renderer keeps every read, so they stay there;
+  - 0.2 kB for the sidebar on a run's page: it shows the Hercule face with Workflows selected, as the book draws it, in place of the threads. The sidebar is on the first screen, so this part cannot move.
+
+  The Before column is already 28.3 kB below the #551 entry's 348.3 kB, because of changes merged in between, such as [#566](https://github.com/theagenticage/hercule/pull/566).
+- **The run page loads 44.7 kB of JavaScript: its own 12.3 kB, the graph's 29.4 kB and the list's times, 3.0 kB.** A few chunks under 1.3 kB each come with them, such as the confirm dialog and the workspace's details. The graph's chunk holds the graph, its node card and the layout (dagre). The bundler split it out because the open workflow and the run page both draw the graph. The list's times (`screens/workflows/list-time.ts`, with `formatStartTime`) are a chunk of their own for the same reason.
+- **The YAML parser is in the open workflow's chunk alone.** The run page does not parse the workflow's source; in the built renderer, the parser's error messages are only in `_workflowId-*.js`.
+- **Opening a workflow now loads 77.7 kB, 9.4 kB more than before.** That is its own chunk, the graph's chunk and the list's times. Moving `formatStartTime` out of `run-page-rows` did not shrink the open workflow's chunk: the open workflow still loads the list's times, now as a chunk it shares. Most of the growth is the graph and its node card, which gained the run states the run page draws: a step's visits, its duration and its status, which the open workflow loads too. The 9.4 kB was not broken down further.
+
+The perf script's rows were measured 2026-10-12 on the reference machine with `apps/desktop/scripts/perf.ts --workflows-only`, in one run, in a throwaway Hercule Home. The script seeds the #551 entry's workflows, then opens a run's page for a live run whose one step has waited for a day, so its "Running for" changes every second. Each push cancels one live run of another workflow. The one-minute load average was 10.10 before the run page's launch.
+
+| Row of [What Workflows costs](#what-workflows-costs) | Expected | Measured |
+|---|---|---|
+| Processes | none added | 4: browser, GPU, network utility, renderer |
+| Memory, a run's page open | within the app's memory row: renderer at most 100 MB, summed at most 220 MB | renderer **53 MB**, summed **680 MB**: **over**. The GPU process holds 567 MB |
+| Idle, window visible, a live run's page, 10 s | no work but the age clock | renderer **1.0%** of a core, **4** wakeups a second; GPU 0.8%, **34** wakeups a second; age clock fired **10** times: **over** the idle rows of the other entries (renderer at most 2 wakeups a second, GPU at most 12) |
+| Idle, window hidden | no work | renderer **0** wakeups; age clock fired 0 times |
+| One tick of the age clock | within 16 ms | **2.8 ms** of renderer main thread, Chromium's own work included |
+| The run's graph | its nodes drawn | **2**: the trigger and the one step |
+| Per push: reads | each run read on screen read once | **1** read of the run; **0** strip reads, **0** live run reads, **0** reads of a Runs list's pages or a day |
+| Per push: renderer main thread | within 16 ms | **5.4 ms** |
+| Per push, renderer and controller CPU | recorded | renderer 9 ms, controller 20 ms |
+
+- **A live run's page wakes once a second, so it misses the idle rows.** Its "Running for" counts seconds, as the book draws it, and so does the duration on the running step's card. Both read the age clock, which fires once a second for them and draws one frame; the page has no timer of its own. The renderer's 4 wakeups and the GPU's 34 come with that one frame a second. How the GPU's 34 split was not looked for. A run that has ended counts nothing, and the hidden window does nothing.
+- **The summed footprint is over its row, as in most entries above.** The GPU process holds 567 of the 680 MB, close to the 692 to 722 MB the #440 entry recorded with ticking durations. The renderer is within its row.
+- **Each push reads the open run once, and nothing else.** The run page draws no strips, no Running section, no Runs list and no day.
+- **Not measured:** opening a run against a remote controller.
+
 **Text generation, desktop slice,** measured 2026-10-11 with `pnpm build:desktop`'s size checks, on the parent commit (Before) and the working tree of branch `agent/282-desktop` (After), for [#282](https://github.com/theagenticage/hercule/issues/282). This change adds no desktop process, timer, polling or live topic, and it changes nothing per streamed token. Runtime memory, CPU and wakeups were not remeasured, because nothing in them changes.
 
 | Measure | Budget | Before | After |

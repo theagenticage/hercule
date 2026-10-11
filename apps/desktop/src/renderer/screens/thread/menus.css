@@ -140,11 +140,12 @@ button.line:hover {
 .line .grow .line-warning {
   color: var(--you-ink);
 }
-/* Not in the book. What a row says about itself at the right: a machine's
-   state, a branch's badge, or why the row cannot be picked. */
+/* What a row says about itself at the right: a machine's state, a branch's
+   badge, why the row cannot be picked, or how long a step's visit took. */
 .line-note {
   flex: none;
   color: var(--faint);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .machine-state[data-state="online"] {

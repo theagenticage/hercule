@@ -29,3 +29,14 @@
 .mark--idle {
   color: var(--faint);
 }
+
+/* The pop of a mark whose state changed while its screen was open: it grows
+   in from 0.6 and transparent. The one keyframe every screen shares (spec
+   17, "Workflows' motion", item 1); each screen plays it under its own
+   reduce-motion rule. */
+@keyframes mark-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}

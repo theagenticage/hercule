@@ -11,10 +11,11 @@ describe("decideScreenFace", () => {
     expect(decideScreenFace(pathname)).toBe("threads");
   });
 
-  it("shows the orchestration face on Intake and Workflows", () => {
+  it("shows the orchestration face on Intake, Workflows and a run's page", () => {
     expect(decideScreenFace("/intake")).toBe("orchestration");
     expect(decideScreenFace("/workflows")).toBe("orchestration");
     expect(decideScreenFace("/workflows/wf_1")).toBe("orchestration");
+    expect(decideScreenFace("/runs/run_1")).toBe("orchestration");
   });
 
   it.each([

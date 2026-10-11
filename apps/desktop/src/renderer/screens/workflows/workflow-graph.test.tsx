@@ -1,13 +1,23 @@
 /**
  * Tests the workflow graph: a plugin's action draws its plugin's mark, a
- * node's card opens and closes, Escape stays with the card, and the zoom
- * opens fitted, never below 80%, and follows the buttons and the keys.
+ * node's card opens and closes, Escape stays with the card, the zoom opens
+ * fitted, never below 80%, and follows the buttons and the keys, and a run
+ * draws on top of the graph and plays only the changes made while it is
+ * open.
+ *
+ * Classes are checked one by one, so a test does not break when an element
+ * gains a class it does not care about.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { WorkflowDefinition } from "@hercule/contract";
-import { buildGraphDrawing } from "@hercule/client-core/graph-model";
+import {
+  buildGraphDrawing,
+  type EdgeOnRun,
+  type NodeRunState,
+  type RunOverlay,
+} from "@hercule/client-core/graph-model";
 import type { NodeCard } from "@hercule/client-core/node-details";
 import { WorkflowGraph } from "./workflow-graph";
 import { layOutGraphDrawing } from "./workflow-graph-layout";
@@ -56,14 +66,16 @@ const CARDS: Record<string, NodeCard> = {
     firesOn: "schedule",
     facts: [{ kind: "time", label: "Next", at: "2026-10-12T02:00:00Z", direction: "future" }],
     prompt: undefined,
+    run: null,
   },
   review: {
     id: "review",
     kind: "agent",
     kindText: "Agent step",
     firesOn: null,
-    facts: [{ kind: "text", label: "Agent", value: "Reviewer", isCode: false }],
+    facts: [{ kind: "text", label: "Agent", value: "Reviewer", isCode: false, isError: false }],
     prompt: "Review the diff.",
+    run: null,
   },
   fix: {
     id: "fix",
@@ -72,6 +84,7 @@ const CARDS: Record<string, NodeCard> = {
     firesOn: null,
     facts: [],
     prompt: "Fix it.",
+    run: null,
   },
 };
 
@@ -284,5 +297,203 @@ describe("the graph's zoom", () => {
     renderGraph();
     fireEvent.keyDown(screen.getByRole("button", { name: "Outside" }), { key: "=", metaKey: true });
     expect(readZoom()).toBe("80%");
+  });
+});
+
+/**
+ * The overlay of a run at `states`, by node id; every other node is
+ * unreached. `edges` gives the run's state at the edges, by their ends. The
+ * stub to the end is fired once its step is done, and not yet otherwise.
+ */
+const buildOverlay = (
+  states: Readonly<Record<string, NodeRunState>>,
+  edges: Readonly<Record<string, EdgeOnRun>> = {},
+  iterationLabels: Readonly<Record<string, string>> = {},
+): RunOverlay => ({
+  nodes: new Map(
+    DRAWING.nodes.map((node) => [
+      node.id,
+      { state: states[node.id] ?? "unreached", iterationLabel: iterationLabels[node.id] },
+    ]),
+  ),
+  edges: new Map(
+    DRAWING.edges.map((edge) => [
+      edge.id,
+      edges[`${edge.from} ${edge.to}`] ?? {
+        travel: "notYet",
+        isFailedEdge: false,
+        traversalBadge: undefined,
+      },
+    ]),
+  ),
+  endStubs: new Map(
+    DRAWING.nodes
+      .filter((node) => node.terminal)
+      .map((node) => [node.id, states[node.id] === "done" ? "fired" : "notYet"]),
+  ),
+});
+
+/** Checks that `element` has every class of `present` and none of `absent`. */
+const expectClasses = (
+  element: Element | null | undefined,
+  present: ReadonlyArray<string>,
+  absent: ReadonlyArray<string> = [],
+) => {
+  expect(element).toBeTruthy();
+  for (const name of present) expect(element!.classList.contains(name), name).toBe(true);
+  for (const name of absent) expect(element!.classList.contains(name), name).toBe(false);
+};
+
+/** Returns the classes of `element` that draw a run on it: those that start with `is-`. */
+const listRunClasses = (element: Element): ReadonlyArray<string> =>
+  [...element.classList].filter((name) => name.startsWith("is-"));
+
+/** Renders the graph of `DRAWING` with `overlay`, and returns a function that draws it again with another. */
+const renderRun = (overlay: RunOverlay | undefined) => {
+  const graph = (next: RunOverlay | undefined) => (
+    <WorkflowGraph
+      drawing={DRAWING}
+      readCard={(nodeId) => CARDS[nodeId]}
+      timezone="UTC"
+      label="The steps of Review"
+      plugins={[]}
+      overlay={next}
+    />
+  );
+  const { rerender, container } = render(graph(overlay));
+  return {
+    container,
+    drawAgain: (next: RunOverlay | undefined) => {
+      rerender(graph(next));
+    },
+  };
+};
+
+/** Returns the button of the node with `id`. */
+const findNode = (container: HTMLElement, id: string) =>
+  [...container.querySelectorAll<HTMLElement>(".node")].find(
+    (node) => node.querySelector(".node-title > b")?.textContent === id,
+  )!;
+
+describe("a run on the graph", () => {
+  it("draws nothing of a run without an overlay", () => {
+    const { container } = renderRun(undefined);
+    expect(container.querySelectorAll(".node-mark, .node-ring, .node-times")).toHaveLength(0);
+    for (const node of container.querySelectorAll(".node")) {
+      expect(listRunClasses(node)).toEqual([]);
+    }
+    expectClasses(findNode(container, "review"), ["node--step"]);
+    expectClasses(findNode(container, "nightly"), ["node--trigger"]);
+    expect(container.querySelectorAll("marker")).toHaveLength(1);
+    for (const edge of container.querySelectorAll(".graph-edges path:not(.arrow)")) {
+      expectClasses(edge, ["edge"]);
+      expect(listRunClasses(edge)).toEqual([]);
+    }
+  });
+
+  it("marks each card with where the run is at it, and rings the ones that need a look", () => {
+    const { container } = renderRun(
+      buildOverlay({ nightly: "fired", review: "waiting", fix: "failed", open_pr: "pending" }),
+    );
+    const readMark = (id: string) => {
+      const mark = findNode(container, id).querySelector(".node-mark > .mark");
+      return mark === null ? undefined : [...mark.classList].find((name) => name !== "mark");
+    };
+    expect(readMark("nightly")).toBe("mark--done");
+    expect(readMark("review")).toBe("mark--waiting");
+    expect(readMark("fix")).toBe("mark--failed");
+    expect(readMark("open_pr")).toBeUndefined();
+    expect(readMark("wait")).toBeUndefined();
+
+    const isRinged = (id: string) => findNode(container, id).querySelector(".node-ring") !== null;
+    expect(isRinged("review")).toBe(true);
+    expect(isRinged("fix")).toBe(true);
+    expect(isRinged("nightly")).toBe(false);
+    expect(isRinged("open_pr")).toBe(false);
+
+    // The state's class picks the ring's colour, and half opacity for a card the run did not reach.
+    expect(listRunClasses(findNode(container, "wait"))).toEqual(["is-unreached"]);
+    expect(listRunClasses(findNode(container, "open_pr"))).toEqual(["is-pending"]);
+  });
+
+  it("puts how often the run came to a step after its id", () => {
+    const { container } = renderRun(buildOverlay({ review: "working" }, {}, { review: "×2" }));
+    expect(findNode(container, "review").querySelector(".node-times")?.textContent).toBe("×2");
+    expect(findNode(container, "fix").querySelector(".node-times")).toBeNull();
+  });
+
+  it("names where the run is at a node in the node's name, in its card's words", () => {
+    renderRun(buildOverlay({ review: "waiting", nightly: "fired" }));
+    expect(screen.getByRole("button", { name: "review, Reviewer, Waiting on you" })).toBeTruthy();
+    // A start trigger's state reads as whether it started the run.
+    expect(screen.getByRole("button", { name: /^nightly, .*, Started this run$/ })).toBeTruthy();
+  });
+
+  it("tones each edge by how far the run came along it, and shows the run's count on a limit", () => {
+    const { container } = renderRun(
+      buildOverlay(
+        { review: "failed", fix: "done" },
+        {
+          "fix review": { travel: "fired", isFailedEdge: true, traversalBadge: "3/3" },
+          "review fix": { travel: "fired", isFailedEdge: false, traversalBadge: undefined },
+          "review open_pr": { travel: "notTaken", isFailedEdge: false, traversalBadge: undefined },
+        },
+      ),
+    );
+    const edgeOf = (from: string, to: string) => {
+      const index = DRAWING.edges.findIndex((edge) => edge.from === from && edge.to === to);
+      return container.querySelectorAll(".graph-edges > path")[index]!;
+    };
+    expect(listRunClasses(edgeOf("fix", "review"))).toEqual(["is-failed"]);
+    expect(edgeOf("fix", "review").getAttribute("marker-end")).toMatch(/-is-failed\)$/);
+    expect(listRunClasses(edgeOf("review", "fix"))).toEqual(["is-fired"]);
+    // An edge the run did not take is dashed, and keeps the plain arrowhead.
+    expect(listRunClasses(edgeOf("review", "open_pr"))).toEqual(["is-not-taken"]);
+    expect(edgeOf("review", "open_pr").getAttribute("marker-end")).toMatch(/graph-arrow-[\w-]+\)$/);
+    expect(edgeOf("review", "open_pr").getAttribute("marker-end")).not.toMatch(/-is-/);
+    expect(container.querySelectorAll("marker")).toHaveLength(5);
+
+    expectClasses(screen.getByText("3/3"), ["edge-label", "edge-label--count", "is-failed"]);
+    expect(screen.queryByText("≤ 3")).toBeNull();
+  });
+
+  it("tones the stub to the end as the overlay says", () => {
+    const { container, drawAgain } = renderRun(buildOverlay({ wait: "done" }));
+    const readStub = () => listRunClasses(container.querySelector(".graph-edges g > path")!);
+    expect(readStub()).toEqual(["is-fired"]);
+    drawAgain(buildOverlay({}));
+    expect(readStub()).toEqual(["is-not-yet"]);
+    // An ended run that never did the last step did not take its stub.
+    drawAgain({ ...buildOverlay({}), endStubs: new Map([["wait", "notTaken"]]) });
+    expect(readStub()).toEqual(["is-not-taken"]);
+  });
+
+  it("plays no change on the run it opens with", () => {
+    const { container } = renderRun(buildOverlay({ review: "waiting" }));
+    expect(container.querySelectorAll(".is-new, .is-brightening, .is-dimming")).toHaveLength(0);
+  });
+
+  it("plays a node's change made while the graph is open, and only that node's", () => {
+    const { container, drawAgain } = renderRun(
+      buildOverlay({ nightly: "fired", review: "working", fix: "pending" }),
+    );
+    drawAgain(buildOverlay({ nightly: "fired", review: "waiting", fix: "skipped" }));
+
+    const review = findNode(container, "review");
+    expect(listRunClasses(review)).toEqual(["is-waiting"]);
+    expectClasses(review.querySelector(".node-ring"), ["is-new"]);
+    expectClasses(review.querySelector(".node-mark"), ["is-new"]);
+    expectClasses(findNode(container, "fix"), ["is-skipped", "is-dimming"]);
+    expectClasses(findNode(container, "nightly").querySelector(".node-mark"), [], ["is-new"]);
+
+    drawAgain(buildOverlay({ nightly: "fired", review: "working", fix: "skipped" }, {}, {}));
+    expect(listRunClasses(findNode(container, "fix"))).toEqual(["is-skipped"]);
+    expect(findNode(container, "review").querySelector(".node-ring")).toBeNull();
+  });
+
+  it("brightens a card the run reaches", () => {
+    const { container, drawAgain } = renderRun(buildOverlay({}));
+    drawAgain(buildOverlay({ review: "working" }));
+    expectClasses(findNode(container, "review"), ["is-working", "is-brightening"]);
   });
 });

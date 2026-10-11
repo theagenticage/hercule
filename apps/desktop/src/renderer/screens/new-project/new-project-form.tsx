@@ -305,24 +305,32 @@ export function NewProjectForm({
         disabled={pending || projectId !== null || localRunner === null}
       >
         <legend>Choose the files agents use</legend>
-        <label>
-          <input
-            type="radio"
-            name="project-checkout"
-            checked={mode === "existing"}
-            onChange={() => setMode("existing")}
-          />
-          Use this checkout<span>Keep its current branch and working files.</span>
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="project-checkout"
-            checked={mode === "managed"}
-            onChange={() => setMode("managed")}
-          />
-          Create a separate checkout<span>Let Hercule manage a separate checkout.</span>
-        </label>
+        <div className="options">
+          <label className="option">
+            <span className="choice-box">
+              <input
+                type="radio"
+                name="project-checkout"
+                checked={mode === "existing"}
+                onChange={() => setMode("existing")}
+              />
+            </span>
+            <b>Use this checkout</b>
+            <small>Keep its current branch and working files.</small>
+          </label>
+          <label className="option">
+            <span className="choice-box">
+              <input
+                type="radio"
+                name="project-checkout"
+                checked={mode === "managed"}
+                onChange={() => setMode("managed")}
+              />
+            </span>
+            <b>Create a separate checkout</b>
+            <small>Let Hercule manage a separate checkout.</small>
+          </label>
+        </div>
       </fieldset>
       <div className="st-form">
         {asksForRemote ? (
