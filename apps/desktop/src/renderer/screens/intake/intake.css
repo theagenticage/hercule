@@ -217,8 +217,10 @@
   max-width: 760px;
   padding: 18px 36px 28px;
 }
-/* The pane takes the focus only to keep Intake's keys working once its
-   answers are gone, and it is no control, so it draws no ring. */
+/* The pane and the list take the focus only to keep Intake's keys working
+   once the control that had it is gone. Neither is a control, so neither
+   draws a ring. */
+.asks-list:focus-visible,
 .ad:focus-visible {
   outline: none;
 }

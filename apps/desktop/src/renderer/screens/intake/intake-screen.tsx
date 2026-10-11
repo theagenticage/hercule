@@ -161,12 +161,17 @@ export function IntakeScreen({
     if (signalId !== selectedIdRef.current) onSelect(signalId);
   };
 
-  /** Puts the focus on the selected row, when the list draws it. */
+  /**
+   * Puts the focus on the selected row. When the list does not draw it,
+   * because the signal was resolved and left To do, the focus goes to the
+   * list itself, so the screen's keys keep working.
+   */
   const focusSelected = (): void => {
     if (selectedId === null) return;
-    listRef.current
-      ?.querySelector<HTMLElement>(`[data-signal-id="${CSS.escape(selectedId)}"]`)
-      ?.focus();
+    const row = listRef.current?.querySelector<HTMLElement>(
+      `[data-signal-id="${CSS.escape(selectedId)}"]`,
+    );
+    (row ?? listRef.current)?.focus();
   };
 
   const moveSelection = (step: 1 | -1): void => {
@@ -364,6 +369,7 @@ export function IntakeScreen({
           ref={listRef}
           className="asks-list"
           aria-label="Signals"
+          tabIndex={-1}
           onTransitionEnd={(event) => {
             // A row's own transitions end here too, so only the list's width counts.
             if (event.target === event.currentTarget && event.propertyName === "width") {

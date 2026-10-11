@@ -531,7 +531,7 @@ describe("Intake's keys", () => {
 
   it("keep working after the signal whose reply is being typed is resolved elsewhere", async () => {
     const { handlers, store } = storeSignals(SIGNALS);
-    const { live } = await openIntake(`/intake?signal=${MENTION.id}`, handlers);
+    const { live, router } = await openIntake(`/intake?signal=${MENTION.id}`, handlers);
     const pane = await findPane();
     await userEvent.type(within(pane).getByRole("textbox", { name: "Reply" }), "Ledger first.");
 
@@ -546,6 +546,11 @@ describe("Intake's keys", () => {
     );
     await userEvent.keyboard("{Escape}");
     expect(isPaneShown()).toBe(false);
+    // The signal has left To do, so it has no row to take the focus back,
+    // and the list takes it: the closing pane is inert and would drop it.
+    expect(document.activeElement).toBe(getList());
+    await userEvent.keyboard("{Escape}");
+    expect(readSelected(router.state.location.search)).toBeUndefined();
   });
 });
 
