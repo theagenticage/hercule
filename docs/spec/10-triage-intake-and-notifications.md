@@ -606,6 +606,7 @@ A signal's actions are Bound Actions, with the shape and the rules of Section 7.
 
 - A workflow that declares an input of type `signal: { kinds: [...] }` ([./07-workflows.md](./07-workflows.md#3-inputs)) accepts signals of those kinds. `proposal` is refused as such a kind.
 - When a signal is written, every enabled workflow that accepts its kind is offered as an action binding `run.start { workflowId, inputs: { <input name>: <signal id> } }`. The actions are frozen with the signal, so a workflow created later is not offered on existing signals.
+- *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* A workflow with another required input that has no default is not offered. The action fills only the signal input, so `run.start` would refuse the click. Give the other inputs defaults to make the workflow a Hand to an agent target.
 - It resolves at the click, like every answer, with the outcome "Handed to *workflow name*". The run reads the signal and its events through `signal.read`. Done shows the run's state beside the line, read-only; a failed run never puts the signal back on To do, and its `core.run-failed` Notification goes to Check-in.
 
 **Build failure.**

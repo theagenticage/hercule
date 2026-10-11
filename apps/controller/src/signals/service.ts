@@ -168,6 +168,10 @@ const buildCoreActions = (input: SignalRaiseInput): ReadonlyArray<BoundAction> =
  * input accepting `kind`. Each binds `run.start` with the signal's id as the
  * first such input. A proposal gets none: a workflow input cannot accept
  * `proposal`, so work always keeps its Task.
+ *
+ * A workflow with another required input that has no default is left out.
+ * The action fills only the signal input, so `run.start` would refuse its
+ * click.
  */
 const buildHandToActions = (
   signalId: string,
@@ -175,10 +179,12 @@ const buildHandToActions = (
   workflows: ReadonlyArray<{ readonly id: string; readonly definition: WorkflowDefinition }>,
 ): ReadonlyArray<BoundAction> =>
   workflows.flatMap(({ id, definition }) => {
-    const input = (definition.inputs ?? []).find((declared) =>
-      declared.signal?.kinds.includes(kind),
+    const inputs = definition.inputs ?? [];
+    const input = inputs.find((declared) => declared.signal?.kinds.includes(kind));
+    const needsMore = inputs.some(
+      (declared) => declared !== input && declared.required && declared.default === undefined,
     );
-    return input === undefined
+    return input === undefined || needsMore
       ? []
       : [
           {

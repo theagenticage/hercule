@@ -176,11 +176,24 @@ const insertEnabledWorkflow = (definition: WorkflowDefinition) =>
     return stored.id;
   });
 
-const buildSignalInputWorkflow = (name: string, kinds: ReadonlyArray<string>) =>
+/**
+ * Builds a workflow whose `signal` input accepts `kinds`. Its other required
+ * input has a default, unless `topicDefault` is null.
+ */
+const buildSignalInputWorkflow = (
+  name: string,
+  kinds: ReadonlyArray<string>,
+  topicDefault: string | null = "inbox",
+) =>
   ({
     name,
     inputs: [
-      { name: "topic", schema: { type: "string" }, required: true },
+      {
+        name: "topic",
+        schema: { type: "string" },
+        required: true,
+        ...(topicDefault === null ? {} : { default: topicDefault }),
+      },
       { name: "signal", signal: { kinds: [...kinds] }, required: true },
     ],
     steps: [],
@@ -253,6 +266,8 @@ describe("signal.raise", () => {
         );
         // Accepts another kind, so it is not offered.
         yield* insertEnabledWorkflow(buildSignalInputWorkflow("Mail bot", ["gmail/mail"]));
+        // Needs a topic the action cannot fill, so run.start would refuse the click.
+        yield* insertEnabledWorkflow(buildSignalInputWorkflow("Topic bot", ["offer"], null));
         return { signal: yield* raiseAndRead({ ...OFFER, actions: [own] }), workflowId };
       }),
     );
