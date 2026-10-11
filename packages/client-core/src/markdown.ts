@@ -143,14 +143,25 @@ const isFootnoteReferenceToken = (token: Token): token is FootnoteReferenceToken
  * the colon, and the spaces after it. As on GitHub, a label holds no
  * whitespace and no unescaped bracket, so `[^note 1]: text` and
  * `[^a\]: text` stay text. A backslash escapes the character after it. The
- * label is at most 999 characters, as in marked's own link labels, which keeps
- * a long line without a closing bracket from being read to its end at every
- * `[^`.
+ * pattern stops after 999 characters or escapes, which keeps a long line
+ * without a closing bracket from being read to its end at every `[^`.
+ * `matchFootnoteLabel` then holds the label to 999 characters of source, as in
+ * marked's own link labels, escapes included.
  */
 const FOOTNOTE_DEFINITION_START = /^ {0,3}\[\^((?:[^[\]\\ \t\r\n]|\\[^ \t\r\n]){1,999})\]:[ \t]*/;
 
 /** Matches a footnote reference at the start of the inline text, with a label as above. */
 const FOOTNOTE_REFERENCE = /^\[\^((?:[^[\]\\ \t\r\n]|\\[^ \t\r\n]){1,999})\]/;
+
+/**
+ * Matches `pattern`, a footnote definition start or reference, at the start of
+ * `text`. Returns the match, whose first group is the label, or `undefined`
+ * when there is none or the label is longer than 999 characters of source.
+ */
+const matchFootnoteLabel = (pattern: RegExp, text: string): RegExpExecArray | undefined => {
+  const match = pattern.exec(text);
+  return match !== null && (match[1] ?? "").length <= 999 ? match : undefined;
+};
 
 /** Matches the indentation that makes a line part of a footnote: 4 spaces or a tab. */
 const FOOTNOTE_INDENT = /^(?: {4}| {0,3}\t)/;
@@ -168,7 +179,7 @@ const FOOTNOTE_INDENT = /^(?: {4}| {0,3}\t)/;
  * line after the footnote, while one that ends too late can hide it.
  */
 const STARTS_ANOTHER_BLOCK =
-  /^ {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|```|~~~|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$|=+[ \t]*$|[-:| \t]+$|\||<|\[[^\]\n]{1,999}\]:)/;
+  /^ {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|```|~~~|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$|=+[ \t]*$|[-:| \t]+$|\||<|\[(?:[^\]\\\n]|\\[^\n]){1,999}\]:)/;
 
 /** Returns whether `line` holds nothing but spaces and tabs. */
 const isBlankLine = (line: string): boolean => line.trim() === "";
@@ -207,8 +218,8 @@ const findLineEnd = (source: string, from: number): number => {
 const readFootnoteDefinition = (
   source: string,
 ): { label: string; text: string; raw: string } | undefined => {
-  const header = FOOTNOTE_DEFINITION_START.exec(source);
-  if (header === null) return undefined;
+  const header = matchFootnoteLabel(FOOTNOTE_DEFINITION_START, source);
+  if (header === undefined) return undefined;
   const firstEnd = findLineEnd(source, header[0].length);
   const firstLine = source.slice(header[0].length, firstEnd);
   const lines = [firstLine];
@@ -265,7 +276,7 @@ const findFootnoteDefinitionStart = (source: string): number | undefined => {
     const lineStart = lineBreak + 1;
     const lineEnd = findLineEnd(source, lineStart);
     const line = source.slice(lineStart, lineEnd);
-    if (FOOTNOTE_DEFINITION_START.test(line)) return lineStart;
+    if (matchFootnoteLabel(FOOTNOTE_DEFINITION_START, line) !== undefined) return lineStart;
     if (isBlankLine(line) || STARTS_ANOTHER_BLOCK.test(line)) return undefined;
     lineBreak = lineEnd === source.length ? -1 : lineEnd;
   }
@@ -330,8 +341,8 @@ const footnoteExtension: MarkedExtension = {
       name: "footnoteReference",
       level: "inline",
       tokenizer(source) {
-        const match = FOOTNOTE_REFERENCE.exec(source);
-        if (match === null) return undefined;
+        const match = matchFootnoteLabel(FOOTNOTE_REFERENCE, source);
+        if (match === undefined) return undefined;
         const label = match[1] ?? "";
         if (!findDefinedLabels(this.lexer.tokens).has(normalizeLabel(label))) return undefined;
         const token: FootnoteReferenceToken = { type: "footnoteReference", raw: match[0], label };

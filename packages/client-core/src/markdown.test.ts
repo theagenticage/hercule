@@ -596,6 +596,20 @@ describe("parseMarkdown footnotes", () => {
     );
   });
 
+  it("ends a footnote at a definition whose label holds an escaped bracket", () => {
+    expect(parseMarkdown("See [^a\\]b].\n\n[^unused]: note\n[^a\\]b]: IMPORTANT WARNING")).toEqual({
+      blocks: [paragraph(text("See "), reference(1), text("."))],
+      footnotes: [
+        { number: 1, children: [paragraph(text("IMPORTANT WARNING"), backReference(1))] },
+      ],
+    });
+  });
+
+  it("keeps a definition whose label is longer than 999 characters of source as text", () => {
+    const source = `[^${"a".repeat(998)}\\*]: IMPORTANT WARNING`;
+    expect(JSON.stringify(parseMarkdown(source).blocks)).toContain("IMPORTANT WARNING");
+  });
+
   it("keeps a link definition whose label starts with a caret but is not a footnote label", () => {
     expect(parseMarkdown("[use][^a b]\n\n[^a b]: https://example.com")).toEqual(
       blocks(
