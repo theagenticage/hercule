@@ -132,7 +132,9 @@ describe("the signals table", () => {
       explainQueryPlan(`SELECT id FROM signals WHERE status = 'open' ORDER BY created_at, id`),
     );
 
-    expect(plan).toContain("USING INDEX signals_open");
+    // The query reads only columns the index holds, so some SQLite builds
+    // report the index as covering; either way the index serves the order.
+    expect(plan).toMatch(/USING (COVERING )?INDEX signals_open\b/);
     expect(plan).not.toContain("TEMP B-TREE");
   });
 
