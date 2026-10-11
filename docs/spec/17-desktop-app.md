@@ -2278,6 +2278,16 @@ Bundle: the first screen is 327.5 kB gzipped before (14 chunks) and 331.6 kB aft
 - **No process, timer, idle work or work per streamed token is added.** The dock draws the waiting pose, which is static.
 - **Profiles are read only while a Permission Request is open.** Opening a thread or Conversation that already has one costs one `profile.query`; one that arrives live costs one the first time, if the profiles are not cached. The list then stays cached; a dock that finds the cached list lacks the session's profile reads it once more, never twice. No live topic is added.
 
+**Loaders split off with their route,** measured 2026-10-11 with `pnpm build:desktop`'s bundle check, on `main` at 0397b60d (Before) and on branch `t3/confirm-dialog-and-split-loaders` merged with it (After), for [#542](https://github.com/theagenticage/hercule/issues/542). The router plugin now puts a route's loader in the chunk of its component, so a loader, and every module it imports, loads the first time its route opens instead of with the first screen. The routes the app starts on keep `codeSplitGroupings: []` and stay whole. The change adds no process, no read and no timer, and touches no file main links.
+
+| Measure | Before | After |
+|---|---|---|
+| The first screen's JavaScript, gzipped | 338.5 kB | 338.4 kB |
+
+- **Today it saves little,** because today's loaders import only what the shell already loads: query options and client-core code. A loader that imports code of its own saves more. On the Workflows prototype, the loaders of the three workflow routes bring the workflow source parser, and keeping them with the first screen cost 4.8 kB gzipped.
+- **A loader now waits for its chunk before it starts.** The chunk is a local file, served on the `app://` origin, so the wait is a few milliseconds.
+- **Hot reload still works.** In the dev server, a split loader that was edited twice was replaced in place each time, and its route loaded again without an error. A specimen page that removes a route's loader fails with "Cannot read properties of undefined (reading 'ensureQueryData')" after such an edit, with or without this change: the hot reload puts the route's real loader back, and the specimen's router has no query client. Reloading the page fixes it.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
