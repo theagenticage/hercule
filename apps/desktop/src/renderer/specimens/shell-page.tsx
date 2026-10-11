@@ -101,9 +101,11 @@ import {
   sessionQuery,
   settingsQuery,
   signalQuery,
+  signalsClearedTodayQuery,
   signalsDoneQuery,
   signalsLaterQuery,
   signalsToDoQuery,
+  snoozeTimerQuery,
   startTasksQuery,
   subagentsQuery,
   threadsQuery,
@@ -397,6 +399,14 @@ const seedQueryCache = (
     pages: [{ items: records.done ?? [] }],
     pageParams: [undefined],
   });
+  queryClient.setQueryData(signalsClearedTodayQuery(client).queryKey, {
+    pages: [{ items: records.done ?? [] }],
+    pageParams: [undefined],
+  });
+  queryClient.setQueryData(
+    snoozeTimerQuery(client).queryKey,
+    records.later?.[0]?.snooze?.until ?? null,
+  );
   queryClient.setQueryData(pluginsQuery(client).queryKey, records.plugins ?? []);
   queryClient.setQueryData(
     assistantsQuery(client).queryKey,

@@ -1,17 +1,21 @@
 import { DONE_ACTION_ID, type Signal, type SignalResolution } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
+  applySignalMove,
   buildSnoozeChoices,
   countClearedToday,
+  decideSignalPaneMoves,
   decideSignalRowControls,
+  describeBulkDoneTitle,
   describeDoneRowOutcome,
   describeIntakeFoot,
   describeMoveToast,
-  describeSnoozeUntil,
+  describeSnoozeLine,
   hasDoneAction,
+  isMoveLeavingView,
   listBulkMoves,
   parsePickedSnoozeTime,
-  planBulkAction,
+  planSignalMove,
   reachesBeforeToday,
   toggleSignalCheck,
 } from "./intake-moves";
@@ -81,43 +85,49 @@ describe("hasDoneAction", () => {
 describe("decideSignalRowControls", () => {
   it("gives a To do row Snooze and Done when its kind offers Done", () => {
     expect(decideSignalRowControls(buildSignal("a"), "to-do")).toEqual({
-      moves: ["snooze", "done"],
+      slots: ["snooze", "done"],
       checkable: true,
     });
   });
 
-  it("gives a proposal, an offer or an unsure row only Snooze", () => {
+  it("keeps Done's place empty on a proposal, an offer or an unsure row", () => {
     for (const kind of ["proposal", "offer", "unsure"] as const) {
-      expect(decideSignalRowControls(buildCoreSignal("a", kind), "to-do").moves).toEqual([
+      expect(decideSignalRowControls(buildCoreSignal("a", kind), "to-do").slots).toEqual([
         "snooze",
+        null,
       ]);
     }
   });
 
   it("adds Not urgent to a Now row, after Done", () => {
     expect(
-      decideSignalRowControls(buildSignal("a", { priority: "urgent" }), "to-do").moves,
+      decideSignalRowControls(buildSignal("a", { priority: "urgent" }), "to-do").slots,
     ).toEqual(["snooze", "done", "not-urgent"]);
+    expect(
+      decideSignalRowControls({ ...buildCoreSignal("b", "proposal"), priority: "urgent" }, "to-do")
+        .slots,
+    ).toEqual(["snooze", null, "not-urgent"]);
   });
 
   it("gives a row back from a snooze the controls of its kind", () => {
     const back = buildSignal("a", { snooze: SNOOZE });
-    expect(decideSignalRowControls(back, "to-do").moves).toEqual(["snooze", "done"]);
+    expect(decideSignalRowControls(back, "to-do").slots).toEqual(["snooze", "done"]);
   });
 
-  it("gives a Later row Unsnooze, and Done only when its kind offers it", () => {
+  it("gives a Later row Unsnooze, then Done or its empty place", () => {
     expect(decideSignalRowControls(buildSignal("a", { snooze: SNOOZE }), "later")).toEqual({
-      moves: ["unsnooze", "done"],
+      slots: ["unsnooze", "done"],
       checkable: true,
     });
-    expect(decideSignalRowControls(buildCoreSignal("b", "proposal"), "later").moves).toEqual([
-      "unsnooze",
-    ]);
+    expect(
+      decideSignalRowControls({ ...buildCoreSignal("b", "proposal"), snooze: SNOOZE }, "later")
+        .slots,
+    ).toEqual(["unsnooze", null]);
   });
 
   it("gives a Done row no controls and no checkbox", () => {
     expect(decideSignalRowControls(buildResolved("a", "2026-10-12T08:00:00.000Z"), "done")).toEqual(
-      { moves: [], checkable: false },
+      { slots: [], checkable: false },
     );
   });
 });
@@ -140,7 +150,7 @@ describe("listBulkMoves", () => {
   });
 });
 
-describe("planBulkAction", () => {
+describe("planSignalMove", () => {
   it("sends Done only for the rows that offer it, and names the kept rows by kind", () => {
     const checked = [
       buildCoreSignal("p1", "proposal"),
@@ -149,9 +159,9 @@ describe("planBulkAction", () => {
       buildSignal("g2"),
       buildSignal("g3"),
     ];
-    expect(planBulkAction(checked, "done")).toEqual({
+    expect(planSignalMove(checked, "done")).toEqual({
       move: "done",
-      signalIds: ["g1", "g2", "g3"],
+      acted: [checked[1], checked[3], checked[4]],
       keptIds: ["p1", "p2"],
       preview: "Done 3 · keeps 2 proposals",
       keptLabel: "2 proposals",
@@ -166,54 +176,160 @@ describe("planBulkAction", () => {
       buildCoreSignal("p2", "proposal"),
       buildSignal("g"),
     ];
-    expect(planBulkAction(checked, "done").preview).toBe(
+    expect(planSignalMove(checked, "done").preview).toBe(
       "Done 1 · keeps 1 offer, 2 proposals and 1 unsure signal",
     );
   });
 
   it("acts on every row with Snooze, so the line is only the count", () => {
-    const plan = planBulkAction([buildCoreSignal("p", "proposal"), buildSignal("g")], "snooze");
-    expect(plan.signalIds).toEqual(["p", "g"]);
+    const plan = planSignalMove([buildCoreSignal("p", "proposal"), buildSignal("g")], "snooze");
+    expect(plan.acted.map((signal) => signal.id)).toEqual(["p", "g"]);
     expect(plan.keptIds).toEqual([]);
     expect(plan.preview).toBe("Snooze 2");
   });
 
   it("unsnoozes only snoozed rows and lowers only Now rows", () => {
     const snoozed = buildSignal("s", { snooze: SNOOZE });
-    expect(planBulkAction([snoozed, buildSignal("o")], "unsnooze").signalIds).toEqual(["s"]);
-    const plan = planBulkAction(
+    expect(planSignalMove([snoozed, buildSignal("o")], "unsnooze").acted).toEqual([snoozed]);
+    const plan = planSignalMove(
       [buildSignal("u", { priority: "urgent" }), buildSignal("n")],
       "not-urgent",
     );
-    expect(plan.signalIds).toEqual(["u"]);
-    expect(plan.preview).toBe("Not urgent 1 · keeps 1 signal");
+    expect(plan.acted.map((signal) => signal.id)).toEqual(["u"]);
+    expect(plan.preview).toBe("Not urgent 1 · keeps 1 mentioned");
+  });
+
+  it("names a kept plugin kind by its kind's label", () => {
+    const plan = planSignalMove(
+      [
+        buildSignal("u", { priority: "urgent" }),
+        buildSignal("r1", { kind: "github/review-requested" }),
+        buildSignal("r2", { kind: "github/review-requested" }),
+      ],
+      "not-urgent",
+    );
+    expect(plan.keptLabel).toBe("2 review requested");
+  });
+});
+
+describe("describeBulkDoneTitle", () => {
+  it("names the split when Done leaves rows alone", () => {
+    const checked = [
+      buildSignal("g"),
+      buildCoreSignal("p", "proposal"),
+      buildCoreSignal("q", "proposal"),
+    ];
+    expect(describeBulkDoneTitle(planSignalMove(checked, "done"))).toBe(
+      "Marks 1 of 3 done. 2 proposals need their own answer",
+    );
+    expect(describeBulkDoneTitle(planSignalMove(checked.slice(0, 2), "done"))).toBe(
+      "Marks 1 of 2 done. 1 proposal needs its own answer",
+    );
+  });
+
+  it("returns null when Done acts on every row, and for any other move", () => {
+    expect(describeBulkDoneTitle(planSignalMove([buildSignal("g")], "done"))).toBeNull();
+    expect(
+      describeBulkDoneTitle(planSignalMove([buildCoreSignal("p", "proposal")], "snooze")),
+    ).toBeNull();
+  });
+});
+
+describe("decideSignalPaneMoves", () => {
+  const moves = (signal: Signal, view: "to-do" | "later" | "done") =>
+    decideSignalPaneMoves(signal, view).map((move) => move.label);
+
+  it("offers Snooze… on To do, and Not urgent for a Now signal", () => {
+    expect(moves(buildSignal("a"), "to-do")).toEqual(["Snooze…"]);
+    expect(moves(buildSignal("a", { priority: "urgent" }), "to-do")).toEqual([
+      "Snooze…",
+      "Not urgent",
+    ]);
+  });
+
+  it("offers Unsnooze and Snooze again… on Later", () => {
+    expect(moves(buildSignal("a", { snooze: SNOOZE }), "later")).toEqual([
+      "Unsnooze",
+      "Snooze again…",
+    ]);
+  });
+
+  it("offers the newer signal for a replaced one, and nothing for any other resolved one", () => {
+    const replaced = buildResolved(
+      "a",
+      "2026-10-12T08:00:00.000Z",
+      { kind: "withdrawn", actor: "system" },
+      { replacedBy: "01a06d02-7f00-7000-8000-000000000009" },
+    );
+    expect(decideSignalPaneMoves(replaced, "done").map((move) => move.move)).toEqual([
+      "open-newer",
+    ]);
+    expect(moves(buildResolved("b", "2026-10-12T08:00:00.000Z"), "done")).toEqual([]);
+  });
+});
+
+describe("isMoveLeavingView and applySignalMove", () => {
+  it("takes a signal out of the lists the move leaves, and nowhere else", () => {
+    expect(isMoveLeavingView("snooze", "to-do")).toBe(true);
+    expect(isMoveLeavingView("snooze", "later")).toBe(false);
+    expect(isMoveLeavingView("done", "later")).toBe(true);
+    expect(isMoveLeavingView("unsnooze", "later")).toBe(true);
+    expect(isMoveLeavingView("unsnooze", "to-do")).toBe(false);
+    expect(isMoveLeavingView("not-urgent", "to-do")).toBe(false);
+  });
+
+  it("removes only the moved signals, never the ones the server skipped", () => {
+    const list = [buildSignal("a"), buildSignal("b"), buildSignal("c")];
+    expect(applySignalMove(list, "to-do", "done", ["a", "c"]).map((s) => s.id)).toEqual(["b"]);
+  });
+
+  it("lowers the moved Now signals to high after Not urgent", () => {
+    const list = [
+      buildSignal("a", { priority: "urgent" }),
+      buildSignal("b", { priority: "urgent" }),
+    ];
+    expect(applySignalMove(list, "to-do", "not-urgent", ["a"]).map((s) => s.priority)).toEqual([
+      "high",
+      "urgent",
+    ]);
+  });
+
+  it("returns the list itself when the move keeps every signal as it is", () => {
+    const list = [buildSignal("a", { snooze: SNOOZE })];
+    expect(applySignalMove(list, "later", "snooze", ["a"])).toBe(list);
   });
 });
 
 describe("describeMoveToast", () => {
   const one = [buildSignal("a", { priority: "urgent", snooze: SNOOZE })];
   const three = [buildSignal("a"), buildSignal("b"), buildSignal("c")];
+  const ids = (signals: ReadonlyArray<Signal>) => signals.map((signal) => signal.id);
 
   it("names the time a snooze ends, and counts more than one row", () => {
-    expect(describeMoveToast(planBulkAction(one, "snooze"), "Monday 09:00")).toBe(
+    expect(describeMoveToast(planSignalMove(one, "snooze"), ["a"], "Monday 09:00")).toBe(
       "Snoozed until Monday 09:00",
     );
-    expect(describeMoveToast(planBulkAction(three, "snooze"), "Monday 09:00")).toBe(
+    expect(describeMoveToast(planSignalMove(three, "snooze"), ids(three), "Monday 09:00")).toBe(
       "Snoozed 3 until Monday 09:00",
     );
   });
 
-  it("says what Done marked and what it kept", () => {
-    expect(describeMoveToast(planBulkAction(one, "done"))).toBe("Marked done");
+  it("names the one signal Done marked, and counts more with what it kept", () => {
+    expect(describeMoveToast(planSignalMove(one, "done"), ["a"])).toBe("Done · Signal a");
     const mixed = [...three, buildCoreSignal("p1", "proposal"), buildCoreSignal("p2", "proposal")];
-    expect(describeMoveToast(planBulkAction(mixed, "done"))).toBe(
+    expect(describeMoveToast(planSignalMove(mixed, "done"), ids(three))).toBe(
       "Marked 3 done. Kept 2 proposals",
     );
   });
 
+  it("counts what the server moved, not what was sent", () => {
+    expect(describeMoveToast(planSignalMove(three, "done"), ["a", "c"])).toBe("Marked 2 done");
+    expect(describeMoveToast(planSignalMove(three, "unsnooze"), ["b"])).toBe("Back on To do");
+  });
+
   it("says where Unsnooze and Not urgent moved the rows", () => {
-    expect(describeMoveToast(planBulkAction(one, "unsnooze"))).toBe("Back on To do");
-    expect(describeMoveToast(planBulkAction(one, "not-urgent"))).toBe("Moved out of Now");
+    expect(describeMoveToast(planSignalMove(one, "unsnooze"), ["a"])).toBe("Back on To do");
+    expect(describeMoveToast(planSignalMove(one, "not-urgent"), ["a"])).toBe("Moved out of Now");
   });
 });
 
@@ -233,9 +349,9 @@ describe("buildSnoozeChoices", () => {
     expect(readChoices("2026-10-13T04:00:00.000Z", KOLKATA)).toEqual([
       [1, "In 1 hour", "10:30", "2026-10-13T05:00:00.000Z", false],
       [2, "This afternoon", "14:00", "2026-10-13T08:30:00.000Z", false],
-      [3, "Tomorrow", "Wednesday 09:00", "2026-10-14T03:30:00.000Z", false],
-      [4, "Monday", "Monday 09:00", "2026-10-19T03:30:00.000Z", false],
-      [5, "Pick a time", null, null, false],
+      [3, "Tomorrow", "Wed 09:00", "2026-10-14T03:30:00.000Z", false],
+      [4, "Monday", "Mon 09:00", "2026-10-19T03:30:00.000Z", false],
+      [5, "Pick a time…", null, null, false],
     ]);
   });
 
@@ -264,7 +380,7 @@ describe("buildSnoozeChoices", () => {
     expect(readChoices("2026-10-13T18:00:00.000Z", KOLKATA)[0]).toEqual([
       1,
       "In 1 hour",
-      "Wednesday 00:30",
+      "Wed 00:30",
       "2026-10-13T19:00:00.000Z",
       false,
     ]);
@@ -288,6 +404,17 @@ describe("buildSnoozeChoices", () => {
     );
   });
 
+  it("disables a choice whose time the clock never reads", () => {
+    // Thursday 29 December 2011, 10:00 in Samoa, which skipped the 30th.
+    expect(readChoices("2011-12-29T20:00:00.000Z", "Pacific/Apia")[2]).toEqual([
+      3,
+      "Tomorrow",
+      null,
+      null,
+      true,
+    ]);
+  });
+
   it("keeps 09:00 on the next day across the night the clocks go back", () => {
     // Saturday 24 October, 22:00 in Amsterdam; the clocks go back that night.
     expect(readChoices("2026-10-24T20:00:00.000Z", AMSTERDAM)[2]?.[3]).toBe(
@@ -296,24 +423,27 @@ describe("buildSnoozeChoices", () => {
   });
 });
 
-describe("describeSnoozeUntil", () => {
+describe("describeSnoozeLine", () => {
   // Tuesday 13 October, 09:30 in Kolkata.
   const now = new Date("2026-10-13T04:00:00.000Z");
 
-  it("names today, tomorrow, a weekday within a week, and a date beyond", () => {
-    expect(describeSnoozeUntil("2026-10-13T08:30:00.000Z", now, KOLKATA)).toBe("today 14:00");
-    expect(describeSnoozeUntil("2026-10-14T03:30:00.000Z", now, KOLKATA)).toBe("tomorrow 09:00");
-    expect(describeSnoozeUntil("2026-10-19T03:30:00.000Z", now, KOLKATA)).toBe("Monday 09:00");
-    expect(describeSnoozeUntil("2026-10-20T03:30:00.000Z", now, KOLKATA)).toBe("Tuesday 09:00");
-    expect(describeSnoozeUntil("2026-11-04T03:30:00.000Z", now, KOLKATA)).toBe("4 Nov 09:00");
+  it("names when the snooze was set and when it ends, leaving out today's date", () => {
+    const snoozed = buildSignal("a", {
+      snooze: { snoozedAt: "2026-10-13T04:14:00.000Z", until: "2026-10-13T08:30:00.000Z" },
+    });
+    expect(describeSnoozeLine(snoozed, now, KOLKATA, "GitHub")).toBe(
+      "Snoozed at 09:44 until today 14:00. Answered on GitHub before then, it goes to Done.",
+    );
   });
 
-  it("counts days from midnight in the user's zone", () => {
-    // 00:30 on Tuesday in Amsterdam, still Monday in UTC.
-    const afterMidnight = new Date("2026-10-12T22:30:00.000Z");
-    expect(describeSnoozeUntil("2026-10-13T07:00:00.000Z", afterMidnight, AMSTERDAM)).toBe(
-      "today 09:00",
+  it("names another day, and leaves out the source when there is none", () => {
+    const snoozed = buildSignal("a", {
+      snooze: { snoozedAt: "2026-10-12T10:40:00.000Z", until: "2026-10-19T03:30:00.000Z" },
+    });
+    expect(describeSnoozeLine(snoozed, now, KOLKATA, null)).toBe(
+      "Snoozed yesterday at 16:10 until Monday 09:00.",
     );
+    expect(describeSnoozeLine(buildSignal("b"), now, KOLKATA, null)).toBeNull();
   });
 });
 
@@ -388,11 +518,9 @@ describe("countClearedToday", () => {
 describe("describeIntakeFoot", () => {
   it("names the cleared count, and those left on their own when there are any", () => {
     expect(describeIntakeFoot({ cleared: 7, leftOnTheirOwn: 3 })).toBe(
-      "7 cleared today. 3 left on their own: answered elsewhere or withdrawn. See Done.",
+      "7 cleared today. 3 left on their own: answered elsewhere or withdrawn.",
     );
-    expect(describeIntakeFoot({ cleared: 7, leftOnTheirOwn: 0 })).toBe(
-      "7 cleared today. See Done.",
-    );
+    expect(describeIntakeFoot({ cleared: 7, leftOnTheirOwn: 0 })).toBe("7 cleared today.");
   });
 
   it("returns null when nothing was cleared", () => {
@@ -417,6 +545,12 @@ describe("describeDoneRowOutcome", () => {
     expect(describeDoneRowOutcome(buildResolved("a", "2026-10-12T22:20:00.000Z"))).toBe(
       "Done, nothing sent",
     );
+    const withdrawn = buildResolved("c", "2026-10-12T22:20:00.000Z", {
+      kind: "withdrawn",
+      actor: "plugin:github",
+      outcome: "Marta removed the request",
+    });
+    expect(describeDoneRowOutcome(withdrawn)).toBe("Withdrawn · Marta removed the request");
     const replaced = buildResolved(
       "b",
       "2026-10-12T22:20:00.000Z",

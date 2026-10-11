@@ -24,12 +24,16 @@ export const SNOOZE_ANCHOR = "--intake-snooze";
  * control carries the anchor name `SNOOZE_ANCHOR` and the attribute
  * `data-opens-snooze`, and a click on it closes the menu.
  *
- * The choices are built from `now`, the moment the menu opened, in
- * `timezone`, the user's timezone setting. `1` to `5` take a choice, the
- * arrow keys move between them, and Esc or a click outside closes the menu
- * and gives the focus back to where it was. Pick a time swaps the choices
- * for a date and time field. `onChoose` is called with the instant the
- * signals come back, after `onClose`.
+ * The choices are built in `timezone`, the user's timezone setting, from
+ * the time they are drawn, and built again when one is taken, so a menu
+ * left open past 17:00 never snoozes until an evening that has begun. `1`
+ * to `5` take a choice, the arrow keys move between them, and Esc or a
+ * click outside closes the menu and gives the focus back to where it was.
+ * Pick a time… swaps the choices for a date and time field. `onChoose` is
+ * called with the instant the signals come back, after `onClose`.
+ *
+ * With `openedByKey`, as when `H` opens it, the focused choice is drawn
+ * active from the start, so the user sees where `↩` lands.
  *
  * The menu is a popover, so it draws above the list and the pane, and no
  * scrolling part clips it. It handles its own keys, and stops them there,
@@ -37,13 +41,13 @@ export const SNOOZE_ANCHOR = "--intake-snooze";
  */
 export function SnoozeMenu({
   place,
-  now,
+  openedByKey,
   timezone,
   onChoose,
   onClose,
 }: {
   readonly place: SnoozeMenuPlace;
-  readonly now: Date;
+  readonly openedByKey: boolean;
   readonly timezone: string;
   readonly onChoose: (until: string) => void;
   readonly onClose: () => void;
@@ -52,7 +56,7 @@ export function SnoozeMenu({
   const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState("");
   const [pickFailed, setPickFailed] = useState(false);
-  const choices = buildSnoozeChoices(now, timezone);
+  const choices = buildSnoozeChoices(new Date(), timezone);
 
   const closeFromOutside = useEffectEvent(onClose);
   useLayoutEffect(() => {
@@ -91,7 +95,7 @@ export function SnoozeMenu({
   };
 
   const takeChoice = (key: number): void => {
-    const choice = choices.find((each) => each.key === key);
+    const choice = buildSnoozeChoices(new Date(), timezone).find((each) => each.key === key);
     if (choice === undefined || choice.disabled) return;
     if (choice.until === null) setPicking(true);
     else choose(choice.until);
@@ -134,6 +138,7 @@ export function SnoozeMenu({
       aria-label="Snooze until"
       className="pop asks-snooze"
       data-place={place}
+      data-opened-by-key={openedByKey || undefined}
       onKeyDown={handleKeys}
     >
       <p className="asks-snooze-h">Snooze until</p>

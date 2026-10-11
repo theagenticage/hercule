@@ -20,6 +20,7 @@ import {
   stubApi,
   stubElementSize,
   stubResizeObserver,
+  type Answer,
   type Call,
   type Handler,
 } from "../../../app/testing";
@@ -408,7 +409,7 @@ describe("Intake's pane", () => {
     await userEvent.click(within(pane).getByRole("button", { name: "Done" }));
     expect(findMove(calls, "mark-done")?.body).toEqual({ signalIds: [REVIEW.id] });
     expect(calls.some(isAct)).toBe(false);
-    expect((await findToast()).textContent).toBe("Marked done");
+    expect((await findToast()).textContent).toBe(`Done · ${REVIEW.title}`);
     await waitFor(() => {
       expect(readSelected(router.state.location.search)).toBe(MENTION.id);
     });
@@ -428,7 +429,12 @@ describe("Intake's pane", () => {
     const pane = await findPane();
     await userEvent.click(within(pane).getByRole("button", { name: "Approve" }));
     const outcome = await within(pane).findByRole("status");
-    expect(outcome.textContent).toBe("What you did: Approved #1294, by you");
+    expect(outcome.querySelector(".b-work-label")!.textContent).toBe("What you did");
+    expect(outcome.querySelector("b")!.textContent).toBe("Approved #1294");
+    expect(outcome.querySelector(".b-work-text > span:last-child")!.textContent).toMatch(
+      /^Here · .+ · by you$/,
+    );
+    expect(outcome.querySelector(".ad-mark .mark--done")).not.toBeNull();
     expect(calls.find(isAct)?.body).toEqual({ actionId: "approve" });
     // The answer's audit entry reaches the app as a push on the `signal`
     // topic, and the list reads To do again, which no longer holds the signal.
@@ -479,7 +485,10 @@ describe("Intake's pane", () => {
     live.pushInvalidation("signal", [MENTION.id]);
 
     const outcome = await within(pane).findByRole("status");
-    expect(outcome.textContent).toBe("Resolved elsewhere: replied on GitHub, by GitHub");
+    expect(outcome.querySelector(".b-work-label")!.textContent).toBe("Left on its own");
+    expect(outcome.querySelector(".ad-outcome-desc")!.textContent).toBe(
+      "Resolved elsewhere: replied on GitHub, by GitHub",
+    );
     const kept = within(pane).getByRole("textbox", { name: "Your reply, not sent" });
     expect((kept as HTMLTextAreaElement).value).toBe("Ledger first.");
   });
@@ -765,7 +774,8 @@ describe("Intake's views", () => {
     await waitFor(() => {
       expect(getRow(SNOOZED)).not.toBeNull();
     });
-    expect(getItem(SNOOZED).querySelector(".ask-until")!.textContent).toMatch(/^Back /);
+    // The day heading names the day; the row shows only the time it comes back.
+    expect(getItem(SNOOZED).querySelector(".ask-until time")!.textContent).toMatch(/^\d\d:\d\d$/);
     expect(getList().querySelectorAll(".ask-item")).toHaveLength(1);
     expect(screen.queryByRole("toolbar", { name: "Checked rows" })).toBeNull();
     await userEvent.click(within(views).getByRole("button", { name: /^To do/ }));
@@ -789,6 +799,26 @@ describe("Intake's views", () => {
     });
     expect((await findToast()).textContent).toBe("Back on To do");
     expect(screen.getByText("Nothing snoozed.", { exact: false })).toBeTruthy();
+  });
+
+  it("snoozes again on Later with H, and keeps the selection and the row", async () => {
+    const { calls, router } = await openIntake(
+      `/intake?view=later&signal=${SNOOZED.id}`,
+      storeSignals([...SIGNALS, SNOOZED]).handlers,
+    );
+    const pane = await findPane();
+    expect(pane.querySelector(".ad-flag")!.textContent).toMatch(/^Snoozed at \d\d:\d\d until /);
+    act(() => {
+      getRow(SNOOZED).focus();
+    });
+    await userEvent.keyboard("h");
+    await userEvent.keyboard("3");
+    await waitFor(() => {
+      expect(findMove(calls, "snooze")?.body).toMatchObject({ signalIds: [SNOOZED.id] });
+    });
+    expect((await findToast()).textContent).toMatch(/^Snoozed until /);
+    expect(readSelected(router.state.location.search)).toBe(SNOOZED.id);
+    expect(getRow(SNOOZED)).not.toBeNull();
   });
 
   it("lists Done with each outcome and no controls, and counts what was cleared today", async () => {
@@ -828,7 +858,7 @@ describe("Intake's moves", () => {
     expect(moves(REVIEW)).toEqual(["Snooze", "Done"]);
     expect(
       within(getItem(REVIEW)).getByRole("button", { name: "Done" }).getAttribute("title"),
-    ).toBe("Marks it done");
+    ).toBe("Marks it done  E");
   });
 
   it("moves a Now signal to Signals with Not urgent", async () => {
@@ -863,7 +893,7 @@ describe("Intake's moves", () => {
       within(menu)
         .getAllByRole("menuitem", { hidden: true })
         .map((item) => item.querySelector("span")!.textContent),
-    ).toEqual(["In 1 hour", "This afternoon", "Tomorrow", "Monday", "Pick a time"]);
+    ).toEqual(["In 1 hour", "This afternoon", "Tomorrow", "Monday", "Pick a time…"]);
     await userEvent.keyboard("3");
     await waitFor(() => {
       expect(findMove(calls, "snooze")).toBeDefined();
@@ -895,7 +925,10 @@ describe("Intake's moves", () => {
     expect(bar.querySelector(".asks-toast-text")!.textContent).toBe("3 selected");
     const done = within(bar).getByRole("button", { name: /^Done/ });
     await userEvent.hover(done);
-    expect(bar.querySelector(".asks-toast-text")!.textContent).toBe("Done 2 · keeps 1 proposal");
+    expect(bar.querySelector(".asks-toast-text")!.textContent).toBe(
+      "3 selected · Done 2 · keeps 1 proposal",
+    );
+    expect(done.getAttribute("title")).toBe("Marks 2 of 3 done. 1 proposal needs its own answer");
     expect(getItem(PROPOSAL).classList.contains("is-kept")).toBe(true);
     expect(getItem(REVIEW).classList.contains("is-acted")).toBe(true);
     await userEvent.click(done);
@@ -924,6 +957,45 @@ describe("Intake's moves", () => {
     expect(isPaneShown()).toBe(true);
   });
 
+  it("stays on the view the user switched to while a move was being sent", async () => {
+    const { handlers } = storeSignals(SIGNALS);
+    let releaseAnswer: () => void = () => {};
+    const answered = new Promise<void>((resolve) => {
+      releaseAnswer = resolve;
+    });
+    const markDone = handlers["POST /api/v1/signals/mark-done"] as Exclude<Handler, Answer>;
+    const { calls, router } = await openIntake(`/intake?signal=${REVIEW.id}`, {
+      ...handlers,
+      // The controller marks the signal done at once, so Done lists it, but
+      // its answer arrives only once the test lets it.
+      "POST /api/v1/signals/mark-done": async (call) => {
+        const answer = await markDone(call);
+        await answered;
+        return answer;
+      },
+    });
+    await findPane();
+    act(() => {
+      getRow(REVIEW).focus();
+    });
+    await userEvent.keyboard("e");
+    await waitFor(() => {
+      expect(findMove(calls, "mark-done")).toBeDefined();
+    });
+    const views = screen.getByRole("group", { name: "View" });
+    await userEvent.click(within(views).getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(getRow(REVIEW)).not.toBeNull();
+    });
+    await userEvent.click(getRow(REVIEW));
+    releaseAnswer();
+    expect((await findToast()).textContent).toBe(`Done · ${REVIEW.title}`);
+    // The move's last step runs after the toast shows; one turn of the event
+    // loop lets it run.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(router.state.location.search).toEqual({ view: "done", signal: REVIEW.id });
+  });
+
   it("shows a failed move in the toast's place, and the row stays", async () => {
     await openIntake("/intake", {
       ...storeSignals(SIGNALS).handlers,
@@ -936,7 +1008,8 @@ describe("Intake's moves", () => {
     const toast = await findToast();
     expect(toast.getAttribute("role")).toBe("alert");
     expect(toast.classList.contains("asks-toast--fail")).toBe(true);
-    expect(toast.textContent).toBe("The database is busy.");
+    expect(toast.textContent).toBe("Couldn't mark done: The database is busy.");
+    expect(toast.querySelector(".mark--failed")).not.toBeNull();
     expect(getRow(REVIEW)).not.toBeNull();
   });
 });

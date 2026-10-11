@@ -17,15 +17,15 @@ import {
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
-import type { Signal, SignalView } from "@hercule/contract";
+import { DONE_ACTION_ID, type Signal, type SignalView } from "@hercule/contract";
 import {
   decideSignalRowControls,
   describeDoneRowOutcome,
   describeSignalRow,
-  describeSnoozeUntil,
-  formatMessageTime,
+  formatClock,
   isBackFromSnooze,
   parseSignalPluginId,
+  SIGNAL_MOVE_LABELS,
   type IntakeSection,
   type PluginIdentity,
   type SignalMove,
@@ -33,10 +33,9 @@ import {
 } from "@hercule/client-core";
 import { assistantsQuery, workflowsQuery } from "../../app/queries";
 import { AlarmIcon } from "../../icons/alarm";
-import { ArrowIcon } from "../../icons/arrow";
 import { CheckIcon } from "../../icons/check";
-import { UndoIcon } from "../../icons/undo";
 import { AgeLabel } from "../age-label";
+import { describeMoveTitle, SIGNAL_MOVE_GLYPHS } from "./move-glyphs";
 import { SNOOZE_ANCHOR } from "./snooze-menu";
 import { SourceMark } from "./source-mark";
 
@@ -78,17 +77,10 @@ const estimateItemHeight = (item: ListItem): number =>
 /** How many lines past each edge of the visible part stay drawn, so a fast scroll shows no gap. */
 const OVERSCAN = 8;
 
-/**
- * Returns the sections' headings and rows as one list, in the order they are
- * drawn. With `headings` false, as on Later and Done, the rows are drawn
- * with no heading.
- */
-const flattenSections = (
-  sections: ReadonlyArray<IntakeSection>,
-  headings: boolean,
-): ReadonlyArray<ListItem> =>
+/** Returns the sections' headings and rows as one list, in the order they are drawn. */
+const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<ListItem> =>
   sections.flatMap((section) => [
-    ...(headings ? [{ kind: "section" as const, key: `section:${section.key}`, section }] : []),
+    { kind: "section" as const, key: `section:${section.key}`, section },
     ...section.signals.map((signal, index) => ({
       kind: "row" as const,
       key: signal.id,
@@ -99,8 +91,8 @@ const flattenSections = (
 
 /**
  * Renders the list of `sections` in `view`, with the row of `selectedId`
- * selected. To do draws each section's heading; Later and Done draw one run
- * of rows, Done's quieter. A click on a row calls `onSelect` with its
+ * selected, each section under its heading: Now and Signals on To do, one
+ * heading per day on Later and Done. Done's rows are quieter. A click on a row calls `onSelect` with its
  * signal's id, and a press on a row's checkbox or one of its moves calls
  * `onRowAction`. The list reads the workflows and the assistants, whose
  * names label the core signals they raised.
@@ -172,7 +164,7 @@ export const IntakeList = memo(function IntakeList({
     () => ({ workflows, assistants }),
     [workflows, assistants],
   );
-  const items = useMemo(() => flattenSections(sections, view === "to-do"), [sections, view]);
+  const items = useMemo(() => flattenSections(sections), [sections]);
   const selectedIndex = useMemo(
     () => items.findIndex((item) => item.key === selectedId),
     [items, selectedId],
@@ -277,21 +269,25 @@ export const IntakeList = memo(function IntakeList({
   );
 });
 
-/** Renders a section's heading: Now with its red dot, or Signals with its count. */
+/**
+ * Renders a section's heading: Now with its red dot, or any other section,
+ * such as Signals or a day on Later and Done, with its count.
+ */
 function SectionHeading({ section }: { readonly section: IntakeSection }): JSX.Element {
+  const now = section.key === "now";
   return (
     <h2 className="section-h asks-sec">
-      {section.key === "now" && <span className="dot dot--fail" />}
+      {now && <span className="dot dot--fail" />}
       {section.label}
-      {section.key === "signals" && <span className="count">{section.signals.length}</span>}
+      {!now && <span className="count">{section.signals.length}</span>}
     </h2>
   );
 }
 
-/** Returns the text of a describe line, without its marks, for a tooltip. */
-const readDescribeLineText = (signal: Signal, actionId: string): string | undefined =>
+/** Returns the text of the Done action's describe line, without its marks, for a tooltip. */
+const readDoneLineText = (signal: Signal): string | undefined =>
   signal.actions
-    .find((action) => action.id === actionId)
+    .find((action) => action.id === DONE_ACTION_ID)
     ?.describeLine?.map((part) => part.text)
     .join("");
 
@@ -301,11 +297,14 @@ const readDescribeLineText = (signal: Signal, actionId: string): string | undefi
  *
  * - To do: "Back" leads the line when its snooze ran out; the end holds the
  *   age and the marigold mark of a `high` signal.
- * - Later: the end holds when it comes back, "Back Monday 09:00".
+ * - Later: the end holds the time it comes back, on the day its heading
+ *   names.
  * - Done: the line is its outcome, and the end the time it was resolved.
  *
  * Beside the row sit its checkbox and its moves, as `decideSignalRowControls`
- * decides them. They show while the pointer or the focus is on the row.
+ * decides them. They show while the pointer is on the row, or while the
+ * keyboard's focus is on one of them; selecting the row with `J` and `K`
+ * does not show them, so the list stays quiet while the user reads it.
  */
 const SignalRow = memo(function SignalRow({
   view,
@@ -418,83 +417,71 @@ const SignalRow = memo(function SignalRow({
           {view === "later" && signal.snooze !== undefined && (
             <span className="ask-until">
               <AlarmIcon size={12} />
-              {`Back ${describeSnoozeUntil(signal.snooze.until, new Date(), timezone)}`}
+              <time dateTime={signal.snooze.until}>
+                {formatClock(new Date(signal.snooze.until), timezone)}
+              </time>
             </span>
           )}
           {view === "done" && signal.resolution !== undefined && (
             <time className="ask-age" dateTime={signal.resolution.at}>
-              {formatMessageTime(new Date(signal.resolution.at), timezone, new Date())}
+              {formatClock(new Date(signal.resolution.at), timezone)}
             </time>
           )}
         </span>
       </button>
-      {controls.moves.length > 0 && (
+      {controls.slots.length > 0 && (
         <span className="ask-acts" style={menuOpen ? { anchorName: SNOOZE_ANCHOR } : undefined}>
-          {controls.moves.map((move) => (
-            <RowMove
-              key={move}
-              move={move}
-              doneTitle={readDescribeLineText(signal, "done")}
-              menuOpen={menuOpen}
-              onPress={() => {
-                onRowAction(signal.id, move);
-              }}
-            />
-          ))}
+          {controls.slots.map((move, index) =>
+            move === null ? (
+              <span key={`slot:${String(index)}`} className="ask-act-slot" />
+            ) : (
+              <RowMove
+                key={move}
+                move={move}
+                doneLine={readDoneLineText(signal)}
+                menuOpen={menuOpen}
+                onPress={() => {
+                  onRowAction(signal.id, move);
+                }}
+              />
+            ),
+          )}
         </span>
       )}
     </div>
   );
 });
 
-/** Each row move's icon and label, and the key the tooltip names. */
-const ROW_MOVES: Readonly<
-  Record<SignalMove, { readonly icon: ReactNode; readonly label: string; readonly key: string }>
-> = {
-  snooze: { icon: <AlarmIcon size={14} />, label: "Snooze", key: "H" },
-  unsnooze: { icon: <UndoIcon size={14} />, label: "Unsnooze", key: "U" },
-  done: { icon: <CheckIcon size={14} />, label: "Done", key: "E" },
-  "not-urgent": {
-    icon: (
-      <span className="asks-down">
-        <ArrowIcon size={14} />
-      </span>
-    ),
-    label: "Not urgent",
-    key: "",
-  },
-};
-
 /**
- * Renders one of a row's moves as an icon button. Done's tooltip is its
- * describe line, `doneTitle`; every other tooltip names the move and its
- * key. Snooze opens the snooze menu, so it says whether the menu is open.
+ * Renders one of a row's moves as an icon button. Its tooltip names the
+ * move and its key; Done's names what Done does, its describe line
+ * `doneLine`, then the key. Snooze opens the snooze menu, so it says
+ * whether the menu is open.
  */
 function RowMove({
   move,
-  doneTitle,
+  doneLine,
   menuOpen,
   onPress,
 }: {
   readonly move: SignalMove;
-  readonly doneTitle: string | undefined;
+  readonly doneLine: string | undefined;
   readonly menuOpen: boolean;
   readonly onPress: () => void;
 }): JSX.Element {
-  const { icon, label, key } = ROW_MOVES[move];
   const opensMenu = move === "snooze";
   return (
     <button
       type="button"
       className="ask-act"
-      aria-label={label}
-      title={move === "done" && doneTitle !== undefined ? doneTitle : `${label}  ${key}`.trim()}
+      aria-label={SIGNAL_MOVE_LABELS[move]}
+      title={describeMoveTitle(move, move === "done" ? doneLine : undefined)}
       data-opens-snooze={opensMenu || undefined}
       aria-haspopup={opensMenu ? "menu" : undefined}
       aria-expanded={opensMenu ? menuOpen : undefined}
       onClick={onPress}
     >
-      {icon}
+      {SIGNAL_MOVE_GLYPHS[move].icon}
     </button>
   );
 }

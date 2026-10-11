@@ -2,14 +2,41 @@
  * The foot under Intake's To do list: how many signals were cleared today
  * (spec 17 §The foot, the toast and failures).
  */
-import { useEffect, type JSX } from "react";
+import { useCallback, useEffect, useSyncExternalStore, type JSX } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
-import { countClearedToday, describeIntakeFoot, reachesBeforeToday } from "@hercule/client-core";
-import { signalsDoneQuery } from "../../app/queries";
+import {
+  computeNextMidnight,
+  countClearedToday,
+  describeIntakeFoot,
+  reachesBeforeToday,
+} from "@hercule/client-core";
+import { ageClock } from "../../app/age-clock";
+import { signalsClearedTodayQuery } from "../../app/queries";
 
-/** The end of the foot's line, drawn as a link to the Done view. */
-const SEE_DONE = "See Done.";
+/**
+ * Draws the calling component again when the age clock's time passes
+ * midnight in `timezone`, so "today" follows the date. The clock reads the
+ * time again when the window is shown or gets focus, which covers a Mac that
+ * slept past midnight.
+ */
+const useRedrawAtMidnight = (timezone: string): void => {
+  const subscribe = useCallback(
+    (onChange: () => void) =>
+      ageClock.watch(
+        // A zone that cannot be read has no midnight; an hour later is checked instead.
+        (now) => computeNextMidnight(now, timezone) ?? new Date(now.getTime() + 3_600_000),
+        onChange,
+      ),
+    [timezone],
+  );
+  // The value is the start of the next day, which changes only at midnight,
+  // so a clock read during the day draws nothing again.
+  useSyncExternalStore(
+    subscribe,
+    () => computeNextMidnight(ageClock.readNow(), timezone)?.getTime() ?? 0,
+  );
+};
 
 /**
  * Renders the foot: "7 cleared today. See Done.", counted in `timezone`,
@@ -21,9 +48,10 @@ const SEE_DONE = "See Done.";
  */
 export function IntakeFoot({ timezone }: { readonly timezone: string }): JSX.Element | null {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const done = useInfiniteQuery(signalsDoneQuery(client));
+  const done = useInfiniteQuery(signalsClearedTodayQuery(client));
   const signals = done.data?.pages.flatMap((page) => page.items) ?? [];
-  const now = new Date();
+  useRedrawAtMidnight(timezone);
+  const now = ageClock.readNow();
   const complete = reachesBeforeToday(signals, now, timezone);
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = done;
 
@@ -35,8 +63,7 @@ export function IntakeFoot({ timezone }: { readonly timezone: string }): JSX.Ele
   if (line === null) return null;
   return (
     <p className="asks-cleared">
-      {/* The line always ends in "See Done.", which is drawn as the link. */}
-      {line.slice(0, -SEE_DONE.length)}
+      {line}{" "}
       <Link to="/intake" search={{ view: "done" }} className="asks-cleared-link">
         See Done
       </Link>

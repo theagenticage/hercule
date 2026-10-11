@@ -5,85 +5,49 @@
  */
 import type { JSX, ReactNode } from "react";
 import type { Signal } from "@hercule/contract";
-import { planBulkAction } from "@hercule/client-core";
-import { AlarmIcon } from "../../icons/alarm";
+import { decideSignalPaneMoves, planSignalMove } from "@hercule/client-core";
 import { ArrowIcon } from "../../icons/arrow";
-import { UndoIcon } from "../../icons/undo";
+import { SIGNAL_MOVE_GLYPHS } from "./move-glyphs";
 import { SNOOZE_ANCHOR } from "./snooze-menu";
 import { useIntakeMoves } from "./use-signal-moves";
 
 /**
- * Renders the pane's moves for `signal`:
- *
- * - on Later: Unsnooze, then Snooze again…;
- * - on To do: Snooze…, then Not urgent for a Now signal;
- * - for a replaced signal: a way to open the newer one.
- *
- * A resolved signal that was not replaced has none, so nothing is drawn.
+ * Renders the pane's moves for `signal`, as `decideSignalPaneMoves` decides
+ * them. Snooze opens the snooze menu above it; Open the newer one selects
+ * the signal that replaced this one. With no moves, nothing is drawn.
  */
-export function SignalMoves({ signal }: { readonly signal: Signal }): JSX.Element | null {
+export function SignalPaneMoves({ signal }: { readonly signal: Signal }): JSX.Element | null {
   const moves = useIntakeMoves();
-  if (signal.replacedBy !== undefined) {
-    const successorId = signal.replacedBy;
-    return (
-      <div className="ledger ad-mine">
-        <MoveRow
-          icon={<ArrowIcon size={14} />}
-          label="Open the newer one"
-          describe="A newer signal asks the same thing"
-          onPress={() => {
-            moves.select(successorId);
-          }}
-        />
-      </div>
-    );
-  }
-  if (signal.status !== "open") return null;
-  const later = moves.view === "later";
-  const menuHere = moves.snoozeMenuPlace === "pane";
+  const paneMoves = decideSignalPaneMoves(signal, moves.view);
+  if (paneMoves.length === 0) return null;
   return (
     <div className="ledger ad-mine">
-      {later && (
-        <MoveRow
-          icon={<UndoIcon size={14} />}
-          label="Unsnooze"
-          describe="Puts it back on To do now"
-          keyLabel="U"
-          locked={moves.pending}
-          onPress={() => {
-            moves.run(planBulkAction([signal], "unsnooze"));
-          }}
-        />
-      )}
-      <MoveRow
-        icon={<AlarmIcon size={14} />}
-        label={later ? "Snooze again…" : "Snooze…"}
-        describe={
-          later
-            ? "Changes when it comes back. Only for you"
-            : "Hides it from To do until a time you pick. Only for you"
-        }
-        keyLabel="H"
-        locked={moves.pending}
-        opensMenu={menuHere}
-        onPress={() => {
-          moves.toggleSnoozeMenu("pane", [signal]);
-        }}
-      />
-      {!later && signal.priority === "urgent" && (
-        <MoveRow
-          icon={
-            <span className="asks-down">
-              <ArrowIcon size={14} />
-            </span>
-          }
-          label="Not urgent"
-          describe="Moves it out of Now. Only for you"
-          locked={moves.pending}
-          onPress={() => {
-            moves.run(planBulkAction([signal], "not-urgent"));
-          }}
-        />
+      {paneMoves.map(({ move, label, describe }) =>
+        move === "open-newer" ? (
+          <MoveRow
+            key={move}
+            icon={<ArrowIcon size={14} />}
+            label={label}
+            describe={describe}
+            onPress={() => {
+              if (signal.replacedBy !== undefined) moves.select(signal.replacedBy);
+            }}
+          />
+        ) : (
+          <MoveRow
+            key={move}
+            icon={SIGNAL_MOVE_GLYPHS[move].icon}
+            label={label}
+            describe={describe}
+            keyLabel={SIGNAL_MOVE_GLYPHS[move].key}
+            locked={moves.pending}
+            opensMenu={move === "snooze" ? moves.snoozeMenuPlace === "pane" : undefined}
+            onPress={() => {
+              if (move === "snooze") moves.toggleSnoozeMenu("pane", [signal]);
+              else moves.run(planSignalMove([signal], move));
+            }}
+          />
+        ),
       )}
     </div>
   );
@@ -106,10 +70,10 @@ function MoveRow({
   readonly icon: ReactNode;
   readonly label: string;
   readonly describe: string;
-  readonly keyLabel?: string;
+  readonly keyLabel?: string | undefined;
   readonly locked?: boolean;
   /** Set only on the row that opens the snooze menu: whether the menu is open from it. */
-  readonly opensMenu?: boolean;
+  readonly opensMenu?: boolean | undefined;
   readonly onPress: () => void;
 }): JSX.Element {
   return (

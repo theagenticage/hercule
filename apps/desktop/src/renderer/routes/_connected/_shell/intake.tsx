@@ -5,7 +5,8 @@ import {
   readOnOpen,
   settingsQuery,
   signalQuery,
-  signalsDoneQuery,
+  signalsClearedTodayQuery,
+  signalsLaterQuery,
   signalsToDoQuery,
   workflowsQuery,
 } from "../../../app/queries";
@@ -40,8 +41,9 @@ const validateIntakeSearch = (search: Record<string, unknown>): IntakeSearch => 
  * runs raised: no live push keeps them current, see `workflowsQuery`. A new
  * selection does not read them again, so stepping through the list with `J`
  * sends no request for them. The loader also has the user's settings, whose
- * timezone the times on Intake are read in, and the first page of Done,
- * which counts the signals cleared today.
+ * timezone the times on Intake are read in, the first page of Done, which
+ * counts the signals cleared today, and the first page of Later, which
+ * counts the snoozed signals in the view switcher.
  *
  * The loader also reads the selected signal:
  *
@@ -63,7 +65,8 @@ export const Route = createFileRoute("/_connected/_shell/intake")({
         ? queryClient.ensureQueryData(workflowsQuery(client))
         : readOnOpen(queryClient, workflowsQuery(client)),
       queryClient.ensureQueryData(settingsQuery(client)),
-      queryClient.ensureInfiniteQueryData(signalsDoneQuery(client)),
+      queryClient.ensureInfiniteQueryData(signalsClearedTodayQuery(client)),
+      queryClient.ensureInfiniteQueryData(signalsLaterQuery(client)),
     ]);
     if (deps.signal === undefined) {
       await opening;

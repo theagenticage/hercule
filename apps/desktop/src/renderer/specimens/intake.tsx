@@ -31,4 +31,6 @@ const scene = readScene();
 document.documentElement.dataset.scenes = INTAKE_SCENES.map((each) => each.name).join(" ");
 await mountIntakeSpecimen(scene.records, scene.intake);
 await scene.play?.();
+// The capture script reads this to move the pointer onto the element.
+if (scene.hover !== undefined) document.documentElement.dataset.hover = scene.hover;
 await markSheetReady();

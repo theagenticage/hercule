@@ -5,7 +5,7 @@ import { listUrgentSignals } from "@hercule/client-core";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
-import { useSnoozeTimer } from "../../app/snooze-timer";
+import { SnoozeTimer } from "../../app/snooze-timer";
 import { ensureShellData, pluginsQuery, signalsToDoQuery } from "../../app/queries";
 import { useWaiting } from "../../app/waiting";
 import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
@@ -62,7 +62,6 @@ function ShellLayout(): JSX.Element {
   const { bridge, controller, queryClient } = Route.useRouteContext();
   const navigate = useNavigate();
   useLiveConnection(controller.live, queryClient);
-  useSnoozeTimer(controller.client, queryClient);
   const waiting = useWaiting();
   const openDestination = useOpenDestination();
   const [dialog, setDialog] = useState<NewThreadDialog | null>(null);
@@ -147,6 +146,7 @@ function ShellLayout(): JSX.Element {
         <Outlet />
       </Shell>
       <NewThreadDialogs dialog={dialog} setDialog={setDialog} onDraft={openDraft} />
+      <SnoozeTimer client={controller.client} />
     </>
   );
 }

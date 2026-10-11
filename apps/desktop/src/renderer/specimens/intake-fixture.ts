@@ -29,7 +29,21 @@
  *   that says so;
  * - `failed`: the same move failing, its error in the toast's place;
  * - `later`: the Later view, with Pieter's snoozed review request open;
- * - `done`: the Done view, with Sanne's approved review request open.
+ * - `done`: the Done view, with Sanne's approved review request open;
+ * - `hover-now`: the pointer on the Sentry alert, a Now row, which shows
+ *   Snooze, an empty place where Done would be, and Not urgent;
+ * - `hover-signal`: the pointer on Jonas's question, a row with Snooze and
+ *   Done;
+ * - `hover-later`: the Later view, the pointer on Sanne's snoozed question,
+ *   with Unsnooze and Done;
+ * - `hover-done`: the Done view, the pointer on a row, which has no moves;
+ * - `evening`: the snooze menu opened at 18:41, when This evening is past
+ *   and disabled;
+ * - `toast-bulk`: Marta's review request marked done, then the next row
+ *   checked, so the toast stands above the bulk bar.
+ *
+ * Done also holds a signal a newer one replaced, from yesterday, so the
+ * `done` and `hover-done` scenes show its "Replaced by a newer one" line.
  *
  * Every scene on To do shows the foot, because the Done list holds seven
  * signals cleared today, as the design does.
@@ -43,6 +57,7 @@ import {
   type SignalAction,
 } from "@hercule/contract";
 import type { FetchLike } from "@hercule/client-core";
+import { stopSpecimenClockAt } from "./fixed-clock";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { IntakeRecords, SidebarRecords } from "./shell-page";
 
@@ -523,7 +538,7 @@ const DONE: ReadonlyArray<Signal> = [
   buildResolved(
     15,
     185,
-    "Withdrawn",
+    "Pieter closed #1286 without merging it",
     {
       kind: "github/review-requested",
       title: "Try the new checkout copy",
@@ -538,6 +553,21 @@ const DONE: ReadonlyArray<Signal> = [
     asker: "Pieter",
     place: "webshop #1288",
   }),
+  {
+    ...buildResolved(
+      17,
+      1130,
+      "Withdrawn",
+      {
+        kind: "github/review-requested",
+        title: "Review the refund webhook",
+        asker: "Marta",
+        place: "payments-api #1290",
+      },
+      { kind: "withdrawn", actor: "plugin:github" },
+    ),
+    replacedBy: REVIEW.id,
+  },
 ];
 
 /** Builds the event a signal was raised from, whose address gives the pane its "Open on" link. */
@@ -576,6 +606,12 @@ export interface IntakeScene {
    * Resolves once the page shows the result. None when left out.
    */
   readonly play?: () => Promise<void>;
+  /**
+   * The element the pointer rests on when the scene is captured, as a CSS
+   * selector. A page cannot put itself under `:hover`, so the capture
+   * script moves the pointer there. None when left out.
+   */
+  readonly hover?: string;
 }
 
 const RECORDS: SidebarRecords = {
@@ -652,17 +688,23 @@ const buildScene = (
     read = signal,
     intake = {},
     play,
+    hover,
   }: {
     read?: Signal;
     intake?: Partial<IntakeRecords>;
     play?: () => Promise<void>;
+    hover?: Signal;
   } = {},
 ): IntakeScene => ({
   name,
   records: RECORDS,
   intake: { signal: read, event: buildEvent(signal, url), ...intake },
   ...(play !== undefined && { play }),
+  ...(hover !== undefined && { hover: selectRow(hover) }),
 });
+
+/** Returns the selector of the row of `signal`, which the pointer rests on in a hover scene. */
+const selectRow = (signal: Signal): string => `.ask-row[data-signal-id="${signal.id}"]`;
 
 const REVIEW_URL = "https://github.com/rogier/payments-api/pull/1294";
 
@@ -732,5 +774,31 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
   }),
   buildScene("done", DONE[0]!, "https://github.com/rogier/webshop/pull/1293", {
     intake: { view: "done" },
+  }),
+  buildScene("hover-now", REVIEW, REVIEW_URL, { hover: ALERT }),
+  buildScene("hover-signal", REVIEW, REVIEW_URL, { hover: MENTION }),
+  buildScene("hover-later", LAZY_IMAGES, "https://github.com/rogier/webshop/pull/1296", {
+    intake: { view: "later" },
+    hover: VAT_COPY,
+  }),
+  buildScene("hover-done", DONE[0]!, "https://github.com/rogier/webshop/pull/1293", {
+    intake: { view: "done" },
+    hover: DONE[4]!,
+  }),
+  buildScene("evening", REVIEW, REVIEW_URL, {
+    play: async () => {
+      stopSpecimenClockAt(SPECIMEN_NOW + 9 * 3_600_000);
+      await pressKeys("h");
+      await waitForElement(".asks-snooze");
+    },
+  }),
+  buildScene("toast-bulk", REVIEW, REVIEW_URL, {
+    intake: { answerMove: answerMoveDone },
+    play: async () => {
+      await pressKeys("e");
+      await waitForElement(".asks-toast:not(.asks-bulk)");
+      await pressKeys("x");
+      await waitForElement(".asks-bulk");
+    },
   }),
 ];

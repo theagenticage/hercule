@@ -1,85 +1,49 @@
 /**
  * The moves on Intake that send nothing to the source: Done, Snooze,
- * Unsnooze and Not urgent, on one row or on the checked rows in bulk. Also
- * the snooze menu's choices, the Later row's "Back" time, and the foot under
- * the list. Spec 17 §Intake owns the screen; spec 10 §9.4 and §9.7 own what
- * each move does to a signal.
+ * Unsnooze and Not urgent, on one row, in the pane, or on the checked rows
+ * in bulk. Also the snooze menu's choices, the Later pane's snooze line, and
+ * the foot under the list. Spec 17 §Intake owns the screen; spec 10 §9.4 and
+ * §9.7 own what each move does to a signal.
  *
  * Every wall-clock time here is in the user's timezone setting, an IANA zone
  * passed by the caller, never the machine's zone. The caller passes a zone
  * this runtime can format, as `resolveDisplayTimezone` returns one.
  */
 import { DONE_ACTION_ID, type Signal, type SignalView } from "@hercule/contract";
+import { lowerFirst, nameSignalKind } from "./intake";
 import { formatNameList } from "./name-list";
-import { isSameDay } from "./time-context";
+import {
+  addCalendarDays,
+  computeMinutesOfDay,
+  computeWeekday,
+  computeZonedInstant,
+  formatClock,
+  formatRelativeDay,
+  formatRelativeMoment,
+  formatShortMoment,
+  isSameDay,
+  readWallClock,
+  type CalendarDate,
+} from "./time-context";
 
-/** A move on a row or in the bulk bar that sends nothing to the source. */
+/** A move on a row, in the pane, or in the bulk bar that sends nothing to the source. */
 export type SignalMove = "snooze" | "done" | "not-urgent" | "unsnooze";
 
-/**
- * Checks whether a signal's kind offers Done: whether its actions hold the
- * core's `done` action. Every plugin kind and `fyi` do; `proposal`, `offer`
- * and `unsure` do not.
- */
-export const hasDoneAction = (signal: Signal): boolean =>
-  signal.actions.some((action) => action.id === DONE_ACTION_ID);
-
-/** The controls a row shows, in the order the row draws them, and whether it has a checkbox. */
-export interface SignalRowControls {
-  readonly moves: ReadonlyArray<SignalMove>;
-  readonly checkable: boolean;
-}
-
-/**
- * Decides which controls a row shows in `view`:
- *
- * - To do: Snooze, then Done when the kind offers it, then Not urgent on a
- *   Now row. A row back from a snooze follows its kind, like any other.
- * - Later: Unsnooze, then Done when the kind offers it.
- * - Done: no controls and no checkbox.
- */
-export const decideSignalRowControls = (signal: Signal, view: SignalView): SignalRowControls => {
-  if (view === "done") return { moves: [], checkable: false };
-  const done: ReadonlyArray<SignalMove> = hasDoneAction(signal) ? ["done"] : [];
-  if (view === "later") return { moves: ["unsnooze", ...done], checkable: true };
-  const notUrgent: ReadonlyArray<SignalMove> = signal.priority === "urgent" ? ["not-urgent"] : [];
-  return { moves: ["snooze", ...done, ...notUrgent], checkable: true };
-};
-
-/**
- * Returns the bulk bar's buttons for the rows checked in `view`, in drawing
- * order: Snooze on To do and Unsnooze on Later, then Done when at least one
- * checked row offers it. The Done view has no bulk bar, so it returns none.
- */
-export const listBulkMoves = (
-  checked: ReadonlyArray<Signal>,
-  view: SignalView,
-): ReadonlyArray<SignalMove> => {
-  if (view === "done") return [];
-  const first: SignalMove = view === "later" ? "unsnooze" : "snooze";
-  return checked.some(hasDoneAction) ? [first, "done"] : [first];
-};
-
-/** What one move does to the checked rows, or to the one row it is made on. */
-export interface BulkPlan {
-  readonly move: SignalMove;
-  /** The ids the call is sent with: the rows the move applies to, in list order. */
-  readonly signalIds: ReadonlyArray<string>;
-  /** The rows the move leaves alone. They stay checked, and fade while the button is hovered. */
-  readonly keptIds: ReadonlyArray<string>;
-  /** The bar's line while the button has hover or focus: "Done 3 · keeps 2 proposals", "Snooze 5". */
-  readonly preview: string;
-  /** The rows the move leaves alone, named by kind: "2 proposals and 1 offer". Empty when none. */
-  readonly keptLabel: string;
-}
-
-/** The label of each move's button, as the bar's line starts with it. */
-const MOVE_LABELS: Readonly<Record<SignalMove, string>> = {
+/** The label of each move's button, and the first word of the bulk bar's line. */
+export const SIGNAL_MOVE_LABELS: Readonly<Record<SignalMove, string>> = {
   snooze: "Snooze",
   done: "Done",
   unsnooze: "Unsnooze",
   "not-urgent": "Not urgent",
 };
+
+/**
+ * Checks whether a signal's kind offers Done: whether its actions hold the
+ * core's `done` action. `fyi` and the plugin kinds that declare it do;
+ * `proposal`, `offer` and `unsure` do not.
+ */
+export const hasDoneAction = (signal: Signal): boolean =>
+  signal.actions.some((action) => action.id === DONE_ACTION_ID);
 
 /** Checks whether `move` applies to `signal`; the server would skip or refuse the rest. */
 const isMoveApplicable = (move: SignalMove, signal: Signal): boolean => {
@@ -95,10 +59,124 @@ const isMoveApplicable = (move: SignalMove, signal: Signal): boolean => {
   }
 };
 
+/** The moves each view offers on a row, in the order the row draws them. */
+const ROW_MOVES: Readonly<Record<SignalView, ReadonlyArray<SignalMove>>> = {
+  "to-do": ["snooze", "done", "not-urgent"],
+  later: ["unsnooze", "done"],
+  done: [],
+};
+
+/** The controls a row shows, and whether it has a checkbox. */
+interface SignalRowControls {
+  /**
+   * The row's moves in the order the row draws them. `null` is an empty
+   * place the row keeps, so the moves line up down the list.
+   */
+  readonly slots: ReadonlyArray<SignalMove | null>;
+  readonly checkable: boolean;
+}
+
+/**
+ * Decides which controls a row shows in `view`:
+ *
+ * - To do: Snooze, then Done, then Not urgent on a Now row. A row back from
+ *   a snooze follows its kind, like any other.
+ * - Later: Unsnooze, then Done.
+ * - Done: no controls and no checkbox.
+ *
+ * A kind that does not offer Done keeps an empty place for it. Not urgent
+ * gets no place outside Now, because Now is a section of its own, so its
+ * rows line up with each other.
+ */
+export const decideSignalRowControls = (signal: Signal, view: SignalView): SignalRowControls => ({
+  slots: ROW_MOVES[view].flatMap((move) =>
+    isMoveApplicable(move, signal) ? [move] : move === "not-urgent" ? [] : [null],
+  ),
+  checkable: view !== "done",
+});
+
+/**
+ * Returns the bulk bar's buttons for the rows checked in `view`, in the
+ * order the rows draw them: Snooze on To do and Unsnooze on Later, then Done
+ * when at least one checked row offers it. Not urgent is never in the bar.
+ * The Done view has no bulk bar, so it returns none.
+ */
+export const listBulkMoves = (
+  checked: ReadonlyArray<Signal>,
+  view: SignalView,
+): ReadonlyArray<SignalMove> =>
+  ROW_MOVES[view].filter(
+    (move) => move !== "not-urgent" && checked.some((signal) => isMoveApplicable(move, signal)),
+  );
+
+/** One of the pane's own moves, under its answers, as the pane draws it. */
+export interface SignalPaneMove {
+  /** The move it makes, or `open-newer` to open the signal that replaced this one. */
+  readonly move: SignalMove | "open-newer";
+  readonly label: string;
+  readonly describe: string;
+}
+
+/**
+ * Decides the pane's own moves for `signal`, shown in `view`:
+ *
+ * - a replaced signal: Open the newer one;
+ * - an open signal on Later: Unsnooze, then Snooze again…;
+ * - an open signal on To do: Snooze…, then Not urgent for a Now signal;
+ * - any other resolved signal: none.
+ */
+export const decideSignalPaneMoves = (
+  signal: Signal,
+  view: SignalView,
+): ReadonlyArray<SignalPaneMove> => {
+  if (signal.replacedBy !== undefined)
+    return [
+      {
+        move: "open-newer",
+        label: "Open the newer one",
+        describe: "A newer signal asks the same thing",
+      },
+    ];
+  if (signal.status !== "open") return [];
+  if (view === "later")
+    return [
+      { move: "unsnooze", label: "Unsnooze", describe: "Puts it back on To do now" },
+      {
+        move: "snooze",
+        label: "Snooze again…",
+        describe: "Changes when it comes back. Only for you",
+      },
+    ];
+  const snooze: SignalPaneMove = {
+    move: "snooze",
+    label: "Snooze…",
+    describe: "Hides it from To do until a time you pick. Only for you",
+  };
+  return isMoveApplicable("not-urgent", signal)
+    ? [
+        snooze,
+        { move: "not-urgent", label: "Not urgent", describe: "Moves it out of Now. Only for you" },
+      ]
+    : [snooze];
+};
+
+/** What one move does to the checked rows, or to the one row it is made on. */
+export interface SignalMovePlan {
+  readonly move: SignalMove;
+  /** The rows the move applies to, in list order. The call is sent with their ids. */
+  readonly acted: ReadonlyArray<Signal>;
+  /** The rows the move leaves alone. They stay checked, and fade while the button is hovered. */
+  readonly keptIds: ReadonlyArray<string>;
+  /** The bar's line while the button has hover or focus: "Done 3 · keeps 2 proposals", "Snooze 5". */
+  readonly preview: string;
+  /** The rows the move leaves alone, named by kind: "2 proposals and 1 offer". Empty when none. */
+  readonly keptLabel: string;
+}
+
 /**
  * The singular and the plural noun for the signals of each core kind, as a
- * sentence counts them. A plugin kind is counted as "signal", because every
- * plugin kind offers Done and so is only left alone by Not urgent.
+ * sentence counts them. A plugin kind is counted by its kind's label, such
+ * as "1 review requested", because its label is no noun to make plural.
  */
 const KIND_NOUNS: Readonly<Record<string, readonly [string, string]>> = {
   proposal: ["proposal", "proposals"],
@@ -113,26 +191,22 @@ const KIND_NOUNS: Readonly<Record<string, readonly [string, string]>> = {
  * for no signals.
  */
 const countSignalsByKind = (signals: ReadonlyArray<Signal>): string => {
-  // Keyed by the singular noun, so every plugin kind is counted together.
-  const counts = new Map<string, { readonly plural: string; count: number }>();
-  for (const signal of signals) {
-    const [singular, plural] = KIND_NOUNS[signal.kind] ?? ["signal", "signals"];
-    const held = counts.get(singular) ?? { plural, count: 0 };
-    held.count += 1;
-    counts.set(singular, held);
-  }
+  const counts = new Map<string, number>();
+  for (const signal of signals) counts.set(signal.kind, (counts.get(signal.kind) ?? 0) + 1);
   return formatNameList(
-    [...counts].map(
-      ([singular, { plural, count }]) => `${String(count)} ${count === 1 ? singular : plural}`,
-    ),
+    [...counts].map(([kind, count]) => {
+      const label = lowerFirst(nameSignalKind(kind));
+      const [singular, plural] = KIND_NOUNS[kind] ?? [label, label];
+      return `${String(count)} ${count === 1 ? singular : plural}`;
+    }),
     "and",
   );
 };
 
 /**
- * Plans `move` over the checked rows: which ids the call sends, which rows
- * it leaves alone, and the line the bar shows while the button has hover or
- * focus.
+ * Plans `move` over the checked rows, or over the one row it is made on:
+ * which rows the call sends, which it leaves alone, and the line the bar
+ * shows while the button has hover or focus.
  *
  * - Snooze applies to every row; Unsnooze to the snoozed ones.
  * - Done applies to the rows whose kind offers it.
@@ -143,14 +217,17 @@ const countSignalsByKind = (signals: ReadonlyArray<Signal>): string => {
  * When the move applies to every row, the line is the label and the count:
  * "Snooze 5".
  */
-export const planBulkAction = (checked: ReadonlyArray<Signal>, move: SignalMove): BulkPlan => {
+export const planSignalMove = (
+  checked: ReadonlyArray<Signal>,
+  move: SignalMove,
+): SignalMovePlan => {
   const acted = checked.filter((signal) => isMoveApplicable(move, signal));
   const kept = checked.filter((signal) => !isMoveApplicable(move, signal));
   const keptLabel = countSignalsByKind(kept);
-  const head = `${MOVE_LABELS[move]} ${String(acted.length)}`;
+  const head = `${SIGNAL_MOVE_LABELS[move]} ${String(acted.length)}`;
   return {
     move,
-    signalIds: acted.map((signal) => signal.id),
+    acted,
     keptIds: kept.map((signal) => signal.id),
     preview: keptLabel === "" ? head : `${head} · keeps ${keptLabel}`,
     keptLabel,
@@ -158,25 +235,48 @@ export const planBulkAction = (checked: ReadonlyArray<Signal>, move: SignalMove)
 };
 
 /**
- * Returns the toast shown after a move succeeded. One row reads without a
- * count, more rows name theirs:
+ * Returns the title of the bulk Done button when Done leaves some checked
+ * rows alone, so the pointer shows the split before the click: "Marks 3 of
+ * 5 done. 2 proposals need their own answer". Returns `null` for any other
+ * move, which applies to every row the bar offers it on, and for a Done
+ * that applies to every checked row; the button then keeps its plain title.
+ */
+export const describeBulkDoneTitle = (plan: SignalMovePlan): string | null => {
+  const kept = plan.keptIds.length;
+  if (plan.move !== "done" || kept === 0) return null;
+  const marked = `Marks ${String(plan.acted.length)} of ${String(plan.acted.length + kept)} done`;
+  return `${marked}. ${plan.keptLabel} ${kept === 1 ? "needs its" : "need their"} own answer`;
+};
+
+/**
+ * Returns the toast shown after a move succeeded. `movedIds` are the ids the
+ * server reports it moved, so a row it skipped, because it was resolved
+ * meanwhile, is not counted. One row reads without a count, more rows name
+ * theirs:
  *
  * - Snooze: "Snoozed until Monday 09:00", "Snoozed 3 until Monday 09:00".
- *   `untilLabel` is `describeSnoozeUntil`'s; without it the toast reads
+ *   `untilLabel` is `formatRelativeMoment`'s; without it the toast reads
  *   "Snoozed".
- * - Done: "Marked done", "Marked 3 done", then ". Kept 2 proposals" when
- *   some rows were left alone.
+ * - Done: "Done · <title>" for one row with none kept; otherwise "Marked 3
+ *   done", then ". Kept 2 proposals" when the plan left rows alone.
  * - Unsnooze: "Back on To do", "3 back on To do".
  * - Not urgent: "Moved out of Now", "Moved 3 out of Now".
  */
-export const describeMoveToast = (plan: BulkPlan, untilLabel?: string): string => {
-  const count = plan.signalIds.length;
+export const describeMoveToast = (
+  plan: SignalMovePlan,
+  movedIds: ReadonlyArray<string>,
+  untilLabel?: string,
+): string => {
+  const count = movedIds.length;
   const many = count === 1 ? "" : ` ${String(count)}`;
   switch (plan.move) {
     case "snooze":
       return `Snoozed${many}${untilLabel === undefined ? "" : ` until ${untilLabel}`}`;
-    case "done":
-      return `Marked${many} done${plan.keptLabel === "" ? "" : `. Kept ${plan.keptLabel}`}`;
+    case "done": {
+      const only = count === 1 ? plan.acted.find((signal) => signal.id === movedIds[0]) : undefined;
+      if (only !== undefined && plan.keptLabel === "") return `Done · ${only.title}`;
+      return `Marked ${String(count)} done${plan.keptLabel === "" ? "" : `. Kept ${plan.keptLabel}`}`;
+    }
     case "unsnooze":
       return count === 1 ? "Back on To do" : `${String(count)} back on To do`;
     case "not-urgent":
@@ -184,129 +284,45 @@ export const describeMoveToast = (plan: BulkPlan, untilLabel?: string): string =
   }
 };
 
-/** A calendar date: the year, the month from 1 to 12, and the day of the month. */
-interface CalendarDate {
-  readonly year: number;
-  readonly month: number;
-  readonly day: number;
-}
-
-/** A calendar date and the time on the clock, as someone in one zone reads an instant. */
-interface WallClock extends CalendarDate {
-  readonly hour: number;
-  readonly minute: number;
-  readonly second: number;
-}
-
-/** The formatters built so far, one per zone: building one is slow, reusing it is cheap. */
-const formatters = new Map<string, Intl.DateTimeFormat>();
-
 /**
- * Reads the date and the clock time of `instant` in `timezone`. Fails with a
- * `RangeError` when this runtime cannot format the zone.
+ * Checks whether `move` takes a signal out of the list of `view`: Done out
+ * of To do and Later, Snooze out of To do, Unsnooze out of Later. Snooze
+ * again on Later and Not urgent on To do keep the signal in its list.
  */
-const readWallClock = (instant: number, timezone: string): WallClock => {
-  let formatter = formatters.get(timezone);
-  if (formatter === undefined) {
-    formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "numeric",
-      day: "numeric",
-      hour: "numeric",
-      minute: "numeric",
-      second: "numeric",
-      hourCycle: "h23",
-    });
-    formatters.set(timezone, formatter);
+export const isMoveLeavingView = (move: SignalMove, view: SignalView): boolean => {
+  switch (move) {
+    case "done":
+      return view !== "done";
+    case "snooze":
+      return view === "to-do";
+    case "unsnooze":
+      return view === "later";
+    case "not-urgent":
+      return false;
   }
-  const parts = formatter.formatToParts(instant);
-  const read = (type: Intl.DateTimeFormatPartTypes): number =>
-    Number(parts.find((part) => part.type === type)?.value);
-  return {
-    year: read("year"),
-    month: read("month"),
-    day: read("day"),
-    hour: read("hour"),
-    minute: read("minute"),
-    second: read("second"),
-  };
 };
 
 /**
- * Returns a calendar date as the number of days since 1 January 1970, so two
- * consecutive dates differ by exactly 1, however long the day between them
- * was in some zone.
+ * Returns the list of `view` as it reads after `move` moved the signals
+ * `movedIds`, before the controller's lists are read again: the moved
+ * signals taken out when the move leaves the view, and lowered to `high`
+ * after Not urgent. Any other change, such as a new `until` after Snooze
+ * again, waits for the read. Returns `signals` itself when nothing changes.
  */
-const countDaysSinceEpoch = (date: CalendarDate): number =>
-  Date.UTC(date.year, date.month - 1, date.day) / 86_400_000;
-
-/** Returns the calendar date `days` after `date`, rolling over months and years. */
-const addDays = (date: CalendarDate, days: number): CalendarDate => {
-  const moved = new Date(Date.UTC(date.year, date.month - 1, date.day + days));
-  return { year: moved.getUTCFullYear(), month: moved.getUTCMonth() + 1, day: moved.getUTCDate() };
-};
-
-/**
- * Computes the instant at which the clock in `timezone` reads `hour:minute`
- * on `date`, in milliseconds since 1970. Returns `null` when the clock never
- * reads that time on that date, as in the hour skipped when daylight saving
- * time starts. When the clock reads it twice, as in the hour repeated when
- * daylight saving time ends, the later instant is returned.
- */
-const computeZonedInstant = (
-  date: CalendarDate,
-  hour: number,
-  minute: number,
-  timezone: string,
-): number | null => {
-  const asIfUtc = Date.UTC(date.year, date.month - 1, date.day, hour, minute);
-  const offsetAt = (instant: number): number => {
-    const clock = readWallClock(instant, timezone);
-    const read = Date.UTC(
-      clock.year,
-      clock.month - 1,
-      clock.day,
-      clock.hour,
-      clock.minute,
-      clock.second,
+export const applySignalMove = (
+  signals: ReadonlyArray<Signal>,
+  view: SignalView,
+  move: SignalMove,
+  movedIds: ReadonlyArray<string>,
+): ReadonlyArray<Signal> => {
+  const moved = new Set(movedIds);
+  if (isMoveLeavingView(move, view)) return signals.filter((signal) => !moved.has(signal.id));
+  if (move === "not-urgent")
+    return signals.map((signal) =>
+      moved.has(signal.id) ? { ...signal, priority: "high" as const } : signal,
     );
-    return read - (instant - (((instant % 1000) + 1000) % 1000));
-  };
-  // The zone's offset at the guess can differ from its offset at the answer
-  // when a daylight saving change falls between the two, so it is read twice.
-  const firstOffset = offsetAt(asIfUtc);
-  let instant = asIfUtc - firstOffset;
-  const secondOffset = offsetAt(instant);
-  if (secondOffset !== firstOffset) instant = asIfUtc - secondOffset;
-  const clock = readWallClock(instant, timezone);
-  const matches =
-    clock.year === date.year &&
-    clock.month === date.month &&
-    clock.day === date.day &&
-    clock.hour === hour &&
-    clock.minute === minute;
-  return matches ? instant : null;
+  return signals;
 };
-
-/**
- * Computes the instant of a fixed menu time, 09:00, 14:00 or 18:00, on
- * `date` in `timezone`, as an ISO instant. No zone skips those hours when its
- * clock changes, so the time always exists.
- */
-const computeMenuInstant = (date: CalendarDate, hour: number, timezone: string): string =>
-  new Date(computeZonedInstant(date, hour, 0, timezone)!).toISOString();
-
-const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-/** Returns the weekday of a calendar date, 0 for Sunday to 6 for Saturday. */
-const readWeekday = (date: CalendarDate): number =>
-  new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay();
-
-/** Formats the clock time of a wall clock on a 24-hour clock: "09:05". */
-const formatClock = (clock: WallClock): string =>
-  `${String(clock.hour).padStart(2, "0")}:${String(clock.minute).padStart(2, "0")}`;
 
 /** The snooze menu's keys, which never move: 2 stays the afternoon or evening choice all day. */
 type SnoozeChoiceKey = 1 | 2 | 3 | 4 | 5;
@@ -314,26 +330,14 @@ type SnoozeChoiceKey = 1 | 2 | 3 | 4 | 5;
 /** One choice of the snooze menu. */
 export interface SnoozeChoice {
   readonly key: SnoozeChoiceKey;
-  /** "In 1 hour", "This afternoon", "This evening", "Tomorrow", "Monday" or "Pick a time". */
+  /** "In 1 hour", "This afternoon", "This evening", "Tomorrow", "Monday" or "Pick a time…". */
   readonly label: string;
-  /** The exact time shown beside the label: "14:00" today, "Monday 09:00" on another day. `null` for Pick a time. */
+  /** The time shown beside the label: "14:00" today, "Mon 09:00" on another day. `null` when there is none. */
   readonly timeLabel: string | null;
-  /** The ISO instant the signal comes back. `null` for Pick a time, and while the choice is disabled. */
+  /** The ISO instant the signal comes back. `null` for Pick a time…, and while the choice is disabled. */
   readonly until: string | null;
   readonly disabled: boolean;
 }
-
-/**
- * Formats the time a menu choice shows beside its label: the clock time
- * when it falls on the day of `now`, and the weekday and the clock time
- * otherwise, such as "Monday 09:00".
- */
-const formatMenuTime = (until: number, today: CalendarDate, timezone: string): string => {
-  const clock = readWallClock(until, timezone);
-  return countDaysSinceEpoch(clock) === countDaysSinceEpoch(today)
-    ? formatClock(clock)
-    : `${WEEKDAYS[readWeekday(clock)]!} ${formatClock(clock)}`;
-};
 
 /**
  * Builds the snooze menu's five choices from `now`, in `timezone`, the
@@ -345,80 +349,81 @@ const formatMenuTime = (until: number, today: CalendarDate, timezone: string): s
  *    choice.
  * 3. Tomorrow at 09:00.
  * 4. Monday at 09:00: the next Monday, a week ahead on a Monday.
- * 5. Pick a time, which has no time of its own.
+ * 5. Pick a time…, which has no time of its own.
  *
  * Days are counted on the calendar in `timezone`, never as 24 hours, so a
- * day on which the clock changes still ends at 09:00 on the next one.
+ * day on which the clock changes still ends at 09:00 on the next one. A
+ * choice whose time the clock never reads, as on the day Samoa skipped in
+ * 2011, is disabled.
  */
 export const buildSnoozeChoices = (now: Date, timezone: string): ReadonlyArray<SnoozeChoice> => {
-  const clock = readWallClock(now.getTime(), timezone);
-  const minutesOfDay = clock.hour * 60 + clock.minute;
-
-  const inAnHour = now.getTime() + 3_600_000;
+  const today = readWallClock(now, timezone);
+  const minutesOfDay = computeMinutesOfDay(now, timezone) ?? 0;
   const evening = minutesOfDay >= 13 * 60;
-  const lateEvening = minutesOfDay >= 17 * 60;
-  const tomorrow = addDays(clock, 1);
-  // Monday is weekday 1; on a Monday itself the choice is a week ahead.
-  const monday = addDays(clock, (8 - readWeekday(clock)) % 7 || 7);
 
-  const fixedChoice = (
+  const buildChoice = (
     key: SnoozeChoiceKey,
     label: string,
-    date: CalendarDate,
+    until: number | undefined,
+  ): SnoozeChoice =>
+    until === undefined
+      ? { key, label, timeLabel: null, until: null, disabled: true }
+      : {
+          key,
+          label,
+          timeLabel: formatShortMoment(new Date(until), now, timezone) ?? null,
+          until: new Date(until).toISOString(),
+          disabled: false,
+        };
+  const buildFixedChoice = (
+    key: SnoozeChoiceKey,
+    label: string,
+    date: CalendarDate | undefined,
     hour: number,
-  ): SnoozeChoice => {
-    const until = computeMenuInstant(date, hour, timezone);
-    return {
-      key,
-      label,
-      timeLabel: formatMenuTime(Date.parse(until), clock, timezone),
-      until,
-      disabled: false,
-    };
-  };
+  ): SnoozeChoice => buildChoice(key, label, date && computeZonedInstant(date, hour, 0, timezone));
 
   return [
-    {
-      key: 1,
-      label: "In 1 hour",
-      timeLabel: formatMenuTime(inAnHour, clock, timezone),
-      until: new Date(inAnHour).toISOString(),
-      disabled: false,
-    },
-    lateEvening
+    buildChoice(1, "In 1 hour", now.getTime() + 3_600_000),
+    minutesOfDay >= 17 * 60
       ? { key: 2, label: "This evening", timeLabel: "18:00", until: null, disabled: true }
-      : fixedChoice(2, evening ? "This evening" : "This afternoon", clock, evening ? 18 : 14),
-    fixedChoice(3, "Tomorrow", tomorrow, 9),
-    fixedChoice(4, "Monday", monday, 9),
-    { key: 5, label: "Pick a time", timeLabel: null, until: null, disabled: false },
+      : buildFixedChoice(2, evening ? "This evening" : "This afternoon", today, evening ? 18 : 14),
+    buildFixedChoice(3, "Tomorrow", today && addCalendarDays(today, 1), 9),
+    // Monday is weekday 1; on a Monday itself the choice is a week ahead.
+    buildFixedChoice(
+      4,
+      "Monday",
+      today && addCalendarDays(today, (8 - computeWeekday(today)) % 7 || 7),
+      9,
+    ),
+    { key: 5, label: "Pick a time…", timeLabel: null, until: null, disabled: false },
   ];
 };
 
 /**
- * Describes when a snoozed signal comes back, for the Later row ("Back " and
- * this) and the toast ("Snoozed until " and this), counted in calendar days
- * from `now` in `timezone`:
- *
- * - "today 14:00" and "tomorrow 09:00", in lowercase because the label sits
- *   inside a sentence: "Back today 14:00";
- * - the weekday from 2 to 7 days ahead: "Monday 09:00", which is also a
- *   Monday snooze picked on a Monday;
- * - the date for any other day, such as a time picked further ahead: "4 Nov
- *   09:00".
+ * Describes a snooze in the Later pane: "Snoozed at 09:44 until today
+ * 14:00.", or "Snoozed yesterday at 16:10 until Monday 09:00.", relative to
+ * `now` in `timezone`. When `sourceName` is given, the signal's source can
+ * still end it, so the line adds " Answered on GitHub before then, it goes
+ * to Done." Returns `null` for a signal that is not snoozed.
  */
-export const describeSnoozeUntil = (until: string, now: Date, timezone: string): string => {
-  const clock = readWallClock(Date.parse(until), timezone);
-  const days =
-    countDaysSinceEpoch(clock) - countDaysSinceEpoch(readWallClock(now.getTime(), timezone));
-  const time = formatClock(clock);
-  if (days === 0) return `today ${time}`;
-  if (days === 1) return `tomorrow ${time}`;
-  if (days >= 2 && days <= 7) return `${WEEKDAYS[readWeekday(clock)]!} ${time}`;
-  return `${String(clock.day)} ${MONTHS[clock.month - 1]!} ${time}`;
+export const describeSnoozeLine = (
+  signal: Signal,
+  now: Date,
+  timezone: string,
+  sourceName: string | null,
+): string | null => {
+  if (signal.snooze === undefined) return null;
+  const snoozedAt = new Date(signal.snooze.snoozedAt);
+  const day = formatRelativeDay(snoozedAt, now, timezone);
+  const at = `${day === "today" || day === undefined ? "" : `${day} `}at ${formatClock(snoozedAt, timezone) ?? ""}`;
+  const until = formatRelativeMoment(new Date(signal.snooze.until), now, timezone) ?? "";
+  const source =
+    sourceName === null ? "" : ` Answered on ${sourceName} before then, it goes to Done.`;
+  return `Snoozed ${at} until ${until}.${source}`;
 };
 
 /**
- * Converts the time picked under Pick a time, a wall-clock time
+ * Converts the time picked under Pick a time…, a wall-clock time
  * `yyyy-mm-ddThh:mm` in `timezone` as a date and time field gives it, to the
  * ISO instant `signal.snooze` takes. Returns `null` when the text is not such
  * a time, when the clock in `timezone` never reads it (the hour skipped when
@@ -443,12 +448,12 @@ export const parsePickedSnoozeTime = (
   // the clock never reads it.
   if (hour > 23 || minute > 59) return null;
   const instant = computeZonedInstant({ year, month, day }, hour, minute, timezone);
-  if (instant === null || instant <= now.getTime()) return null;
+  if (instant === undefined || instant <= now.getTime()) return null;
   return new Date(instant).toISOString();
 };
 
 /** The two numbers the foot under the list shows. */
-export interface ClearedToday {
+interface ClearedToday {
   /** The signals resolved since midnight. */
   readonly cleared: number;
   /** Those of them the user's own move did not end: withdrawn, or decided on the source. */
@@ -482,17 +487,18 @@ export const countClearedToday = (
 };
 
 /**
- * Returns the foot under the list: "7 cleared today. 3 left on their own:
- * answered elsewhere or withdrawn. See Done.", or "7 cleared today. See
- * Done." when none were left on their own. Returns `null` when none were
- * cleared, because then there is no foot.
+ * Returns the foot under the list, without its closing link, which the
+ * client draws after it as "See Done.": "7 cleared today. 3 left on their
+ * own: answered elsewhere or withdrawn.", or "7 cleared today." when none
+ * were left on their own. Returns `null` when none were cleared, because
+ * then there is no foot.
  */
 export const describeIntakeFoot = (cleared: ClearedToday): string | null => {
   if (cleared.cleared === 0) return null;
   const count = `${String(cleared.cleared)} cleared today.`;
   return cleared.leftOnTheirOwn === 0
-    ? `${count} See Done.`
-    : `${count} ${String(cleared.leftOnTheirOwn)} left on their own: answered elsewhere or withdrawn. See Done.`;
+    ? count
+    : `${count} ${String(cleared.leftOnTheirOwn)} left on their own: answered elsewhere or withdrawn.`;
 };
 
 /**
@@ -512,13 +518,22 @@ export const reachesBeforeToday = (
   );
 
 /**
- * Returns the outcome a Done row shows: "Replaced by a newer one" for a
- * signal a newer one replaced, and the resolution's stored outcome line
- * otherwise. The Done view holds only resolved signals, so a signal with no
- * resolution returns "".
+ * Returns the outcome a Done row shows under its title:
+ *
+ * - "Replaced by a newer one" for a signal a newer one replaced;
+ * - "Withdrawn · " and the stored outcome for a signal withdrawn on its
+ *   source: "Withdrawn · Marta removed the request";
+ * - the stored outcome otherwise: "Approved #1293".
+ *
+ * The Done view holds only resolved signals, so a signal with no resolution
+ * returns "".
  */
-export const describeDoneRowOutcome = (signal: Signal): string =>
-  signal.replacedBy !== undefined ? "Replaced by a newer one" : (signal.resolution?.outcome ?? "");
+export const describeDoneRowOutcome = (signal: Signal): string => {
+  if (signal.replacedBy !== undefined) return "Replaced by a newer one";
+  const { resolution } = signal;
+  if (resolution === undefined) return "";
+  return resolution.kind === "withdrawn" ? `Withdrawn · ${resolution.outcome}` : resolution.outcome;
+};
 
 /**
  * Returns the checked rows with `signalId` toggled: checked when it was not,

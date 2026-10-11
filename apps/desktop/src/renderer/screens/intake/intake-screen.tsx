@@ -17,19 +17,22 @@ import type { Signal, SignalView } from "@hercule/contract";
 import {
   buildIntakeTabs,
   decideSignalRowControls,
+  describeBulkDoneTitle,
   fitIntakeListWidth,
   fitsIntakePane,
+  groupSignalsByDay,
   groupSignalsIntoSections,
+  isMoveLeavingView,
   listBulkMoves,
   MIN_INTAKE_LIST_WIDTH,
   MIN_INTAKE_PANE_WIDTH,
   moveSignalSelection,
-  planBulkAction,
+  planSignalMove,
   resolveDisplayTimezone,
   toggleSignalCheck,
-  type BulkPlan,
   type IntakeSection,
   type SignalMove,
+  type SignalMovePlan,
 } from "@hercule/client-core";
 import {
   pluginsQuery,
@@ -49,7 +52,7 @@ import { SourceMark } from "./source-mark";
 import { useIntakeListWidth } from "./use-intake-list-width";
 import {
   IntakeMovesContext,
-  useSignalMoves,
+  useSignalMoveRunner,
   type IntakeMoves,
   type SnoozeMenuPlace,
 } from "./use-signal-moves";
@@ -74,11 +77,11 @@ const VIEWS: ReadonlyArray<{ readonly view: SignalView; readonly label: string }
   { view: "done", label: "Done" },
 ];
 
-/** The snooze menu while it is open: where, for which signals, and the moment it opened. */
+/** The snooze menu while it is open: where, for which signals, and whether `H` opened it. */
 interface OpenSnoozeMenu {
   readonly place: SnoozeMenuPlace;
   readonly signals: ReadonlyArray<Signal>;
-  readonly now: Date;
+  readonly openedByKey: boolean;
 }
 
 /** The checked rows, and the view and tab they were checked in. */
@@ -98,10 +101,6 @@ const isTextField = (target: EventTarget): boolean =>
 /** Checks whether `signal` can be checked in `view`. */
 const isCheckable = (signal: Signal | undefined, view: SignalView): signal is Signal =>
   signal !== undefined && decideSignalRowControls(signal, view).checkable;
-
-/** Checks whether `move` is one of the moves of `signal`'s row in `view`. */
-const hasRowMove = (signal: Signal | undefined, view: SignalView, move: SignalMove): boolean =>
-  signal !== undefined && decideSignalRowControls(signal, view).moves.includes(move);
 
 /**
  * Renders Intake: the bar with its source tabs and the pane's toggle, then
@@ -142,7 +141,7 @@ export function IntakeScreen({
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const timezone = resolveDisplayTimezone(settings.user.timezone);
-  const moves = useSignalMoves(client, timezone);
+  const moves = useSignalMoveRunner(client, timezone);
   const [pluginId, setPluginId] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [focusPaneFor, setFocusPaneFor] = useState<string | null>(null);
@@ -195,20 +194,20 @@ export function IntakeScreen({
   const built = buildIntakeTabs(toDo, plugins, seenSourceIds);
   if (built.seenSourceIds !== seenSourceIds) setSeenSourceIds(built.seenSourceIds);
   const { tabs } = built;
-  const pagedSignals =
-    view === "to-do" ? [] : (paged.data?.pages.flatMap((page) => page.items) ?? []);
   const sections: ReadonlyArray<IntakeSection> =
     view === "to-do"
       ? groupSignalsIntoSections(toDo, pluginId)
-      : pagedSignals.length === 0
-        ? []
-        : [{ key: "signals", label: "Signals", signals: pagedSignals }];
+      : groupSignalsByDay(
+          paged.data?.pages.flatMap((page) => page.items) ?? [],
+          view,
+          new Date(),
+          timezone,
+        );
+  // The rows the list draws, in order, for the view and the tab shown.
   const listedSignals = sections.flatMap((section) => section.signals);
+  const selectedSignal = listedSignals.find((signal) => signal.id === selectedId);
   const fits = available === null || fitsIntakePane(available);
   const paneShown = selectedId !== null && !dismissed && fits;
-  const listed = (view === "to-do" ? toDo : pagedSignals).find(
-    (signal) => signal.id === selectedId,
-  );
 
   // Checks belong to one view and one tab: switching either clears them, as
   // it closes the snooze menu and drops the bulk bar's preview.
@@ -221,8 +220,13 @@ export function IntakeScreen({
     setPreview(null);
     setMenu(null);
   }
+  // Read when a move ends, which can be after the user switched the view or
+  // the tab.
+  const scopeRef = useRef(scope);
+  useLayoutEffect(() => {
+    scopeRef.current = scope;
+  }, [scope]);
   const checkedSignals = listedSignals.filter((signal) => checks.ids.has(signal.id));
-  const selectedSignal = listedSignals.find((signal) => signal.id === selectedId);
 
   /** Replaces the checked rows with `ids`. With none left, the bar's preview goes with the bar. */
   const updateChecks = (ids: ReadonlySet<string>): void => {
@@ -345,21 +349,25 @@ export function IntakeScreen({
   /**
    * Sends `plan`, with `until` for Snooze. Once its rows have left the
    * view, they leave the checks too, and a selected row that left hands the
-   * selection to the next row that stayed. Not urgent keeps its rows on To
-   * do, so it changes neither.
+   * selection to the next row that stayed. A move that keeps its rows in the
+   * view, such as Not urgent on To do or Snooze again on Later, changes
+   * neither. Nor does a move that ends after the user switched to another
+   * view or tab: the selection then belongs to the list shown now, and
+   * moving it would pull the user back to the list the move started from.
    */
-  const runMove = (plan: BulkPlan, until?: string): void => {
+  const runMove = (plan: SignalMovePlan, until?: string): void => {
     setPreview(null);
     const listedIds = listedSignals.map((signal) => signal.id);
+    const actedIds = plan.acted.map((signal) => signal.id);
     moves.run(plan, until, () => {
-      if (plan.move === "not-urgent") return;
-      const moved = new Set(plan.signalIds);
+      if (!isMoveLeavingView(plan.move, view) || scopeRef.current !== scope) return;
+      const moved = new Set(actedIds);
       setChecks((current) => ({
         ...current,
         ids: new Set([...current.ids].filter((id) => !moved.has(id))),
       }));
       const current = selectedIdRef.current;
-      const next = pickSelectionAfterMove(listedIds, current, plan.signalIds);
+      const next = pickSelectionAfterMove(listedIds, current, actedIds);
       // The moved rows, or the bulk bar, may hold the focus, and both are
       // about to go. The list holds it until the next row is drawn.
       const focused = document.activeElement;
@@ -373,19 +381,47 @@ export function IntakeScreen({
     });
   };
 
-  /** Opens the snooze menu for `signals` at `place`, or closes it when it is open there. */
-  const toggleSnoozeMenu = (place: SnoozeMenuPlace, signals: ReadonlyArray<Signal>): void => {
+  /**
+   * Opens the snooze menu for `signals` at `place`, or closes it when it is
+   * open there. `openedByKey` is set when `H` opened it, which marks its
+   * first choice as the one `↩` takes.
+   */
+  const toggleSnoozeMenu = (
+    place: SnoozeMenuPlace,
+    signals: ReadonlyArray<Signal>,
+    openedByKey = false,
+  ): void => {
     setMenu((open) =>
       open?.place === place && open.signals[0]?.id === signals[0]?.id
         ? null
-        : { place, signals, now: new Date() },
+        : { place, signals, openedByKey },
     );
   };
 
   /** Runs one of the bulk bar's moves on the checked rows. Snooze opens its menu first. */
-  const runBulkMove = (move: SignalMove): void => {
-    if (move === "snooze") toggleSnoozeMenu("bar", checkedSignals);
-    else runMove(planBulkAction(checkedSignals, move));
+  const runBulkMove = (move: SignalMove, openedByKey = false): void => {
+    if (move === "snooze") toggleSnoozeMenu("bar", checkedSignals, openedByKey);
+    else runMove(planSignalMove(checkedSignals, move));
+  };
+
+  /**
+   * Runs `move` from its key: on the checked rows when there are some and
+   * the bulk bar offers it, otherwise on the selected row when its row
+   * offers it. Snooze opens its menu first. On Later, `H` snoozes the
+   * selected row again, as the pane's Snooze again… does, but does nothing
+   * to checked rows, whose bar offers Unsnooze in place of Snooze.
+   */
+  const runKeyMove = (move: "done" | "snooze" | "unsnooze"): void => {
+    if (checkedSignals.length > 0) {
+      if (listBulkMoves(checkedSignals, view).includes(move)) runBulkMove(move, true);
+      return;
+    }
+    if (selectedSignal === undefined) return;
+    if (move === "snooze") {
+      if (view !== "done") toggleSnoozeMenu(paneShown ? "pane" : "row", [selectedSignal], true);
+    } else if (decideSignalRowControls(selectedSignal, view).slots.includes(move)) {
+      runMove(planSignalMove([selectedSignal], move));
+    }
   };
 
   // A press on a row's checkbox or move. The list's rows are memoized, so the
@@ -401,7 +437,7 @@ export function IntakeScreen({
       } else if (action === "snooze") {
         toggleSnoozeMenu("row", [signal]);
       } else {
-        runMove(planBulkAction([signal], action));
+        runMove(planSignalMove([signal], action));
       }
     };
   });
@@ -446,28 +482,15 @@ export function IntakeScreen({
         return;
       case "e":
         event.preventDefault();
-        if (checkedSignals.length > 0) {
-          if (listBulkMoves(checkedSignals, view).includes("done")) runBulkMove("done");
-        } else if (hasRowMove(selectedSignal, view, "done")) {
-          runMove(planBulkAction([selectedSignal!], "done"));
-        }
+        runKeyMove("done");
         return;
       case "h":
         event.preventDefault();
-        // On Later the checked rows have Unsnooze in place of Snooze, so H does nothing there.
-        if (checkedSignals.length > 0) {
-          if (listBulkMoves(checkedSignals, view).includes("snooze")) runBulkMove("snooze");
-        } else if (selectedSignal !== undefined && view !== "done") {
-          toggleSnoozeMenu(paneShown ? "pane" : "row", [selectedSignal]);
-        }
+        runKeyMove("snooze");
         return;
       case "u":
         event.preventDefault();
-        if (checkedSignals.length > 0) {
-          if (listBulkMoves(checkedSignals, view).includes("unsnooze")) runBulkMove("unsnooze");
-        } else if (hasRowMove(selectedSignal, view, "unsnooze")) {
-          runMove(planBulkAction([selectedSignal!], "unsnooze"));
-        }
+        runKeyMove("unsnooze");
         return;
       case "Enter": {
         // `↩` on a row opens the pane on the suggested answer, and never
@@ -568,12 +591,15 @@ export function IntakeScreen({
   const shownPlan =
     moves.acting ??
     (preview !== null && checkedSignals.length > 0
-      ? planBulkAction(checkedSignals, preview)
+      ? planSignalMove(checkedSignals, preview)
       : null);
   const highlight: BulkHighlight | null =
     shownPlan === null
       ? null
-      : { actedIds: new Set(shownPlan.signalIds), keptIds: new Set(shownPlan.keptIds) };
+      : {
+          actedIds: new Set(shownPlan.acted.map((signal) => signal.id)),
+          keptIds: new Set(shownPlan.keptIds),
+        };
   const bulkMoves = listBulkMoves(checkedSignals, view);
   const tabName = tabs.find((tab) => tab.pluginId === pluginId && pluginId !== null)?.label;
 
@@ -706,6 +732,9 @@ export function IntakeScreen({
                             checkedCount: checkedSignals.length,
                             moves: bulkMoves,
                             preview: shownPlan?.preview ?? null,
+                            doneTitle: describeBulkDoneTitle(
+                              planSignalMove(checkedSignals, "done"),
+                            ),
                             snoozeMenuOpen: menu?.place === "bar",
                             onPreview: setPreview,
                             onMove: runBulkMove,
@@ -745,7 +774,7 @@ export function IntakeScreen({
             <SignalPane
               key={selectedId}
               signalId={selectedId}
-              listed={listed}
+              listed={selectedSignal}
               timezone={timezone}
               shown={paneShown}
               focusSuggestedOnOpen={focusPaneFor === selectedId}
@@ -760,10 +789,10 @@ export function IntakeScreen({
       {menu !== null && (
         <SnoozeMenu
           place={menu.place}
-          now={menu.now}
+          openedByKey={menu.openedByKey}
           timezone={timezone}
           onChoose={(until) => {
-            runMove(planBulkAction(menu.signals, "snooze"), until);
+            runMove(planSignalMove(menu.signals, "snooze"), until);
           }}
           onClose={() => {
             setMenu(null);

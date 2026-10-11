@@ -1,7 +1,6 @@
 /**
  * Tests Intake in the packaged app, signed in to a real controller whose
- * signals the test raises with `hercule signal raise`, as spec 17 §Testing
- * asks (§Intake, slice 25):
+ * signals the test raises with `hercule signal raise` (spec 17 §Testing):
  *
  * - Intake opens from the Hercule face's row and from Go › Intake, ⌘⇧I, and
  *   shows the Hercule face; View's two items change the face without
@@ -11,9 +10,8 @@
  * - the keys answer a signal: `J` moves the selection, `↩` opens the pane on
  *   the suggested answer, and a second `↩` presses it; Esc steps back;
  * - a new Now signal notifies while the window is not focused, and a click
- *   on the notification opens Intake with the signal selected.
- *
- * - the moves (slice 26): `H` and a number snooze a signal into Later, `U`
+ *   on the notification opens Intake with the signal selected;
+ * - the moves: `H` and a number snooze a signal into Later, `U`
  *   brings it back, `E` marks one done, `X` and `⇧J` check two rows whose
  *   Done the bulk bar sends, and Done lists all three.
  *
@@ -302,14 +300,24 @@ describe("Intake", () => {
       .poll(async () => (await readRowTitles(page)).toSorted())
       .toEqual(["Docs moved to the wiki", "Staging was rebuilt"]);
     await expect.poll(() => readToDoCounts(page)).toMatchObject({ segment: "Hercule, 2 to do" });
+    // A move ignores the keys until the one before it ends, and the toast
+    // shows when it has.
+    await expect
+      .poll(() => page.locator(".asks-toast[role=status]").textContent())
+      .toBe("Snoozed until tomorrow 09:00");
 
-    // Later lists it with when it comes back; U brings it back to To do.
+    // Later lists it under the day it comes back, with the time at the row's
+    // end; U brings it back to To do.
     await showView(page, "Later");
     await expect.poll(() => readRowTitles(page)).toEqual(["Release 4.2 shipped"]);
-    expect(await page.locator(".ask-until").textContent()).toMatch(/^Back tomorrow 09:00$/i);
+    expect(await page.locator(".asks-sec").textContent()).toBe("Back tomorrow1");
+    expect(await page.locator(".ask-until").textContent()).toBe("09:00");
     await selectRow(page, "Release 4.2 shipped");
     await page.keyboard.press("u");
     await expect.poll(() => readRowTitles(page)).toEqual([]);
+    await expect
+      .poll(() => page.locator(".asks-toast[role=status]").textContent())
+      .toBe("Back on To do");
     await showView(page, "To do");
     await expect
       .poll(async () => (await readRowTitles(page)).toSorted())
@@ -322,7 +330,9 @@ describe("Intake", () => {
     await expect
       .poll(async () => (await readRowTitles(page)).toSorted())
       .toEqual(["Release 4.2 shipped", "Staging was rebuilt"]);
-    await expect.poll(() => page.locator(".asks-toast[role=status]").count()).toBe(1);
+    await expect
+      .poll(() => page.locator(".asks-toast[role=status]").textContent())
+      .toBe("Done · Docs moved to the wiki");
 
     // X checks the first row and ⇧J adds the next one; the bulk bar's Done
     // sends both.

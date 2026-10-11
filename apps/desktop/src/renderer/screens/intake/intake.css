@@ -218,8 +218,11 @@
 }
 
 /* A row's moves: Snooze and Done, Unsnooze on Later, and Not urgent on a Now
-   row. They show only while the pointer is on the row or the focus is in it,
-   so at rest a row is only its words. */
+   row. They show while the pointer is on the row, while the keyboard's
+   focus is on one of them or on the checkbox, and while the row's snooze
+   menu is open. Moving the selection with J and K focuses the row itself,
+   which shows no moves, so at rest a row is only its words. Hidden moves
+   keep their place and only turn transparent, so Tab still reaches them. */
 .ask-acts {
   position: absolute;
   top: 0;
@@ -236,16 +239,34 @@
   transition: opacity var(--dur-1);
 }
 .ask-item:hover > .ask-acts,
-.ask-item:focus-within > .ask-acts,
+.ask-item:has(> .ask-acts :focus-visible, > .ask-check:focus-visible) > .ask-acts,
 .ask-item.has-menu > .ask-acts {
   opacity: 1;
   pointer-events: auto;
 }
+/* A Now row's three moves cover more of the row than two do. While they
+   show, the row's text ends where their fade begins, so the title is cut
+   short with an ellipsis instead of running under them. */
+.ask-item:is(:hover, .has-menu, :has(> .ask-acts :focus-visible, > .ask-check:focus-visible)):has(
+    > .ask-acts > :nth-child(3)
+  )
+  > .ask-row {
+  padding-right: calc(3 * 28px + 2 * 2px + 8px + 28px);
+}
+.ask-item:is(:hover, .has-menu, :has(> .ask-acts :focus-visible, > .ask-check:focus-visible)):has(
+    > .ask-acts > :nth-child(3)
+  )
+  .ask-end {
+  display: none;
+}
+.ask-act,
+.ask-act-slot {
+  width: 28px;
+  height: 28px;
+}
 .ask-act {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
   border-radius: var(--r-sm);
   color: var(--muted);
   transition:
@@ -403,13 +424,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A move that failed, in the toast's place. */
-.asks-toast--fail {
-  background: var(--fail-tint);
-  color: var(--fail-ink);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in oklab, var(--fail-ink) 20%, transparent),
-    var(--shadow-2);
+/* A move that failed, in the toast's place: the same ink toast, with its
+   mark in the failure colour. Its text wraps instead of being cut short,
+   because the reason it failed and what to do next are at the end. */
+.asks-toast--fail .mark {
+  color: var(--fail);
+}
+.asks-toast--fail .asks-toast-text {
+  white-space: normal;
 }
 @media (prefers-reduced-motion: no-preference) {
   .asks-toast.is-new {
@@ -442,6 +464,12 @@
 }
 .asks-bulk .asks-toast-text b {
   font-variant-numeric: tabular-nums;
+}
+/* What the button with hover or focus would do, after the count. Not in the
+   drawing. Dimmed as the keys are, because --muted is drawn for the light
+   surface and reads too faintly on the ink bar. */
+.asks-bulk-preview {
+  opacity: 0.7;
 }
 .asks-bulk button {
   display: inline-flex;
@@ -480,6 +508,7 @@
   width: 260px;
   margin: 0;
   padding: 6px;
+  border-radius: var(--r-lg);
 }
 .asks-snooze[data-place="row"] {
   top: calc(anchor(bottom) - 6px);
@@ -514,7 +543,8 @@
   font-size: var(--t-13);
 }
 .asks-snooze [role="menuitem"]:hover,
-.asks-snooze [role="menuitem"]:focus-visible {
+.asks-snooze [role="menuitem"]:focus-visible,
+.asks-snooze[data-opened-by-key] [role="menuitem"]:focus {
   background: var(--hover);
   outline: none;
 }
@@ -612,9 +642,12 @@
   gap: 18px;
   margin-top: 22px;
 }
-/* Not in the drawing: the quiet line when the plugin could not draw the
-   signal, in the style of the drawing's `.ad-flag`. */
+/* One quiet line under the head: when a snoozed signal comes back, or,
+   not in the drawing, when the plugin could not draw the signal. */
 .ad-flag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 14px 0 0;
   padding: 7px 12px;
   border-radius: var(--r-md);
@@ -622,6 +655,9 @@
   color: var(--muted);
   font-size: var(--t-12);
   line-height: 1.45;
+}
+.ad-flag .ic {
+  flex: none;
 }
 /* The pane's own moves, under the answers: what changes only the user's
    list. Quieter than the answers. With no answers above them, they keep
@@ -654,8 +690,14 @@
   margin: 6px 0 0 10px;
 }
 
-/* How a resolved signal left the list, in place of its answers. */
+/* How a resolved signal left the list, in place of its answers: a mark,
+   then what ended it, then where, when and by whom. */
 .ad-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ad-outcome-top {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -677,12 +719,12 @@
   width: 28px;
   height: 28px;
   border-radius: 50%;
+  background: var(--ok-tint);
+  color: var(--ok);
+}
+.ad-mark--quiet {
   background: var(--sunken);
   color: var(--muted);
-}
-.ad-mark--you {
-  background: var(--you-tint);
-  color: var(--you-ink);
 }
 
 /* The keys for the open signal, kept in view at the bottom of the pane. */

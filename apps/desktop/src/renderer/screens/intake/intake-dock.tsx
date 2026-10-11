@@ -3,12 +3,11 @@
  * the bulk bar while rows are checked (spec 17 §Row controls and the bulk
  * bar, §The foot, the toast and failures).
  */
-import { useEffect, useEffectEvent, useState, type JSX, type ReactNode } from "react";
-import type { SignalMove } from "@hercule/client-core";
-import { AlarmIcon } from "../../icons/alarm";
-import { CheckIcon } from "../../icons/check";
+import { useEffect, useEffectEvent, useState, type JSX } from "react";
+import { SIGNAL_MOVE_LABELS, type SignalMove } from "@hercule/client-core";
 import { CloseIcon } from "../../icons/close";
-import { UndoIcon } from "../../icons/undo";
+import { Mark } from "../../marks";
+import { SIGNAL_MOVE_GLYPHS } from "./move-glyphs";
 import { SNOOZE_ANCHOR } from "./snooze-menu";
 import type { MoveToast } from "./use-signal-moves";
 
@@ -20,26 +19,16 @@ export interface BulkBar {
   readonly checkedCount: number;
   /** The buttons, in drawing order, as `listBulkMoves` returns them. */
   readonly moves: ReadonlyArray<SignalMove>;
-  /** The bar's line while a button has hover or focus, such as "Done 3 · keeps 2 proposals". */
+  /** What the button with hover or focus would do, such as "Done 3 · keeps 2 proposals". */
   readonly preview: string | null;
+  /** The Done button's tooltip when Done leaves some checked rows alone, as `describeBulkDoneTitle` gives it. */
+  readonly doneTitle: string | null;
   readonly snoozeMenuOpen: boolean;
   /** Called with the move whose button gains hover or focus, and with `null` when it loses both. */
   readonly onPreview: (move: SignalMove | null) => void;
   readonly onMove: (move: SignalMove) => void;
   readonly onClear: () => void;
 }
-
-/** Each bulk button's icon, label and key. Not urgent is never a bulk button. */
-const BULK_BUTTONS: Readonly<
-  Record<
-    Exclude<SignalMove, "not-urgent">,
-    { readonly icon: ReactNode; readonly label: string; readonly key: string }
-  >
-> = {
-  snooze: { icon: <AlarmIcon size={14} />, label: "Snooze", key: "H" },
-  unsnooze: { icon: <UndoIcon size={14} />, label: "Unsnooze", key: "U" },
-  done: { icon: <CheckIcon size={14} />, label: "Done", key: "E" },
-};
 
 /**
  * Renders the dock: the toast above the bulk bar. The dock sticks to the
@@ -72,7 +61,8 @@ export function IntakeDock({
  * when the pointer leaves, the five seconds start again. Under Reduce
  * motion it neither rises nor fades: it goes at once.
  *
- * A failed move shows its error here, in the fail colours, as an alert.
+ * The toast leads with the done mark. A failed move shows its error here
+ * instead, behind the failed mark, as an alert.
  */
 function MoveToastLine({
   toast,
@@ -115,15 +105,16 @@ function MoveToastLine({
         if (event.animationName === "asks-fade") onDismiss();
       }}
     >
+      <Mark state={toast.failed ? "failed" : "done"} />
       <span className="asks-toast-text">{toast.text}</span>
     </div>
   );
 }
 
 /**
- * Renders the bulk bar: "3 selected", or the preview of the button with
- * hover or focus, then the buttons and the clear button. The bar anchors
- * the snooze menu while the menu is open from it.
+ * Renders the bulk bar: "3 selected", and after it what the button with
+ * hover or focus would do, then the buttons and the clear button. The bar
+ * anchors the snooze menu while the menu is open from it.
  */
 function BulkBarLine({ bulk }: { readonly bulk: BulkBar }): JSX.Element {
   return (
@@ -134,20 +125,16 @@ function BulkBarLine({ bulk }: { readonly bulk: BulkBar }): JSX.Element {
       style={bulk.snoozeMenuOpen ? { anchorName: SNOOZE_ANCHOR } : undefined}
     >
       <span className="asks-toast-text" aria-live="polite">
-        {bulk.preview ?? (
-          <>
-            <b>{bulk.checkedCount}</b> selected
-          </>
-        )}
+        <b>{bulk.checkedCount}</b> selected
+        {bulk.preview !== null && <span className="asks-bulk-preview">{` · ${bulk.preview}`}</span>}
       </span>
       {bulk.moves.map((move) => {
-        if (move === "not-urgent") return null;
-        const button = BULK_BUTTONS[move];
         const opensMenu = move === "snooze";
         return (
           <button
             key={move}
             type="button"
+            title={(move === "done" && bulk.doneTitle) || undefined}
             data-opens-snooze={opensMenu || undefined}
             aria-haspopup={opensMenu ? "menu" : undefined}
             aria-expanded={opensMenu ? bulk.snoozeMenuOpen : undefined}
@@ -167,9 +154,9 @@ function BulkBarLine({ bulk }: { readonly bulk: BulkBar }): JSX.Element {
               bulk.onMove(move);
             }}
           >
-            {button.icon}
-            {button.label}
-            <kbd aria-hidden="true">{button.key}</kbd>
+            {SIGNAL_MOVE_GLYPHS[move].icon}
+            {SIGNAL_MOVE_LABELS[move]}
+            <kbd aria-hidden="true">{SIGNAL_MOVE_GLYPHS[move].key}</kbd>
           </button>
         );
       })}
