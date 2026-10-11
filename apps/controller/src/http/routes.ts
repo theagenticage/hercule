@@ -74,6 +74,7 @@ import {
   WorkflowSignalsLayer,
   WorkspaceStepsLayer,
 } from "../daemon";
+import { TextGeneration, TextGenerationError } from "../daemon/text-generation";
 import { NotificationService, NotificationServiceLayer } from "../notifications";
 import { SignalService, SignalServiceLayer } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
@@ -741,8 +742,11 @@ const PermissionRequestsDomainLayer = PermissionRequestsLayer.pipe(
  * built. A second instance would have no plugins, no connections, none of the
  * state a session's stream is coalesced in, and no promotion phase, and would
  * write over the same rows the drivers use. The handlers get them from the boot.
+ *
+ * The list leaves `TextGeneration` for its caller to provide (`buildOperationLayers`),
+ * so a test can put a fake in its place.
  */
-export const operationLayers = Layer.mergeAll(
+const operationServices = Layer.mergeAll(
   AuthLayer,
   ApiKeysLayer,
   UserLayer,
@@ -852,6 +856,28 @@ export const operationLayers = Layer.mergeAll(
   WsTicketsLayer,
   AttachmentServiceLayer,
 );
+
+/**
+ * Builds the operation layers on top of the given `TextGeneration` layer.
+ * The production controller uses `operationLayers` below; a test passes a
+ * fake, so no test needs a runner with a model to see a generated title.
+ */
+export const buildOperationLayers = <E, R>(textGeneration: Layer.Layer<TextGeneration, E, R>) =>
+  operationServices.pipe(Layer.provideMerge(textGeneration));
+
+// MERGE(#282): replace with TextGenerationLayer
+const UnavailableTextGenerationLayer = Layer.succeed(TextGeneration, {
+  generate: () =>
+    Effect.fail(
+      new TextGenerationError({
+        reason: "unavailable",
+        message: "text generation is not set up on this controller",
+      }),
+    ),
+});
+
+/** Every service an operation uses, with text generation as the controller runs it. */
+export const operationLayers = buildOperationLayers(UnavailableTextGenerationLayer);
 
 /** The handlers of every group, which `HttpApiBuilder.layer(api)` needs to build routes. */
 export const handlerLayers = Layer.mergeAll(

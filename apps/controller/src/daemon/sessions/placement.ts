@@ -77,6 +77,8 @@ import {
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
 import { buildThreadBranch, WorkspaceService } from "../../workspaces";
+import { TextGeneration } from "../text-generation";
+import { makeForkAfterCommit } from "./after-commit";
 import { Dispatch } from "./dispatch";
 import { resumable } from "./resuming";
 
@@ -88,6 +90,26 @@ type ContinueInput = Schema.Schema.Type<typeof ContinueInput>;
 
 const decodeSpawn = Schema.decodeUnknownEffect(SessionSpawnInput);
 const decodeContinue = Schema.decodeUnknownEffect(ContinueInput);
+
+/**
+ * How many characters of a Thread's first message go to the model that writes
+ * its title. A title needs the gist, not the whole message, and a pasted log
+ * would only make the call slower and dearer.
+ */
+const MAX_TITLE_INPUT_LENGTH = 4000;
+
+/** What the model is told when it writes a Thread's title. */
+const THREAD_TITLE_INSTRUCTIONS =
+  "The input is the first message a user sent to a coding assistant. " +
+  "Write a short title for the conversation it starts.\n" +
+  "- Use at most 6 words.\n" +
+  "- Write the title in the language of the message.\n" +
+  "- Name the task or the topic. Do not address the assistant, and do not use quotes or a final period.\n" +
+  "- Set needsRefinement to true when the message is too vague or too short to title well, " +
+  'such as a greeting or "help me". Still write your best title.';
+
+/** The answer the model gives for a Thread's title. */
+const ThreadTitle = Schema.Struct({ title: Schema.String, needsRefinement: Schema.Boolean });
 
 const NO_SUCH_PROFILE = "no such permission profile";
 
@@ -236,6 +258,34 @@ const make = Effect.gen(function* () {
   const one = readSessionOrFail(rows);
   const resumableNativeSession = yield* resumable;
   const { dispatch } = yield* Dispatch;
+  const textGeneration = yield* TextGeneration;
+  const forkAfterCommit = yield* makeForkAfterCommit;
+
+  /**
+   * Starts writing a title for a new Thread on a background fiber, from its
+   * first message, and returns at once. The turn never waits for the title
+   * and never fails because of it: when the generation fails, the service has
+   * already recorded why, and the Thread keeps the cut-short title it was
+   * given from the message.
+   */
+  const startThreadTitle = (sessionId: string, firstMessage: string): Effect.Effect<void> =>
+    forkAfterCommit(
+      "Generating a Thread title failed",
+      textGeneration
+        .generate({
+          caller: "core:sessions",
+          purpose: "thread.title",
+          instructions: THREAD_TITLE_INSTRUCTIONS,
+          input: firstMessage.slice(0, MAX_TITLE_INPUT_LENGTH),
+          output: ThreadTitle,
+        })
+        .pipe(
+          Effect.flatMap(({ title, needsRefinement }) =>
+            promotion.whenServing(sessions.setGeneratedTitle(sessionId, title, needsRefinement)),
+          ),
+          Effect.catchTag("TextGenerationError", () => Effect.void),
+        ),
+    );
 
   /**
    * Chooses the runner for a session when the caller did not name one: the
@@ -966,7 +1016,7 @@ const make = Effect.gen(function* () {
           timeouts: buildTimeouts(yield* settings.all()),
         } satisfies SessionSpec;
 
-        return yield* place({
+        const session = yield* place({
           permissionProfileId: profileId,
           agentId: agent?.id,
           conversationId: undefined,
@@ -992,6 +1042,13 @@ const make = Effect.gen(function* () {
             ...(decoded.projectId === undefined ? {} : { projectId: decoded.projectId }),
           },
         });
+        // Only a Thread gets a generated title: a session spawned from an Agent
+        // is titled by its caller's work, and a message with only images has
+        // no text to title.
+        if (agent === undefined && decoded.prompt.trim() !== "") {
+          yield* startThreadTitle(session.id, decoded.prompt);
+        }
+        return session;
       }),
 
     /**
@@ -1092,4 +1149,5 @@ export const PlacementLayer: Layer.Layer<
   | PluginHost
   | Dispatch
   | PromotionState
+  | TextGeneration
 > = Layer.effect(Placement)(make);

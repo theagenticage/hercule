@@ -2112,6 +2112,37 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Replaces a Thread's cut-short title with one a model generated from its
+     * first message, and stores `needsRefinement`, the model's own judgement
+     * that the first message was too vague for a good title. Announces the
+     * session, so clients show the new title. Runs in its own transaction.
+     *
+     * The title is cleaned like any other: line breaks and repeated spaces
+     * become single spaces, and it is cut to `MAX_TITLE_LENGTH`. A title that
+     * is empty after cleaning changes nothing, and the cut-short title stays.
+     *
+     * No user can rename a session today, so there is no user-chosen title to
+     * protect. A system write like this one carries no actor, as with
+     * `setSelection`.
+     */
+    setGeneratedTitle: (
+      sessionId: string,
+      title: string,
+      needsRefinement: boolean,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const cleaned = buildTitle(title.replace(/\s+/g, " "), "", undefined);
+        if (cleaned === "") return;
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sessions.setGeneratedTitle(sessionId, cleaned, needsRefinement);
+            yield* announceSessionChangeById(sessionId);
+          }),
+        );
+      }),
+
+    /**
      * Sets the access mode and permission profile an exited session resumes
      * under, joining the caller's transaction. The caller also puts the same
      * access mode in the resume spec, so the row shows what the resumed
