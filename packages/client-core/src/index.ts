@@ -178,10 +178,7 @@ export {
   parseMarkdown,
   type ColumnAlignment,
   type MarkdownBlock,
-  type MarkdownDocument,
-  type MarkdownFootnote,
   type MarkdownInline,
-  type MarkdownListItem,
 } from "./markdown";
 export { listWaiting, type Waiting, type WaitingAssistant, type WaitingThread } from "./waiting";
 export { buildIdOptions } from "./id-options";
