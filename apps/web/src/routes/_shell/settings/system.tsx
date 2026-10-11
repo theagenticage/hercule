@@ -48,7 +48,7 @@ function System(): JSX.Element {
     <div className="flex flex-col gap-4">
       <FormCard
         label="Text generation"
-        fine="Small background calls, such as Thread titles, use this model. They run on a runner where that provider is logged in."
+        fine="The model that does short jobs for Hercule, such as naming a thread."
       >
         <Row label="Model" htmlFor="text-generation-model">
           <Select
@@ -91,7 +91,7 @@ function System(): JSX.Element {
       </FormCard>
       <EmptyState
         headline="The rest of the controller's settings are not editable yet."
-        lead="Retention windows, the daily backup and HTTPS are set on this screen."
+        lead="Retention windows, the daily backup and HTTPS will be set here once they can be edited."
       />
     </div>
   );

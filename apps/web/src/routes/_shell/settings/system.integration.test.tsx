@@ -166,16 +166,17 @@ describe("Settings > System: the access-mode fallback policy", () => {
     }
   });
 
-  it("shows the retention, backup and HTTPS settings as an empty state that does not mention the policy", async () => {
+  it("names the retention, backup and HTTPS settings as not editable yet, without claiming they are set here", async () => {
     await openApp();
 
     const headline = await screen.findByRole("heading", {
       name: "The rest of the controller's settings are not editable yet.",
     });
     const empty = readPageText(headline.parentElement);
-    expect(empty).toContain("Retention");
-    expect(empty).toContain("HTTPS");
-    // The empty state does not say the fallback policy is set here, because
+    expect(empty).toContain(
+      "Retention windows, the daily backup and HTTPS will be set here once they can be edited.",
+    );
+    // The empty state does not claim the fallback policy is set here, because
     // the screen describes the policy above as read-only text.
     expect(empty).not.toMatch(/fallback/i);
   });
@@ -201,7 +202,7 @@ describe("Settings > System: text generation", () => {
     expect(field.selectedOptions[0]?.textContent).toBe("Automatic - currently Codex · GPT-6 Luna");
   });
 
-  it("says Automatic found no model when none is available", async () => {
+  it("shows Automatic with no model when none is available", async () => {
     await openApp({ textGeneration: { model: null, lastFailure: null } });
 
     const field = await findModelField();
@@ -209,14 +210,14 @@ describe("Settings > System: text generation", () => {
     expect(field.selectedOptions[0]?.textContent).toBe("Automatic - no model available");
   });
 
-  it("says what the setting is for and where it runs", async () => {
+  it("explains what the setting is for", async () => {
     await openApp();
 
     await findModelField();
 
-    const text = readPageText();
-    expect(text).toContain("Small background calls, such as Thread titles");
-    expect(text).toContain("They run on a runner where that provider is logged in.");
+    expect(readPageText()).toContain(
+      "The model that does short jobs for Hercule, such as naming a thread.",
+    );
   });
 
   it("writes the chosen instance and model to textGeneration.model", async () => {
@@ -304,6 +305,25 @@ describe("Settings > System: text generation", () => {
 
       expect(readPageText()).toContain(
         "Last failure 5 minutes ago - timed out: The model did not answer within 60 seconds.",
+      );
+    });
+
+    it("reads the reason unavailable as a failure, not as a missing model", async () => {
+      await openApp({
+        textGeneration: {
+          ...FAILED,
+          lastFailure: {
+            reason: "unavailable",
+            message: "The harness exited with code 1.",
+            at: new Date(Date.now() - 2 * 60_000).toISOString(),
+          },
+        },
+      });
+
+      await findModelField();
+
+      expect(readPageText()).toContain(
+        "Last failure 2 minutes ago - failed: The harness exited with code 1.",
       );
     });
 

@@ -98,7 +98,7 @@ function Sessions(): JSX.Element {
         fine={
           <>
             A thread needs a harness that is logged in, so starting one waits on this. Small
-            background tasks like Thread titles use a text generation model - change it in{" "}
+            background tasks like naming a thread use a text generation model - change it in{" "}
             <Link to="/settings/system" className="underline">
               Settings &gt; System
             </Link>

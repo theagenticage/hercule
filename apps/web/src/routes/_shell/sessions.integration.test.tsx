@@ -204,7 +204,7 @@ describe("Sessions", () => {
 
     expect(link.getAttribute("href")).toBe("/settings/system");
     expect(readPageText(link.parentElement)).toContain(
-      "Small background tasks like Thread titles use a text generation model - change it in Settings > System.",
+      "Small background tasks like naming a thread use a text generation model - change it in Settings > System.",
     );
   });
 

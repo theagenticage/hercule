@@ -4,7 +4,8 @@
  * The web app and the desktop app both read them from here, so neither screen
  * holds a rule of its own about what Automatic means or when a failure is
  * worth showing. The desktop's first run names the model with
- * `describeTextGenerationModel`.
+ * `describeTextGenerationModel`, and the recap line of its last screen, All
+ * set, is `describeTextGenerationRecap`.
  *
  * The controller decides which model Automatic resolves to and reports it in
  * `controller.read`. Nothing here repeats that rule.
@@ -48,6 +49,20 @@ export const describeTextGenerationModel = (
     model.model,
   );
 
+/** What the select and the recap read when Automatic found no model to run on. */
+const NO_MODEL_AVAILABLE = "no model available";
+
+/**
+ * Returns the recap line of the desktop's All set: the name of the model that
+ * text generation runs on, such as `Codex · GPT-6 Luna`, or "no model
+ * available" when `status` holds none.
+ */
+export const describeTextGenerationRecap = (
+  instances: readonly ProviderInstance[],
+  status: TextGenerationStatus,
+): string =>
+  status.model === null ? NO_MODEL_AVAILABLE : describeTextGenerationModel(instances, status.model);
+
 const buildModelKey = (instanceId: string, model: string): string => `${instanceId}/${model}`;
 
 /**
@@ -58,7 +73,7 @@ const buildModelKey = (instanceId: string, model: string): string => `${instance
  *
  * Automatic names the model it resolves to only while it is the stored
  * setting. With any other setting, `status.model` is that setting's own model,
- * so it says nothing about what Automatic would pick.
+ * so it tells nothing about what Automatic would pick.
  *
  * A stored model that no logged-in instance offers any more (the instance was
  * deleted, or logged out) stays in the list as "(not offered)". The setting
@@ -74,7 +89,7 @@ export const buildTextGenerationField = (
 
   const describeAutomatic = (): string => {
     if (setting !== "automatic") return "Automatic";
-    if (status.model === null) return "Automatic - no model available";
+    if (status.model === null) return `Automatic - ${NO_MODEL_AVAILABLE}`;
     return `Automatic - currently ${describeTextGenerationModel(instances, status.model)}`;
   };
 
@@ -115,7 +130,7 @@ export const buildTextGenerationField = (
 };
 
 const FAILURE_REASON_WORDS = {
-  unavailable: "no model available",
+  unavailable: "failed",
   timeout: "timed out",
   "invalid-output": "invalid output",
 } as const;
@@ -125,7 +140,13 @@ const FAILURE_REASON_WORDS = {
  * "Last failure 5 minutes ago - timed out: The model did not answer in time."
  * Returns null when there is nothing to show: no failure is known, or text
  * generation is off, because a failure from before it was turned off no
- * longer says anything about the current setting.
+ * longer applies to the current setting.
+ *
+ * The line names no model. The status does not carry which model failed, and
+ * the controller keeps the failure until a later text generation succeeds, so
+ * after the user picks another model the line can still be about the earlier
+ * one. The reason `unavailable` also covers a model that exists but whose
+ * harness failed, which is why it reads "failed" and not "no model".
  */
 export const describeTextGenerationFailure = (
   stored: TextGenerationModel | undefined,
