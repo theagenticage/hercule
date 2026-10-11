@@ -52,17 +52,26 @@ export interface UserActor {
  * An agent inside a session, calling with the token the controller created for
  * it.
  *
- * The grants are those of the session's permission profile at the time the
- * token was resolved, stored here rather than looked up again. The check runs
- * on every call, before the body is decoded, and a second read per request
- * would add a join to every request for a set that changes only when the user
- * edits the profile.
+ * The grants are those the session held when the token was resolved: its
+ * permission profile's grants, plus the grant of each of its Permission
+ * Requests decided with outcome `session`. They are stored here rather than
+ * looked up again. The check runs on every call, before the body is decoded,
+ * and a second read per request would add a join to every request for a set
+ * that changes only when the user edits the profile or decides a request.
  */
 export interface SessionActor {
   readonly _tag: "session";
   readonly sessionId: string;
   readonly profileId: string;
+  /** Every grant the session holds: its profile's, plus those its decided requests added. */
   readonly grants: ReadonlyArray<Grant>;
+  /**
+   * The grants of the session's profile alone, without those its Permission
+   * Requests added. Spawning compares an Agent's profile against these: a
+   * grant the user gave this one session must not pass to a session it
+   * spawns.
+   */
+  readonly profileGrants: ReadonlyArray<Grant>;
   /**
    * The assistant the session speaks for, or null when the session is not
    * part of an assistant's conversation. A notification the session creates
@@ -243,7 +252,7 @@ const findRequiredGrant = (requirement: Requirement): Grant | undefined => {
  *
  * The user actor passes every grant, because no profile applies to it, and so
  * does a run, which acts for the user (see `RunActor`). A session passes
- * exactly the grants its permission profile holds. Plugin actors do not exist
+ * exactly the grants on its actor (see `SessionActor`). Plugin actors do not exist
  * yet; they will be one more case here.
  *
  * It returns the whole error rather than only the missing grant, so the caller
@@ -272,7 +281,7 @@ export const checkGrant = (id: OperationId, actor: Actor): Forbidden | undefined
  * and a `Forbidden` error with `message` when it does not.
  *
  * The user and a run hold every grant, and a session holds exactly the grants
- * its permission profile holds, as for `checkGrant`. Use it for a grant an
+ * on its actor, as for `checkGrant`. Use it for a grant an
  * operation needs only for some payloads, which `checkGrant` cannot see,
  * such as `connection.use` when `run.start` sends a workflow with a step
  * that acts through a Connection.

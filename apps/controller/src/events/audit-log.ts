@@ -108,6 +108,7 @@ export const AUDIT_KINDS = [
   "signal.raised",
   "signal.decided",
   "signal.withdrawn",
+  "permission.requested",
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -177,6 +178,9 @@ const RECORD_KINDS = {
   "signal.raised": "created",
   "signal.decided": "updated",
   "signal.withdrawn": "updated",
+  // The record it names is the asking session, whose list of open Permission
+  // Requests gained one.
+  "permission.requested": "updated",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;

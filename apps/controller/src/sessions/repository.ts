@@ -23,6 +23,7 @@ import {
   createNotFoundError,
   SESSION_STATUSES,
   type NotFound,
+  type PermissionRequest,
   type SessionRequest,
   type SessionStatus,
   type SortDirection,
@@ -40,6 +41,7 @@ import {
   type CursorScope,
   type Page,
 } from "../db";
+import { buildOpenPermissionRequestsColumn, parseOpenPermissionRequests } from "../permissions";
 import { buildReadyClause } from "../workspaces";
 import type { SessionEndReason } from "./observer";
 import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
@@ -104,6 +106,8 @@ export interface StoredSession {
    * opened shows on the next read, and nothing stale is stored.
    */
   readonly subagentNames: ReadonlyMap<SubagentId, string>;
+  /** The Permission Requests the session waits on the user's decision for, oldest first. */
+  readonly openPermissionRequests: ReadonlyArray<PermissionRequest>;
   /** The session's Token Usage over its whole life; `undefined` until a harness reports some. */
   readonly usage: StoredTokenUsage | undefined;
   /** The current process's last usage snapshot; see `addUsageSnapshot`. Never shown by the API. */
@@ -242,6 +246,8 @@ interface SessionRow {
    * its name, or `null` when it has none.
    */
   readonly subagent_names: string;
+  /** A JSON array of the open Permission Requests; see `parseOpenPermissionRequests`. */
+  readonly open_permission_requests: string;
   readonly usage: string | null;
   readonly usage_process: string | null;
   readonly created_at: string;
@@ -282,7 +288,8 @@ const buildColumnList = (): string =>
   "(SELECT json_group_object(subagent_id, COALESCE(description, agent_type)) " +
   "FROM session_subagents WHERE session_subagents.session_id = sessions.id " +
   "AND subagent_id IN (SELECT json_extract(value, '$.subagentId') " +
-  "FROM json_each(sessions.open_requests))) AS subagent_names";
+  "FROM json_each(sessions.open_requests))) AS subagent_names, " +
+  `${buildOpenPermissionRequestsColumn("sessions")} AS open_permission_requests`;
 
 /**
  * Parses a nullable JSON column that holds Token Usage. Returns `undefined`
@@ -320,6 +327,7 @@ const toSession = (row: SessionRow): StoredSession => ({
         name === null ? [] : [[subagentId, name]],
     ),
   ),
+  openPermissionRequests: parseOpenPermissionRequests(row.open_permission_requests),
   usage: parseUsage(row.usage),
   usageProcess: parseUsage(row.usage_process),
   createdAt: row.created_at,

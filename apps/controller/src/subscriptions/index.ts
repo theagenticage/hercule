@@ -1,7 +1,9 @@
 /**
  * Subscriptions: the standing claims a holder has on events that have not
- * arrived. A session registers its own through three operations; a run opens
- * one for each signal trigger of its plan through `runHeldSubscriptions`.
+ * arrived. A session registers its own through three operations, and
+ * `permission.request` opens one on the request it makes through
+ * `permissionRequestSubscriptions`; a run opens one for each signal trigger of its
+ * plan through `runHeldSubscriptions`.
  * `targets.ts` expands a target or an Event Selector into the expression the
  * event router evaluates, and only this domain calls it.
  *
@@ -10,6 +12,7 @@
  * this one and not the other way round.
  */
 export { subscriptionRepository, type StoredSubscription } from "./repository";
+export { permissionRequestSubscriptions } from "./permission-request-subscription";
 export { runHeldSubscriptions } from "./run-held";
 export { RunTargets } from "./run-targets";
 export { buildHolderEndedReason, SubscriptionService, SubscriptionServiceLayer } from "./service";

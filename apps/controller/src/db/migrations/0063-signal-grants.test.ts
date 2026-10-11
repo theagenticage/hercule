@@ -19,13 +19,13 @@ import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
 /** The migrations before the one under test. */
-const BEFORE = migrations.filter(([id]) => id < 62);
+const BEFORE = migrations.filter(([id]) => id < 63);
 
 /**
  * The migrations up to and including the one under test. A later migration
  * may change the same profiles, so the test stops here.
  */
-const THROUGH = migrations.filter(([id]) => id <= 62);
+const THROUGH = migrations.filter(([id]) => id <= 63);
 
 const at = "2026-10-01T00:00:00.000Z";
 

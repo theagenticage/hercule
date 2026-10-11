@@ -3,6 +3,7 @@
  * pages to the others, and which agent asked it.
  */
 import type { SessionRequest, Subagent, SubagentId } from "@hercule/contract";
+import { locateShownRequest, type ShownRequest } from "../threads/shown-request";
 import { nameSubagentParent } from "./describe";
 import { nameSubagent } from "./name";
 
@@ -25,14 +26,7 @@ export type RequestAsker =
     };
 
 /** What the Request dock shows. */
-export interface RequestDockState {
-  readonly request: SessionRequest;
-  /** Where the shown Request is among the open ones, counted from 1. Null when only one is open. */
-  readonly position: { readonly at: number; readonly of: number } | null;
-  /** The Request the pager's back arrow shows; undefined on the first one. */
-  readonly previousRequestId: string | undefined;
-  /** The Request the pager's forward arrow shows; undefined on the last one. */
-  readonly nextRequestId: string | undefined;
+export interface RequestDockState extends ShownRequest<SessionRequest> {
   /**
    * The agent the line above the card names. Null on a subagent's page,
    * which already names the subagent.
@@ -91,10 +85,9 @@ export const buildRequestDock = (
     pageSubagentId === undefined
       ? openRequests
       : openRequests.filter((request) => request.subagentId === pageSubagentId);
-  const found = requests.findIndex((request) => request.requestId === shownRequestId);
-  const index = found === -1 ? 0 : found;
-  const request = requests[index];
-  if (request === undefined) return null;
+  const shown = locateShownRequest(requests, (request) => request.requestId, shownRequestId);
+  if (shown === null) return null;
+  const { request } = shown;
   const asker: RequestAsker | null =
     pageSubagentId !== undefined
       ? null
@@ -102,10 +95,7 @@ export const buildRequestDock = (
         ? { kind: "main agent" }
         : buildSubagentAsker(request.subagentId, request.subagentName, subagents);
   return {
-    request,
-    position: requests.length > 1 ? { at: index + 1, of: requests.length } : null,
-    previousRequestId: index > 0 ? requests[index - 1]?.requestId : undefined,
-    nextRequestId: requests[index + 1]?.requestId,
+    ...shown,
     asker,
     showsAskerLine: requests.length > 1 || asker?.kind === "subagent",
   };

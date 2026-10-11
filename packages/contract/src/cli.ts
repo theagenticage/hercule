@@ -306,7 +306,7 @@ export const CLI = {
   },
   "profile.update": {
     command: "profile update",
-    help: "Edits a Permission Profile. The grant list is replaced whole, not merged, so send every grant the profile is to keep. A session already running keeps the grants it was spawned with.",
+    help: "Edits a Permission Profile. The grant list is replaced whole, not merged, so send every grant the profile is to keep. A running session on the profile holds the new grants from its next call.",
     examples: [{ args: ["1f3a9c2e", "--grant", "task.read", "--grant", "task.create"] }],
     fields: {
       id: {
@@ -335,6 +335,55 @@ export const CLI = {
     errors: {
       invalid_state:
         "that profile is one of the three shipped profiles, which cannot be deleted; edit its grants instead",
+    },
+  },
+  "permission.request": {
+    command: "permission request",
+    help: "Asks the user for a grant this session's profile lacks, such as the one a forbidden error named. Give the reason in your own words: the user reads it before deciding. The decision arrives as this session's next input, a permission.decided event naming the outcome, so end the turn instead of polling, and retry the refused call when the outcome is session or profile. Only a session can ask.",
+    examples: [
+      {
+        args: [
+          "task.delete",
+          "--reason",
+          "Task 1f3a9c2e duplicates 7b20d4e1; deleting it keeps the list clean.",
+        ],
+      },
+    ],
+    fields: {
+      grant: {
+        positional: true,
+        placeholder: "grant",
+        help: "The grant to ask for, spelled as the forbidden error named it, such as task.delete.",
+      },
+      reason: { flag: "reason", help: "Why this session needs the grant, shown to the user." },
+      // The `operation` is the refused call as an operation id and its input,
+      // which a program builds. On the command line the reason says what the
+      // call is for.
+      operation: { hidden: true },
+    },
+    errors: {
+      invalid_state:
+        "this session already holds the grant, so retry the call; or it already waits on a request for the same grant, whose id the error names, so wait for that decision",
+      validation:
+        "the grant is not one Hercule knows, or the reason is empty or too long; or the caller is a user credential, which holds every grant already: only a session token can ask",
+    },
+  },
+  "permission.decide": {
+    command: "permission decide",
+    help: "Decides a Permission Request; the user usually does this from its notification or the session view. session lets only the asking session use the grant, until it ends. profile adds the grant to the session's Permission Profile, so every session on that profile holds it too. deny changes nothing. Every outcome reaches the asking session as its next input.",
+    examples: [{ args: ["0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f", "--outcome", "session"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "request-id",
+        help: "The Permission Request's full id, as its notification and the session's record show it; a tail is not resolved here.",
+      },
+      outcome: { flag: "outcome", help: "The decision: session, profile or deny." },
+    },
+    errors: {
+      not_found: "no Permission Request has that id",
+      invalid_state:
+        "the request was already decided, or was withdrawn because its session ended; a decision cannot be changed. Also refused when the session has ended, and, for session and profile, when the session moved to another Permission Profile after it asked: decide deny, and the session can ask again",
     },
   },
 
@@ -1288,12 +1337,12 @@ export const CLI = {
       target: {
         positional: true,
         placeholder: "target",
-        help: "What to wait on, as one word: an External Ref written <system>:<kind>:<identity>, or run:<run id>, session:<session id>, request:<permission request id>.",
+        help: "What to wait on, as one word: an External Ref written <system>:<kind>:<identity>, or run:<run id>, session:<session id>, request:<permission request id>. `hercule permission request` already subscribes the session to its own request, so a request target is refused.",
       },
     },
     errors: {
       invalid_state:
-        "the run has already ended, so no event about it will arrive: read it with `hercule run read <id>`. Or the target is a session or a Permission Request, which this version cannot wait on yet: wait on a ref or a run instead",
+        "the run has already ended, so no event about it will arrive: read it with `hercule run read <id>`. Or the target is a session, which this version cannot wait on yet, so wait on a ref or a run instead; or the target is a Permission Request, whose decision `hercule permission request` already subscribed the asking session to",
       not_found: "no run has the id in a run:<id> target",
       forbidden:
         "you lack subscription.write, or the target is a run and you lack run.read, which a run target needs because the events about a run describe the run; the error names the grant to ask for in a Permission Request",
@@ -3169,6 +3218,10 @@ export const NOUNS = {
   profile: {
     summary: "Permission Profiles: the named grant bundles a session's token carries.",
     flow: "hercule profile list to see what exists, hercule profile create for a new bundle, then pass it to hercule session spawn.",
+  },
+  permission: {
+    summary: "Permission Requests: a session asks the user for a grant its profile lacks.",
+    flow: "hercule permission request asks after a forbidden error and ends the turn, the decision arrives as the next input, and hercule permission decide answers a request by hand.",
   },
   secret: {
     summary:

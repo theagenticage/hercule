@@ -41,9 +41,11 @@ import {
   type PluginAnswerOperation,
 } from "../../bound-actions";
 import { connectionRepository, ConnectionTypes } from "../../connections";
+import type { PermissionProfiles } from "../../permissions";
 import { executePluginAction, PluginHost, type RegisteredWorkflowAction } from "../../plugins";
 import { RunService } from "../../runs";
 import { TaskService } from "../../tasks";
+import { PermissionRequests } from "../permissions";
 import { Live } from "../sessions";
 import { buildDescribe } from "./describer";
 
@@ -85,6 +87,7 @@ const make = Effect.gen(function* () {
   const tasks = yield* TaskService;
   const runs = yield* RunService;
   const live = yield* Live;
+  const permissionRequests = yield* PermissionRequests;
   const host = yield* PluginHost;
   const connections = yield* connectionRepository;
   const connectionTypes = yield* ConnectionTypes;
@@ -102,6 +105,7 @@ const make = Effect.gen(function* () {
     "session.input": ({ sessionId, ...input }) => live.queueInput({ id: sessionId, ...input }),
     "session.respondToApprovalRequest": ({ sessionId, ...decided }) =>
       live.respondToApprovalRequest({ id: sessionId, ...decided }),
+    "permission.decide": (input) => permissionRequests.decide(input),
   };
 
   /**
@@ -338,11 +342,20 @@ const writeOutcome = (action: RegisteredWorkflowAction, input: unknown): string 
 };
 
 /**
- * The bound operations, run with the task and run services, `Live` and the
- * plugin host.
+ * The bound operations, run with the task and run services, `Live`, the
+ * Permission Request use case and the plugin host. Describing an answer reads
+ * the permission profiles, to name the profile a Permission Request's
+ * `profile` answer widens.
  */
 export const BoundOperationsLayer: Layer.Layer<
   BoundOperations,
   never,
-  SqlClient.SqlClient | TaskService | RunService | Live | PluginHost | ConnectionTypes
+  | SqlClient.SqlClient
+  | TaskService
+  | RunService
+  | Live
+  | PermissionRequests
+  | PermissionProfiles
+  | PluginHost
+  | ConnectionTypes
 > = Layer.effect(BoundOperations)(make);

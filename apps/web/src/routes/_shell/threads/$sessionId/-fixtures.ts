@@ -33,6 +33,7 @@ export const SESSION: Session = {
   modelSelection: { model: "claude-sonnet-5", options: {} },
   parentSessionId: null,
   openRequests: [],
+  openPermissionRequests: [],
   createdAt: "2026-09-08T09:59:00.000Z",
   startedAt: "2026-09-08T09:59:01.000Z",
   exitedAt: null,

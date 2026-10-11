@@ -60,6 +60,7 @@ const ANSWER_OPERATIONS = [...new Set([...NOTIFICATION_OPERATIONS, ...SIGNAL_OPE
 describe("the operations an answer may run", () => {
   it("are the ones whose usableIn lists an answer place", () => {
     expect(NOTIFICATION_OPERATIONS).toEqual([
+      "permission.decide",
       "task.update",
       "run.start",
       "session.input",
@@ -71,9 +72,18 @@ describe("the operations an answer may run", () => {
   // An answer runs as the user, without checking the producer's grants, so it
   // must never reach credentials, secrets, the infrastructure, permissions or
   // the management of Connections.
+  //
+  // `permission.decide` is exempt from the `permission` family by name, and
+  // only it: it is how the user answers a Permission Request, and the core
+  // refuses it from every producer but itself, so no producer can make a
+  // click grant something the answer does not show.
   it.each(ANSWER_OPERATIONS)("do not let %s touch a guarded area", (op) => {
     const requirement = readRequirement(op);
-    expect(requirement).not.toMatch(/^(credential|secret|infra|permission)\./);
+    const guarded =
+      op === "permission.decide"
+        ? /^(credential|secret|infra)\./
+        : /^(credential|secret|infra|permission)\./;
+    expect(requirement).not.toMatch(guarded);
     expect(requirement).not.toBe("connection.manage");
   });
 
@@ -153,6 +163,8 @@ describe("dispatchAnswerOperation", () => {
     "session.input": ({ sessionId, text }) => `session.input of "${text}" to ${sessionId}`,
     "session.respondToApprovalRequest": ({ requestId, decision }) =>
       `session.respondToApprovalRequest of ${decision} to ${requestId}`,
+    "permission.decide": ({ requestId, outcome }) =>
+      `permission.decide of ${outcome} to ${requestId}`,
   };
 
   it("calls the handler for the operation with the operation's input", () => {

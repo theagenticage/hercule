@@ -644,6 +644,40 @@ describe("running an operation", () => {
   });
 });
 
+describe("the permission commands", () => {
+  it("asks for a grant with the grant as the positional and the reason as a flag", async () => {
+    const { fetch, run } = createStubCli(() => ({
+      requestId: buildId("aaaaaaa1"),
+      subscriptionId: buildId("bbbbbbb2"),
+    }));
+    expect(
+      await run("permission", "request", "task.delete", "--reason", "It duplicates a task."),
+    ).toBe(0);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/permissions/request",
+      body: { grant: "task.delete", reason: "It duplicates a task." },
+    });
+  });
+
+  it("decides a request by its full id with --outcome", async () => {
+    const { fetch, run } = createStubCli(() => ({}));
+    const requestId = buildId("ccccccc3");
+    expect(await run("permission", "decide", requestId, "--outcome", "session")).toBe(0);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: `/api/v1/permissions/requests/${requestId}/decide`,
+      body: { outcome: "session" },
+    });
+  });
+
+  it("does not offer --operation, which only a program builds", async () => {
+    expect(
+      readBetweenSections(await runHelp("permission", "request"), "flags:", "returns:"),
+    ).not.toContain("--operation");
+  });
+});
+
 describe("paging", () => {
   const buildPage = (items: ReadonlyArray<unknown>, nextCursor?: string) => ({
     items,
@@ -1077,6 +1111,7 @@ describe("hercule session spawn --agent", () => {
     modelSelection: { model: "claude-haiku-4-5", options: {} },
     parentSessionId: null,
     openRequests: [],
+    openPermissionRequests: [],
     createdAt: "2026-09-19T10:01:00.000Z",
     startedAt: null,
     exitedAt: null,

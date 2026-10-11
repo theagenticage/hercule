@@ -34,6 +34,8 @@ const PLATFORM_EVENT_DESCRIPTIONS: Record<PlatformEventKind, string> = {
   "run.cancelled": "A run was cancelled. A cancellation is not a failure.",
   "task.created": "A Task was created.",
   "task.updated": "A Task was changed.",
+  "permission.decided":
+    "The user decided a Permission Request: the session may use the grant, its profile gained it, or it was denied.",
 };
 
 /** The platform event kinds, which a trigger can listen for. The controller emits them. */

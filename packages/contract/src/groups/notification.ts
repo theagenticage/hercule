@@ -76,6 +76,18 @@ export const MAX_ACTION_DESCRIPTION_LENGTH = 4 * 1024;
 export const MAX_BOUND_INPUT_BYTES = 16 * 1024;
 
 /**
+ * The most levels of arrays and objects a bound operation's input may nest:
+ * `"x"` nests 0 levels, `{ "ids": ["x"] }` nests 2. The input is stored in a
+ * JSON column, and SQLite's JSON functions refuse JSON nested deeper than a
+ * limit that depends on the SQLite build: 1000 levels in current SQLite, and
+ * about 800 in the build Bun uses on macOS. Without this bound, an input a few
+ * kilobytes long could pass the size check and then fail to be stored. 32
+ * levels is far below either limit and far above anything an operation's
+ * input needs.
+ */
+export const MAX_BOUND_INPUT_DEPTH = 32;
+
+/**
  * Returns how many bytes `value` takes once written as JSON in UTF-8. A value
  * that JSON cannot write, such as `undefined`, takes none.
  */
@@ -111,10 +123,13 @@ export const CORE_KIND_PREFIX = "core.";
  * The kinds the core produces about itself. Clients that treat one of them
  * specially, such as marking a failed run, name it from here. `core.approval`
  * is the decision raised while a session waits for approval to run a command,
- * change or read files, or use a tool. Spec 10 §7.2 owns the list.
+ * change or read files, or use a tool. `core.permission-request` is the
+ * decision raised when a session asks for a grant its profile lacks. Spec 10
+ * §7.2 owns the list.
  */
 export const CORE_NOTIFICATION_KINDS = [
   "core.approval",
+  "core.permission-request",
   "core.run-failed",
   "core.plugin-error",
   "core.connection-error",
@@ -168,7 +183,8 @@ const buildIdSubject = <const Kind extends string, Value extends Schema.Top>(
  * named by its workflow and its id in that workflow's source. A request is
  * the approval a session waits on, named by its session and its own id, so
  * the core can resolve the decision about one request without touching other
- * decisions about the same session.
+ * decisions about the same session. A Permission Request has its own kind,
+ * so its id is never read as an approval's.
  */
 export const NotificationSubject = Schema.Union([
   buildIdSubject("task", Id),
@@ -180,6 +196,7 @@ export const NotificationSubject = Schema.Union([
   buildIdSubject("subscription", Id),
   buildIdSubject("plugin", PluginId),
   buildIdSubject("event", EventId),
+  buildIdSubject("permissionRequest", Id),
   Schema.Struct({ kind: Schema.Literal("trigger"), workflowId: Id, triggerId: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("request"), sessionId: Id, requestId: Fact }),
 ]);
@@ -187,17 +204,28 @@ export const NotificationSubject = Schema.Union([
 export type NotificationSubject = Schema.Schema.Type<typeof NotificationSubject>;
 
 /**
+ * Checks whether a JSON value nests arrays and objects more than `levels`
+ * deep. It stops descending once it is past `levels`, so the check costs no
+ * more for a very deep value than for one just past the limit.
+ */
+const isNestedDeeperThan = (value: unknown, levels: number): boolean => {
+  if (typeof value !== "object" || value === null) return false;
+  if (levels === 0) return true;
+  return Object.values(value).some((child) => isNestedDeeperThan(child, levels - 1));
+};
+
+/**
  * The operation an answer runs when the user takes it: a contract operation
  * id or a plugin action's qualified id, the Connection it acts through, and
  * its whole input as one object.
  *
- * This schema only checks the shape. The core checks the rest when the
- * Notification or the Signal is written, and again before the operation
- * runs: that the operation lists the place in its `usableIn`, that the input
- * fits the operation's schema (`decodeAnswerOperation` for a contract
- * operation), and that a named Connection fits the action. A stored answer is
- * read with this looser schema, so it stays readable after an operation's
- * `usableIn` or input schema changes.
+ * This schema only bounds the input's size and nesting. The core checks the
+ * rest when the Notification or the Signal is written, and again before the
+ * operation runs: that the operation lists the place in its `usableIn`, that
+ * the input fits the operation's schema (`decodeAnswerOperation` for a
+ * contract operation), and that a named Connection fits the action. A stored
+ * answer is read with this looser schema, so it stays readable after an
+ * operation's `usableIn` or input schema changes.
  */
 export const BoundOperation = Schema.Struct({
   op: Schema.String.check(
@@ -213,6 +241,11 @@ export const BoundOperation = Schema.Struct({
    */
   connectionId: Schema.optionalKey(Id),
   input: Schema.Unknown.check(
+    Schema.makeFilter((input) =>
+      isNestedDeeperThan(input, MAX_BOUND_INPUT_DEPTH)
+        ? `The input nests arrays and objects more than ${MAX_BOUND_INPUT_DEPTH} levels deep, which cannot be stored. Send a flatter input, or leave out the operation.`
+        : undefined,
+    ),
     Schema.makeFilter((input) =>
       countJsonBytes(input) <= MAX_BOUND_INPUT_BYTES
         ? undefined

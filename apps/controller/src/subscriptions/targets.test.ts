@@ -70,8 +70,50 @@ describe("expandTarget", () => {
  * decision. With a kind nobody emits, the target would silently never match.
  */
 describe("the request expansion", () => {
+  /** Returns whether the request target's expansion matches an event with these fields. */
+  const matchesRequestTarget = (event: {
+    readonly source: string;
+    readonly kind: string;
+    readonly payload: Record<string, unknown>;
+  }): boolean =>
+    Effect.runSync(
+      provideUnlimitedBudget(
+        evaluateCondition(expandTarget({ kind: "request", requestId: "pr_7" }), { event }),
+      ),
+    );
+
   it("waits on the decision kind the security spec gives", () => {
     expect(expandTarget({ kind: "request", requestId: "pr_7" })).toContain('"permission.decided"');
+  });
+
+  it("matches the decision of that request", () => {
+    expect(
+      matchesRequestTarget({
+        source: "platform",
+        kind: "permission.decided",
+        payload: { requestId: "pr_7" },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not match another request's decision", () => {
+    expect(
+      matchesRequestTarget({
+        source: "platform",
+        kind: "permission.decided",
+        payload: { requestId: "pr_8" },
+      }),
+    ).toBe(false);
+  });
+
+  it("does not match a decision kind that the controller did not write", () => {
+    expect(
+      matchesRequestTarget({
+        source: "manual",
+        kind: "permission.decided",
+        payload: { requestId: "pr_7" },
+      }),
+    ).toBe(false);
   });
 });
 

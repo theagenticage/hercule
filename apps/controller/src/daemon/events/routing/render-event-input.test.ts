@@ -85,4 +85,14 @@ describe("renderEventInput", () => {
     expect(readFirstLine(text)).toContain("github.pr.closed");
     expect(readFencedPayload(text)).toEqual({});
   });
+
+  it("writes the payload as compact JSON, so a deeply nested payload stays its own size", () => {
+    const payload = {
+      nested: JSON.parse(`${"[".repeat(1000)}"end"${"]".repeat(1000)}`) as unknown,
+    };
+    const text = renderEventInput(buildEvent({ payload }));
+
+    expect(text).toContain(JSON.stringify(payload));
+    expect(text.length).toBeLessThan(JSON.stringify(payload).length + 200);
+  });
 });

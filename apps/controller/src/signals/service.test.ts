@@ -52,6 +52,7 @@ const buildSessionActor = (sessionId: string, grants = SIGNAL_GRANTS): Actor => 
   sessionId,
   profileId: "0199e0e7-0000-7000-8000-00000000d001",
   grants,
+  profileGrants: grants,
   assistantId: null,
 });
 

@@ -95,14 +95,14 @@ export const buildHolderEndedReason = (sessionId: string): string =>
   `session ${sessionId}, which held this subscription, has exited and its transcript ` +
   `cannot be picked up again`;
 
-/** The reason each target kind that this version cannot wait on is rejected. */
+/** The reason each target kind `subscription.create` does not accept is rejected. */
 const ABSENT_TARGET_REASON: Record<Exclude<SubscriptionTarget["kind"], "ref" | "run">, string> = {
   session:
     "no session.* platform events are emitted yet, so a session target would never match; " +
     "wait on an External Ref instead",
   request:
-    "no Permission Requests exist yet, so there is no decision to wait for; " +
-    "wait on an External Ref instead",
+    "a Permission Request's subscription is registered by permission.request itself, " +
+    "so the asking session already waits on the decision; there is nothing to subscribe to",
 };
 
 /**
@@ -154,8 +154,9 @@ const make = Effect.gen(function* () {
      * Fails with:
      *
      * - `Validation` if the caller is not a session;
-     * - `InvalidState` for a session or a request target, which this version
-     *   cannot wait on, and for a run target whose run has already ended;
+     * - `InvalidState` for a session target, which this version cannot wait
+     *   on; for a request target, whose subscription `permission.request`
+     *   registers itself; and for a run target whose run has already ended;
      * - `NotFound` for a run target that names no run;
      * - `Forbidden` for a run target when the caller lacks `run.read`,
      *   because the events about a run describe the run.

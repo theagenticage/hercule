@@ -24,7 +24,7 @@ describe("buildApprovalNotification", () => {
     expect(notification).toEqual({
       kind: "core.approval",
       title: "Run `pnpm test`?",
-      body: 'The session "Fix the login" is waiting for your answer.\n\n```\npnpm test\n```',
+      body: "The session ` Fix the login ` is waiting for your answer.\n\n```\npnpm test\n```",
       subject: [
         { kind: "session", id: SESSION.id },
         { kind: "request", sessionId: SESSION.id, requestId: "req-1" },
@@ -51,10 +51,17 @@ describe("buildApprovalNotification", () => {
     });
   });
 
+  it("shows a hostile session title as inline code, so it cannot add a link", () => {
+    const hostile = { ...SESSION, title: "[Renew](https://evil.example)" };
+    expect(buildApprovalNotification(hostile, COMMAND)?.body).toMatch(
+      /^The session ` \[Renew\]\(https:\/\/evil\.example\) ` is waiting/,
+    );
+  });
+
   it("starts the body with the subagent that asked, or with a subagent when it has no name", () => {
     const asked = { ...COMMAND, subagentId: "a1" };
     expect(buildApprovalNotification(SESSION, asked, "Review the diff")?.body).toMatch(
-      /^Asked by ` Review the diff `\n\nThe session "Fix the login" is waiting/,
+      /^Asked by ` Review the diff `\n\nThe session ` Fix the login ` is waiting/,
     );
     expect(buildApprovalNotification(SESSION, asked)?.body).toMatch(
       /^Asked by a subagent\n\nThe session/,

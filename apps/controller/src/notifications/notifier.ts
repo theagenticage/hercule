@@ -49,6 +49,7 @@ import {
   OWN_SESSION_ALIAS,
   truncateText,
   type AnswerOperation,
+  type AnswerOperationId,
   type BoundAction,
   type BoundOperation,
   type CoreNotificationKind,
@@ -135,12 +136,18 @@ const USER_CANNOT_CREATE =
   "a notification is a message to you, so you cannot create one; a session or a workflow step creates it";
 
 /**
- * The refusal for a producer that binds `session.respondToApprovalRequest`
- * to an answer. The core raises the decision about each approval request
- * itself, with the request's own answers.
+ * The operations only the core binds to an answer, each with the refusal a
+ * producer that binds it gets. The core raises the decision about each
+ * approval request and each Permission Request itself, with that request's
+ * own answers. A producer that could bind these operations could make the
+ * user approve something other than what the answer shows.
  */
-const PRODUCER_CANNOT_RESPOND =
-  "An answer cannot run session.respondToApprovalRequest: the core raises the decision about each approval request itself, with the request's own answers. To ask the user a question, bind session.input instead.";
+const CORE_ONLY_OPERATIONS: Partial<Record<AnswerOperationId<"notification.answer">, string>> = {
+  "session.respondToApprovalRequest":
+    "An answer cannot run session.respondToApprovalRequest: the core raises the decision about each approval request itself, with the request's own answers. To ask the user a question, bind session.input instead.",
+  "permission.decide":
+    "An answer cannot run permission.decide: the core raises the decision about each Permission Request itself, with the request's own answers. To ask for a grant, call permission.request instead.",
+};
 
 /**
  * The refusal for a session that binds `session.input` to another session.
@@ -212,8 +219,7 @@ const replaceOwnSessionAlias = (
  * Checks the rules that depend on who produces an answer, after the answer's
  * operation was decoded. Fails with `Validation` when:
  *
- * - the answer runs `session.respondToApprovalRequest`, which only the core
- *   binds;
+ * - the answer runs an operation only the core binds (`CORE_ONLY_OPERATIONS`);
  * - a session binds `session.input` to a session other than itself;
  * - a session in an assistant's conversation binds `session.input` to
  *   itself, which it cannot take.
@@ -227,8 +233,8 @@ const checkProducerMayBind = (
 ): Effect.Effect<void, Validation> => {
   const refuse = (field: string, message: string) =>
     Effect.fail(createValidationError([{ path: [...path, field], message }]));
-  if (operation.op === "session.respondToApprovalRequest")
-    return refuse("op", PRODUCER_CANNOT_RESPOND);
+  const coreOnly = CORE_ONLY_OPERATIONS[operation.op];
+  if (coreOnly !== undefined) return refuse("op", coreOnly);
   if (operation.op !== "session.input" || caller._tag === "run") return Effect.void;
   if (operation.input.sessionId !== caller.sessionId) {
     return refuse("input", SESSION_INPUT_ONLY_TO_ITSELF);

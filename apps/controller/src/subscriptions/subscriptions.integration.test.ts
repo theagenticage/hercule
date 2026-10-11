@@ -159,20 +159,21 @@ describe("subscription.create", () => {
     });
   });
 
-  it("rejects each target kind this version cannot wait on, and names it", async () => {
+  it("rejects each target kind it does not accept, and says why", async () => {
     await withAgentFleet(async (arranged) => {
       const agent = await spawnThreadWithGrants(arranged, "subscribers", ["subscription.write"]);
       const cases: ReadonlyArray<readonly [unknown, RegExp]> = [
-        [{ kind: "session", sessionId: agent.session.id }, /session/i],
-        [{ kind: "request", requestId: "pr_7" }, /permission request/i],
+        // No session.* platform events are emitted yet.
+        [{ kind: "session", sessionId: agent.session.id }, /session.*yet/i],
+        // permission.request registers the subscription itself.
+        [{ kind: "request", requestId: "pr_7" }, /permission\.request/],
       ];
-      for (const [target, names] of cases) {
+      for (const [target, reason] of cases) {
         const response = await createSubscription(arranged, target, agent.token);
         const refused = await readErrorBody(response);
         expect(response.status, JSON.stringify(target)).toBe(409);
         expect(refused.code, JSON.stringify(target)).toBe("invalid_state");
-        expect(refused.message).toMatch(names);
-        expect(refused.message, "says the subject does not exist yet").toMatch(/yet/i);
+        expect(refused.message).toMatch(reason);
       }
     });
   });

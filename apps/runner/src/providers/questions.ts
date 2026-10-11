@@ -25,7 +25,7 @@ import {
   type Question,
   type QuestionAnswers,
 } from "@hercule/protocol";
-import { truncateFact, truncateMessage } from "./text";
+import { truncateFact, truncateMessage, truncateWithMarker } from "./text";
 
 /**
  * Parses the options of one question. The user picks from them, and the
@@ -80,7 +80,7 @@ const buildUniqueHeader = (header: string, taken: ReadonlySet<string>): string =
   if (!taken.has(shown)) return shown;
   for (let number = 2; ; number++) {
     const suffix = ` (${String(number)})`;
-    const numbered = `${header.slice(0, MAX_FACT_LENGTH - suffix.length)}${suffix}`;
+    const numbered = `${truncateWithMarker(header, MAX_FACT_LENGTH - suffix.length)}${suffix}`;
     if (!taken.has(numbered)) return numbered;
   }
 };

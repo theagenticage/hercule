@@ -153,7 +153,12 @@
 .ans > .btn {
   width: 100%;
 }
+/* Not in the book, whose descriptions are short. A description may name a
+   profile of 128 characters with no space, so it wraps anywhere rather than
+   widen the ledger past its container. */
 .ans-desc {
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--muted);
   font-size: var(--t-12);
 }
@@ -165,6 +170,11 @@
    button reacts to the pointer. */
 .ans[aria-disabled="true"] {
   pointer-events: none;
+}
+/* An answer that cannot be given yet fades its key with its button, so the
+   key does not read as live beside a faded button. */
+.ans:has(> .btn[data-unready]) kbd {
+  opacity: 0.5;
 }
 
 /* ---------- Pills ---------- */

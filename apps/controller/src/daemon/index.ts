@@ -68,7 +68,12 @@ export { AttachmentSweepInterval, runAttachmentSweepLoop } from "./attachments";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
 export { IngestExecutorLayer, IngestReconcileInterval, runIngestReconciler } from "./ingest";
 export { BoundOperationsLayer } from "./bound-actions";
-export { ProfileRemoval, ProfileRemovalLayer } from "./permissions";
+export {
+  PermissionRequests,
+  PermissionRequestsLayer,
+  ProfileRemoval,
+  ProfileRemovalLayer,
+} from "./permissions";
 export { thawExpiredFreezes } from "./promotion";
 export {
   Arrival,

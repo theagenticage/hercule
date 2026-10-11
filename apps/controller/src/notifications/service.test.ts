@@ -82,7 +82,14 @@ const buildSessionActor = (
   sessionId: string,
   grants: ReadonlyArray<Grant> = NOTIFICATION_GRANTS,
   assistantId: string | null = null,
-): Actor => ({ _tag: "session", sessionId, profileId: PROFILE_ID, grants, assistantId });
+): Actor => ({
+  _tag: "session",
+  sessionId,
+  profileId: PROFILE_ID,
+  grants,
+  profileGrants: grants,
+  assistantId,
+});
 
 const ASSISTANT_SESSION = buildSessionActor(
   ASSISTANT_SESSION_ID,
@@ -928,6 +935,37 @@ describe("notification.create with answers only the producer may bind", () => {
     },
   );
 
+  it.each([
+    ["a session", PLAIN_SESSION],
+    ["a run", WORKFLOW_RUN],
+  ] as const)(
+    "refuses permission.decide from %s, because only the core binds it",
+    async (_, actor) => {
+      const error = await run(
+        refuseAnswer(actor, {
+          op: "permission.decide",
+          input: { requestId: PLAIN_SESSION_ID, outcome: "profile" },
+        }),
+      );
+
+      expect(error).toMatchObject({
+        error: {
+          code: "validation",
+          details: {
+            issues: [
+              {
+                path: ["actions", "0", "operation", "op"],
+                message: expect.stringMatching(
+                  /core raises .* call permission.request instead/,
+                ) as unknown,
+              },
+            ],
+          },
+        },
+      });
+    },
+  );
+
   it("refuses a session that binds session.input to another session", async () => {
     const error = await run(
       refuseAnswer(PLAIN_SESSION, {
@@ -1068,7 +1106,7 @@ describe("describe lines", () => {
     expect(notification.actions[0]!.describeLine).toEqual([
       {
         kind: "text",
-        text: "Cannot be taken: An answer on a notification cannot run task.delete. An answer on a notification can run one of: task.update, run.start, session.input, session.respondToApprovalRequest, or a plugin action that lists notification.answer in its usableIn.",
+        text: "Cannot be taken: An answer on a notification cannot run task.delete. An answer on a notification can run one of: permission.decide, task.update, run.start, session.input, session.respondToApprovalRequest, or a plugin action that lists notification.answer in its usableIn.",
       },
     ]);
   });

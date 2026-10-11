@@ -8,7 +8,7 @@
  * turns, one named Provider Instance, one session with a few persisted
  * turns, the timezone first-run setup persisted, a project name and a
  * repository remote, two user settings that migration 60 deletes, and the
- * shipped permission profiles that migration 62 gives the signal grants.
+ * shipped permission profiles that migration 63 gives the signal grants.
  * After the upgrade the test checks that those records, their content,
  * ordering and associations survived. It is not a matrix of session states or
  * provider behaviour.
@@ -77,9 +77,9 @@ const RETIRED_SETTINGS = {
 const RETIRED_SETTINGS_MIGRATION = 60;
 
 /** The migration that adds `SIGNAL_GRANTS` to the `SIGNAL_PROFILES`. */
-const SIGNAL_GRANTS_MIGRATION = 62;
+const SIGNAL_GRANTS_MIGRATION = 63;
 
-/** The shipped profiles that hold `SIGNAL_GRANTS` from migration 62 on. */
+/** The shipped profiles that hold `SIGNAL_GRANTS` from migration 63 on. */
 const SIGNAL_PROFILES = ["assistant", "worker", "unrestricted"] as const;
 
 const SIGNAL_GRANTS = ["signal.read", "signal.write"] as const;
@@ -586,7 +586,7 @@ describe("upgrading from the previous edge release", () => {
       expect(await controller.stop()).toBe(0);
       controller = undefined;
 
-      // A database from before migration 62 has shipped profiles without the
+      // A database from before migration 63 has shipped profiles without the
       // signal grants, so the upgrade must add them. A newer one was seeded
       // with them, and the checks after the upgrade only show they survived.
       // The version is read only now, with the controller stopped, because a

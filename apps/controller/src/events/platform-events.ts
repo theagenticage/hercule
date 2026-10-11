@@ -17,6 +17,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  PermissionDecidedEventPayload,
   RunCancelledEventPayload,
   RunCompletedEventPayload,
   RunFailedEventPayload,
@@ -34,6 +35,7 @@ const PLATFORM_EVENT_PAYLOADS = {
   "run.cancelled": RunCancelledEventPayload,
   "task.created": TaskCreatedEventPayload,
   "task.updated": TaskUpdatedEventPayload,
+  "permission.decided": PermissionDecidedEventPayload,
 } as const;
 
 export type PlatformEventKind = keyof typeof PLATFORM_EVENT_PAYLOADS;

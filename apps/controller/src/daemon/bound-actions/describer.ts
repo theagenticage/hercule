@@ -4,12 +4,13 @@
  * "Start a run of Bugfix". This is the `describe` half of the
  * `BoundOperations` port.
  *
- * It reads the tasks, projects, workflows, sessions, signals and Connections
- * an operation names, and those domains depend on the domains that hold Bound
- * Actions, so those domains cannot read them themselves. It reads their
- * repositories rather than their services: a describe line is part of reading
- * a notification or a signal, not a read of the task or session on the
- * caller's behalf, so their grant checks do not apply.
+ * It reads the tasks, projects, workflows, sessions, signals, Connections,
+ * Permission Requests and permission profiles an operation names, and those
+ * domains depend on the domains that hold Bound Actions, so those domains
+ * cannot read them themselves. It reads their repositories rather than their
+ * services: a describe line is part of reading a notification or a signal,
+ * not a read of the task or session on the caller's behalf, so their grant
+ * checks do not apply.
  *
  * Because it reads the rows directly, a read rule a service enforces applies
  * here only if this module repeats it. This module repeats one: a deleted task
@@ -36,6 +37,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   isId,
   type ApprovalDecision,
+  type PermissionDecisionOutcome,
   dispatchAnswerOperation,
   type AnswerOperationHandlers,
   type AnswerOperationInput,
@@ -51,6 +53,11 @@ import {
   type PluginAnswerOperation,
 } from "../../bound-actions";
 import { connectionRepository } from "../../connections";
+import {
+  permissionRequestRepository,
+  PermissionProfiles,
+  type PermissionProfile,
+} from "../../permissions";
 import { PluginHost } from "../../plugins";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
@@ -115,12 +122,18 @@ const describeOpenRequest = (
   }
 };
 
-/** Lists every path as its own `marked` part, separated by commas. */
+/**
+ * Lists every path as its own `marked` part, separated by commas. A request
+ * may name no path, such as a listing of the whole workspace, and then the
+ * list reads "files" so the sentence around it stays whole.
+ */
 const listPaths = (paths: ReadonlyArray<string>): DescribeLine =>
-  joinParts(
-    paths.map((path) => [buildMarkedPart(path)]),
-    ", ",
-  );
+  paths.length === 0
+    ? [buildTextPart("files")]
+    : joinParts(
+        paths.map((path) => [buildMarkedPart(path)]),
+        ", ",
+      );
 
 /**
  * Returns the describe line of one approval answer, in the words of the
@@ -160,6 +173,26 @@ const describeDecision = (
         buildTextPart(" and stop the turn in session "),
         session,
       ];
+  }
+};
+
+/**
+ * Returns the describe line of one Permission Request answer, such as "Let
+ * session «Fix the build» use «task.delete»".
+ */
+const describePermissionDecision = (
+  outcome: PermissionDecisionOutcome,
+  grant: DescribeLinePart,
+  session: DescribeLinePart,
+  profile: DescribeLinePart,
+): DescribeLine => {
+  switch (outcome) {
+    case "session":
+      return [buildTextPart("Let session "), session, buildTextPart(" use "), grant];
+    case "profile":
+      return [buildTextPart("Add "), grant, buildTextPart(" to profile "), profile];
+    case "deny":
+      return [buildTextPart("Refuse "), grant, buildTextPart(" to session "), session];
   }
 };
 
@@ -250,7 +283,7 @@ export const buildDescribe: Effect.Effect<
     operations: ReadonlyArray<CheckedOperation>,
   ) => Effect.Effect<ReadonlyArray<DescribeLine>, SqlError>,
   never,
-  SqlClient.SqlClient | PluginHost
+  SqlClient.SqlClient | PluginHost | PermissionProfiles
 > = Effect.gen(function* () {
   const tasks = yield* taskRepository;
   const projects = yield* projectRepository;
@@ -259,6 +292,8 @@ export const buildDescribe: Effect.Effect<
   const signals = yield* signalRepository;
   const connections = yield* connectionRepository;
   const host = yield* PluginHost;
+  const permissionRequests = yield* permissionRequestRepository;
+  const permissionProfiles = yield* PermissionProfiles;
 
   /**
    * Builds the describer for one `describe` call, reading each entity at
@@ -323,6 +358,47 @@ export const buildDescribe: Effect.Effect<
           onSome: (session) => session.openRequests,
         }),
       })),
+    );
+
+    /** Returns a permission profile's name, or its id when it cannot be read. */
+    const readProfileName = readOncePerId((id) =>
+      Effect.map(
+        // A profile whose stored grants no longer decode still has a name,
+        // but this read returns none; the id names it instead.
+        Effect.catchTag(permissionProfiles.getById(id), "GrantsError", () =>
+          Effect.succeed(Option.none<PermissionProfile>()),
+        ),
+        Option.match({ onNone: () => id, onSome: (profile) => profile.name }),
+      ),
+    );
+
+    /**
+     * Returns the parts that name a Permission Request's grant, its session
+     * and the profile the session asked under, which the `profile` answer
+     * widens. A request that does not exist names its own id in place of all
+     * three. A request's session row is never deleted, so a request without
+     * one is a bug.
+     */
+    const readPermissionRequestParts = readOncePerId((id) =>
+      Effect.gen(function* () {
+        const found = yield* permissionRequests.read(id);
+        if (Option.isNone(found)) {
+          const missing = buildMarkedPart(id);
+          return { grant: missing, session: missing, profile: missing };
+        }
+        const request = found.value;
+        const session = yield* sessions.one(request.sessionId);
+        if (Option.isNone(session)) {
+          return yield* Effect.die(
+            `the session ${request.sessionId} of a Permission Request has no row`,
+          );
+        }
+        return {
+          grant: buildMarkedPart(request.grant),
+          session: buildMarkedPart(session.value.title),
+          profile: buildMarkedPart(yield* readProfileName(request.profileId)),
+        };
+      }),
     );
 
     /**
@@ -500,6 +576,10 @@ export const buildDescribe: Effect.Effect<
             describeOpenRequest(session.openRequests, requestId),
             session.markedName,
           ),
+        ),
+      "permission.decide": ({ requestId, outcome }) =>
+        Effect.map(readPermissionRequestParts(requestId), (parts) =>
+          describePermissionDecision(outcome, parts.grant, parts.session, parts.profile),
         ),
     } satisfies AnswerOperationHandlers<AnswerPlace, Effect.Effect<DescribeLine, SqlError>>;
 

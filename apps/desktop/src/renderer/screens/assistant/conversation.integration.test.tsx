@@ -532,6 +532,57 @@ describe("an assistant's Conversation", () => {
     expect(findShownCommand()).toContain("df -h");
     expect(screen.getByText("2 of 2")).toBeTruthy();
   });
+
+  it("answers the current session's Permission Request in the dock, naming its profile", async () => {
+    const user = userEvent.setup();
+    const session = buildAdaSession({
+      openPermissionRequests: [
+        {
+          id: "01a06d02-9e00-7000-8000-000000000001",
+          grant: "task.delete",
+          reason: "The task duplicates another one.",
+          createdAt: "2026-09-10T09:20:00.000Z",
+        },
+      ],
+    });
+    const decide = "/api/v1/permissions/requests/01a06d02-9e00-7000-8000-000000000001/decide";
+    const { calls } = await openConversation({
+      readSession: () => session,
+      messages: [QUESTION],
+      handlers: {
+        "GET /api/v1/profiles": {
+          body: {
+            items: [
+              {
+                id: session.permissionProfileId,
+                name: "assistant",
+                grants: [],
+                shipped: true,
+                createdAt: "2026-09-01T09:00:00.000Z",
+                updatedAt: "2026-09-01T09:00:00.000Z",
+              },
+            ],
+          },
+        },
+        [`POST ${decide}`]: { body: {} },
+      },
+    });
+    const dock = screen.getByRole("group", { name: "Grant this permission?" });
+
+    await user.click(
+      within(dock).getByRole("button", {
+        name: "Add to profile",
+        description:
+          "Adds task.delete to the profile assistant; every session on it gains the grant.",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(calls.filter((call) => call.path === decide).map((call) => call.body)).toEqual([
+        { outcome: "profile" },
+      ]);
+    });
+  });
 });
 
 describe("the Conversation's pages", () => {

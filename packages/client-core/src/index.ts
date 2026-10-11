@@ -493,6 +493,12 @@ export {
 } from "./threads/recent";
 export { decideRelatedReads } from "./threads/related-reads";
 export { findOldestOpenRequest } from "./threads/oldest-request";
+export {
+  buildPermissionRequestCard,
+  buildPermissionRequestDock,
+  type PermissionAnswerRow,
+  type PermissionRequestCard,
+} from "./threads/permission-request";
 export { formatRequestQuestion } from "./threads/request-question";
 export {
   changeRequestDraft,

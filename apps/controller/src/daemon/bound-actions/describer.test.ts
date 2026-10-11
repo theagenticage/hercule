@@ -8,7 +8,7 @@
  * compare whole part lists, spaces included.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import * as Statement from "effect/unstable/sql/Statement";
 import type {
   AnswerOperation,
@@ -18,6 +18,11 @@ import type {
 } from "@hercule/contract";
 import { connectionRepository } from "../../connections";
 import { mintUuid, uuidToString } from "../../db";
+import {
+  permissionRequestRepository,
+  PermissionProfiles,
+  PermissionProfilesLayer,
+} from "../../permissions";
 import { buildPluginStack } from "../../plugins/testing";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
@@ -25,7 +30,7 @@ import { taskRepository } from "../../tasks";
 import { workflowRepository } from "../../workflows";
 import { buildDescribe } from "./describer";
 
-const layer = buildPluginStack();
+const layer = PermissionProfilesLayer.pipe(Layer.provideMerge(buildPluginStack()));
 
 const AT = "2026-09-07T10:00:00.000Z";
 
@@ -74,14 +79,18 @@ const insertTask = (title: string) =>
   });
 
 /** Inserts a session titled `title`, waiting on `openRequest`, and returns its id. */
-const insertSession = (title: string, openRequest: OpenRequest | null = null) =>
+const insertSession = (
+  title: string,
+  openRequest: OpenRequest | null = null,
+  permissionProfileId: string = mintId(),
+) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
     const id = mintId();
     yield* sessions.insert({
       id,
       title,
-      permissionProfileId: mintId(),
+      permissionProfileId,
       agentId: undefined,
       conversationId: undefined,
       step: undefined,
@@ -453,6 +462,13 @@ describe("session.respondToApprovalRequest", () => {
           decisions: ["allow", "deny"],
           detail: { paths: ["a.ts", "b.ts"] },
         });
+        const listing = yield* insertSession("No paths", {
+          requestId: "req-3",
+          itemId: "item-3",
+          kind: "file_read_approval",
+          decisions: ["allow", "deny"],
+          detail: { paths: [] },
+        });
         const answeredElsewhere = yield* insertSession(
           "Moved on",
           buildCommandRequest("req-2", "ls"),
@@ -461,6 +477,10 @@ describe("session.respondToApprovalRequest", () => {
           files: yield* describeOperation({
             op: "session.respondToApprovalRequest",
             input: { sessionId: changing, requestId: "req-1", decision: "allow" },
+          }),
+          noPaths: yield* describeOperation({
+            op: "session.respondToApprovalRequest",
+            input: { sessionId: listing, requestId: "req-3", decision: "allow" },
           }),
           otherRequest: yield* describeOperation({
             op: "session.respondToApprovalRequest",
@@ -482,6 +502,15 @@ describe("session.respondToApprovalRequest", () => {
       marked("b.ts"),
       text(" once in session "),
       marked("Two files"),
+    ]);
+    // A request that names no path, such as a listing of the workspace,
+    // still reads as a whole sentence.
+    expect(lines.noPaths).toEqual([
+      text("Allow "),
+      text("the read of "),
+      text("files"),
+      text(" once in session "),
+      marked("No paths"),
     ]);
     expect(lines.otherRequest).toEqual([
       text("Allow "),
@@ -537,5 +566,59 @@ describe("describing the answers of one decision", () => {
     // the test counts the statements that read each entity's own table.
     expect(statements.filter((sql) => /FROM tasks\s/.test(sql))).toHaveLength(1);
     expect(statements.filter((sql) => /FROM sessions WHERE/.test(sql))).toHaveLength(1);
+  });
+});
+
+describe("permission.decide", () => {
+  it("names the grant, the session and its profile for each outcome", async () => {
+    const lines = await run(
+      Effect.gen(function* () {
+        const profiles = yield* PermissionProfiles;
+        const profile = Option.getOrThrow(yield* profiles.create("tester", ["task.read"]));
+        const sessionId = yield* insertSession("Fix the build", null, profile.id);
+        const requests = yield* permissionRequestRepository;
+        const requestId = yield* requests.insert({
+          sessionId,
+          profileId: profile.id,
+          grant: "task.delete",
+          reason: "the task is a duplicate",
+          operation: undefined,
+          at: AT,
+        });
+        const answer = (outcome: "session" | "profile" | "deny", id = requestId) =>
+          describeOperation({ op: "permission.decide", input: { requestId: id, outcome } });
+        return {
+          session: yield* answer("session"),
+          profile: yield* answer("profile"),
+          deny: yield* answer("deny"),
+          missing: yield* answer("deny", MISSING_ID),
+        };
+      }),
+    );
+
+    expect(lines.session).toEqual([
+      text("Let session "),
+      marked("Fix the build"),
+      text(" use "),
+      marked("task.delete"),
+    ]);
+    expect(lines.profile).toEqual([
+      text("Add "),
+      marked("task.delete"),
+      text(" to profile "),
+      marked("tester"),
+    ]);
+    expect(lines.deny).toEqual([
+      text("Refuse "),
+      marked("task.delete"),
+      text(" to session "),
+      marked("Fix the build"),
+    ]);
+    expect(lines.missing).toEqual([
+      text("Refuse "),
+      marked(MISSING_ID),
+      text(" to session "),
+      marked(MISSING_ID),
+    ]);
   });
 });

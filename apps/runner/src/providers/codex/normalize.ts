@@ -582,11 +582,17 @@ export const normalize = (
   state: Normalizing,
   frame: NotificationFrame,
 ): ReadonlyArray<ProviderEvent> => {
-  const reasoning = REASONING_CHANNELS[frame.method];
+  // Only each table's own keys count, so a method or status named like an
+  // object method, such as `constructor`, finds nothing.
+  const reasoning = Object.hasOwn(REASONING_CHANNELS, frame.method)
+    ? REASONING_CHANNELS[frame.method]
+    : undefined;
   if (reasoning !== undefined) {
     return buildReasoningDelta(state, frame.params as AgentMessageDeltaNotification, reasoning);
   }
-  const streamKind = DELTA_STREAMS[frame.method];
+  const streamKind = Object.hasOwn(DELTA_STREAMS, frame.method)
+    ? DELTA_STREAMS[frame.method]
+    : undefined;
   if (streamKind !== undefined) {
     return buildContentDelta(state, frame.params as AgentMessageDeltaNotification, streamKind);
   }
@@ -610,7 +616,9 @@ export const normalize = (
     }
     case "turn/completed": {
       const params = frame.params as TurnCompletedNotification;
-      const ended = TURN_STATES[params.turn.status];
+      const ended = Object.hasOwn(TURN_STATES, params.turn.status)
+        ? TURN_STATES[params.turn.status]
+        : undefined;
       if (ended === undefined) return [];
       const structuredResult = judgeTurn(state, params.turn, ended);
       // The items of an ended turn cannot stream any more, so their reasoning

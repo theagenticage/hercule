@@ -171,6 +171,13 @@ export interface ThreadScreenRecords {
    * each by its id, and `null` for one the user cannot read. None when left out.
    */
   readonly senders?: ReadonlyArray<{ readonly id: string; readonly session: Session | null }>;
+  /**
+   * The permission profiles, for the name a Permission Request's "Add to
+   * profile" answer shows. None when left out. `null` stands for a read of
+   * them that failed: the answer then names no profile, and the dock does not
+   * read them again.
+   */
+  readonly profiles?: ReadonlyArray<Profile> | null;
 }
 
 /** What the draft screen reads of a Draft Thread in a project that joins no workspace. */
@@ -406,6 +413,19 @@ const seedQueryCache = (
     queryClient.setQueryData(queuedInputsQuery(client, sessionId).queryKey, thread.queuedInputs);
     // The Bureau book draws a thread with no subagents.
     queryClient.setQueryData(subagentsQuery(client, sessionId).queryKey, []);
+    if (thread.profiles === null) {
+      // A failed read keeps the list read before it, here an empty one, and
+      // the dock reads the profiles again only after a read that succeeded.
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: profilesQuery(client).queryKey })
+        ?.setState({
+          status: "error",
+          error: new Error("The permission profiles could not be read."),
+        });
+    } else if (thread.profiles !== undefined) {
+      queryClient.setQueryData(profilesQuery(client).queryKey, thread.profiles);
+    }
     for (const sender of thread.senders ?? []) {
       queryClient.setQueryData(senderSessionQuery(client, sender.id).queryKey, sender.session);
     }

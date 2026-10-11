@@ -13,6 +13,12 @@
  *   families, and those that need `connection.manage`;
  * - operations that destroy in bulk: every `*.delete` and `*.purge`.
  *
+ * `permission.decide` is the one exception, kept on purpose: it is how the
+ * user answers a Permission Request, and its "add to profile" answer edits a
+ * profile. Only the core binds it, to the decision it raises for the request,
+ * and the core refuses it from every other producer, as it refuses
+ * `session.respondToApprovalRequest`.
+ *
  * Each operation that lists a place has a schema of its whole input as one
  * object, ids included, because an answer has no URL path to carry an id in.
  * The core checks an answer when the Notification or the Signal is written
@@ -28,6 +34,7 @@
 import type { AnswerPlace } from "@hercule/plugin-host";
 import { Effect, Schema } from "effect";
 import { createValidationError, listSchemaIssues, type Validation } from "./errors";
+import { PermissionDecideCall } from "./groups/permission";
 import { RunStartCall } from "./groups/run";
 import { SessionInputCall, SessionRespondToApprovalRequestCall } from "./groups/session";
 import { TaskCreateInput, TaskUpdateCall } from "./groups/task";
@@ -60,6 +67,7 @@ const ANSWER_OPERATION_INPUTS = {
   "run.start": RunStartCall,
   "session.input": SessionInputCall,
   "session.respondToApprovalRequest": SessionRespondToApprovalRequestCall,
+  "permission.decide": PermissionDecideCall,
 } as const satisfies Record<AnswerOperationId, Schema.Top>;
 
 /** The decoded input of the operation `Op` when an answer runs it. */

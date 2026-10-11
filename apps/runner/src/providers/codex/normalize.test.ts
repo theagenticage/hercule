@@ -1062,3 +1062,15 @@ describe("incomplete Codex token accounting", () => {
     });
   });
 });
+
+describe("a method or a status named like an object method", () => {
+  it("normalizes a notification whose method is `constructor` to nothing", () => {
+    expect(normalizeFromStart([buildDeltaNote("constructor", { delta: "x" })])).toEqual([]);
+  });
+
+  it("does not end a turn whose status is `constructor`", () => {
+    const events = normalizeFromStart([TURN_STARTED, buildTurnCompleted("constructor")]);
+
+    expect(listEventTags(events)).not.toContain("turn.completed");
+  });
+});
