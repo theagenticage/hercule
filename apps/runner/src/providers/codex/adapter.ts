@@ -943,19 +943,21 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       openHost(ctx, ctx.binary, undefined, TEXT_GENERATION_PROCESS_OVERRIDES, watch),
       (host) =>
         Effect.gen(function* () {
-          yield* Effect.mapError(initializeAppServer(host), (error) =>
-            describeRpcError(host, error),
-          );
+          // A failure is reported by the request's own error, never by the
+          // app-server's error output: the message is stored in the audit log
+          // and shown in Settings, and error output can hold a credential or
+          // quote the input.
+          yield* Effect.mapError(initializeAppServer(host), (error) => error.message);
           const opened = yield* Effect.mapError(
             host.rpc.request("thread/start", buildTextGenerationThread(spec, ctx.cwd)),
-            (error) => describeRpcError(host, error),
+            (error) => error.message,
           );
           yield* Effect.mapError(
             host.rpc.request(
               "turn/start",
               buildTextGenerationTurn((opened as ThreadStartResponse).thread.id, spec),
             ),
-            (error) => describeRpcError(host, error),
+            (error) => error.message,
           );
           return decideTextGenerationOutcome(spec, yield* watch.ended);
         }),

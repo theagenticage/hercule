@@ -218,9 +218,13 @@ describe("codex generateText: invalid-output", () => {
 });
 
 describe("codex generateText: failed", () => {
-  it("fails when the app-server cannot start", async () => {
+  it("fails when the app-server cannot start, without its error output", async () => {
+    // The scripted app-server writes "codex: app-server failed to start" to its
+    // error output. The message is stored and shown, and error output can hold
+    // a credential, so the message never carries it.
     const run = await generate([], { dies: true });
     expect(run.outcome.outcome).toBe("failed");
+    expect((run.outcome as { message: string }).message).not.toContain("codex:");
   });
 
   it("fails when the app-server exits during the turn", async () => {

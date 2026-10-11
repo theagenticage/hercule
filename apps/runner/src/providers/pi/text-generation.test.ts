@@ -202,14 +202,15 @@ describe("a text generation on pi", () => {
     await expect(outcome).resolves.toEqual({ outcome: "failed", message: "401 invalid api key" });
   });
 
-  it("reports a failure with pi's last error output when pi exits before it answers", async () => {
+  it("reports a failure without pi's error output when pi exits before it answers", async () => {
     const { outcome, child } = await startGeneration();
 
-    child.crash("pi: Z.ai rejected the key");
+    // The message is stored and shown, and error output can hold a credential.
+    child.crash("pi: Z.ai rejected the key zai-secret-123");
 
     await expect(outcome).resolves.toEqual({
       outcome: "failed",
-      message: "pi: Z.ai rejected the key",
+      message: "pi exited before it answered",
     });
   });
 
@@ -218,7 +219,7 @@ describe("a text generation on pi", () => {
 
     const outcome = await Effect.runPromise(generate(makePiAdapter(seam)));
 
-    expect(outcome).toEqual({ outcome: "failed", message: "pi: could not start" });
+    expect(outcome).toEqual({ outcome: "failed", message: "pi exited before it answered" });
   });
 
   it("reports a failure when pi refuses the prompt", async () => {

@@ -60,7 +60,7 @@ input.on("line", (line) => {
     return;
   }
   if (frame.type === "user" && process.env["HARNESS_ANSWER"] === "crash") {
-    process.stderr.write("fixture harness: not logged in\n");
+    process.stderr.write("fixture harness: authentication failed for sk-ant-api03-FIXTURE\n");
     process.exit(3);
   }
   if (frame.type !== "user" || process.env["HARNESS_ANSWER"] !== "submit") return;

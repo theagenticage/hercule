@@ -16,16 +16,6 @@ import type { SpawnedProcess, SpawnOptions } from "@anthropic-ai/claude-agent-sd
 import * as Effect from "effect/Effect";
 import { stopChild } from "./process";
 
-/** How much of the CLI's error output is kept, the same length the SDK keeps. */
-const STDERR_TAIL_LENGTH = 2048;
-
-/**
- * How long after the CLI exits its error output may stay open. A process the
- * CLI started can hold the pipe open for good, so the wait for the last of the
- * output is bounded.
- */
-const STDERR_CLOSE_WAIT_MS = 200;
-
 type Listener = Parameters<EventEmitter["on"]>[1];
 
 const toError = (error: unknown): Error =>
@@ -44,32 +34,28 @@ export interface ChildOwner {
    * the grace of `stopChild`. Never fails.
    */
   readonly stop: Effect.Effect<void>;
-  /**
-   * Returns the last part of what the CLI wrote to its error output. Waits
-   * for the output to end, for at most `STDERR_CLOSE_WAIT_MS`.
-   */
-  readonly readStderrTail: () => Promise<string>;
 }
 
 /**
  * Creates an owner for one CLI process. The process is started as the SDK
  * starts it itself: same command, arguments, directory, environment and abort
- * signal, with all three streams piped. The SDK's own start also reads the
- * error output and adds its tail to an exit error, so this one keeps the tail
- * for the caller to do the same.
+ * signal, with stdin and stdout piped.
+ *
+ * The CLI's error output is discarded. A text generation's failure message is
+ * stored in the audit log and shown in Settings, and error output can hold a
+ * credential or quote the input, so an exit error carries only the SDK's
+ * exit code message.
  */
 export const createChildOwner = (): ChildOwner => {
-  let child: Bun.Subprocess<"pipe", "pipe", "pipe"> | undefined;
-  let stderrTail = "";
-  let stderrEnded: Promise<void> = Promise.resolve();
+  let child: Bun.Subprocess<"pipe", "pipe", "ignore"> | undefined;
 
   const spawn = ({ command, args, cwd, env, signal }: SpawnOptions): SpawnedProcess => {
-    let started: Bun.Subprocess<"pipe", "pipe", "pipe">;
+    let started: Bun.Subprocess<"pipe", "pipe", "ignore">;
     try {
       started = Bun.spawn([command, ...args], {
         stdin: "pipe",
         stdout: "pipe",
-        stderr: "pipe",
+        stderr: "ignore",
         env,
         signal,
         ...(cwd === undefined ? {} : { cwd }),
@@ -82,15 +68,6 @@ export const createChildOwner = (): ChildOwner => {
       );
     }
     child = started;
-
-    stderrEnded = (async () => {
-      const decoder = new TextDecoder();
-      for await (const chunk of started.stderr) {
-        stderrTail = (stderrTail + decoder.decode(chunk, { stream: true })).slice(
-          -STDERR_TAIL_LENGTH,
-        );
-      }
-    })().catch(() => undefined);
 
     const events = new EventEmitter();
     void started.exited.then(() => {
@@ -167,16 +144,5 @@ export const createChildOwner = (): ChildOwner => {
         exited: owned.exited,
       });
     }),
-    readStderrTail: async () => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([
-        stderrEnded,
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, STDERR_CLOSE_WAIT_MS);
-        }),
-      ]);
-      clearTimeout(timer);
-      return stderrTail;
-    },
   };
 };

@@ -305,7 +305,7 @@ describe("a Claude Code text generation with the real SDK and a CLI that ignores
     expect(result.elapsedMillis).toBeLessThan(Duration.toMillis(STOP_GRACE));
   });
 
-  it("reports a CLI that crashed with the tail of its error output", SLOW, async () => {
+  it("reports a CLI that crashed by its exit code, never by its error output", SLOW, async () => {
     const result = await generateWithClaude({
       answer: "crash",
       onStdinEnd: "ignore",
@@ -315,9 +315,10 @@ describe("a Claude Code text generation with the real SDK and a CLI that ignores
     const [outcome] = result.outcomes;
     expect(outcome?.outcome).toBe("failed");
     expect(outcome).toHaveProperty("message");
-    expect((outcome as { readonly message: string }).message).toMatch(
-      /exited with code 3.*stderr: fixture harness: not logged in/,
-    );
+    // The message is stored and shown, and error output can hold a credential.
+    const { message } = outcome as { readonly message: string };
+    expect(message).toMatch(/exited with code 3/);
+    expect(message).not.toContain("sk-ant-");
     expect(result.stillRunning).toEqual([]);
   });
 

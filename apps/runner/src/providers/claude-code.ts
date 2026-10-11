@@ -1385,27 +1385,6 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   };
 };
 
-/**
- * Wraps the SDK's message iterator so that an error about the CLI process
- * exiting carries the tail of the CLI's error output. The SDK adds that tail
- * itself only for a CLI it started itself, and a text generation starts its
- * own (see `createChildOwner`). Other errors, and an empty tail, pass through
- * unchanged.
- */
-const addStderrToExitErrors = (
-  messages: AsyncIterator<SDKMessage>,
-  readStderrTail: () => Promise<string>,
-): AsyncIterator<SDKMessage> => ({
-  next: () =>
-    messages.next().catch(async (error: unknown) => {
-      if (error instanceof Error && error.message.startsWith("Claude Code process")) {
-        const tail = (await readStderrTail()).trim();
-        if (tail !== "") throw new Error(`${error.message}. stderr: ${tail}`, { cause: error });
-      }
-      throw error;
-    }),
-});
-
 export const claudeCode: ProviderAdapter = makeClaudeCodeAdapter({
   stream: ({ options, input, closeWaitsForExit }) => {
     // Only a text generation starts the CLI itself. A session keeps the SDK's
@@ -1416,10 +1395,7 @@ export const claudeCode: ProviderAdapter = makeClaudeCodeAdapter({
       options: owner === undefined ? options : { ...options, spawnClaudeCodeProcess: owner.spawn },
     });
     return {
-      [Symbol.asyncIterator]: () =>
-        owner === undefined
-          ? running[Symbol.asyncIterator]()
-          : addStderrToExitErrors(running[Symbol.asyncIterator](), owner.readStderrTail),
+      [Symbol.asyncIterator]: () => running[Symbol.asyncIterator](),
       interrupt: () => running.interrupt().then(() => undefined),
       setModel: (model) => running.setModel(model),
       stopTask: (taskId) => running.stopTask(taskId),

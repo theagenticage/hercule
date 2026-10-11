@@ -1509,17 +1509,16 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       ({ child }) =>
         Effect.gen(function* () {
           const settled = Deferred.makeUnsafe<TextGenerationOutcome>();
-          const complaints: Array<string> = [];
+          // pi's error output is read so its pipe never fills, and then
+          // discarded: the failure message is stored in the audit log and
+          // shown in Settings, and error output can hold a credential or quote
+          // the input.
           const drained = (async () => {
             try {
-              for await (const line of child.stderr) {
-                if (line.trim() === "") continue;
-                complaints.push(line);
-                if (complaints.length > MAX_COMPLAINT_LINES) complaints.shift();
-              }
+              const lines = child.stderr[Symbol.asyncIterator]();
+              while ((await lines.next()).done !== true);
             } catch {
-              // A killed child has no more output, and the lines already read
-              // are still worth reporting.
+              // A killed child has no more output.
             }
           })();
           const id = crypto.randomUUID();
@@ -1551,8 +1550,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
             state: buildNormalizingState(id, id, spec.outputSchema),
             depth: 0,
           };
-          // If pi exits before the turn ends, there is no turn to wait for, and
-          // its last error output is the reason.
+          // If pi exits before the turn ends, there is no turn to wait for.
           Effect.runFork(
             agent.rpc.pump.pipe(
               Effect.andThen(Effect.promise(() => drained)),
@@ -1562,11 +1560,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
                     settled,
                     Effect.succeed<TextGenerationOutcome>({
                       outcome: "failed",
-                      message: truncateMessage(
-                        complaints.length === 0
-                          ? "pi exited before it answered"
-                          : complaints.join("\n"),
-                      ),
+                      message: "pi exited before it answered",
                     }),
                   ),
                 ),
@@ -1574,8 +1568,8 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
             ),
           );
           yield* Effect.catch(agent.rpc.send({ type: "prompt", message: spec.input }), (error) =>
-            // A pi that already exited is reported below with its error output,
-            // which tells more than this error does.
+            // A pi that already exited is reported below, by the watch on its
+            // exit.
             error === PI_GONE ? Effect.void : Effect.fail(error),
           );
           return yield* Deferred.await(settled);
