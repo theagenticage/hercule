@@ -369,6 +369,78 @@ describe("Settings > Assistants, a memory document's page", () => {
     expect(screen.getByRole("button", { name: "Save my text anyway" })).toBeTruthy();
   });
 
+  it("saves nothing again when Save anyway is clicked after newer text was typed", async () => {
+    const { topic, handlers } = keepWebshop();
+    const { calls } = await openDocument("webshop", handlers);
+    const gist = await screen.findByRole("textbox", { name: "Gist" });
+    // An agent writes the topic after the page read it.
+    topic.stored = buildMemoryDocument("webshop", WEBSHOP.body, "Card payments", 2);
+
+    await userEvent.clear(gist);
+    await userEvent.type(gist, "Payments, EU{Enter}");
+    await screen.findByRole("button", { name: "Save my gist anyway" });
+    await userEvent.clear(gist);
+    await userEvent.type(gist, "Payments, NL");
+    // The click blurs the gist first, which saves the newer text.
+    await userEvent.click(screen.getByRole("button", { name: "Save my gist anyway" }));
+
+    await waitFor(() => {
+      expect(topic.stored.gist).toBe("Payments, NL");
+    });
+    expect(listWrites(calls, "webshop")).toEqual([
+      { body: WEBSHOP.body, gist: "Payments, EU", expectedVersion: 1 },
+      { body: WEBSHOP.body, gist: "Payments, NL", expectedVersion: 2 },
+    ]);
+  });
+
+  it("refuses a confirmed cut of text saved anyway when an agent wrote it once more", async () => {
+    const { topic, handlers } = keepWebshop();
+    const { calls, router } = await openDocument("webshop", handlers);
+    const text = await screen.findByRole("textbox", { name: "Text" });
+    topic.stored = buildMemoryDocument("webshop", "Stripe only.", WEBSHOP.gist, 2);
+
+    await userEvent.clear(text);
+    await userEvent.type(text, "Hi.");
+    await userEvent.tab();
+    topic.refuse = {
+      status: 422,
+      body: {
+        error: {
+          code: "shrink_rejected",
+          message: "this write would cut webshop from 1,000 to 3 characters; repeat it to confirm.",
+          details: { previousSize: 1000, size: 3 },
+        },
+      },
+    };
+    await userEvent.click(await screen.findByRole("button", { name: "Save my text anyway" }));
+    await screen.findByRole("button", { name: "Save the shorter text…" });
+    // An agent writes the text again, and the page opened again reads it.
+    topic.stored = buildMemoryDocument("webshop", "Stripe and Adyen.", WEBSHOP.gist, 3);
+    await router.navigate({ to: "/settings/assistants", search: { assistant: ADA.id } });
+    await router.navigate({
+      to: "/settings/assistants/$id/memory/$name",
+      params: { id: ADA.id, name: "webshop" },
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Text" })).toHaveProperty(
+        "value",
+        "Stripe and Adyen.",
+      );
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Save the shorter text…" }));
+    const dialog = screen.getByRole("dialog", { name: "Save the shorter text?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      `Could not save: ${CONFLICT_MESSAGE}`,
+    );
+    expect(topic.stored.body).toBe("Stripe and Adyen.");
+    expect(listWrites(calls, "webshop").slice(1)).toEqual([
+      { body: "Hi.", expectedVersion: 2 },
+      { body: "Hi.", expectedVersion: 2, confirmShrink: true },
+    ]);
+  });
+
   it("shows a refused save under its row, as the controller words it, and puts the text back", async () => {
     const message =
       'topic "webshop" is 12,009 chars; cap is 12,000. Move some of it to another topic.';
@@ -449,6 +521,28 @@ describe("Settings > Assistants, a memory document's page", () => {
     expect(calls.filter((call) => call.method === "DELETE").map((call) => call.path)).toEqual([
       `${MEMORY_PATH}/webshop`,
     ]);
+  });
+
+  it("keeps no save of a topic once it is deleted", async () => {
+    const { context } = await openDocument("webshop");
+    const text = await screen.findByRole("textbox", { name: "Text" });
+
+    await userEvent.type(text, " Mollie for NL.");
+    await userEvent.tab();
+    await waitFor(() => {
+      expect(text).toHaveProperty("readOnly", false);
+    });
+    expect(context.queryClient.getMutationCache().getAll()).not.toEqual([]);
+    await userEvent.click(screen.getByRole("button", { name: "Delete topic" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete webshop?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await screen.findByRole("complementary", { name: "Memory" });
+    await waitFor(() => {
+      expect(
+        context.queryClient.getMutationCache().findAll({ mutationKey: ["saved-memory-document"] }),
+      ).toEqual([]);
+    });
   });
 
   it("has no gist and no Delete on the core note", async () => {

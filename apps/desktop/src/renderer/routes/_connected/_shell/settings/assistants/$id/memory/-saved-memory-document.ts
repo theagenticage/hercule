@@ -1,5 +1,10 @@
 import { useRef } from "react";
-import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useMutationState,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import {
   buildMemoryWrite,
   chooseMemoryBaseVersion,
@@ -16,15 +21,43 @@ export type MemoryField = MemoryFieldEditStart["field"];
 
 /**
  * One save of one field of a memory document: its new text, where the edit
- * began, and whether a large cut is confirmed. A save with no `start` is
- * written over the cached document.
+ * began, and whether a large cut is confirmed.
  */
 interface MemorySave {
   readonly field: MemoryField;
   readonly text: string;
-  readonly start: MemoryFieldEditStart | undefined;
+  readonly start: MemoryFieldEditStart;
   readonly confirmShrink: boolean;
 }
+
+/** Builds the mutation key the saves of one memory document are kept under. */
+const buildMemorySavesKey = (assistantId: string, name: string) => [
+  "saved-memory-document",
+  assistantId,
+  name,
+];
+
+/**
+ * Removes the finished saves of the memory document `name` from the query
+ * client: those of `field`, or of both fields when `field` is not given.
+ * Saves still running stay. The saves are kept past the app's mutation
+ * `gcTime` of 0, so they are removed here: when the field is saved again,
+ * and when the document is deleted.
+ */
+export const dropFinishedMemorySaves = (
+  queryClient: QueryClient,
+  assistantId: string,
+  name: string,
+  field?: MemoryField,
+): void => {
+  const cache = queryClient.getMutationCache();
+  const mutationKey = buildMemorySavesKey(assistantId, name);
+  for (const each of cache.findAll({ mutationKey, exact: true })) {
+    const save = each.state.variables as MemorySave | undefined;
+    const isField = field === undefined || save?.field === field;
+    if (isField && each.state.status !== "pending") cache.remove(each);
+  }
+};
 
 /** What the page shows of one field. */
 export interface SavedMemoryField {
@@ -44,9 +77,16 @@ export interface SavedMemoryDocument {
   readonly startEdit: (field: MemoryField) => void;
   /** Saves `text` as `field`, against what the edit began on. */
   readonly save: (field: MemoryField, text: string) => void;
-  /** Saves the failed text of `field` again, over the document as it is cached now. */
+  /**
+   * Saves the failed text of `field` again, over the document the page shows
+   * now. Does nothing when the field's last save did not fail.
+   */
   readonly saveAnyway: (field: MemoryField) => void;
-  /** Saves the failed text of `field` again, with the large cut it makes confirmed. */
+  /**
+   * Saves the failed text of `field` again, against what the failed save was
+   * made against, with the large cut it makes confirmed. Does nothing when
+   * the field's last save did not fail.
+   */
   readonly confirmShrink: (field: MemoryField) => void;
 }
 
@@ -67,12 +107,18 @@ export interface SavedMemoryDocument {
  *   typing began on, so the controller refuses it with `conflict`.
  * - A field's `error` is the error of its last save, until the field is
  *   saved again. After a `conflict` the document and the index are read
- *   again first, so the page shows what the agent wrote, and `saveAnyway`
- *   writes the refused text over that version.
+ *   again first, so the page shows what the agent wrote. `saveAnyway`
+ *   begins a new edit on that text, so it writes the refused text over what
+ *   the page shows and is refused again if an agent writes the field once
+ *   more. `confirmShrink` repeats the refused save, and so is refused too
+ *   when the field changed since.
+ * - Both act on the field's last save as the query client holds it when
+ *   they are called, so a click that comes after a newer save of the field
+ *   saves nothing.
  * - Saves and their errors are kept in the query client, not the page, so
  *   they hold when the page is left and opened again while a save runs. The
- *   last finished save of each field is kept until the field is saved again,
- *   so at most two are held per document.
+ *   last finished save of each field is kept until the field is saved again
+ *   or the document is deleted, so at most two are held per document.
  * - A successful save puts the stored document in the cache, and its size
  *   and gist in the cached index, so the Memory column shows them.
  */
@@ -83,7 +129,7 @@ export function useSavedMemoryDocument(
 ): SavedMemoryDocument {
   const queryClient = useQueryClient();
   const { name } = document;
-  const mutationKey = ["saved-memory-document", assistantId, name];
+  const mutationKey = buildMemorySavesKey(assistantId, name);
   const documentKey = memoryDocumentQuery(client, assistantId, name).queryKey;
   const indexKey = memoryIndexQuery(client, assistantId).queryKey;
   // Every save of this document still in the query client, oldest first.
@@ -102,15 +148,14 @@ export function useSavedMemoryDocument(
     // The app removes a finished mutation nothing observes at once, and the
     // page observes only its latest save. A field's failed save must outlive
     // a later save of the other field, so finished saves are kept here and
-    // removed by `dropFinishedSaves` instead.
+    // removed by `dropFinishedMemorySaves` instead.
     gcTime: Infinity,
     scope: { id: `memory:${assistantId}:${name}` },
     mutationFn: ({ field, text, start, confirmShrink }: MemorySave) => {
       // Read when the save runs, after the saves queued before it, so their
       // stored versions are in the cache.
       const cached = queryClient.getQueryData(documentKey) ?? document;
-      const baseVersion =
-        start === undefined ? cached.version : chooseMemoryBaseVersion(cached, start);
+      const baseVersion = chooseMemoryBaseVersion(cached, start);
       const write = buildMemoryWrite(cached, { [field]: text, baseVersion });
       return client.memory.write({
         params: { id: assistantId, name },
@@ -131,9 +176,8 @@ export function useSavedMemoryDocument(
       );
     },
   });
-  const findLastSave = (field: MemoryField) => saves.findLast((each) => each.save?.field === field);
   const readField = (field: MemoryField): SavedMemoryField => {
-    const last = findLastSave(field);
+    const last = saves.findLast((each) => each.save?.field === field);
     const saving = last?.status === "pending";
     return {
       text: saving && last.save !== undefined ? last.save.text : document[field],
@@ -148,23 +192,22 @@ export function useSavedMemoryDocument(
     shown: field === "gist" ? gist.text : body.text,
     version: document.version,
   });
-  const dropFinishedSaves = (field: MemoryField): void => {
-    const cache = queryClient.getMutationCache();
-    for (const each of cache.findAll({ mutationKey, exact: true })) {
-      const save = each.state.variables as MemorySave | undefined;
-      if (save?.field === field && each.state.status !== "pending") cache.remove(each);
-    }
-  };
   const saveField = (save: MemorySave): void => {
-    dropFinishedSaves(save.field);
+    dropFinishedMemorySaves(queryClient, assistantId, name, save.field);
     mutation.mutate(save);
   };
   const retry = (
     field: MemoryField,
     how: Partial<Pick<MemorySave, "start" | "confirmShrink">>,
   ): void => {
-    const failed = findLastSave(field)?.save;
-    if (failed !== undefined) saveField({ ...failed, ...how });
+    // Read from the query client, not the last render: the click that calls
+    // this can blur the field first, which saves the field's newer text.
+    const last = queryClient
+      .getMutationCache()
+      .findAll({ mutationKey, exact: true })
+      .findLast((each) => (each.state.variables as MemorySave | undefined)?.field === field);
+    const failed = last?.state.status === "error" ? (last.state.variables as MemorySave) : null;
+    if (failed !== null) saveField({ ...failed, ...how });
   };
   return {
     gist,
@@ -178,7 +221,7 @@ export function useSavedMemoryDocument(
       saveField({ field, text, start, confirmShrink: false });
     },
     saveAnyway: (field) => {
-      retry(field, { start: undefined, confirmShrink: false });
+      retry(field, { start: noteStart(field), confirmShrink: false });
     },
     confirmShrink: (field) => {
       retry(field, { confirmShrink: true });

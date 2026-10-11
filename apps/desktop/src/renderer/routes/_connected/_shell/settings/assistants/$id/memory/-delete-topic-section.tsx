@@ -6,6 +6,7 @@ import type { Assistant } from "@hercule/contract";
 import { memoryDocumentQuery, memoryIndexQuery } from "../../../../../../../app/queries";
 import { ConfirmDialog } from "../../../../../../../screens/confirm-dialog";
 import { SettingRow } from "../../../../../../../screens/settings/setting-row";
+import { dropFinishedMemorySaves } from "./-saved-memory-document";
 
 /**
  * Renders the Delete section of a memory topic: a row whose button asks for a
@@ -33,10 +34,12 @@ export function DeleteTopicSection({
         entries === undefined ? undefined : removeMemoryEntry(entries, name),
       );
       await navigate({ to: "/settings/assistants", search: { assistant: assistant.id } });
-      // Removed once the page is gone, so nothing on it reads the document again.
+      // Removed once the page is gone, so nothing on it reads the document
+      // or its saves again.
       queryClient.removeQueries({
         queryKey: memoryDocumentQuery(client, assistant.id, name).queryKey,
       });
+      dropFinishedMemorySaves(queryClient, assistant.id, name);
     },
   });
   return (
