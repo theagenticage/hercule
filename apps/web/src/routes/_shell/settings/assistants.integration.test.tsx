@@ -1,15 +1,27 @@
 /**
  * Tests for Settings > Assistants against a stubbed controller: the list of
- * assistants, the form that edits the selected one, "New assistant", and
- * deleting an assistant after a confirmation.
+ * assistants, the form that edits the selected one, "New assistant",
+ * deleting an assistant after a confirmation, and the memory editor.
  *
- * The stub keeps the assistants in memory, so a list read after a create, an
- * update or a delete returns what the writes left.
+ * The stub keeps the assistants and their memory in memory, so a read after
+ * a write returns what the writes left. Its memory writes enforce the caps,
+ * the shrink guard and the expected version with the contract's own rules,
+ * as the controller does.
  */
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Assistant, Profile, ProviderInstance } from "@hercule/contract";
+import {
+  chooseMemoryCap,
+  countCharacters,
+  MEMORY_CORE,
+  requiresShrinkConfirmation,
+  type Assistant,
+  type MemoryDocument,
+  type MemoryWriteInput,
+  type Profile,
+  type ProviderInstance,
+} from "@hercule/contract";
 import {
   buildErrorBody,
   expectInDocumentOrder,
@@ -118,6 +130,38 @@ const CREATED = buildAssistant({
   systemPrompt: "You are a personal assistant running inside the user's own controller.",
 });
 
+const buildMemoryDocument = (
+  name: string,
+  gist: string,
+  body: string,
+  version = 1,
+): MemoryDocument => ({
+  name,
+  gist,
+  size: countCharacters(body),
+  body,
+  version,
+  updatedAt: AT,
+});
+
+/** Ada's memory on arrival: her core note and two topics. */
+const ADA_MEMORY: readonly MemoryDocument[] = [
+  buildMemoryDocument(MEMORY_CORE, "", "Rogier lives in Amsterdam. Prefers short answers."),
+  buildMemoryDocument(
+    "decisions",
+    "What we decided about the build, and why each choice was made over the others",
+    "Use SQLite.\nShip one binary.",
+  ),
+  // Over 1,000 characters, so the shrink guard protects it.
+  buildMemoryDocument("people", "", "Ines runs the infrastructure team. ".repeat(40)),
+];
+
+/**
+ * The document names the stub answers for, per assistant. The stub matches
+ * exact paths, so a name a test writes must be listed here.
+ */
+const MEMORY_NAMES = [MEMORY_CORE, "decisions", "people", "travel"] as const;
+
 const QUESTION_ADA =
   "Delete Ada? Its conversation and messages are deleted. Its sessions and transcripts stay.";
 
@@ -162,6 +206,112 @@ const buildController = (
       ],
     ];
   });
+  const memory = new Map<string, readonly MemoryDocument[]>(
+    [...initial, CREATED].map(({ id }) => [
+      id,
+      id === ADA.id ? ADA_MEMORY : [buildMemoryDocument(MEMORY_CORE, "", "")],
+    ]),
+  );
+  const perMemory = [...initial, CREATED].flatMap(({ id }): Array<[string, Handler]> => {
+    const readDocuments = (): readonly MemoryDocument[] => memory.get(id) ?? [];
+    const documentRoutes = MEMORY_NAMES.flatMap((name): Array<[string, Handler]> => {
+      const path = `/api/v1/assistants/${id}/memory/${name}`;
+      const read = (): MemoryDocument | undefined =>
+        readDocuments().find((each) => each.name === name);
+      const missingDocument = {
+        status: 404,
+        body: buildErrorBody("not_found", `no memory document named "${name}"`),
+      };
+      return [
+        [
+          `GET ${path}`,
+          () => {
+            const current = read();
+            return current === undefined ? missingDocument : { body: current };
+          },
+        ],
+        [
+          `PUT ${path}`,
+          (call) => {
+            const input = call.body as MemoryWriteInput;
+            const current = read();
+            const version = current?.version ?? 0;
+            if (input.expectedVersion !== undefined && input.expectedVersion !== version) {
+              return {
+                status: 409,
+                body: buildErrorBody(
+                  "conflict",
+                  `${name} is at version ${String(version)}, not ${String(input.expectedVersion)}; read it again`,
+                ),
+              };
+            }
+            const size = countCharacters(input.body);
+            const cap = chooseMemoryCap(name);
+            if (size > cap) {
+              return {
+                status: 422,
+                body: {
+                  error: {
+                    code: "cap_exceeded",
+                    message: `${name} is ${String(size)} chars; cap is ${String(cap)}`,
+                    details: { size, cap },
+                  },
+                },
+              };
+            }
+            if (
+              current !== undefined &&
+              input.confirmShrink !== true &&
+              requiresShrinkConfirmation(current.size, size)
+            ) {
+              return {
+                status: 422,
+                body: {
+                  error: {
+                    code: "shrink_rejected",
+                    message: `${name} would shrink from ${String(current.size)} to ${String(size)} chars; send confirmShrink: true to write it anyway`,
+                    details: { previousSize: current.size, size },
+                  },
+                },
+              };
+            }
+            const saved = buildMemoryDocument(
+              name,
+              input.gist ?? current?.gist ?? "",
+              input.body,
+              version + 1,
+            );
+            memory.set(
+              id,
+              current === undefined
+                ? [...readDocuments(), saved]
+                : readDocuments().map((each) => (each.name === name ? saved : each)),
+            );
+            return { body: saved };
+          },
+        ],
+        [
+          `DELETE ${path}`,
+          () => {
+            memory.set(
+              id,
+              readDocuments().filter((each) => each.name !== name),
+            );
+            return { body: {} };
+          },
+        ],
+      ];
+    });
+    return [
+      [
+        `GET /api/v1/assistants/${id}/memory`,
+        () => ({
+          body: readDocuments().map(({ name, gist, size }) => ({ name, gist, size })),
+        }),
+      ],
+      ...documentRoutes,
+    ];
+  });
   return {
     "GET /api/v1/setup": { body: { complete: true } },
     "GET /api/v1/settings": {
@@ -183,6 +333,7 @@ const buildController = (
       return { body: created };
     },
     ...Object.fromEntries(perAssistant),
+    ...Object.fromEntries(perMemory),
     ...extra,
   };
 };
@@ -228,7 +379,7 @@ const holdAnswer = (): { readonly held: Promise<void>; readonly release: () => v
   return { held, release };
 };
 
-/** Returns the writes the screen sent to the assistants endpoints, in order. */
+/** Returns the writes the screen sent to the assistants endpoints, memory included, in order. */
 const listWrites = (api: { readonly calls: readonly Call[] }): readonly Call[] =>
   api.calls.filter((call) => call.method !== "GET" && call.path.startsWith("/api/v1/assistants"));
 
@@ -994,3 +1145,414 @@ describe("Settings > Assistants: after a delete", () => {
     );
   });
 });
+
+/** Returns the writes the screen sent to one assistant's memory, in order. */
+const listMemoryWrites = (
+  api: { readonly calls: readonly Call[] },
+  assistantId: string,
+): readonly Call[] =>
+  api.calls.filter(
+    (call) =>
+      call.method !== "GET" && call.path.startsWith(`/api/v1/assistants/${assistantId}/memory`),
+  );
+
+/** Finds the row of the topic named `name`: the button around the text of its name. */
+const findTopicRow = async (name: string): Promise<HTMLElement> => {
+  const label = await screen.findByText(name, { selector: "ul button > span" });
+  const row = label.closest("button");
+  if (row === null) throw new Error(`no row for the topic ${name}`);
+  return row;
+};
+
+/** Opens the topic named `name` and waits for its text to load. */
+const openTopic = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
+  await user.click(await findTopicRow(name));
+  return screen.findByLabelText<HTMLTextAreaElement>("Text");
+};
+
+describe("Settings > Assistants: memory", () => {
+  it("shows the core note with its usage, and every topic with its gist and size", async () => {
+    await openScreen([ADA, BOB]);
+
+    const core = await screen.findByLabelText<HTMLTextAreaElement>("Core note");
+    expect(core.value).toBe("Rogier lives in Amsterdam. Prefers short answers.");
+    expect(screen.getByText("49 of 4,000")).toBeDefined();
+    expect(
+      screen.getByRole("meter", { name: "Core note used" }).getAttribute("aria-valuenow"),
+    ).toBe("49");
+
+    const decisions = await findTopicRow("decisions");
+    expect(decisions.textContent).toBe(
+      "decisionsWhat we decided about the build, and why each choice was made over the others28",
+    );
+    expect((await findTopicRow("people")).textContent).toBe("people1.4k");
+    expect(screen.getByText("2 of 24 topics · up to 12,000 characters each")).toBeDefined();
+    expect(queryTopicNames()).toEqual(["decisions", "people"]);
+  });
+
+  it("keeps a long gist on one line and puts the whole gist in its tooltip", async () => {
+    await openScreen([ADA]);
+
+    const gist = within(await findTopicRow("decisions")).getByText(
+      "What we decided about the build, and why each choice was made over the others",
+    );
+    expect(gist.className).toContain("truncate");
+    expect(gist.getAttribute("title")).toBe(gist.textContent);
+  });
+
+  it("says when an assistant has no topics", async () => {
+    const user = userEvent.setup();
+    await openScreen([ADA, BOB]);
+    await selectAssistant(user, "Bob");
+
+    expect(await screen.findByText("No topics yet.")).toBeDefined();
+    expect(screen.getByText("0 of 24 topics · up to 12,000 characters each")).toBeDefined();
+  });
+
+  it("shows a memory read's error in the memory section and keeps the form", async () => {
+    await openScreen([ADA], {
+      [`GET /api/v1/assistants/${ADA.id}/memory`]: {
+        status: 500,
+        body: buildErrorBody("internal", "the database is locked"),
+      },
+    });
+
+    expect((await screen.findByRole("alert")).textContent).toBe("the database is locked");
+    expect(screen.getByLabelText<HTMLInputElement>("Name").value).toBe("Ada");
+  });
+
+  it("saves the edited core note, counting as the user types", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA]);
+
+    const core = await screen.findByLabelText("Core note");
+    await user.type(core, " Has a cat.");
+    expect(screen.getByText("60 of 4,000")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Save core note" }));
+
+    expect(await screen.findByText("Saved.")).toBeDefined();
+    const writes = listMemoryWrites(api, ADA.id);
+    expect(writes.map((call) => `${call.method} ${call.path}`)).toEqual([
+      `PUT /api/v1/assistants/${ADA.id}/memory/core`,
+    ]);
+    // `core` has no gist, so none is sent.
+    expect(writes[0]?.body).toEqual({
+      body: "Rogier lives in Amsterdam. Prefers short answers. Has a cat.",
+      expectedVersion: 1,
+    });
+    expect(screen.getByRole("button", { name: "Save core note" })).toHaveProperty("disabled", true);
+  });
+
+  it("saves a topic's edited gist with its text, and shows the new gist in the list", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA]);
+
+    await openTopic(user, "decisions");
+    const gist = screen.getByLabelText("Gist");
+    await user.clear(gist);
+    await user.type(gist, "build decisions");
+    await user.click(screen.getByRole("button", { name: "Save topic decisions" }));
+
+    await waitFor(async () => {
+      expect((await findTopicRow("decisions")).textContent).toBe("decisionsbuild decisions28");
+    });
+    expect(listMemoryWrites(api, ADA.id).map((call) => call.body)).toEqual([
+      { body: "Use SQLite.\nShip one binary.", gist: "build decisions", expectedVersion: 1 },
+    ]);
+  });
+
+  it("adds a topic with its name, gist and text, and opens it", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA]);
+    await findTopicRow("decisions");
+
+    await user.click(screen.getByRole("button", { name: "New topic" }));
+    await user.type(screen.getByLabelText("Topic name"), "travel");
+    await user.type(screen.getByLabelText("Gist"), "trips and bookings");
+    await user.type(screen.getByLabelText("Text"), "Flies KLM.");
+    await user.click(screen.getByRole("button", { name: "Save new topic" }));
+
+    expect((await findTopicRow("travel")).textContent).toBe("traveltrips and bookings10");
+    expect(
+      listMemoryWrites(api, ADA.id).map((call) => [`${call.method} ${call.path}`, call.body]),
+    ).toEqual([
+      [
+        `PUT /api/v1/assistants/${ADA.id}/memory/travel`,
+        // Version 0: the topic must not exist yet.
+        { body: "Flies KLM.", gist: "trips and bookings", expectedVersion: 0 },
+      ],
+    ]);
+    expect(screen.getByRole("button", { name: "Save topic travel" })).toBeDefined();
+    expect(screen.getByText("3 of 24 topics · up to 12,000 characters each")).toBeDefined();
+  });
+
+  it("refuses a new topic named like an existing one, before any write", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA]);
+    await findTopicRow("decisions");
+
+    await user.click(screen.getByRole("button", { name: "New topic" }));
+    await user.type(screen.getByLabelText("Topic name"), "decisions");
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      'A topic named "decisions" already exists; open it to edit it.',
+    );
+    expect(screen.getByRole("button", { name: "Save new topic" })).toHaveProperty("disabled", true);
+    expect(listMemoryWrites(api, ADA.id)).toEqual([]);
+  });
+
+  it("shows the contract's message for a topic name with a slash, and sends nothing", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA]);
+    await findTopicRow("decisions");
+
+    await user.click(screen.getByRole("button", { name: "New topic" }));
+    await user.type(screen.getByLabelText("Topic name"), "a/b");
+    await user.click(screen.getByRole("button", { name: "Save new topic" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "a memory name cannot contain a slash",
+    );
+    expect(listMemoryWrites(api, ADA.id)).toEqual([]);
+  });
+
+  it("deletes a topic after a question, and drops it from the list", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA]);
+
+    await openTopic(user, "decisions");
+    await user.click(screen.getByRole("button", { name: "Delete topic" }));
+    expect(
+      screen.getByText("Delete the topic decisions? Its gist and text are deleted."),
+    ).toBeDefined();
+    expect(listMemoryWrites(api, ADA.id)).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(queryTopicNames()).toEqual(["people"]);
+    });
+    expect(listMemoryWrites(api, ADA.id).map((call) => `${call.method} ${call.path}`)).toEqual([
+      `DELETE /api/v1/assistants/${ADA.id}/memory/decisions`,
+    ]);
+    expect(screen.queryByLabelText("Text")).toBeNull();
+  });
+
+  it("shows the controller's cap_exceeded message as it is, and keeps the text", async () => {
+    const user = userEvent.setup();
+    await openScreen([ADA]);
+
+    const core = await screen.findByLabelText<HTMLTextAreaElement>("Core note");
+    await user.clear(core);
+    await user.click(core);
+    await user.paste("x".repeat(4001));
+    expect(screen.getByText("4,001 of 4,000")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Save core note" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("core is 4001 chars; cap is 4000");
+    expect(core.value).toHaveLength(4001);
+  });
+
+  it("asks before a write that shrinks a large topic, and Save anyway confirms the shrink", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA]);
+
+    const body = await openTopic(user, "people");
+    await user.clear(body);
+    await user.type(body, "Ines left.");
+    await user.click(screen.getByRole("button", { name: "Save topic people" }));
+
+    // The question is built from the sizes in the error, not the
+    // controller's message, which is written for agents and the CLI.
+    const question =
+      "This cuts the document from 1,400 to 10 characters. What it cuts cannot be brought back.";
+    expect(await screen.findByText(question)).toBeDefined();
+    expect(screen.queryByRole("alert")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Save anyway" }));
+
+    expect(await screen.findByText("Saved.")).toBeDefined();
+    expect(listMemoryWrites(api, ADA.id).map((call) => call.body)).toEqual([
+      { body: "Ines left.", expectedVersion: 1 },
+      { body: "Ines left.", expectedVersion: 1, confirmShrink: true },
+    ]);
+    expect(screen.queryByText(question)).toBeNull();
+    expect((await findTopicRow("people")).textContent).toBe("people10");
+  });
+
+  it("writes nothing when the shrink question is cancelled, and keeps the text", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA]);
+
+    const body = await openTopic(user, "people");
+    await user.clear(body);
+    await user.type(body, "Ines left.");
+    await user.click(screen.getByRole("button", { name: "Save topic people" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("button", { name: "Save anyway" })).toBeNull();
+    expect(listMemoryWrites(api, ADA.id)).toHaveLength(1);
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Text").value).toBe("Ines left.");
+  });
+
+  it("refuses a save over text the assistant wrote since, keeps the user's text, and Save anyway writes it", async () => {
+    const user = userEvent.setup();
+    const route = `PUT /api/v1/assistants/${ADA.id}/memory/decisions`;
+    const assistantText = "Use SQLite.\nShip one binary.\nTest on Node.";
+    let assistantWrote = false;
+    const { api } = await openScreenAround([ADA], (_routes, answer) => ({
+      [route]: async (call) => {
+        // The assistant writes the topic just before the user's first save.
+        if (!assistantWrote) {
+          assistantWrote = true;
+          await answer(route, { ...call, body: { body: assistantText } });
+        }
+        return answer(route, call);
+      },
+    }));
+
+    const body = await openTopic(user, "decisions");
+    await user.type(body, " Test on Bun.");
+    await user.click(screen.getByRole("button", { name: "Save topic decisions" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "decisions is at version 2, not 1; read it again",
+    );
+    expect(body.value).toBe("Use SQLite.\nShip one binary. Test on Bun.");
+    await user.click(await screen.findByRole("button", { name: "Save anyway" }));
+
+    expect(await screen.findByText("Saved.")).toBeDefined();
+    // The assistant's write goes straight to the stub, so only the user's are listed.
+    expect(listMemoryWrites(api, ADA.id).map((call) => call.body)).toEqual([
+      { body: "Use SQLite.\nShip one binary. Test on Bun.", expectedVersion: 1 },
+      { body: "Use SQLite.\nShip one binary. Test on Bun.", expectedVersion: 2 },
+    ]);
+    expect(body.value).toBe("Use SQLite.\nShip one binary. Test on Bun.");
+  });
+
+  it("keeps the old text typed back while a save runs", async () => {
+    const user = userEvent.setup();
+    const route = `PUT /api/v1/assistants/${ADA.id}/memory/decisions`;
+    const { held, release } = holdAnswer();
+    await openScreenAround([ADA], (_routes, answer) => ({
+      [route]: async (call) => {
+        await held;
+        return answer(route, call);
+      },
+    }));
+
+    const body = await openTopic(user, "decisions");
+    await user.type(body, " Test on Bun.");
+    await user.click(screen.getByRole("button", { name: "Save topic decisions" }));
+    await user.clear(body);
+    await user.type(body, "Use SQLite.\nShip one binary.");
+    release();
+
+    expect(await screen.findByText("28", { selector: "ul span" })).toBeDefined();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Save topic decisions" })).toHaveProperty(
+        "disabled",
+        false,
+      );
+    });
+    expect(body.value).toBe("Use SQLite.\nShip one binary.");
+  });
+
+  it("keeps the old text typed back while a save runs that the assistant's write refuses", async () => {
+    const user = userEvent.setup();
+    const route = `PUT /api/v1/assistants/${ADA.id}/memory/decisions`;
+    const { held, release } = holdAnswer();
+    let assistantWrote = false;
+    const { api } = await openScreenAround([ADA], (_routes, answer) => ({
+      [route]: async (call) => {
+        await held;
+        if (!assistantWrote) {
+          assistantWrote = true;
+          await answer(route, { ...call, body: { body: "Use Postgres." } });
+        }
+        return answer(route, call);
+      },
+    }));
+
+    const body = await openTopic(user, "decisions");
+    await user.type(body, " Test on Bun.");
+    await user.click(screen.getByRole("button", { name: "Save topic decisions" }));
+    await user.clear(body);
+    await user.type(body, "Use SQLite.\nShip one binary.");
+    release();
+
+    expect(await screen.findByRole("alert")).toBeDefined();
+    expect(body.value).toBe("Use SQLite.\nShip one binary.");
+    await user.click(await screen.findByRole("button", { name: "Save anyway" }));
+
+    expect(await screen.findByText("Saved.")).toBeDefined();
+    expect(listMemoryWrites(api, ADA.id).at(-1)?.body).toEqual({
+      body: "Use SQLite.\nShip one binary.",
+      expectedVersion: 2,
+    });
+  });
+
+  it("refuses a new topic the assistant created meanwhile, and names it as taken", async () => {
+    const user = userEvent.setup();
+    const route = `PUT /api/v1/assistants/${ADA.id}/memory/travel`;
+    let assistantWrote = false;
+    await openScreenAround([ADA], (_routes, answer) => ({
+      [route]: async (call) => {
+        if (!assistantWrote) {
+          assistantWrote = true;
+          await answer(route, { ...call, body: { body: "Flies KLM." } });
+        }
+        return answer(route, call);
+      },
+    }));
+    await findTopicRow("decisions");
+
+    await user.click(screen.getByRole("button", { name: "New topic" }));
+    await user.type(screen.getByLabelText("Topic name"), "travel");
+    await user.type(screen.getByLabelText("Text"), "Takes the train.");
+    await user.click(screen.getByRole("button", { name: "Save new topic" }));
+
+    expect(
+      await screen.findByText('A topic named "travel" already exists; open it to edit it.'),
+    ).toBeDefined();
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Text").value).toBe("Takes the train.");
+  });
+
+  it("keeps a topic's edits while another topic is open", async () => {
+    const user = userEvent.setup();
+    await openScreen([ADA]);
+
+    await user.type(await openTopic(user, "decisions"), " Test on Bun.");
+    await openTopic(user, "people");
+    const body = await openTopic(user, "decisions");
+
+    expect(body.value).toBe("Use SQLite.\nShip one binary. Test on Bun.");
+  });
+
+  it("asks before switching assistants with unsaved memory edits", async () => {
+    const user = userEvent.setup();
+    await openScreen([ADA, BOB]);
+
+    await user.type(await screen.findByLabelText("Core note"), " Has a cat.");
+    await user.click(await findAssistantRow("Bob"));
+
+    expect(screen.getByText("Discard changes to Ada?")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    await selectAssistant(user, "Bob");
+    await user.click(await findAssistantRow("Ada"));
+
+    // The edit was discarded, so going back asks nothing and shows the stored note.
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLTextAreaElement>("Core note").value).toBe(
+        "Rogier lives in Amsterdam. Prefers short answers.",
+      );
+    });
+  });
+});
+
+/** Returns the names of the listed topics, in order. */
+const queryTopicNames = (): readonly string[] =>
+  screen
+    .queryAllByRole("button", { expanded: false })
+    .concat(screen.queryAllByRole("button", { expanded: true }))
+    .filter((row) => row.closest("ul") !== null)
+    .map((row) => row.querySelector("span")?.textContent ?? "")
+    .sort();

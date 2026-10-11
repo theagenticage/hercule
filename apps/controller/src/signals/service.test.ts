@@ -61,6 +61,7 @@ const buildSessionActor = (
   grants,
   profileGrants: grants,
   assistantId,
+  agentId: null,
 });
 
 const TRIAGE_SESSION_ID = "0199e0e7-0000-7000-8000-00000000b501";

@@ -6,11 +6,13 @@
  * This catches migrations that are correct on an empty database but fail on
  * real data. The fixture is one representative conversation of several owner
  * turns, one named Provider Instance, one session with a few persisted
- * turns, the timezone first-run setup persisted, a project name and a
- * repository remote, two user settings that migration 60 deletes, and the
- * shipped permission profiles that migration 63 gives the signal grants.
- * After the upgrade the test checks that those records, their content,
- * ordering and associations survived. It is not a matrix of session states or
+ * turns and the audit entry of its creation, the timezone first-run setup
+ * persisted, a project name and a repository remote, two user settings that
+ * migration 60 deletes, and the shipped permission profiles that migration
+ * 65 gives the signal grants. After the upgrade the test checks that those
+ * records, their content, ordering and associations survived, that the
+ * session's messages are searchable, and that migration 63 read who created
+ * the session from the audit entry. It is not a matrix of session states or
  * provider behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
@@ -76,10 +78,19 @@ const RETIRED_SETTINGS = {
 /** The migration that deletes `RETIRED_SETTINGS`. */
 const RETIRED_SETTINGS_MIGRATION = 60;
 
-/** The migration that adds `SIGNAL_GRANTS` to the `SIGNAL_PROFILES`. */
-const SIGNAL_GRANTS_MIGRATION = 63;
+/**
+ * The migration that indexes transcripts for search and fills each session's
+ * `created_by` from the audit entry of its creation.
+ */
+const TRANSCRIPT_SEARCH_MIGRATION = 63;
 
-/** The shipped profiles that hold `SIGNAL_GRANTS` from migration 63 on. */
+/** The actor stamp on the seeded session's audit entry: another session spawned it. */
+const SESSION_CREATOR = "session:0190c000-0000-7000-8000-000000000001";
+
+/** The migration that adds `SIGNAL_GRANTS` to the `SIGNAL_PROFILES`. */
+const SIGNAL_GRANTS_MIGRATION = 65;
+
+/** The shipped profiles that hold `SIGNAL_GRANTS` from migration 65 on. */
 const SIGNAL_PROFILES = ["assistant", "worker", "unrestricted"] as const;
 
 const SIGNAL_GRANTS = ["signal.read", "signal.write"] as const;
@@ -257,9 +268,10 @@ function uuidBlob(id: string): Buffer {
 }
 
 /**
- * Writes one exited session and a few transcript turns into the database the
- * edge binary created. `ids` are records that binary already persisted.
- * Returns the new session's id.
+ * Writes one exited session, a few transcript turns, and the audit entry of
+ * the session's creation by `SESSION_CREATOR` into the database the edge
+ * binary created. `ids` are records that binary already persisted. Returns
+ * the new session's id.
  */
 function persistRepresentativeSession(options: {
   readonly home: string;
@@ -343,23 +355,16 @@ function persistRepresentativeSession(options: {
       const position = index + 1;
       insertEvent.run(uuidBlob(sessionId), position, position, at, JSON.stringify(event));
     }
+    database
+      .query(
+        `INSERT INTO events (source, system, kind, occurred_at, received_at, dedup_key, payload, actor)
+         VALUES ('platform', 'platform', 'session.spawned', ?, ?, ?, ?, ?)`,
+      )
+      .run(at, at, crypto.randomUUID(), JSON.stringify({ sessionId }), SESSION_CREATOR);
   } finally {
     database.close();
   }
   return sessionId;
-}
-
-/** Returns the id of the last migration the database in `home` ran. */
-function readMigrationVersion(home: string): number {
-  const database = new Database(join(home, "data", "hercule.db"));
-  try {
-    const { version } = database
-      .query("SELECT max(migration_id) AS version FROM effect_sql_migrations")
-      .get() as { version: number };
-    return version;
-  } finally {
-    database.close();
-  }
 }
 
 /**
@@ -385,6 +390,19 @@ function persistRetiredSettings(home: string): boolean {
       insert.run(key, JSON.stringify(value), at);
     }
     return true;
+  } finally {
+    database.close();
+  }
+}
+
+/** Returns the id of the last migration the database in `home` ran. */
+function readMigrationVersion(home: string): number {
+  const database = new Database(join(home, "data", "hercule.db"), { readonly: true });
+  try {
+    const { version } = database
+      .query("SELECT max(migration_id) AS version FROM effect_sql_migrations")
+      .get() as { version: number };
+    return version;
   } finally {
     database.close();
   }
@@ -614,6 +632,7 @@ describe("upgrading from the previous edge release", () => {
       });
 
       const retiredSettingsSeeded = persistRetiredSettings(home);
+      const edgeVersion = readMigrationVersion(home);
 
       controller = await startOnPort({ home, binary: edgeBinary, port });
 
@@ -719,6 +738,13 @@ describe("upgrading from the previous edge release", () => {
         assistantId: assistant.id,
       });
 
+      // Migration 0062 gives every assistant that existed before it an empty
+      // `core`, so an assistant from the edge build has memory to read.
+      const upgradedCore = expectJson<{ name: string; body: string; size: number }>(
+        await runCli(["memory", "read", assistant.id, "core", "--json"], upgraded),
+      );
+      expect(upgradedCore).toMatchObject({ name: "core", body: "", size: 0 });
+
       const upgradedMessages = readListedItems<SeededMessage>(
         await runCli(
           ["conversation", "message", "list", assistant.mainConversationId, "--json"],
@@ -753,6 +779,32 @@ describe("upgrading from the previous edge release", () => {
           await runCli(["profile", "read", listed?.id ?? name, "--json"], upgraded),
         );
         expect(read).toMatchObject({ id: listed?.id, name, grants: listed?.grants });
+      }
+
+      // The messages written before the upgrade are searchable after it.
+      const passages = readListedItems<{ sessionId: string; excerpt: string }>(
+        await runCli(
+          ["transcript", "list", "--text", "risks", "--session", sessionId, "--json"],
+          upgraded,
+        ),
+      );
+      expect(passages).toMatchObject([{ sessionId, excerpt: TURNS[1] }]);
+
+      expect(await controller.stop()).toBe(0);
+      controller = undefined;
+      if (edgeVersion < TRANSCRIPT_SEARCH_MIGRATION) {
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          expect(
+            reader.query("SELECT created_by FROM sessions WHERE id = ?").get(uuidBlob(sessionId)),
+          ).toEqual({ created_by: SESSION_CREATOR });
+        } finally {
+          reader.close();
+        }
+      } else {
+        console.log(
+          `Skipping the session creator fixture: the edge database already ran migration ${String(TRANSCRIPT_SEARCH_MIGRATION)}.`,
+        );
       }
     } finally {
       await controller?.stop().catch(() => -1);

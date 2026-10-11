@@ -42,6 +42,21 @@ export const queryKeys = {
    * shows up on the next read.
    */
   resources: (): LiveQueryKey => ["resources"],
+  /**
+   * An assistant's memory: with `name`, one document; with the assistant's id
+   * alone, its index, the list `memory.list` returns; with neither, the
+   * prefix of every assistant's. The index's key is the prefix of its
+   * documents' keys, so one invalidation after a write or a delete reads the
+   * index and every document of that assistant again.
+   *
+   * No live topic yet: an assistant's write shows up on the next read.
+   */
+  memory: (assistantId?: string, name?: string): LiveQueryKey =>
+    assistantId === undefined
+      ? ["memory"]
+      : name === undefined
+        ? ["memory", assistantId]
+        : ["memory", assistantId, name],
   workspaces: (): LiveQueryKey => ["workspaces"],
   workspace: (id?: string): LiveQueryKey => (id === undefined ? ["workspace"] : ["workspace", id]),
   connections: (): LiveQueryKey => ["connections"],

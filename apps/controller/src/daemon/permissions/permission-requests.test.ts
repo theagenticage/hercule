@@ -116,6 +116,7 @@ const buildSessionActor = (sessionId: string, profileId: string): Actor => {
     grants,
     profileGrants: grants,
     assistantId: null,
+    agentId: null,
   };
 };
 

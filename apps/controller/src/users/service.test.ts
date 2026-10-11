@@ -60,6 +60,7 @@ const buildSessionActor = (grants: ReadonlyArray<Grant>): Actor => ({
   grants,
   profileGrants: grants,
   assistantId: null,
+  agentId: null,
 });
 
 describe("user.read", () => {

@@ -43,6 +43,7 @@ const insertSession = Effect.gen(function* () {
     spec: "{}",
     modelSelection: { model: "clever", options: {} },
     parentSessionId: undefined,
+    createdBy: "user",
     at: AT,
   });
   return id;

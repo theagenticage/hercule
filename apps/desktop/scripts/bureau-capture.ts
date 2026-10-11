@@ -379,9 +379,10 @@ const CONVERSATION_REGION: Rect = {
 };
 
 // Every part of Settings > Assistants whose box is compared, as a selector
-// inside `main.main`: the header, the Settings list, and the section. The
-// fields are compared as boxes: the app's hold a native input or select
-// where the book's hold text, and the pixel comparison checks the text.
+// inside `main.main`: the header, the Settings list, the section and the
+// Memory column beside it. The fields are compared as boxes: the app's hold
+// a native input or select where the book's hold text, and the pixel
+// comparison checks the text.
 // Where the app names a part differently from the book, so that the book's
 // short class names do not reach the rest of the app, the selector names
 // both, and each page finds its own.
@@ -429,6 +430,21 @@ const ASSISTANTS_SETTINGS_PARTS = [
   ".day-now, .heartbeat-day-now",
   ".day-axis, .heartbeat-day-axis",
   ".day-axis > span, .heartbeat-day-axis > span",
+  ".rec-side, .assistant-memory",
+  ".side-sec, .memory-side-sec",
+  ".side-sec > h3, .memory-side-sec > h3",
+  ".side-sec > h3 > svg, .memory-side-sec > h3 > svg",
+  ".side-sec > h3 > a, .memory-side-sec > h3 > a",
+  ".core-top, .memory-core-top",
+  ".side-sec > .meter, .memory-side-sec > .meter",
+  ".side-sec > .meter > i, .memory-side-sec > .meter > i",
+  ".core-note, .memory-core-note",
+  ".topic, .memory-topic",
+  ".topic > b, .memory-topic > b",
+  ".topic > small, .memory-topic > small",
+  ".topic > span, .memory-topic > span",
+  ".topics-foot, .memory-topics-foot",
+  ".side-sec > .btn, .memory-side-sec > .btn",
 ];
 
 // Every part of Settings > Appearance whose box is compared, as a selector
@@ -506,8 +522,8 @@ const PROFILES_SETTINGS_PARTS = [
   ".prof .nm > b, .profile-row .profile-name > b",
   ".prof .nm > span, .profile-row .profile-name > span",
   ".prof .held, .profile-row .profile-held",
-  ".prof .meter, .profile-row .profile-meter",
-  ".prof .meter > i, .profile-row .profile-meter > i",
+  ".prof .meter, .profile-row .meter",
+  ".prof .meter > i, .profile-row .meter > i",
   ".prof .used, .profile-row .profile-used",
   ".prof .used .stack, .profile-row .profile-used .profile-faces",
   ".prof .used .stack > svg, .profile-row .profile-used .profile-faces > svg",

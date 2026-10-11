@@ -55,6 +55,19 @@ export const SUBAGENT_TOOL = "subagent";
 export const SUBAGENTS_VARIABLE = "HERCULE_SUBAGENTS";
 
 /**
+ * The environment variable that turns off pi's automatic compaction. The
+ * adapter sets it to "1" for an assistant's session, which the controller
+ * rotates to a fresh session instead (spec 06 section 9.2), and leaves it out
+ * otherwise.
+ *
+ * The extension cancels the compaction instead of the adapter sending pi's
+ * `set_auto_compaction` command, because that command saves the choice in the
+ * instance's `settings.json`, and every later session of the instance would
+ * start with compaction off.
+ */
+export const NO_AUTO_COMPACTION_VARIABLE = "HERCULE_NO_AUTO_COMPACTION";
+
+/**
  * The title of the dialog the `subagent` tool opens to ask the runner for a
  * subagent. The dialog's placeholder is the request as JSON:
  * `{ toolCallId, description, prompt }`. The runner recognises the dialog by
@@ -164,6 +177,14 @@ export default function (pi) {
         return { content: [{ type: "text", text: reply.text }], details: {} };
       },
     });
+  }
+  // pi asks before every compaction. Only the automatic ones are cancelled: a
+  // compaction the user asked for with /compact still runs. Registered before
+  // the mode check, because a full-access session is rotated the same way.
+  if (process.env.${NO_AUTO_COMPACTION_VARIABLE} === "1") {
+    pi.on("session_before_compact", async (event) =>
+      event.reason === "manual" ? undefined : { cancel: true },
+    );
   }
   // Full access asks about nothing, so no handler is registered and no tool
   // call can wait for an answer that will never come.

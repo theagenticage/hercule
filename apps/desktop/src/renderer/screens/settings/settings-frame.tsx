@@ -16,8 +16,16 @@ const SettingsHeaderSlot = createContext<HTMLElement | null>(null);
 
 /** The crumb and title a section draws in the header in place of the frame's own. */
 interface SettingsHeaderTitleProps {
-  /** The section the crumb links back to, such as the list a record belongs to. */
-  readonly parent: { readonly title: string; readonly to: SettingsSectionPath };
+  /**
+   * The section the crumb links back to, such as the list a record belongs
+   * to, and the search parameters that open it as the record left it, such
+   * as the assistant whose memory the record is.
+   */
+  readonly parent: {
+    readonly title: string;
+    readonly to: SettingsSectionPath;
+    readonly search?: Readonly<Record<string, string>>;
+  };
   readonly title: string;
 }
 
@@ -58,7 +66,15 @@ export function SettingsFrame({
           {headerTitle !== null && (
             <>
               {" "}
-              <Link to={headerTitle.parent.to}>{headerTitle.parent.title}</Link> /
+              <Link
+                to={headerTitle.parent.to}
+                {...(headerTitle.parent.search === undefined
+                  ? {}
+                  : { search: headerTitle.parent.search })}
+              >
+                {headerTitle.parent.title}
+              </Link>
+              {" /"}
             </>
           )}
         </span>
@@ -97,7 +113,8 @@ export function SettingsHeaderActions({
 
 /**
  * Replaces the Settings header's title with `title`, and its crumb with
- * "Settings / `parent.title` /", where `parent.title` links to `parent.to`.
+ * "Settings / `parent.title` /", where `parent.title` links to `parent.to`
+ * with `parent.search`.
  * A section that shows one record of a list uses it, so the header names the
  * record and leads back to the list. The title is the section's state, such
  * as a name the user is editing, so it follows the edit. The header goes back
@@ -109,13 +126,20 @@ export function SettingsHeaderActions({
  */
 export function SettingsHeaderTitle({ parent, title }: SettingsHeaderTitleProps): null {
   const setHeaderTitle = useContext(SettingsHeaderTitleSetter);
-  const { title: parentTitle, to } = parent;
+  const { title: parentTitle, to, search } = parent;
+  // The search object is new on every render, so the effect depends on its
+  // text, and does not run again for a search that has not changed.
+  const searchText = search === undefined ? undefined : JSON.stringify(search);
   // A layout effect, so the header never paints the section's own title first.
   useLayoutEffect(() => {
-    setHeaderTitle({ parent: { title: parentTitle, to }, title });
+    const parsed =
+      searchText === undefined
+        ? {}
+        : { search: JSON.parse(searchText) as Readonly<Record<string, string>> };
+    setHeaderTitle({ parent: { title: parentTitle, to, ...parsed }, title });
     return () => {
       setHeaderTitle(null);
     };
-  }, [setHeaderTitle, parentTitle, to, title]);
+  }, [setHeaderTitle, parentTitle, to, searchText, title]);
   return null;
 }

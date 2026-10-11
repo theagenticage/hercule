@@ -12,7 +12,11 @@
  * - the turn of the agent that produced them completes,
  * - the session exits,
  * - the held text reaches `DELTA_FLUSH_BYTES`, so a long item is stored in
- *   pieces and a crash loses only its tail.
+ *   pieces and a crash loses only its tail. The piece ends at the last
+ *   whitespace in the text held before the newest delta, and the rest stays
+ *   held, so no word is split across two rows. Everything held is flushed
+ *   when the newest delta alone reaches the size, or when that text has no
+ *   whitespace in its last `DELTA_FLUSH_BYTES / 2` characters.
  *
  * Every other event becomes its own row. Spec 04 (Streaming) owns the rule
  * that deltas are not stored per token.
@@ -97,6 +101,24 @@ const buildBufferKey = (
   itemId: string,
   streamKind: StreamKind,
 ): string => `${agent ?? ""}\u0000${itemId}\u0000${streamKind}`;
+
+/**
+ * Returns the index just after the last whitespace in the last
+ * `DELTA_FLUSH_BYTES / 2` characters of `text`, or `undefined` when there is
+ * none. Cutting `text` there ends the first part on a word break and starts
+ * the second on a word.
+ *
+ * Whitespace further back is not used. Text that ends in one long word, such
+ * as an encoded blob, would keep that word held, and every later delta would
+ * then cut off a tiny row.
+ */
+const findWordBreakNearEnd = (text: string): number | undefined => {
+  const stop = Math.max(0, text.length - DELTA_FLUSH_BYTES / 2);
+  for (let index = text.length - 1; index > stop; index--) {
+    if (/\s/.test(text[index]!)) return index + 1;
+  }
+  return undefined;
+};
 
 const toFlushedRow = (held: Held): StreamRow => ({
   seq: held.seq,
@@ -234,11 +256,29 @@ export const fold = (
       held === undefined
         ? { first: event, text: event.delta, seq }
         : { first: held.first, text: held.text + event.delta, seq };
-    if (grown.text.length >= DELTA_FLUSH_BYTES) {
-      rows.push(toFlushedRow(grown));
-      buffers.delete(key);
-    } else {
+    if (grown.text.length < DELTA_FLUSH_BYTES) {
       buffers.set(key, grown);
+    } else {
+      const cut = held === undefined ? undefined : findWordBreakNearEnd(held.text);
+      if (held === undefined || cut === undefined) {
+        rows.push(toFlushedRow(grown));
+        buffers.delete(key);
+      } else {
+        // The row ends on a word break, so full-text search finds every word
+        // whole. It holds text up to an earlier delta only, so it takes that
+        // delta's sequence number, and the rest stays held under this one:
+        // two rows never share a sequence number, which would drop the second.
+        rows.push(toFlushedRow({ ...held, text: held.text.slice(0, cut) }));
+        const rest: Held = { first: event, text: held.text.slice(cut) + event.delta, seq };
+        // A delta that alone reaches the bound is written at once, as one
+        // with no word break would be, so no more than the bound is ever held.
+        if (rest.text.length < DELTA_FLUSH_BYTES) {
+          buffers.set(key, rest);
+        } else {
+          rows.push(toFlushedRow(rest));
+          buffers.delete(key);
+        }
+      }
     }
     // A delta is not a boundary and moves nothing: `busy` is already where the
     // turn that produced it put the session.

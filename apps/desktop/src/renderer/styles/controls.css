@@ -1,9 +1,9 @@
 /* The controls every screen shares: the buttons, the answer ledger, the
-   pills, the segmented controls, the navigation rows, the counts, the text
-   field, the quiet text and dots, the priority bars, the bar over the main
-   pane, the tabs and the section headings. The rules and class names are
-   the Bureau book's, as its system.css spells them. Each departure from the
-   book says why. */
+   pills, the segmented controls, the navigation rows, the counts, the
+   meters, the text field, the quiet text and dots, the priority bars, the
+   bar over the main pane, the tabs and the section headings. The rules and
+   class names are the Bureau book's, as its system.css spells them. Each
+   departure from the book says why. */
 
 /* ---------- Buttons ---------- */
 /* One doctrine for every button:
@@ -284,6 +284,24 @@ button.nav-row {
 .count--you {
   color: var(--face-ink);
   background: var(--you);
+}
+
+/* ---------- Meters ---------- */
+/* How full something is, as a bar in the colour of whose it is, such as a
+   permission profile's share of agents or an assistant's core note against
+   its cap. The bar is the `i`, whose width the screen sets. */
+.meter {
+  position: relative;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--who, var(--ink));
 }
 
 /* ---------- Chips ---------- */

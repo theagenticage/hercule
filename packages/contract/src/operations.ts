@@ -467,6 +467,39 @@ const TABLE = {
     path: "/api/v1/assistants/:id",
   },
 
+  // Memory is an owned sub-resource of an assistant. A session token reaches
+  // only its own assistant's memory; the service checks that after the grant.
+  "memory.list": {
+    requires: "memory.read",
+    method: "GET",
+    path: "/api/v1/assistants/:id/memory",
+  },
+  "memory.search": {
+    requires: "memory.read",
+    method: "GET",
+    path: "/api/v1/assistants/:id/memory/search",
+  },
+  "memory.read": {
+    requires: "memory.read",
+    method: "GET",
+    path: "/api/v1/assistants/:id/memory/:name",
+  },
+  "memory.write": {
+    requires: "memory.write",
+    method: "PUT",
+    path: "/api/v1/assistants/:id/memory/:name",
+  },
+  "memory.append": {
+    requires: "memory.write",
+    method: "POST",
+    path: "/api/v1/assistants/:id/memory/:name/append",
+  },
+  "memory.delete": {
+    requires: "memory.write",
+    method: "DELETE",
+    path: "/api/v1/assistants/:id/memory/:name",
+  },
+
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
   "conversation.read": {
     requires: "agent.read",
@@ -562,6 +595,7 @@ const TABLE = {
     method: "GET",
     path: "/api/v1/sessions/:id/transcript",
   },
+  "transcript.query": { requires: "session.read", method: "GET", path: "/api/v1/transcripts" },
   "attachment.create": {
     requires: "session.steer",
     method: "POST",

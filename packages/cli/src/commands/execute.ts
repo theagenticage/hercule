@@ -15,7 +15,7 @@
  */
 import { basename } from "node:path";
 import { ApiError, checkImageFile, type HerculeClient } from "@hercule/client-core";
-import { MAX_ATTACHMENTS_PER_INPUT } from "@hercule/contract";
+import { MAX_ATTACHMENTS_PER_INPUT, OWN_AGENT_ALIAS } from "@hercule/contract";
 import { UsageError } from "../exit";
 import { coerceFieldValue, formatFieldName, type Arguments } from "./args";
 import { findCommandById, type Command, type Field } from "./tree";
@@ -94,8 +94,9 @@ const nameListedThing = (listing: Command): string => listing.words.at(-2)!;
 /**
  * Returns the full id that the text given for a field refers to.
  *
- * A canonical id is returned as it is. Anything else is read against the list
- * the field's row names, in full:
+ * A canonical id is returned as it is, and so is `me` for a field that holds
+ * an id. Anything else is read against the list the field's row names, in
+ * full:
  *
  * - an id equal to the text is returned. Ids a harness chooses, such as a
  *   subagent's, are not UUIDs and may be shorter than a tail;
@@ -120,7 +121,8 @@ const resolveTail = async (
   text: string,
   scope: Record<string, string | number>,
 ): Promise<string> => {
-  if (CANONICAL_ID.test(text)) return text;
+  // `me` is resolved by the controller, which knows which session is asking.
+  if (CANONICAL_ID.test(text) || (field.holdsAnId && text === OWN_AGENT_ALIAS)) return text;
 
   const failTooShort = (): never => {
     throw new UsageError(

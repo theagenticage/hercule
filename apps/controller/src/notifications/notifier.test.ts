@@ -55,6 +55,7 @@ const buildSessionActor = (sessionId: string): Actor => ({
   grants: ["notification.read", "notification.write"],
   profileGrants: ["notification.read", "notification.write"],
   assistantId: null,
+  agentId: null,
 });
 
 const PLAIN_SESSION = buildSessionActor(PLAIN_SESSION_ID);

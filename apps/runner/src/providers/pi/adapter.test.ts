@@ -12,7 +12,12 @@ import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
-import { AGENT_FILE_VARIABLE, OUTPUT_SCHEMA_VARIABLE, SUBMIT_RESULT_TOOL } from "./extension";
+import {
+  AGENT_FILE_VARIABLE,
+  NO_AUTO_COMPACTION_VARIABLE,
+  OUTPUT_SCHEMA_VARIABLE,
+  SUBMIT_RESULT_TOOL,
+} from "./extension";
 import {
   buildFakePiSeam,
   startBusySession,
@@ -690,6 +695,22 @@ describe("launching pi for a session with an Agent", () => {
     expect(run.child.command).not.toContain(SYSTEM_PROMPT);
   });
 
+  it("appends an assistant's memory after the agent's instructions, as the last part of the file", async () => {
+    const memory = "## Memory (core)\nThe user is Rogier.\n\n## Memory topics\n- projects";
+    const run = await startTestSession({}, { ...STRUCTURED, memory });
+
+    const path = readFlagValue(run.child.command, "--append-system-prompt")!;
+    expect(readFileSync(path, "utf8")).toBe(`${SYSTEM_PROMPT}\n\n${memory}`);
+  });
+
+  it("writes the instructions file for memory alone, when the session has no agent instructions", async () => {
+    const memory = "## Memory (core)\nThe user is Rogier.";
+    const run = await startTestSession({}, { ...SPEC, memory });
+
+    const path = readFlagValue(run.child.command, "--append-system-prompt")!;
+    expect(readFileSync(path, "utf8")).toBe(memory);
+  });
+
   it("deletes the session's instructions file when the session ends", async () => {
     const run = await startTestSession({}, STRUCTURED);
     const path = readFlagValue(run.child.command, "--append-system-prompt")!;
@@ -757,6 +778,23 @@ describe("launching pi for a session with an Agent", () => {
     const run = await startTestSession({}, STRUCTURED);
 
     expect(run.child.env[OUTPUT_SCHEMA_VARIABLE]).toBe(JSON.stringify(OUTPUT_SCHEMA));
+  });
+
+  it("tells the extension to cancel automatic compaction when the spec turns it off", async () => {
+    const run = await startTestSession({}, { ...STRUCTURED, autoCompaction: false });
+
+    expect(run.child.env[NO_AUTO_COMPACTION_VARIABLE]).toBe("1");
+    // Never pi's own command: it saves the choice in the instance's
+    // settings.json, which every later session of the instance reads.
+    expect(listSentCommands(run.sent, "set_auto_compaction")).toEqual([]);
+  });
+
+  it("leaves pi's own compaction alone when the spec does not turn it off", async () => {
+    // A runner started from inside a pi session inherits that session's value.
+    const run = await startTestSession({}, STRUCTURED, { [NO_AUTO_COMPACTION_VARIABLE]: "1" });
+
+    expect(NO_AUTO_COMPACTION_VARIABLE in run.child.env).toBe(false);
+    expect(listSentCommands(run.sent, "set_auto_compaction")).toEqual([]);
   });
 
   it("adds none of the three for a Thread, which has none of these fields", async () => {

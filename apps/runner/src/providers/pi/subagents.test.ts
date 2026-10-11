@@ -21,6 +21,7 @@ import type { OutputSchema, ProviderEvent, SessionSpec, SubagentId } from "@herc
 import {
   AGENT_FILE_VARIABLE,
   EXTENSION_SOURCE,
+  NO_AUTO_COMPACTION_VARIABLE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENT_DIALOG,
   SUBAGENT_TOOL,
@@ -251,6 +252,15 @@ describe("how a subagent's pi is started", () => {
     expect(child.env[OUTPUT_SCHEMA_VARIABLE]).toBeUndefined();
     expect(run.child.env[SUBAGENTS_VARIABLE]).toBe("1");
     expect(run.child.env[OUTPUT_SCHEMA_VARIABLE]).toBeDefined();
+  });
+
+  it("leaves a subagent's own compaction on when the session's is off, because only the session is rotated", async () => {
+    const run = await startBusySession({}, { ...SPEC, autoCompaction: false });
+
+    const { child } = await askForSubagent(run, run.child);
+
+    expect(run.child.env[NO_AUTO_COMPACTION_VARIABLE]).toBe("1");
+    expect(child.env).not.toHaveProperty(NO_AUTO_COMPACTION_VARIABLE);
   });
 
   it("gives a subagent's subagent no subagent tool, because it runs at the deepest level allowed", async () => {

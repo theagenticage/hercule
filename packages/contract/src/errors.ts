@@ -16,7 +16,8 @@
  * decide the order of the checks, not this module: the promotion gate
  * (`controller_sealed`, `promotion_in_progress`), `unauthenticated`, the
  * static grant check, `validation`, `not_found`, entity-dependent `forbidden`,
- * business rules, then `internal`.
+ * business rules (`conflict`, `invalid_state`, `cap_exceeded`,
+ * `shrink_rejected`), then `internal`.
  */
 import { Schema, SchemaIssue } from "effect";
 import { GrantSchema, type Grant } from "./grants";
@@ -32,6 +33,7 @@ export const ERROR_CODES = [
   "controller_sealed",
   "promotion_in_progress",
   "cap_exceeded",
+  "shrink_rejected",
   "internal",
 ] as const;
 
@@ -48,6 +50,7 @@ export const ERROR_STATUS = {
   controller_sealed: 503,
   promotion_in_progress: 409,
   cap_exceeded: 422,
+  shrink_rejected: 422,
   internal: 500,
 } as const satisfies Record<ErrorCode, number>;
 
@@ -66,6 +69,14 @@ export const CapDetails = Schema.Union([
 ]);
 
 export type CapDetails = Schema.Schema.Type<typeof CapDetails>;
+
+/**
+ * The details of a `shrink_rejected` error: the document's size before the
+ * write and the size the write would leave, both in characters.
+ */
+export const ShrinkDetails = Schema.Struct({ previousSize: Schema.Int, size: Schema.Int });
+
+export type ShrinkDetails = Schema.Schema.Type<typeof ShrinkDetails>;
 
 /** No credential, or one that does not resolve. */
 export class Unauthenticated extends Schema.Error<Unauthenticated>("hercule/Unauthenticated")(
@@ -180,6 +191,21 @@ export class CapExceeded extends Schema.Error<CapExceeded>("hercule/CapExceeded"
   { description: "CapExceeded", httpApiStatus: ERROR_STATUS.cap_exceeded },
 ) {}
 
+/**
+ * A write would discard most of a large document. The caller repeats it with
+ * the shrink confirmed when the loss is intended.
+ */
+export class ShrinkRejected extends Schema.Error<ShrinkRejected>("hercule/ShrinkRejected")(
+  {
+    error: Schema.Struct({
+      code: Schema.Literal("shrink_rejected"),
+      message: Schema.String,
+      details: ShrinkDetails,
+    }),
+  },
+  { description: "ShrinkRejected", httpApiStatus: ERROR_STATUS.shrink_rejected },
+) {}
+
 /** Something went wrong that the caller cannot act on. */
 export class Internal extends Schema.Error<Internal>("hercule/Internal")(
   {
@@ -202,6 +228,7 @@ export type ApiError =
   | ControllerSealed
   | PromotionInProgress
   | CapExceeded
+  | ShrinkRejected
   | Internal;
 
 const API_ERRORS = [
@@ -214,6 +241,7 @@ const API_ERRORS = [
   ControllerSealed,
   PromotionInProgress,
   CapExceeded,
+  ShrinkRejected,
   Internal,
 ];
 
@@ -261,6 +289,12 @@ export const createPromotionInProgressError = (message: string): PromotionInProg
 /** Creates the error for a size or a count that is more than its cap. */
 export const createCapExceededError = (details: CapDetails, message: string): CapExceeded =>
   new CapExceeded({ error: { code: "cap_exceeded", message, details } });
+
+/** Creates the error for a write that would discard most of a large document. */
+export const createShrinkRejectedError = (
+  details: ShrinkDetails,
+  message: string,
+): ShrinkRejected => new ShrinkRejected({ error: { code: "shrink_rejected", message, details } });
 
 /** Creates the error for a failure that the caller cannot fix. */
 export const createInternalError = (message: string): Internal =>

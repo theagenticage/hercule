@@ -37,7 +37,7 @@ import type {
 } from "../index";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
-import { buildHarnessPrompt } from "../prompt";
+import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { runProcess, spawnAppServer, type Run } from "../process";
 import { truncateMessage } from "../text";
 import { now } from "../../report";
@@ -201,25 +201,60 @@ const retryWhileOverloaded = <A>(request: Effect.Effect<A, RpcError>): Effect.Ef
   });
 
 /**
+ * The largest value Codex accepts for `model_auto_compact_token_limit`, which
+ * it reads as a signed 64-bit integer.
+ */
+const UNREACHABLE_TOKEN_LIMIT = "9223372036854775807";
+
+/**
+ * Returns the `-c` arguments that turn Codex's automatic compaction off, as
+ * far as Codex allows, for a session whose spec sets `autoCompaction: false`.
+ * Returns none for every other session, which keeps Codex's default.
+ *
+ * An assistant's session is rotated by the controller instead of being
+ * compacted (spec 06 section 9.2). The pinned Codex release has no setting
+ * that turns automatic compaction off, so this is partial:
+ *
+ * - In the default scope, Codex caps the token limit at 90% of the context
+ *   window, so a higher limit alone changes nothing. The
+ *   `body_after_prefix` scope is the one that takes the limit as given.
+ * - Codex still compacts at 95% of the window, on the turn after the model
+ *   reports the context as too long, and when the model changes. No setting
+ *   turns those off. The controller rotates well before 95%.
+ *
+ * These are arguments of the session's own app-server, never lines in the
+ * instance's `config.toml`, because every session of the instance reads that
+ * file.
+ */
+const buildCompactionOverrides = (spec: SessionSpec): ReadonlyArray<string> =>
+  spec.autoCompaction === false
+    ? [
+        "-c",
+        "model_auto_compact_token_limit_scope=body_after_prefix",
+        "-c",
+        `model_auto_compact_token_limit=${UNREACHABLE_TOKEN_LIMIT}`,
+      ]
+    : [];
+
+/**
  * Builds the developer instructions for one thread. A Codex thread accepts only
  * one set of instructions, so the parts are joined with a blank line between
  * them, in this order:
  *
  * - the session's system prompt;
  * - the user's own instructions, for a Thread that sees the user's material;
- * - the skill.
+ * - the skill;
+ * - an assistant's memory.
  *
  * A missing or empty part is left out, so the text never starts with a blank
- * line or has two blank lines in a row.
+ * line or has two blank lines in a row. Returns an empty string only when every
+ * part is missing, which cannot happen while the skill has text.
  */
 const buildDeveloperInstructions = (
-  systemPrompt: string | undefined,
+  spec: SessionSpec,
   userInstructions: string | undefined,
   skill: string,
-): string =>
-  [systemPrompt, userInstructions, skill]
-    .filter((part) => part !== undefined && part !== "")
-    .join("\n\n");
+): string => joinInstructions([spec.systemPrompt, userInstructions, skill, spec.memory]) ?? "";
 
 /**
  * Reads the user's own instructions file. Returns its text, or `undefined`
@@ -384,13 +419,21 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     ctx: ProviderRunnerContext,
     binary: string,
     sessionId: string | undefined,
+    overrides: ReadonlyArray<string>,
   ): Host => {
     const complaints: Array<string> = [];
     const child = seam.appServer(
       // `--strict-config` makes a setting renamed in an upgrade fail the start
       // instead of being silently ignored. The updater is off because a
       // harness that updated itself would run a version nobody chose.
-      [binary, "app-server", "--strict-config", "-c", "check_for_update_on_startup=false"],
+      [
+        binary,
+        "app-server",
+        "--strict-config",
+        "-c",
+        "check_for_update_on_startup=false",
+        ...overrides,
+      ],
       prepareEnv(ctx),
     );
     const rememberComplaint = (line: string): void => {
@@ -450,15 +493,17 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   /**
    * Starts an app-server, failing with the error message if it cannot be
    * started. A home directory the runner cannot write to is an expected
-   * failure, not a defect.
+   * failure, not a defect. `overrides` are more `-c` arguments for this one
+   * process; a probe has none.
    */
   const openHost = (
     ctx: ProviderRunnerContext,
     binary: string,
     sessionId?: string,
+    overrides: ReadonlyArray<string> = [],
   ): Effect.Effect<Host, string> =>
     Effect.try({
-      try: () => startHost(ctx, binary, sessionId),
+      try: () => startHost(ctx, binary, sessionId, overrides),
       catch: (error) => (error instanceof Error ? error.message : String(error)),
     });
 
@@ -466,6 +511,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   const startSessionHost = (
     sessionId: string,
+    spec: SessionSpec,
     ctx: ProviderRunnerContext,
     binary: string,
   ): Effect.Effect<Host, string> =>
@@ -478,7 +524,8 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         hosts.delete(sessionId);
         stale.kill();
       }
-      return Effect.flatMap(openHost(ctx, binary, sessionId), (host) =>
+      const overrides = buildCompactionOverrides(spec);
+      return Effect.flatMap(openHost(ctx, binary, sessionId, overrides), (host) =>
         Effect.matchEffect(initializeAppServer(host), {
           // Registered only after the handshake succeeds. A host registered
           // without one could never be used, and its child would outlive the
@@ -835,7 +882,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       cwd: ctx.cwd,
       model: spec.modelSelection.model,
       developerInstructions: buildDeveloperInstructions(
-        spec.systemPrompt,
+        spec,
         userInstructions,
         ctx.herculeTool.skill,
       ),
@@ -862,7 +909,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         const binary = ctx.binary;
         if (binary === undefined) return yield* Effect.fail(`no ${CODEX_BINARY} on this machine`);
         const userInstructions = yield* readUserInstructions(ctx.userMaterial);
-        const host = yield* startSessionHost(sessionId, ctx, binary);
+        const host = yield* startSessionHost(sessionId, spec, ctx, binary);
         const carried = spec.continue;
         const opened = yield* Effect.matchEffect(
           carried === undefined

@@ -69,8 +69,10 @@ import promotion from "./0058-promotion";
 import sessionToolResultAttachments from "./0059-session-tool-result-attachments";
 import retiredIntakeSettings from "./0060-retired-intake-settings";
 import permissionRequests from "./0061-permission-requests";
-import signals from "./0062-signals";
-import signalGrants from "./0063-signal-grants";
+import assistantMemory from "./0062-assistant-memory";
+import transcriptSearch from "./0063-transcript-search";
+import signals from "./0064-signals";
+import signalGrants from "./0065-signal-grants";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -134,8 +136,10 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [59, "session-tool-result-attachments", Effect.succeed(sessionToolResultAttachments)],
   [60, "retired-intake-settings", Effect.succeed(retiredIntakeSettings)],
   [61, "permission-requests", Effect.succeed(permissionRequests)],
-  [62, "signals", Effect.succeed(signals)],
-  [63, "signal-grants", Effect.succeed(signalGrants)],
+  [62, "assistant-memory", Effect.succeed(assistantMemory)],
+  [63, "transcript-search", Effect.succeed(transcriptSearch)],
+  [64, "signals", Effect.succeed(signals)],
+  [65, "signal-grants", Effect.succeed(signalGrants)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

@@ -2711,6 +2711,39 @@ describe("a session the controller started for an Agent", () => {
     });
   });
 
+  it("appends an assistant's memory after the agent's instructions, as the last part", async () => {
+    const run = createDriving();
+    const memory = "## Memory (core)\nThe user is Rogier.\n\n## Memory topics\n- projects";
+    await Effect.runPromise(run.adapter.startSession(SESSION, { ...STRUCTURED, memory }, WORKING));
+
+    expect(run.options[0]?.systemPrompt).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: `${SYSTEM_PROMPT}\n\n${memory}`,
+    });
+  });
+
+  it("turns off only the CLI's automatic compaction when the spec asks for it", async () => {
+    const run = createDriving();
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, { ...STRUCTURED, autoCompaction: false }, WORKING),
+    );
+
+    const env = run.options[0]?.env ?? {};
+    expect(env["DISABLE_AUTO_COMPACT"]).toBe("1");
+    // `DISABLE_COMPACT` would also turn off `/compact`, which the user can send.
+    expect(Object.keys(env)).not.toContain("DISABLE_COMPACT");
+  });
+
+  it("leaves the CLI's automatic compaction on when the spec does not turn it off", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, WORKING));
+
+    const keys = Object.keys(run.options[0]?.env ?? {});
+    expect(keys).not.toContain("DISABLE_AUTO_COMPACT");
+    expect(keys).not.toContain("DISABLE_COMPACT");
+  });
+
   it("disallows every Claude tool in each disallowed tool family", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, WORKING));

@@ -9,12 +9,14 @@ import { HeartbeatSection } from "../../../../../screens/settings/assistants/hea
 import { RotationSection } from "../../../../../screens/settings/assistants/rotation-section";
 import { DeleteSection } from "./-delete-section";
 import { HowItWorksSection } from "./-how-it-works-section";
+import { MemoryColumn } from "./-memory-column";
 import { useSavedAssistantField } from "./-saved-assistant-field";
 
 /**
  * Renders the settings of one assistant, in its hue: its face and name, how
- * it works, its heartbeat, its rotation, and Delete. `onDeleted` is called
- * with the assistant's id once it is deleted.
+ * it works, its heartbeat, its rotation, and Delete, and beside them the
+ * Memory column. `onDeleted` is called with the assistant's id once it is
+ * deleted.
  */
 export function AssistantRecord({
   assistant,
@@ -55,31 +57,35 @@ export function AssistantRecord({
   );
   const now = computeHeartbeatNow(openedAt, heartbeat.value.timezone, settings.user.timezone);
   const look = buildAssistantLook(assistant.id);
+  const hueStyle = buildHueStyle(look.hue);
   return (
-    <div className="assistant-record" style={buildHueStyle(look.hue)}>
-      <div className="head">
-        <Face look={look} pose={pose} size={64} />
-        <h2>{assistant.name}</h2>
+    <>
+      <div className="assistant-record" style={hueStyle}>
+        <div className="head">
+          <Face look={look} pose={pose} size={64} />
+          <h2>{assistant.name}</h2>
+        </div>
+        <HowItWorksSection assistant={assistant} />
+        <HeartbeatSection
+          assistantName={assistant.name}
+          heartbeat={{ ...heartbeat.value, prompt: prompt.value }}
+          nowMinutes={now.nowMinutes}
+          nowTimezone={now.timezone}
+          unknownTimezone={now.unknownTimezone}
+          error={heartbeat.error}
+          onSave={heartbeat.save}
+          promptError={prompt.error}
+          onSavePrompt={prompt.save}
+        />
+        <RotationSection
+          assistantName={assistant.name}
+          rotation={rotation.value}
+          error={rotation.error}
+          onSave={rotation.save}
+        />
+        <DeleteSection assistant={assistant} onDeleted={onDeleted} />
       </div>
-      <HowItWorksSection assistant={assistant} />
-      <HeartbeatSection
-        assistantName={assistant.name}
-        heartbeat={{ ...heartbeat.value, prompt: prompt.value }}
-        nowMinutes={now.nowMinutes}
-        nowTimezone={now.timezone}
-        unknownTimezone={now.unknownTimezone}
-        error={heartbeat.error}
-        onSave={heartbeat.save}
-        promptError={prompt.error}
-        onSavePrompt={prompt.save}
-      />
-      <RotationSection
-        assistantName={assistant.name}
-        rotation={rotation.value}
-        error={rotation.error}
-        onSave={rotation.save}
-      />
-      <DeleteSection assistant={assistant} onDeleted={onDeleted} />
-    </div>
+      <MemoryColumn assistant={assistant} style={hueStyle} />
+    </>
   );
 }

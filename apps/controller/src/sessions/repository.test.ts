@@ -54,6 +54,7 @@ const insertSession = (permissionProfileId: string) =>
       spec: "{}",
       modelSelection: { model: "clever", options: {} },
       parentSessionId: undefined,
+      createdBy: "user",
       at,
     });
     return id;
@@ -521,6 +522,7 @@ const insertResumableSession = Effect.gen(function* () {
     spec: "{}",
     modelSelection: { model: "clever", options: {} },
     parentSessionId: undefined,
+    createdBy: "user",
     at,
   });
   yield* sessions.bind(sessionId, uuidToString(runner), instanceId, "native-1");

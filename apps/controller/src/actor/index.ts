@@ -78,6 +78,11 @@ export interface SessionActor {
    * is muted by this assistant.
    */
   readonly assistantId: string | null;
+  /**
+   * The Agent the session runs as, or null for a Thread, which runs as no
+   * Agent. It is what `me` names where an operation takes an Agent's id.
+   */
+  readonly agentId: string | null;
 }
 
 /**

@@ -27,6 +27,7 @@ import { AssistantResponderLayer, AssistantService, AssistantServiceLayer } from
 import { AttachmentService, AttachmentServiceLayer } from "../attachments";
 import { Auth, AuthLayer } from "../auth";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
+import { MemoryService, MemoryServiceLayer } from "../memory";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
@@ -308,6 +309,25 @@ const assistantRoutes = HttpApiBuilder.group(api, "assistant", (handlers) =>
         withApiErrors(assistants.update({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(assistants.delete(params.id)));
+  }),
+);
+
+const memoryRoutes = HttpApiBuilder.group(api, "memory", (handlers) =>
+  Effect.gen(function* () {
+    const memory = yield* MemoryService;
+    return handlers
+      .handle("list", ({ params }) => withApiErrors(memory.list(params)))
+      .handle("search", ({ params, query }) =>
+        withApiErrors(memory.search({ ...params, ...query })),
+      )
+      .handle("read", ({ params }) => withApiErrors(memory.read(params)))
+      .handle("write", ({ params, payload }) =>
+        withApiErrors(memory.write({ ...params, ...payload })),
+      )
+      .handle("append", ({ params, payload }) =>
+        withApiErrors(memory.append({ ...params, ...payload })),
+      )
+      .handle("delete", ({ params }) => withApiErrors(memory.delete(params)));
   }),
 );
 
@@ -617,9 +637,11 @@ const attachmentRoutes = HttpApiBuilder.group(api, "attachment", (handlers) =>
 const transcriptRoutes = HttpApiBuilder.group(api, "transcript", (handlers) =>
   Effect.gen(function* () {
     const sessions = yield* SessionService;
-    return handlers.handle("read", ({ params, query }) =>
-      withApiErrors(sessions.transcript({ id: params.id, ...query })),
-    );
+    return handlers
+      .handle("read", ({ params, query }) =>
+        withApiErrors(sessions.transcript({ id: params.id, ...query })),
+      )
+      .handle("query", ({ query }) => withApiErrors(sessions.queryPassages(query)));
   }),
 );
 
@@ -738,6 +760,7 @@ export const operationLayers = Layer.mergeAll(
   ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
   PermissionRequestsDomainLayer,
   AgentServiceLayer,
+  MemoryServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
@@ -846,6 +869,7 @@ export const handlerLayers = Layer.mergeAll(
   signalRoutes,
   agentRoutes,
   assistantRoutes,
+  memoryRoutes,
   conversationRoutes,
   projectRoutes,
   resourceRoutes,

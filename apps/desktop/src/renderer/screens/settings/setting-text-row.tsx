@@ -9,22 +9,28 @@ import { useTextDraft } from "./use-text-draft";
  *
  * The text saves through `onCommit` as `useTextDraft` describes: when the
  * textarea loses focus or on Cmd+Enter, and only when it changed.
+ * `onEditStart` runs when the user begins typing over the shown text. A
+ * `readOnly` row shows its text and takes no typing.
  */
 export function SettingTextRow({
   label,
   hint,
   value,
+  readOnly = false,
   error,
   onCommit,
+  onEditStart,
 }: {
   readonly label: string;
   readonly hint: string;
   readonly value: string;
+  readonly readOnly?: boolean;
   readonly error: string | null;
   readonly onCommit: (text: string) => void;
+  readonly onEditStart?: () => void;
 }): JSX.Element {
   const id = useId();
-  const draft = useTextDraft(value, onCommit);
+  const draft = useTextDraft(value, onCommit, onEditStart);
   return (
     <>
       <div className="set-row set-row--text">
@@ -36,6 +42,7 @@ export function SettingTextRow({
           className="field"
           aria-labelledby={`${id}-label`}
           aria-describedby={`${id}-hint`}
+          readOnly={readOnly}
           {...draft}
         />
       </div>

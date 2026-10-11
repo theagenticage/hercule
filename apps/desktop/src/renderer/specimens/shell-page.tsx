@@ -56,6 +56,8 @@ import type {
   ConversationMessage,
   Event,
   Input,
+  MemoryDocument,
+  MemoryEntry,
   PluginDetail,
   Profile,
   Project,
@@ -85,6 +87,8 @@ import {
   currentConversationSessionQuery,
   eventQuery,
   localRunnerQuery,
+  memoryDocumentQuery,
+  memoryIndexQuery,
   pluginsQuery,
   profilesQuery,
   projectsQuery,
@@ -118,7 +122,7 @@ import { DraftScreen } from "../screens/new-thread/draft-screen";
 import { AgentPage } from "../screens/thread/agent-page";
 import { Route as SettingsRoute } from "../routes/_connected/_shell/settings/route";
 import { Route as AppearanceSettingsRoute } from "../routes/_connected/_shell/settings/appearance";
-import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/settings/assistants/route";
+import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/settings/assistants/index";
 import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/index";
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
 import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
@@ -198,6 +202,12 @@ export interface AssistantsSettingsRecords {
   readonly profiles: ReadonlyArray<Profile>;
   /** The Connections the Settings list reads for its Connections row's dot. */
   readonly connections: ReadonlyArray<Connection>;
+  /** The picked assistant's memory, which the Memory column shows: its index and its core note. */
+  readonly memory: {
+    readonly assistantId: string;
+    readonly entries: ReadonlyArray<MemoryEntry>;
+    readonly core: MemoryDocument;
+  };
 }
 
 /** What Settings > Permission profiles reads besides the sidebar's lists. */
@@ -389,6 +399,9 @@ const seedQueryCache = (
   if (assistantsSettings !== undefined) {
     queryClient.setQueryData(profilesQuery(client).queryKey, assistantsSettings.profiles);
     queryClient.setQueryData(connectionsQuery(client).queryKey, assistantsSettings.connections);
+    const { assistantId, entries, core } = assistantsSettings.memory;
+    queryClient.setQueryData(memoryIndexQuery(client, assistantId).queryKey, entries);
+    queryClient.setQueryData(memoryDocumentQuery(client, assistantId, core.name).queryKey, core);
   }
   if (permissionProfilesSettings !== undefined) {
     queryClient.setQueryData(profilesQuery(client).queryKey, permissionProfilesSettings.profiles);
@@ -523,8 +536,8 @@ const buildRouter = (
     getParentRoute: () => shellRoute,
   } as never);
   const assistantsSettingsRoute = AssistantsSettingsRoute.update({
-    id: "/assistants",
-    path: "/assistants",
+    id: "/assistants/",
+    path: "/assistants/",
     getParentRoute: () => settingsRoute,
     loader: undefined,
   } as never);

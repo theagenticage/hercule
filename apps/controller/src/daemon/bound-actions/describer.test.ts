@@ -105,6 +105,7 @@ const insertSession = (
       spec: "{}",
       modelSelection: { model: "clever", options: {} },
       parentSessionId: undefined,
+      createdBy: "user",
       at: AT,
     });
     yield* sessions.setOpenRequests(id, openRequest === null ? [] : [openRequest]);

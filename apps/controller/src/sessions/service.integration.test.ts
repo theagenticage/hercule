@@ -1,7 +1,8 @@
 /**
  * Tests for the frames the sessions domain builds: the complete `sessionStart`
  * frames `starting` returns, and the one-line builders for the frames sent
- * later in a session's life. Also tests `endOnLostRunners`.
+ * later in a session's life. Also tests `endOnLostRunners`, and the
+ * transcript search `queryPassages`.
  *
  * The tests check the frame's shape on the wire and where each field comes
  * from, not how the domain builds it:
@@ -21,9 +22,12 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   SessionSpec,
   type ModelSelection,
+  type ProviderEvent,
   type SessionInputResult,
   type SessionStart,
 } from "@hercule/protocol";
+import type { Passage } from "@hercule/contract";
+import { buildSessionStamp, CurrentActor, type Actor, type SessionActor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } from "../connections";
 import { hashToken } from "../credentials";
@@ -46,7 +50,12 @@ import type { GithubAccount } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
 import { SessionObserver } from "./observer";
-import { SessionService, SessionServiceLayer, type StartRequest } from "./service";
+import {
+  SessionService,
+  SessionServiceLayer,
+  type PassageQueryInput,
+  type StartRequest,
+} from "./service";
 
 /** Temporary Hercule Homes for the master key, deleted after each test. */
 let homes: Array<string> = [];
@@ -182,6 +191,8 @@ const insertQueuedSession = (
     readonly permissionProfileId?: string;
     /** The Agent the session runs as. Without it the session is a Thread. */
     readonly agentId?: string;
+    /** The actor stamp of whoever created the session. Without it, the user. */
+    readonly createdBy?: string;
     /**
      * Stores no input with the session, like a row queued before a start
      * carried its first input. `create` always stores the prompt.
@@ -218,6 +229,7 @@ const insertQueuedSession = (
       spec: options.storedSpec ?? JSON.stringify(encodeSpec(options.spec)),
       modelSelection: options.spec.modelSelection,
       parentSessionId: undefined,
+      createdBy: options.createdBy ?? "user",
       at,
     });
     if (options.withoutInput !== true) {
@@ -1467,5 +1479,272 @@ describe("a report applied after its session ended", () => {
     expect(result.session.status).toBe("exited");
     expect(result.session.openRequests).toEqual([]);
     expect(result.notifications).toEqual([]);
+  });
+});
+
+describe("SessionService.queryPassages", () => {
+  const agentA = "0190b000-0000-7000-8000-00000000000a";
+  const agentB = "0190b000-0000-7000-8000-00000000000b";
+  /** When each message was written, oldest first. */
+  const t = [1, 2, 3, 4, 5, 6].map((minute) => `2026-10-11T10:0${minute}:00.000Z`);
+
+  const USER: Actor = {
+    _tag: "user",
+    userId: "user",
+    credential: { kind: "login", id: "credential", tokenHash: "hash" },
+  };
+
+  /** Returns a session actor that holds `session.read`, for the session given. */
+  const buildSessionActor = (sessionId: string, agentId: string | null): SessionActor => ({
+    _tag: "session",
+    sessionId,
+    profileId: "profile",
+    grants: ["session.read"],
+    profileGrants: ["session.read"],
+    assistantId: null,
+    agentId,
+  });
+
+  /**
+   * Writes four sessions and their stream:
+   *
+   * - `agentRun`, of Agent A, created by the user: a user message, the same
+   *   message completed, an assistant reply and some reasoning;
+   * - `child`, of Agent A, created by `thread`: a reply from its subagent;
+   * - `thread`, a Thread created by the user: a user message;
+   * - `other`, of Agent B: an assistant reply.
+   *
+   * Every message mentions the rocket, so a search for it finds one passage
+   * per message.
+   */
+  const seed = Effect.gen(function* () {
+    const sessions = yield* sessionRepository;
+    const instanceId = yield* insertInstance("an-adapter", {});
+    const spec = buildSpec(instanceId, "clever");
+    const runnerId = mintId();
+    const thread = yield* insertQueuedSession(runnerId, { instanceId, spec });
+    const agentRun = yield* insertQueuedSession(runnerId, { instanceId, spec, agentId: agentA });
+    const child = yield* insertQueuedSession(runnerId, {
+      instanceId,
+      spec,
+      agentId: agentA,
+      createdBy: buildSessionStamp(thread),
+    });
+    const other = yield* insertQueuedSession(runnerId, { instanceId, spec, agentId: agentB });
+    const base = { eventId: "e", sessionId: "native", at: t[0]! };
+    const userMessage = (text: string) =>
+      ({
+        ...base,
+        turnId: "turn-1",
+        itemId: "item-1",
+        kind: "user_message",
+        detail: { text },
+      }) as const;
+    const reply = (
+      text: string,
+      streamKind: "assistant_text" | "reasoning_text" = "assistant_text",
+    ) =>
+      ({
+        _tag: "content.delta",
+        ...base,
+        turnId: "turn-1",
+        itemId: "item-2",
+        streamKind,
+        delta: text,
+      }) as const;
+    const rows: ReadonlyArray<readonly [string, string, ProviderEvent]> = [
+      [agentRun, t[0]!, { _tag: "item.started", ...userMessage("launch the rocket today") }],
+      [
+        agentRun,
+        t[0]!,
+        { _tag: "item.completed", ...userMessage("launch the rocket today"), status: "completed" },
+      ],
+      [agentRun, t[1]!, reply("the rocket launched")],
+      [agentRun, t[2]!, reply("the rocket reasoning", "reasoning_text")],
+      [child, t[3]!, { ...reply("the rocket is fuelled"), subagentId: "helper" }],
+      [thread, t[4]!, { _tag: "item.started", ...userMessage("where is the rocket") }],
+      [other, t[5]!, reply("another rocket")],
+    ];
+    for (const [index, [sessionId, rowAt, event]] of rows.entries()) {
+      yield* sessions.append(sessionId, { seq: index + 1, at: rowAt, event });
+    }
+    return { thread, agentRun, child, other };
+  });
+
+  type Seeded = Effect.Success<typeof seed>;
+
+  /** Seeds the stream, then runs `test` with the seeded ids. */
+  const runSeeded = <A, E>(
+    test: (seeded: Seeded) => Effect.Effect<A, E, Layer.Success<typeof layer>>,
+  ) => run(Effect.flatMap(seed, test));
+
+  /** Runs `transcript.query` as `actor`, failing the test on any error. */
+  const queryAs = (actor: Actor, input: PassageQueryInput) =>
+    Effect.flatMap(SessionService, (service) =>
+      Effect.provideService(service.queryPassages(input), CurrentActor, actor),
+    );
+
+  /** Returns where each passage is from: its session and when it was written. */
+  const locate = (items: ReadonlyArray<Passage>) => items.map((item) => [item.sessionId, item.at]);
+
+  it("finds every message once, newest first, with an excerpt of the text that matched", async () => {
+    const { seeded, page } = await runSeeded((seeded) =>
+      Effect.map(queryAs(USER, { text: "rocket" }), (page) => ({ seeded, page })),
+    );
+
+    // The completed user message repeats its start, and reasoning is not a
+    // message, so neither is a passage.
+    expect(locate(page.items)).toEqual([
+      [seeded.other, t[5]],
+      [seeded.thread, t[4]],
+      [seeded.child, t[3]],
+      [seeded.agentRun, t[1]],
+      [seeded.agentRun, t[0]],
+    ]);
+    expect(page.items[4]).toEqual({
+      sessionId: seeded.agentRun,
+      turnId: "turn-1",
+      at: t[0],
+      excerpt: "launch the rocket today",
+    });
+    expect(page.nextCursor).toBeUndefined();
+  });
+
+  it("marks a passage from a subagent with its subagent id, and no other passage", async () => {
+    const page = await runSeeded(() => queryAs(USER, { text: "rocket" }));
+
+    expect(page.items.map((item) => item.subagentId)).toEqual([
+      undefined,
+      undefined,
+      "helper",
+      undefined,
+      undefined,
+    ]);
+    expect(page.items.filter((item) => "subagentId" in item)).toHaveLength(1);
+  });
+
+  it("pages through every passage once, in either direction", async () => {
+    const { first, second, third, oldestFirst } = await runSeeded(() =>
+      Effect.gen(function* () {
+        const first = yield* queryAs(USER, { text: "rocket", limit: 2 });
+        const second = yield* queryAs(USER, {
+          text: "rocket",
+          limit: 2,
+          cursor: first.nextCursor!,
+        });
+        const third = yield* queryAs(USER, {
+          text: "rocket",
+          limit: 2,
+          cursor: second.nextCursor!,
+        });
+        const oldestFirst = yield* queryAs(USER, {
+          text: "rocket",
+          sort: [{ field: "at", direction: "asc" }],
+        });
+        return { first, second, third, oldestFirst };
+      }),
+    );
+
+    const all = [...first.items, ...second.items, ...third.items];
+    expect(all.map((item) => item.at)).toEqual([t[5], t[4], t[3], t[1], t[0]]);
+    expect(third.nextCursor).toBeUndefined();
+    expect(oldestFirst.items.map((item) => item.at)).toEqual([t[0], t[1], t[3], t[4], t[5]]);
+  });
+
+  it("narrows by session, by Agent, and by when the message was written", async () => {
+    const result = await runSeeded((seeded) =>
+      Effect.gen(function* () {
+        return {
+          seeded,
+          bySession: yield* queryAs(USER, { text: "rocket", sessionId: seeded.agentRun }),
+          byAgent: yield* queryAs(USER, { text: "rocket", agentId: agentA }),
+          since: yield* queryAs(USER, { text: "rocket", since: t[3]! }),
+          until: yield* queryAs(USER, { text: "rocket", until: t[3]! }),
+          narrowed: yield* queryAs(USER, { text: "launched rocket", agentId: agentA }),
+        };
+      }),
+    );
+
+    const { seeded } = result;
+    expect(locate(result.bySession.items)).toEqual([
+      [seeded.agentRun, t[1]],
+      [seeded.agentRun, t[0]],
+    ]);
+    expect(locate(result.byAgent.items)).toEqual([
+      [seeded.child, t[3]],
+      [seeded.agentRun, t[1]],
+      [seeded.agentRun, t[0]],
+    ]);
+    // `since` keeps the instant itself, and `until` stops before it.
+    expect(result.since.items.map((item) => item.at)).toEqual([t[5], t[4], t[3]]);
+    expect(result.until.items.map((item) => item.at)).toEqual([t[1], t[0]]);
+    // Every word must match.
+    expect(locate(result.narrowed.items)).toEqual([[seeded.agentRun, t[1]]]);
+  });
+
+  it("resolves `me` from the calling session: its Agent, and the sessions it created", async () => {
+    const result = await runSeeded((seeded) =>
+      Effect.gen(function* () {
+        return {
+          seeded,
+          ownAgent: yield* queryAs(buildSessionActor(seeded.child, agentA), {
+            text: "rocket",
+            agentId: "me",
+          }),
+          created: yield* queryAs(buildSessionActor(seeded.thread, null), {
+            text: "rocket",
+            actor: "me",
+          }),
+        };
+      }),
+    );
+
+    const { seeded } = result;
+    expect(locate(result.ownAgent.items)).toEqual([
+      [seeded.child, t[3]],
+      [seeded.agentRun, t[1]],
+      [seeded.agentRun, t[0]],
+    ]);
+    expect(locate(result.created.items)).toEqual([[seeded.child, t[3]]]);
+  });
+
+  it("refuses `me` from a caller it names nothing for, saying which field and why", async () => {
+    const refusals = await runSeeded((seeded) =>
+      Effect.all(
+        [
+          queryAs(USER, { text: "rocket", agentId: "me" }),
+          queryAs(USER, { text: "rocket", actor: "me" }),
+          queryAs(buildSessionActor(seeded.thread, null), { text: "rocket", agentId: "me" }),
+        ].map((query) => Effect.flip(query)),
+      ),
+    );
+
+    const refusedField = (field: string) => ({
+      error: { code: "validation", details: { issues: [{ path: [field] }] } },
+    });
+    expect(refusals).toMatchObject([
+      refusedField("agentId"),
+      refusedField("actor"),
+      refusedField("agentId"),
+    ]);
+    expect(JSON.stringify(refusals[2])).toContain("runs as no Agent");
+  });
+
+  it("requires the session.read grant", async () => {
+    const refusal = await runSeeded((seeded) =>
+      Effect.flip(
+        queryAs({ ...buildSessionActor(seeded.thread, null), grants: [] }, { text: "rocket" }),
+      ),
+    );
+
+    expect(refusal).toMatchObject({
+      error: { code: "forbidden", details: { grant: "session.read" } },
+    });
+  });
+
+  it("returns an empty page for text with no word in it", async () => {
+    const page = await runSeeded(() => queryAs(USER, { text: "?!" }));
+
+    expect(page).toEqual({ items: [] });
   });
 });

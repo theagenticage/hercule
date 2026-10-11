@@ -1,6 +1,6 @@
 /**
- * Tests the stacked text row: when its text saves, how Esc puts the stored
- * text back, and its error.
+ * Tests the stacked text row: when its text saves, when an edit starts, how
+ * Esc puts the stored text back, and its error.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -9,6 +9,7 @@ import { SettingTextRow } from "./setting-text-row";
 
 const renderRow = (error: string | null = null) => {
   const onCommit = vi.fn<(text: string) => void>();
+  const onEditStart = vi.fn<() => void>();
   render(
     <SettingTextRow
       label="Persona"
@@ -16,9 +17,10 @@ const renderRow = (error: string | null = null) => {
       value="Be brief."
       error={error}
       onCommit={onCommit}
+      onEditStart={onEditStart}
     />,
   );
-  return { onCommit, area: screen.getByRole("textbox", { name: "Persona" }) };
+  return { onCommit, onEditStart, area: screen.getByRole("textbox", { name: "Persona" }) };
 };
 
 describe("SettingTextRow", () => {
@@ -39,6 +41,16 @@ describe("SettingTextRow", () => {
     await userEvent.keyboard("{Meta>}{Enter}{/Meta}");
     expect(onCommit).toHaveBeenCalledExactlyOnceWith("Be brief.\nBe kind.");
     expect(document.activeElement).not.toBe(area);
+  });
+
+  it("starts an edit at the first key typed over the shown text, once per edit", async () => {
+    const { onEditStart, area } = renderRow();
+    await userEvent.click(area);
+    expect(onEditStart).not.toHaveBeenCalled();
+    await userEvent.type(area, " Be kind.");
+    expect(onEditStart).toHaveBeenCalledOnce();
+    await userEvent.type(area, "{Escape} Be calm.");
+    expect(onEditStart).toHaveBeenCalledTimes(2);
   });
 
   it("puts the stored text back on Esc", async () => {

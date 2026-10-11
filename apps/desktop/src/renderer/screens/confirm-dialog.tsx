@@ -11,6 +11,9 @@ import { GlassDialog } from "./glass-dialog";
  * - Pressing the action calls `onConfirm`, unless `pending` is true because
  *   an earlier press is still running. The dialog stays open, so the caller
  *   closes it through `dialogRef` once it is done.
+ * - Enter in a field of `children`, such as a radio, presses the action too,
+ *   as Enter presses the default button of a macOS dialog. Enter on Cancel
+ *   presses Cancel.
  * - `error`, when given, is shown under `children` as an alert.
  * - Cancel, Esc and a click on the scrim close the dialog without calling
  *   `onConfirm`. `onClose` is called whenever the dialog closes, and the
@@ -42,7 +45,15 @@ export function ConfirmDialog({
       <div className="pop-h">
         <b>{title}</b>
       </div>
-      <div className="pop-sec confirm-dialog-body">
+      {/* A form, so the browser presses the action, its submit button, on
+          Enter in a field. */}
+      <form
+        className="pop-sec confirm-dialog-body"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!pending) onConfirm();
+        }}
+      >
         {children}
         {error !== null && (
           <p className="fl-err" role="alert">
@@ -57,18 +68,11 @@ export function ConfirmDialog({
           >
             Cancel
           </button>
-          <button
-            type="button"
-            className={`btn btn--${actionClass}`}
-            aria-disabled={pending}
-            onClick={() => {
-              if (!pending) onConfirm();
-            }}
-          >
+          <button type="submit" className={`btn btn--${actionClass}`} aria-disabled={pending}>
             {actionLabel}
           </button>
         </div>
-      </div>
+      </form>
     </GlassDialog>
   );
 }

@@ -27,6 +27,14 @@ export default defineConfig(({ command }) => {
         routesDirectory: "routes",
         generatedRouteTree: "routeTree.gen.ts",
         autoCodeSplitting: true,
+        // Puts a route's loader in the chunk of its component. By default the
+        // loader stays in the route's own file, which loads with the first
+        // screen, together with every module the loader imports, even when
+        // the route never opens. A route the app starts on opts out with
+        // `codeSplitGroupings: []`.
+        codeSplittingOptions: {
+          defaultBehavior: [["loader", "component"], ["errorComponent"], ["notFoundComponent"]],
+        },
         routeFileIgnorePattern: "\\.test\\.tsx?$",
       }),
       react(),

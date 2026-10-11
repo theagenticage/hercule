@@ -20,8 +20,15 @@ export interface TextDraftProps {
  * - Cmd+Enter commits and leaves the control.
  * - Enter commits in a one-line input, which has no other use for it.
  * - Esc drops the typed text and shows `stored` again.
+ *
+ * `onEditStart` runs when the user begins typing over the shown value, so a
+ * caller can note what the edit began on before a later read changes it.
  */
-export function useTextDraft(stored: string, onCommit: (text: string) => void): TextDraftProps {
+export function useTextDraft(
+  stored: string,
+  onCommit: (text: string) => void,
+  onEditStart?: () => void,
+): TextDraftProps {
   // The text being typed, or null while the control shows `stored`.
   const [draft, setDraft] = useState<string | null>(null);
   const commit = (): void => {
@@ -32,6 +39,7 @@ export function useTextDraft(stored: string, onCommit: (text: string) => void): 
   return {
     value: draft ?? stored,
     onChange: (event) => {
+      if (draft === null) onEditStart?.();
       setDraft(event.target.value);
     },
     onBlur: commit,
