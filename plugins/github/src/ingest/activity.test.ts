@@ -1,7 +1,8 @@
 /**
  * Tests the events about what people did on one item: which comments
- * mention the user, and which review requests are for the user or one of
- * their teams. The ingest harness checks each event against its kind's
+ * mention the user, which review requests are for the user, one of their
+ * teams or made by the user, which assignments the history holds, and what a
+ * review says about whose pull request it is on. The ingest harness checks each event against its kind's
  * schema, as the host does.
  */
 import { describe, expect, it } from "vitest";
@@ -14,7 +15,12 @@ import {
   TEST_IDENTITY,
 } from "../testing";
 import { TEST_TOKEN } from "../actions/testing";
-import { emitCommentEvents, emitReviewRequestEvents, type ActivityPoll } from "./activity";
+import {
+  emitCommentEvents,
+  emitHistoryEvents,
+  emitNewReviews,
+  type ActivityPoll,
+} from "./activity";
 
 const REPO = "acme/webshop";
 const PULL = { repo: REPO, kind: "pr" as const, number: 1293, title: "Faster checkout" };
@@ -101,7 +107,7 @@ const buildEntry = (id: number, event: string, extra: object) => ({
   ...extra,
 });
 
-describe("emitReviewRequestEvents", () => {
+describe("emitHistoryEvents", () => {
   const history = [
     buildEntry(1, "review_requested", {
       requested_reviewer: TEST_ACCOUNT,
@@ -119,7 +125,7 @@ describe("emitReviewRequestEvents", () => {
     const stub = stubGithub(() => ({ status: 200, body: history }));
 
     const result = await runAgainstStub(
-      emitReviewRequestEvents(poll, PULL, undefined, Effect.succeed([])),
+      emitHistoryEvents(poll, PULL, undefined, Effect.succeed([])),
       stub,
     );
 
@@ -157,7 +163,7 @@ describe("emitReviewRequestEvents", () => {
     const stub = stubGithub(() => ({ status: 200, body: history }));
 
     await runAgainstStub(
-      emitReviewRequestEvents(poll, PULL, "2026-10-11T11:00:00Z", Effect.succeed([])),
+      emitHistoryEvents(poll, PULL, "2026-10-11T11:00:00Z", Effect.succeed([])),
       stub,
     );
 
@@ -175,7 +181,7 @@ describe("emitReviewRequestEvents", () => {
     const readRemoval = async (requestsNow: ReadonlyArray<string>) => {
       harness.events.length = 0;
       await runAgainstStub(
-        emitReviewRequestEvents({ ...poll, teams }, PULL, undefined, Effect.succeed(requestsNow)),
+        emitHistoryEvents({ ...poll, teams }, PULL, undefined, Effect.succeed(requestsNow)),
         stub,
       );
       return harness.events[0]!.payload;
@@ -186,5 +192,184 @@ describe("emitReviewRequestEvents", () => {
       teamStillRequested: true,
     });
     expect(await readRemoval(["you"])).toMatchObject({ teamStillRequested: false });
+  });
+
+  it("emits a request the user made to someone else as reviewer other, with no team", async () => {
+    const { harness, poll } = buildPoll();
+    const asked = {
+      actor: TEST_ACCOUNT,
+      review_requester: TEST_ACCOUNT,
+    };
+    const stub = stubGithub(() => ({
+      status: 200,
+      body: [
+        buildEntry(21, "review_requested", {
+          ...asked,
+          requested_reviewer: { login: "mona", id: 2 },
+        }),
+        buildEntry(22, "review_requested", { ...asked, requested_team: { slug: "design" } }),
+      ],
+    }));
+
+    await runAgainstStub(emitHistoryEvents(poll, PULL, undefined, Effect.succeed([])), stub);
+
+    expect(harness.events).toMatchObject([
+      {
+        kind: "github.pr.review-requested",
+        dedupKey: "pr.review-requested:21",
+        author: "octocat",
+        title: `octocat requested a review from mona on ${REPO}#1293`,
+        payload: { reviewer: "other", requestedBy: "octocat", byYou: true, toYou: false },
+      },
+      {
+        dedupKey: "pr.review-requested:22",
+        title: `octocat requested a review from acme/design on ${REPO}#1293`,
+        payload: { reviewer: "other", byYou: true, toYou: false },
+      },
+    ]);
+    for (const event of harness.events) expect(event.payload).not.toHaveProperty("team");
+  });
+
+  it("emits nothing for a request to someone else that another person made, or that the user took back", async () => {
+    const { harness, poll } = buildPoll();
+    const stub = stubGithub(() => ({
+      status: 200,
+      body: [
+        buildEntry(23, "review_requested", { requested_reviewer: { login: "mona", id: 2 } }),
+        buildEntry(24, "review_request_removed", {
+          actor: TEST_ACCOUNT,
+          requested_reviewer: { login: "mona", id: 2 },
+        }),
+      ],
+    }));
+
+    await runAgainstStub(emitHistoryEvents(poll, PULL, undefined, Effect.succeed([])), stub);
+
+    expect(harness.events).toEqual([]);
+  });
+});
+
+describe("emitHistoryEvents, for assignments", () => {
+  const ISSUE = { repo: REPO, kind: "issue" as const, number: 88, title: "Totals are off" };
+
+  /** Reads `history` as the history of `item`, and returns the events emitted. */
+  const readHistory = async (
+    item: typeof ISSUE | typeof PULL,
+    history: Array<object>,
+    start?: string,
+  ) => {
+    const { harness, poll } = buildPoll();
+    const stub = stubGithub(() => ({ status: 200, body: history }));
+    await runAgainstStub(emitHistoryEvents(poll, item, start, Effect.succeed([])), stub);
+    return harness.events;
+  };
+
+  it("emits an assignment to the user by someone else", async () => {
+    const events = await readHistory(ISSUE, [
+      buildEntry(11, "assigned", { assignee: TEST_ACCOUNT }),
+    ]);
+
+    expect(events).toMatchObject([
+      {
+        kind: "github.issue.assigned",
+        dedupKey: "issue.assigned:11",
+        author: "marta",
+        title: `marta assigned octocat to ${REPO}#88`,
+        payload: { assignee: "octocat", toYou: true, byYou: false },
+      },
+    ]);
+  });
+
+  it("emits an assignment to someone else, and one the user made", async () => {
+    const events = await readHistory(ISSUE, [
+      buildEntry(12, "assigned", { assignee: { login: "mona", id: 2 } }),
+      buildEntry(13, "assigned", { actor: TEST_ACCOUNT, assignee: { login: "mona", id: 2 } }),
+    ]);
+
+    expect(events).toMatchObject([
+      { author: "marta", payload: { assignee: "mona", toYou: false, byYou: false } },
+      { author: "octocat", payload: { assignee: "mona", toYou: false, byYou: true } },
+    ]);
+  });
+
+  it("emits an unassignment with its own kind and key", async () => {
+    const events = await readHistory(ISSUE, [
+      buildEntry(14, "unassigned", { assignee: TEST_ACCOUNT }),
+    ]);
+
+    expect(events).toMatchObject([
+      {
+        kind: "github.issue.unassigned",
+        dedupKey: "issue.unassigned:14",
+        title: `marta unassigned octocat from ${REPO}#88`,
+        payload: { assignee: "octocat", toYou: true, byYou: false },
+      },
+    ]);
+  });
+
+  it("gives an assignment on a pull request the pull request's refs", async () => {
+    const events = await readHistory(PULL, [
+      buildEntry(15, "assigned", { assignee: TEST_ACCOUNT }),
+    ]);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]!.refs).toContain(`github:pr:${REPO}#1293`);
+    expect(events[0]!.refs).not.toContain(`github:issue:${REPO}#1293`);
+  });
+
+  it("leaves the author empty when GitHub names no actor, and skips an entry with no assignee", async () => {
+    const events = await readHistory(ISSUE, [
+      buildEntry(16, "assigned", { actor: null, assignee: TEST_ACCOUNT }),
+      buildEntry(17, "assigned", { assignee: null }),
+    ]);
+
+    expect(events).toMatchObject([{ dedupKey: "issue.assigned:16", author: null }]);
+  });
+
+  it("skips the assignments from before the poll's start", async () => {
+    const events = await readHistory(
+      ISSUE,
+      [buildEntry(18, "assigned", { assignee: TEST_ACCOUNT })],
+      "2026-10-11T10:00:01Z",
+    );
+
+    expect(events).toEqual([]);
+  });
+});
+
+describe("emitNewReviews", () => {
+  const review = {
+    id: 5001,
+    user: { login: "marta", id: 9 },
+    state: "CHANGES_REQUESTED",
+    submitted_at: "2026-10-11T10:00:00Z",
+  };
+
+  /** Reads one review of the pull request, saying whether the pull request is the user's. */
+  const readReviews = async (onYourPullRequest: boolean) => {
+    const { harness, poll } = buildPoll();
+    const stub = stubGithub(() => ({ status: 200, body: [review] }));
+    await runAgainstStub(emitNewReviews(poll, PULL, undefined, onYourPullRequest), stub);
+    return harness.events;
+  };
+
+  it("carries the review's id and says the pull request is the user's", async () => {
+    expect(await readReviews(true)).toMatchObject([
+      {
+        kind: "github.pr.review-submitted",
+        dedupKey: "pr.review-submitted:5001",
+        payload: {
+          reviewer: "marta",
+          verdict: "changes-requested",
+          reviewId: 5001,
+          byYou: false,
+          onYourPullRequest: true,
+        },
+      },
+    ]);
+  });
+
+  it("says when the pull request is somebody else's", async () => {
+    expect(await readReviews(false)).toMatchObject([{ payload: { onYourPullRequest: false } }]);
   });
 });

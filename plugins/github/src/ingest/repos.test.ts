@@ -257,6 +257,20 @@ const buildReviewRequest = (id: number, time: string) => ({
   requested_reviewer: TEST_ACCOUNT,
 });
 
+/** Returns a history entry in which mona assigns `assignee` at `time`, or unassigns them. */
+const buildAssignment = (
+  id: number,
+  event: "assigned" | "unassigned",
+  assignee: { login: string; id?: number },
+  time: string,
+) => ({
+  id,
+  event,
+  created_at: time,
+  actor: { login: "mona", id: 1 },
+  assignee,
+});
+
 /** Returns each recorded event as `kind dedupKey`, for a compact comparison. */
 const listEvents = (harness: IngestHarness) =>
   harness.events.map((event) => `${event.kind} ${event.dedupKey}`);
@@ -329,6 +343,9 @@ describe("the repos feed", () => {
         assignees: [{ login: "hubot" }],
       }),
     );
+    repository.history[3] = [
+      buildAssignment(70, "assigned", { login: "hubot", id: 9 }, "2026-10-01T10:00:00Z"),
+    ];
     repository.etag = '"v2"';
 
     await poll(harness, answerFrom(repository));
@@ -336,7 +353,7 @@ describe("the repos feed", () => {
     expect(listEvents(harness)).toEqual([
       `github.issue.opened issue.opened:${REPO}#3`,
       `github.issue.labeled issue.labeled:${REPO}#3:2026-10-01T10:00:00Z:${computeDigest(["+triage"])}`,
-      `github.issue.assigned issue.assigned:${REPO}#3:2026-10-01T10:00:00Z:${computeDigest(["hubot"])}`,
+      `github.issue.assigned issue.assigned:70`,
     ]);
     const [opened, labeled] = harness.events;
     expect(opened!.occurredAt).toBe("2026-10-01T10:00:00Z");
@@ -345,7 +362,7 @@ describe("the repos feed", () => {
     expect(labeled!.payload).toMatchObject({ added: ["triage"], removed: [] });
   });
 
-  it("emits a new pull request as opened, then its labels, and nothing for its assignee", async () => {
+  it("emits a new pull request as opened, then its labels and its assignee, on the pull request's ref", async () => {
     const repository = buildRepository();
     const harness = await baseline(repository);
     repository.issues.push(
@@ -355,6 +372,9 @@ describe("the repos feed", () => {
       }),
     );
     repository.heads[3] = "sha-c";
+    repository.history[3] = [
+      buildAssignment(71, "assigned", { login: "hubot", id: 9 }, "2026-10-01T10:00:00Z"),
+    ];
     repository.etag = '"v2"';
 
     const { result } = await poll(harness, answerFrom(repository));
@@ -363,7 +383,14 @@ describe("the repos feed", () => {
     expect(listEvents(harness)).toEqual([
       `github.pr.opened pr.opened:${REPO}#3`,
       `github.pr.labeled pr.labeled:${REPO}#3:2026-10-01T10:00:00Z:${computeDigest(["+feature"])}`,
+      `github.issue.assigned issue.assigned:71`,
     ]);
+    expect(harness.events[2]!.refs).toContain(`github:pr:${REPO}#3`);
+    expect(harness.events[2]!.payload).toMatchObject({
+      assignee: "hubot",
+      toYou: false,
+      byYou: false,
+    });
     expect(harness.events[0]!.url).toBe(`https://github.com/${REPO}/pull/3`);
     expect(harness.state.get(`repos/${REPO}`)).toMatchObject({
       items: { "3": { pullRequest: true, headSha: "sha-c" } },
@@ -381,16 +408,118 @@ describe("the repos feed", () => {
       updated_at: "2026-10-01T11:00:00Z",
       closed_at: "2026-10-01T11:00:00Z",
     };
+    repository.history[1] = [
+      buildAssignment(72, "assigned", { login: "hubot", id: 9 }, "2026-10-01T10:30:00Z"),
+    ];
     repository.etag = '"v2"';
 
     await poll(harness, answerFrom(repository));
 
+    // The assignment happened at 10:30. The label change is dated at the
+    // item's previous update, because the listing does not say when it happened.
     expect(listEvents(harness)).toEqual([
+      `github.issue.assigned issue.assigned:72`,
       `github.issue.labeled issue.labeled:${REPO}#1:2026-10-01T09:00:00Z:${computeDigest(["+wontfix", "-bug"])}`,
-      `github.issue.assigned issue.assigned:${REPO}#1:2026-10-01T09:00:00Z:${computeDigest(["hubot"])}`,
       `github.issue.closed issue.closed:${REPO}#1:2026-10-01T11:00:00Z`,
     ]);
-    expect(harness.events[0]!.payload).toMatchObject({ added: ["wontfix"], removed: ["bug"] });
+    expect(harness.events[1]!.payload).toMatchObject({ added: ["wontfix"], removed: ["bug"] });
+  });
+
+  it("emits no assignment from before the first poll, and reads no history for an issue that is already assigned", async () => {
+    const repository = buildRepository();
+    repository.issues[0] = {
+      ...repository.issues[0]!,
+      assignees: [{ login: "hubot" }],
+      updated_at: "2026-10-01T09:00:00Z",
+    };
+    // One assignment long before the first poll, one in the second of the
+    // newest update, which is the same second as the baseline's own.
+    repository.history[1] = [
+      buildAssignment(80, "assigned", { login: "hubot", id: 9 }, "2026-10-01T08:00:00Z"),
+      buildAssignment(81, "assigned", { login: "hubot", id: 9 }, "2026-10-01T09:00:00Z"),
+    ];
+    repository.issues[1] = { ...repository.issues[1]!, updated_at: "2026-10-01T08:30:00Z" };
+    const harness = buildIngestHarness();
+
+    const first = await poll(harness, answerFrom(repository));
+    repository.etag = '"v2"';
+    const second = await poll(harness, answerFrom(repository));
+
+    expect(Result.isSuccess(first.result)).toBe(true);
+    expect(harness.events).toEqual([]);
+    const readsHistory = (requests: ReadonlyArray<{ path: string }>) =>
+      requests.some((request) => request.path.endsWith("/events"));
+    expect(readsHistory(first.requests)).toBe(false);
+    expect(readsHistory(second.requests)).toBe(false);
+  });
+
+  it("reads an item's history only when its assignees changed, and emits only the new entries", async () => {
+    const repository = buildRepository();
+    repository.issues[0] = { ...repository.issues[0]!, assignees: [{ login: "hubot" }] };
+    repository.history[1] = [
+      buildAssignment(80, "assigned", { login: "hubot", id: 9 }, "2026-10-01T08:00:00Z"),
+    ];
+    const harness = await baseline(repository);
+    // A comment changes the item, but not who is assigned.
+    repository.issues[0] = {
+      ...repository.issues[0],
+      comments: 1,
+      updated_at: "2026-10-01T10:00:00Z",
+    };
+    repository.etag = '"v2"';
+    const unchanged = await poll(harness, answerFrom(repository));
+    expect(harness.events).toEqual([]);
+    expect(unchanged.requests.filter((request) => request.path.endsWith("/events"))).toEqual([]);
+
+    // Mona replaces hubot with the user.
+    repository.issues[0] = {
+      ...repository.issues[0],
+      assignees: [TEST_ACCOUNT],
+      updated_at: "2026-10-01T11:00:00Z",
+    };
+    repository.history[1].push(
+      buildAssignment(82, "unassigned", { login: "hubot", id: 9 }, "2026-10-01T11:00:00Z"),
+      buildAssignment(83, "assigned", TEST_ACCOUNT, "2026-10-01T11:00:00Z"),
+    );
+    repository.etag = '"v3"';
+    const changed = await poll(harness, answerFrom(repository));
+
+    expect(changed.requests.filter((request) => request.path.endsWith("/events"))).toHaveLength(1);
+    expect(listEvents(harness)).toEqual([
+      `github.issue.unassigned issue.unassigned:82`,
+      `github.issue.assigned issue.assigned:83`,
+    ]);
+    expect(harness.events.map((event) => event.author)).toEqual(["mona", "mona"]);
+    expect(harness.events.map((event) => event.payload)).toEqual([
+      expect.objectContaining({ assignee: "hubot", toYou: false, byYou: false }),
+      expect.objectContaining({ assignee: "octocat", toYou: true, byYou: false }),
+    ]);
+  });
+
+  it("marks an assignment the user made as by you", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    repository.issues[0] = {
+      ...repository.issues[0]!,
+      assignees: [{ login: "hubot" }],
+      updated_at: "2026-10-01T10:00:00Z",
+    };
+    repository.history[1] = [
+      {
+        ...buildAssignment(84, "assigned", { login: "hubot", id: 9 }, "2026-10-01T10:00:00Z"),
+        actor: TEST_ACCOUNT,
+      },
+    ];
+    repository.etag = '"v2"';
+
+    await poll(harness, answerFrom(repository));
+
+    expect(harness.events).toHaveLength(1);
+    expect(harness.events[0]!.payload).toMatchObject({
+      assignee: "hubot",
+      toYou: false,
+      byYou: true,
+    });
   });
 
   it("emits a reopened issue", async () => {
@@ -522,6 +651,8 @@ describe("the repos feed", () => {
     expect(harness.events[0]!.payload).toMatchObject({
       reviewer: "hubot",
       verdict: "changes-requested",
+      reviewId: 101,
+      onYourPullRequest: false,
     });
     // The listing, the pull request for its head, its reviews, and the
     // repository's comments, which are read whenever an item changed.
@@ -867,6 +998,9 @@ describe("the repos feed", () => {
     };
     repository.issues[1] = { ...repository.issues[1]!, labels, updated_at: "2026-10-01T11:01:00Z" };
     repository.heads[99999999] = "b".repeat(40);
+    repository.history[99999998] = [
+      buildAssignment(9999999999, "assigned", assignees[0]!, "2026-10-01T10:30:00Z"),
+    ];
     repository.etag = '"v2"';
 
     // The harness refuses a key longer than 200 characters, as the host does.
@@ -874,8 +1008,8 @@ describe("the repos feed", () => {
 
     expect(Result.isSuccess(result)).toBe(true);
     expect(harness.events.map((event) => event.kind)).toEqual([
-      "github.issue.labeled",
       "github.issue.assigned",
+      "github.issue.labeled",
       "github.issue.closed",
       // The pull request is read before its changes are listed, because a
       // merge's author comes from it, so its new head is emitted first.
@@ -893,6 +1027,7 @@ describe("the repos feed", () => {
       assignees: [{ login: "hubot" }],
       updated_at: second,
     };
+    repository.history[1] = [buildAssignment(73, "assigned", { login: "hubot", id: 9 }, second)];
     // In one second, the user reviews and mona asks for a review again.
     repository.issues[1] = { ...repository.issues[1]!, updated_at: second };
     repository.requestedReviewers[2] = [TEST_ACCOUNT];
@@ -924,7 +1059,7 @@ describe("the repos feed", () => {
     // request from its own second that it answered, and stay there, because
     // the next poll's copy of it is dropped as a duplicate.
     expect(listEvents(harness)).toEqual([
-      expect.stringMatching(/^github\.issue\.assigned /),
+      `github.issue.assigned issue.assigned:73`,
       `github.pr.review-submitted pr.review-submitted:200`,
       `github.pr.review-requested pr.review-requested:1`,
     ]);

@@ -132,6 +132,57 @@ describe("pollFollowedItems", () => {
     expect(harness.state.has("followed-hints")).toBe(false);
   });
 
+  it("reads the history of a followed issue, and emits the assignments in it", async () => {
+    const harness = buildIngestHarness();
+    await Effect.runPromise(
+      recordFollowedHints(harness.context.state, [{ ref: `github:issue:${REPO}#3`, since: SINCE }]),
+    );
+    // An issue is a pull request's listing entry without its `pull_request` field.
+    const issue = { ...buildPull(3), pull_request: undefined };
+    const assignment = (id: number, event: string, assignee: object, time: string) => ({
+      id,
+      event,
+      created_at: time,
+      actor: { login: "marta", id: 9 },
+      assignee,
+    });
+    const stub = stubGithub(
+      answerUserRequests((request) => {
+        const { path } = readStubRequestTarget(request);
+        if (path.endsWith("/events")) {
+          return {
+            status: 200,
+            body: [
+              // Before the hint's time: already known, so not emitted.
+              assignment(1, "assigned", { login: "hubot", id: 5 }, "2026-10-11T07:00:00Z"),
+              assignment(2, "unassigned", { login: "hubot", id: 5 }, "2026-10-11T09:00:00Z"),
+              assignment(3, "assigned", TEST_ACCOUNT, "2026-10-11T09:10:00Z"),
+            ],
+          };
+        }
+        return path.endsWith("/issues/3")
+          ? { status: 200, body: issue }
+          : { status: 200, body: [] };
+      }),
+    );
+
+    await runAgainstStub(
+      pollFollowedItems(TEST_TOKEN, harness.context, [], TEST_IDENTITY, new Set()),
+      stub,
+    );
+
+    expect(harness.events.map((event) => [event.kind, event.dedupKey])).toEqual([
+      ["github.issue.unassigned", "issue.unassigned:2"],
+      ["github.issue.assigned", "issue.assigned:3"],
+    ]);
+    expect(harness.events[1]!.refs).toContain(`github:issue:${REPO}#3`);
+    expect(harness.events[1]!.payload).toMatchObject({
+      assignee: TEST_ACCOUNT.login,
+      toYou: true,
+      byYou: false,
+    });
+  });
+
   it("emits the merge that ends an open signal on an item outside the watch list", async () => {
     const harness = buildIngestHarness();
     harness.openSignals.push({

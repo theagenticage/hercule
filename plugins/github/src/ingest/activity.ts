@@ -1,7 +1,7 @@
 /**
  * The events about what people did on one issue or pull request: a comment,
- * a mention of the user in it, a review, and a review request to the user or
- * one of their teams. The `repos` feed emits them for the watched
+ * a mention of the user in it, a review, a review request, and an assignment
+ * or an unassignment. The `repos` feed emits them for the watched
  * repositories, and the followed items (`followed.ts`) for the items outside
  * them. Both build them here, so one fact has one dedup key whichever feed
  * finds it.
@@ -9,7 +9,7 @@
 import { Effect, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { EmittedEvent, IngestContext, PluginError } from "@hercule/plugin-host";
-import { readReviewVerdict, type ReviewVerdict } from "../github-objects";
+import { readReviewVerdict, type GithubAccount, type ReviewVerdict } from "../github-objects";
 import { findMention, isUserAccount, type GithubIdentity } from "../identity";
 import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
 import { IssueEvent, ListedPull, ListedReview, type ListedComment } from "./feed-objects";
@@ -220,12 +220,14 @@ const buildReviewTitle = (reviewer: string, verdict: ReviewVerdict, place: strin
 /**
  * Fetches a pull request's reviews, newest first, and emits one
  * `github.pr.review-submitted` per review submitted at or after `start`, as
- * `emitReviewEvent` decides.
+ * `emitReviewEvent` decides. `onYourPullRequest` says whether the user wrote
+ * the pull request.
  */
 export const emitNewReviews = (
   poll: ActivityPoll,
   item: GithubItem,
   start: string | undefined,
+  onYourPullRequest: boolean,
 ): Effect.Effect<void, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const listing = yield* fetchNewestItems(
@@ -241,7 +243,7 @@ export const emitNewReviews = (
     if (listing.truncated) yield* logTruncatedListing("reviews", item);
     for (const raw of listing.items) {
       const review = yield* decodeGithubValue(ListedReview, raw, "a review");
-      yield* emitReviewEvent(poll, item, review, raw, start);
+      yield* emitReviewEvent(poll, item, review, raw, start, onYourPullRequest);
     }
   });
 
@@ -256,6 +258,7 @@ const emitReviewEvent = (
   review: ListedReview,
   raw: Schema.JsonObject,
   start: string | undefined,
+  onYourPullRequest: boolean,
 ): Effect.Effect<void, FeedError> => {
   const verdict = readReviewVerdict(review.state);
   const submittedAt = review.submitted_at ?? null;
@@ -270,7 +273,13 @@ const emitReviewEvent = (
       occurredAt: submittedAt,
       title: buildReviewTitle(reviewer, verdict, buildItemPlace(item)),
       author: review.user?.login ?? null,
-      fields: { reviewer, verdict, byYou: isUserAccount(poll.identity, review.user) },
+      fields: {
+        reviewer,
+        verdict,
+        reviewId: review.id,
+        byYou: isUserAccount(poll.identity, review.user),
+        onYourPullRequest,
+      },
       raw: truncateRaw(raw),
     }),
   );
@@ -339,19 +348,93 @@ export const fetchReviewRequests = (
   });
 
 /**
- * Fetches a pull request's history, newest first, and emits `github.pr.review-requested`
- * and `github.pr.review-request-removed` for each request to the user or one
- * of their teams made or taken back at or after `start`. Each one's dedup
- * key is the history entry's id.
+ * Emits `github.issue.assigned` or `github.issue.unassigned` for one history
+ * entry, for whoever was assigned or unassigned, not only the user. Emits
+ * nothing for an entry that names no assignee. The event's `author` is who
+ * made the change.
+ */
+const emitAssignmentEvent = (
+  poll: ActivityPoll,
+  item: GithubItem,
+  entry: IssueEvent,
+  raw: Schema.JsonObject,
+): Effect.Effect<void, FeedError> => {
+  if (entry.assignee == null) return Effect.void;
+  const assigned = entry.event === "assigned";
+  const actor = entry.actor?.login ?? null;
+  const assignee = entry.assignee.login;
+  const place = buildItemPlace(item);
+  const key = assigned ? "issue.assigned" : "issue.unassigned";
+  return poll.emit(
+    buildItemEvent(item, {
+      kind: `github.${key}`,
+      dedupKey: `${key}:${String(entry.id)}`,
+      occurredAt: entry.created_at,
+      title: assigned
+        ? `${actor ?? "Someone"} assigned ${assignee} to ${place}`
+        : `${actor ?? "Someone"} unassigned ${assignee} from ${place}`,
+      author: actor,
+      fields: {
+        assignee,
+        toYou: isUserAccount(poll.identity, entry.assignee),
+        byYou: isUserAccount(poll.identity, entry.actor),
+      },
+      raw: truncateRaw(raw),
+    }),
+  );
+};
+
+/**
+ * Emits `github.pr.review-requested` with `reviewer: "other"` for one
+ * history entry in which the user (`asker`) asked someone who is neither the
+ * user nor one of their teams. A request that two other people made between
+ * themselves is none of the user's business, so the caller does not pass it.
+ */
+const emitReviewRequestToOther = (
+  poll: ActivityPoll,
+  item: GithubItem,
+  entry: IssueEvent,
+  asker: GithubAccount | null,
+  raw: Schema.JsonObject,
+): Effect.Effect<void, FeedError> => {
+  const requested =
+    entry.requested_reviewer?.login ??
+    (entry.requested_team == null
+      ? "someone"
+      : buildTeamName(poll.repo.split("/")[0]!, entry.requested_team.slug));
+  return poll.emit(
+    buildItemEvent(item, {
+      kind: "github.pr.review-requested",
+      dedupKey: `pr.review-requested:${String(entry.id)}`,
+      occurredAt: entry.created_at,
+      title: `${asker?.login ?? "Someone"} requested a review from ${requested} on ${buildItemPlace(item)}`,
+      author: asker?.login ?? null,
+      fields: { reviewer: "other", requestedBy: asker?.login ?? null, byYou: true, toYou: false },
+      raw: truncateRaw(raw),
+    }),
+  );
+};
+
+/**
+ * Fetches an issue's or a pull request's history, newest first, and emits
+ * what it holds at or after `start`. Each event's dedup key is the history
+ * entry's id:
  *
- * Only the history says who asked and when. A pull request's list of
- * requested reviewers says only who is asked now, and GitHub also drops a
- * reviewer from it when they review, which is not a removal.
+ * - `github.issue.assigned` and `github.issue.unassigned` for each
+ *   assignment, to anyone (`emitAssignmentEvent`);
+ * - `github.pr.review-requested` and `github.pr.review-request-removed` for
+ *   each request to the user or one of their teams made or taken back;
+ * - `github.pr.review-requested` with `reviewer: "other"` for each request
+ *   the user made to anyone else (`emitReviewRequestToOther`).
+ *
+ * Only the history says who asked, who assigned and when. A pull request's
+ * list of requested reviewers says only who is asked now, and GitHub also
+ * drops a reviewer from it when they review, which is not a removal.
  *
  * `readRequestsNow` returns the reviews the pull request asks of the user
  * and their teams now, as `readReviewRequests` returns them. It runs at most
- * once, and only when the history holds a request or a removal to emit. Its
- * answer decides two things:
+ * once, and only when the history holds a request to the user or a team, or a
+ * removal of one, to emit. Its answer decides two things:
  *
  * - where a request goes among the events of its own second
  *   (`TIE_RANKS`);
@@ -366,7 +449,7 @@ export const fetchReviewRequests = (
  * that should end, and the next poll cannot correct it, because the events
  * it emits again have the same dedup keys.
  */
-export const emitReviewRequestEvents = (
+export const emitHistoryEvents = (
   poll: ActivityPoll,
   item: GithubItem,
   start: string | undefined,
@@ -387,18 +470,23 @@ export const emitReviewRequestEvents = (
     if (listing.truncated) yield* logTruncatedListing("history entries", item);
     const place = buildItemPlace(item);
     for (const raw of listing.items) {
-      const entry = yield* decodeGithubValue(
-        IssueEvent,
-        raw,
-        "an entry of a pull request's history",
-      );
+      const entry = yield* decodeGithubValue(IssueEvent, raw, "an entry of an item's history");
+      if (!isAtOrAfter(entry.created_at, start)) continue;
+      if (entry.event === "assigned" || entry.event === "unassigned") {
+        yield* emitAssignmentEvent(poll, item, entry, raw);
+        continue;
+      }
       const requested = entry.event === "review_requested";
       if (!requested && entry.event !== "review_request_removed") continue;
-      if (!isAtOrAfter(entry.created_at, start)) continue;
-      const target = readRequestedReviewer(poll, entry);
-      if (target === undefined) continue;
-      requestsNow ??= yield* readRequestsNow;
       const asker = entry.review_requester ?? entry.actor;
+      const target = readRequestedReviewer(poll, entry);
+      if (target === undefined) {
+        if (requested && isUserAccount(poll.identity, asker)) {
+          yield* emitReviewRequestToOther(poll, item, entry, asker, raw);
+        }
+        continue;
+      }
+      requestsNow ??= yield* readRequestsNow;
       const askerLogin = asker?.login ?? null;
       const whom = target.reviewer === "you" ? "you" : target.team;
       const team = target.reviewer === "team" ? { team: target.team } : {};
