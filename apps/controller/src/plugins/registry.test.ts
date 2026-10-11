@@ -54,6 +54,7 @@ const SHIPPED = [
         disallowedTools: "native",
         structuredOutput: "supported",
       },
+      suggestedTextGenerationModel: "haiku",
     },
   },
   {
