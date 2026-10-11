@@ -7,8 +7,10 @@
  * controller's local runner, which also reads the user's own skills, prompt
  * templates and instructions, each named on its command line.
  */
-import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -27,6 +29,8 @@ import type {
   SessionBinding,
   SessionSpec,
   SubagentId,
+  TextGenerationOutcome,
+  TextGenerationSpec,
   TurnState,
 } from "@hercule/protocol";
 import type {
@@ -142,6 +146,9 @@ interface Subagent extends RunningAgent {
   /** The item id of that call in the parent's transcript. */
   readonly toolCallItemId: string;
 }
+
+const describeError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 const isSubagent = (agent: RunningAgent): agent is Subagent => "parent" in agent;
 
@@ -623,6 +630,69 @@ const buildArgv = (
     // left out when there is nothing to exclude.
     ...(excluded.length === 0 ? [] : ["--exclude-tools", excluded.join(",")]),
   ];
+};
+
+/**
+ * Builds pi's command-line arguments for one text generation: a pi that keeps
+ * no transcript, reads nothing of the machine's own, and has only the
+ * `submit_result` tool.
+ *
+ * - `--no-builtin-tools` removes pi's read, edit and write tools but keeps the
+ *   extension's. `--no-tools` would also remove `submit_result`, which is how
+ *   the answer comes back. The extension registers `bash` itself, which
+ *   `--no-builtin-tools` does not remove, so `--exclude-tools bash` does.
+ * - Thinking is `off`. pi clamps a level the model does not support to the
+ *   nearest one it does, so this is the cheapest setting on every model.
+ * - The instructions are passed as a file path, not as text, so they do not
+ *   show in the machine's process list.
+ */
+const buildTextGenerationArgv = (
+  spec: TextGenerationSpec,
+  extensionFile: string,
+  instructionsFile: string,
+): ReadonlyArray<string> => [
+  "--mode",
+  "rpc",
+  "--no-session",
+  "--no-context-files",
+  "--no-extensions",
+  "--no-skills",
+  "--no-prompt-templates",
+  "--no-themes",
+  "--no-approve",
+  "--offline",
+  "--no-builtin-tools",
+  "--exclude-tools",
+  "bash",
+  "-e",
+  extensionFile,
+  "--model",
+  `${ZAI}/${spec.model.model}`,
+  "--thinking",
+  "off",
+  "--system-prompt",
+  instructionsFile,
+];
+
+/**
+ * Decides how a text generation ended from the turn that pi's one prompt
+ * started. A turn that did not complete, or has no structured result, is a
+ * failed call. A completed turn is judged by the output schema: a value that
+ * matches is the answer, anything else is invalid output with the reason.
+ */
+const decideTextGenerationOutcome = (
+  turn: Extract<ProviderEvent, { readonly _tag: "turn.completed" }>,
+): TextGenerationOutcome => {
+  const result = turn.structuredResult;
+  if (turn.state !== "completed" || result === undefined) {
+    return {
+      outcome: "failed",
+      message: truncateMessage(turn.error ?? `pi ended the turn as ${turn.state}`),
+    };
+  }
+  return result.outcome === "ok"
+    ? { outcome: "ok", value: result.value, usage: turn.usage ?? null }
+    : { outcome: "invalid-output", reason: result.reason };
 };
 
 export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
@@ -1354,6 +1424,128 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       held.modelSelection = selection;
     });
 
+  /**
+   * Runs one text generation in the `scratch` directory and returns how it
+   * ended. Fails with a message when pi cannot be started or refuses the
+   * prompt. The pi gets the instructions as its system prompt and the input as
+   * its one prompt, and this waits for the turn to end. The pi is killed when
+   * this finishes or is interrupted.
+   *
+   * The turn is read with the same normalizer as a session, so the answer,
+   * the usage and the schema check are the ones a session with an output
+   * schema gets. Unlike a session, the turn is not re-prompted when pi
+   * settles without an answer: that is reported as invalid output.
+   */
+  const runTextGeneration = (
+    ctx: ProviderRunnerContext,
+    binary: string,
+    spec: TextGenerationSpec,
+    scratch: string,
+  ): Effect.Effect<TextGenerationOutcome, string> =>
+    Effect.acquireUseRelease(
+      Effect.try({
+        try: () => {
+          const extensionFile = join(scratch, "extension.ts");
+          const instructionsFile = join(scratch, "instructions.txt");
+          writeFileSync(instructionsFile, spec.instructions, { mode: 0o600 });
+          return spawnAgent(
+            [binary, ...buildTextGenerationArgv(spec, extensionFile, instructionsFile)],
+            buildEnv(ctx, {
+              // pi writes bookkeeping files into its agent directory even with
+              // `--no-session`. Pointing it at the scratch directory keeps
+              // them out of the instance's home, and removes them with the
+              // call. The key comes from the environment, not from this
+              // directory.
+              PI_CODING_AGENT_DIR: scratch,
+              // Full access registers no approval hook, so the `submit_result`
+              // call cannot wait for an approval nobody will answer.
+              [ACCESS_MODE_VARIABLE]: "full-access",
+              [AGENT_FILE_VARIABLE]: extensionFile,
+              [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(spec.outputSchema),
+              // Given as undefined so `buildEnv` removes them, in case the
+              // runner itself was started from inside a pi session.
+              [SUBAGENTS_VARIABLE]: undefined,
+              [NO_AUTO_COMPACTION_VARIABLE]: undefined,
+            }),
+            // pi's working directory. It is the scratch directory, never a
+            // workspace, so a call can neither see nor change the user's files.
+            scratch,
+            extensionFile,
+          );
+        },
+        catch: describeError,
+      }),
+      (child) =>
+        Effect.gen(function* () {
+          const settled = Deferred.makeUnsafe<TextGenerationOutcome>();
+          const complaints: Array<string> = [];
+          const drained = (async () => {
+            try {
+              for await (const line of child.stderr) {
+                if (line.trim() === "") continue;
+                complaints.push(line);
+                if (complaints.length > MAX_COMPLAINT_LINES) complaints.shift();
+              }
+            } catch {
+              // A killed child has no more output, and the lines already read
+              // are still worth reporting.
+            }
+          })();
+          const id = crypto.randomUUID();
+          const agent: RunningAgent = {
+            child,
+            rpc: makeRpc(child, (line, frame) => {
+              for (const event of normalize(agent.state, line, frame)) {
+                if (event._tag === "turn.completed") {
+                  Deferred.doneUnsafe(settled, Effect.succeed(decideTextGenerationOutcome(event)));
+                }
+              }
+              // A model that keeps sending answers the schema rejects would
+              // otherwise run until the deadline.
+              if (
+                agent.state.refusedAnswers >= MAX_REFUSED_ANSWERS &&
+                agent.state.endedBySystem === undefined
+              ) {
+                Effect.runFork(abortTurn(agent, "schema"));
+              }
+            }),
+            state: buildNormalizingState(id, id, spec.outputSchema),
+            depth: 0,
+          };
+          // If pi exits before the turn ends, there is no turn to wait for, and
+          // its last error output is the reason.
+          Effect.runFork(
+            agent.rpc.pump.pipe(
+              Effect.andThen(Effect.promise(() => drained)),
+              Effect.andThen(
+                Effect.sync(() =>
+                  Deferred.doneUnsafe(
+                    settled,
+                    Effect.succeed<TextGenerationOutcome>({
+                      outcome: "failed",
+                      message: truncateMessage(
+                        complaints.length === 0
+                          ? "pi exited before it answered"
+                          : complaints.join("\n"),
+                      ),
+                    }),
+                  ),
+                ),
+              ),
+            ),
+          );
+          yield* Effect.catch(agent.rpc.send({ type: "prompt", message: spec.input }), (error) =>
+            // A pi that already exited is reported below with its error output,
+            // which says more than this error does.
+            error === PI_GONE ? Effect.void : Effect.fail(error),
+          );
+          return yield* Deferred.await(settled);
+        }),
+      // A pi left running would keep the instance's key and go on with its
+      // model call.
+      (child) => Effect.sync(() => attempt(() => child.kill())),
+    );
+
   return {
     providerId: PI,
     binaryName: PI_BINARY,
@@ -1611,9 +1803,35 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
-    // Built by the provider's own slice of #282.
-    generateText: () =>
-      Effect.succeed({ outcome: "failed" as const, message: "text generation is not built yet" }),
+    generateText: (ctx, _config, spec) => {
+      const binary = ctx.binary;
+      if (binary === undefined) {
+        return Effect.succeed<TextGenerationOutcome>({
+          outcome: "failed",
+          message: `no ${PI_BINARY} on this machine`,
+        });
+      }
+      // The scratch directory is pi's working directory and holds its copy of
+      // the extension and the instructions. It is removed after pi is killed,
+      // whichever way the call ends, so nothing of the call stays on the
+      // machine.
+      return Effect.acquireUseRelease(
+        Effect.try({
+          try: () => mkdtempSync(join(tmpdir(), "hercule-text-generation-")),
+          catch: describeError,
+        }),
+        (scratch) => runTextGeneration(ctx, binary, spec, scratch),
+        (scratch) =>
+          Effect.sync(() => attempt(() => rmSync(scratch, { recursive: true, force: true }))),
+      ).pipe(
+        Effect.catch((message) =>
+          Effect.succeed<TextGenerationOutcome>({
+            outcome: "failed",
+            message: truncateMessage(message),
+          }),
+        ),
+      );
+    },
 
     install: makePiInstall(seam.run),
   };
