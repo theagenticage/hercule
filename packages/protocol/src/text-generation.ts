@@ -37,11 +37,21 @@ export const MAX_TEXT_GENERATION_TEXT_LENGTH = 64 * 1024;
  */
 export const TEXT_GENERATION_DEADLINE_MS = 60_000;
 
+/**
+ * How many text generations one runner makes at once. The controller sends a
+ * runner no more than this many, and the runner refuses any call over it, so
+ * a burst of calls cannot start more harnesses than this on one machine.
+ */
+export const MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER = 10;
+
 const Text = Schema.String.check(Schema.isMaxLength(MAX_TEXT_GENERATION_TEXT_LENGTH));
 
-// Never empty: the controller shows the message to the user as the reason a
+// Never blank: the controller shows the message to the user as the reason a
 // call failed, and an empty reason explains nothing.
-const Message = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_MESSAGE_LENGTH));
+const Message = Schema.String.check(
+  Schema.isPattern(/\S/, { title: "message", description: "text that is not only whitespace" }),
+  Schema.isMaxLength(MAX_MESSAGE_LENGTH),
+);
 
 /** What one text generation asks the model: the same for every provider. */
 export const TextGenerationSpec = Schema.Struct({
