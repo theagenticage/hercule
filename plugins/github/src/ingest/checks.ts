@@ -33,6 +33,7 @@
  * same check-suites request as above. Their state is kept under
  * `checks-own`, outside the per-repository keys.
  */
+import { isFailedConclusion } from "../github-objects";
 import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import { PluginError, type IngestContext, type PollResult } from "@hercule/plugin-host";
@@ -121,9 +122,6 @@ const describeConclusion = (conclusion: string): string => {
   return "finished";
 };
 
-/** The conclusions that do not make a commit's checks fail. */
-export const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
-
 /**
  * Returns the one conclusion of a commit's finished check suites:
  *
@@ -139,7 +137,7 @@ export const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
  */
 export const rollUpConclusion = (suites: ReadonlyArray<GithubCheckSuite>): string => {
   const conclusions = suites.map((suite) => suite.conclusion ?? "unknown");
-  if (conclusions.some((conclusion) => !PASSING_CONCLUSIONS.has(conclusion))) return "failure";
+  if (conclusions.some(isFailedConclusion)) return "failure";
   return conclusions.includes("success") ? "success" : "neutral";
 };
 
@@ -250,9 +248,7 @@ const fetchFailedCheckNames = (
       listing.items,
       "check runs",
     );
-    const failed = runs
-      .filter((run) => run.conclusion !== null && !PASSING_CONCLUSIONS.has(run.conclusion))
-      .map((run) => run.name);
+    const failed = runs.filter((run) => isFailedConclusion(run.conclusion)).map((run) => run.name);
     return [...new Set(failed)].sort();
   });
 

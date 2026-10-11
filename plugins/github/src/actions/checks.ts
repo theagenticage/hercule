@@ -2,6 +2,7 @@
  * The workflow action that re-runs the failed checks on a GitHub pull
  * request's head commit.
  */
+import { isFailedConclusion } from "../github-objects";
 import { Clock, Effect, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import { ActionError } from "@hercule/plugin-host";
@@ -26,14 +27,10 @@ import { describePullRequest, fetchPullRequest, PULL_REQUEST_ADDRESS } from "./p
 /** The app slug of the check suites GitHub Actions creates, one for each workflow. */
 const GITHUB_ACTIONS_SLUG = "github-actions";
 
-/** The conclusions of a finished check suite that need nobody's attention. */
-const PASSING_CONCLUSIONS: ReadonlySet<string> = new Set(["success", "neutral", "skipped"]);
-
 /** Checks whether a check suite finished with a conclusion that needs attention. */
 const hasFailed = (suite: GithubCheckSuite): boolean =>
   suite.status === "completed" &&
-  suite.conclusion !== null &&
-  !PASSING_CONCLUSIONS.has(suite.conclusion) &&
+  isFailedConclusion(suite.conclusion) &&
   // A suite with no check runs is one GitHub made for an app with nothing to
   // run on this commit; there is nothing in it to run again.
   suite.latest_check_runs_count > 0;

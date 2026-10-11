@@ -33,8 +33,7 @@ import {
   type StoredEvent,
 } from "@hercule/plugin-host";
 import { readToken } from "./api";
-import { GithubAccount } from "./github-objects";
-import { PASSING_CONCLUSIONS } from "./ingest/checks";
+import { GithubAccount, isFailedConclusion, isPassingConclusion } from "./github-objects";
 import { ListedCheckRun, ListedComment } from "./ingest/feed-objects";
 import {
   decodeGithubValue,
@@ -748,9 +747,7 @@ export const buildChecksFailedSignal = (
       listing.items,
       "check runs",
     );
-    const failed = runs.filter(
-      (run) => run.conclusion !== null && !PASSING_CONCLUSIONS.has(run.conclusion),
-    );
+    const failed = runs.filter((run) => isFailedConclusion(run.conclusion));
     const pending = runs.filter((run) => run.status !== "completed");
     const rows = [...failed, ...pending].slice(0, MAX_CHECK_ROWS);
     // The failed checks come first among the rows, so the logs line up with the rows' first entries.
@@ -767,9 +764,7 @@ export const buildChecksFailedSignal = (
         {
           type: "checks",
           rows: rows.map((run, index) => buildCheckRow(run, logs[index])),
-          passed: runs.filter(
-            (run) => run.conclusion !== null && PASSING_CONCLUSIONS.has(run.conclusion),
-          ).length,
+          passed: runs.filter((run) => isPassingConclusion(run.conclusion)).length,
           omitted: failed.length + pending.length - rows.length,
         },
       ],

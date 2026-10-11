@@ -57,3 +57,19 @@ export const readReviewVerdict = (state: string): ReviewVerdict | undefined => {
       return undefined;
   }
 };
+
+/** The conclusions of a finished check that need nobody's attention. */
+const PASSING_CONCLUSIONS: ReadonlySet<string> = new Set(["success", "neutral", "skipped"]);
+
+/**
+ * Checks whether a check run or a check suite concluded in a way that needs
+ * attention, such as `failure`, `timed_out`, `cancelled` or
+ * `action_required`. A check that has not concluded yet has a null
+ * conclusion and has not failed.
+ */
+export const isFailedConclusion = (conclusion: string | null): boolean =>
+  conclusion !== null && !PASSING_CONCLUSIONS.has(conclusion);
+
+/** Checks whether a check run or a check suite concluded `success`, `neutral` or `skipped`. */
+export const isPassingConclusion = (conclusion: string | null): boolean =>
+  conclusion !== null && PASSING_CONCLUSIONS.has(conclusion);
