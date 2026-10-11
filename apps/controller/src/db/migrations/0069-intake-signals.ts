@@ -19,6 +19,8 @@
  *   call the source, so it can never run inside the router's transaction.
  *   The row keeps the Connection and the thread too, so an end the router
  *   sees before the step has run can drop the raise it makes pointless.
+ * - an index on the signals whose `build` failed, by kind, so the count the
+ *   build-failed Notification shows reads only those few rows.
  * - an index on the event id of `session_inputs` and of `run_steps`, so the
  *   known-work check (a live Subscription received this event) is a lookup
  *   rather than a scan of every input and step.
@@ -47,6 +49,8 @@ export default Effect.gen(function* () {
     CREATE INDEX signals_open_thread ON signals (connection_id, thread_ref)
     WHERE status = 'open'
   `;
+
+  yield* sql`CREATE INDEX signals_build_failed ON signals (kind) WHERE build_error IS NOT NULL`;
 
   yield* sql`
     CREATE TABLE signal_raises (
