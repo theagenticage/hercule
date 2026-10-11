@@ -1,7 +1,7 @@
 /**
  * What every GitHub workflow action shares: how it is defined, how it reads
  * the Connection's token, how it calls GitHub, and how it turns GitHub's
- * failures into an `ActionError`. All nine actions fail with the same codes:
+ * failures into an `ActionError`. Every action fails with the same codes:
  *
  * - `unauthenticated`: the step has no Connection, the Connection has no
  *   token, or GitHub rejected the token (401).

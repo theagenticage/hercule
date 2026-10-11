@@ -25,6 +25,26 @@ export const MAX_BLOCK_NAME_LENGTH = 256;
 /** The longest link a block carries. */
 export const MAX_BLOCK_URL_LENGTH = 2048;
 
+/** The most messages a messages block holds. The producer records the rest in `omitted`. */
+export const MAX_BLOCK_MESSAGES = 20;
+
+/** The most failed or pending rows a checks block holds. The producer records the rest in `omitted`. */
+export const MAX_CHECK_ROWS = 20;
+
+/** The most lines of a check's log. */
+export const MAX_CHECK_LOG_LINES = 40;
+
+/** The longest log of a check, in characters, so 40 very long lines are still refused. */
+export const MAX_CHECK_LOG_LENGTH = 8 * 1024;
+
+/**
+ * The most bytes one raised signal may take once written as JSON. Each field
+ * has its own limit, but together they still allow megabytes, and every open
+ * signal is read each time To do loads. A plugin's `build` that lays out a
+ * long block, such as many messages, counts bytes against it.
+ */
+export const MAX_SIGNAL_BYTES = 256 * 1024;
+
 /**
  * How much a Task matters, highest first. A signal has the same priorities,
  * so a signal and the Task made from it agree; `urgent` shows as Now. Shown

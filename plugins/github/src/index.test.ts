@@ -92,6 +92,7 @@ const KINDS = [
   "github.issue.opened",
   "github.issue.closed",
   "github.issue.reopened",
+  "github.issue.unassigned",
   "github.issue.labeled",
   "github.issue.assigned",
   "github.issue.commented",
@@ -119,6 +120,7 @@ const ACTIONS = [
   "pr.update",
   "pr.merge",
   "pr.create",
+  "checks.rerun",
 ];
 
 describe("what the github plugin registers", () => {
@@ -174,6 +176,7 @@ describe("what the github plugin registers", () => {
       .map(([kind]) => kind)
       .sort();
     expect(hidden).toEqual([
+      "github.issue.unassigned",
       "github.pr.checks-completed",
       "github.pr.labeled",
       "github.pr.review-request-removed",
@@ -181,7 +184,7 @@ describe("what the github plugin registers", () => {
     ]);
   });
 
-  it("declares the three signal kinds, reading only the source's own event kinds", async () => {
+  it("declares the six signal kinds, reading only the source's own event kinds", async () => {
     const source = (await collectContributions(github)).sources[0]!;
     const signalKinds = source.signalKinds ?? [];
 
@@ -189,6 +192,9 @@ describe("what the github plugin registers", () => {
       "review-requested",
       "team-review-requested",
       "mentioned",
+      "assigned",
+      "changes-requested",
+      "checks-failed",
     ]);
     for (const kind of signalKinds) {
       for (const eventKind of [...kind.from, ...kind.ends.map((end) => end.eventKind)]) {
@@ -197,16 +203,22 @@ describe("what the github plugin registers", () => {
     }
   });
 
-  it("lets a Signal's answer run the four actions spec 05 lists, and no other", async () => {
+  it("lets a Signal's answer run the five actions spec 05 lists, and no other", async () => {
     const actions = (await collectContributions(github)).actions;
 
     const answers = actions
       .filter((action) => action.usableIn?.some((place) => place === "signal.answer") === true)
       .map((action) => action.id);
-    expect(answers).toEqual(["issue.comment", "pr.comment", "pr.review", "pr.merge"]);
+    expect(answers).toEqual([
+      "issue.comment",
+      "pr.comment",
+      "pr.review",
+      "pr.merge",
+      "checks.rerun",
+    ]);
   });
 
-  it("contributes the nine actions, each acting through a GitHub Connection", async () => {
+  it("contributes the ten actions, each acting through a GitHub Connection", async () => {
     const actions = (await collectContributions(github)).actions;
 
     expect(actions.map((action) => action.id)).toEqual(ACTIONS);

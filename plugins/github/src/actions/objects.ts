@@ -18,6 +18,7 @@ import { ActionError } from "@hercule/plugin-host";
 import {
   GithubAccount,
   GithubAccounts,
+  GithubCheckSuite,
   GithubLabel,
   readReviewVerdict,
   ReviewVerdict,
@@ -245,3 +246,51 @@ export const decodeReview = (body: Schema.Json): Effect.Effect<Review, ActionErr
 /** Decodes the answer to a merge from GitHub's response. */
 export const decodeMerge = (body: Schema.Json): Effect.Effect<GithubMerge, ActionError> =>
   decodeGithubBody(GithubMerge, body);
+
+/** One page of `GET /repos/{owner}/{repo}/commits/{sha}/check-suites`. */
+const GithubCheckSuitePage = Schema.Struct({ check_suites: Schema.Array(GithubCheckSuite) });
+
+/**
+ * One page of `GET /repos/{owner}/{repo}/actions/runs`. `name` is the name of
+ * the workflow, or the run's own name when the workflow sets one.
+ */
+const GithubWorkflowRunPage = Schema.Struct({
+  workflow_runs: Schema.Array(
+    Schema.Struct({ id: Schema.Int, name: Schema.optionalKey(Schema.NullOr(Schema.String)) }),
+  ),
+});
+
+/** What `checks.rerun` returns. */
+export const ChecksRerun = Schema.Struct({
+  sha: Schema.String.annotate({ description: "The head commit whose checks were re-run." }),
+  rerun: Schema.Array(
+    Schema.Struct({
+      name: Schema.String.annotate({
+        description:
+          "The name of the GitHub Actions workflow that was re-run, or of the app whose checks were re-run.",
+      }),
+    }),
+  ).annotate({ description: "The check suites that were re-run, one entry for each." }),
+});
+
+export type ChecksRerun = Schema.Schema.Type<typeof ChecksRerun>;
+
+/** Decodes one page of check suites from GitHub's response. */
+export const decodeCheckSuitePage = (
+  body: Schema.Json,
+): Effect.Effect<ReadonlyArray<GithubCheckSuite>, ActionError> =>
+  Effect.map(decodeGithubBody(GithubCheckSuitePage, body), (page) => page.check_suites);
+
+/**
+ * Decodes a page of workflow runs from GitHub's response. `name` is
+ * undefined for a run GitHub gives no name.
+ */
+export const decodeWorkflowRuns = (
+  body: Schema.Json,
+): Effect.Effect<
+  ReadonlyArray<{ readonly id: number; readonly name: string | undefined }>,
+  ActionError
+> =>
+  Effect.map(decodeGithubBody(GithubWorkflowRunPage, body), (page) =>
+    page.workflow_runs.map((run) => ({ id: run.id, name: run.name ?? undefined })),
+  );

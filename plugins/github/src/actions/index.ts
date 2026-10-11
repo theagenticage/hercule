@@ -5,6 +5,7 @@
  * `github/issue.read`.
  */
 import type { WorkflowActionContribution } from "@hercule/plugin-host";
+import { checksRerun } from "./checks";
 import { issueComment, issueRead, issueUpdate } from "./issue";
 import { prComment, prCreate, prMerge, prRead, prReview, prUpdate } from "./pr";
 
@@ -18,4 +19,5 @@ export const GITHUB_WORKFLOW_ACTIONS: ReadonlyArray<WorkflowActionContribution> 
   prUpdate,
   prMerge,
   prCreate,
+  checksRerun,
 ];

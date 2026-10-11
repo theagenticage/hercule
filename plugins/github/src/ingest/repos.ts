@@ -15,16 +15,26 @@
  *    repository where nothing changed answers 304, which costs no quota.
  * 2. For each pull request diffed: `GET .../pulls/{n}/reviews`, for new
  *    reviews, and, when it is open or was just closed, `GET .../pulls/{n}`,
- *    for its head commit, its review requests and who merged it. When the
- *    review requests to the user or their teams changed, or the pull
- *    request asks for one of them, `GET .../issues/{n}/events` too, for who
- *    asked and when. The second case catches a request made again after a
- *    review between two polls: the reviewer leaves the list when they review
- *    and is back on it by the next poll, so the list alone looks unchanged,
- *    and the update time may not have moved either when both happened in
- *    the snapshot's own second. When the history holds a request or a
- *    removal to emit, `GET .../pulls/{n}` once more, after the reviews and
- *    the history, for who is asked now (see `emitReviewRequestEvents`).
+ *    for its head commit, its review requests and who merged it. It also
+ *    sends `GET .../issues/{n}/events`, for who asked and when, in any of
+ *    these cases:
+ *    - the review requests to the user or their teams changed;
+ *    - the pull request asks for the user or one of their teams. This
+ *      catches a request made again after a review between two polls: the
+ *      reviewer leaves the list when they review and is back on it by the
+ *      next poll, so the list alone looks unchanged, and the update time may
+ *      not have moved either when both happened in the snapshot's own
+ *      second;
+ *    - the user wrote the pull request. This finds the user asking someone
+ *      else for a review, which the list of reviewers asked cannot rule out.
+ *
+ *    When the history holds a request or a removal to emit,
+ *    `GET .../pulls/{n}` once more, after the reviews and the history, for
+ *    who is asked now (see `emitHistoryEvents`).
+ *
+ *    The history is also read for any issue or pull request whose assignees
+ *    changed, for who was assigned or unassigned, by whom and when. An item
+ *    whose assignees did not change costs no history request of its own.
  *    Reviews and history are read newest first, up to a page limit, and a
  *    listing cut short logs a warning.
  * 3. When the listing held any item, or the last poll's comment listing
@@ -90,22 +100,22 @@
  * state the diff started from. A poll that emitted its events but failed
  * before saving the snapshot diffs from the same snapshot next time and
  * builds the same keys, so the host writes each event once. When the item
- * changed again in between, a label or assignee change that grew holds a
- * different digest and is emitted again with the newer change in it, so
- * nothing is lost. The one key without a snapshot is `reopened` for an item
+ * changed again in between, a label change that grew holds a different
+ * digest and is emitted again with the newer change in it, so nothing is
+ * lost. The one key without a snapshot is `reopened` for an item
  * missing from it, which holds the item's own `updated_at`.
  */
 import { Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { IngestContext, PollResult } from "@hercule/plugin-host";
-import type { GithubIdentity } from "../identity";
+import { isUserAccount, type GithubIdentity } from "../identity";
 import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
 import {
   emitCommentEvents,
   emitNewReviews,
-  emitReviewRequestEvents,
+  emitHistoryEvents,
   emitInTimeOrder,
-  fetchReviewRequests,
+  fetchPull,
   isAtOrAfter,
   readReviewRequests,
   type ActivityPoll,
@@ -130,6 +140,7 @@ const ItemSnapshot = Schema.Struct({
   pullRequest: Schema.Boolean,
   state: Schema.String,
   labels: Schema.Array(Schema.String),
+  /** The logins of the assignees. A change in them makes the poll read the item's history. */
   assignees: Schema.Array(Schema.String),
   updatedAt: Schema.String,
   /** The head commit of an open pull request, to tell when a new one was pushed. */
@@ -312,19 +323,20 @@ const computeNewActivityStart = (
  * ended.
  *
  * - Not in the snapshot and created since the cursor: it is new. It is
- *   `opened`, and compared with an empty open item, so labels, assignees and
- *   a close that came with it emit too.
+ *   `opened`, and compared with an empty open item, so labels and a close
+ *   that came with it emit too.
  * - Not in the snapshot and older: it was closed at some point and the
  *   snapshot let go of it, or it lay beyond the first poll's page limit, or
  *   it was moved here from another repository. An open issue whose
  *   `state_reason` is `reopened` is `reopened`; anything else emits nothing,
- *   because its labels and assignees before are not known.
+ *   because its labels before are not known.
  * - In the snapshot: a close is `closed`, or `merged` for a pull request with
  *   a merge time; a reopen is `reopened` for an issue; labels added or
- *   removed are one `labeled`; new assignees of an issue are one `assigned`.
+ *   removed are one `labeled`.
  *
- * The plugin declares no kind for a pull request that was reopened or
- * assigned, and none for an unassignment, so those changes emit nothing.
+ * Assignments are not listed here: the item's history says who assigned
+ * whom and when, and `emitHistoryEvents` emits them. The plugin declares no
+ * kind for a pull request that was reopened, so that change emits nothing.
  * `mergedBy` is the login of who merged a pull request, when it is known.
  */
 const listItemChanges = (
@@ -357,10 +369,9 @@ const listItemChanges = (
         ]
       : [];
   }
-  const before: Pick<ItemSnapshot, "state" | "labels" | "assignees" | "updatedAt"> = previous ?? {
+  const before: Pick<ItemSnapshot, "state" | "labels" | "updatedAt"> = previous ?? {
     state: "open",
     labels: [],
-    assignees: [],
     updatedAt: issue.created_at,
   };
   // Every key of a diff holds the state it started from; see the header comment.
@@ -402,16 +413,6 @@ const listItemChanges = (
       title: `Labels changed on ${item}: ${[...added.map((name) => `+${name}`), ...removed.map((name) => `-${name}`)].join(" ")}`,
       author: null,
       fields: { added, removed },
-    });
-  }
-  const assigned = listMissingFrom(readAssignees(issue), before.assignees);
-  if (kind === "issue" && assigned.length > 0) {
-    changes.push({
-      kind: "github.issue.assigned",
-      dedupKey: `issue.assigned:${diffed}:${computeDigest(assigned)}`,
-      occurredAt: issue.updated_at,
-      title: `Issue ${item} was assigned to ${assigned.join(", ")}`,
-      author: null,
     });
   }
   if (before.state === "open" && issue.state === "closed") {
@@ -516,7 +517,10 @@ const baselineRepo = (
       items[String(issue.number)] = buildItemSnapshot(issue, {
         ...(pull === undefined
           ? {}
-          : { headSha: pull.head.sha, reviewRequests: readReviewRequests(poll, pull) }),
+          : {
+              headSha: pull.head.sha,
+              reviewRequests: readReviewRequests(poll, pull),
+            }),
         fromBaseline: true,
       });
     }
@@ -545,6 +549,13 @@ const buildItemSnapshot = (issue: ListedIssue, extras: SnapshotExtras): ItemSnap
   ...(extras.fromBaseline ? { fromBaseline: true } : {}),
   ...(extras.reviewRequests === undefined ? {} : { reviewRequests: extras.reviewRequests }),
 });
+
+/** Checks whether two lists of assignee logins hold different people, in any order. */
+const haveAssigneesChanged = (
+  before: ReadonlyArray<string>,
+  after: ReadonlyArray<string>,
+): boolean =>
+  listMissingFrom(after, before).length > 0 || listMissingFrom(before, after).length > 0;
 
 /** Checks whether two sorted lists of review requests differ. */
 const haveReviewRequestsChanged = (
@@ -727,8 +738,15 @@ const pollRepo = (
       }
       let headSha = previous?.headSha;
       let reviewRequests = previous?.reviewRequests;
+      // An item missing from the snapshot that is not new has unknown
+      // assignees before, so only the history since the cursor could tell,
+      // and it is not read: see `listItemChanges`.
+      let readsHistory =
+        (previous !== undefined || isNewItem(issue, previous, stored.cursor)) &&
+        haveAssigneesChanged(previous?.assignees ?? [], readAssignees(issue));
       if (item.kind === "pr") {
-        yield* emitNewReviews(poll, item, start);
+        const wroteIt = isUserAccount(poll.identity, issue.user);
+        yield* emitNewReviews(poll, item, start, wroteIt);
         if (pull !== undefined && pull.state === "open") {
           headSha = pull.head.sha;
           const now = readReviewRequests(poll, pull);
@@ -741,15 +759,21 @@ const pollRepo = (
           // comment).
           const before = previous === undefined ? [] : previous.reviewRequests;
           if (now.length > 0 || (before !== undefined && haveReviewRequestsChanged(before, now))) {
-            yield* emitReviewRequestEvents(
-              poll,
-              item,
-              start,
-              fetchReviewRequests(poll, item.number),
-            );
+            readsHistory = true;
           }
           reviewRequests = now;
+          // Every update of a pull request the user wrote reads the history,
+          // for a request the user made to someone else. The list of
+          // reviewers asked cannot rule one out: a reviewer asked again
+          // after their review is on it at both polls, and one who answered
+          // the new request before the next poll is on it at neither. Only
+          // the user's own pull requests pay this, so a busy repository
+          // does not cost a history read for every update of other people's.
+          if (wroteIt) readsHistory = true;
         }
+      }
+      if (readsHistory) {
+        yield* emitHistoryEvents(poll, item, start, fetchPull(poll, item.number));
       }
       // Every diffed item arms the comment listing, not only one whose comment
       // count went up: a comment deleted and another added leave the count
