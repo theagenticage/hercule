@@ -95,7 +95,16 @@ function Sessions(): JSX.Element {
       <Screen
         headline={describeFoundHarnesses(state.offers.map((row) => row.name))}
         lead={state.lead}
-        fine="A thread needs a harness that is logged in, so starting one waits on this."
+        fine={
+          <>
+            A thread needs a harness that is logged in, so starting one waits on this. Small
+            background tasks like Thread titles use a text generation model - change it in{" "}
+            <Link to="/settings/system" className="underline">
+              Settings &gt; System
+            </Link>
+            .
+          </>
+        }
         failure={probe.error === null ? null : readErrorMessage(probe.error)}
       >
         {state.offers.flatMap((row) => {

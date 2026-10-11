@@ -36,6 +36,7 @@ const api: Readonly<Record<string, Handler>> = {
       version: "0.1.0",
       defaultRunnerId: null,
       localRunnerId: null,
+      textGeneration: { model: null, lastFailure: null },
     },
   },
 };
@@ -62,7 +63,7 @@ const screens: readonly [path: string, title: string, headline: string][] = [
   ["/settings/secrets", "Secrets", "No secrets are stored."],
   ["/settings/bounds", "Bounds", "No trigger has a bound to show yet."],
   ["/settings/plugins", "Plugins", "No plugins are installed."],
-  ["/settings/system", "System", "The controller's settings are not editable yet."],
+  ["/settings/system", "System", "The rest of the controller's settings are not editable yet."],
 ];
 
 describe("every screen inside the shell", () => {

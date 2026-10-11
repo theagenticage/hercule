@@ -435,6 +435,12 @@ export {
   type SubagentNode,
 } from "./subagents/tree";
 export { resolveThreadRowsMode } from "./thread-rows";
+export {
+  buildTextGenerationField,
+  describeTextGenerationFailure,
+  type TextGenerationChoice,
+  type TextGenerationField,
+} from "./text-generation";
 export { findTimeOfDayError, formatTimeOfDay } from "./time-of-day";
 export { countUsedTokens, describeTokenUsage } from "./token-usage";
 export { formatAccessMode, type AccessModeMenuItem } from "./threads/access-modes";
