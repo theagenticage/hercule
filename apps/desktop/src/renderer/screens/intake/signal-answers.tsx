@@ -78,8 +78,7 @@ const groupAnswers = (
  *   box, the describe line and the send button, which `⌘↩` presses too.
  *   Every other answer is a ledger row.
  * - A click on the row of an answer with a text field calls `onOpenReply`;
- *   a click on any other row calls `onAct`. Done is not built yet, so its
- *   row does nothing and says so.
+ *   a click on any other row calls `onAct`.
  * - While `locked`, every answer keeps its place and its focus, and does
  *   nothing.
  * - A `failure` shows under the button of the answer that failed.
@@ -161,22 +160,17 @@ function AnswerRow({
   const { action, style, suggested } = answer;
   const describeId = `${idPrefix}-${action.id}-describe`;
   const errorId = `${idPrefix}-${action.id}-error`;
-  // Done needs `signal.markDone`, which the controller does not have yet.
-  // Its row stays, so the ledger reads as the spec draws it, but does nothing.
-  const inert = style === "done";
   return (
     <>
       <button
         type="button"
         className="ans"
         data-action-id={action.id}
-        data-inert={inert || undefined}
-        title={inert ? "Not built yet" : undefined}
         aria-label={action.label}
         aria-describedby={error === null ? describeId : `${describeId} ${errorId}`}
-        aria-disabled={inert || locked || undefined}
+        aria-disabled={locked || undefined}
         onClick={() => {
-          if (inert || locked) return;
+          if (locked) return;
           if (style === "reply") onOpenReply(action.id);
           else onAct(action.id);
         }}
@@ -191,7 +185,7 @@ function AnswerRow({
           <DescribeLineText action={action} />
         </span>
         {/* The key that answers from the pane: ↩ for the suggested answer, R to
-            open a reply, and E for Done, which stays inert with its row. */}
+            open a reply, and E for Done. */}
         {suggested ? (
           <kbd aria-hidden="true">↩</kbd>
         ) : style === "reply" ? (

@@ -141,15 +141,24 @@ export const readSortFields = (query: unknown): ReadonlyArray<string> => {
 };
 
 /**
+ * The page size and the cursor of a paged `query` operation, without `sort`.
+ * A list with one fixed order, such as each view of `signal.query`, takes
+ * these alone.
+ */
+export const cursorParams = Schema.Struct({
+  limit: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
+  ),
+  cursor: Schema.optionalKey(Schema.NonEmptyString),
+});
+
+/**
  * The pagination parameters of one `query` operation, over that operation's
  * own enum of sortable fields.
  */
 export const pageParams = <const Fields extends ReadonlyArray<string>>(fields: Fields) =>
   Schema.Struct({
-    limit: Schema.optionalKey(
-      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
-    ),
-    cursor: Schema.optionalKey(Schema.NonEmptyString),
+    ...cursorParams.fields,
     sort: Schema.optionalKey(sortParam(fields)),
   });
 

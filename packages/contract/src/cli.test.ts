@@ -107,6 +107,10 @@ const COMMANDS: Record<string, string> = {
   "signal.raise": "signal raise",
   "signal.act": "signal act",
   "signal.withdraw": "signal withdraw",
+  "signal.markDone": "signal done",
+  "signal.snooze": "signal snooze",
+  "signal.unsnooze": "signal unsnooze",
+  "signal.lowerPriority": "signal lower-priority",
 
   "project.query": "project list",
   "project.read": "project read",
@@ -299,6 +303,10 @@ const RESOLVES: Record<string, string> = {
   "signal.read id": "signal.query",
   "signal.act id": "signal.query",
   "signal.withdraw id": "signal.query",
+  "signal.markDone signalIds": "signal.query",
+  "signal.snooze signalIds": "signal.query",
+  "signal.unsnooze signalIds": "signal.query",
+  "signal.lowerPriority signalIds": "signal.query",
 
   "project.read id": "project.query",
   "project.update id": "project.query",
@@ -621,6 +629,8 @@ const USER_ONLY = [
   "controller.update",
   "conversation.send",
   "signal.act",
+  "signal.markDone",
+  "signal.lowerPriority",
 ];
 
 /**

@@ -24,6 +24,7 @@ import {
   type NounRow,
   type Requirement,
 } from "@hercule/contract";
+import { formatPositionalShape } from "./args";
 import { COMMANDS, listCommandsUnder, findMentions, type Command, type Field } from "./tree";
 
 /** The maximum line width before a line is wrapped. */
@@ -217,7 +218,7 @@ const listMentionedCommands = (command: Command): ReadonlyArray<string> => {
 export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
   const flags = [...command.payload.filter((field) => !field.stdin), ...command.query];
   const onStdin = command.payload.filter((field) => field.stdin);
-  const shape = command.positionals.map((field) => `<${field.spelling}>`).join(" ");
+  const shape = command.positionals.map(formatPositionalShape).join(" ");
   const lines: Array<string> = [...wrapParagraph(command.help, "")];
 
   const takesFlags = flags.length > 0 || command.paged || command.requires === "setup-token";
@@ -234,11 +235,15 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
   }
 
   if (command.positionals.length > 0) {
-    const width = Math.max(...command.positionals.map((field) => field.spelling.length)) + 2;
+    const width = Math.max(
+      ...command.positionals.map((field) => formatPositionalShape(field).length),
+    );
     lines.push("", "arguments:");
     for (const field of command.positionals) {
       const closed = field.choices === undefined ? "" : ` One of: ${field.choices.join(", ")}.`;
-      lines.push(...formatLabelledText(`<${field.spelling}>`, width, `${field.help}${closed}`));
+      lines.push(
+        ...formatLabelledText(formatPositionalShape(field), width, `${field.help}${closed}`),
+      );
     }
   }
 
@@ -270,7 +275,10 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
       rows.push(
         { label: "--limit <number>", notes: "optional; the page size" },
         { label: "--cursor <cursor>", notes: "optional; the nextCursor of the page before" },
-        {
+      );
+      // A list with one fixed order takes no --sort.
+      if (command.sortFields.length > 0) {
+        rows.push({
           label: "--sort <field>[:asc|desc]",
           notes: [
             "optional",
@@ -280,12 +288,12 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
           help: canRepeatSort
             ? "Repeat to break ties: the first --sort orders the list, and each later one orders only the rows the ones before it leave equal. No direction means asc."
             : "No direction means asc.",
-        },
-        {
-          label: "--all",
-          notes: "optional; follow nextCursor to the end and print every item",
-        },
-      );
+        });
+      }
+      rows.push({
+        label: "--all",
+        notes: "optional; follow nextCursor to the end and print every item",
+      });
     }
 
     const width = Math.max(...rows.map((row) => row.label.length));
@@ -325,7 +333,7 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
       "",
       "paging:",
       ...wrapParagraph(
-        "One page at a time, in the command's default order unless --sort says otherwise. The response includes nextCursor while more pages remain; pass it back as --cursor, or use --all to follow it to the end.",
+        `One page at a time, in the command's ${command.sortFields.length > 0 ? "default order unless --sort says otherwise" : "fixed order"}. The response includes nextCursor while more pages remain; pass it back as --cursor, or use --all to follow it to the end.`,
         "  ",
       ),
     );
@@ -386,10 +394,9 @@ export const buildNounHelp = (prefix: ReadonlyArray<string>): ReadonlyArray<stri
   const noun = prefix.join(" ");
   const commands = listCommandsUnder(prefix);
   const buildUsageShape = (command: Command): string =>
-    [
-      ...command.words.slice(prefix.length),
-      ...command.positionals.map((field) => `<${field.spelling}>`),
-    ].join(" ");
+    [...command.words.slice(prefix.length), ...command.positionals.map(formatPositionalShape)].join(
+      " ",
+    );
   // Only a root noun has a summary; a nested noun is described by its parent.
   const noted: NounRow | undefined =
     prefix.length === 1 ? NOUNS[prefix[0] as keyof typeof NOUNS] : undefined;

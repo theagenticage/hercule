@@ -178,6 +178,28 @@ describe("parseArguments", () => {
     );
   });
 
+  it("takes one or more words for a repeated positional, and refuses none", async () => {
+    const signalDone = lookUpCommand("signal", "done");
+    const args = await parseArguments(signalDone, ["a1", "b2", "c3"], refuseStdinRead);
+    expect(args.positionals).toEqual(["a1", "b2", "c3"]);
+    await expect(parseArguments(signalDone, [], refuseStdinRead)).rejects.toThrow(
+      /takes 1 or more argument/,
+    );
+  });
+
+  it("refuses --sort on a paged list with one fixed order", async () => {
+    const signalList = lookUpCommand("signal", "list");
+    await expect(parseArguments(signalList, ["--sort", "until"], refuseStdinRead)).rejects.toThrow(
+      /unknown flag --sort/,
+    );
+    const paged = await parseArguments(
+      signalList,
+      ["--view", "later", "--limit", "5"],
+      refuseStdinRead,
+    );
+    expect(paged.limit).toBe(5);
+  });
+
   it("sends null for a nullable field given null, and the text for a field that is not nullable", async () => {
     const detached = await parseArguments(taskUpdate, [ID, "--project", "null"], refuseStdinRead);
     expect(detached.payload["projectId"]).toBeNull();

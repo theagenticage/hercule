@@ -105,3 +105,16 @@ describe("the validation error line", () => {
     expect(readValidation("task.create")).toContain("nothing was written");
   });
 });
+
+describe("a repeated positional and a list with one fixed order", () => {
+  it("marks a positional that takes several words with ...", () => {
+    const lines = buildCommandHelp(readCommand("signal.markDone"));
+    expect(lines.some((line) => line.includes("signal done <signal-id>..."))).toBe(true);
+  });
+
+  it("offers no --sort on a paged list with one fixed order", () => {
+    const lines = buildCommandHelp(readCommand("signal.query"));
+    expect(lines.some((line) => line.includes("--limit"))).toBe(true);
+    expect(lines.some((line) => line.includes("--sort"))).toBe(false);
+  });
+});

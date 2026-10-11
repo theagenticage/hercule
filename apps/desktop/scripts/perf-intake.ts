@@ -101,14 +101,28 @@ export async function raiseSignals(
 }
 
 /**
- * Raises one signal of the kind `fyi` titled `title` through `signal.raise`.
- * Fails when the controller refuses it.
+ * Raises one signal and snoozes it for an hour, so Intake runs its snooze
+ * timer while the perf script reads it idle. The signal waits on Later, so To
+ * do still holds the signals `raiseSignals` raised and no more. Fails when
+ * the controller refuses either call.
+ */
+export async function raiseSnoozedSignal(fixture: ThreadFixture): Promise<void> {
+  const { signalId } = await raiseSignal(fixture, "Snoozed signal");
+  await fixture.call("POST", "/signals/snooze", {
+    signalIds: [signalId],
+    until: new Date(Date.now() + 3_600_000).toISOString(),
+  });
+}
+
+/**
+ * Raises one signal of the kind `fyi` titled `title` through `signal.raise`,
+ * and returns its id. Fails when the controller refuses it.
  *
  * The signal names no event: no plugin in the perf script's controller emits
  * one, and the contract allows an empty list.
  */
-async function raiseSignal(fixture: ThreadFixture, title: string): Promise<void> {
-  await fixture.call<SignalRaiseResult>("POST", "/signals/raise", {
+async function raiseSignal(fixture: ThreadFixture, title: string): Promise<SignalRaiseResult> {
+  return await fixture.call<SignalRaiseResult>("POST", "/signals/raise", {
     kind: "fyi",
     title,
     reason: "Raised by the perf script",

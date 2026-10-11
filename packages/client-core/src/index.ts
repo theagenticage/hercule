@@ -269,10 +269,12 @@ export {
   describeResolvedElsewhere,
   describeSignalAsker,
   describeSignalOutcome,
+  describeSignalOutcomeMoment,
   describeSignalProvenance,
   describeSignalRow,
   findReplyAnswer,
   findSuggestedAnswer,
+  groupSignalsByDay,
   groupSignalsIntoSections,
   isBackFromSnooze,
   listUrgentSignals,
@@ -298,6 +300,29 @@ export {
   type SignalRaiserNames,
   type UrgentSignal,
 } from "./intake";
+export {
+  applySignalMove,
+  buildSnoozeChoices,
+  countClearedToday,
+  decideSignalPaneMoves,
+  decideSignalRowControls,
+  describeBulkDoneTitle,
+  describeDoneRowOutcome,
+  describeIntakeFoot,
+  describeMoveToast,
+  describeSnoozeLine,
+  hasDoneAction,
+  isMoveLeavingView,
+  listBulkMoves,
+  parsePickedSnoozeTime,
+  planSignalMove,
+  reachesBeforeToday,
+  SIGNAL_MOVE_LABELS,
+  toggleSignalCheck,
+  type SignalMove,
+  type SignalMovePlan,
+  type SignalPaneMove,
+} from "./intake-moves";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
@@ -385,8 +410,11 @@ export {
 } from "./onboarding";
 export {
   chooseStamps,
+  computeNextMidnight,
+  formatClock,
   formatDayStamp,
   formatPreciseStamp,
+  formatRelativeMoment,
   formatSince,
   formatStamp,
   formatTimeContext,

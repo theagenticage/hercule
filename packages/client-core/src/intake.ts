@@ -1,6 +1,6 @@
 /**
  * How Intake reads the signals on To do: the count, the tabs, the sections
- * and their order, what a row and the pane say, and the answers in the order
+ * and their order, the day sections of Later and Done, what a row and the pane say, and the answers in the order
  * the pane draws them. Spec 17 §Intake owns the screen; spec 10 §9 owns the
  * Signal record.
  *
@@ -16,6 +16,7 @@ import {
   type SignalAction,
   type SignalOrigin,
 } from "@hercule/contract";
+import { countCalendarDaysBetween, formatRelativeDay, formatRelativeMoment } from "./time-context";
 
 /** A plugin's id and the name the user knows it by, as `plugin.query` returns them. */
 export interface PluginName {
@@ -56,7 +57,7 @@ const CORE_KIND_LABELS: Readonly<Record<string, string>> = {
  * becomes "review requested". Text that starts with an acronym, such as
  * "FYI", is returned unchanged, because "fYI" would misspell it.
  */
-const lowerFirst = (text: string): string =>
+export const lowerFirst = (text: string): string =>
   /^\p{Lu}{2}/u.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1);
 
 /** Returns `text` with its first letter in upper case: "an agent" becomes "An agent". */
@@ -78,7 +79,7 @@ export const parseSignalPluginId = (kind: string): string | null =>
  * word after the "/": dashes become spaces and the first letter is a
  * capital.
  */
-const nameSignalKind = (kind: string): string =>
+export const nameSignalKind = (kind: string): string =>
   CORE_KIND_LABELS[kind] ?? upperFirst(kind.slice(kind.indexOf("/") + 1).replaceAll("-", " "));
 
 /** Returns the name of the plugin `pluginId`, or the id itself when the plugin is not listed. */
@@ -253,11 +254,16 @@ export const buildIntakeTabs = (
   return { tabs, seenSourceIds: seen };
 };
 
-/** One section of the To do list. */
+/** One section of an Intake list, under its heading. */
 export interface IntakeSection {
-  /** `now` holds the `urgent` signals; `signals` holds every other one. */
-  readonly key: "now" | "signals";
-  readonly label: "Now" | "Signals";
+  /**
+   * On To do, `now` holds the `urgent` signals and `signals` every other
+   * one. On Later and Done, each calendar date has its own section, keyed
+   * `day:` and the number of days from today, such as `day:-1`.
+   */
+  readonly key: string;
+  /** The heading: "Now", "Signals", "Back Monday", "Yesterday". */
+  readonly label: string;
   /** The section's signals, in the order the list draws them. Never empty. */
   readonly signals: ReadonlyArray<Signal>;
 }
@@ -299,6 +305,42 @@ export const groupSignalsIntoSections = (
     ...(now.length > 0 ? [{ key: "now", label: "Now", signals: now } as const] : []),
     ...(rest.length > 0 ? [{ key: "signals", label: "Signals", signals: rest } as const] : []),
   ];
+};
+
+/**
+ * Groups the signals of Later or Done into one section per calendar date in
+ * `timezone`, in the order `signals` holds them, which the controller sorts:
+ *
+ * - Later, by the date each signal comes back: "Back today", "Back Monday";
+ * - Done, by the date each was resolved: "Today", "Yesterday", "Friday".
+ *
+ * The dates are named relative to `now`, as `formatRelativeDay` names them.
+ */
+export const groupSignalsByDay = (
+  signals: ReadonlyArray<Signal>,
+  view: "later" | "done",
+  now: Date,
+  timezone: string,
+): ReadonlyArray<IntakeSection> => {
+  const sections: Array<{ key: string; label: string; signals: Signal[] }> = [];
+  for (const signal of signals) {
+    const at = new Date((view === "later" ? signal.snooze?.until : signal.resolution?.at) ?? "");
+    const key = `day:${String(countCalendarDaysBetween(now, at, timezone))}`;
+    const last = sections.at(-1);
+    if (last?.key === key) {
+      last.signals.push(signal);
+      continue;
+    }
+    // Only a zone this runtime cannot read leaves a date unnamed; the
+    // heading is then left empty rather than wrong.
+    const day = formatRelativeDay(at, now, timezone) ?? "";
+    sections.push({
+      key,
+      label: view === "later" ? `Back ${day}` : upperFirst(day),
+      signals: [signal],
+    });
+  }
+  return sections;
 };
 
 /**
@@ -448,9 +490,35 @@ export interface SignalOutcome {
   readonly outcome: string;
   /** Who ended it: "by you", "by GitHub", "by an agent". */
   readonly by: string;
-  /** Whether the user's own move ended it, which the pane draws with a filled mark. */
+  /** Whether the user's own move ended it, which the pane draws with a green mark. */
   readonly byUser: boolean;
 }
+
+/**
+ * Returns the line under a resolved signal's outcome in the pane: where and
+ * when it ended, and by whom, with the moment relative to `now` in
+ * `timezone`:
+ *
+ * - "Here · today 10:42 · by you" when the user's move ended it;
+ * - "Withdrawn by GitHub · today 10:42" when its source withdrew it;
+ * - "Resolved by GitHub · yesterday 16:05" when someone else decided it.
+ *
+ * Returns `null` while the signal is open.
+ */
+export const describeSignalOutcomeMoment = (
+  signal: Signal,
+  plugins: ReadonlyArray<PluginName>,
+  now: Date,
+  timezone: string,
+): string | null => {
+  const { resolution } = signal;
+  if (signal.status === "open" || resolution === undefined) return null;
+  const moment = formatRelativeMoment(new Date(resolution.at), now, timezone) ?? "";
+  if (resolution.kind === "decided" && resolution.actor === "user")
+    return `Here · ${moment} · by you`;
+  const ended = resolution.kind === "withdrawn" ? "Withdrawn" : "Resolved";
+  return `${ended} by ${nameActor(resolution.actor, plugins)} · ${moment}`;
+};
 
 /**
  * Returns how a resolved signal ended, for the outcome the pane shows in
