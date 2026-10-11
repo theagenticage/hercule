@@ -4,13 +4,23 @@ import { useIsMutating, useMutation, useSuspenseQuery } from "@tanstack/react-qu
 import {
   buildAssistantDraft,
   buildAssistantUpdate,
+  hasUnsavedMemoryEdits,
   type AssistantDraft,
+  type MemoryEdits,
   NEW_ASSISTANT_NAME,
+  NO_MEMORY_EDITS,
   readErrorMessage,
 } from "@hercule/client-core";
+import { MEMORY_CORE } from "@hercule/contract";
 import { Button, EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
-import { assistantsQuery, profilesQuery, providersQuery } from "../../../app/queries";
+import {
+  assistantsQuery,
+  memoryDocumentQuery,
+  memoryQuery,
+  profilesQuery,
+  providersQuery,
+} from "../../../app/queries";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { SaveStatus } from "../../../screens/save-status";
 import {
@@ -19,17 +29,29 @@ import {
   type ChangeAssistantEdits,
 } from "./-assistant-form";
 import { AssistantList } from "./-assistant-list";
+import { AssistantMemory, type ChangeMemoryEdits } from "./-memory";
 
 export const Route = createFileRoute("/_shell/settings/assistants")({
   staticData: { title: "Assistants" },
   // The form's selects read the provider instances and the permission
   // profiles, so both load with the list and the form never waits for them.
-  loader: ({ context }) =>
-    Promise.all([
-      context.queryClient.ensureQueryData(assistantsQuery(context.client)),
-      context.queryClient.ensureQueryData(providersQuery(context.client)),
-      context.queryClient.ensureQueryData(profilesQuery(context.client)),
-    ]),
+  // The first assistant, the one selected on arrival, also has its memory
+  // index and core note loaded. A failed memory read does not fail the
+  // screen: the memory section shows its own error.
+  loader: async ({ context }) => {
+    const { client, queryClient } = context;
+    const [page] = await Promise.all([
+      queryClient.ensureQueryData(assistantsQuery(client)),
+      queryClient.ensureQueryData(providersQuery(client)),
+      queryClient.ensureQueryData(profilesQuery(client)),
+    ]);
+    const first = page.items[0];
+    if (first === undefined) return;
+    await Promise.all([
+      queryClient.prefetchQuery(memoryQuery(client, first.id)),
+      queryClient.prefetchQuery(memoryDocumentQuery(client, first.id, MEMORY_CORE)),
+    ]);
+  },
   component: Assistants,
 });
 
@@ -71,10 +93,21 @@ function Assistants(): JSX.Element {
     readonly fields: Partial<AssistantDraft>;
   }>({ assistantId: null, fields: {} });
   const fields = selected !== undefined && edits.assistantId === selected.id ? edits.fields : {};
+  // The memory edits are tagged the same way, and count as unsaved edits of
+  // the assistant: switching away asks before throwing them away too.
+  const [memoryEdits, setMemoryEdits] = useState<{
+    readonly assistantId: string | null;
+    readonly edits: MemoryEdits;
+  }>({ assistantId: null, edits: NO_MEMORY_EDITS });
+  const selectedMemoryEdits =
+    selected !== undefined && memoryEdits.assistantId === selected.id
+      ? memoryEdits.edits
+      : NO_MEMORY_EDITS;
   const hasUnsavedEdits =
     selected !== undefined &&
-    Object.keys(buildAssistantUpdate(selected, { ...buildAssistantDraft(selected), ...fields }))
-      .length > 0;
+    (Object.keys(buildAssistantUpdate(selected, { ...buildAssistantDraft(selected), ...fields }))
+      .length > 0 ||
+      hasUnsavedMemoryEdits(selectedMemoryEdits));
   const busy = useIsMutating({ mutationKey: ASSISTANT_MUTATION_KEY }) > 0;
 
   const [leaving, setLeaving] = useState<Leaving | null>(null);
@@ -112,6 +145,7 @@ function Assistants(): JSX.Element {
   const leave = (next: Leaving): void => {
     setLeaving(null);
     setEdits({ assistantId: null, fields: {} });
+    setMemoryEdits({ assistantId: null, edits: NO_MEMORY_EDITS });
     if (next._tag === "select") {
       setSelectedId(next.assistantId);
       focusSelectedRowRef.current = true;
@@ -129,6 +163,14 @@ function Assistants(): JSX.Element {
     setEdits((current) => ({
       assistantId: selected.id,
       fields: update(current.assistantId === selected.id ? current.fields : {}),
+    }));
+  };
+
+  const changeMemoryEdits: ChangeMemoryEdits = (update) => {
+    if (selected === undefined) return;
+    setMemoryEdits((current) => ({
+      assistantId: selected.id,
+      edits: update(current.assistantId === selected.id ? current.edits : NO_MEMORY_EDITS),
     }));
   };
 
@@ -209,6 +251,16 @@ function Assistants(): JSX.Element {
           setLeaving(null);
           focusSelectedRowRef.current = true;
         }}
+      />
+
+      <AssistantMemory
+        // Keyed by the assistant, so the open topic and the save state of
+        // one assistant's memory never show on another.
+        key={`memory-${selected.id}`}
+        client={client}
+        assistantId={selected.id}
+        edits={selectedMemoryEdits}
+        onEditsChange={changeMemoryEdits}
       />
     </div>
   );

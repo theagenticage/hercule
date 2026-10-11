@@ -60,6 +60,24 @@ export {
   listContextFractionChoices,
   listContextTokenChoices,
 } from "./assistants/rotation";
+export {
+  buildMemoryWrite,
+  computeMemoryFill,
+  describeShrinkLoss,
+  describeTopicCount,
+  describeTopicNameConflict,
+  dropSavedMemoryEdit,
+  formatMemorySize,
+  formatMemoryUsage,
+  hasUnsavedMemoryEdits,
+  isShrinkRejected,
+  listMemoryTopics,
+  mergeMemoryEdit,
+  NO_MEMORY_EDITS,
+  type MemoryEdit,
+  type MemoryEdits,
+  type NewTopicDraft,
+} from "./assistants/memory";
 export { buildAssistantProviderField } from "./assistants/provider-field";
 export { buildAssistantRows, decideAssistantPose, type AssistantRow } from "./assistants/rows";
 export { checkImageFile, formatAttachmentSize, type ImageFile } from "./attachments/files";
