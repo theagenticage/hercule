@@ -298,6 +298,26 @@ export {
   type SignalRaiserNames,
   type UrgentSignal,
 } from "./intake";
+export {
+  buildSnoozeChoices,
+  countClearedToday,
+  decideSignalRowControls,
+  describeDoneRowOutcome,
+  describeIntakeFoot,
+  describeMoveToast,
+  describeSnoozeUntil,
+  hasDoneAction,
+  listBulkMoves,
+  parsePickedSnoozeTime,
+  planBulkAction,
+  reachesBeforeToday,
+  toggleSignalCheck,
+  type BulkPlan,
+  type ClearedToday,
+  type SignalMove,
+  type SignalRowControls,
+  type SnoozeChoice,
+} from "./intake-moves";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
