@@ -9,6 +9,7 @@ import {
   infiniteQueryOptions,
   keepPreviousData,
   queryOptions,
+  type EnsureInfiniteQueryDataOptions,
   type EnsureQueryDataOptions,
   type QueryClient,
   type QueryKey,
@@ -33,6 +34,7 @@ import {
   LIVE_SESSION_STATUSES,
   MAX_PAGE_LIMIT,
   type ConversationMessage,
+  type EventHandling,
   type Input,
   type Runner,
   type Session,
@@ -931,6 +933,51 @@ export const signalQuery = (client: HerculeClient, id: string) =>
     retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
+
+/** What the Everything view narrows its events by. Each field is absent when that filter is off. */
+export interface EverythingFilter {
+  readonly text?: string;
+  readonly source?: string;
+  readonly handling?: EventHandling;
+}
+
+/**
+ * Reads Intake's Everything view page by page, newest first: the events
+ * Intake covers, with the facts their handlings are drawn from, narrowed by
+ * `filter`. Not a live topic: the log is append-only, so Intake reads it
+ * again each time it opens, see `readInfiniteOnOpen`.
+ */
+export const eventsEverythingQuery = (client: HerculeClient, filter: EverythingFilter = {}) => {
+  const listing = {
+    intake: true,
+    ...(filter.text === undefined ? {} : { text: filter.text }),
+    ...(filter.source === undefined ? {} : { source: filter.source }),
+    ...(filter.handling === undefined ? {} : { handling: [filter.handling] }),
+  };
+  return infiniteQueryOptions({
+    queryKey: queryKeys.events(listing),
+    queryFn: ({ pageParam }) =>
+      client.event.query({
+        query: pageParam === undefined ? listing : { ...listing, cursor: pageParam },
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    ...READ_ON_OPEN_OPTIONS,
+  });
+};
+
+/**
+ * Reads the first page of the infinite `options` once for this opening of a
+ * screen, as `readOnOpen` does for a plain read. When the listing is held,
+ * every held page is read again in the background.
+ */
+export const readInfiniteOnOpen = <Page, PageParam>(
+  queryClient: QueryClient,
+  options: EnsureInfiniteQueryDataOptions<Page, Error, Page, QueryKey, PageParam>,
+) => {
+  void queryClient.invalidateQueries({ queryKey: options.queryKey, refetchType: "none" });
+  return queryClient.ensureInfiniteQueryData({ ...options, revalidateIfStale: true });
+};
 
 /**
  * Reads one event, for the address Intake's pane opens a signal at on its
