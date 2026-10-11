@@ -956,8 +956,12 @@ describe("parseMarkdown worst-case input", () => {
   });
 
   it("parses a definition with many lazy continuation lines in linear time", () => {
+    // The lines become one paragraph, and marked's own paragraph pattern hangs in
+    // Bun on Linux somewhere between 20,000 and 50,000 lines, even with no
+    // footnote. The apps run on V8, which has no such limit. 20,000 lines still
+    // take seconds if reading the definition costs more than linear time.
     const started = performance.now();
-    parseMarkdown(`[^a]: first\n${"lazy\n".repeat(50_000)}`);
+    parseMarkdown(`[^a]: first\n${"lazy\n".repeat(20_000)}`);
     expect(performance.now() - started).toBeLessThan(1000);
   });
 
