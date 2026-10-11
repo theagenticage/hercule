@@ -13,6 +13,12 @@
   border-radius: var(--r-lg);
   color: var(--ink);
 }
+/* The card takes the focus when it opens, so that a screen reader reads it
+   and Escape returns to the node. The open card itself shows where the
+   focus is, so it draws no ring. */
+.node-pop:focus-visible {
+  outline: none;
+}
 /* The node's id is the title and its kind is on the right; a long id gives way first. */
 .node-pop .pop-h b {
   min-width: 0;
@@ -20,7 +26,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.node-pop .pop-h .ic {
+/* The node's icon, or a plugin action's mark, in muted ink. */
+.node-pop .pop-h :is(.ic, .br) {
   flex: none;
   color: var(--muted);
 }

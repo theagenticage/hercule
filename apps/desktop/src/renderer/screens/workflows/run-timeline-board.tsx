@@ -13,7 +13,7 @@
  * the day is drawn as a percentage of the lanes' width, so the axis and the
  * lanes line up, being as wide as the pane's content.
  */
-import { useState, type JSX, type KeyboardEvent } from "react";
+import { useRef, type JSX, type KeyboardEvent } from "react";
 import type {
   TimelineBar,
   TimelineFire,
@@ -44,16 +44,11 @@ declare module "react" {
     "--track"?: number;
     /** How many tracks the lanes are tall. */
     "--tracks"?: number;
-    /** A bar's place in the order the bars arrive in, 0 for the first. */
-    "--order"?: number;
   }
 }
 
 /** The two ways the Runs tab shows a workflow's runs. */
 export type RunsView = "list" | "timeline";
-
-/** How many bars arrive one after another; the rest arrive together, as one layer. */
-const STAGGERED_BAR_COUNT = 8;
 
 /** Returns a place across the day, from 0 to 1, as a CSS percentage. */
 const formatPlace = (place: number): string => `${String(place * 100)}%`;
@@ -103,35 +98,56 @@ export function RunsViewPicker({
 
 /**
  * Renders the timeline's day stepper: the day it draws, `dayText`, between a
- * step back and a step on, which is disabled on today. Away from today, a
+ * step back, which cannot act on the oldest day the timeline shows
+ * (`isOldest`), and a step on, which cannot act on today. Away from today, a
  * quiet "Today" button leads it, as in the Mac's Calendar.
+ *
+ * Focus never falls out of the stepper. Each step is `aria-disabled` rather
+ * than `disabled` where it cannot act, so it keeps the focus when it steps
+ * onto that day. The "Today" button is gone on today, as the book draws it, so a
+ * click on it moves the focus to the step back first.
  */
 export function TimelineDayStepper({
   dayText,
   isToday,
+  isOldest,
   onStepBack,
   onStepOn,
   onShowToday,
 }: {
   readonly dayText: string;
   readonly isToday: boolean;
+  readonly isOldest: boolean;
   readonly onStepBack: () => void;
   readonly onStepOn: () => void;
   readonly onShowToday: () => void;
 }): JSX.Element {
+  const stepBackRef = useRef<HTMLButtonElement>(null);
   return (
     <span className="stepper">
       {isToday ? null : (
-        <button type="button" className="btn btn--quiet btn--sm" onClick={onShowToday}>
+        <button
+          type="button"
+          className="btn btn--quiet btn--sm"
+          onClick={() => {
+            stepBackRef.current!.focus();
+            onShowToday();
+          }}
+        >
           Today
         </button>
       )}
       <button
+        ref={stepBackRef}
         type="button"
         className="icon-btn"
         aria-label="Show the day before"
         title="Show the day before"
-        onClick={onStepBack}
+        aria-disabled={isOldest || undefined}
+        data-unready={isOldest || undefined}
+        onClick={() => {
+          if (!isOldest) onStepBack();
+        }}
       >
         <ChevronLeftIcon size={14} />
       </button>
@@ -143,8 +159,11 @@ export function TimelineDayStepper({
         className="icon-btn"
         aria-label="Show the day after"
         title="Show the day after"
-        disabled={isToday}
-        onClick={onStepOn}
+        aria-disabled={isToday || undefined}
+        data-unready={isToday || undefined}
+        onClick={() => {
+          if (!isToday) onStepOn();
+        }}
       >
         <ChevronRightIcon size={14} />
       </button>
@@ -193,12 +212,6 @@ export function TimelineAxis({
  * run, and a tick for each fire still to come. `label` names the day for
  * assistive technology, and a day with no runs shows `emptyText`. The times
  * in the bars' names read `timezone`.
- *
- * The component is drawn afresh for each day (its key is the day), so its
- * first bars arrive because the user opened the timeline or stepped to the
- * day. The first eight arrive one after another; the rest sit in one layer
- * that fades in once, so a day of hundreds of runs animates nine layers, not
- * hundreds.
  */
 export function TimelineLanes({
   label,
@@ -219,17 +232,6 @@ export function TimelineLanes({
   readonly emptyText: string;
   readonly timezone: string;
 }): JSX.Element {
-  const lateRunIds = useLateRunIds(bars);
-  const drawBar = (bar: TimelineBar, order: number): JSX.Element => (
-    <RunBar
-      key={bar.row.id}
-      bar={bar}
-      order={order}
-      now={now}
-      isLate={lateRunIds.has(bar.row.id)}
-      timezone={timezone}
-    />
-  );
   return (
     <div
       className="lanes"
@@ -252,48 +254,19 @@ export function TimelineLanes({
         </span>
       ))}
       {bars.length === 0 ? <p className="lanes-empty">{emptyText}</p> : null}
-      {bars.slice(0, STAGGERED_BAR_COUNT).map(drawBar)}
-      {bars.length > STAGGERED_BAR_COUNT ? (
-        <div className="lanes-rest">
-          {bars
-            .slice(STAGGERED_BAR_COUNT)
-            .map((bar, index) => drawBar(bar, STAGGERED_BAR_COUNT + index))}
-        </div>
-      ) : null}
+      {bars.map((bar) => (
+        <RunBar key={bar.row.id} bar={bar} now={now} timezone={timezone} />
+      ))}
     </div>
   );
 }
 
 /**
- * Returns the ids of the runs whose bars arrived, or whose marks changed,
- * after the lanes were first drawn. A run stays in the set once it is in it.
- *
- * A bar drawn first arrives because the user asked for the day, so its line
- * sweeps in. A later bar arrives because a run started or changed, which the
- * user did not do, so it only pops in its mark.
- */
-function useLateRunIds(bars: ReadonlyArray<TimelineBar>): ReadonlySet<string> {
-  const [firstStates] = useState(() => new Map(bars.map((bar) => [bar.row.id, bar.row.state])));
-  const [lateRunIds, setLateRunIds] = useState<ReadonlySet<string>>(new Set());
-  const newlyLate = bars
-    .filter((bar) => !lateRunIds.has(bar.row.id) && firstStates.get(bar.row.id) !== bar.row.state)
-    .map((bar) => bar.row.id);
-  // Set while rendering, so the late bar never draws one frame with its sweep.
-  if (newlyLate.length > 0) setLateRunIds(new Set([...lateRunIds, ...newlyLate]));
-  return lateRunIds;
-}
-
-/**
  * Renders the mark at a bar's end: the run's mark, or a faint dot for a
- * cancelled run and one that has not started, which have none. Keyed by the
- * run's state, so the mark pops in again each time the state changes.
+ * cancelled run and one that has not started, which have none.
  */
 function BarMark({ state }: { readonly state: RunRow["state"] }): JSX.Element {
-  return hasRunMark(state) ? (
-    <Mark key={state} state={state} />
-  ) : (
-    <span key={state} className="dot dot--mark" />
-  );
+  return hasRunMark(state) ? <Mark state={state} /> : <span className="dot dot--mark" />;
 }
 
 /**
@@ -301,22 +274,17 @@ function BarMark({ state }: { readonly state: RunRow["state"] }): JSX.Element {
  * the end. A live run's bar ends at `now`. A bar cut at the day's start or
  * end has a square end there, and a chevron beside it pointing to the day
  * the run went on into; a bar cut at the end has no mark, because the run
- * had not ended there. `isLate` is whether the bar arrived or changed after
- * the lanes were first drawn.
+ * had not ended there.
  *
  * Its name describes the run, with the times kept current by the age clock.
  */
 function RunBar({
   bar,
-  order,
   now,
-  isLate,
   timezone,
 }: {
   readonly bar: TimelineBar;
-  readonly order: number;
   readonly now: TimelineNow | null;
-  readonly isLate: boolean;
   readonly timezone: string;
 }): JSX.Element {
   const { row } = bar;
@@ -335,7 +303,6 @@ function RunBar({
     row.statusTone === "muted" ? "" : `run-bar--${row.statusTone}`,
     bar.startsBefore ? "is-cut-start" : "",
     bar.endsAfter ? "is-cut-end" : "",
-    isLate ? "is-late" : "",
   ]
     .filter((name) => name !== "")
     .join(" ");
@@ -349,7 +316,6 @@ function RunBar({
         "--at": formatPlace(bar.from),
         "--span": formatPlace(Math.max(to - bar.from, 0)),
         "--track": bar.track,
-        "--order": order,
       }}
     >
       {bar.startsBefore ? (

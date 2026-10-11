@@ -208,6 +208,24 @@ const openWorkflows = async (
     "GET /api/v1/workflows": { body: { items: workflows } },
     "GET /api/v1/triggers": { body: { items: TRIGGERS } },
     "GET /api/v1/runs": answerRunQuery,
+    // What an open workflow reads besides the list: the workflow itself,
+    // with one step, and the Agents and workflow actions that name steps.
+    ...Object.fromEntries(
+      workflows.map((workflow): [string, Handler] => [
+        `GET /api/v1/workflows/${workflow.id}`,
+        {
+          body: {
+            id: workflow.id,
+            enabled: workflow.enabled,
+            source: `name: ${workflow.name}\nsteps:\n  - id: review\n    kind: agent\n    agent: 01a06d02-7b00-7000-8000-000000000001\n    prompt: Review.\n`,
+            createdAt: AT,
+            updatedAt: AT,
+          },
+        },
+      ]),
+    ),
+    "GET /api/v1/agents": { body: { items: [] } },
+    "GET /api/v1/workflow-actions": { body: [] },
   };
   const calls = stubApi(handlers);
   const app = await renderApp(
@@ -332,6 +350,29 @@ describe("the workflow list", () => {
     expect(selected.getAttribute("aria-current")).toBe("page");
     // The selected row is drawn with the selection's fill, which only its class shows.
     expect(selected.classList.contains("is-on")).toBe(true);
+  });
+
+  it("keeps the focus on the open workflow's row while the list changes width", async () => {
+    const { router } = await openWorkflows();
+    act(() => within(getList()).getByRole("link", { name: "Nightly sync" }).focus());
+
+    await userEvent.keyboard("{Enter}");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/workflows/${SYNC.id}`));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(getList()).getByRole("link", { name: "Nightly sync" }),
+      ),
+    );
+
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/workflows"));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(getList()).getByRole("link", { name: "Nightly sync" }),
+      ),
+    );
   });
 
   it("says when there are no workflows", async () => {

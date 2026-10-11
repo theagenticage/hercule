@@ -15,6 +15,7 @@ import type {
   WorkflowAction,
   WorkflowSummary,
 } from "@hercule/contract";
+import { MAX_TIMELINE_DAYS_BACK } from "@hercule/client-core/run-timeline";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -24,6 +25,7 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   stubElementSize,
+  holdAnswer,
   type Call,
   type Handler,
 } from "../../../../app/testing";
@@ -77,6 +79,13 @@ const SHIP: Workflow = {
   source: SOURCE,
   createdAt: AT,
   updatedAt: AT,
+};
+
+/** Tag release: a second workflow, with Ship release's steps under another name. */
+const TAG: Workflow = {
+  ...SHIP,
+  id: "01a06d02-7800-7000-8000-000000000002",
+  source: SOURCE.replace("name: Ship release", "name: Tag release"),
 };
 
 const SHIP_SUMMARY: WorkflowSummary = {
@@ -195,6 +204,10 @@ const openShip = async ({
   return { calls, ...app };
 };
 
+/** Returns how many GET requests in `calls` went to `path`. */
+const countReads = (calls: readonly Call[], path: string): number =>
+  calls.filter((call) => call.method === "GET" && call.path === path).length;
+
 const getPage = () => screen.getByRole("region", { name: "Ship release" });
 const getTabs = () => within(getPage()).getByRole("tablist", { name: "Workflow" });
 const getTab = (name: RegExp) => within(getTabs()).getByRole("tab", { name });
@@ -216,6 +229,10 @@ describe("the open workflow's lead", () => {
   it("shows the name with its switch, what the switch does, the description and the chips", async () => {
     await openShip();
 
+    // The page is a region named by its heading.
+    expect(getPage().getAttribute("aria-labelledby")).toBe(
+      within(getPage()).getByRole("heading", { level: 1 }).id,
+    );
     expect(getWorkflowSwitch().getAttribute("aria-checked")).toBe("true");
     expect(
       within(getPage()).getByText(
@@ -239,7 +256,8 @@ describe("the open workflow's lead", () => {
     expect(
       within(chips)
         .getByText(/github\.issue\.opened/)
-        .classList.contains("chip--fail"),
+        .closest("li")
+        ?.classList.contains("chip--fail"),
     ).toBe(true);
   });
 
@@ -260,10 +278,15 @@ describe("the open workflow's lead", () => {
 
 describe("the open workflow's switches", () => {
   it("turn the workflow off with workflow.update, and show the off hint", async () => {
+    // The page reads the workflow again after the save, so the controller
+    // answers with what it saved.
+    let saved = SHIP;
     const { calls } = await openShip({
       overrides: {
-        [`PATCH /api/v1/workflows/${SHIP_ID}`]: {
-          body: { workflow: { ...SHIP, enabled: false }, warnings: [] },
+        [`GET /api/v1/workflows/${SHIP_ID}`]: () => ({ body: saved }),
+        [`PATCH /api/v1/workflows/${SHIP_ID}`]: () => {
+          saved = { ...SHIP, enabled: false };
+          return { body: { workflow: saved, warnings: [] } };
         },
       },
     });
@@ -298,10 +321,15 @@ describe("the open workflow's switches", () => {
   });
 
   it("pause a start trigger, and put its switch back and say why when the save fails", async () => {
+    // The page reads the triggers again after a save, so the controller
+    // answers with what it saved.
+    let nightlyNow = NIGHTLY;
     const { calls } = await openShip({
       overrides: {
-        [`POST /api/v1/workflows/${SHIP_ID}/triggers/nightly/pause`]: {
-          body: { ...NIGHTLY, status: "paused" },
+        "GET /api/v1/triggers": () => ({ body: { items: [nightlyNow, ON_ISSUE] } }),
+        [`POST /api/v1/workflows/${SHIP_ID}/triggers/nightly/pause`]: () => {
+          nightlyNow = { ...NIGHTLY, status: "paused" };
+          return { body: nightlyNow };
         },
         [`POST /api/v1/workflows/${SHIP_ID}/triggers/on_issue/pause`]: {
           status: 500,
@@ -324,6 +352,144 @@ describe("the open workflow's switches", () => {
     expect(alert.textContent).toBe("Could not save: the disk is full");
     expect(onIssue.getAttribute("aria-checked")).toBe("true");
   });
+
+  it("keep a trigger's failure under that trigger while another trigger saves", async () => {
+    let nightlyNow = NIGHTLY;
+    await openShip({
+      overrides: {
+        "GET /api/v1/triggers": () => ({ body: { items: [nightlyNow, ON_ISSUE] } }),
+        [`POST /api/v1/workflows/${SHIP_ID}/triggers/on_issue/pause`]: {
+          status: 500,
+          body: buildErrorBody("internal", "the disk is full"),
+        },
+        [`POST /api/v1/workflows/${SHIP_ID}/triggers/nightly/pause`]: () => {
+          nightlyNow = { ...NIGHTLY, status: "paused" };
+          return { body: nightlyNow };
+        },
+      },
+    });
+    await userEvent.click(getTab(/^Triggers/));
+    await userEvent.click(within(getPanel()).getByRole("switch", { name: "on_issue starts runs" }));
+    await within(getPanel()).findByRole("alert");
+
+    await userEvent.click(within(getPanel()).getByRole("switch", { name: "nightly starts runs" }));
+
+    await waitFor(() =>
+      expect(
+        within(getPanel())
+          .getByRole("switch", { name: "nightly starts runs" })
+          .getAttribute("aria-checked"),
+      ).toBe("false"),
+    );
+    const [alert, ...others] = within(getPanel()).getAllByRole("alert");
+    expect(others).toEqual([]);
+    expect(
+      within(getPanel())
+        .getByRole("switch", { name: "on_issue starts runs" })
+        .getAttribute("aria-describedby"),
+    ).toBe(alert!.id);
+  });
+
+  it("clear a failure when a press queued behind the failed save saves", async () => {
+    const first = holdAnswer();
+    let patches = 0;
+    await openShip({
+      overrides: {
+        [`PATCH /api/v1/workflows/${SHIP_ID}`]: () =>
+          ++patches === 1 ? first.handler() : { body: { workflow: SHIP, warnings: [] } },
+      },
+    });
+
+    // Off, then on again while the first save is on its way.
+    await userEvent.click(getWorkflowSwitch());
+    await userEvent.click(getWorkflowSwitch());
+    first.answer({ status: 500, body: buildErrorBody("internal", "the disk is full") });
+
+    await waitFor(() => expect(patches).toBe(2));
+    await waitFor(() => expect(within(getPage()).queryByRole("alert")).toBeNull());
+    expect(getWorkflowSwitch().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("end as the controller has the workflow when a newer change arrives while a save is on its way", async () => {
+    const save = holdAnswer();
+    const NEWER_SOURCE = SOURCE.replace(
+      "description: Reviews the main branch and opens the release pull request.",
+      "description: Opens the release pull request.",
+    );
+    let stored = SHIP;
+    const { live, context } = await openShip({
+      overrides: {
+        [`GET /api/v1/workflows/${SHIP_ID}`]: () => ({ body: stored }),
+        [`PATCH /api/v1/workflows/${SHIP_ID}`]: save.handler,
+      },
+    });
+    await waitFor(() => expect(live.readTopics()).toContain("workflow"));
+
+    await userEvent.click(getWorkflowSwitch());
+    // Another writer changes the description after the switch was saved.
+    stored = { ...SHIP, enabled: false, source: NEWER_SOURCE };
+    act(() => live.pushInvalidation("workflow", [SHIP_ID]));
+    await within(getPage()).findByText("Opens the release pull request.");
+    // The save's answer holds the workflow as it was saved, before that change.
+    save.answer({ body: { workflow: { ...SHIP, enabled: false }, warnings: [] } });
+
+    // The save counts as running until the workflow is read again.
+    await waitFor(() => expect(context.queryClient.isMutating()).toBe(0));
+    expect(getWorkflowSwitch().getAttribute("aria-checked")).toBe("false");
+    expect(within(getPage()).getByText("Opens the release pull request.")).toBeTruthy();
+  });
+});
+
+describe("an open workflow that is deleted", () => {
+  it("says the workflow was not found", async () => {
+    let isDeleted = false;
+    const { live } = await openShip({
+      overrides: {
+        [`GET /api/v1/workflows/${SHIP_ID}`]: () =>
+          isDeleted
+            ? { status: 404, body: buildErrorBody("not_found", `no workflow ${SHIP_ID}`) }
+            : { body: SHIP },
+      },
+    });
+    await waitFor(() => expect(live.readTopics()).toContain("workflow"));
+
+    isDeleted = true;
+    act(() => live.pushInvalidation("workflow", [SHIP_ID]));
+
+    await screen.findByRole("heading", { level: 1, name: "This workflow was not found." });
+  });
+});
+
+describe("opening another workflow from an open one", () => {
+  it("reads the Agents and the workflow actions again, and a new search reads neither", async () => {
+    const { calls, router } = await openShip({
+      overrides: { [`GET /api/v1/workflows/${TAG.id}`]: { body: TAG } },
+    });
+    const agentReads = countReads(calls, "/api/v1/agents");
+    const actionReads = countReads(calls, "/api/v1/workflow-actions");
+
+    await act(() =>
+      router.navigate({ to: "/workflows/$workflowId", params: { workflowId: TAG.id } }),
+    );
+
+    await screen.findByRole("heading", { level: 1, name: "Tag release" });
+    await waitFor(() => expect(countReads(calls, "/api/v1/agents")).toBe(agentReads + 1));
+    await waitFor(() =>
+      expect(countReads(calls, "/api/v1/workflow-actions")).toBe(actionReads + 1),
+    );
+
+    await act(() =>
+      router.navigate({
+        to: "/workflows/$workflowId",
+        params: { workflowId: TAG.id },
+        search: { runsView: "timeline" },
+      }),
+    );
+
+    await screen.findByRole("group", { name: "Runs, Today" });
+    expect(countReads(calls, "/api/v1/agents")).toBe(agentReads + 1);
+    expect(countReads(calls, "/api/v1/workflow-actions")).toBe(actionReads + 1);
+  });
 });
 
 describe("the open workflow's tabs", () => {
@@ -337,6 +503,8 @@ describe("the open workflow's tabs", () => {
     ).toEqual(["Runs", "Triggers2", "Inputs1", "Source"]);
     expect(getTab(/^Runs/).getAttribute("aria-selected")).toBe("true");
     expect(getPanel().getAttribute("aria-labelledby")).toBe(getTab(/^Runs/).id);
+    // A panel with nothing in it that takes focus is in the tab order itself.
+    expect(getPanel().tabIndex).toBe(0);
   });
 
   it("move with ←, →, Home and End, with only the open tab in the tab order", async () => {
@@ -373,6 +541,8 @@ describe("the open workflow's tabs", () => {
       ["", "nightly", "Starts a run", "Daily at 01:00", "Next Mon 01:00", ""],
       ["", "on_issue", "Starts a run", "github.issue.opened", "No such key: labels", ""],
     ]);
+    // Each row holds a switch, so the panel itself is not in the tab order.
+    expect(getPanel().hasAttribute("tabindex")).toBe(false);
 
     await userEvent.click(getTab(/^Inputs/));
     expect(await readRows()).toEqual([["version", "string", "Required", ""]]);
@@ -456,7 +626,7 @@ describe("the Runs tab", () => {
       key: "ArrowLeft",
     });
 
-    await waitFor(() => expect(router.state.location.search).toEqual({ full: true }));
+    await waitFor(() => expect(router.state.location.searchStr).toBe("?full=true"));
     expect(router.history.length).toBe(length);
     expect(document.activeElement).toBe(within(picker).getByRole("button", { name: "List" }));
   });
@@ -465,7 +635,7 @@ describe("the Runs tab", () => {
     const { router } = await openShip({ search: "?runsView=timeline" });
     const length = router.history.length;
     const after = within(getPage()).getByRole("button", { name: "Show the day after" });
-    expect((after as HTMLButtonElement).disabled).toBe(true);
+    expect(after.getAttribute("aria-disabled")).toBe("true");
     expect(within(getPage()).queryByRole("button", { name: "Today" })).toBeNull();
 
     await userEvent.click(within(getPage()).getByRole("button", { name: "Show the day before" }));
@@ -473,7 +643,7 @@ describe("the Runs tab", () => {
     await within(getPanel()).findByRole("group", { name: "Runs, Yesterday" });
     expect(router.state.location.search).toEqual({ runsView: "timeline", daysBack: 1 });
     expect(router.history.length).toBe(length);
-    expect((after as HTMLButtonElement).disabled).toBe(false);
+    expect(after.getAttribute("aria-disabled")).toBeNull();
 
     await userEvent.click(within(getPage()).getByRole("button", { name: "Show the day before" }));
     await within(getPanel()).findByRole("group", { name: "Runs, 9 Oct" });
@@ -484,6 +654,39 @@ describe("the Runs tab", () => {
     await within(getPanel()).findByRole("group", { name: "Runs, Today" });
     expect(router.state.location.search).toEqual({ runsView: "timeline" });
     expect(router.history.length).toBe(length);
+  });
+
+  it("steps back no further than the oldest day the timeline shows", async () => {
+    const { router } = await openShip({
+      search: `?runsView=timeline&daysBack=${MAX_TIMELINE_DAYS_BACK}`,
+    });
+    const before = within(getPage()).getByRole("button", { name: "Show the day before" });
+    expect(before.getAttribute("aria-disabled")).toBe("true");
+
+    await userEvent.click(before);
+
+    expect(router.state.location.search).toEqual({
+      runsView: "timeline",
+      daysBack: MAX_TIMELINE_DAYS_BACK,
+    });
+  });
+
+  it("shows today for a day older than the timeline shows", async () => {
+    const { router } = await openShip({
+      search: `?runsView=timeline&daysBack=${MAX_TIMELINE_DAYS_BACK + 1}`,
+    });
+
+    expect(within(getPanel()).getByRole("group", { name: "Runs, Today" })).toBeTruthy();
+    expect(
+      within(getPage())
+        .getByRole("button", { name: "Show the day after" })
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
+
+    // Stepping on writes a URL with the day dropped, not set to nothing.
+    await userEvent.click(within(getPage()).getByRole("button", { name: "Show the day before" }));
+    await within(getPanel()).findByRole("group", { name: "Runs, Yesterday" });
+    expect(router.state.location.searchStr).toBe("?runsView=timeline&daysBack=1");
   });
 
   it("says when today has no runs", async () => {

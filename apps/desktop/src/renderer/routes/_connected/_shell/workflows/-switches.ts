@@ -13,6 +13,21 @@ import type { SavedField } from "../../../../app/saved-field";
 const describeSaveFailure = (error: Error): string => `Could not save: ${readErrorMessage(error)}`;
 
 /**
+ * Checks that the save calling it is the only one with `mutationKey` still
+ * running or waiting, matching `isSamePress` when given. A save counts
+ * itself while its `onSuccess` runs, so one pending save means no other.
+ */
+const isOnlyPendingSave = (
+  queryClient: QueryClient,
+  mutationKey: ReadonlyArray<string>,
+  isSamePress: (variables: unknown) => boolean = () => true,
+): boolean =>
+  queryClient
+    .getMutationCache()
+    .findAll({ mutationKey, status: "pending" })
+    .filter((each) => isSamePress(each.state.variables)).length <= 1;
+
+/**
  * Returns the switch that turns `workflow` on or off, saved with
  * `workflow.update { enabled }`. It saves as Settings' switches do (spec 17
  * §Settings, Saving):
@@ -21,11 +36,17 @@ const describeSaveFailure = (error: Error): string => `Could not save: ${readErr
  * - Every save of the workflow shares one mutation scope, so presses made
  *   while a save runs are saved after it, in the order made.
  * - A failed save puts the switch back to the saved value, and `error` says
- *   why until the next press.
+ *   why until the next press, or until a later press saves with no other
+ *   press still waiting.
  *
  * A successful save puts the stored workflow in the cache, and its row in
- * the workflow list, so both show it before the `workflow` push reads them
- * again.
+ * the workflow list, so both show it at once, and then reads both again.
+ * The stored workflow can be older than the cache: a `workflow` push can
+ * bring in another writer's newer change while the answer is on its way.
+ * The new reads start after the save and replace any read that started
+ * before it, so the cache ends as the controller has it. The save counts as
+ * running until those reads answer, so the switch never shows the old value
+ * in between.
  */
 export const useWorkflowSwitch = (
   client: HerculeClient,
@@ -48,7 +69,8 @@ export const useWorkflowSwitch = (
     mutationFn: (enabled: boolean) =>
       client.workflow.update({ params: { id: workflow.id }, payload: { enabled } }),
     onError: (error) => setFailure(error),
-    onSuccess: ({ workflow: saved }) => {
+    onSuccess: async ({ workflow: saved }) => {
+      if (isOnlyPendingSave(queryClient, mutationKey)) setFailure(null);
       queryClient.setQueryData(queryKeys.workflow(saved.id), saved);
       queryClient.setQueryData(
         queryKeys.workflows(),
@@ -57,6 +79,10 @@ export const useWorkflowSwitch = (
             entry.id === saved.id ? { ...entry, enabled: saved.enabled } : entry,
           ),
       );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.workflow(saved.id) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.workflows() }),
+      ]);
     },
   });
   return {
@@ -79,8 +105,8 @@ interface TriggerChange {
 export interface TriggerSwitches {
   /** The workflow's triggers, each as its switch shows it: with the newest press still saving. */
   readonly triggers: ReadonlyArray<Trigger>;
-  /** The trigger whose last save failed, and why, or `null` when none did. */
-  readonly error: { readonly triggerId: string; readonly text: string } | null;
+  /** Why the last save of each trigger failed, by trigger id. A trigger with no failure is absent. */
+  readonly errors: ReadonlyMap<string, string>;
   /** Pauses the start trigger `triggerId`, or resumes it when it is paused. */
   readonly toggle: (triggerId: string) => void;
 }
@@ -96,15 +122,29 @@ const replaceCachedTrigger = (queryClient: QueryClient, trigger: Trigger): void 
   );
 };
 
+/** Returns `failures` without the failure of the trigger `triggerId`. */
+const dropFailure = (
+  failures: ReadonlyMap<string, Error>,
+  triggerId: string,
+): ReadonlyMap<string, Error> => {
+  if (!failures.has(triggerId)) return failures;
+  const kept = new Map(failures);
+  kept.delete(triggerId);
+  return kept;
+};
+
 /**
  * Returns the pause switches of the start triggers in `triggers`, the
  * triggers of the workflow `workflowId`, saved with `trigger.pause` and
  * `trigger.resume`. They save as the workflow's switch does (see
  * `useWorkflowSwitch`): one at a time, in the order pressed, each showing
- * its newest press while it saves.
+ * its newest press while it saves. Each trigger keeps its own failure, so a
+ * failed save of one trigger shows under that trigger only, and a press on
+ * another trigger leaves it.
  *
  * The trigger the controller returns is put in the cached list of every
- * trigger, which both the workflow list and the open workflow read.
+ * trigger, which both the workflow list and the open workflow read, and the
+ * list is then read again, for the reason `useWorkflowSwitch` gives.
  */
 export const useTriggerSwitches = (
   client: HerculeClient,
@@ -119,7 +159,7 @@ export const useTriggerSwitches = (
     filters: { mutationKey, status: "pending" },
     select: (each) => each.state.variables as TriggerChange,
   });
-  const [failure, setFailure] = useState<{ triggerId: string; error: Error } | null>(null);
+  const [failures, setFailures] = useState<ReadonlyMap<string, Error>>(new Map());
   const change = useMutation({
     mutationKey,
     scope: { id: `triggers:${workflowId}` },
@@ -127,8 +167,18 @@ export const useTriggerSwitches = (
       active
         ? client.trigger.resume({ params: { workflowId, triggerId } })
         : client.trigger.pause({ params: { workflowId, triggerId } }),
-    onError: (error, { triggerId }) => setFailure({ triggerId, error }),
-    onSuccess: (trigger) => replaceCachedTrigger(queryClient, trigger),
+    onError: (error, { triggerId }) => {
+      setFailures((current) => new Map(current).set(triggerId, error));
+    },
+    onSuccess: async (trigger, { triggerId }) => {
+      const isSameTrigger = (variables: unknown): boolean =>
+        (variables as TriggerChange).triggerId === triggerId;
+      if (isOnlyPendingSave(queryClient, mutationKey, isSameTrigger)) {
+        setFailures((current) => dropFailure(current, triggerId));
+      }
+      replaceCachedTrigger(queryClient, trigger);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.triggers() });
+    },
   });
   const shown = triggers.map((trigger) => {
     const newest = pending.findLast((each) => each.triggerId === trigger.triggerId);
@@ -138,14 +188,13 @@ export const useTriggerSwitches = (
   });
   return {
     triggers: shown,
-    error:
-      failure === null
-        ? null
-        : { triggerId: failure.triggerId, text: describeSaveFailure(failure.error) },
+    errors: new Map(
+      [...failures].map(([triggerId, error]) => [triggerId, describeSaveFailure(error)]),
+    ),
     toggle: (triggerId) => {
       const trigger = shown.find((each) => each.triggerId === triggerId);
       if (trigger === undefined) return;
-      setFailure(null);
+      setFailures((current) => dropFailure(current, triggerId));
       change.mutate({ triggerId, active: trigger.status === "paused" });
     },
   };

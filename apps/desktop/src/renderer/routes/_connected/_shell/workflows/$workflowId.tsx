@@ -1,5 +1,5 @@
-import { Suspense, useId, useState, type JSX } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useEffect, useId, useRef, useState, type JSX } from "react";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import {
   isNotFound,
@@ -8,15 +8,12 @@ import {
 } from "@hercule/client-core";
 import { buildGraphDrawing } from "@hercule/client-core/graph-model";
 import { buildNodeCard } from "@hercule/client-core/node-details";
-import { buildTimelineHours, computeTimelineDay } from "@hercule/client-core/run-timeline";
-import {
-  buildInputRows,
-  buildTriggerRows,
-  buildWorkflowChips,
-} from "@hercule/client-core/workflow-detail-rows";
+import { MAX_TIMELINE_DAYS_BACK, computeTimelineDay } from "@hercule/client-core/run-timeline";
+import { buildWorkflowChips } from "@hercule/client-core/workflow-detail-rows";
 import { throwScreenNotFound } from "../../../../app/last-screen";
 import {
   agentsQuery,
+  pluginsQuery,
   providersQuery,
   readOnOpen,
   settingsQuery,
@@ -27,26 +24,10 @@ import {
   workflowRunsQuery,
 } from "../../../../app/queries";
 import { NotFound } from "../../../../screens/not-found";
-import {
-  RunsViewPicker,
-  TimelineAxis,
-  TimelineDayStepper,
-  type RunsView,
-} from "../../../../screens/workflows/run-timeline-board";
-import {
-  InputTable,
-  InputTableHeads,
-  RunTableHeads,
-  TriggerTable,
-  TriggerTableHeads,
-  WorkflowLead,
-  WorkflowTabBar,
-  buildTabElementId,
-  type WorkflowTab,
-} from "../../../../screens/workflows/workflow-detail";
+import { WorkflowLead } from "../../../../screens/workflows/workflow-detail";
 import { WorkflowGraph } from "../../../../screens/workflows/workflow-graph";
-import { RunDayLanes, RunList, useShownDay, useTimelineNow } from "./-runs";
 import { useTriggerSwitches, useWorkflowSwitch } from "./-switches";
+import { WorkflowTabs } from "./-tabs";
 
 /**
  * The search params of an open workflow (spec 17 §Workflows, "The routes"):
@@ -57,24 +38,32 @@ import { useTriggerSwitches, useWorkflowSwitch } from "./-switches";
  * - `daysBack`: the day the timeline shows, counted back from today; without
  *   it, today.
  */
-export interface WorkflowSearch {
-  readonly full?: true;
-  readonly runsView?: "timeline";
-  readonly daysBack?: number;
+interface WorkflowSearch {
+  readonly full?: true | undefined;
+  readonly runsView?: "timeline" | undefined;
+  readonly daysBack?: number | undefined;
 }
 
 /**
  * Returns an open workflow's search params from the URL's. A param with any
  * other value is dropped, so the page shows its default: a `full` that is
  * not `true`, a `runsView` that is not `timeline`, and a `daysBack` that is
- * not a whole number above 0.
+ * not a whole number from 1 to `MAX_TIMELINE_DAYS_BACK`, the oldest day the
+ * timeline shows.
+ *
+ * A dropped param is returned as `undefined` rather than left out, because
+ * the router lays the returned params over the URL's: a param left out
+ * would keep the URL's value.
  */
 const validateWorkflowSearch = (search: Record<string, unknown>): WorkflowSearch => ({
-  ...(search.full === true ? { full: true } : {}),
-  ...(search.runsView === "timeline" ? { runsView: "timeline" } : {}),
-  ...(Number.isSafeInteger(search.daysBack) && (search.daysBack as number) > 0
-    ? { daysBack: search.daysBack as number }
-    : {}),
+  full: search.full === true ? true : undefined,
+  runsView: search.runsView === "timeline" ? "timeline" : undefined,
+  daysBack:
+    Number.isSafeInteger(search.daysBack) &&
+    (search.daysBack as number) > 0 &&
+    (search.daysBack as number) <= MAX_TIMELINE_DAYS_BACK
+      ? (search.daysBack as number)
+      : undefined,
 });
 
 /**
@@ -88,13 +77,19 @@ const validateWorkflowSearch = (search: Record<string, unknown>): WorkflowSearch
  *   and the tabs; when no workflow has the id, the route shows
  *   `WorkflowNotFound`;
  * - the Agents and the workflow actions, which name the graph's steps, read
- *   each time the page opens because no topic covers them;
+ *   each time a workflow opens because no topic covers them;
  * - the Runs tab's first page of runs, or the day its timeline shows.
  *
- * The triggers, the settings and the provider instances are read by the
- * Workflows layout and the shell, and are cached already. Stepping the day
- * or switching the view runs the loader again, with `cause` "stay", and
- * reads only the runs it has not read.
+ * The triggers, the settings, the plugins and the provider instances are
+ * read by the Workflows layout and the shell, and are cached already.
+ * Stepping the day or switching the view runs the loader again, with
+ * `cause` "stay", and reads only the runs it has not read.
+ *
+ * Opening another workflow from an open one runs the loader with `cause`
+ * "stay" too: the router tells only whether this route was already open, not
+ * whether its workflow changed. So the loader reads the Agents and the
+ * workflow actions again only when the route opens, and `OpenWorkflowRoute`
+ * reads them again when the workflow changes under it.
  */
 export const Route = createFileRoute("/_connected/_shell/workflows/$workflowId")({
   staticData: { title: "Workflows" },
@@ -153,36 +148,49 @@ function WorkflowNotFound(): JSX.Element {
 /**
  * Draws the open workflow afresh for each workflow, so it opens on the Runs
  * tab and settles in again. Widening it to fill the pane keeps it.
+ *
+ * When another workflow opens from this one, it reads the Agents and the
+ * workflow actions again, as the loader does when the route opens (see
+ * `Route`). The page draws with the cached ones meanwhile, and draws again
+ * when the reads answer.
  */
 function OpenWorkflowRoute(): JSX.Element {
+  const { controller } = Route.useRouteContext();
+  const { client } = controller;
+  const queryClient = useQueryClient();
   const { workflowId } = Route.useParams();
+  const shownWorkflowId = useRef(workflowId);
+  useEffect(() => {
+    if (shownWorkflowId.current === workflowId) return;
+    shownWorkflowId.current = workflowId;
+    void readOnOpen(queryClient, agentsQuery(client));
+    void readOnOpen(queryClient, workflowActionsQuery(client));
+  }, [client, queryClient, workflowId]);
   return <OpenWorkflow key={workflowId} workflowId={workflowId} />;
 }
 
 /**
- * Reads the open workflow and draws it: the lead with its switch, the
- * graph, and the four tabs. It holds the open tab, and saves the workflow's
- * switch and its triggers' pause switches.
+ * Reads the open workflow and draws it: the lead with its switch, the graph,
+ * and the four tabs. It saves the workflow's switch and its triggers' pause
+ * switches. When the workflow is deleted while it is open, it shows
+ * `WorkflowNotFound`: the `workflow` push reads it again, and the read fails
+ * as not found while the cache still holds the workflow.
  */
 function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Element {
   const { controller } = Route.useRouteContext();
   const { client } = controller;
-  const { runsView = "list", daysBack = 0 } = Route.useSearch();
-  const navigate = Route.useNavigate();
+  const search = Route.useSearch();
+  const runsView = search.runsView ?? "list";
+  const daysBack = search.daysBack ?? 0;
 
-  const { data: workflow } = useSuspenseQuery(workflowQuery(client, workflowId));
+  const { data: workflow, error } = useSuspenseQuery(workflowQuery(client, workflowId));
   const { data: everyTrigger } = useSuspenseQuery(triggersQuery(client));
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const { data: agents } = useSuspenseQuery(agentsQuery(client));
   const { data: actions } = useSuspenseQuery(workflowActionsQuery(client));
   const { data: instances } = useSuspenseQuery(providersQuery(client));
+  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const timezone = resolveDisplayTimezone(settings.user.timezone);
-
-  const { definition } = parseWorkflowSourceWithRanges(workflow.source);
-  if (definition === undefined) {
-    // The controller saves only a source that parses, so this is a bug.
-    throw new Error(`The saved source of the workflow "${workflowId}" does not parse.`);
-  }
 
   const enabled = useWorkflowSwitch(client, workflow);
   const switches = useTriggerSwitches(
@@ -191,58 +199,25 @@ function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Elem
     everyTrigger.filter((trigger) => trigger.workflowId === workflowId),
   );
   const { triggers } = switches;
-
-  const [tab, setTab] = useState<WorkflowTab>("runs");
-  const baseId = useId();
+  const headingId = useId();
   // The pane is kept in state, not in a ref, so the Runs list draws again
   // once the pane is mounted. React sets a parent's ref only after its
   // children's layout effects ran, so the list's virtualizer would find no
   // pane to measure on its first render, and nothing would make it look again.
   const [pane, setPane] = useState<HTMLElement | null>(null);
 
-  const shown = useShownDay(daysBack, timezone);
-  const now = useTimelineNow(shown.day, timezone);
-  const hours = buildTimelineHours(shown.day, timezone);
-
-  const triggerRows = buildTriggerRows(definition, enabled.value, triggers);
-  const inputRows = buildInputRows(definition);
-
-  // Picking a view goes back to today, and stepping the day keeps the view.
-  // Both replace the history entry, so Back leaves the workflow.
-  const pickView = (view: RunsView): void => {
-    void navigate({
-      to: ".",
-      search: (previous) => {
-        const kept = { ...previous };
-        delete kept.runsView;
-        delete kept.daysBack;
-        return view === "timeline" ? { ...kept, runsView: "timeline" as const } : kept;
-      },
-      replace: true,
-    });
-  };
-  const showDay = (next: number): void => {
-    void navigate({
-      to: ".",
-      search: (previous) => {
-        const kept = { ...previous };
-        delete kept.daysBack;
-        return next === 0 ? kept : { ...kept, daysBack: next };
-      },
-      replace: true,
-    });
-  };
-
-  const panelProps = {
-    role: "tabpanel",
-    id: buildTabElementId(baseId, tab, "panel"),
-    "aria-labelledby": buildTabElementId(baseId, tab, "tab"),
-  } as const;
+  if (isNotFound(error)) return <WorkflowNotFound />;
+  const { definition } = parseWorkflowSourceWithRanges(workflow.source);
+  if (definition === undefined) {
+    // The controller saves only a source that parses, so this is a bug.
+    throw new Error(`The saved source of the workflow "${workflowId}" does not parse.`);
+  }
 
   return (
-    <section ref={setPane} className="open-pane" aria-label={definition.name}>
+    <section ref={setPane} className="open-pane" aria-labelledby={headingId}>
       <div className="pill-room" />
       <WorkflowLead
+        headingId={headingId}
         name={definition.name}
         description={definition.description}
         isEnabled={enabled.value}
@@ -264,96 +239,22 @@ function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Elem
             isWorkflowEnabled: enabled.value,
           })
         }
+        plugins={plugins}
         timezone={timezone}
         label={`The steps of ${definition.name}`}
       />
-      <div className="tab-band">
-        <WorkflowTabBar
-          baseId={baseId}
-          tab={tab}
-          triggerCount={triggerRows.length}
-          inputCount={inputRows.length}
-          onSelect={setTab}
-          tools={
-            tab === "runs" ? (
-              <>
-                {runsView === "timeline" ? (
-                  <TimelineDayStepper
-                    dayText={shown.dayText}
-                    isToday={shown.day.isToday}
-                    onStepBack={() => {
-                      showDay(daysBack + 1);
-                    }}
-                    onStepOn={() => {
-                      showDay(daysBack - 1);
-                    }}
-                    onShowToday={() => {
-                      showDay(0);
-                    }}
-                  />
-                ) : null}
-                <RunsViewPicker view={runsView} onPick={pickView} />
-              </>
-            ) : null
-          }
-        />
-        {tab === "runs" && runsView === "list" ? <RunTableHeads /> : null}
-        {tab === "runs" && runsView === "timeline" ? (
-          <TimelineAxis hours={hours} now={now} />
-        ) : null}
-        {tab === "triggers" ? <TriggerTableHeads /> : null}
-        {tab === "inputs" ? <InputTableHeads /> : null}
-      </div>
-      {tab === "runs" ? (
-        <div {...panelProps}>
-          {runsView === "list" ? (
-            <RunList
-              client={client}
-              workflowId={workflowId}
-              definition={definition}
-              timezone={timezone}
-              pane={pane}
-            />
-          ) : (
-            // The loader reads the day before it shows. Only when the day
-            // turns at midnight is the new day read here, and the lanes
-            // stay empty until it answers.
-            <Suspense fallback={<div className="lanes" style={{ "--tracks": 1 }} />}>
-              <RunDayLanes
-                client={client}
-                workflowId={workflowId}
-                definition={definition}
-                isEnabled={enabled.value}
-                triggers={triggers}
-                shown={shown}
-                hours={hours}
-                now={now}
-                timezone={timezone}
-              />
-            </Suspense>
-          )}
-        </div>
-      ) : null}
-      {tab === "triggers" ? (
-        <div {...panelProps}>
-          <TriggerTable
-            rows={triggerRows}
-            error={switches.error}
-            timezone={timezone}
-            onToggle={switches.toggle}
-          />
-        </div>
-      ) : null}
-      {tab === "inputs" ? (
-        <div {...panelProps}>
-          <InputTable rows={inputRows} />
-        </div>
-      ) : null}
-      {tab === "source" ? (
-        <pre className="codeblock" {...panelProps}>
-          {workflow.source}
-        </pre>
-      ) : null}
+      <WorkflowTabs
+        client={client}
+        workflowId={workflowId}
+        source={workflow.source}
+        definition={definition}
+        isEnabled={enabled.value}
+        switches={switches}
+        runsView={runsView}
+        daysBack={daysBack}
+        timezone={timezone}
+        pane={pane}
+      />
     </section>
   );
 }

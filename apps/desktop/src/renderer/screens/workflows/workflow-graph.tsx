@@ -14,6 +14,7 @@ import {
   type JSX,
   type KeyboardEvent,
 } from "react";
+import type { PluginIdentity } from "@hercule/client-core";
 import { buildCurve } from "@hercule/client-core/graph-layout";
 import type { GraphEdge, WorkflowGraphDrawing } from "@hercule/client-core/graph-model";
 import type { NodeCard } from "@hercule/client-core/node-details";
@@ -68,6 +69,13 @@ const findKeyZoom = (event: KeyboardEvent, scale: number, fitScale: number): num
     : undefined;
 };
 
+/** Checks whether a key press lands in a text field, where Escape belongs to the field. */
+const isTextField = (target: EventTarget | null): boolean =>
+  target instanceof HTMLInputElement ||
+  target instanceof HTMLTextAreaElement ||
+  target instanceof HTMLSelectElement ||
+  (target instanceof HTMLElement && target.isContentEditable);
+
 /**
  * Places the open card under its node `anchor`, at the node's left edge, or
  * over it when it does not fit below. The card stays inside the window; its
@@ -115,29 +123,35 @@ function EdgeLabel({
  * Draws `drawing` in a pane that zooms. `readCard` returns the card of a
  * node by its id, and `timezone` is the zone its times are shown in. `label`
  * names the graph for assistive technology, such as "The steps of Ship
- * release".
+ * release". `plugins` holds the plugins' names and marks, which a plugin's
+ * action step draws.
  *
  * - The graph opens fitted to the pane's width, never below 80% and never
  *   above 100%, and follows the pane's width until the user zooms. The zoom
  *   pill shows only when the graph is wider than the pane at 100%.
  * - While the pane or a node in it has focus, ⌘= or ⌘+, ⌘-, ⌘0 and ⇧1 zoom
  *   in, out, to 100% and to fit. A text field is never inside the pane, so
- *   the keys never reach one.
+ *   the keys never reach one. A zoom button at its end of the range cannot
+ *   act, but keeps the focus.
  * - A side where the pane cuts the graph off fades out over 48px.
- * - A click on a node opens its card under it. A click on the same node,
- *   Escape, or a click anywhere else closes it. Escape returns focus to the
- *   node, and is not passed on, so the page does not also close.
+ * - A click on a node opens its card under it, and moves the focus to the
+ *   card, which is a dialog. A click on the same node, Escape, or a click
+ *   anywhere else closes it. Escape returns focus to the node, and is not
+ *   passed on, so the page does not also close. Escape in a text field, such
+ *   as the list's search, is left to the field.
  */
 export function WorkflowGraph({
   drawing,
   readCard,
   timezone,
   label,
+  plugins,
 }: {
   readonly drawing: WorkflowGraphDrawing;
   readonly readCard: (nodeId: string) => NodeCard | undefined;
   readonly timezone: string;
   readonly label: string;
+  readonly plugins: ReadonlyArray<PluginIdentity>;
 }): JSX.Element {
   const id = useId().replace(/[^\w-]/g, "");
   const arrowId = `graph-arrow-${id}`;
@@ -198,18 +212,27 @@ export function WorkflowGraph({
   const [openNodeId, setOpenNodeId] = useState<string | undefined>(undefined);
   const openCard = openNodeId === undefined ? undefined : readCard(openNodeId);
   const isOpen = openCard !== undefined;
+  const openPluginId = drawing.nodes.find((node) => node.id === openNodeId)?.pluginId ?? null;
 
   const placeOpenCard = useEffectEvent(() => {
     const anchor = openNodeId === undefined ? undefined : nodeRefs.current.get(openNodeId);
     if (anchor !== undefined) placeNodeCard(cardRef.current!, anchor);
   });
+  // The card is a dialog, so it takes the focus when it opens, or when it
+  // moves to another node; a change of zoom only places it again.
   useLayoutEffect(() => {
-    cardRef.current!.togglePopover(isOpen);
+    const card = cardRef.current!;
+    card.togglePopover(isOpen);
+    if (!isOpen) return;
+    placeOpenCard();
+    card.focus();
+  }, [isOpen, openNodeId]);
+  useLayoutEffect(() => {
     if (isOpen) placeOpenCard();
-  }, [isOpen, openNodeId, scale]);
+  }, [isOpen, scale]);
 
   const closeWithEscape = useEffectEvent((event: globalThis.KeyboardEvent) => {
-    if (event.key !== "Escape") return;
+    if (event.key !== "Escape" || isTextField(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
     if (openNodeId !== undefined) nodeRefs.current.get(openNodeId)?.focus();
@@ -356,7 +379,12 @@ export function WorkflowGraph({
                 >
                   {node.joinsAll ? <span className="node-join">all</span> : null}
                   <span className="node-lead">
-                    <NodeIcon kind={node.kind} firesOn={node.firesOn} />
+                    <NodeIcon
+                      kind={node.kind}
+                      firesOn={node.firesOn}
+                      pluginId={node.pluginId}
+                      plugins={plugins}
+                    />
                   </span>
                   <span className="node-text">
                     <span className="node-title">
@@ -377,9 +405,10 @@ export function WorkflowGraph({
             className="icon-btn"
             aria-label="Zoom out"
             title="Zoom out (⌘−)"
-            disabled={scale <= MIN_SCALE}
+            aria-disabled={scale <= MIN_SCALE || undefined}
+            data-unready={scale <= MIN_SCALE || undefined}
             onClick={() => {
-              zoomTo(scale / ZOOM_STEP);
+              if (scale > MIN_SCALE) zoomTo(scale / ZOOM_STEP);
             }}
           >
             <MinusIcon size={14} />
@@ -390,9 +419,10 @@ export function WorkflowGraph({
             className="icon-btn"
             aria-label="Zoom in"
             title="Zoom in (⌘+)"
-            disabled={scale >= MAX_SCALE}
+            aria-disabled={scale >= MAX_SCALE || undefined}
+            data-unready={scale >= MAX_SCALE || undefined}
             onClick={() => {
-              zoomTo(scale * ZOOM_STEP);
+              if (scale < MAX_SCALE) zoomTo(scale * ZOOM_STEP);
             }}
           >
             <PlusIcon size={14} />
@@ -414,10 +444,18 @@ export function WorkflowGraph({
         id={cardId}
         popover="manual"
         role="dialog"
+        tabIndex={-1}
         className="pop node-pop"
         aria-label={isOpen ? `${openCard.id}, ${openCard.kindText}` : undefined}
       >
-        {isOpen ? <NodeCardContent card={openCard} timezone={timezone} /> : null}
+        {isOpen ? (
+          <NodeCardContent
+            card={openCard}
+            pluginId={openPluginId}
+            plugins={plugins}
+            timezone={timezone}
+          />
+        ) : null}
       </div>
     </div>
   );

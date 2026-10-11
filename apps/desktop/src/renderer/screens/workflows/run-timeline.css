@@ -1,7 +1,7 @@
-/* The Runs tab's timeline: the Bureau book's "Timelines" and "Workflows'
-   motion" rules (system.css), with their selectors. A place across the day,
-   --at, is a percentage of the lanes' width, so ticks, lines and bars line
-   up. Each departure from the book is explained in a comment. */
+/* The Runs tab's timeline: the Bureau book's "Timelines" rules
+   (system.css), with their selectors. A place across the day, --at, is a
+   percentage of the lanes' width, so ticks, lines and bars line up. Each
+   departure from the book is explained in a comment. */
 
 /* The day stepper: arrows around the day, whose room fits "Yesterday", so
    the arrows stay put as the user steps. */
@@ -21,13 +21,6 @@
   text-align: center;
   white-space: nowrap;
 }
-/* Not in the book, whose step on is a disabled button with no style of its
-   own. On today it is faint and takes no hover. */
-.stepper > .icon-btn:disabled {
-  opacity: 0.5;
-  pointer-events: none;
-}
-
 /* The axis sits where a list's column heads sit, as tall and in their
    type. */
 .axis {
@@ -87,12 +80,6 @@
   position: relative;
   height: calc(var(--tracks) * 24px + 16px);
   box-shadow: inset 0 -1px 0 var(--line-soft);
-}
-/* Not in the book. The bars from the ninth on, in one layer as large as the
-   lanes, which fades in once (see the motion below). */
-.lanes-rest {
-  position: absolute;
-  inset: 0;
 }
 /* The hour lines behind everything, and the now line in ink. */
 .hour-line,
@@ -203,47 +190,4 @@
 }
 .run-bar-cut--end {
   right: -18px;
-}
-
-/* Opening the timeline, or stepping to a day, brings its bars in 30ms
-   apart: each line sweeps from its start, then its mark pops in. The book
-   brings every bar from the ninth on in with the eighth; here they sit in
-   one layer that fades in with the eighth instead, as spec 17's motion rule
-   6 asks, so a day of hundreds of runs animates nine layers, not hundreds.
-   A bar that arrives or changes later (`.is-late`) only pops its mark. */
-@media (prefers-reduced-motion: no-preference) {
-  .run-bar-line {
-    transform-origin: left;
-    animation: bar-sweep var(--dur-3) var(--ease-out) backwards;
-    animation-delay: calc(min(var(--order), 8) * 30ms);
-  }
-  .run-bar > :is(.mark, .dot--mark) {
-    animation: mark-in var(--dur-2) var(--ease-spring) backwards;
-    animation-delay: calc(min(var(--order), 8) * 30ms + var(--dur-2));
-  }
-  .lanes-rest {
-    animation: lanes-in var(--dur-3) var(--ease-out) backwards;
-    animation-delay: 240ms;
-  }
-  .lanes-rest .run-bar-line,
-  .run-bar.is-late > .run-bar-line {
-    animation: none;
-  }
-  .lanes-rest .run-bar > :is(.mark, .dot--mark) {
-    animation: none;
-  }
-  .run-bar.is-late > :is(.mark, .dot--mark) {
-    animation: mark-in var(--dur-2) var(--ease-spring);
-  }
-}
-@keyframes bar-sweep {
-  from {
-    opacity: 0;
-    transform: scaleX(0);
-  }
-}
-@keyframes lanes-in {
-  from {
-    opacity: 0;
-  }
 }

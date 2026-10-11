@@ -92,6 +92,17 @@
   padding: 0;
   list-style: none;
 }
+/* Not in the book, whose chips are short. A chip is never wider than the
+   row: its text is cut short with an ellipsis, and its tooltip holds the
+   whole text. */
+.chip-row > .chip {
+  max-width: 100%;
+}
+.chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .chip--fail {
   background: var(--fail-tint);
   color: var(--fail-ink);
@@ -182,18 +193,5 @@
   }
   :is(.col-by, .col-does) {
     display: none;
-  }
-}
-
-/* An open workflow settles in from the side the list opens it towards. */
-@media (prefers-reduced-motion: no-preference) {
-  .open-pane {
-    animation: open-in var(--dur-3) var(--ease-out);
-  }
-}
-@keyframes open-in {
-  from {
-    opacity: 0;
-    transform: translateX(14px);
   }
 }

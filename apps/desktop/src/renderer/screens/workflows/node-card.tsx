@@ -4,6 +4,7 @@
  * prompt (spec 17 §Workflows, "A step's card").
  */
 import type { JSX } from "react";
+import type { PluginIdentity } from "@hercule/client-core";
 import type { NodeCard, NodeFact } from "@hercule/client-core/node-details";
 import { useListTime } from "./list-time";
 import { NodeIcon } from "./node-icon";
@@ -26,19 +27,24 @@ function TimeValue({
 /**
  * Renders the inside of `card`: the header with the node's icon, its id and
  * its kind, then its rows and its prompt where it has them. Time rows are
- * shown in `timezone`.
+ * shown in `timezone`. `pluginId` is the plugin whose action an action step
+ * calls, or null, and its mark is drawn from `plugins`, as on the node.
  */
 export function NodeCardContent({
   card,
+  pluginId,
+  plugins,
   timezone,
 }: {
   readonly card: NodeCard;
+  readonly pluginId: string | null;
+  readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly timezone: string;
 }): JSX.Element {
   return (
     <>
       <div className="pop-h">
-        <NodeIcon kind={card.kind} firesOn={card.firesOn} />
+        <NodeIcon kind={card.kind} firesOn={card.firesOn} pluginId={pluginId} plugins={plugins} />
         <b>{card.id}</b>
         <span>{card.kindText}</span>
       </div>

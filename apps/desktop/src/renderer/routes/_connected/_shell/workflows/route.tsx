@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, useMatch, useNavigate } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
@@ -90,9 +90,16 @@ const isTextField = (target: EventTarget | null): boolean =>
  *
  * - a step's card, or anything else that handles Esc and calls
  *   `preventDefault()`;
- * - an open popover or dialog, which the browser closes on Esc without
- *   calling `preventDefault()`;
+ * - an open dialog, or an open popover the browser closes on Esc (one with
+ *   `popover="auto"`), which the browser closes without calling
+ *   `preventDefault()`. A manual popover, such as the sidebar's hover card
+ *   of a thread, does not close on Esc, so it does not take it;
  * - a focused text field, where Esc belongs to the field.
+ *
+ * Opening a workflow or closing it draws the list again at its new width,
+ * which drops the keyboard's focus when it was in the list or the open
+ * workflow. Focus then moves to the workflow's row in the list at its new
+ * width, when that row is mounted.
  */
 function WorkflowsLayout(): JSX.Element {
   const { controller, queryClient } = Route.useRouteContext();
@@ -105,13 +112,56 @@ function WorkflowsLayout(): JSX.Element {
   const width =
     openWorkflow === undefined ? "table" : openWorkflow.search.full === true ? "full" : "column";
   const isOpen = openWorkflow !== undefined;
+  const openWorkflowId = openWorkflow?.params.workflowId;
+
+  // The width the list was drawn at, and the workflow open last, so that its
+  // row takes focus after the list is drawn at a new width.
+  const lastWidth = useRef(width);
+  const lastOpenWorkflowId = useRef(openWorkflowId);
+  useEffect(() => {
+    const workflowId = openWorkflowId ?? lastOpenWorkflowId.current;
+    const isNewWidth = width !== lastWidth.current;
+    lastWidth.current = width;
+    lastOpenWorkflowId.current = workflowId;
+    // Focus that the new width did not drop stays where it is, and a list
+    // hidden behind a full open workflow has no row to focus.
+    if (
+      !isNewWidth ||
+      width === "full" ||
+      workflowId === undefined ||
+      document.activeElement !== document.body
+    ) {
+      return;
+    }
+    const list = document.querySelector(".workflow-list");
+    if (list === null) return;
+    // Returns false while the list has drawn no row yet. A list at a new
+    // width draws its rows only after it has measured itself, a render after
+    // this effect runs, so the row is looked for again as the list changes.
+    // When the open workflow's row is not among the rows drawn, the focus
+    // stays where it is.
+    const focusRow = (): boolean => {
+      if (list.querySelector("[data-key]") === null) return false;
+      if (document.activeElement === document.body) {
+        // A workflow id is a UUID, which needs no escaping in a selector.
+        list.querySelector<HTMLElement>(`[data-key="workflow:${workflowId}"]`)?.focus();
+      }
+      return true;
+    };
+    if (focusRow()) return;
+    const observer = new MutationObserver(() => {
+      if (focusRow()) observer.disconnect();
+    });
+    observer.observe(list, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [width, openWorkflowId]);
 
   useEffect(() => {
     if (!isOpen) return;
     const closeWorkflow = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       if (isTextField(event.target)) return;
-      if (document.querySelector("dialog[open], :popover-open") !== null) return;
+      if (document.querySelector('dialog[open], [popover="auto"]:popover-open') !== null) return;
       void navigate({ to: "/workflows" });
     };
     window.addEventListener("keydown", closeWorkflow);

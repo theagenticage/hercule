@@ -4,7 +4,7 @@
  * Every component here is presentational: it takes values and callbacks, and
  * the route reads and saves.
  */
-import type { JSX, KeyboardEvent, ReactNode } from "react";
+import { useId, type JSX, type KeyboardEvent, type ReactNode } from "react";
 import type { TriggerFiresOn } from "@hercule/contract";
 import { hasRunMark } from "@hercule/client-core/run-marks";
 import {
@@ -34,12 +34,31 @@ function FiresOnIcon({ firesOn }: { readonly firesOn: TriggerFiresOn | null }): 
   return <span className="no-icon" />;
 }
 
+/** Renders `text` in a span with `className`, cut short with an ellipsis by its CSS, with the whole text as its tooltip. */
+function FittedText({
+  text,
+  className,
+}: {
+  readonly text: string;
+  readonly className?: string | undefined;
+}): JSX.Element {
+  return (
+    <span className={className} title={text}>
+      {text}
+    </span>
+  );
+}
+
 /**
  * Renders the lead of an open workflow: its name with its switch, what the
  * switch does, its description, and its chips. `error` is why the switch's
- * last save failed, shown under the name as an alert.
+ * last save failed, shown under the name as an alert. The name is the page's
+ * heading, with the id `headingId`, so the page can take its name from it.
+ * The switch is described by the line saying what it does, and by `error`
+ * while there is one.
  */
 export function WorkflowLead({
+  headingId,
   name,
   description,
   isEnabled,
@@ -48,6 +67,7 @@ export function WorkflowLead({
   timezone,
   onToggle,
 }: {
+  readonly headingId: string;
   readonly name: string;
   readonly description: string | undefined;
   readonly isEnabled: boolean;
@@ -56,10 +76,15 @@ export function WorkflowLead({
   readonly timezone: string;
   readonly onToggle: () => void;
 }): JSX.Element {
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const errorId = `${id}-error`;
   return (
     <>
       <div className="open-name">
-        <h1>{name}</h1>
+        <h1 id={headingId} title={name}>
+          {name}
+        </h1>
         <label className="open-switch">
           Enabled
           <button
@@ -67,17 +92,18 @@ export function WorkflowLead({
             className="toggle"
             role="switch"
             aria-checked={isEnabled}
+            aria-describedby={error === null ? hintId : `${hintId} ${errorId}`}
             onClick={onToggle}
           />
         </label>
       </div>
       {error === null ? null : (
-        <p className="open-err" role="alert">
+        <p id={errorId} className="open-err" role="alert">
           {error}
         </p>
       )}
       {description === undefined ? null : <p className="open-gist">{description}</p>}
-      <p className="open-hint">
+      <p id={hintId} className="open-hint">
         {isEnabled
           ? "When on, its triggers start runs. Runs already going are not touched."
           : "Its triggers start no runs while it is off. Runs already going are not touched."}
@@ -86,9 +112,15 @@ export function WorkflowLead({
         {chips.map((chip) => (
           <li key={chip.key} className={chip.tone === "fail" ? "chip chip--fail" : "chip"}>
             {chip.firesOn === null ? null : <FiresOnIcon firesOn={chip.firesOn} />}
-            {chip.text}
-            {chip.nextFireAt === null ? null : (
-              <NextFireText at={chip.nextFireAt} timezone={timezone} prefix=" · next " />
+            {chip.nextFireAt === null ? (
+              <FittedText className="chip-text" text={chip.text} />
+            ) : (
+              <NextFireText
+                className="chip-text"
+                at={chip.nextFireAt}
+                timezone={timezone}
+                prefix={`${chip.text} · next `}
+              />
             )}
           </li>
         ))}
@@ -97,17 +129,23 @@ export function WorkflowLead({
   );
 }
 
-/** Renders `prefix` and when a trigger fires next, as a list shows a time to come, kept current. */
+/**
+ * Renders `prefix` and when a trigger fires next, as a list shows a time to
+ * come, kept current, as `FittedText` with `className`.
+ */
 function NextFireText({
   at,
   timezone,
   prefix,
+  className,
 }: {
   readonly at: string;
   readonly timezone: string;
   readonly prefix: string;
+  readonly className?: string | undefined;
 }): JSX.Element {
-  return <>{`${prefix}${useListTime(at, timezone, "future", true)}`}</>;
+  const text = `${prefix}${useListTime(at, timezone, "future", true)}`;
+  return <FittedText className={className} text={text} />;
 }
 
 /** The open workflow's four tabs. */
@@ -172,7 +210,7 @@ export function WorkflowTabBar({
   };
   return (
     <div className="tab-bar">
-      <nav className="tabs" role="tablist" aria-label="Workflow" onKeyDown={moveFocus}>
+      <div className="tabs" role="tablist" aria-label="Workflow" onKeyDown={moveFocus}>
         {TABS.map(({ tab: each, label }) => {
           const isOn = each === tab;
           const count = counts[each];
@@ -195,7 +233,7 @@ export function WorkflowTabBar({
             </button>
           );
         })}
-      </nav>
+      </div>
       {tools === null ? null : <span className="tab-tools">{tools}</span>}
     </div>
   );
@@ -297,69 +335,78 @@ export function RunListRow({
 
 /**
  * Renders the Triggers tab's rows, each start trigger with its pause switch.
- * `error` is the trigger whose last save failed and why, shown under its row
- * as an alert. When the workflow has no trigger, shows a line of text instead.
+ * `errors` maps the id of each trigger whose last save failed to why, shown
+ * under its row as an alert, which describes the row's switch. When the
+ * workflow has no trigger, shows a line of text instead.
  */
 export function TriggerTable({
   rows,
-  error,
+  errors,
   timezone,
   onToggle,
 }: {
   readonly rows: ReadonlyArray<TriggerRow>;
-  readonly error: { readonly triggerId: string; readonly text: string } | null;
+  readonly errors: ReadonlyMap<string, string>;
   readonly timezone: string;
   readonly onToggle: (triggerId: string) => void;
 }): JSX.Element {
+  const id = useId();
   if (rows.length === 0) {
     return <p className="table-empty">No triggers. Only you, an agent or another run start it.</p>;
   }
   return (
     <div role="list">
-      {rows.map((row) => (
-        <div key={row.id} role="listitem">
-          <div className="table-row tbl-triggers">
-            <span className="table-quiet">
-              <FiresOnIcon firesOn={row.firesOn} />
-            </span>
-            <span className="table-name">{row.id}</span>
-            <span className="table-quiet col-does">{row.doesText}</span>
-            <span className="table-quiet">
-              <span>{row.firesOnText}</span>
-            </span>
-            <span
-              className={row.stateTone === "fail" ? "status-text status-text--fail" : "table-quiet"}
-            >
-              {row.nextFireAt === null ? (
-                <span>{row.stateText}</span>
-              ) : (
-                <span>
+      {rows.map((row) => {
+        const error = errors.get(row.id);
+        const errorId = `${id}-error-${row.id}`;
+        return (
+          <div key={row.id} role="listitem">
+            <div className="table-row tbl-triggers">
+              <span className="table-quiet">
+                <FiresOnIcon firesOn={row.firesOn} />
+              </span>
+              <FittedText className="table-name" text={row.id} />
+              <span className="table-quiet col-does" title={row.doesText}>
+                {row.doesText}
+              </span>
+              <span className="table-quiet">
+                <FittedText text={row.firesOnText} />
+              </span>
+              <span
+                className={
+                  row.stateTone === "fail" ? "status-text status-text--fail" : "table-quiet"
+                }
+              >
+                {row.nextFireAt === null ? (
+                  <FittedText text={row.stateText} />
+                ) : (
                   <NextFireText at={row.nextFireAt} timezone={timezone} prefix="Next " />
-                </span>
+                )}
+              </span>
+              {row.switch === null ? (
+                <span />
+              ) : (
+                <button
+                  type="button"
+                  className="toggle"
+                  role="switch"
+                  aria-checked={row.switch.isActive}
+                  aria-label={row.switch.label}
+                  aria-describedby={error === undefined ? undefined : errorId}
+                  onClick={() => {
+                    onToggle(row.id);
+                  }}
+                />
               )}
-            </span>
-            {row.switch === null ? (
-              <span />
-            ) : (
-              <button
-                type="button"
-                className="toggle"
-                role="switch"
-                aria-checked={row.switch.isActive}
-                aria-label={row.switch.label}
-                onClick={() => {
-                  onToggle(row.id);
-                }}
-              />
+            </div>
+            {error === undefined ? null : (
+              <p id={errorId} className="open-err open-err--row" role="alert">
+                {error}
+              </p>
             )}
           </div>
-          {error?.triggerId === row.id ? (
-            <p className="open-err open-err--row" role="alert">
-              {error.text}
-            </p>
-          ) : null}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -371,13 +418,13 @@ export function InputTable({ rows }: { readonly rows: ReadonlyArray<InputRow> })
     <div role="list">
       {rows.map((row) => (
         <div key={row.name} className="table-row tbl-inputs" role="listitem">
-          <span className="table-name">{row.name}</span>
+          <FittedText className="table-name" text={row.name} />
           <span className="table-quiet">
-            <span>{row.typeText}</span>
+            <FittedText text={row.typeText} />
           </span>
           <span className="table-quiet">{row.requiredText}</span>
           <span className="table-quiet table-code">
-            <span>{row.defaultText}</span>
+            <FittedText text={row.defaultText} />
           </span>
         </div>
       ))}
