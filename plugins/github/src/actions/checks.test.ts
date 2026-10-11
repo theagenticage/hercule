@@ -23,6 +23,9 @@ const PULL_PATH = "/repos/octocat/hello-world/pulls/1347";
 const SUITES_PATH = `/repos/octocat/hello-world/commits/${HEAD_SHA}/check-suites`;
 const RUNS_PATH = "/repos/octocat/hello-world/actions/runs";
 
+/** The route that lists the workflow run of check suite `suiteId`. */
+const runsOf = (suiteId: number) => `GET ${RUNS_PATH}?check_suite_id=${String(suiteId)}`;
+
 /** A pull request whose branch points at `sha`, as GitHub returns it. */
 const buildGithubPullRequest = (sha: string) => ({
   node_id: "MDExOlB1bGxSZXF1ZXN0MQ==",
@@ -45,6 +48,7 @@ const buildSuite = (overrides: Readonly<Record<string, unknown>> = {}) => ({
   id: 5,
   status: "completed",
   conclusion: "failure",
+  updated_at: "2026-10-11T09:00:00Z",
   latest_check_runs_count: 3,
   app: { slug: "github-actions", name: "GitHub Actions" },
   ...overrides,
@@ -57,16 +61,23 @@ const CIRCLE_SUITE = buildSuite({
 
 /**
  * Builds a stub that answers each request by its method and path, written as
- * `GET /repos/...`. A request the table does not hold gets a 404.
+ * `GET /repos/...`, followed by `?check_suite_id=<id>` when the request
+ * asks for one suite's workflow run. A request the table does not hold gets a
+ * 404.
  */
 const stubRoutes = (routes: Readonly<Record<string, StubResponse>>): GithubStub =>
-  stubGithub(
-    (request) =>
-      routes[`${request.method} ${readStubRequestTarget(request).path}`] ?? {
+  stubGithub((request) => {
+    const { path, query } = readStubRequestTarget(request);
+    const suite = query["check_suite_id"];
+    return (
+      routes[
+        `${request.method} ${path}${suite === undefined ? "" : `?check_suite_id=${suite}`}`
+      ] ?? {
         status: 404,
         body: { message: "Not Found" },
-      },
-  );
+      }
+    );
+  });
 
 /** Lists the requests a stub received as `METHOD path`, in order. */
 const listRequests = (stub: GithubStub): ReadonlyArray<string> =>
@@ -96,17 +107,12 @@ const readFailure = async (
 };
 
 describe("checks.rerun", () => {
-  it("re-runs only the failed jobs of a GitHub Actions suite", async () => {
+  it("re-runs only the failed jobs of a GitHub Actions suite, and names it after its workflow", async () => {
     const stub = stubRoutes(
       buildRoutes([buildSuite()], {
-        [`GET ${RUNS_PATH}`]: {
+        [runsOf(5)]: {
           status: 200,
-          body: {
-            workflow_runs: [
-              { id: 99, check_suite_id: 4 },
-              { id: 30433642, check_suite_id: 5 },
-            ],
-          },
+          body: { workflow_runs: [{ id: 30433642, name: "CI" }] },
         },
         "POST /repos/octocat/hello-world/actions/runs/30433642/rerun-failed-jobs": { status: 201 },
       }),
@@ -114,7 +120,7 @@ describe("checks.rerun", () => {
 
     const outcome = await runAgainstStub(checksRerun.perform(ADDRESS, buildActionContext()), stub);
 
-    expect(readSuccess(outcome)).toEqual({ sha: HEAD_SHA, rerun: [{ name: "GitHub Actions" }] });
+    expect(readSuccess(outcome)).toEqual({ sha: HEAD_SHA, rerun: [{ name: "CI" }] });
     expect(listRequests(stub)).toEqual([
       `GET ${PULL_PATH}`,
       `GET ${SUITES_PATH}`,
@@ -122,9 +128,37 @@ describe("checks.rerun", () => {
       "POST /repos/octocat/hello-world/actions/runs/30433642/rerun-failed-jobs",
     ]);
     expect(readStubRequestTarget(stub.requests[2]!).query).toEqual({
-      head_sha: HEAD_SHA,
-      per_page: "100",
+      check_suite_id: "5",
+      per_page: "1",
     });
+  });
+
+  it("names a suite after its app when the workflow run has no name", async () => {
+    const stub = stubRoutes(
+      buildRoutes([buildSuite()], {
+        [runsOf(5)]: { status: 200, body: { workflow_runs: [{ id: 11, name: null }] } },
+        "POST /repos/octocat/hello-world/actions/runs/11/rerun-failed-jobs": { status: 201 },
+      }),
+    );
+
+    const outcome = await runAgainstStub(checksRerun.perform(ADDRESS, buildActionContext()), stub);
+
+    expect(readSuccess(outcome).rerun).toEqual([{ name: "GitHub Actions" }]);
+  });
+
+  it("looks up the workflow run of each failed suite by its own id", async () => {
+    const stub = stubRoutes(
+      buildRoutes([buildSuite({ id: 5 }), buildSuite({ id: 6 })], {
+        [runsOf(5)]: { status: 200, body: { workflow_runs: [{ id: 11, name: "CI" }] } },
+        [runsOf(6)]: { status: 200, body: { workflow_runs: [{ id: 12, name: "Deploy" }] } },
+        "POST /repos/octocat/hello-world/actions/runs/11/rerun-failed-jobs": { status: 201 },
+        "POST /repos/octocat/hello-world/actions/runs/12/rerun-failed-jobs": { status: 201 },
+      }),
+    );
+
+    const outcome = await runAgainstStub(checksRerun.perform(ADDRESS, buildActionContext()), stub);
+
+    expect(readSuccess(outcome).rerun).toEqual([{ name: "CI" }, { name: "Deploy" }]);
   });
 
   it("asks any other app to run its suite again", async () => {
@@ -147,10 +181,7 @@ describe("checks.rerun", () => {
   it("re-runs a mix of both kinds", async () => {
     const stub = stubRoutes(
       buildRoutes([buildSuite(), CIRCLE_SUITE], {
-        [`GET ${RUNS_PATH}`]: {
-          status: 200,
-          body: { workflow_runs: [{ id: 11, check_suite_id: 5 }] },
-        },
+        [runsOf(5)]: { status: 200, body: { workflow_runs: [{ id: 11, name: "CI" }] } },
         "POST /repos/octocat/hello-world/actions/runs/11/rerun-failed-jobs": { status: 201 },
         "POST /repos/octocat/hello-world/check-suites/7/rerequest": { status: 201 },
       }),
@@ -158,10 +189,7 @@ describe("checks.rerun", () => {
 
     const outcome = await runAgainstStub(checksRerun.perform(ADDRESS, buildActionContext()), stub);
 
-    expect(readSuccess(outcome).rerun).toEqual([
-      { name: "GitHub Actions" },
-      { name: "CircleCI Checks" },
-    ]);
+    expect(readSuccess(outcome).rerun).toEqual([{ name: "CI" }, { name: "CircleCI Checks" }]);
   });
 
   it("leaves passing, running and empty suites alone", async () => {
@@ -216,7 +244,8 @@ describe("checks.rerun", () => {
     const error = await readFailure(stub);
 
     expect(error.code).toBe("conflict");
-    expect(error.message).toContain("No checks failed");
+    expect(error.message).toContain("No failed checks are left to re-run");
+    expect(error.message).toContain("passed, or they are already running again");
     expect(listRequests(stub)).toEqual([`GET ${PULL_PATH}`, `GET ${SUITES_PATH}`]);
   });
 
@@ -251,7 +280,7 @@ describe("checks.rerun", () => {
   it("re-runs nothing when a GitHub Actions suite has no workflow run", async () => {
     const stub = stubRoutes(
       buildRoutes([buildSuite(), CIRCLE_SUITE], {
-        [`GET ${RUNS_PATH}`]: { status: 200, body: { workflow_runs: [] } },
+        [runsOf(5)]: { status: 200, body: { workflow_runs: [] } },
       }),
     );
 
@@ -279,10 +308,7 @@ describe("checks.rerun", () => {
   it("says which suites were already re-run when a later one fails", async () => {
     const stub = stubRoutes(
       buildRoutes([buildSuite(), CIRCLE_SUITE], {
-        [`GET ${RUNS_PATH}`]: {
-          status: 200,
-          body: { workflow_runs: [{ id: 11, check_suite_id: 5 }] },
-        },
+        [runsOf(5)]: { status: 200, body: { workflow_runs: [{ id: 11, name: "CI" }] } },
         "POST /repos/octocat/hello-world/actions/runs/11/rerun-failed-jobs": { status: 201 },
         "POST /repos/octocat/hello-world/check-suites/7/rerequest": {
           status: 422,
@@ -295,7 +321,7 @@ describe("checks.rerun", () => {
 
     expect(error.code).toBe("validation");
     expect(error.message).toContain("Could not re-run the checks of CircleCI Checks");
-    expect(error.message).toContain("Already re-run, and not undone: GitHub Actions.");
+    expect(error.message).toContain("Already re-run, and not undone: CI.");
   });
 });
 

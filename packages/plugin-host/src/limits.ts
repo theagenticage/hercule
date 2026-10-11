@@ -38,6 +38,14 @@ export const MAX_CHECK_LOG_LINES = 40;
 export const MAX_CHECK_LOG_LENGTH = 8 * 1024;
 
 /**
+ * The most bytes one raised signal may take once written as JSON. Each field
+ * has its own limit, but together they still allow megabytes, and every open
+ * signal is read each time To do loads. A plugin's `build` that lays out a
+ * long block, such as many messages, counts bytes against it.
+ */
+export const MAX_SIGNAL_BYTES = 256 * 1024;
+
+/**
  * How much a Task matters, highest first. A signal has the same priorities,
  * so a signal and the Task made from it agree; `urgent` shows as Now. Shown
  * as bars and font weight, never as colour. The list is in ranking order, so

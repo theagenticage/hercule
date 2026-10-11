@@ -24,6 +24,7 @@ import {
   MAX_CHECK_LOG_LINES,
   MAX_CHECK_ROWS,
   MAX_MESSAGE_TEXT_LENGTH,
+  MAX_SIGNAL_BYTES,
   MAX_SIGNAL_TITLE_LENGTH,
   PluginId,
 } from "@hercule/plugin-host";
@@ -69,6 +70,7 @@ export {
   MAX_CHECK_LOG_LINES,
   MAX_CHECK_ROWS,
   MAX_MESSAGE_TEXT_LENGTH,
+  MAX_SIGNAL_BYTES,
   MAX_SIGNAL_TITLE_LENGTH,
 } from "@hercule/plugin-host";
 
@@ -114,13 +116,6 @@ export const MAX_SIGNAL_REPLY_LENGTH = 16 * 1024;
  * this length, because the action has already run when the line is written.
  */
 export const MAX_SIGNAL_OUTCOME_LENGTH = 1024;
-
-/**
- * The most bytes one raised signal may take once written as JSON. Each field
- * has its own limit, but together they still allow megabytes, and every open
- * signal is read each time To do loads.
- */
-export const MAX_SIGNAL_BYTES = 256 * 1024;
 
 /**
  * The kinds the core owns. They are not prefixed. `signal.raise` raises these

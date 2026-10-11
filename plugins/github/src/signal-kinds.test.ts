@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Result, Schema } from "effect";
 import type { SignalBuildContext, SignalDraft, StoredEvent } from "@hercule/plugin-host";
-import { BoundAction, KnownBlock } from "@hercule/contract";
+import { BoundAction, KnownBlock, MAX_SIGNAL_BYTES } from "@hercule/contract";
 import { TEST_TOKEN } from "./actions/testing";
 import {
   buildAssignedSignal,
@@ -473,6 +473,32 @@ describe("the changes-requested signal", () => {
     expectDraftWithinContract(draft);
   });
 
+  it("leaves out the oldest comments until the signal fits the size limit", async () => {
+    // 16,000 euro signs are 48,000 bytes of JSON each, so 19 of them are far over the limit.
+    const stub = stubReview(
+      { ...REVIEW, body: "€".repeat(16_000) },
+      Array.from({ length: 19 }, (_, index) =>
+        buildReviewComment(index + 1, { body: "€".repeat(16_000) }),
+      ),
+    );
+
+    const draft = readDraft(
+      await runAgainstStub(buildChangesRequestedSignal(event, CONTEXT), stub),
+    );
+
+    const { messages, omitted } = readMessagesBlock(draft);
+    // The review and the newest comment are kept, and every comment is either shown or counted.
+    expect(messages[0]?.text).toBe("€".repeat(16_000));
+    expect(messages.length).toBeGreaterThan(1);
+    expect(messages.length).toBeLessThan(20);
+    expect(messages.length - 1 + omitted).toBe(19);
+    expect((messages.at(-1) as unknown as { url: string }).url).toMatch(/discussion_r19$/);
+    expect(new TextEncoder().encode(JSON.stringify(draft)).byteLength).toBeLessThan(
+      MAX_SIGNAL_BYTES,
+    );
+    expectDraftWithinContract(draft);
+  });
+
   it("reads the last page of a long review, and counts the comments before it", async () => {
     const api = `https://api.github.com${REVIEW_PATH}/comments`;
     const stub = stubGithub((request) => {
@@ -543,6 +569,60 @@ describe("cutting a check log", () => {
     expect(cutCheckLog("")).toBeUndefined();
     expect(cutCheckLog("\n  \n\u001b[0m\n")).toBeUndefined();
   });
+
+  it("removes every kind of terminal escape sequence", () => {
+    const sequences = [
+      "\u001b[1;31m", // color
+      "\u001b[?25l", // hide the cursor
+      "\u001b[2K", // erase the line
+      "\u001b]0;window title\u0007", // OSC ended by BEL
+      "\u001b]8;;https://evil.example\u001b\\", // OSC ended by ESC \
+      "\u001bPdevice control\u001b\\", // DCS
+      "\u001b_application command\u001b\\", // APC
+      "\u001b(B", // select a character set
+      "\u001b7", // save the cursor
+      "\u001bc", // reset the terminal
+      "\u009b31m", // eight-bit CSI
+      "\u009d0;title\u009c", // eight-bit OSC and ST
+    ];
+
+    const log = cutCheckLog(sequences.map((sequence) => `a${sequence}b`).join("\n"));
+
+    expect(log).toBe(Array.from(sequences, () => "ab").join("\n"));
+  });
+
+  it("removes an unterminated string sequence up to the end of its line only", () => {
+    expect(cutCheckLog("one \u001b]0;never ended\nnext line")).toBe("one \nnext line");
+  });
+
+  it("removes control characters but keeps tabs and newlines", () => {
+    expect(cutCheckLog("a\u0000b\u0007c\u0008d\u007fe\u0085f\u0080g\th\u001b")).toBe("abcdefg\th");
+  });
+
+  it("removes the characters that reorder text", () => {
+    const bidi = "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069";
+
+    expect(cutCheckLog(`pass${bidi}word`)).toBe("password");
+  });
+
+  it("keeps the last version of a line a progress bar rewrote, and handles CRLF", () => {
+    expect(cutCheckLog("10%\r50%\r100%\r\nnext\r\ndone\r")).toBe("100%\nnext\ndone");
+  });
+
+  it("does not cut a surrogate pair in half", () => {
+    // 8,191 letters and a pair make the log 8,193 units long: the cut falls inside the pair.
+    const log = cutCheckLog(`😀${"x".repeat(8191)}`);
+
+    expect(log).toBe("x".repeat(8191));
+    expect(log?.length).toBeLessThanOrEqual(8 * 1024);
+  });
+
+  it("keeps a whole pair that fits", () => {
+    const log = cutCheckLog(`start${"x".repeat(8190)}😀`);
+
+    expect(log?.length).toBe(8 * 1024);
+    expect(log?.endsWith("x😀")).toBe(true);
+  });
 });
 
 describe("the checks-failed signal", () => {
@@ -602,8 +682,21 @@ describe("the checks-failed signal", () => {
       return {
         status: 200,
         body: [
-          { path: "src/a.ts", start_line: 4, message: "Expected true" },
-          { path: "src/b.ts", start_line: 9, message: "Line one\nLine two" },
+          {
+            path: "src/a.ts",
+            start_line: 4,
+            message: "Expected true",
+            annotation_level: "failure",
+          },
+          // Warnings and notices are not the error, and a null message has nothing to show.
+          { path: "src/w.ts", start_line: 1, message: "Unused", annotation_level: "warning" },
+          { path: "src/n.ts", start_line: 2, message: null, annotation_level: "failure" },
+          {
+            path: "src/b.ts",
+            start_line: 9,
+            message: "Line one\nLine two",
+            annotation_level: "failure",
+          },
         ],
       };
     });
@@ -673,6 +766,54 @@ describe("the checks-failed signal", () => {
     expectDraftWithinContract(draft);
   });
 
+  it("falls back to the text when no annotation is a failure", async () => {
+    const stub = stubGithub((request) =>
+      readStubRequestTarget(request).path === COMMIT_PATH
+        ? {
+            status: 200,
+            body: {
+              total_count: 1,
+              check_runs: [
+                buildCheckRun(1, "lint", {
+                  conclusion: "failure",
+                  output: { title: null, summary: null, text: "the report", annotations_count: 1 },
+                }),
+              ],
+            },
+          }
+        : {
+            status: 200,
+            body: [{ path: "a.ts", start_line: 1, message: "Unused", annotation_level: "warning" }],
+          },
+    );
+
+    const draft = readDraft(await runAgainstStub(buildChecksFailedSignal(event, CONTEXT), stub));
+
+    expect(draft.blocks).toMatchObject([{ rows: [{ name: "lint", log: "the report" }] }]);
+    expectDraftWithinContract(draft);
+  });
+
+  it("puts each log on its own check when failed checks are not the first rows", async () => {
+    // Pending checks come before the failed ones in GitHub's list; the logs still follow their checks.
+    const stub = stubRuns([
+      buildCheckRun(1, "deploy", { status: "in_progress", conclusion: null }),
+      buildFailedRun(2, "unit", "unit failed"),
+      buildFailedRun(3, "e2e", "e2e failed"),
+    ]);
+
+    const draft = readDraft(await runAgainstStub(buildChecksFailedSignal(event, CONTEXT), stub));
+
+    expect(draft.blocks).toMatchObject([
+      {
+        rows: [
+          { name: "unit", log: "unit failed" },
+          { name: "e2e", log: "e2e failed" },
+          { name: "deploy", state: "pending" },
+        ],
+      },
+    ]);
+  });
+
   it("cuts the rows to the limit, counts the rest, and reads the logs of the first five only", async () => {
     const failed = Array.from({ length: 25 }, (_, index) =>
       buildFailedRun(index + 1, `job ${String(index + 1)}`),
@@ -704,7 +845,10 @@ describe("the checks-failed signal", () => {
     const stub = stubGithub((request) => {
       const { path, query } = readStubRequestTarget(request);
       if (path !== COMMIT_PATH) {
-        return { status: 200, body: [{ path: "a.ts", start_line: 1, message: "bad" }] };
+        return {
+          status: 200,
+          body: [{ path: "a.ts", start_line: 1, message: "bad", annotation_level: "failure" }],
+        };
       }
       const page = Number(query["page"] ?? "1");
       return {

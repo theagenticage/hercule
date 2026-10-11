@@ -23,6 +23,7 @@ import {
   MAX_CHECK_LOG_LINES,
   MAX_CHECK_ROWS,
   MAX_MESSAGE_TEXT_LENGTH,
+  MAX_SIGNAL_BYTES,
   MAX_SIGNAL_TITLE_LENGTH,
   PluginError,
   type SignalBuildContext,
@@ -33,12 +34,17 @@ import {
   type StoredEvent,
 } from "@hercule/plugin-host";
 import { readToken } from "./api";
-import { GithubAccount, isFailedConclusion, isPassingConclusion } from "./github-objects";
-import { ListedCheckRun, ListedComment } from "./ingest/feed-objects";
+import {
+  GithubAccount,
+  isFailedConclusion,
+  isPassingConclusion,
+  type ListedCheckRun,
+} from "./github-objects";
+import { fetchLatestCheckRuns } from "./ingest/checks";
+import { ListedComment } from "./ingest/feed-objects";
 import {
   decodeGithubValue,
   fetchFeedResponse,
-  fetchListing,
   fetchNewestItems,
   type FeedError,
 } from "./ingest/requests";
@@ -70,6 +76,16 @@ const MAX_CHECK_RUN_PAGES = 3;
 
 /** For how many failed checks `build` reads what the check reported, one request each. */
 const MAX_LOGGED_CHECKS = 5;
+
+/**
+ * The most bytes of JSON the rest of a signal takes besides one big block:
+ * the title, asker, place, the reply or re-run answer, and the reason and
+ * event ids the core adds. Their limits add up to about 12 KB at most.
+ */
+const SIGNAL_BYTES_BESIDES_BLOCK = 16 * 1024;
+
+/** The most bytes of JSON a messages block may take, so the whole signal stays under `MAX_SIGNAL_BYTES`. */
+const MAX_MESSAGES_BLOCK_BYTES = MAX_SIGNAL_BYTES - SIGNAL_BYTES_BESIDES_BLOCK;
 
 /** The thread of every kind: the issue or pull request, by its External Ref. */
 const THREAD_REF = "event.refs[0]";
@@ -535,6 +551,42 @@ const ReviewComment = Schema.Struct({
 const EMPTY_REVIEW_TEXT = "Requested changes";
 
 /**
+ * Returns how many bytes `value` takes once written as JSON in UTF-8. The
+ * contract has the same function; a plugin cannot import the contract.
+ */
+const countJsonBytes = (value: unknown): number =>
+  new TextEncoder().encode(JSON.stringify(value)).byteLength;
+
+/**
+ * Builds a messages block of the `first` message and the `others` after it,
+ * leaving out the oldest of the others until the block takes at most
+ * `MAX_MESSAGES_BLOCK_BYTES` of JSON. `omitted` is the number of messages
+ * already left out before `others`; each one dropped here is added to it.
+ * The first message is always kept, because the core refuses a signal larger
+ * than `MAX_SIGNAL_BYTES`, and the signal would then fall back to the event's
+ * own text.
+ */
+const buildMessagesBlockWithinBytes = (
+  first: object,
+  others: ReadonlyArray<object>,
+  omitted: number,
+) => {
+  const buildBlock = (dropped: number) => ({
+    type: "messages",
+    messages: [first, ...others.slice(dropped)],
+    omitted: omitted + dropped,
+  });
+  let dropped = 0;
+  while (
+    dropped < others.length &&
+    countJsonBytes(buildBlock(dropped)) > MAX_MESSAGES_BLOCK_BYTES
+  ) {
+    dropped++;
+  }
+  return buildBlock(dropped);
+};
+
+/**
  * Builds the signal of requested changes: the pull request's title, who
  * requested the changes, a `messages` block with the review and then its
  * comments, each with the file and line it is on, and a Reply answer that
@@ -544,7 +596,10 @@ const EMPTY_REVIEW_TEXT = "Requested changes";
  * A messages block shows the review (its first message) and at most
  * `MAX_BLOCK_MESSAGES - 1` comments. When the review has more, the newest
  * are kept and `omitted` counts the older ones left out, because the block
- * can only record omitted messages that come before the ones shown.
+ * can only record omitted messages that come before the ones shown. The
+ * block also keeps within `MAX_MESSAGES_BLOCK_BYTES` of JSON: 19 comments of
+ * 16 K characters would make a signal the core refuses, so the oldest
+ * comments that do not fit are left out too.
  *
  * Fails with a `PluginError` when the event names no pull request or has no
  * review id, the Connection has no token, or GitHub refuses or cannot be
@@ -580,40 +635,33 @@ export const buildChangesRequestedSignal = (
     const shown = comments.slice(-(MAX_BLOCK_MESSAGES - 1));
     const body = review.body ?? "";
     const place = buildItemPlace(item);
+    const reviewMessage = buildMessage(
+      review.user,
+      review.submitted_at ?? event.occurredAt,
+      body.trim() === "" ? EMPTY_REVIEW_TEXT : body,
+      review.html_url,
+      false,
+    );
+    const commentMessages = shown.map((comment) => {
+      const line = comment.line ?? comment.original_line ?? undefined;
+      return {
+        ...buildMessage(comment.user, comment.created_at, comment.body, comment.html_url, false),
+        location: {
+          path: cutText(comment.path, MAX_BLOCK_NAME_LENGTH),
+          ...(line === undefined ? {} : { line }),
+        },
+      };
+    });
     return {
       title: cutText(payload.subject.title ?? place, MAX_SIGNAL_TITLE_LENGTH),
       ...(event.author === null ? {} : { asker: event.author }),
       place,
       blocks: [
-        {
-          type: "messages",
-          messages: [
-            buildMessage(
-              review.user,
-              review.submitted_at ?? event.occurredAt,
-              body.trim() === "" ? EMPTY_REVIEW_TEXT : body,
-              review.html_url,
-              false,
-            ),
-            ...shown.map((comment) => {
-              const line = comment.line ?? comment.original_line ?? undefined;
-              return {
-                ...buildMessage(
-                  comment.user,
-                  comment.created_at,
-                  comment.body,
-                  comment.html_url,
-                  false,
-                ),
-                location: {
-                  path: cutText(comment.path, MAX_BLOCK_NAME_LENGTH),
-                  ...(line === undefined ? {} : { line }),
-                },
-              };
-            }),
-          ],
-          omitted: listing.itemsBefore + comments.length - shown.length,
-        },
+        buildMessagesBlockWithinBytes(
+          reviewMessage,
+          commentMessages,
+          listing.itemsBefore + comments.length - shown.length,
+        ),
       ],
       actions: [buildReplyAction(item)],
     };
@@ -625,38 +673,98 @@ const ChecksPayload = Schema.Struct({
   headSha: Schema.String,
 });
 
-/** One annotation of a check run, as `GET .../check-runs/{id}/annotations` returns it. */
+/**
+ * One annotation of a check run, as `GET .../check-runs/{id}/annotations`
+ * returns it. `annotation_level` is `failure`, `warning` or `notice`; GitHub
+ * sends null for either of the two text fields it does not have.
+ */
 const CheckAnnotation = Schema.Struct({
   path: Schema.String,
   start_line: Schema.Int,
-  message: Schema.String,
+  message: Schema.NullOr(Schema.String),
+  annotation_level: Schema.NullOr(Schema.String),
 });
 
-/** The ANSI escape sequences a terminal log holds for colors and cursor moves. */
-const ANSI_ESCAPE_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g");
+/**
+ * The escape sequences a terminal acts on instead of printing, which a log
+ * must not carry to the terminal that shows it:
+ *
+ * - a string sequence (`ESC ]` OSC, `ESC P` DCS, and SOS, PM and APC) up to
+ *   its terminator, a BEL or `ESC \`; one without a terminator ends at the
+ *   end of its line;
+ * - a CSI sequence (`ESC [` and parameters, such as colors and cursor moves);
+ * - any other `ESC` sequence of one or two characters, such as `ESC ( B`.
+ *
+ * The eight-bit forms of the introducers (U+009B for CSI, U+009D for OSC, and
+ * so on) count too, because a terminal in UTF-8 mode may read them.
+ */
+const ESCAPE_SEQUENCE_PATTERN = (() => {
+  const escape = String.fromCharCode(27);
+  const bell = String.fromCharCode(7);
+  const stringStart = `(?:${escape}[\\]PX^_]|[\u0090\u0098\u009d\u009e\u009f])`;
+  const stringEnd = `(?:${bell}|${escape}\\\\|\u009c)?`;
+  const csi = `(?:${escape}\\[|\u009b)[0-?]*[ -/]*[@-~]`;
+  const other = `${escape}[ -/]*[0-~]`;
+  return new RegExp(
+    `${stringStart}[^${bell}${escape}\\u009c\\n]*${stringEnd}|${csi}|${other}`,
+    "gu",
+  );
+})();
+
+/** Every control character except tab and newline, and the characters that reorder text: bidi overrides and isolates. */
+const UNSAFE_CHARACTER_PATTERN = /(?![\t\n])\p{Cc}|[\u202A-\u202E\u2066-\u2069]/gu;
+
+/**
+ * Returns what a terminal shows of one line that may hold carriage returns:
+ * the last part after one, because a progress bar writes `10%\r20%\r100%` on
+ * one line to overwrite itself. Empty parts are skipped, so a line that ends
+ * with `\r` keeps its text.
+ */
+const keepLastOverwrite = (line: string): string =>
+  line.split("\r").findLast((part) => part !== "") ?? "";
+
+/** Returns the text without its first character when that is the second half of a surrogate pair, which a cut just before it left alone. */
+const dropOrphanedLowSurrogate = (text: string): string => {
+  const first = text.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
+};
 
 /**
  * Cuts the output of a check to the end of it that fits a checks row's log.
- * Returns the last `MAX_CHECK_LOG_LINES` lines of `output` without ANSI
- * escape codes and trailing blank lines, and, when those are still longer
- * than `MAX_CHECK_LOG_LENGTH` characters, the last characters of them.
- * Returns `undefined` when nothing is left, because a row's log is not
- * allowed to be empty. The end is kept because that is where a failing
- * command says why it failed.
+ * Removes every terminal escape sequence, every control character but tab and
+ * newline, and the bidi override and isolate characters, because
+ * `hercule signal read` prints the log to a terminal. A line rewritten with
+ * carriage returns keeps its last version. Then keeps the last
+ * `MAX_CHECK_LOG_LINES` lines without trailing blank lines, and, when those
+ * are still longer than `MAX_CHECK_LOG_LENGTH` characters (UTF-16 units, as
+ * the contract counts them), the last characters of them, never starting in
+ * the middle of a surrogate pair. Returns `undefined` when nothing is left,
+ * because a row's log is not allowed to be empty. The end is kept because
+ * that is where a failing command says why it failed.
+ *
+ * Exported so its test can check the cleaning on its own; `build` applies it
+ * to every log.
  */
 export const cutCheckLog = (output: string): string | undefined => {
-  const lines = output.replace(ANSI_ESCAPE_PATTERN, "").split(/\r?\n/);
+  const lines = output
+    .replace(/\r\n/g, "\n")
+    .replace(ESCAPE_SEQUENCE_PATTERN, "")
+    .split("\n")
+    .map((line) => keepLastOverwrite(line).replace(UNSAFE_CHARACTER_PATTERN, ""));
   while (lines.length > 0 && lines[lines.length - 1]!.trim() === "") lines.pop();
   const log = lines.slice(-MAX_CHECK_LOG_LINES).join("\n");
   if (log === "") return undefined;
-  return log.length > MAX_CHECK_LOG_LENGTH ? log.slice(-MAX_CHECK_LOG_LENGTH) : log;
+  return log.length > MAX_CHECK_LOG_LENGTH
+    ? dropOrphanedLowSurrogate(log.slice(-MAX_CHECK_LOG_LENGTH))
+    : log;
 };
 
 /**
  * Reads what a failed check reported and returns the end of it as a row's
- * log, or `undefined` when it reported nothing. The check's annotations
- * (up to 50, one line each as `path:line message`) are read when it has
- * any, and otherwise its `text`, or its `summary` when the `text` holds no
+ * log, or `undefined` when it reported nothing. The check's failure
+ * annotations (up to 50 are read, one line each as `path:line message`) are
+ * the log when it has any: warnings and notices would crowd out the error.
+ * Otherwise the log is its `text`, or its `summary` when the `text` holds no
  * log. Fails with a `PluginError` when GitHub refuses or cannot be reached.
  */
 const readFailedCheckLog = (
@@ -665,9 +773,9 @@ const readFailedCheckLog = (
   run: ListedCheckRun,
 ): Effect.Effect<string | undefined, PluginError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    if (run.output.annotations_count === 0) {
-      return cutCheckLog(run.output.text ?? "") ?? cutCheckLog(run.output.summary ?? "");
-    }
+    const reported = () =>
+      cutCheckLog(run.output.text ?? "") ?? cutCheckLog(run.output.summary ?? "");
+    if (run.output.annotations_count === 0) return reported();
     const response = yield* Effect.mapError(
       fetchFeedResponse({
         method: "GET",
@@ -682,14 +790,12 @@ const readFailedCheckLog = (
       response.body,
       "check annotations",
     );
-    return cutCheckLog(
-      annotations
-        .map(
-          (annotation) =>
-            `${annotation.path}:${String(annotation.start_line)} ${annotation.message}`,
-        )
-        .join("\n"),
+    const failures = annotations.flatMap((annotation) =>
+      annotation.annotation_level === "failure" && annotation.message !== null
+        ? [`${annotation.path}:${String(annotation.start_line)} ${annotation.message}`]
+        : [],
     );
+    return cutCheckLog(failures.join("\n")) ?? reported();
   });
 
 /**
@@ -717,9 +823,10 @@ const buildCheckRow = (run: ListedCheckRun, log: string | undefined) => {
  * end of what they reported.
  *
  * Reads the head commit's check runs, up to 300 in three pages, and the
- * annotations of up to five of them: at most eight requests. Fails with a
- * `PluginError` when the event names no pull request or has no head commit,
- * the Connection has no token, or GitHub refuses or cannot be reached.
+ * annotations of up to five of them, at the same time: at most eight
+ * requests. Fails with a `PluginError` when the event names no pull request
+ * or has no head commit, the Connection has no token, or GitHub refuses or
+ * cannot be reached.
  */
 export const buildChecksFailedSignal = (
   event: StoredEvent,
@@ -729,30 +836,19 @@ export const buildChecksFailedSignal = (
     const item = yield* readEventItem(event);
     const payload = yield* decodeEventPayload(ChecksPayload, event);
     const token = yield* readBuildToken(context);
-    const listing = yield* Effect.mapError(
-      fetchListing(
-        {
-          method: "GET",
-          path: `/repos/${item.repo}/commits/${encodeURIComponent(payload.headSha)}/check-runs`,
-          token,
-          query: { filter: "latest", per_page: "100" },
-        },
-        MAX_CHECK_RUN_PAGES,
-        { itemsField: "check_runs" },
-      ),
+    const runs = yield* Effect.mapError(
+      fetchLatestCheckRuns(item.repo, payload.headSha, token, MAX_CHECK_RUN_PAGES),
       convertToBuildError,
-    );
-    const runs = yield* decodeGithubValue(
-      Schema.Array(ListedCheckRun),
-      listing.items,
-      "check runs",
     );
     const failed = runs.filter((run) => isFailedConclusion(run.conclusion));
     const pending = runs.filter((run) => run.status !== "completed");
     const rows = [...failed, ...pending].slice(0, MAX_CHECK_ROWS);
-    // The failed checks come first among the rows, so the logs line up with the rows' first entries.
-    const logs = yield* Effect.forEach(failed.slice(0, MAX_LOGGED_CHECKS), (run) =>
-      readFailedCheckLog(item, token, run),
+    const logs = new Map(
+      yield* Effect.forEach(
+        failed.slice(0, MAX_LOGGED_CHECKS),
+        (run) => Effect.map(readFailedCheckLog(item, token, run), (log) => [run.id, log] as const),
+        { concurrency: MAX_LOGGED_CHECKS },
+      ),
     );
     const place = buildItemPlace(item);
     const app = failed[0]?.app?.name;
@@ -763,7 +859,7 @@ export const buildChecksFailedSignal = (
       blocks: [
         {
           type: "checks",
-          rows: rows.map((run, index) => buildCheckRow(run, logs[index])),
+          rows: rows.map((run) => buildCheckRow(run, logs.get(run.id))),
           passed: runs.filter((run) => isPassingConclusion(run.conclusion)).length,
           omitted: failed.length + pending.length - rows.length,
         },
@@ -915,7 +1011,7 @@ export const GITHUB_SIGNAL_KINDS: ReadonlyArray<SignalKindDeclaration> = [
     from: ["github.pr.checks-completed"],
     rule: 'event.payload.conclusion == "failure" && event.payload.onYourPullRequest ? "yes" : "no"',
     guidance:
-      "The checks on the user's own pull request finished with a failure. The user asked nobody, so it does not name them.",
+      "The checks on the user's own pull request finished with a failure. No person asked; the asker shown is the app whose check failed.",
     threadRef: THREAD_REF,
     namesYou: false,
     priority: "normal",

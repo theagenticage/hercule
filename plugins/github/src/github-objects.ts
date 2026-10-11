@@ -1,7 +1,7 @@
 /**
  * The small objects GitHub embeds in its issues, pull requests and reviews,
- * and the verdict of a review, which the feeds and the workflow actions read
- * the same way.
+ * the check suites and check runs on a commit, and the verdict of a review,
+ * which the feeds, the signal kinds and the workflow actions read the same way.
  *
  * The issue, pull request, review and comment around them are not here: the
  * feeds and the actions read different fields of them, from different
@@ -57,6 +57,49 @@ export const readReviewVerdict = (state: string): ReviewVerdict | undefined => {
       return undefined;
   }
 };
+
+/** The app that ran a check suite or a check run; `slug` is `github-actions` for GitHub Actions. */
+export const GithubApp = Schema.Struct({ name: Schema.String, slug: Schema.String });
+
+/**
+ * One check suite on a commit, as an entry of the `check_suites` list that
+ * `GET /repos/{owner}/{repo}/commits/{sha}/check-suites` returns. `app` is
+ * null for a suite whose app was deleted.
+ */
+export const GithubCheckSuite = Schema.Struct({
+  id: Schema.Int,
+  status: Schema.NullOr(Schema.String),
+  conclusion: Schema.NullOr(Schema.String),
+  updated_at: Schema.NullOr(Schema.String),
+  latest_check_runs_count: Schema.Int,
+  app: Schema.NullOr(GithubApp),
+});
+
+export type GithubCheckSuite = Schema.Schema.Type<typeof GithubCheckSuite>;
+
+/**
+ * One check run on a commit, as an entry of the `check_runs` list that
+ * `GET /repos/{owner}/{repo}/commits/{sha}/check-runs` returns. `output`
+ * holds what the check reported: `summary` and `text` are markdown, and
+ * `annotations_count` says how many annotations
+ * `GET .../check-runs/{id}/annotations` lists.
+ */
+export const ListedCheckRun = Schema.Struct({
+  id: Schema.Int,
+  name: Schema.String,
+  status: Schema.String,
+  conclusion: Schema.NullOr(Schema.String),
+  html_url: Schema.NullOr(Schema.String),
+  app: Schema.NullOr(GithubApp),
+  output: Schema.Struct({
+    title: Schema.NullOr(Schema.String),
+    summary: Schema.NullOr(Schema.String),
+    text: Schema.NullOr(Schema.String),
+    annotations_count: Schema.Int,
+  }),
+});
+
+export type ListedCheckRun = Schema.Schema.Type<typeof ListedCheckRun>;
 
 /** The conclusions of a finished check that need nobody's attention. */
 const PASSING_CONCLUSIONS: ReadonlySet<string> = new Set(["success", "neutral", "skipped"]);

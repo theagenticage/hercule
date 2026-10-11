@@ -21,7 +21,9 @@
  * 3. When a commit's verdict is a failure that is about to be emitted:
  *    `GET /repos/{o}/{r}/commits/{sha}/check-runs?filter=latest&per_page=100`,
  *    one page, for the names of the check runs that failed. A passing
- *    verdict sends no such request.
+ *    verdict sends no such request. When this request fails, the repository's
+ *    whole checks poll fails with it and stores nothing, and the next poll
+ *    reads the repository again.
  *
  * So a quiet repository costs one free 304 plus one free 304 per pull
  * request in the window, as long as no commit has more than 100 suites.
@@ -33,14 +35,14 @@
  * same check-suites request as above. Their state is kept under
  * `checks-own`, outside the per-repository keys.
  */
-import { isFailedConclusion } from "../github-objects";
 import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import { PluginError, type IngestContext, type PollResult } from "@hercule/plugin-host";
+import { GithubCheckSuite, isFailedConclusion, ListedCheckRun } from "../github-objects";
 import { isUserAccount, type GithubIdentity } from "../identity";
 import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
 import { computeDigest } from "./digest";
-import { GithubCheckSuite, ListedCheckRun, ListedPull } from "./feed-objects";
+import { ListedPull } from "./feed-objects";
 import { fetchOwnOpenPullRequests } from "./own-pulls";
 import {
   decodeGithubValue,
@@ -59,9 +61,9 @@ const PullRequestSnapshot = Schema.Struct({
   author: Schema.optionalKey(Schema.String),
   /**
    * True when the user wrote the pull request. Absent in state an older
-   * version wrote, which counts as false until the next listing replaces it.
+   * version wrote: `fetchOpenPullRequests` works it out from `author` then.
    */
-  authoredByYou: Schema.optionalKey(Schema.Boolean),
+  onYourPullRequest: Schema.optionalKey(Schema.Boolean),
   headSha: Schema.String,
   updatedAt: Schema.String,
 });
@@ -199,7 +201,20 @@ const fetchOpenPullRequests = (
       },
       MAX_PULL_PAGES,
     );
-    if (listing.unchanged) return stored;
+    if (listing.unchanged) {
+      return {
+        ...(stored.etag === undefined ? {} : { etag: stored.etag }),
+        // State an older version wrote has no `onYourPullRequest`, and a 304
+        // keeps returning that state until a pull request changes.
+        pullRequests: stored.pullRequests.map((pullRequest) => ({
+          ...pullRequest,
+          onYourPullRequest:
+            pullRequest.onYourPullRequest ??
+            (pullRequest.author !== undefined &&
+              isUserAccount(identity, { login: pullRequest.author })),
+        })),
+      };
+    }
     const pulls = yield* decodeGithubValue(
       Schema.Array(ListedPull),
       listing.items,
@@ -213,7 +228,7 @@ const fetchOpenPullRequests = (
           number: pull.number,
           title: pull.title,
           ...(pull.user === null ? {} : { author: pull.user.login }),
-          authoredByYou: isUserAccount(identity, pull.user),
+          onYourPullRequest: isUserAccount(identity, pull.user),
           headSha: pull.head.sha,
           updatedAt: pull.updated_at,
         })),
@@ -221,33 +236,45 @@ const fetchOpenPullRequests = (
   });
 
 /**
+ * Fetches the latest check runs of a commit, following at most `maxPages`
+ * pages of 100. A commit with more runs lists only those. Fails as
+ * `fetchListing` fails, and with a `PluginError` when a run lacks the fields
+ * read.
+ */
+export const fetchLatestCheckRuns = (
+  repo: string,
+  sha: string,
+  token: string,
+  maxPages: number,
+): Effect.Effect<ReadonlyArray<ListedCheckRun>, FeedError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const listing = yield* fetchListing(
+      {
+        method: "GET",
+        path: `/repos/${repo}/commits/${encodeURIComponent(sha)}/check-runs`,
+        token,
+        query: { filter: "latest", per_page: "100" },
+      },
+      maxPages,
+      { itemsField: "check_runs" },
+    );
+    return yield* decodeGithubValue(Schema.Array(ListedCheckRun), listing.items, "check runs");
+  });
+
+/**
  * Fetches the names of the check runs on a commit that failed, sorted and
  * without duplicates. A run failed when it concluded with anything but
  * `success`, `neutral` or `skipped`; one still running has no conclusion and
  * did not fail. Reads one page of the commit's latest runs, 100 at most, so
- * a commit with more runs lists only those. Fails as `fetchListing` fails,
- * and with a `PluginError` when a run lacks the fields read.
+ * a commit with more runs lists only those. Fails as `fetchLatestCheckRuns`
+ * fails.
  */
 const fetchFailedCheckNames = (
   poll: RepoPoll,
   headSha: string,
 ): Effect.Effect<Array<string>, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const listing = yield* fetchListing(
-      {
-        method: "GET",
-        path: `/repos/${poll.repo}/commits/${headSha}/check-runs`,
-        token: poll.token,
-        query: { filter: "latest", per_page: "100" },
-      },
-      1,
-      { itemsField: "check_runs" },
-    );
-    const runs = yield* decodeGithubValue(
-      Schema.Array(ListedCheckRun),
-      listing.items,
-      "check runs",
-    );
+    const runs = yield* fetchLatestCheckRuns(poll.repo, headSha, poll.token, 1);
     const failed = runs.filter((run) => isFailedConclusion(run.conclusion)).map((run) => run.name);
     return [...new Set(failed)].sort();
   });
@@ -262,7 +289,10 @@ const fetchFailedCheckNames = (
  *
  * A failure verdict also reads the commit's check runs, for the names of
  * those that failed. When that read fails, so does this, with no event
- * emitted and no new state kept, so the next poll reads the commit again.
+ * emitted for the commit. That fails the whole checks poll of the repository,
+ * which stores nothing, and the next poll reads the repository again. Events
+ * already emitted in the failed poll repeat then, and the dedup keys drop
+ * them.
  */
 const checkHead = (
   poll: RepoPoll,
@@ -338,7 +368,7 @@ const checkHead = (
             })),
             headSha: pullRequest.headSha,
             failedChecks,
-            onYourPullRequest: pullRequest.authoredByYou === true,
+            onYourPullRequest: pullRequest.onYourPullRequest === true,
           },
           raw: truncateRaw(body),
         }),
@@ -499,7 +529,7 @@ const checkOwnPullRequests = (
         const headKey = `${found.repo}@${snapshot.headSha}`;
         heads[headKey] = yield* checkHead(
           { repo: found.repo, token, emit },
-          { ...snapshot, author: identity.login, authoredByYou: true },
+          { ...snapshot, author: identity.login, onYourPullRequest: true },
           stored.heads[headKey],
           stored.watchedSince,
         );

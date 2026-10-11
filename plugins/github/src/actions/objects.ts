@@ -18,6 +18,7 @@ import { ActionError } from "@hercule/plugin-host";
 import {
   GithubAccount,
   GithubAccounts,
+  GithubCheckSuite,
   GithubLabel,
   readReviewVerdict,
   ReviewVerdict,
@@ -246,34 +247,16 @@ export const decodeReview = (body: Schema.Json): Effect.Effect<Review, ActionErr
 export const decodeMerge = (body: Schema.Json): Effect.Effect<GithubMerge, ActionError> =>
   decodeGithubBody(GithubMerge, body);
 
-/**
- * A check suite on a commit, as an entry of the `check_suites` list that
- * `GET /repos/{owner}/{repo}/commits/{sha}/check-suites` returns. `app` is
- * null for a suite whose app was deleted.
- */
-const GithubCheckSuite = Schema.Struct({
-  id: Schema.Int,
-  status: Schema.NullOr(Schema.String),
-  conclusion: Schema.NullOr(Schema.String),
-  latest_check_runs_count: Schema.Int,
-  app: Schema.NullOr(Schema.Struct({ slug: Schema.String, name: Schema.String })),
-});
-
-export type GithubCheckSuite = Schema.Schema.Type<typeof GithubCheckSuite>;
-
 /** One page of `GET /repos/{owner}/{repo}/commits/{sha}/check-suites`. */
 const GithubCheckSuitePage = Schema.Struct({ check_suites: Schema.Array(GithubCheckSuite) });
 
 /**
- * One page of `GET /repos/{owner}/{repo}/actions/runs`. `check_suite_id` ties
- * a workflow run to its check suite.
+ * One page of `GET /repos/{owner}/{repo}/actions/runs`. `name` is the name of
+ * the workflow, or the run's own name when the workflow sets one.
  */
 const GithubWorkflowRunPage = Schema.Struct({
   workflow_runs: Schema.Array(
-    Schema.Struct({
-      id: Schema.Int,
-      check_suite_id: Schema.optionalKey(Schema.NullOr(Schema.Int)),
-    }),
+    Schema.Struct({ id: Schema.Int, name: Schema.optionalKey(Schema.NullOr(Schema.String)) }),
   ),
 });
 
@@ -282,7 +265,10 @@ export const ChecksRerun = Schema.Struct({
   sha: Schema.String.annotate({ description: "The head commit whose checks were re-run." }),
   rerun: Schema.Array(
     Schema.Struct({
-      name: Schema.String.annotate({ description: "The name of the app that runs the checks." }),
+      name: Schema.String.annotate({
+        description:
+          "The name of the GitHub Actions workflow that was re-run, or of the app whose checks were re-run.",
+      }),
     }),
   ).annotate({ description: "The check suites that were re-run, one entry for each." }),
 });
@@ -296,18 +282,15 @@ export const decodeCheckSuitePage = (
   Effect.map(decodeGithubBody(GithubCheckSuitePage, body), (page) => page.check_suites);
 
 /**
- * Decodes a page of workflow runs from GitHub's response into a map from
- * check suite id to workflow run id.
+ * Decodes a page of workflow runs from GitHub's response. `name` is
+ * undefined for a run GitHub gives no name.
  */
-export const decodeWorkflowRunIds = (
+export const decodeWorkflowRuns = (
   body: Schema.Json,
-): Effect.Effect<ReadonlyMap<number, number>, ActionError> =>
-  Effect.map(
-    decodeGithubBody(GithubWorkflowRunPage, body),
-    (page) =>
-      new Map(
-        page.workflow_runs.flatMap((run) =>
-          run.check_suite_id == null ? [] : [[run.check_suite_id, run.id] as const],
-        ),
-      ),
+): Effect.Effect<
+  ReadonlyArray<{ readonly id: number; readonly name: string | undefined }>,
+  ActionError
+> =>
+  Effect.map(decodeGithubBody(GithubWorkflowRunPage, body), (page) =>
+    page.workflow_runs.map((run) => ({ id: run.id, name: run.name ?? undefined })),
   );

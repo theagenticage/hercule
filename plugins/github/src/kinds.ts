@@ -41,19 +41,20 @@ export type GithubSubject = Schema.Schema.Type<typeof Subject>;
  */
 const ByYou = Schema.Boolean;
 
-/** Who a review request was taken back from: the user, or one of the user's teams. */
-const Reviewer = Schema.Literals(["you", "team"]);
-
 /**
  * Whether the user's own pull request is the one an event is about, worked
- * out at ingest from the Connection's identity.
+ * out at ingest from the Connection's identity. The description is in the
+ * catalog, so a rule or a triage agent knows what the field means.
  */
-const OnYourPullRequest = Schema.Boolean;
+const OnYourPullRequest = Schema.Boolean.annotate({
+  description: "True when the user wrote the pull request the event is about.",
+});
 
 /**
- * Declares an assignment kind: who was assigned or unassigned, and whether
- * that was the user, or done by the user. Who made the change is the event's
- * `author`. Issues and pull requests both emit it.
+ * Declares an assignment kind: the login of who was assigned or unassigned,
+ * `toYou` when that is the user, and `byYou` when the user made the change.
+ * Who made the change is the event's `author`. Issues and pull requests both
+ * emit it.
  */
 const declareAssignmentKind = (
   description: string,
@@ -162,7 +163,8 @@ export const GITHUB_EVENT_KINDS: Record<string, EventKindDeclaration> = {
       "A review request to the user or one of their teams was taken back on a pull request.",
     schema: Schema.Struct({
       subject: Subject,
-      reviewer: Reviewer,
+      /** Who the review request was taken back from: the user, or one of the user's teams. */
+      reviewer: Schema.Literals(["you", "team"]),
       /** The team, as `org/slug`, when `reviewer` is `team`. */
       team: Schema.optionalKey(Schema.String),
       /**

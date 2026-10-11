@@ -18,7 +18,7 @@ import {
   answerUserRequests,
   isUserRequest,
 } from "../testing";
-import type { GithubCheckSuite } from "./feed-objects";
+import type { GithubCheckSuite } from "../github-objects";
 import { pollChecks, rollUpConclusion } from "./checks";
 
 const REPO = "octocat/hello-world";
@@ -291,6 +291,26 @@ describe("the checks feed", () => {
 
     await poll(harness, repository);
 
+    expect(harness.events[0]!.payload).toMatchObject({ onYourPullRequest: true });
+  });
+
+  it("knows a pull request is the user's from state stored before onYourPullRequest, on a 304 listing", async () => {
+    const repository = buildRepository();
+    repository.pulls[0] = { ...repository.pulls[0]!, author: TEST_IDENTITY.login };
+    const harness = await baseline(repository);
+    await poll(harness, repository);
+    // The state an older version stored: the same snapshot, without the field.
+    const stored = harness.state.get(`checks/${REPO}`) as {
+      pullRequests: Array<Record<string, unknown>>;
+    };
+    for (const snapshot of stored.pullRequests) delete snapshot["onYourPullRequest"];
+    repository.suites["sha-a"] = [buildSuite("GitHub Actions", "completed", "failure")];
+    repository.checkRuns["sha-a"] = [buildCheckRun("test", "failure")];
+
+    // The pull request listing is unchanged, so GitHub answers 304.
+    await poll(harness, repository);
+
+    expect(harness.events).toHaveLength(1);
     expect(harness.events[0]!.payload).toMatchObject({ onYourPullRequest: true });
   });
 

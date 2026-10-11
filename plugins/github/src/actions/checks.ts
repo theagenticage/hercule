@@ -2,11 +2,11 @@
  * The workflow action that re-runs the failed checks on a GitHub pull
  * request's head commit.
  */
-import { isFailedConclusion } from "../github-objects";
 import { Clock, Effect, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import { ActionError } from "@hercule/plugin-host";
 import type { GithubRequest } from "../api";
+import { isFailedConclusion, type GithubCheckSuite } from "../github-objects";
 import {
   callGithub,
   convertGithubFailure,
@@ -16,12 +16,7 @@ import {
   sendGithubRequest,
 } from "./call";
 import { describeItem, nameItemBriefly } from "./describe";
-import {
-  ChecksRerun,
-  decodeCheckSuitePage,
-  decodeWorkflowRunIds,
-  type GithubCheckSuite,
-} from "./objects";
+import { ChecksRerun, decodeCheckSuitePage, decodeWorkflowRuns } from "./objects";
 import { describePullRequest, fetchPullRequest, PULL_REQUEST_ADDRESS } from "./pr";
 
 /** The app slug of the check suites GitHub Actions creates, one for each workflow. */
@@ -78,12 +73,43 @@ interface RerunTarget {
 }
 
 /**
+ * Fetches the workflow run of a GitHub Actions check suite, or returns
+ * undefined when GitHub lists none. Asks for the suite's own run, so a commit
+ * with many workflow runs is no problem. Fails with the error
+ * `convertGithubFailure` builds when GitHub refuses.
+ */
+const fetchWorkflowRun = (
+  repo: string,
+  suiteId: number,
+  token: string,
+): Effect.Effect<
+  { readonly id: number; readonly name: string | undefined } | undefined,
+  ActionError,
+  HttpClient.HttpClient
+> =>
+  Effect.map(
+    Effect.flatMap(
+      callGithub(
+        {
+          method: "GET",
+          path: `/repos/${repo}/actions/runs`,
+          query: { check_suite_id: String(suiteId), per_page: "1" },
+          token,
+        },
+        `The workflow run of the check suite ${String(suiteId)} of ${repo}`,
+      ),
+      decodeWorkflowRuns,
+    ),
+    (runs) => runs[0],
+  );
+
+/**
  * Returns the request that runs each failed suite again. A GitHub Actions
  * suite goes through its workflow run, so that only the failed jobs run
- * again. Any other app's suite is re-requested, which sends the app a
- * `rerequested` event. Fails with `not_found` when a GitHub Actions suite has
- * no workflow run among the 100 newest of the commit, before anything is sent
- * to re-run a suite.
+ * again, and is named after the workflow. Any other app's suite is
+ * re-requested, which sends the app a `rerequested` event, and is named after
+ * the app. Fails with `not_found` when a GitHub Actions suite has no workflow
+ * run, before anything is sent to re-run a suite.
  */
 const planReruns = (
   repo: string,
@@ -92,37 +118,26 @@ const planReruns = (
   token: string,
 ): Effect.Effect<ReadonlyArray<RerunTarget>, ActionError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const runIds = failed.some(isActionsSuite)
-      ? yield* Effect.flatMap(
-          callGithub(
-            {
-              method: "GET",
-              path: `/repos/${repo}/actions/runs`,
-              query: { head_sha: sha, per_page: "100" },
-              token,
-            },
-            `The workflow runs of the commit ${sha} of ${repo}`,
-          ),
-          decodeWorkflowRunIds,
-        )
-      : new Map<number, number>();
     const targets: Array<RerunTarget> = [];
     for (const suite of failed) {
-      const name = suite.app?.name ?? "an app that is gone";
+      const appName = suite.app?.name ?? "an app that is gone";
       if (!isActionsSuite(suite)) {
-        targets.push({ name, path: `/repos/${repo}/check-suites/${String(suite.id)}/rerequest` });
+        targets.push({
+          name: appName,
+          path: `/repos/${repo}/check-suites/${String(suite.id)}/rerequest`,
+        });
         continue;
       }
-      const runId = runIds.get(suite.id);
-      if (runId === undefined) {
+      const run = yield* fetchWorkflowRun(repo, suite.id, token);
+      if (run === undefined) {
         return yield* new ActionError({
           code: "not_found",
           message: `Found no GitHub Actions workflow run for the failed check suite ${String(suite.id)} on ${sha}, so nothing was re-run.`,
         });
       }
       targets.push({
-        name,
-        path: `/repos/${repo}/actions/runs/${String(runId)}/rerun-failed-jobs`,
+        name: run.name ?? appName,
+        path: `/repos/${repo}/actions/runs/${String(run.id)}/rerun-failed-jobs`,
       });
     }
     return targets;
@@ -136,14 +151,14 @@ const planReruns = (
 const explainPartialRerun = (
   error: ActionError,
   failedName: string,
-  alreadyRerun: ReadonlyArray<{ readonly name: string }>,
+  alreadyRerun: ReadonlyArray<string>,
 ): ActionError =>
   new ActionError({
     code: error.code,
     message: `Could not re-run the checks of ${failedName}. ${
       alreadyRerun.length === 0
         ? "Nothing was re-run before it."
-        : `Already re-run, and not undone: ${alreadyRerun.map((suite) => suite.name).join(", ")}.`
+        : `Already re-run, and not undone: ${alreadyRerun.join(", ")}.`
     } ${error.message}`,
   });
 
@@ -151,7 +166,7 @@ export const checksRerun = defineGithubAction({
   id: "checks.rerun",
   displayName: "Re-run the failed checks of a GitHub pull request",
   description:
-    "Re-runs the checks that failed on a pull request's head commit. GitHub Actions workflows run only their failed jobs again; other apps are asked to run their checks again. With sha, the checks are re-run only if the pull request's branch still points at that commit, otherwise the step fails with the code conflict. The output holds the commit and the apps whose checks were re-run.",
+    "Re-runs the checks that failed on a pull request's head commit. GitHub Actions workflows run only their failed jobs again; other apps are asked to run their checks again. With sha, the checks are re-run only if the pull request's branch still points at that commit, otherwise the step fails with the code conflict. The output holds the commit and the names of the workflows and apps whose checks were re-run.",
   usableIn: ["workflow.step", "signal.answer"],
   describe: (input) => [
     { kind: "text", text: "Re-runs the failed checks on " },
@@ -182,17 +197,17 @@ export const checksRerun = defineGithubAction({
       if (failed.length === 0) {
         return yield* new ActionError({
           code: "conflict",
-          message: `No checks failed on the head commit ${head} of ${describePullRequest(input)}, so there is nothing to re-run.`,
+          message: `No failed checks are left to re-run on the head commit ${head} of ${describePullRequest(input)}: its checks passed, or they are already running again.`,
         });
       }
-      const rerun: Array<{ readonly name: string }> = [];
+      const rerun: Array<string> = [];
       for (const target of yield* planReruns(input.repo, head, failed, token)) {
         yield* callGithub(
           { method: "POST", path: target.path, token },
           `The check suite of ${target.name}`,
         ).pipe(Effect.mapError((error) => explainPartialRerun(error, target.name, rerun)));
-        rerun.push({ name: target.name });
+        rerun.push(target.name);
       }
-      return { sha: head, rerun };
+      return { sha: head, rerun: rerun.map((name) => ({ name })) };
     }),
 });
