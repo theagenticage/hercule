@@ -8,7 +8,7 @@
  * host refuses to load a plugin whose schema uses anything else, so such a
  * plugin has no schema here.
  */
-import type { Issue, PluginConfigureInput } from "@hercule/contract";
+import type { ConfigChoice, Issue, PluginConfigureInput } from "@hercule/contract";
 import { readValidationIssues } from "./errors";
 import { readJsonObject, readStringList } from "./json-shape";
 
@@ -29,6 +29,13 @@ export interface ConfigField {
    * when the setting is unset. Absent when the schema declares no default.
    */
   readonly defaultValue?: string;
+  /**
+   * Whether the field's choices load from the external account, so the form
+   * draws a picker of them instead of a plain widget. Present only for a
+   * string or string-list field the plugin marked `choices`. The choices
+   * themselves come from `connection.listChoices`.
+   */
+  readonly loadsChoices?: true;
 }
 
 export type ConfigJson = PluginConfigureInput["config"];
@@ -85,9 +92,79 @@ export const buildConfigFields = (
       required: required.has(name),
       ...(kind === "enum" ? { options: readStringList(property["enum"]) ?? [] } : {}),
       ...(defaultValue === undefined ? {} : { defaultValue }),
+      ...(property["x-choices"] === true ? { loadsChoices: true as const } : {}),
     });
   }
   return fields;
+};
+
+/** The most choices a picker shows without a filter box above it. */
+export const CONFIG_CHOICES_WITHOUT_FILTER = 10;
+
+/** One row of a choices picker. */
+export interface ChoiceOption {
+  /** What the config stores. */
+  readonly value: string;
+  /** What the picker shows. */
+  readonly label: string;
+  /** Whether the stored value is not among the account's choices. */
+  readonly notFound: boolean;
+}
+
+/**
+ * Returns the values a picker has selected: the one value of a text field
+ * (none when it is empty) or the entries of a list field.
+ */
+const listSelectedValues = (value: ConfigValue): ReadonlyArray<string> => {
+  if (typeof value === "string") return value === "" ? [] : [value];
+  return typeof value === "boolean" ? [] : value;
+};
+
+/**
+ * Returns the rows of a choices picker: the account's choices in the order
+ * the plugin listed them, preceded by a "Not found: <value>" row for each
+ * selected value that is not among them. Such a value stays selected, so the
+ * user sees it and can remove it. The not-found rows come first, so a long
+ * list does not hide them.
+ */
+export const buildChoiceOptions = (
+  choices: ReadonlyArray<ConfigChoice>,
+  selected: ConfigValue,
+): ReadonlyArray<ChoiceOption> => {
+  const known = new Set(choices.map((choice) => choice.value));
+  const values = listSelectedValues(selected);
+  const notFound = values
+    .filter((value, at) => !known.has(value) && values.indexOf(value) === at)
+    .map((value) => ({ value, label: `Not found: ${value}`, notFound: true }));
+  return [...notFound, ...choices.map((choice) => ({ ...choice, notFound: false }))];
+};
+
+/**
+ * Checks whether a picker shows a filter box: only when the account has more
+ * than `CONFIG_CHOICES_WITHOUT_FILTER` choices. A "Not found" row is not a
+ * choice, so it does not count.
+ */
+export const showsChoiceFilter = (options: ReadonlyArray<ChoiceOption>): boolean =>
+  options.filter((option) => !option.notFound).length > CONFIG_CHOICES_WITHOUT_FILTER;
+
+/**
+ * Returns the rows whose label contains the typed text, ignoring case and
+ * the spaces around the text. A selected row is always kept, including a
+ * "Not found" one: hiding it would leave the user unable to see or remove
+ * the value, and a dropdown would show a different row than the one stored.
+ */
+export const filterChoiceOptions = (
+  options: ReadonlyArray<ChoiceOption>,
+  typed: string,
+  selected: ConfigValue,
+): ReadonlyArray<ChoiceOption> => {
+  const needle = typed.trim().toLowerCase();
+  const values = listSelectedValues(selected);
+  return needle === ""
+    ? options
+    : options.filter(
+        (option) => values.includes(option.value) || option.label.toLowerCase().includes(needle),
+      );
 };
 
 /**

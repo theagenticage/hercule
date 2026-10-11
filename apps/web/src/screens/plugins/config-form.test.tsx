@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildConfigFields, type ConfigJson } from "@hercule/client-core";
-import { ConfigForm } from "./config-form";
+import { ConfigFieldRow, ConfigForm, type FieldChoices } from "./config-form";
 
 const FIELDS = buildConfigFields({
   type: "object",
@@ -99,5 +99,43 @@ describe("ConfigForm", () => {
 
     const options = screen.getAllByRole<HTMLOptionElement>("option").map((option) => option.text);
     expect(options).toEqual(["Not set", "fast", "slow"]);
+  });
+});
+
+describe("ConfigFieldRow, for a field that loads its choices", () => {
+  const [team] = buildConfigFields({
+    type: "object",
+    properties: { team: { type: "string", title: "Team", "x-choices": true } },
+    required: [],
+    additionalProperties: false,
+  });
+  if (team === undefined) throw new Error("the schema has a team field");
+
+  const renderRow = (choices: FieldChoices) =>
+    render(
+      <ConfigFieldRow
+        inputId="desk-team"
+        field={team}
+        value="t1"
+        error={undefined}
+        entryErrors={undefined}
+        choices={choices}
+        onChange={() => undefined}
+      />,
+    );
+
+  it("shows a line while the choices load, and no widget to type into", () => {
+    renderRow({ status: "loading" });
+
+    expect(screen.getByText("Loading choices...")).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("shows the picker once they load", () => {
+    renderRow({ status: "loaded", choices: [{ value: "t1", label: "Backend" }] });
+
+    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Team" }).value).toBe("t1");
+    expect(screen.queryByText("Loading choices...")).toBeNull();
   });
 });

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildChoiceOptions,
+  filterChoiceOptions,
+  showsChoiceFilter,
   buildConfigDraft,
   buildConfigFields,
   readConfigHeading,
@@ -394,5 +397,100 @@ describe("readConfigIssues", () => {
       perEntry: {},
       rest: true,
     });
+  });
+});
+
+describe("a field that loads its choices from the account", () => {
+  it("is marked on a string and on a list of strings, and on nothing else", () => {
+    const fields = buildConfigFields(
+      buildObjectSchema({
+        team: { type: "string", "x-choices": true },
+        projects: { type: "array", items: { type: "string" }, "x-choices": true },
+        note: { type: "string" },
+      }),
+    );
+
+    expect(fields.map((field) => [field.name, field.kind, field.loadsChoices])).toEqual([
+      ["team", "string", true],
+      ["projects", "stringList", true],
+      ["note", "string", undefined],
+    ]);
+  });
+});
+
+describe("buildChoiceOptions", () => {
+  const choices = [
+    { value: "a1", label: "Backend" },
+    { value: "b2", label: "Web" },
+  ];
+
+  it("lists the choices in the plugin's order, none of them not found", () => {
+    expect(buildChoiceOptions(choices, "b2")).toEqual([
+      { value: "a1", label: "Backend", notFound: false },
+      { value: "b2", label: "Web", notFound: false },
+    ]);
+  });
+
+  it("puts a stored value that is not among the choices first, as 'Not found'", () => {
+    expect(buildChoiceOptions(choices, "gone")).toEqual([
+      { value: "gone", label: "Not found: gone", notFound: true },
+      { value: "a1", label: "Backend", notFound: false },
+      { value: "b2", label: "Web", notFound: false },
+    ]);
+  });
+
+  it("adds one row for each missing entry of a list, once, and none for an empty value", () => {
+    expect(
+      buildChoiceOptions(choices, ["a1", "x", "y", "x"]).map((option) => option.label),
+    ).toEqual(["Not found: x", "Not found: y", "Backend", "Web"]);
+    expect(buildChoiceOptions(choices, "")).toHaveLength(2);
+    expect(buildChoiceOptions(choices, [])).toHaveLength(2);
+  });
+});
+
+describe("showsChoiceFilter", () => {
+  const count = (size: number, selected: string) =>
+    buildChoiceOptions(
+      Array.from({ length: size }, (_, at) => ({
+        value: `v${String(at)}`,
+        label: `L${String(at)}`,
+      })),
+      selected,
+    );
+
+  it("shows the filter above 10 choices and not at 10", () => {
+    expect(showsChoiceFilter(count(10, ""))).toBe(false);
+    expect(showsChoiceFilter(count(11, ""))).toBe(true);
+  });
+
+  it("does not count a 'Not found' row as a choice", () => {
+    expect(showsChoiceFilter(count(10, "gone"))).toBe(false);
+  });
+});
+
+describe("filterChoiceOptions", () => {
+  const options = buildChoiceOptions(
+    [
+      { value: "1", label: "Backend" },
+      { value: "2", label: "Web app" },
+    ],
+    "gone",
+  );
+
+  it("keeps the rows whose label contains the text, ignoring case and outer spaces", () => {
+    expect(filterChoiceOptions(options, "  WEB ", "").map((option) => option.value)).toEqual(["2"]);
+  });
+
+  it("returns every row for empty text", () => {
+    expect(filterChoiceOptions(options, "", "gone")).toEqual(options);
+  });
+
+  it("always keeps the selected rows, 'Not found' ones included", () => {
+    expect(filterChoiceOptions(options, "zzz", "gone").map((option) => option.value)).toEqual([
+      "gone",
+    ]);
+    expect(
+      filterChoiceOptions(options, "web", ["1", "gone"]).map((option) => option.value),
+    ).toEqual(["gone", "1", "2"]);
   });
 });
