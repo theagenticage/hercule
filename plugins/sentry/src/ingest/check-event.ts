@@ -5,21 +5,19 @@
  */
 import { Effect, Schema } from "effect";
 import {
+  EXTERNAL_REF_PATTERN,
+  MAX_DEDUP_KEY_LENGTH,
   MAX_EMITTED_FIELD_BYTES,
+  MAX_EVENT_AUTHOR_LENGTH,
+  MAX_EVENT_SYSTEM_LENGTH,
   MAX_EVENT_TITLE_LENGTH,
+  MAX_EVENT_URL_LENGTH,
+  MAX_EXTERNAL_REF_LENGTH,
   PluginError,
   type EmittedEvent,
 } from "@hercule/plugin-host";
 import { SENTRY_EVENT_KINDS } from "../kinds";
-import {
-  EXTERNAL_REF_PATTERN,
-  ISO_TIMESTAMP_PATTERN,
-  MAX_DEDUP_KEY_LENGTH,
-  MAX_EVENT_AUTHOR_LENGTH,
-  MAX_EVENT_SYSTEM_LENGTH,
-  MAX_EVENT_URL_LENGTH,
-  MAX_EXTERNAL_REF_LENGTH,
-} from "../limits";
+import { ISO_TIMESTAMP_PATTERN } from "../sentry-objects";
 
 /** A string of at least `minimum` and at most `maximum` characters. */
 const bounded = (minimum: number, maximum: number) =>

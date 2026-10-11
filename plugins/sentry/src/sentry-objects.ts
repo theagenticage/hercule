@@ -6,7 +6,6 @@
 import { Option, Schema } from "effect";
 import { MAX_BLOCK_URL_LENGTH } from "@hercule/plugin-host";
 import { MAX_STACK_FRAMES, type IssueBlock, type LatestEvent, type StackFrame } from "./kinds";
-import { ISO_TIMESTAMP_PATTERN } from "./limits";
 import { cutName, cutText, MAX_EXCEPTION_VALUE_LENGTH, MAX_TITLE_LENGTH } from "./text";
 
 /**
@@ -39,6 +38,10 @@ const SentryEventId = Schema.String.check(
   Schema.isPattern(/^[0-9a-fA-F]+$/),
   Schema.isMaxLength(MAX_EVENT_ID_LENGTH),
 );
+
+/** An ISO 8601 date and time with an explicit time zone, which the host requires of `occurredAt`. */
+export const ISO_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
 
 /** A time as an ISO 8601 date and time with a zone, such as `2026-10-12T09:00:00.123456Z`. */
 const SentryTime = Schema.String.check(

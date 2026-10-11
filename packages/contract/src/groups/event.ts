@@ -20,6 +20,13 @@
  * empty page would mislead the caller.
  */
 import { Schema } from "effect";
+import {
+  MAX_DEDUP_KEY_LENGTH,
+  MAX_EVENT_AUTHOR_LENGTH,
+  MAX_EVENT_SYSTEM_LENGTH,
+  MAX_EVENT_TITLE_LENGTH,
+  MAX_EVENT_URL_LENGTH,
+} from "@hercule/plugin-host";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
@@ -84,24 +91,17 @@ export type Event = Schema.Schema.Type<typeof Event>;
 /** The log is sorted by position only. */
 export const EVENT_SORT_FIELDS = ["id"] as const;
 
-/** The longest idempotency key an emitter may write. */
-export const MAX_DEDUP_KEY_LENGTH = 200;
-
-/** The longest system name. It is the name of a system, not a sentence. */
-export const MAX_EVENT_SYSTEM_LENGTH = 64;
-
-/** The longest source URL. It is where a person opens the event, not a document. */
-export const MAX_EVENT_URL_LENGTH = 2048;
-
-/** Re-exported from the package plugins are written against, so a plugin cuts its titles to the limit this API checks. */
-export { MAX_EVENT_TITLE_LENGTH } from "@hercule/plugin-host";
-
 /**
- * The longest author a plugin's event may name. A signal written from the
- * event alone takes it as its asker, so it is the limit of a signal's asker
- * too.
+ * Re-exported from the package plugins are written against, so a plugin
+ * checks its events against the limits this API checks.
  */
-export const MAX_EVENT_AUTHOR_LENGTH = 256;
+export {
+  MAX_DEDUP_KEY_LENGTH,
+  MAX_EVENT_AUTHOR_LENGTH,
+  MAX_EVENT_SYSTEM_LENGTH,
+  MAX_EVENT_TITLE_LENGTH,
+  MAX_EVENT_URL_LENGTH,
+};
 
 /** The payload of a manual emit. The core fills in every other field of the event. */
 export const EventEmitInput = Schema.Struct({

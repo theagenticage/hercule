@@ -4,6 +4,7 @@
  */
 import { Schema, SchemaGetter } from "effect";
 import { Timestamp } from "@hercule/protocol";
+import { EXTERNAL_REF_PATTERN, MAX_EXTERNAL_REF_LENGTH } from "@hercule/plugin-host";
 import { markShorthandOnItself } from "./shorthand";
 export { Timestamp };
 
@@ -169,11 +170,8 @@ const QUALIFIED_ID_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*\/[^/]+$/;
 /** Checks whether `id` is a qualified id, such as `github/pr.merge`. */
 export const isQualifiedId = (id: string): boolean => QUALIFIED_ID_PATTERN.test(id);
 
-/** The longest External Ref. It is an identity, not a document. */
-export const MAX_EXTERNAL_REF_LENGTH = 512;
-
-/** The grammar of an External Ref, written once. */
-const EXTERNAL_REF_PATTERN = /^[a-z0-9][a-z0-9-]*:[^\s:]+:\S+$/;
+/** Re-exported from the package plugins are written against, so a plugin checks its refs the same way. */
+export { MAX_EXTERNAL_REF_LENGTH };
 
 /**
  * A fully-qualified identifier for a thing outside Hercule:
