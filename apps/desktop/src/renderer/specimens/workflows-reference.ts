@@ -16,13 +16,30 @@
  * view while the lanes scroll beneath them. The book draws the axis at the
  * top of the lanes, where it scrolls away. Both places draw the axis at the
  * same height on a page that has not scrolled.
+ *
+ * With an open workflow (`?view=split` or `?view=full`), it also draws the
+ * GitHub mark on the open_pr step in place of the book's puzzle piece. Spec
+ * 17 draws an action step with the mark of the plugin whose action it calls,
+ * and open_pr calls `github/pr.create`. The book draws a puzzle piece for
+ * every action.
  */
-import { markSheetReady, stillBookPage, stillGraphFade } from "./sheet-page";
+import { findElement } from "./book-page";
+import { markSheetReady, readCrew, stillBookPage, stillGraphFade } from "./sheet-page";
 
+const params = new URLSearchParams(location.search);
 stillBookPage();
 stillGraphFade();
 
-if (new URLSearchParams(location.search).get("runs") === "timeline") {
+if (params.get("view") === "split" || params.get("view") === "full") {
+  const lead = findElement(document, '[data-node="open_pr"] > .node-lead');
+  const mark = document.createElement("i");
+  mark.dataset.brand = "github";
+  mark.dataset.size = "14";
+  lead.replaceChildren(mark);
+  readCrew().drawPlaceholders(lead);
+}
+
+if (params.get("runs") === "timeline") {
   const axis = document.querySelector("[data-run-day] > .axis");
   const band = document.querySelector(".open-pane .tab-band");
   if (axis === null || band === null) {

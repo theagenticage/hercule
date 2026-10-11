@@ -24,6 +24,7 @@ import { NodeCardContent } from "./node-card";
 import { NodeIcon } from "./node-icon";
 import { BUS, CARD, END_RADIUS, END_STUB, layOutGraphDrawing } from "./workflow-graph-layout";
 import "./workflow-graph.css";
+import { isTextField } from "../../app/text-field";
 
 /** The space between the drawing and the pane's edges, which `.graph`'s negative margin takes back. */
 const PANE_PADDING = 12;
@@ -68,13 +69,6 @@ const findKeyZoom = (event: KeyboardEvent, scale: number, fitScale: number): num
     ? fitScale
     : undefined;
 };
-
-/** Checks whether a key press lands in a text field, where Escape belongs to the field. */
-const isTextField = (target: EventTarget | null): boolean =>
-  target instanceof HTMLInputElement ||
-  target instanceof HTMLTextAreaElement ||
-  target instanceof HTMLSelectElement ||
-  (target instanceof HTMLElement && target.isContentEditable);
 
 /**
  * Places the open card under its node `anchor`, at the node's left edge, or

@@ -60,7 +60,9 @@
  *   the window, so the items of this pair are only those inside the window;
  * - Ship release open on the same pages, with its runs as a list: beside
  *   the list drawn as a column (`?view=split`), and across the whole pane
- *   (`?view=full`). Again only the items inside the window count;
+ *   (`?view=full`). Again only the items inside the window count. The
+ *   reference module draws the GitHub mark on the book's open_pr step, as
+ *   the app draws a plugin's action step with its plugin's mark;
  * - Ship release open across the whole pane with today's runs on the
  *   timeline (`?view=full&runs=timeline`). The reference module moves the
  *   book's hour axis into the tab band, where spec 17 puts it.

@@ -33,6 +33,7 @@ import {
   ANY_CONNECTION,
   type Agent,
   type OpenRequest,
+  type PluginDetail,
   type RunSummary,
   type Session,
   type Trigger,
@@ -42,6 +43,7 @@ import {
   type WorkflowAction,
   type WorkflowSummary,
 } from "@hercule/contract";
+import { GITHUB_PLUGIN } from "./plugins-fixture";
 import { CLAUDE_SONNET, SPECIMEN_RECORDS } from "./sidebar-fixture";
 
 /** One trigger of a workflow, as the fixture writes it. */
@@ -759,6 +761,11 @@ export interface WorkflowsRecords {
   readonly runningRuns: ReadonlyArray<RunSummary>;
   /** The live sessions that are not threads: one per run that waits on the user. */
   readonly agentSessions: ReadonlyArray<Session>;
+  /**
+   * The installed plugins, as `plugin.query` lists them: GitHub, whose mark
+   * Ship release's open_pr step draws, because it calls `github/pr.create`.
+   */
+  readonly plugins: ReadonlyArray<PluginDetail>;
   /** Ship release, the workflow the book opens. */
   readonly openWorkflow: OpenWorkflowRecords;
 }
@@ -863,7 +870,15 @@ const buildWorkflowsRecords = (): WorkflowsRecords => {
   if (openWorkflow === undefined) {
     throw new Error(`The fixture has no workflow named ${OPEN_WORKFLOW_NAME} to open.`);
   }
-  return { workflows, triggers, newestRuns, runningRuns, agentSessions, openWorkflow };
+  return {
+    workflows,
+    triggers,
+    newestRuns,
+    runningRuns,
+    agentSessions,
+    plugins: [GITHUB_PLUGIN],
+    openWorkflow,
+  };
 };
 
 export const WORKFLOWS_RECORDS: WorkflowsRecords = buildWorkflowsRecords();

@@ -25,6 +25,7 @@ import {
   WorkflowSearchField,
 } from "../../../../screens/workflows/workflow-list-header";
 import { WorkflowTableHeads } from "../../../../screens/workflows/workflow-list-rows";
+import { isTextField } from "../../../../app/text-field";
 
 /**
  * Workflows: the workflow list and the open workflow (spec 17 §Workflows).
@@ -73,11 +74,6 @@ export const Route = createFileRoute("/_connected/_shell/workflows")({
 
 /** The open workflow's route, whose search holds `full`. */
 const OPEN_WORKFLOW_ROUTE = "/_connected/_shell/workflows/$workflowId";
-
-/** Returns true when `target`, the keyboard's focus, is a field, where keys edit text. */
-const isTextField = (target: EventTarget | null): boolean =>
-  target instanceof HTMLElement &&
-  (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
 /**
  * Keeps the workflow pages' reads current while the page is open, builds

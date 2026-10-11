@@ -39,7 +39,11 @@ function readView(): (typeof VIEWS)[number] {
 
 stillGraphFade();
 await mountWorkflowsSpecimen(
-  { ...SPECIMEN_RECORDS, agentSessions: WORKFLOWS_RECORDS.agentSessions },
+  {
+    ...SPECIMEN_RECORDS,
+    agentSessions: WORKFLOWS_RECORDS.agentSessions,
+    plugins: WORKFLOWS_RECORDS.plugins,
+  },
   WORKFLOWS_RECORDS,
   readView(),
   new URLSearchParams(location.search).get("runs") === "timeline" ? "timeline" : "list",

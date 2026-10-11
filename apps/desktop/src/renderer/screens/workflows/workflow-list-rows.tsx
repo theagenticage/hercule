@@ -323,7 +323,11 @@ export const WorkflowColumnRow = memo(function WorkflowColumnRow({
         <Mark state={mark} />
       </span>
       <span className="column-text">
-        <span className="column-name">{name}</span>
+        {/* The column is narrow, so a long name ends in an ellipsis; the
+            title shows the whole name on hover. */}
+        <span className="column-name" title={name}>
+          {name}
+        </span>
         <span
           className={
             statusTone === "muted"
