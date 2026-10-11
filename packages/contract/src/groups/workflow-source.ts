@@ -25,11 +25,8 @@ import {
 } from "yaml";
 import type { Issue } from "../errors";
 import { shortenLibraryMessage } from "../excerpts";
-import {
-  decodeWorkflowDefinition,
-  truncateIssues,
-  WorkflowDefinition,
-} from "./workflow-definition";
+import { WorkflowDefinition } from "./workflow-definition";
+import { decodeWorkflowDefinition, truncateIssues } from "./workflow-definition-decode";
 
 /**
  * The maximum length, in characters, of a workflow's YAML source that the API
