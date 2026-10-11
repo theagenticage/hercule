@@ -857,6 +857,7 @@ const GITHUB_KINDS = [
   "github.issue.reopened",
   "github.issue.labeled",
   "github.issue.assigned",
+  "github.issue.unassigned",
   "github.issue.commented",
   "github.pr.opened",
   "github.pr.synchronized",

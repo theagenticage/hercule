@@ -18,7 +18,7 @@ import {
   answerUserRequests,
   isUserRequest,
 } from "../testing";
-import type { GithubCheckSuite } from "./feed-objects";
+import type { GithubCheckSuite } from "../github-objects";
 import { pollChecks, rollUpConclusion } from "./checks";
 
 const REPO = "octocat/hello-world";
@@ -47,7 +47,7 @@ const buildSuite = (
   conclusion,
   updated_at: updatedAt,
   latest_check_runs_count: runs,
-  app: { name: app },
+  app: { name: app, slug: app.toLowerCase().replaceAll(" ", "-") },
 });
 
 /** One open pull request in the stub repository. */
@@ -56,10 +56,27 @@ interface StubPull {
   title: string;
   sha: string;
   updatedAt: string;
+  /** The login of the pull request's author; "mona" when absent. */
+  author?: string;
 }
+
+/** Builds a check run named `name` in the shape `GET .../check-runs` lists it. */
+const buildCheckRun = (name: string, conclusion: string | null, id = 1) => ({
+  id,
+  name,
+  status: conclusion === null ? "in_progress" : "completed",
+  conclusion,
+  html_url: null,
+  app: { name: "GitHub Actions", slug: "github-actions" },
+  output: { title: null, summary: null, text: null, annotations_count: 0 },
+});
 
 /** The stub repository: its open pull requests and the check suites on each commit. */
 interface StubRepository {
+  /** The latest check runs of each commit, as `GET .../check-runs?filter=latest` lists them. */
+  checkRuns: Record<string, Array<ReturnType<typeof buildCheckRun>>>;
+  /** When set, the check-runs request fails with this status. */
+  checkRunsFailure?: number;
   /** The open pull requests, most recently updated first, as GitHub sorts them. */
   pulls: Array<StubPull>;
   /** How many pull requests one page of the listing holds; GitHub's is 100. */
@@ -96,11 +113,19 @@ const answerFrom =
           number: pull.number,
           title: pull.title,
           state: "open",
-          user: { login: "mona" },
+          user: { login: pull.author ?? "mona" },
           head: { sha: pull.sha },
           updated_at: pull.updatedAt,
         })),
       };
+    }
+    const runs = /\/commits\/([^/]+)\/check-runs$/.exec(path);
+    if (runs) {
+      if (repository.checkRunsFailure !== undefined) {
+        return { status: repository.checkRunsFailure, body: { message: "Server Error" } };
+      }
+      const listed = repository.checkRuns[runs[1]!] ?? [];
+      return { status: 200, body: { total_count: listed.length, check_runs: listed } };
     }
     const commit = /\/commits\/([^/]+)\/check-suites$/.exec(path);
     if (commit) {
@@ -131,6 +156,7 @@ const buildRepository = (): StubRepository => ({
   pulls: [{ number: 7, title: "Add a feature", sha: "sha-a", updatedAt: fromNow(-3_600_000) }],
   pullsPerPage: 100,
   suites: { "sha-a": [buildSuite("GitHub Actions", "in_progress", null)] },
+  checkRuns: {},
   suitesPerPage: 100,
   pullsEtag: '"p1"',
 });
@@ -187,7 +213,7 @@ describe("the checks feed", () => {
       buildSuite("Dependabot", "queued", null, fromNow(0), 0),
     ];
 
-    await poll(harness, repository);
+    const requests = await poll(harness, repository);
 
     expect(harness.events).toHaveLength(1);
     const event = harness.events[0]!;
@@ -211,7 +237,204 @@ describe("the checks feed", () => {
         { name: "GitHub Actions", conclusion: "success" },
         { name: "Codecov", conclusion: "neutral" },
       ],
+      headSha: "sha-a",
+      failedChecks: [],
+      onYourPullRequest: false,
     });
+    // A passing verdict needs no check-run names, so none are requested.
+    expect(requests.some((path) => path.endsWith("/check-runs"))).toBe(false);
+  });
+
+  it("names the failed check runs, sorted and without duplicates, on a failure verdict", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    repository.suites["sha-a"] = [buildSuite("GitHub Actions", "completed", "failure")];
+    repository.checkRuns["sha-a"] = [
+      buildCheckRun("test", "failure", 1),
+      buildCheckRun("build", "success", 2),
+      buildCheckRun("lint", "timed_out", 3),
+      buildCheckRun("deploy", null, 4),
+      buildCheckRun("test", "failure", 5),
+      buildCheckRun("docs", "skipped", 6),
+      buildCheckRun("e2e", "neutral", 7),
+    ];
+    const stub = stubGithub(answerUserRequests(answerFrom(repository)));
+
+    await Effect.runPromise(
+      pollChecks("token", harness.context, [REPO], 7, TEST_IDENTITY).pipe(
+        Effect.provide(stub.layer),
+      ),
+    );
+
+    expect(harness.events).toHaveLength(1);
+    expect(harness.events[0]!.payload).toMatchObject({
+      conclusion: "failure",
+      headSha: "sha-a",
+      failedChecks: ["lint", "test"],
+    });
+    const runRequests = stub.requests
+      .map(readStubRequestTarget)
+      .filter((target) => target.path.endsWith("/check-runs"));
+    expect(runRequests).toEqual([
+      {
+        path: `/repos/${REPO}/commits/sha-a/check-runs`,
+        query: { filter: "latest", per_page: "100" },
+      },
+    ]);
+  });
+
+  it("sets onYourPullRequest when the user wrote the pull request", async () => {
+    const repository = buildRepository();
+    repository.pulls[0] = { ...repository.pulls[0]!, author: TEST_IDENTITY.login };
+    const harness = await baseline(repository);
+    repository.suites["sha-a"] = [buildSuite("GitHub Actions", "completed", "success")];
+
+    await poll(harness, repository);
+
+    expect(harness.events[0]!.payload).toMatchObject({ onYourPullRequest: true });
+  });
+
+  it("knows a pull request is the user's from state stored before onYourPullRequest, on a 304 listing", async () => {
+    const repository = buildRepository();
+    repository.pulls[0] = { ...repository.pulls[0]!, author: TEST_IDENTITY.login };
+    const harness = await baseline(repository);
+    await poll(harness, repository);
+    // The state an older version stored: the same snapshot, without the field.
+    const stored = harness.state.get(`checks/${REPO}`) as {
+      pullRequests: Array<Record<string, unknown>>;
+    };
+    for (const snapshot of stored.pullRequests) delete snapshot["onYourPullRequest"];
+    repository.suites["sha-a"] = [buildSuite("GitHub Actions", "completed", "failure")];
+    repository.checkRuns["sha-a"] = [buildCheckRun("test", "failure")];
+
+    // The pull request listing is unchanged, so GitHub answers 304.
+    await poll(harness, repository);
+
+    expect(harness.events).toHaveLength(1);
+    expect(harness.events[0]!.payload).toMatchObject({ onYourPullRequest: true });
+  });
+
+  it("sets onYourPullRequest on the user's own pull request outside the watch list", async () => {
+    const other = "other/repo";
+    const repository = buildRepository();
+    const route = (request: HttpClientRequest.HttpClientRequest): StubResponse => {
+      const { path } = readStubRequestTarget(request);
+      if (path === "/search/issues") {
+        return {
+          status: 200,
+          body: {
+            total_count: 1,
+            items: [
+              {
+                number: 7,
+                title: "Add a feature",
+                repository_url: `https://api.github.com/repos/${other}`,
+                updated_at: fromNow(-3_600_000),
+              },
+            ],
+          },
+        };
+      }
+      if (path === `/repos/${other}/pulls/7`) {
+        const { pulls } = repository;
+        return {
+          status: 200,
+          body: {
+            number: 7,
+            title: "Add a feature",
+            state: "open",
+            user: { login: TEST_IDENTITY.login },
+            head: { sha: pulls[0]!.sha },
+            updated_at: pulls[0]!.updatedAt,
+          },
+        };
+      }
+      return answerFrom(repository, other)(request);
+    };
+    const harness = buildIngestHarness();
+    const pollOwn = async () => {
+      const stub = stubGithub(route);
+      await Effect.runPromise(
+        pollChecks("token", harness.context, [], 7, TEST_IDENTITY).pipe(Effect.provide(stub.layer)),
+      );
+    };
+    await pollOwn();
+    repository.suites["sha-a"] = [buildSuite("GitHub Actions", "completed", "success")];
+
+    await pollOwn();
+
+    expect(harness.events).toHaveLength(1);
+    expect(harness.events[0]!.payload).toMatchObject({ onYourPullRequest: true });
+  });
+
+  it("checks nothing on an own pull request the search lists as open that GitHub says is closed", async () => {
+    const other = "other/repo";
+    const repository = buildRepository();
+    const route = (request: HttpClientRequest.HttpClientRequest): StubResponse => {
+      const { path } = readStubRequestTarget(request);
+      if (path === "/search/issues") {
+        return {
+          status: 200,
+          body: {
+            total_count: 1,
+            items: [
+              {
+                number: 7,
+                title: "Add a feature",
+                repository_url: `https://api.github.com/repos/${other}`,
+                updated_at: fromNow(-3_600_000),
+              },
+            ],
+          },
+        };
+      }
+      if (path === `/repos/${other}/pulls/7`) {
+        const { pulls } = repository;
+        return {
+          status: 200,
+          body: {
+            number: 7,
+            title: "Add a feature",
+            state: "closed",
+            user: { login: TEST_IDENTITY.login },
+            head: { sha: pulls[0]!.sha },
+            updated_at: pulls[0]!.updatedAt,
+          },
+        };
+      }
+      return answerFrom(repository, other)(request);
+    };
+    const harness = buildIngestHarness();
+    const pollOwn = async () => {
+      const stub = stubGithub(route);
+      await Effect.runPromise(
+        pollChecks("token", harness.context, [], 7, TEST_IDENTITY).pipe(Effect.provide(stub.layer)),
+      );
+    };
+    await pollOwn();
+    repository.suites["sha-a"] = [buildSuite("GitHub Actions", "completed", "success")];
+
+    await pollOwn();
+
+    expect(harness.events).toEqual([]);
+  });
+
+  it("emits nothing when the check runs cannot be read, and tries again at the next poll", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    repository.suites["sha-a"] = [buildSuite("GitHub Actions", "completed", "failure")];
+    repository.checkRuns["sha-a"] = [buildCheckRun("test", "failure")];
+    repository.checkRunsFailure = 500;
+
+    await poll(harness, repository).catch(() => undefined);
+
+    expect(harness.events).toEqual([]);
+
+    delete repository.checkRunsFailure;
+    await poll(harness, repository);
+
+    expect(harness.events).toHaveLength(1);
+    expect(harness.events[0]!.payload).toMatchObject({ failedChecks: ["test"] });
   });
 
   it("emits once per verdict and head commit, asking again with the commit's ETag", async () => {

@@ -94,7 +94,8 @@ export type ListedComment = Schema.Schema.Type<typeof ListedComment>;
  * One entry of an issue's or a pull request's history, as
  * `GET /repos/{owner}/{repo}/issues/{number}/events` returns it, oldest
  * first. `event` is GitHub's word, such as `review_requested`, `merged` or
- * `closed`. A review request names either one reviewer or one team.
+ * `closed`. A review request names either one reviewer or one team; an
+ * assignment names its `assignee`.
  */
 export const IssueEvent = Schema.Struct({
   id: Schema.Int,
@@ -104,6 +105,7 @@ export const IssueEvent = Schema.Struct({
   requested_reviewer: Schema.optionalKey(Schema.NullOr(GithubAccount)),
   requested_team: Schema.optionalKey(Schema.NullOr(ListedTeamRef)),
   review_requester: Schema.optionalKey(Schema.NullOr(GithubAccount)),
+  assignee: Schema.optionalKey(Schema.NullOr(GithubAccount)),
 });
 
 export type IssueEvent = Schema.Schema.Type<typeof IssueEvent>;
@@ -143,18 +145,3 @@ export const GithubNotification = Schema.Struct({
 });
 
 export type GithubNotification = Schema.Schema.Type<typeof GithubNotification>;
-
-/**
- * One check suite on a commit, as an entry of the `check_suites` list that
- * `GET /repos/{owner}/{repo}/commits/{sha}/check-suites` returns.
- */
-export const GithubCheckSuite = Schema.Struct({
-  id: Schema.Int,
-  status: Schema.NullOr(Schema.String),
-  conclusion: Schema.NullOr(Schema.String),
-  updated_at: Schema.NullOr(Schema.String),
-  latest_check_runs_count: Schema.Int,
-  app: Schema.NullOr(Schema.Struct({ name: Schema.String })),
-});
-
-export type GithubCheckSuite = Schema.Schema.Type<typeof GithubCheckSuite>;

@@ -20,9 +20,10 @@
  *    A 403, 404 or 410 means the item is gone for the token: the read ends,
  *    and the hint that named it is used up.
  * 2. Otherwise, everything at or after the item's `since` is emitted: its
- *    comments (`.../issues/{n}/comments?since=`), and for a pull request its
- *    reviews and the review requests in its history, as the watched
- *    repositories emit them (`activity.ts`), and a close or merge. Each
+ *    comments (`.../issues/{n}/comments?since=`), for a pull request its
+ *    reviews, the review requests and the assignments in its history, for an
+ *    issue its assignments, as the watched repositories emit them
+ *    (`activity.ts`), and a close or merge. Each
  *    listing is read newest first and stops at a page limit; a listing that
  *    has more since `since` than the limit allows logs a warning, because
  *    what it did not read is never emitted.
@@ -43,7 +44,7 @@
 import { Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import { PluginError, type IngestContext, type KeyValueStore } from "@hercule/plugin-host";
-import type { GithubIdentity } from "../identity";
+import { isUserAccount, type GithubIdentity } from "../identity";
 import {
   buildItemEvent,
   buildItemPlace,
@@ -54,9 +55,9 @@ import {
 import {
   emitCommentEvents,
   emitNewReviews,
-  emitReviewRequestEvents,
+  emitHistoryEvents,
   emitInTimeOrder,
-  fetchReviewRequests,
+  fetchPull,
   isAtOrAfter,
   type ActivityPoll,
 } from "./activity";
@@ -85,8 +86,8 @@ const LAST_READ_KEY = "followed-last-read";
 /**
  * How many followed items one poll reads. An item that did not change costs
  * one free 304. A changed one costs about four requests: the item, its
- * comments, and for a pull request its history and its reviews, each one
- * page when nothing much happened.
+ * comments, its history, and for a pull request its reviews, each one page
+ * when nothing much happened.
  */
 export const MAX_FOLLOWED_ITEMS_PER_POLL = 20;
 
@@ -246,9 +247,11 @@ const readFollowedItem = (
     }
 
     if (item.kind === "pr") {
-      yield* emitNewReviews(poll, item, since);
-      yield* emitReviewRequestEvents(poll, item, since, fetchReviewRequests(poll, number));
+      yield* emitNewReviews(poll, item, since, isUserAccount(poll.identity, issue.user));
     }
+    // An issue's history is read too, for an assignment or an unassignment:
+    // an open `github/assigned` signal on an issue ends with one.
+    yield* emitHistoryEvents(poll, item, since, fetchPull(poll, number));
 
     if (
       issue.state === "closed" &&

@@ -18,6 +18,13 @@
  *    only when its suites fit on one page: GitHub's ETag covers one page, so
  *    a 304 on the first page says nothing about a suite on the second.
  *
+ * 3. When a commit's verdict is a failure that is about to be emitted:
+ *    `GET /repos/{o}/{r}/commits/{sha}/check-runs?filter=latest&per_page=100`,
+ *    one page, for the names of the check runs that failed. A passing
+ *    verdict sends no such request. When this request fails, the repository's
+ *    whole checks poll fails with it and stores nothing, and the next poll
+ *    reads the repository again.
+ *
  * So a quiet repository costs one free 304 plus one free 304 per pull
  * request in the window, as long as no commit has more than 100 suites.
  *
@@ -31,10 +38,11 @@
 import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import { PluginError, type IngestContext, type PollResult } from "@hercule/plugin-host";
-import type { GithubIdentity } from "../identity";
+import { GithubCheckSuite, isFailedConclusion, ListedCheckRun } from "../github-objects";
+import { isUserAccount, type GithubIdentity } from "../identity";
 import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
 import { computeDigest } from "./digest";
-import { GithubCheckSuite, ListedPull } from "./feed-objects";
+import { ListedPull } from "./feed-objects";
 import { fetchOwnOpenPullRequests } from "./own-pulls";
 import {
   decodeGithubValue,
@@ -51,6 +59,11 @@ const PullRequestSnapshot = Schema.Struct({
   number: Schema.Int,
   title: Schema.String,
   author: Schema.optionalKey(Schema.String),
+  /**
+   * True when the user wrote the pull request. Absent in state an older
+   * version wrote: `fetchOpenPullRequests` works it out from `author` then.
+   */
+  onYourPullRequest: Schema.optionalKey(Schema.Boolean),
   headSha: Schema.String,
   updatedAt: Schema.String,
 });
@@ -111,9 +124,6 @@ const describeConclusion = (conclusion: string): string => {
   return "finished";
 };
 
-/** The conclusions that do not make a commit's checks fail. */
-const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
-
 /**
  * Returns the one conclusion of a commit's finished check suites:
  *
@@ -129,7 +139,7 @@ const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
  */
 export const rollUpConclusion = (suites: ReadonlyArray<GithubCheckSuite>): string => {
   const conclusions = suites.map((suite) => suite.conclusion ?? "unknown");
-  if (conclusions.some((conclusion) => !PASSING_CONCLUSIONS.has(conclusion))) return "failure";
+  if (conclusions.some(isFailedConclusion)) return "failure";
   return conclusions.includes("success") ? "success" : "neutral";
 };
 
@@ -174,6 +184,7 @@ const fetchOpenPullRequests = (
   poll: RepoPoll,
   stored: ChecksState,
   oldest: number,
+  identity: GithubIdentity,
 ): Effect.Effect<
   { readonly etag?: string; readonly pullRequests: ReadonlyArray<PullRequestSnapshot> },
   FeedError,
@@ -190,7 +201,20 @@ const fetchOpenPullRequests = (
       },
       MAX_PULL_PAGES,
     );
-    if (listing.unchanged) return stored;
+    if (listing.unchanged) {
+      return {
+        ...(stored.etag === undefined ? {} : { etag: stored.etag }),
+        // State an older version wrote has no `onYourPullRequest`, and a 304
+        // keeps returning that state until a pull request changes.
+        pullRequests: stored.pullRequests.map((pullRequest) => ({
+          ...pullRequest,
+          onYourPullRequest:
+            pullRequest.onYourPullRequest ??
+            (pullRequest.author !== undefined &&
+              isUserAccount(identity, { login: pullRequest.author })),
+        })),
+      };
+    }
     const pulls = yield* decodeGithubValue(
       Schema.Array(ListedPull),
       listing.items,
@@ -204,10 +228,55 @@ const fetchOpenPullRequests = (
           number: pull.number,
           title: pull.title,
           ...(pull.user === null ? {} : { author: pull.user.login }),
+          onYourPullRequest: isUserAccount(identity, pull.user),
           headSha: pull.head.sha,
           updatedAt: pull.updated_at,
         })),
     };
+  });
+
+/**
+ * Fetches the latest check runs of a commit, following at most `maxPages`
+ * pages of 100. A commit with more runs lists only those. Fails as
+ * `fetchListing` fails, and with a `PluginError` when a run lacks the fields
+ * read.
+ */
+export const fetchLatestCheckRuns = (
+  repo: string,
+  sha: string,
+  token: string,
+  maxPages: number,
+): Effect.Effect<ReadonlyArray<ListedCheckRun>, FeedError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const listing = yield* fetchListing(
+      {
+        method: "GET",
+        path: `/repos/${repo}/commits/${encodeURIComponent(sha)}/check-runs`,
+        token,
+        query: { filter: "latest", per_page: "100" },
+      },
+      maxPages,
+      { itemsField: "check_runs" },
+    );
+    return yield* decodeGithubValue(Schema.Array(ListedCheckRun), listing.items, "check runs");
+  });
+
+/**
+ * Fetches the names of the check runs on a commit that failed, sorted and
+ * without duplicates. A run failed when it concluded with anything but
+ * `success`, `neutral` or `skipped`; one still running has no conclusion and
+ * did not fail. Reads one page of the commit's latest runs, 100 at most, so
+ * a commit with more runs lists only those. Fails as `fetchLatestCheckRuns`
+ * fails.
+ */
+const fetchFailedCheckNames = (
+  poll: RepoPoll,
+  headSha: string,
+): Effect.Effect<Array<string>, FeedError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const runs = yield* fetchLatestCheckRuns(poll.repo, headSha, poll.token, 1);
+    const failed = runs.filter((run) => isFailedConclusion(run.conclusion)).map((run) => run.name);
+    return [...new Set(failed)].sort();
   });
 
 /**
@@ -217,6 +286,13 @@ const fetchOpenPullRequests = (
  * polled. Returns the commit's new state. While a check runs again, the
  * state keeps the last verdict, so a re-run that ends the same way emits
  * nothing.
+ *
+ * A failure verdict also reads the commit's check runs, for the names of
+ * those that failed. When that read fails, so does this, with no event
+ * emitted for the commit. That fails the whole checks poll of the repository,
+ * which stores nothing, and the next poll reads the repository again. Events
+ * already emitted in the failed poll repeat then, and the dedup keys drop
+ * them.
  */
 const checkHead = (
   poll: RepoPoll,
@@ -273,6 +349,8 @@ const checkHead = (
         state: "open",
       };
       const conclusion = rollUpConclusion(suites);
+      const failedChecks =
+        conclusion === "failure" ? yield* fetchFailedCheckNames(poll, pullRequest.headSha) : [];
       yield* poll.emit(
         buildItemEvent(item, {
           kind: "github.pr.checks-completed",
@@ -288,6 +366,9 @@ const checkHead = (
               name: suite.app?.name ?? "unknown",
               conclusion: suite.conclusion ?? "unknown",
             })),
+            headSha: pullRequest.headSha,
+            failedChecks,
+            onYourPullRequest: pullRequest.onYourPullRequest === true,
           },
           raw: truncateRaw(body),
         }),
@@ -305,10 +386,11 @@ const pollRepo = (
   poll: RepoPoll,
   stored: ChecksState,
   windowDays: number,
+  identity: GithubIdentity,
 ): Effect.Effect<ChecksState, FeedError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const oldest = (yield* Clock.currentTimeMillis) - windowDays * DAY_MS;
-    const listing = yield* fetchOpenPullRequests(poll, stored, oldest);
+    const listing = yield* fetchOpenPullRequests(poll, stored, oldest, identity);
     // A 304 returns the stored pull requests, some of which may have left the window since.
     const recent = listing.pullRequests.filter(
       (pullRequest) => Date.parse(pullRequest.updatedAt) >= oldest,
@@ -430,24 +512,32 @@ const checkOwnPullRequests = (
           token,
           ...(previous?.etag === undefined ? {} : { etag: previous.etag }),
         });
+        // The search index can lag behind GitHub, so a pull request it lists
+        // as open may be closed already. Its checks are not read: a failure
+        // would raise a signal on a finished pull request, whose close was
+        // already written and cannot end it.
         const snapshot =
           response.status === 304 && previous !== undefined
             ? previous
             : yield* Effect.map(
                 decodeGithubValue(ListedPull, response.body, "a pull request"),
-                (pull) => ({
-                  repo: found.repo,
-                  number: found.number,
-                  title: pull.title,
-                  headSha: pull.head.sha,
-                  updatedAt: pull.updated_at,
-                  ...(response.etag === undefined ? {} : { etag: response.etag }),
-                }),
+                (pull) =>
+                  pull.state !== "open"
+                    ? undefined
+                    : {
+                        repo: found.repo,
+                        number: found.number,
+                        title: pull.title,
+                        headSha: pull.head.sha,
+                        updatedAt: pull.updated_at,
+                        ...(response.etag === undefined ? {} : { etag: response.etag }),
+                      },
               );
+        if (snapshot === undefined) return;
         const headKey = `${found.repo}@${snapshot.headSha}`;
         heads[headKey] = yield* checkHead(
           { repo: found.repo, token, emit },
-          { ...snapshot, author: identity.login },
+          { ...snapshot, author: identity.login, onYourPullRequest: true },
           stored.heads[headKey],
           stored.watchedSince,
         );
@@ -482,7 +572,7 @@ export const pollChecks = (
     yield* pollWatchedRepos("checks", context.state, watchList, ChecksState, (repo, stored) =>
       Option.isNone(stored)
         ? baselineRepo
-        : pollRepo({ repo, token, emit: context.emit }, stored.value, windowDays),
+        : pollRepo({ repo, token, emit: context.emit }, stored.value, windowDays, identity),
     );
     const stored = yield* readFeedState(context.state, OWN_CHECKS_KEY, OwnChecksState);
     const next = Option.isNone(stored)

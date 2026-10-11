@@ -42,10 +42,36 @@ export type GithubSubject = Schema.Schema.Type<typeof Subject>;
 const ByYou = Schema.Boolean;
 
 /**
- * Who a review was requested from: the user, or one of the user's teams.
- * Requests to anyone else emit nothing.
+ * Whether the user's own pull request is the one an event is about, worked
+ * out at ingest from the Connection's identity. The description is in the
+ * catalog, so a rule or a triage agent knows what the field means.
  */
-const Reviewer = Schema.Literals(["you", "team"]);
+const OnYourPullRequest = Schema.Boolean.annotate({
+  description: "True when the user wrote the pull request the event is about.",
+});
+
+/**
+ * Declares an assignment kind: the login of who was assigned or unassigned,
+ * `toYou` when that is the user, and `byYou` when the user made the change.
+ * Who made the change is the event's `author`. Issues and pull requests both
+ * emit it.
+ */
+const declareAssignmentKind = (
+  description: string,
+  availableToTriage: boolean,
+): EventKindDeclaration => ({
+  description,
+  schema: Schema.Struct({
+    subject: Subject,
+    /** The login of the account assigned or unassigned. */
+    assignee: Schema.String,
+    /** True when the assignee is the user. */
+    toYou: Schema.Boolean,
+    /** True when the user made the change. */
+    byYou: ByYou,
+  }),
+  availableToTriage,
+});
 
 /** Declares a kind whose payload is only the subject: what happened, and to what. */
 const declareSubjectKind = (
@@ -99,16 +125,28 @@ export const GITHUB_EVENT_KINDS: Record<string, EventKindDeclaration> = {
   "github.issue.closed": declareSubjectKind("An issue was closed.", true),
   "github.issue.reopened": declareSubjectKind("An issue was reopened.", true),
   "github.issue.labeled": declareLabelKind("The labels on an issue changed.", true),
-  "github.issue.assigned": declareSubjectKind("An issue was assigned.", true),
+  "github.issue.assigned": declareAssignmentKind(
+    "Someone was assigned to an issue or a pull request.",
+    true,
+  ),
+  "github.issue.unassigned": declareAssignmentKind(
+    "Someone was unassigned from an issue or a pull request.",
+    false,
+  ),
   "github.issue.commented": declareCommentKind("A comment was added to an issue."),
 
   "github.pr.opened": declareSubjectKind("A pull request was opened.", true),
   "github.pr.synchronized": declareSubjectKind("A pull request got a new head commit.", false),
   "github.pr.review-requested": {
-    description: "A review was requested on a pull request from the user or one of their teams.",
+    description:
+      "A review was requested on a pull request from the user or one of their teams, or by the user from anyone.",
     schema: Schema.Struct({
       subject: Subject,
-      reviewer: Reviewer,
+      /**
+       * Who the review was requested from: the user, one of the user's
+       * teams, or, only when the user asked, anyone else.
+       */
+      reviewer: Schema.Literals(["you", "team", "other"]),
       /** The team, as `org/slug`, when `reviewer` is `team`. */
       team: Schema.optionalKey(Schema.String),
       /** The login of who asked for the review, or null when GitHub did not say. */
@@ -125,7 +163,8 @@ export const GITHUB_EVENT_KINDS: Record<string, EventKindDeclaration> = {
       "A review request to the user or one of their teams was taken back on a pull request.",
     schema: Schema.Struct({
       subject: Subject,
-      reviewer: Reviewer,
+      /** Who the review request was taken back from: the user, or one of the user's teams. */
+      reviewer: Schema.Literals(["you", "team"]),
       /** The team, as `org/slug`, when `reviewer` is `team`. */
       team: Schema.optionalKey(Schema.String),
       /**
@@ -145,8 +184,11 @@ export const GITHUB_EVENT_KINDS: Record<string, EventKindDeclaration> = {
       subject: Subject,
       reviewer: Schema.String,
       verdict: ReviewVerdict,
+      /** GitHub's id of the review, to read it and its comments. */
+      reviewId: Schema.Int,
       /** True when the user submitted the review. */
       byYou: ByYou,
+      onYourPullRequest: OnYourPullRequest,
     }),
     availableToTriage: true,
   },
@@ -162,6 +204,14 @@ export const GITHUB_EVENT_KINDS: Record<string, EventKindDeclaration> = {
       /** The roll-up of every suite: success, failure, neutral and the rest. */
       conclusion: Schema.String,
       suites: Schema.Array(Schema.Struct({ name: Schema.String, conclusion: Schema.String })),
+      /** The head commit the checks ran on. */
+      headSha: Schema.String,
+      /**
+       * The names of the check runs that failed, sorted. Empty unless
+       * `conclusion` is `failure`.
+       */
+      failedChecks: Schema.Array(Schema.String),
+      onYourPullRequest: OnYourPullRequest,
     }),
     availableToTriage: false,
   },
