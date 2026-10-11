@@ -92,6 +92,7 @@ const KINDS = [
   "github.issue.opened",
   "github.issue.closed",
   "github.issue.reopened",
+  "github.issue.unassigned",
   "github.issue.labeled",
   "github.issue.assigned",
   "github.issue.commented",
@@ -175,6 +176,7 @@ describe("what the github plugin registers", () => {
       .map(([kind]) => kind)
       .sort();
     expect(hidden).toEqual([
+      "github.issue.unassigned",
       "github.pr.checks-completed",
       "github.pr.labeled",
       "github.pr.review-request-removed",
