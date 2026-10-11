@@ -15,6 +15,7 @@
 export { IconFrame, type IconProps } from "./icon-frame";
 export { AlarmIcon } from "./alarm";
 export { ArrowIcon } from "./arrow";
+export { BoltIcon } from "./bolt";
 export { BoundIcon } from "./bound";
 export { BranchIcon } from "./branch";
 export { ChatIcon } from "./chat";

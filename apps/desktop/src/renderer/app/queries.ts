@@ -24,6 +24,7 @@ import {
   queryKeys,
   readEveryPage,
   readSenderSession,
+  STRIP_RUN_LIMIT,
   type HerculeClient,
   type MessagePage,
   type MessagePages,
@@ -448,16 +449,56 @@ export const pluginsQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads every workflow, for the name Intake gives a signal a workflow's run
- * raised. The shell subscribes to no `workflow` topic, because the controller
- * pushes on it at every cron fire, so Intake reads it each time it opens, see
- * `readOnOpen`.
+ * Reads every workflow: the workflow list's rows, and the name Intake gives a
+ * signal a workflow's run raised. The shell holds no `workflow` topic,
+ * because the controller pushes on it at every cron fire. The workflows page
+ * holds it while it is mounted and the window is visible (`useWorkflowsLive`),
+ * so a push reads the list again there. Intake holds no topic, so it reads
+ * the list each time it opens, see `readOnOpen`.
  */
 export const workflowsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.workflows(),
     queryFn: () => readEveryPage((page) => client.workflow.query({ query: page })),
     ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
+ * Reads every trigger of every workflow, for the workflow list's Starts on,
+ * Next, and a trigger in error. A trigger is part of its workflow, so a push
+ * on the `workflow` topic reads it again.
+ */
+export const triggersQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.triggers(),
+    queryFn: () => readEveryPage((page) => client.trigger.query({ query: page })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads a workflow's newest runs, newest first, for its strip in the
+ * workflow list: one page of `STRIP_RUN_LIMIT` runs. Its key sits under the
+ * `runs` prefix, so a push on the `run` topic reads it again.
+ */
+export const runStripQuery = (client: HerculeClient, workflowId: string) =>
+  queryOptions({
+    queryKey: queryKeys.runStrip(workflowId),
+    queryFn: async () =>
+      (await client.run.query({ query: { workflowId, limit: STRIP_RUN_LIMIT } })).items,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads every run with the status `status`. The workflow list reads the
+ * `running` runs and the `pending` ones, which are its Running group: the
+ * filter takes one status, so it takes two reads. Its key sits under the
+ * `runs` prefix, so a push on the `run` topic reads it again.
+ */
+export const liveRunsQuery = (client: HerculeClient, status: "running" | "pending") =>
+  queryOptions({
+    queryKey: queryKeys.runs({ status }),
+    queryFn: () => readEveryPage((page) => client.run.query({ query: { status, ...page } })),
+    ...LIVE_KEPT_READ_OPTIONS,
   });
 
 /**

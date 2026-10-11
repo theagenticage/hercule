@@ -31,12 +31,13 @@
  * renamed from the CLI, shows at the next reconnect, or when the thread list
  * names a record the cache does not hold (see `useRelatedReads`).
  */
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { invalidateWithoutCancelling, queryKeys, type Live } from "@hercule/client-core";
 import type { MutableLiveTopic } from "@hercule/contract";
 import { ageClock } from "./age-clock";
+import { useWindowVisible } from "./window-visibility";
 
 /** The topics the shell keeps subscribed. */
 const SHELL_TOPICS: readonly MutableLiveTopic[] = [
@@ -104,6 +105,36 @@ export const useLiveConnection = (live: Live, queryClient: QueryClient): void =>
   }, [live, queryClient, router]);
 };
 
+/** Holds no topic, for a hook that holds its topics only some of the time. */
+const NO_TOPICS: readonly MutableLiveTopic[] = [];
+
+/**
+ * Subscribes to `topics` while the calling component is mounted, and has
+ * each push invalidate the query keys it lists. Subscribes again whenever
+ * `topics` changes identity, so pass a constant, or `NO_TOPICS` to hold none.
+ *
+ * Pushes sent while a topic was not held were lost, so a read cached by an
+ * earlier visit may be out of date. The controller covers that: its first
+ * push on every subscription says that every record of the topic may have
+ * changed, so every read the topic covers is read again then.
+ */
+const useLiveTopics = (
+  live: Live,
+  queryClient: QueryClient,
+  topics: readonly MutableLiveTopic[],
+): void => {
+  useEffect(() => {
+    const unsubscribes = topics.map((topic) =>
+      live.subscribe(topic, (keys) => {
+        for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
+      }),
+    );
+    return () => {
+      for (const unsubscribe of unsubscribes) unsubscribe();
+    };
+  }, [live, queryClient, topics]);
+};
+
 /**
  * Keeps the subagents of the thread `sessionId` current while the calling
  * component is mounted: subscribes to the `subagent` topic, whose pushes
@@ -111,22 +142,41 @@ export const useLiveConnection = (live: Live, queryClient: QueryClient): void =>
  * null.
  *
  * The topic is held only while a thread is open, because only a thread shows
- * subagents (spec 17 §What subagents cost). Pushes sent while the topic was
- * not held were lost, so a list cached by an earlier visit may be out of
- * date. The controller's first push on the subscription names no session,
- * which invalidates every subagent list, so the open thread's list is read
- * again then. The cost is one more read each time a thread opens, right
- * after its loader read the list.
+ * subagents (spec 17 §What subagents cost). It is subscribed again when
+ * another thread opens. The controller's first push on the subscription
+ * names no session, which invalidates every subagent list, so the open
+ * thread's list is read again then. The cost is one more read each time a
+ * thread opens, right after its loader read the list.
  */
 export const useSubagentsLive = (
   live: Live,
   queryClient: QueryClient,
   sessionId: string | null,
 ): void => {
-  useEffect(() => {
-    if (sessionId === null) return;
-    return live.subscribe("subagent", (keys) => {
-      for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
-    });
-  }, [live, queryClient, sessionId]);
+  // A new list for each thread, so opening another thread subscribes again.
+  const topics = useMemo(
+    (): readonly MutableLiveTopic[] => (sessionId === null ? NO_TOPICS : ["subagent"]),
+    [sessionId],
+  );
+  useLiveTopics(live, queryClient, topics);
+};
+
+/** The topics `useWorkflowsLive` holds: the workflows with their triggers, and the runs. */
+const WORKFLOW_TOPICS: readonly MutableLiveTopic[] = ["workflow", "run"];
+
+/**
+ * Keeps the workflow pages' reads current while the calling component is
+ * mounted and the window is visible: subscribes to the `workflow` topic,
+ * whose pushes read the workflows and the triggers again, and to `run`, whose
+ * pushes read every run list again.
+ *
+ * The shell holds neither topic, because the controller pushes on both at
+ * every cron fire. While the window is hidden nobody reads the pages, so
+ * both topics are dropped (spec 17 §Rules, rule 3). When the window shows
+ * again, they are subscribed again, and the controller's first push on each
+ * reads every list they cover again.
+ */
+export const useWorkflowsLive = (live: Live, queryClient: QueryClient): void => {
+  const visible = useWindowVisible();
+  useLiveTopics(live, queryClient, visible ? WORKFLOW_TOPICS : NO_TOPICS);
 };

@@ -26,14 +26,7 @@
  * markdown, so the message renders once per paragraph rather than once per
  * token.
  */
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import {
@@ -45,6 +38,7 @@ import {
   type Live,
 } from "@hercule/client-core";
 import { buildAgentStreamTopic, buildAgentTapTopic, type TranscriptRow } from "@hercule/contract";
+import { useWindowVisible } from "../../app/window-visibility";
 
 /**
  * A message the agent is still writing, as it attaches the element that its
@@ -77,21 +71,6 @@ export type AttachOpenParagraph = (
   element: HTMLElement | null,
   message: OpenMessage,
 ) => (() => void) | undefined;
-
-/** Calls `onChange` each time the window is hidden or shown. Returns a function that stops. */
-const subscribeToVisibility = (onChange: () => void): (() => void) => {
-  document.addEventListener("visibilitychange", onChange);
-  return () => {
-    document.removeEventListener("visibilitychange", onChange);
-  };
-};
-
-/**
- * Checks whether the window can be seen. In Electron the page is hidden
- * while its window is hidden (⌘W hides it) or minimized, and on macOS also
- * while other windows cover it completely.
- */
-const isWindowVisible = (): boolean => document.visibilityState === "visible";
 
 /** What `useSessionLive` keeps current, and where. */
 export interface SessionLiveOptions {
@@ -182,7 +161,7 @@ export const useSessionLive = ({
   const [buffer] = useState(createTailBuffer);
   const [rowsKey] = useState(() => rowsKeyAtMount);
   const [trimRows] = useState(() => trimRowsAtMount);
-  const visible = useSyncExternalStore(subscribeToVisibility, isWindowVisible);
+  const visible = useWindowVisible();
   /** The open message attached last, and the text node its open paragraph is written into. */
   const targetRef = useRef<{ readonly node: Text; readonly message: OpenMessage } | null>(null);
   const frameRef = useRef<number | null>(null);

@@ -178,6 +178,7 @@ export {
   buildWorkflowRows,
   countWorkflowsByFilter,
   pickWorkflowFocusFallback,
+  STRIP_RUN_LIMIT,
   WORKFLOW_LIST_FILTERS,
   type StripRunState,
   type WorkflowGroup,

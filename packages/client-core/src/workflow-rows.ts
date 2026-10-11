@@ -9,9 +9,9 @@
  * a row field by field, and the strip element by element, redraws only the
  * rows that changed.
  *
- * Times are kept as instants. The screen formats them with
- * `formatListTime` against its own clock, so a row does not change as the
- * day passes.
+ * Times are kept as instants, so a row does not change as the day passes.
+ * The screen formats them with `formatListTime` against the age clock, so
+ * only the time text changes, at local midnight.
  */
 import {
   isSchedule,
@@ -46,6 +46,12 @@ const WORKFLOW_GROUPS: ReadonlyArray<{ readonly group: WorkflowGroup; readonly t
   { group: "running", title: "Running" },
   { group: "everythingElse", title: "Everything else" },
 ];
+
+/**
+ * How many of a workflow's newest runs its strip shows: the list reads them
+ * with `run.query({ workflowId, limit: STRIP_RUN_LIMIT })`.
+ */
+export const STRIP_RUN_LIMIT = 20;
 
 /**
  * The state mark that leads a row: its group's mark, or in Everything else

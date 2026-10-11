@@ -22,6 +22,7 @@ import { buildLook, Face, UserAvatar } from "../faces";
 import {
   AlarmIcon,
   ArrowIcon,
+  BoltIcon,
   BoundIcon,
   BranchIcon,
   ChatIcon,
@@ -84,6 +85,7 @@ import { applySheetTheme, markSheetReady } from "./sheet-page";
 const ICONS: { readonly [Name in IconName]: (props: IconProps) => JSX.Element } = {
   alarm: AlarmIcon,
   arrow: ArrowIcon,
+  bolt: BoltIcon,
   bound: BoundIcon,
   branch: BranchIcon,
   chat: ChatIcon,

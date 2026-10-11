@@ -22,6 +22,7 @@ import type { MarkState } from "../marks";
 export type IconName =
   | "alarm"
   | "arrow"
+  | "bolt"
   | "bound"
   | "branch"
   | "chat"
@@ -107,12 +108,13 @@ const MARK_STATES: ReadonlyArray<MarkState> = [
 const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["alarm", [12]],
   ["arrow", [12]],
+  ["bolt", [12]],
   ["bound", []],
   ["branch", [13, 14]],
   ["chat", [13]],
   ["check", [12, 14]],
   ["chevron-right", [13]],
-  ["clock", [14]],
+  ["clock", [12, 14]],
   ["close", [12]],
   ["compose", [14]],
   ["connections", []],
