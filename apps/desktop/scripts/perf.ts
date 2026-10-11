@@ -75,8 +75,11 @@
  *    has 300 runs spread over yesterday; the script then opens it beside
  *    the list, and a last launch measures memory and idle with it open, its
  *    virtualized Runs list, the reads and main thread time of a push on its
- *    Runs list and on the timeline of its 300-run day, and drawing that day
- *    (see `perf-workflows.ts`). Pass `--workflows-only` to skip steps 2 to 6:
+ *    Runs list and on the timeline of its 300-run day, and drawing that day.
+ *    A last launch opens the page of one of the live runs and measures
+ *    memory and idle with it open, the work of each tick of its "Running
+ *    for" duration, and what a `run` push reads (see `perf-workflows.ts`).
+ *    Pass `--workflows-only` to skip steps 2 to 6:
  *
  *        pnpm --filter @hercule/desktop perf -- --workflows-only
  *
@@ -218,11 +221,14 @@ import {
 import { measureSubagentLaunch, reportSubagentLaunch } from "./perf-subagents.ts";
 import {
   measureOpenWorkflowWork,
+  measureRunPageWork,
   measureWorkflowWork,
+  openRunPageOnce,
   openWorkflowOnce,
   openWorkflowsOnce,
   pickPushRound,
   reportOpenWorkflowWork,
+  reportRunPageWork,
   reportWorkflowWork,
   seedWorkflows,
 } from "./perf-workflows.ts";
@@ -1238,6 +1244,10 @@ const launches = await runWithThreadFixture(async (fixture) => {
         pickPushRound(liveRunIds, 2),
       ),
     );
+    // The first live workflow's last run stays live: the pushes cancel the
+    // fourth run of each live workflow, and earlier rounds the first three.
+    await openRunPageOnce(userDataDir, liveRunIds[0]!.at(-1)!);
+    reportRunPageWork(await measureRunPageWork(userDataDir, fixture, pickPushRound(liveRunIds, 3)));
     return measured;
   } finally {
     rmSync(userDataDir, { recursive: true, force: true });

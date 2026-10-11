@@ -8,6 +8,12 @@ import { useState, type JSX } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterContextProvider,
+} from "@tanstack/react-router";
 import type { TimelineBar } from "@hercule/client-core/run-timeline";
 import { stubIntersectionObserver } from "../../app/testing";
 import { TimelineDayStepper, TimelineLanes } from "./run-timeline-board";
@@ -108,21 +114,31 @@ const LIVE_BAR: TimelineBar = {
   endsAfter: false,
 };
 
-/** Draws the lanes of a day with `LIVE_BAR` on them, and returns the bar. */
+/**
+ * Draws the lanes of a day with `LIVE_BAR` on them, and returns the bar. A
+ * bar is a link to its run's page, so the lanes render with a router's
+ * context, which a link needs to build its address.
+ */
 const renderLiveBar = (): HTMLElement => {
+  const router = createRouter({
+    routeTree: createRootRoute(),
+    history: createMemoryHistory(),
+  });
   render(
-    <TimelineLanes
-      label="Runs, Today"
-      hours={[]}
-      now={null}
-      bars={[LIVE_BAR]}
-      trackCount={1}
-      fires={[]}
-      emptyText="No runs today"
-      timezone="UTC"
-    />,
+    <RouterContextProvider router={router}>
+      <TimelineLanes
+        label="Runs, Today"
+        hours={[]}
+        now={null}
+        bars={[LIVE_BAR]}
+        trackCount={1}
+        fires={[]}
+        emptyText="No runs today"
+        timezone="UTC"
+      />
+    </RouterContextProvider>,
   );
-  return screen.getByRole("img");
+  return screen.getByRole("link");
 };
 
 describe("a bar on the timeline", () => {

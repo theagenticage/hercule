@@ -13,6 +13,7 @@
     "src/ipc/**/*.ts",
     "scripts/**/*.ts",
     "vite.*.config.ts",
+    "vitest.*.config.ts",
     // The motion test reads every stylesheet of the renderer with `node:fs`,
     // and the React Compiler test compiles the workflow pages' sources it
     // reads the same way, so both belong to the Node program, although each

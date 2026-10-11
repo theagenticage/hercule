@@ -1,7 +1,8 @@
 /* The controls every screen shares: the buttons, the answer ledger, the
    pills, the segmented controls, the navigation rows, the counts, the
-   meters, the text field, the quiet text and dots, the priority bars, the
-   bar over the main pane, the tabs and the section headings. The rules and
+   meters, the text field, the switches and choices, the quiet text and
+   dots, the priority bars, the bar over the main pane, the tabs and the
+   section headings. The rules and
    class names are the Bureau book's, as its system.css spells them. Each
    departure from the book says why. */
 
@@ -575,6 +576,93 @@ input.field[type="password"]:not(:placeholder-shown) {
    button. */
 .toggle:disabled {
   opacity: 0.5;
+}
+
+/* A checkbox or radio drawn in the book's ink: the native input keeps its
+   keyboard and screen reader behaviour, and a checkbox's tick is the check
+   icon laid over it. */
+.choice-box {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.choice-box input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border-radius: 4px;
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--faint) 60%, transparent);
+}
+.choice-box input[type="radio"] {
+  border-radius: 50%;
+}
+.choice-box input:checked {
+  background: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+/* A checked radio is an ink dot inside an ink ring, with the field's colour
+   between them. */
+.choice-box input[type="radio"]:checked {
+  box-shadow:
+    inset 0 0 0 1px var(--ink),
+    inset 0 0 0 4px var(--field);
+}
+.choice-box input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+/* Not in the book, whose choices are never disabled. A choice the user
+   cannot change, such as a checkout picked while its project is being
+   added, at half opacity like a disabled toggle. */
+.choice-box input:disabled {
+  opacity: 0.5;
+}
+.choice-box .ic {
+  position: absolute;
+  color: var(--field);
+  opacity: 0;
+  pointer-events: none;
+}
+.choice-box input:checked + .ic {
+  opacity: 1;
+}
+
+/* Stacked choices: a .choice-box, its label, and its explanation under the
+   label. The whole row is the target, and its hover reaches 8px past the
+   text on each side. */
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 -8px 4px;
+}
+.option {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 6px 8px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+/* Not in the book. A row whose choice cannot change shows no hover. */
+.option:hover:not(:has(input:disabled)) {
+  background: var(--hover);
+}
+.option b {
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.option small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
 }
 
 /* A slider in ink, like the toggle's on state, such as the Glass level. The

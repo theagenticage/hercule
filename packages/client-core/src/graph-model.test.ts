@@ -1,6 +1,14 @@
 import { assert, describe, it } from "vitest";
-import type { WorkflowDefinition } from "@hercule/contract";
-import { buildGraphDrawing, type GraphEdge } from "./graph-model";
+import type { OpenRequest, Run, StepRecord, WorkflowDefinition } from "@hercule/contract";
+import {
+  buildGraphDrawing,
+  buildRunOverlay,
+  decideStepRunState,
+  type EdgeOnRun,
+  type GraphEdge,
+  type RunOverlay,
+} from "./graph-model";
+import { buildSession } from "./threads/workspaces.testing";
 
 const AGENTS = [
   { id: "a-writer", name: "Writer" },
@@ -154,5 +162,251 @@ describe("buildGraphDrawing", () => {
       condition: "number",
       fullCondition: "event.payload.number == steps.open_pr.output.number",
     });
+  });
+});
+
+describe("decideStepRunState", () => {
+  it("reads a running record whose session asks as waiting, and a completed one as done", () => {
+    assert.strictEqual(decideStepRunState("running", true), "waiting");
+    assert.strictEqual(decideStepRunState("running", false), "working");
+    assert.strictEqual(decideStepRunState("completed", false), "done");
+    // Only a running record can wait on the user.
+    assert.strictEqual(decideStepRunState("failed", true), "failed");
+    assert.strictEqual(decideStepRunState("unreached", false), "unreached");
+  });
+});
+
+describe("buildRunOverlay", () => {
+  const START = "2026-09-24T12:00:00.000Z";
+  const at = (ms: number): string => new Date(Date.parse(START) + ms).toISOString();
+  const RUN_ID = "01a06d02-c111-7a0e-8b3d-9c1f1f3a9c2e";
+  const REVIEW_SESSION_ID = "01a06d02-c111-7a0e-8b3d-9c1f00005e55";
+  const DRAWING = buildGraphDrawing(RELEASE, AGENTS, ACTIONS);
+
+  /** Returns a completed record of `stepId`'s visit `iteration`, from `from` to `to` milliseconds after the start. */
+  const complete = (stepId: string, iteration: number, from: number, to: number): StepRecord => ({
+    stepId,
+    iteration,
+    status: "completed",
+    startedAt: at(from),
+    finishedAt: at(to),
+    output: { number: 12 },
+  });
+
+  const RUN_FIELDS = {
+    id: RUN_ID,
+    workflowId: null,
+    plan: RELEASE,
+    inputs: {},
+    origin: { kind: "trigger", triggerId: "labeled", eventId: 1 },
+    subscriptions: [],
+    createdAt: START,
+  } as const;
+
+  /**
+   * The label started the run; `notes` is done, `review` asked for changes
+   * once, `fix` made them, and `review` runs again. The edges by index:
+   * 0 notes>open_pr, 1 review>open_pr, 2 review>fix, 3 fix>review (max 3),
+   * 4 merged>announce.
+   */
+  const REVIEWING: Run = {
+    ...RUN_FIELDS,
+    status: "running",
+    startedAt: START,
+    steps: [
+      complete("notes", 1, 0, 10),
+      complete("review", 1, 0, 20),
+      complete("fix", 1, 25, 40),
+      {
+        stepId: "review",
+        iteration: 2,
+        status: "running",
+        startedAt: at(45),
+        sessionId: REVIEW_SESSION_ID,
+      },
+    ],
+    edgeTraversals: [1, 0, 1, 1, 0],
+  };
+
+  const COMMAND_REQUEST: OpenRequest = {
+    requestId: "r-1",
+    itemId: "tool-1",
+    decisions: ["allow", "deny"],
+    kind: "command_approval",
+    detail: { command: "npm audit fix --force" },
+  };
+  const ASKING = buildSession({
+    id: REVIEW_SESSION_ID,
+    runId: RUN_ID,
+    stepId: "review",
+    openRequests: [COMMAND_REQUEST],
+  });
+
+  /** Returns each node's state, with its iteration label when it has one. */
+  const listNodeStates = (overlay: RunOverlay): Record<string, string> =>
+    Object.fromEntries(
+      [...overlay.nodes].map(([id, node]) => [
+        id,
+        node.iterationLabel === undefined ? node.state : `${node.state} ${node.iterationLabel}`,
+      ]),
+    );
+
+  /** Returns each edge's travel by its id. */
+  const listEdgeTravel = (overlay: RunOverlay): Record<string, string> =>
+    Object.fromEntries([...overlay.edges].map(([id, edge]) => [id, edge.travel]));
+
+  /** Returns the run's state at the edge `id`, failing the test when there is none. */
+  const findEdgeOnRun = (overlay: RunOverlay, id: string): EdgeOnRun => {
+    const edge = overlay.edges.get(id);
+    assert.isDefined(edge, `no state for ${id}`);
+    return edge;
+  };
+
+  it("marks every node and edge of the drawing, by its id", () => {
+    const overlay = buildRunOverlay(DRAWING, REVIEWING, []);
+    assert.deepStrictEqual(
+      [...overlay.nodes.keys()],
+      DRAWING.nodes.map((node) => node.id),
+    );
+    assert.deepStrictEqual(
+      [...overlay.edges.keys()],
+      DRAWING.edges.map((edge) => edge.id),
+    );
+  });
+
+  it("marks where a live run is at each node, and counts a step's visits", () => {
+    assert.deepStrictEqual(listNodeStates(buildRunOverlay(DRAWING, REVIEWING, [])), {
+      labeled: "fired",
+      friday: "quiet",
+      // A step runs, so the run does not listen for the signal yet.
+      merged: "quiet",
+      notes: "done",
+      review: "working ×2",
+      fix: "done",
+      open_pr: "unreached",
+      announce: "unreached",
+    });
+  });
+
+  it("marks a running step whose session asks as waiting", () => {
+    const overlay = buildRunOverlay(DRAWING, REVIEWING, [ASKING]);
+    assert.strictEqual(overlay.nodes.get("review")?.state, "waiting");
+    // The same session with nothing to ask is working.
+    const quiet = buildRunOverlay(DRAWING, REVIEWING, [{ ...ASKING, openRequests: [] }]);
+    assert.strictEqual(quiet.nodes.get("review")?.state, "working");
+  });
+
+  it("gives an edge through the junction the furthest travel of the edges it stands for", () => {
+    assert.deepStrictEqual(listEdgeTravel(buildRunOverlay(DRAWING, REVIEWING, [])), {
+      // `labeled` led to `notes`, which is done, and to `review`, which runs.
+      "bus in labeled": "active",
+      "bus in friday": "notYet",
+      "bus out notes": "fired",
+      "bus out review": "active",
+      "plan 0": "fired",
+      "plan 1": "notYet",
+      "plan 2": "fired",
+      "plan 3": "active",
+      "plan 4": "notYet",
+      "correlation open_pr merged": "notYet",
+    });
+  });
+
+  it("counts a loop edge's traversals out of its limit", () => {
+    const overlay = buildRunOverlay(DRAWING, REVIEWING, []);
+    assert.deepStrictEqual(findEdgeOnRun(overlay, "plan 3"), {
+      travel: "active",
+      isFailedEdge: false,
+      traversalBadge: "1/3",
+    });
+    assert.isUndefined(findEdgeOnRun(overlay, "plan 2").traversalBadge);
+  });
+
+  it("marks the edge a run failed at, and leaves an ended run's untaken edges not taken", () => {
+    const loop = [1, 2, 3, 4].flatMap((visit) => [
+      complete("review", visit, visit * 100, visit * 100 + 20),
+      complete("fix", visit, visit * 100 + 30, visit * 100 + 50),
+    ]);
+    const failed: Run = {
+      ...RUN_FIELDS,
+      origin: { kind: "manual", actor: "user" },
+      status: "failed",
+      failureReason: "iteration-limit",
+      failedStepId: "fix",
+      failedEdge: { index: 3, message: "The run would follow fix → review a fourth time." },
+      startedAt: START,
+      finishedAt: at(500),
+      steps: [complete("notes", 1, 0, 10), ...loop],
+      edgeTraversals: [1, 0, 4, 3, 0],
+    };
+    const overlay = buildRunOverlay(DRAWING, failed, []);
+    assert.deepStrictEqual(findEdgeOnRun(overlay, "plan 3"), {
+      travel: "fired",
+      isFailedEdge: true,
+      traversalBadge: "3/3",
+    });
+    assert.deepInclude(listNodeStates(overlay), {
+      labeled: "quiet",
+      friday: "quiet",
+      review: "done ×4",
+      open_pr: "unreached",
+    });
+    assert.deepInclude(listEdgeTravel(overlay), {
+      "bus in labeled": "notTaken",
+      "bus in friday": "notTaken",
+      "plan 1": "notTaken",
+      "correlation open_pr merged": "notTaken",
+    });
+  });
+
+  it("takes the stub to the end once its terminal step is done, and never once the run ended without it", () => {
+    assert.deepStrictEqual(
+      [...buildRunOverlay(DRAWING, REVIEWING, []).endStubs],
+      [["announce", "notYet"]],
+    );
+    const announced: Run = {
+      ...REVIEWING,
+      status: "completed",
+      finishedAt: at(90),
+      steps: [...REVIEWING.steps.slice(0, 3), complete("announce", 1, 60, 90)],
+    };
+    assert.strictEqual(buildRunOverlay(DRAWING, announced, []).endStubs.get("announce"), "fired");
+    const cancelled: Run = { ...REVIEWING, status: "cancelled", finishedAt: at(90) };
+    assert.strictEqual(
+      buildRunOverlay(DRAWING, cancelled, []).endStubs.get("announce"),
+      "notTaken",
+    );
+  });
+
+  it("listens for a signal once the run waits, and marks it fired once it has fired", () => {
+    const opened: Run = {
+      ...RUN_FIELDS,
+      status: "running",
+      startedAt: START,
+      steps: [
+        complete("notes", 1, 0, 10),
+        complete("review", 1, 0, 20),
+        complete("open_pr", 1, 30, 40),
+      ],
+      edgeTraversals: [1, 1, 0, 0, 0],
+    };
+    const listening = buildRunOverlay(DRAWING, opened, []);
+    assert.strictEqual(listening.nodes.get("merged")?.state, "listening");
+    // The pull request is open, so the run has what it matches the signal on.
+    assert.strictEqual(findEdgeOnRun(listening, "correlation open_pr merged").travel, "fired");
+
+    const merged: Run = {
+      ...opened,
+      steps: [
+        ...opened.steps,
+        complete("merged", 1, 50, 50),
+        { stepId: "announce", iteration: 1, status: "running", startedAt: at(55) },
+      ],
+      edgeTraversals: [1, 1, 0, 0, 1],
+    };
+    const overlay = buildRunOverlay(DRAWING, merged, []);
+    assert.strictEqual(overlay.nodes.get("merged")?.state, "fired");
+    assert.strictEqual(overlay.nodes.get("announce")?.state, "working");
+    assert.strictEqual(findEdgeOnRun(overlay, "plan 4").travel, "active");
   });
 });

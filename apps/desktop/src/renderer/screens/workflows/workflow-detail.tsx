@@ -5,6 +5,7 @@
  * the route reads and saves.
  */
 import { useId, type JSX, type KeyboardEvent, type ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
 import type { TriggerFiresOn } from "@hercule/contract";
 import { hasRunMark } from "@hercule/client-core/run-marks";
 import {
@@ -282,11 +283,13 @@ export function InputTableHeads(): JSX.Element {
 }
 
 /**
- * Renders one run's row in the Runs list: its mark and status, who started
- * it, how long it took, and when it started, with the times kept current by
- * the age clock. A cancelled run, and one that has not started, has no mark,
- * so its words stand in the mark's column. `onScreen` is whether the row is
- * in view, which keeps its times current.
+ * Renders one run's row in the Runs list, a link to the run's page: its mark
+ * and status, who started it, how long it took, and when it started, with
+ * the times kept current by the age clock. A cancelled run, and one that has
+ * not started, has no mark, so its words stand in the mark's column.
+ * `onScreen` is whether the row is in view, which keeps its times current.
+ * The list item around it is the caller's, because the virtualized list
+ * positions each row in a wrapper of its own.
  */
 export function RunListRow({
   row,
@@ -312,9 +315,10 @@ export function RunListRow({
     .filter((name) => name !== "")
     .join(" ");
   return (
-    <div
+    <Link
+      to="/runs/$runId"
+      params={{ runId: row.id }}
       className="table-row tbl-runs"
-      role="listitem"
       aria-label={describeRunRow(row, startedText, tookText)}
     >
       {hasRunMark(row.state) ? (
@@ -329,7 +333,7 @@ export function RunListRow({
       </span>
       <span className="table-num">{tookText}</span>
       <span className="table-num">{startedText}</span>
-    </div>
+    </Link>
   );
 }
 

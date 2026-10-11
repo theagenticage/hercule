@@ -1,0 +1,143 @@
+/* A run's step timeline: the Bureau book's "Step timeline" rules
+   (system.css), with their selectors, over the table rules of
+   workflow-list.css and the timeline rules of run-timeline.css. Each
+   departure from the book is explained in a comment. */
+
+:is(.table-heads, .table-row).tbl-steps {
+  grid-template-columns: 14px minmax(0, 180px) minmax(0, 1fr) 64px;
+}
+.table-row.tbl-steps {
+  align-items: stretch;
+  height: auto;
+  min-height: 40px;
+}
+.table-row.tbl-steps > :not(.track) {
+  align-self: center;
+}
+/* The column heads already draw a hairline under them, so the first row
+   draws none. Scoped to the steps, so the Runs list keeps its own rules. */
+.table-rows > .table-row.tbl-steps:first-child::before {
+  border-top-color: transparent;
+}
+
+/* The book's rows with a thread are links; here they are buttons, which
+   take a link row's width, alignment and hover. Every rule below is scoped
+   to the steps, so the classes the book shares with other pages keep their
+   own rules there. */
+button.table-row.tbl-steps {
+  width: 100%;
+  text-align: left;
+}
+button.table-row.tbl-steps:hover {
+  background: var(--hover);
+}
+button.table-row.tbl-steps:hover::before,
+button.table-row.tbl-steps:hover + .table-row.tbl-steps::before {
+  border-top-color: transparent;
+}
+
+.tbl-steps > .record {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 0;
+}
+.tbl-steps .record-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: var(--w-medium);
+}
+.tbl-steps .record-name small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.tbl-steps .record-name.is-quiet {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.tbl-steps .record-err {
+  overflow: hidden;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:is(.table-heads, .table-row).tbl-steps > .track {
+  position: relative;
+  align-self: stretch;
+  overflow: visible;
+}
+.table-heads.tbl-steps > .track {
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+/* Not in the book, whose still page ends the axis at now and pins the pill
+   to its right end. A live axis here ends at the tick past now, so the pill
+   and each row's now line sit at now: on a layer the width of the track,
+   moved there by transform, so a tick of the clock lays nothing out. */
+.tbl-steps .now-at {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.tbl-steps .now-at > .axis-now {
+  left: 0;
+}
+/* The line ends at now, as the book's ends at the axis's end. */
+.tbl-steps .now-at > .now-line {
+  left: -1px;
+}
+/* Not in the book, which sizes its axis by hand. One digit in the axis's
+   type, which the timeline measures to fit its ticks to the axis. */
+.tbl-steps .axis-probe {
+  position: absolute;
+  visibility: hidden;
+}
+
+.tbl-steps > .track > .run-bar {
+  top: 50%;
+  margin-top: -8px;
+}
+/* Not in the book, which draws a still page. A running step's line and
+   mark reach now: the line is drawn to its full room and scaled from its
+   start, and the mark rides on a layer the width of the bar, moved back by
+   the room left. Both move by transform alone, once a second. */
+.tbl-steps .run-bar-line.is-live {
+  transform-origin: left;
+}
+.tbl-steps .run-bar-end {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.tbl-steps .run-bar-end > .mark {
+  position: relative;
+  margin-right: -7px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.tbl-steps .run-bar-end > .dot--mark {
+  position: relative;
+  margin-right: -5px;
+}
+
+.tbl-steps .track-note {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  padding-right: 6px;
+  background: var(--surface);
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  transform: translateY(-50%);
+}
+button.table-row.tbl-steps:hover :is(.run-bar .mark, .track-note) {
+  background: linear-gradient(var(--hover), var(--hover)), var(--surface);
+}

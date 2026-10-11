@@ -36,6 +36,16 @@
  * - how many of those 300 runs the timeline draws, on how many tracks, and
  *   the renderer main thread's time from asking for the day until it shows.
  *
+ * The third opens the page of the first live workflow's last run, whose
+ * step waits a day, so its "Running for" duration changes every second (see
+ * `measureRunPageWork`), and measures:
+ *
+ * - processes and memory with the run's page open;
+ * - each process's CPU and wakeups with the page open, visible and hidden,
+ *   and the age clock's fires in each;
+ * - the renderer main thread's time for each tick of the duration;
+ * - what one `run` push of another workflow's run costs.
+ *
  * The seed (see `seedWorkflows`):
  *
  * - 50 workflows, each with one start trigger: half on a schedule, half on
@@ -57,10 +67,12 @@
  * A push is one run cancelled through `run.cancel`, one live workflow after
  * another. Cancelling is one change to one run, where starting a run is two
  * (pending, then running). Each round of 10 pushes cancels each live
- * workflow's next run, so the three rounds take the live runs from 50 down
- * to 20. That changes no count of reads: each push reads every run read on
+ * workflow's next run, so the four rounds take the live runs from 50 down
+ * to 10. That changes no count of reads: each push reads every run read on
  * screen once, however many runs are live. No push changes a run of the
  * open workflow, so the open workflow's reads answer the same each time.
+ * Each live workflow's last run stays live, among them the run whose page
+ * the last launch opens.
  *
  * Each strip holds at most 20 runs, as a strip shows at most. The seed's
  * 339 finished runs and 50 live ones make the strips' answer at most 109
@@ -999,6 +1011,134 @@ export async function measureOpenWorkflowWork(
   return measured;
 }
 
+/** What the run's page scenario measured. */
+export interface RunPageWork extends LaunchAtRest {
+  /** How many nodes the run's graph drew. */
+  readonly graphNodes: number;
+  /** How often the age clock fired over the tick sample, and how long that sample lasted, in milliseconds. */
+  readonly tickFires: number;
+  readonly tickSampleMs: number;
+  /** The renderer main thread's time over the tick sample, in milliseconds. */
+  readonly tickMainThreadMs: number;
+  /** What the pushes cost with the run's page open. */
+  readonly pushes: PushCost;
+}
+
+/** How many nodes a live run's graph draws: its workflow's trigger and its one step. */
+const RUN_PAGE_NODES = 2;
+
+/** An expression that evaluates, in the page, to whether the run's page has drawn its graph. */
+const RUN_PAGE_DRAWN = `document.querySelectorAll(".run-page .graph .node").length >= ${String(RUN_PAGE_NODES)}`;
+
+/**
+ * Opens the run `runId`'s page once in the signed-in app on `userDataDir`,
+ * so the app opens it again at its next launch (see `openScreenOnce`).
+ * Fails when its graph does not show.
+ */
+export const openRunPageOnce = (userDataDir: string, runId: string): Promise<void> =>
+  openScreenOnce(userDataDir, `/runs/${runId}`, (page: Page) =>
+    page
+      .locator(".run-page .graph .node")
+      .nth(RUN_PAGE_NODES - 1)
+      .waitFor(),
+  );
+
+/**
+ * Starts the signed-in app on `userDataDir` as a plain process, warm (see
+ * `warmUpApp`), where it opens a live run's page again, and measures it.
+ * The run's one step waits a day, so the page's "Running for" duration
+ * changes every second, and the age clock fires for it every second.
+ * Returns, read in this order:
+ *
+ * - each process's memory, 13 s after the page opened;
+ * - how many nodes the run's graph drew;
+ * - each process's CPU and wakeups over 10 s with the window visible, from
+ *   30 s after the page opened, and over 10 s with the window hidden, with
+ *   the age clock's fires in each;
+ * - with the window shown again, the renderer main thread's time over 10 s
+ *   and the age clock's fires in them, so the work of one tick;
+ * - what the pushes of `pushRunIds` cost (see `measurePushes`). None of
+ *   them is the open run.
+ *
+ * Fails when the run's page does not show within 15 s, when the window is
+ * not visible or hidden as each sample expects, or when the app does not
+ * quit cleanly afterwards.
+ */
+export async function measureRunPageWork(
+  userDataDir: string,
+  fixture: ThreadFixture,
+  pushRunIds: readonly string[],
+): Promise<RunPageWork> {
+  await warmUpApp(userDataDir);
+  const loadAtSpawn = loadavg()[0]!;
+  const app = await launchPlainApp(userDataDir);
+  const { inspectorUrl } = app;
+  let measured: RunPageWork;
+  try {
+    const pageSocketUrl = await waitForPageSocketUrl(app.endpoint);
+    const pageOpenedAt = Date.now();
+    const sleepUntil = (msAfterOpen: number) =>
+      sleep(Math.max(0, pageOpenedAt + msAfterOpen - Date.now()));
+    await pollUntil(
+      async () =>
+        (await evaluateInPage(pageSocketUrl, RUN_PAGE_DRAWN)) === true ? true : undefined,
+      {
+        timeoutMs: 15_000,
+        intervalMs: 100,
+        timeoutMessage: "the app did not open the run's page with its graph",
+      },
+    );
+
+    await sleepUntil(MEMORY_READ_AT_MS);
+    const memory = await readProcessMemory(app.process.pid!);
+    const rendererPid = findRendererPid(memory);
+    const graphNodes = (await evaluateInPage(
+      pageSocketUrl,
+      `document.querySelectorAll(".run-page .graph .node").length`,
+    )) as number;
+
+    await sleepUntil(VISIBLE_SAMPLE_AT_MS);
+    const samples = await sampleVisibleAndHidden(inspectorUrl, SAMPLE_MS);
+
+    const page = await connectInspector(pageSocketUrl);
+    try {
+      const fires = await countAgeClockFires(page, samples);
+      await page.send("Performance.enable");
+      // Nothing changes on the controller during this sample, so the main
+      // thread's time in it is the clock's ticks and Chromium's own work.
+      const tickFrom = Date.now();
+      const mainThreadBefore = await readMainThreadMs(page);
+      await sleep(SAMPLE_MS);
+      const tickMainThreadMs = (await readMainThreadMs(page)) - mainThreadBefore;
+      const tickTo = Date.now();
+      const fireTimes = (await page.evaluate("Runtime.evaluate", {
+        expression: READ_AGE_CLOCK_FIRES,
+        returnByValue: true,
+      })) as number[];
+      const pushes = await measurePushes(page, fixture, rendererPid, pushRunIds);
+      measured = {
+        loadAtSpawn,
+        memory,
+        visible: samples.visible,
+        visibleMs: samples.visibleTo - samples.visibleFrom,
+        hidden: samples.hidden,
+        ...fires,
+        graphNodes,
+        tickFires: fireTimes.filter((at) => at >= tickFrom && at < tickTo).length,
+        tickSampleMs: tickTo - tickFrom,
+        tickMainThreadMs,
+        pushes,
+      };
+    } finally {
+      page.close();
+    }
+  } finally {
+    await stopPlainApp(app);
+  }
+  assertExitedCleanly(app.process);
+  return measured;
+}
+
 /**
  * Counts `reads` by kind, and the other reads by path, leaving out the reads
  * that started before the first push in `pushedAt`. Returns the counts and,
@@ -1417,6 +1557,44 @@ export function reportOpenWorkflowWork(measured: OpenWorkflowWork): void {
   printLaunch(
     `## The open workflow, ${String(OPEN_WORKFLOW_RUNS)} runs yesterday, beside ` +
       `${String(WORKFLOW_COUNT)} workflows listed, one run of another workflow cancelled a push`,
+    measured,
+    budgets,
+  );
+}
+
+/** Prints what the run's page scenario measured, against the limits spec 17 sets. */
+export function reportRunPageWork(measured: RunPageWork): void {
+  const perTickMs =
+    measured.tickFires === 0 ? null : measured.tickMainThreadMs / measured.tickFires;
+  const budgets: BudgetRow[] = [
+    ...buildAtRestRows(measured, "recorded; the run's duration changes every second"),
+    [
+      "The run's graph, nodes drawn",
+      `${String(RUN_PAGE_NODES)}: the trigger and the one step`,
+      String(measured.graphNodes),
+      measured.graphNodes === RUN_PAGE_NODES,
+    ],
+    [
+      `Ticks, age clock over ${(measured.tickSampleMs / 1_000).toFixed(0)} s, attached`,
+      "recorded; one a second while the run is live",
+      String(measured.tickFires),
+      null,
+    ],
+    [
+      "Ticks, renderer main thread a tick",
+      `at most ${String(BUDGET.rendererMainThreadPerNudgeMs)} ms, one frame`,
+      perTickMs === null
+        ? "no tick"
+        : `${perTickMs.toFixed(2)} ms (${measured.tickMainThreadMs.toFixed(0)} ms over the sample, Chromium's own work included)`,
+      perTickMs === null ? null : perTickMs <= BUDGET.rendererMainThreadPerNudgeMs,
+    ],
+    // A run's page draws no strips, no Running section, no Runs list and no
+    // day, so a push should read none of them. Its own reads, the run and its
+    // re-runs, are recorded with the other reads.
+    ...buildPushRows("Per push, run's page", measured.pushes, {}),
+  ];
+  printLaunch(
+    "## A live run's page, its one step waiting a day, one run of another workflow cancelled a push",
     measured,
     budgets,
   );

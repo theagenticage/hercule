@@ -676,6 +676,47 @@ export const workflowDayRunsQuery = (
 };
 
 /**
+ * Reads one run with its plan and step records, for its page. A push on the
+ * `run` topic that names the run reads it again. Fails with a `not_found`
+ * `ApiError` when no run has the id, which is not tried again: the page shows
+ * that the run was not found.
+ */
+export const runQuery = (client: HerculeClient, runId: string) =>
+  queryOptions({
+    queryKey: queryKeys.run(runId),
+    queryFn: () => client.run.read({ params: { id: runId } }),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads every session a run's agent steps started, for the run's page: what
+ * a waiting step asks, and a step's model, tokens and tool calls. Its key
+ * sits under the `sessions` prefix, so a push on the `session` topic, which
+ * the shell holds, reads it again.
+ */
+export const runSessionsQuery = (client: HerculeClient, runId: string) =>
+  queryOptions({
+    queryKey: queryKeys.sessions({ runId }),
+    queryFn: () => readEveryPage((page) => client.session.query({ query: { runId, ...page } })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads every re-run of a run, newest first, for the re-run links of its
+ * page. Its key sits under the `runs` prefix, so a push on the `run` topic
+ * reads it again, which also brings in a re-run started while the page is
+ * open.
+ */
+export const rerunsQuery = (client: HerculeClient, runId: string) =>
+  queryOptions({
+    queryKey: queryKeys.runs({ originalRunId: runId }),
+    queryFn: () =>
+      readEveryPage((page) => client.run.query({ query: { originalRunId: runId, ...page } })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
  * Checks whether a failed read, such as a thread's records or an assistant's
  * current session, is worth trying again. Returns `true` for the first three
  * failures that got no answer from the controller, such as a dropped

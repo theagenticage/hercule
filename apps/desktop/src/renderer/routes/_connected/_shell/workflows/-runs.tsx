@@ -269,6 +269,7 @@ export function RunList({
       {virtualItems.map(({ index, key, start }) => (
         <div
           key={key}
+          role="listitem"
           style={{
             position: "absolute",
             top: 0,

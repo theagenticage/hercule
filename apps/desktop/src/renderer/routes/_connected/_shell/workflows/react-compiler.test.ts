@@ -1,7 +1,7 @@
 /**
  * Tests that the React Compiler compiles every component and hook of the
- * workflow pages: the route files here and the screens they draw. When the
- * compiler cannot compile a function, it leaves it as written, with no
+ * workflow pages: the route files here and a run's page's, and the screens
+ * they draw. When the compiler cannot compile a function, it leaves it as written, with no
  * memoization, and the build prints nothing. The lint rules do not catch
  * every such case, so this test runs the compiler the build runs, with the
  * same options as `reactCompilerPreset()` in `vite.renderer.config.ts`.
@@ -13,9 +13,9 @@ import { fileURLToPath } from "node:url";
 import { transformSync } from "@babel/core";
 import { describe, expect, it } from "vitest";
 
-/** The folders whose files are compiled: this route folder and the workflow screens. */
+/** The folders whose files are compiled: this route folder, the run's page's, and the workflow screens. */
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FOLDERS = [HERE, join(HERE, "../../../../screens/workflows")];
+const FOLDERS = [HERE, join(HERE, "../runs"), join(HERE, "../../../../screens/workflows")];
 
 /**
  * The functions the compiler skips on purpose, by file, with the reason it

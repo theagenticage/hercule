@@ -18,7 +18,9 @@
  *   compares with the book's;
  * - intake.tsx, which opens Intake, with or without a signal's pane;
  * - workflows.tsx, which opens Workflows, and whose workflow list
- *   `pnpm compare:bureau` compares with the book's table.
+ *   `pnpm compare:bureau` compares with the book's table;
+ * - run.tsx, which opens a run's page, and whose main pane
+ *   `pnpm compare:bureau` compares with the book's.
  *
  * The page builds a router whose routes have the app's route ids, so the
  * sidebar and the screens find the controller in their route context, and
@@ -100,9 +102,12 @@ import {
   projectsQuery,
   providersQuery,
   queuedInputsQuery,
+  rerunsQuery,
   resourcesQuery,
   runnersQuery,
   runningTurnQuery,
+  runQuery,
+  runSessionsQuery,
   senderSessionQuery,
   sessionQuery,
   settingsQuery,
@@ -143,8 +148,10 @@ import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_s
 import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
 import { Route as WorkflowsRoute } from "../routes/_connected/_shell/workflows/route";
 import { Route as OpenWorkflowRoute } from "../routes/_connected/_shell/workflows/$workflowId";
+import { Route as RunRoute } from "../routes/_connected/_shell/runs/$runId";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
+import type { RunRecords } from "./run-fixture";
 import type { WorkflowsRecords } from "./workflows-fixture";
 
 /**
@@ -286,6 +293,17 @@ interface OpenScreens {
   readonly appearanceSettings?: AppearanceSettingsRecords;
   readonly intake?: IntakeRecords;
   readonly workflows?: WorkflowsRecords;
+  readonly run?: RunScreenRecords;
+}
+
+/**
+ * The run a run's page opens, with its sessions, and the Workflows records
+ * that hold its workflow, the triggers, the Agents and the workflow actions
+ * the page reads besides.
+ */
+export interface RunScreenRecords {
+  readonly records: RunRecords;
+  readonly workflows: WorkflowsRecords;
 }
 
 /** An address that never answers. The client sends nothing to it. */
@@ -415,6 +433,7 @@ const seedQueryCache = (
     appearanceSettings,
     intake,
     workflows,
+    run,
   }: OpenScreens,
 ): void => {
   queryClient.setQueryData(threadsQuery(client).queryKey, records.threads);
@@ -497,6 +516,23 @@ const seedQueryCache = (
   }
   if (intake?.event != null) {
     queryClient.setQueryData(eventQuery(client, intake.event.id).queryKey, intake.event);
+  }
+  if (run !== undefined) {
+    const { workflow, agents, workflowActions } = run.workflows.openWorkflow;
+    const runId = run.records.run.id;
+    queryClient.setQueryData(runQuery(client, runId).queryKey, run.records.run);
+    queryClient.setQueryData(runSessionsQuery(client, runId).queryKey, run.records.sessions);
+    queryClient.setQueryData(rerunsQuery(client, runId).queryKey, []);
+    queryClient.setQueryData(workflowsQuery(client).queryKey, run.workflows.workflows);
+    queryClient.setQueryData(workflowQuery(client, workflow.id).queryKey, workflow);
+    queryClient.setQueryData(triggersQuery(client).queryKey, run.workflows.triggers);
+    queryClient.setQueryData(agentsQuery(client).queryKey, agents);
+    queryClient.setQueryData(workflowActionsQuery(client).queryKey, workflowActions);
+    // The book's times are UTC, and so is the specimen's clock.
+    queryClient.setQueryData(settingsQuery(client).queryKey, {
+      controller: {},
+      user: { timezone: "UTC" },
+    });
   }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
@@ -679,6 +715,12 @@ const buildRouter = (
     getParentRoute: () => workflowsRoute,
     loader: undefined,
   } as never);
+  const runRoute = RunRoute.update({
+    id: "/runs/$runId",
+    path: "/runs/$runId",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
   const routeTree = rootRoute.addChildren([
     connectedRoute.addChildren([
       shellRoute.addChildren([
@@ -698,6 +740,7 @@ const buildRouter = (
         }),
         intakeRoute,
         workflowsRoute.addChildren([openWorkflowRoute]),
+        runRoute,
         settingsRoute.addChildren([
           appearanceSettingsRoute,
           assistantsSettingsRoute,
@@ -741,11 +784,20 @@ const findWorkflowsDrawnSelector = (path: string): string => {
 };
 
 /**
+ * Returns the selector of what a run's page at `path` draws last: the
+ * graph's nodes, or the timeline's axis ticks, which the timeline draws
+ * once it has measured its axis, after the first render.
+ */
+const findRunDrawnSelector = (path: string): string =>
+  path.includes("view=timeline") ? ".run-page .axis-tick" : ".run-page .node";
+
+/**
  * Checks that the page drew the sidebar's thread rows, the transcript when
  * `screens` opens a thread, an assistant's settings when it opens Settings >
  * Assistants, the theme cards when it opens Settings > Appearance, the
- * list's rows or its empty line when it opens Intake or Workflows, and the start cards with the focus in the message field when
- * it opens a draft, and started no read. Fails with the keys of the
+ * list's rows or its empty line when it opens Intake or Workflows, a step
+ * when it opens a run's page, and the start cards with the focus in the
+ * message field when it opens a draft, and started no read. Fails with the keys of the
  * reads it started, or with what it did not draw, otherwise.
  */
 const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: string): void => {
@@ -795,6 +847,9 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
     throw new Error(
       "Workflows drew no row and no empty line. Check the page's console for the error.",
     );
+  }
+  if (screens.run !== undefined && document.querySelector(findRunDrawnSelector(path)) === null) {
+    throw new Error("The run's page drew no step. Check the page's console for the error.");
   }
   if (screens.draft !== undefined) {
     if (document.querySelector(".start") === null) {
@@ -870,6 +925,7 @@ async function mountShellSpecimen(
   if (screens.workflows !== undefined) {
     await waitForElement(findWorkflowsDrawnSelector(path));
   }
+  if (screens.run !== undefined) await waitForElement(findRunDrawnSelector(path));
   assertShellDrawn(queryClient, screens, path);
 }
 
@@ -1025,4 +1081,21 @@ export async function mountWorkflowsSpecimen(
       : `/workflows/${workflows.openWorkflow.workflow.id}` +
         (search.size === 0 ? "" : `?${search.toString()}`);
   await mountShellSpecimen(records, path, { workflows });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with the page of `run` open: the main pane shows the app's real run page,
+ * with its steps as a graph, or on a timeline when `stepsView` is
+ * `timeline`. Returns once the graph's nodes, or the timeline's ticks, are
+ * in the document. Fails when the page has no `#root`, draws no sidebar row
+ * and no step, or tries to read a record the cache does not hold.
+ */
+export async function mountRunSpecimen(
+  records: SidebarRecords,
+  run: RunScreenRecords,
+  stepsView: "graph" | "timeline",
+): Promise<void> {
+  const path = `/runs/${run.records.run.id}` + (stepsView === "timeline" ? "?view=timeline" : "");
+  await mountShellSpecimen(records, path, { run });
 }

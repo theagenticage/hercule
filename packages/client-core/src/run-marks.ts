@@ -7,7 +7,7 @@
  * the index, so that it stays off the desktop app's first screen: it loads
  * in the chunk of the Workflows route.
  */
-import type { RunSummary } from "@hercule/contract";
+import type { RunStatus, RunSummary } from "@hercule/contract";
 import type { Pose } from "./threads/pose";
 import type { WaitingRunSession } from "./waiting";
 
@@ -31,10 +31,23 @@ export const hasRunMark = (
   state !== "cancelled" && state !== "starting";
 
 /**
+ * Where a run is, as its mark reads it: its status, and while it runs, the
+ * steps that are active and the signals it waits for. A `RunSummary` has this
+ * shape; a run's page builds it from the run's step records.
+ */
+export type RunPlace =
+  | {
+      readonly status: "running";
+      readonly activeStepIds: ReadonlyArray<string>;
+      readonly awaitedSignalIds: ReadonlyArray<string>;
+    }
+  | { readonly status: Exclude<RunStatus, "running"> };
+
+/**
  * Checks whether a run has not started any step yet: it is pending, or
  * running with nothing active or awaited.
  */
-const isRunStarting = (run: RunSummary): boolean =>
+const isRunStarting = (run: RunPlace): boolean =>
   run.status === "pending" ||
   (run.status === "running" && run.activeStepIds.length === 0 && run.awaitedSignalIds.length === 0);
 
@@ -42,7 +55,7 @@ const isRunStarting = (run: RunSummary): boolean =>
  * Returns a run's state as a strip, a run row and the timeline draw it.
  * `isWaiting` is whether a session of the run waits on the user.
  */
-export const decideRunMarkState = (run: RunSummary, isWaiting: boolean): RunMarkState => {
+export const decideRunMarkState = (run: RunPlace, isWaiting: boolean): RunMarkState => {
   if (isWaiting) return "waiting";
   if (isRunStarting(run)) return "starting";
   if (run.status === "running") return "working";

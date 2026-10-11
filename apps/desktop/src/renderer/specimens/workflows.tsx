@@ -14,7 +14,7 @@
  *
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`.
  * Like the book's page, it draws the open workflow's graph without the fade
- * at its cut edge (see `stillGraphFade`).
+ * at its cut edge (see `stillGraphPane`).
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
@@ -22,7 +22,7 @@ import "./fixed-clock";
 import { SPECIMEN_RECORDS } from "./sidebar-fixture";
 import { WORKFLOWS_RECORDS } from "./workflows-fixture";
 import { mountWorkflowsSpecimen } from "./shell-page";
-import { markSheetReady, stillGraphFade } from "./sheet-page";
+import { markSheetReady, stillGraphPane } from "./sheet-page";
 
 /** The widths the page draws the list at, as the book's `?view=` names them. */
 const VIEWS = ["table", "split", "full"] as const;
@@ -37,7 +37,7 @@ function readView(): (typeof VIEWS)[number] {
   return known;
 }
 
-stillGraphFade();
+stillGraphPane();
 await mountWorkflowsSpecimen(
   {
     ...SPECIMEN_RECORDS,

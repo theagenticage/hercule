@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares twenty-two pairs of
+ * For each theme, Whitehaven and Orient Express, it compares twenty-eight pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -65,7 +65,21 @@
  *   the app draws a plugin's action step with its plugin's mark;
  * - Ship release open across the whole pane with today's runs on the
  *   timeline (`?view=full&runs=timeline`). The reference module moves the
- *   book's hour axis into the tab band, where spec 17 puts it.
+ *   book's hour axis into the tab band, where spec 17 puts it;
+ * - a run's page (the main pane) of run.html: the book's page stilled by
+ *   specimens/run-reference.ts, and the run specimen (run.html), whose
+ *   fixture holds two of the book's runs of Ship release. The waiting run
+ *   is compared on its graph, then with the card of its security step open
+ *   (`&card=security`) and with the card of its review step, which the run
+ *   came to twice (`&card=review`). The failed run is compared on its step
+ *   timeline (`?state=failed&steps=timeline`): an ended run's axis ends
+ *   where the run ended, so its ticks are the book's. Then each dialog:
+ *   Cancel run on the waiting run (`&dialog=cancel`) and Re-run on the
+ *   failed one (`?state=failed&dialog=rerun`). The reference module draws
+ *   the GitHub mark on open_pr, and opens the dialog in the top layer, as
+ *   the app does. On the waiting run it also adds the Workspace row the app
+ *   draws, which the book leaves out, and moves an open card down by the
+ *   row's height, with the node it belongs to.
  *
  * Each reference module edits the book's page to show its fixture's data.
  * For each region pair, the capture:
@@ -657,7 +671,7 @@ const WORKFLOW_COLUMN_PARTS = [
 // inside `main.main`: the lead with its switch and chips, the graph with its
 // cards and edge labels, and the tab band. The scaled drawing's box carries
 // the graph's zoom, and the pane's cut classes say on which side the graph
-// fades out, which the capture does not draw (see `stillGraphFade`).
+// fades out, which the capture does not draw (see `stillGraphPane`).
 const OPEN_WORKFLOW_PARTS = [
   ".open-pane",
   ".open-name",
@@ -724,6 +738,126 @@ const RUN_TIMELINE_PARTS = [
   ".run-bar-line",
   ".run-bar > svg",
 ];
+
+// Every part of a run's page above its steps, as a selector inside
+// `main.main`: the crumbs with the run's mark and time, the button that
+// cancels or re-runs it, the run's state and how long it took, the gist
+// with its button, who started it, its inputs, and the tab band with the
+// Graph and Timeline switch.
+const RUN_LEAD_PARTS = [
+  ".top > .pill",
+  ".pill-crumb",
+  ".ptab",
+  ".ptab > svg",
+  ".ptab > small",
+  ".pill-btn",
+  ".open-pane",
+  ".open-name",
+  ".run-state",
+  ".run-state > svg",
+  ".run-took",
+  ".run-gist",
+  ".run-gist > p",
+  ".run-gist > .btn",
+  ".chip-row",
+  ".chip",
+  ".chip > svg",
+  ".run-inputs",
+  ".run-inputs > div",
+  ".run-inputs dt",
+  ".run-inputs dd",
+  ".run-note",
+  ".tab-band",
+  ".tab-bar",
+  ".run-steps",
+  ".run-steps > small",
+  ".tab-tools",
+  ".seg",
+  ".seg > button",
+];
+
+// Every part of a run's graph, as a selector inside `main.main`: the graph
+// of the open workflow, and on each node where the run is: its ring, its
+// mark, and how many times the run came to it.
+const RUN_GRAPH_PARTS = [
+  ".graph",
+  ".graph-pane",
+  ".graph-pane.is-cut-left",
+  ".graph-pane.is-cut-right",
+  ".graph-room",
+  ".graph-draw",
+  ".node",
+  ".node-ring",
+  ".node-lead",
+  ".node-lead > svg",
+  ".node-title",
+  ".node-times",
+  ".node-detail",
+  ".node-mark",
+  ".node-mark > svg",
+  ".edge-label",
+  ".pill.zoom",
+  ".zoom > *",
+];
+
+// Every part of a node's card on a run's graph, as a selector inside
+// `main.main`: where the run is at the node, the facts of its latest visit,
+// its prompt, each time the run came to it, and Open thread.
+const RUN_CARD_PARTS = [
+  ".node-pop",
+  ".node-pop .pop-h",
+  ".node-pop .pop-sec",
+  ".node-status",
+  ".node-status > svg",
+  ".node-status small",
+  ".node-facts > div",
+  ".node-facts dt",
+  ".node-facts dd",
+  ".node-pop .q-h",
+  ".node-prompt",
+  ".node-pop .line",
+  ".node-pop .line-note",
+];
+
+// Every part of a run's step timeline, as a selector inside `main.main`:
+// the column heads with the time axis, and each step record's row with its
+// mark, its name, its bar on the axis and how long it took.
+const STEP_TIMELINE_PARTS = [
+  ".tbl-steps.table-heads",
+  ".tbl-steps.table-heads > span",
+  ".axis-tick",
+  ".axis-now",
+  ".tbl-steps.table-row",
+  ".tbl-steps > .table-mark",
+  ".tbl-steps > .table-mark > svg",
+  ".record-name",
+  ".record-name > small",
+  ".record-err",
+  ".tbl-steps > .track",
+  ".hour-line",
+  ".now-line",
+  ".run-bar",
+  ".run-bar-line",
+  ".run-bar > svg",
+  ".track-note",
+  ".tbl-steps > .table-num",
+];
+
+/** Returns the pair that compares one view of a run's page, `view` being the book's `?state=` and its other parameters. */
+const buildRunPair = (
+  name: string,
+  parts: ReadonlyArray<string>,
+  view: { readonly state?: string; readonly search?: Readonly<Record<string, string>> } = {},
+): RegionPair => ({
+  name,
+  bookPage: "crew-bureau-2/desktop/run.html",
+  referenceModule: "run-reference.ts",
+  specimenPage: "run.html",
+  ...view,
+  region: MAIN_PANE_REGION,
+  scope: "main.main",
+  parts,
+});
 
 /** Returns the pair that compares one state of Settings > Permission profiles, `view` being the book's `?state=` and whether the page is scrolled. */
 const buildProfilesPair = (
@@ -899,6 +1033,24 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
       ...RUN_TIMELINE_PARTS,
     ],
   },
+  buildRunPair("run", [...RUN_LEAD_PARTS, ...RUN_GRAPH_PARTS]),
+  buildRunPair("run-card", [...RUN_LEAD_PARTS, ...RUN_GRAPH_PARTS, ...RUN_CARD_PARTS], {
+    search: { card: "security" },
+  }),
+  buildRunPair("run-card-visits", [...RUN_LEAD_PARTS, ...RUN_GRAPH_PARTS, ...RUN_CARD_PARTS], {
+    search: { card: "review" },
+  }),
+  buildRunPair("run-timeline", [...RUN_LEAD_PARTS, ...STEP_TIMELINE_PARTS], {
+    state: "failed",
+    search: { steps: "timeline" },
+  }),
+  buildRunPair("run-cancel", [...RUN_LEAD_PARTS, ...RUN_GRAPH_PARTS], {
+    search: { dialog: "cancel" },
+  }),
+  buildRunPair("run-rerun", [...RUN_LEAD_PARTS, ...RUN_GRAPH_PARTS], {
+    state: "failed",
+    search: { dialog: "rerun" },
+  }),
 ];
 
 /**

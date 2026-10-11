@@ -169,6 +169,13 @@
 .open-pane [role="tabpanel"] > [role="list"] > :first-child > .table-row::before {
   border-top-color: transparent;
 }
+/* The Runs list's rows are links, each in a wrapper of its own that the
+   virtualized list positions, so the row after a hovered one is found
+   through its wrapper. Its hairline goes, as it does in the workflow list,
+   so no line touches the hovered row's rounded corners. */
+.open-pane [role="list"] > :has(> a.table-row:hover) + * > .table-row::before {
+  border-top-color: transparent;
+}
 /* Not in the book, whose tables are never empty. An empty tab says so in
    muted ink, where its first row would be. */
 .table-empty {

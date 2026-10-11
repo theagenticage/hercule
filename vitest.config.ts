@@ -16,7 +16,9 @@ import { defineConfig } from "vitest/config";
  * The desktop app runs on no Bun at all. `desktop-main` holds every desktop
  * test outside the renderer: main runs in Electron's main process, which is
  * Node, and the IPC contract and the build scripts run there or under plain
- * Node too. `desktop-renderer` is the renderer's page on jsdom. Both run in the
+ * Node too. `desktop-renderer` is the renderer's page on jsdom, compiled by the
+ * React Compiler as the build compiles it; its config is
+ * `apps/desktop/vitest.renderer.config.ts`. Both run in the
  * Node half of `pnpm test`.
  *
  * The `binary` project is out of both, and out of `pnpm test`: `pnpm test:binary`
@@ -42,7 +44,7 @@ const reactSources = ["apps/web/src", "packages/ui/src"];
 /** The desktop app's page, whose tests run in the `desktop-renderer` project. */
 const desktopRenderer = "apps/desktop/src/renderer";
 
-/** The settings every project that renders React on jsdom shares. */
+/** The settings of the `react` project, which renders React on jsdom. */
 const reactOnJsdom = {
   environment: "jsdom",
   // Stylesheets are processed rather than stubbed, so a test can read the
@@ -140,14 +142,8 @@ export default defineConfig({
           ],
         },
       },
-      {
-        test: {
-          name: "desktop-renderer",
-          ...reactOnJsdom,
-          setupFiles: [`${desktopRenderer}/test-setup.ts`],
-          include: [`${desktopRenderer}/**/*.test.{ts,tsx}`],
-        },
-      },
+      // Its config sits in the desktop app, which has the React Compiler's plugins.
+      "apps/desktop/vitest.renderer.config.ts",
       {
         test: {
           name: "binary",

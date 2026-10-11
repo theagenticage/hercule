@@ -1,0 +1,174 @@
+/* A run's page (spec 17 §Workflows, "A run's page"). Its pane, its lead
+   and its band are the open workflow's (workflow-detail.css); the rules here
+   are the Bureau book's for a run's page (system.css, "A run's page"). Each
+   departure from the book is explained in a comment. */
+
+/* ---------- The header ---------- */
+
+/* The crumb: Workflows, the workflow, then the run. The workflow's name
+   gives way first when the header runs out of room. */
+.top > .run-crumbs {
+  min-width: 0;
+}
+.run-crumbs > .pill-crumb {
+  min-width: 0;
+}
+.run-crumbs > .pill-crumb:nth-child(2) {
+  flex-shrink: 1000;
+  max-width: 260px;
+}
+.run-crumbs > .pill-crumb > :is(a, span) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-crumbs > .pill-crumb > a {
+  transition: color var(--dur-1);
+}
+.run-crumbs > .pill-crumb > a:hover {
+  color: var(--ink);
+}
+/* Not in the book. Why a workflow that is gone has no page to go back to,
+   "deleted" or "not saved", drawn as a tab's time is. */
+.run-crumbs > .pill-crumb small {
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.run-crumbs > .ptab {
+  flex: none;
+}
+/* A button in a header pill, such as Cancel run…. */
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-weight: var(--w-medium);
+}
+.pill-btn:hover {
+  background: var(--hover);
+}
+
+/* ---------- The lead ---------- */
+
+/* The title is the run's state after its mark, with how long it has run
+   right after it. */
+.open-name > h1.run-state {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+}
+.run-took {
+  color: var(--muted);
+  font-size: var(--t-14);
+  font-variant-numeric: tabular-nums;
+}
+/* What the run asks the user, or why it failed, on the tint of its colour,
+   as the waiting strip is drawn. */
+.run-gist {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 700px;
+  margin: 2px 0 14px;
+  padding: 8px 8px 8px 12px;
+  border-radius: var(--r-md);
+}
+.run-gist > .btn {
+  flex: none;
+}
+.run-gist > p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--t-14);
+  line-height: 1.45;
+}
+.run-gist--you {
+  background: var(--you-tint);
+  color: var(--you-ink);
+}
+.run-gist--fail {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+/* The inputs the run started with: names in a column as wide as the
+   longest, values in mono. */
+.run-inputs {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  max-width: 700px;
+  margin: 14px 0 0;
+  font-size: var(--t-12);
+}
+.run-inputs > div {
+  display: contents;
+}
+.run-inputs dt {
+  color: var(--muted);
+}
+.run-inputs dd {
+  margin: 0;
+  overflow: hidden;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-inputs:not(.run-facts) dd,
+.run-facts dd.is-code {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+}
+/* Not in the book, which draws no facts beside the inputs. What the web
+   app's run page shows besides (the re-runs, the runner, the workspace, why
+   the run waits and the event that started it) takes the inputs' rows, with
+   words in the interface's face and ids in mono. */
+.run-facts a,
+.run-facts .fact-action {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
+}
+.run-facts a:hover,
+.run-facts .fact-action:hover {
+  text-decoration-color: currentColor;
+}
+.run-facts .is-faint {
+  color: var(--faint);
+}
+/* The earlier-version note, ruled in the hairline's colour because nothing
+   waits on the user. */
+.run-note {
+  max-width: 700px;
+  margin: 16px 0 0;
+  padding-left: 11px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.run-inputs + .tab-band,
+.run-note + .tab-band {
+  margin-top: 20px;
+}
+
+/* ---------- The steps ---------- */
+
+/* Under the steps' band, the graph keeps 16px from the band's hairline. */
+.tab-band + .graph {
+  margin-top: 16px;
+}
+.run-steps small {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}

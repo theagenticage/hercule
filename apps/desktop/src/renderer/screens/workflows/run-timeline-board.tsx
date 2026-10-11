@@ -14,7 +14,8 @@
  * the day is drawn as a percentage of the lanes' width, so the axis and the
  * lanes line up, being as wide as the pane's content.
  */
-import { useRef, type JSX, type KeyboardEvent } from "react";
+import { useRef, type JSX } from "react";
+import { Link } from "@tanstack/react-router";
 import type {
   TimelineBar,
   TimelineFire,
@@ -28,7 +29,9 @@ import {
 } from "@hercule/client-core/workflow-detail-rows";
 import { isHourLabelCovered } from "@hercule/client-core/run-timeline";
 import { hasRunMark } from "@hercule/client-core/run-marks";
+import { formatPlace } from "./axis-place";
 import { useListTime } from "./list-time";
+import { ViewSwitch, type ViewChoice } from "./view-switch";
 import { useDurationText } from "../../app/age-clock";
 import { useIsOnScreen, useScreenWatcher, type ScreenWatcher } from "../../app/screen-watcher";
 import { ChevronLeftIcon } from "../../icons/chevron-left";
@@ -52,19 +55,12 @@ declare module "react" {
 /** The two ways the Runs tab shows a workflow's runs. */
 export type RunsView = "list" | "timeline";
 
-/** Returns a place across the day, from 0 to 1, as a CSS percentage. */
-const formatPlace = (place: number): string => `${String(place * 100)}%`;
-
-const VIEWS: ReadonlyArray<{ readonly view: RunsView; readonly label: string }> = [
+const VIEWS: readonly [ViewChoice<RunsView>, ViewChoice<RunsView>] = [
   { view: "list", label: "List" },
   { view: "timeline", label: "Timeline" },
 ];
 
-/**
- * Renders the switch "Show the runs as" between the Runs tab's list and its
- * timeline. ← and → pick the other view and move focus to its button, as a
- * segmented control on the Mac does.
- */
+/** Renders the switch "Show the runs as" between the Runs tab's list and its timeline. */
 export function RunsViewPicker({
   view,
   onPick,
@@ -72,30 +68,7 @@ export function RunsViewPicker({
   readonly view: RunsView;
   readonly onPick: (view: RunsView) => void;
 }): JSX.Element {
-  const pickWithArrow = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    const next = event.key === "ArrowLeft" ? VIEWS[0]! : VIEWS[1]!;
-    if (next.view !== view) onPick(next.view);
-    event.currentTarget.querySelector<HTMLButtonElement>(`[data-view="${next.view}"]`)?.focus();
-  };
-  return (
-    <div className="seg" role="group" aria-label="Show the runs as" onKeyDown={pickWithArrow}>
-      {VIEWS.map((each) => (
-        <button
-          key={each.view}
-          type="button"
-          data-view={each.view}
-          aria-pressed={each.view === view}
-          onClick={() => {
-            if (each.view !== view) onPick(each.view);
-          }}
-        >
-          {each.label}
-        </button>
-      ))}
-    </div>
-  );
+  return <ViewSwitch label="Show the runs as" choices={VIEWS} view={view} onPick={onPick} />;
 }
 
 /**
@@ -282,11 +255,11 @@ function BarMark({ state }: { readonly state: RunRow["state"] }): JSX.Element {
 }
 
 /**
- * Renders one run's bar: a line from its start to its end, with its mark at
- * the end. A live run's bar ends at `now`. A bar cut at the day's start or
- * end has a square end there, and a chevron beside it pointing to the day
- * the run went on into; a bar cut at the end has no mark, because the run
- * had not ended there.
+ * Renders one run's bar, a link to the run's page: a line from its start to
+ * its end, with its mark at the end. A live run's bar ends at `now`. A bar
+ * cut at the day's start or end has a square end there, and a chevron beside
+ * it pointing to the day the run went on into; a bar cut at the end has no
+ * mark, because the run had not ended there.
  *
  * Its name describes the run, with the times kept current by the age clock
  * while the bar is on screen, as `watchScreen` reports it. Every bar is
@@ -305,7 +278,7 @@ function RunBar({
   readonly watchScreen: ScreenWatcher;
 }): JSX.Element {
   const { row } = bar;
-  const barRef = useRef<HTMLSpanElement>(null);
+  const barRef = useRef<HTMLAnchorElement>(null);
   const onScreen = useIsOnScreen(watchScreen, barRef, true);
   const startedText = useListTime(row.createdAt, timezone, "past", onScreen);
   const tookText = useDurationText(
@@ -326,10 +299,11 @@ function RunBar({
     .filter((name) => name !== "")
     .join(" ");
   return (
-    <span
+    <Link
       ref={barRef}
+      to="/runs/$runId"
+      params={{ runId: row.id }}
       className={className}
-      role="img"
       aria-label={label}
       title={label}
       style={{
@@ -351,6 +325,6 @@ function RunBar({
       ) : (
         <BarMark state={row.state} />
       )}
-    </span>
+    </Link>
   );
 }

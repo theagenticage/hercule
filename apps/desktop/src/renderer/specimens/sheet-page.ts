@@ -125,16 +125,22 @@ export function stillBookPage(): void {
 }
 
 /**
- * Stops a workflow graph from fading out at a cut edge, on the book's page
- * and on the app's alike. The fade is a CSS mask, and Chromium draws a
- * masked pane a little differently from one capture to the next: the same
- * page failed by 30 to 380 pixels at random, on the book's side as often as
- * on the app's. The compared parts still check that both pages cut the
- * graph on the same side, through the pane's `is-cut-left` and
- * `is-cut-right` classes.
+ * Draws a workflow graph's pane the same way on every capture, on the book's
+ * page and on the app's alike. Chromium draws two parts of the pane a little
+ * differently from one capture to the next, so the same page failed by 30 to
+ * 380 pixels at random, on the book's side as often as on the app's:
+ *
+ * - the fade at a cut edge, which is a CSS mask, so the pane loses it;
+ * - a pane that scrolls, which Chromium draws on a layer of its own, so the
+ *   pane stops scrolling. The graph stays where it opened, with no scroll
+ *   bar.
+ *
+ * The compared parts still check that both pages cut the graph on the same
+ * side, through the pane's `is-cut-left` and `is-cut-right` classes.
  */
-export function stillGraphFade(): void {
+export function stillGraphPane(): void {
   const style = document.createElement("style");
-  style.textContent = ".graph-pane { mask-image: none !important; }";
+  style.textContent = ".graph-pane { mask-image: none !important; overflow: hidden !important; }";
   document.head.append(style);
 }
+

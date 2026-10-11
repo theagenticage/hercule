@@ -137,6 +137,17 @@
   width: max(var(--span), 7px);
   height: 16px;
 }
+/* A bar is a link to its run's page. Hovering it draws a pill behind it,
+   a little wider than the bar, so a short bar is easy to hit. */
+a.run-bar::before {
+  content: "";
+  position: absolute;
+  inset: -2px -11px -2px -6px;
+  border-radius: var(--r-pill);
+}
+a.run-bar:hover::before {
+  background: var(--hover);
+}
 .run-bar-line {
   position: absolute;
   inset: 6px 0;
