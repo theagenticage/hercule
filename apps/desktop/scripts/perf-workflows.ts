@@ -25,8 +25,9 @@
  * `measureOpenWorkflowWork`), and measures:
  *
  * - processes and memory with the list and the open workflow;
- * - each process's CPU and wakeups with the workflow open, visible and
- *   hidden, and the age clock's fires in each;
+ * - each process's CPU and wakeups with the workflow open, visible for 70 s
+ *   and hidden, and the age clock's fires in each, and again visible for
+ *   70 s on today's timeline, where the time now moves once a minute;
  * - how many nodes the graph drew, and how many rows of the Runs list are
  *   mounted against how many it has read;
  * - what one `run` push costs with the Runs tab on its list, then on the
@@ -95,6 +96,7 @@ import {
   BUDGET,
   HIDDEN_SETTLE_MS,
   MEMORY_READ_AT_MS,
+  SAMPLE_MS,
   VISIBLE_SAMPLE_AT_MS,
   evaluateInPage,
   findProcessUse,
@@ -161,6 +163,12 @@ const LAUNCH_READS_AT_MS = 28_000;
 
 /** How long the window is shown again before the pushes start, so the page has read again. */
 const SHOW_SETTLE_MS = 3_000;
+
+/**
+ * How long the open workflow's visible idle samples last: over a minute, so
+ * a clock that ticks once a minute fires at least once in each.
+ */
+const OPEN_WORKFLOW_VISIBLE_SAMPLE_MS = 70_000;
 
 /**
  * How many entries the page's resource timing buffer holds during the
@@ -495,7 +503,7 @@ interface PushCost {
 
 /** Each process's use with the window visible and hidden, and when each sample ran. */
 interface IdleSamples {
-  /** Each process's use over 10 s with the window visible. */
+  /** Each process's use with the window visible, over the length the caller asked for. */
   readonly visible: readonly ProcessUse[];
   /** Each process's use over 10 s with the window hidden, from 3 s after it was hidden. */
   readonly hidden: readonly ProcessUse[];
@@ -513,8 +521,10 @@ interface LaunchAtRest {
   readonly loadAtSpawn: number;
   /** Each process's memory, 13 s after the page opened. */
   readonly memory: readonly ProcessMemory[];
-  /** Each process's use over 10 s with the window visible, from 30 s after the page opened. */
+  /** Each process's use with the window visible, over `visibleMs`, from 30 s after the page opened. */
   readonly visible: readonly ProcessUse[];
+  /** How long the visible sample lasted, in milliseconds. */
+  readonly visibleMs: number;
   /** Each process's use over 10 s with the window hidden, from 3 s after it was hidden. */
   readonly hidden: readonly ProcessUse[];
   /** How often the age clock fired during the visible sample. */
@@ -534,16 +544,19 @@ const callWindow = (inspectorUrl: string, method: "hide" | "showInactive" | "isV
   evaluateInMain(inspectorUrl, `require("electron").BrowserWindow.getAllWindows()[0]?.${method}()`);
 
 /**
- * Samples each process's use over 10 s with the window visible, hides the
- * window, samples again from 3 s after hiding it (see `sampleIdleUse`), and
- * shows the window again, without taking the focus. Returns once the window
- * has been shown for 3 s, so the page has read again what it dropped while
- * hidden. Fails when the window is not visible or hidden as each sample
- * expects.
+ * Samples each process's use over `visibleMs` with the window visible, hides
+ * the window, samples again over 10 s from 3 s after hiding it (see
+ * `sampleIdleUse`), and shows the window again, without taking the focus.
+ * Returns once the window has been shown for 3 s, so the page has read again
+ * what it dropped while hidden. Fails when the window is not visible or
+ * hidden as each sample expects.
  */
-async function sampleVisibleAndHidden(inspectorUrl: string): Promise<IdleSamples> {
+async function sampleVisibleAndHidden(
+  inspectorUrl: string,
+  visibleMs: number,
+): Promise<IdleSamples> {
   const visibleFrom = Date.now();
-  const visible = await sampleIdleUse(inspectorUrl);
+  const visible = await sampleIdleUse(inspectorUrl, visibleMs);
   const visibleTo = Date.now();
   if ((await callWindow(inspectorUrl, "isVisible")) !== true) {
     throw new Error("the window was not visible while sampled");
@@ -564,6 +577,13 @@ async function sampleVisibleAndHidden(inspectorUrl: string): Promise<IdleSamples
 }
 
 /**
+ * An expression that evaluates, in the page, to when the age clock fired,
+ * each in milliseconds since the epoch. The clock marks each fire with
+ * `performance.mark("age-clock-fire")`.
+ */
+const READ_AGE_CLOCK_FIRES = `performance.getEntriesByName("age-clock-fire").map((entry) => performance.timeOrigin + entry.startTime)`;
+
+/**
  * Returns how often the age clock fired in `samples`' visible sample, and
  * from hiding the window to the end of the hidden one, read from the page
  * `page`. The clock marks each fire with `performance.mark("age-clock-fire")`.
@@ -573,7 +593,7 @@ async function countAgeClockFires(
   samples: IdleSamples,
 ): Promise<{ firesVisible: number; firesHidden: number }> {
   const fires = (await page.evaluate("Runtime.evaluate", {
-    expression: `performance.getEntriesByName("age-clock-fire").map((entry) => performance.timeOrigin + entry.startTime)`,
+    expression: READ_AGE_CLOCK_FIRES,
     returnByValue: true,
   })) as number[];
   const countFires = (from: number, to: number) =>
@@ -749,7 +769,7 @@ export async function measureWorkflowWork(
     };
 
     await sleepUntil(VISIBLE_SAMPLE_AT_MS);
-    const samples = await sampleVisibleAndHidden(inspectorUrl);
+    const samples = await sampleVisibleAndHidden(inspectorUrl, SAMPLE_MS);
 
     const page = await connectInspector(pageSocketUrl);
     try {
@@ -763,6 +783,7 @@ export async function measureWorkflowWork(
         loadAtSpawn,
         memory,
         visible: samples.visible,
+        visibleMs: samples.visibleTo - samples.visibleFrom,
         hidden: samples.hidden,
         ...fires,
         opening,
@@ -795,7 +816,18 @@ export interface OpenWorkflowWork extends LaunchAtRest {
   readonly dayTracks: number;
   /** What the pushes cost with the Runs tab on the timeline of that day. */
   readonly timelinePushes: PushCost;
+  /** Each process's use with the window visible and the Runs tab on today's timeline, over `todayVisibleMs`. */
+  readonly todayVisible: readonly ProcessUse[];
+  readonly todayVisibleMs: number;
+  /** How often the age clock fired during that sample. */
+  readonly firesTodayVisible: number;
 }
+
+/** The fields of `OpenWorkflowWork` read on today's timeline, last. */
+type TodayTimelineFields = "todayVisible" | "todayVisibleMs" | "firesTodayVisible";
+
+/** The open workflow's "Show the day after" button, which is disabled on today. */
+const DAY_AFTER_BUTTON = `document.querySelector('.open-pane button[aria-label="Show the day after"]')`;
 
 /** An expression that evaluates, in the page, to how many bars the open workflow's timeline draws. */
 const COUNT_DAY_BARS = `document.querySelectorAll(".open-pane .lanes .run-bar").length`;
@@ -808,7 +840,7 @@ const COUNT_DAY_BARS = `document.querySelectorAll(".open-pane .lanes .run-bar").
  * - each process's memory, 13 s after the page opened;
  * - how many nodes the graph drew, and how many rows of the Runs list are
  *   mounted against how many it has read, with the list at its top;
- * - each process's CPU and wakeups over 10 s with the window visible, from
+ * - each process's CPU and wakeups over 70 s with the window visible, from
  *   30 s after the page opened, and over 10 s with the window hidden, with
  *   the age clock's fires in each;
  * - with the window shown again, what the pushes of `listPushRunIds` cost
@@ -818,10 +850,14 @@ const COUNT_DAY_BARS = `document.querySelectorAll(".open-pane .lanes .run-bar").
  *   bar is in the page, so the bars' arrival is in it; how many bars the
  *   day drew, and on how many tracks;
  * - 3 s later, once the day has settled, what the pushes of
- *   `timelinePushRunIds` cost on that day.
+ *   `timelinePushRunIds` cost on that day;
+ * - each process's CPU and wakeups over 70 s with the window visible, from
+ *   3 s after stepping on to today's timeline, with the age clock's fires.
+ *   Today's timeline draws the time now, which moves once a minute.
  *
  * Fails when the workflow does not show within 15 s, when the day does not
- * draw its 300 runs within 15 s, when the window is not visible or hidden
+ * draw its 300 runs within 15 s, when the timeline does not step on to
+ * today within 15 s, when the window is not visible or hidden
  * as each sample expects, or when the app does not quit cleanly afterwards.
  */
 export async function measureOpenWorkflowWork(
@@ -840,6 +876,7 @@ export async function measureOpenWorkflowWork(
     const pageOpenedAt = Date.now();
     const sleepUntil = (msAfterOpen: number) =>
       sleep(Math.max(0, pageOpenedAt + msAfterOpen - Date.now()));
+    let measuredBeforeToday: Omit<OpenWorkflowWork, TodayTimelineFields>;
     await pollUntil(
       async () =>
         (await evaluateInPage(pageSocketUrl, OPEN_WORKFLOW_DRAWN)) === true ? true : undefined,
@@ -868,7 +905,7 @@ export async function measureOpenWorkflowWork(
     )) as { graphNodes: number; mountedRows: number; listedRows: number };
 
     await sleepUntil(VISIBLE_SAMPLE_AT_MS);
-    const samples = await sampleVisibleAndHidden(inspectorUrl);
+    const samples = await sampleVisibleAndHidden(inspectorUrl, OPEN_WORKFLOW_VISIBLE_SAMPLE_MS);
 
     const page = await connectInspector(pageSocketUrl);
     try {
@@ -909,10 +946,11 @@ export async function measureOpenWorkflowWork(
       );
       await sleep(SHOW_SETTLE_MS);
       const timelinePushes = await measurePushes(page, fixture, rendererPid, timelinePushRunIds);
-      measured = {
+      measuredBeforeToday = {
         loadAtSpawn,
         memory,
         visible: samples.visible,
+        visibleMs: samples.visibleTo - samples.visibleFrom,
         hidden: samples.hidden,
         ...fires,
         graphNodes,
@@ -927,6 +965,33 @@ export async function measureOpenWorkflowWork(
     } finally {
       page.close();
     }
+
+    // Nothing stays attached to the page during this sample either.
+    await evaluateInPage(pageSocketUrl, `${DAY_AFTER_BUTTON}.click()`);
+    await pollUntil(
+      async () =>
+        (await evaluateInPage(
+          pageSocketUrl,
+          `${DAY_AFTER_BUTTON}.getAttribute("aria-disabled") === "true"`,
+        )) === true
+          ? true
+          : undefined,
+      { timeoutMs: 15_000, intervalMs: 50, timeoutMessage: "the timeline did not show today" },
+    );
+    await sleep(SHOW_SETTLE_MS);
+    const todayFrom = Date.now();
+    const todayVisible = await sampleIdleUse(inspectorUrl, OPEN_WORKFLOW_VISIBLE_SAMPLE_MS);
+    const todayTo = Date.now();
+    if ((await callWindow(inspectorUrl, "isVisible")) !== true) {
+      throw new Error("the window was not visible while sampled on today's timeline");
+    }
+    const fires = (await evaluateInPage(pageSocketUrl, READ_AGE_CLOCK_FIRES)) as number[];
+    measured = {
+      ...measuredBeforeToday,
+      todayVisible,
+      todayVisibleMs: todayTo - todayFrom,
+      firesTodayVisible: fires.filter((at) => at >= todayFrom && at < todayTo).length,
+    };
   } finally {
     await stopPlainApp(app);
   }
@@ -1049,7 +1114,12 @@ function buildAtRestRows(measured: LaunchAtRest, agesText: string): BudgetRow[] 
       gpuVisible.text,
       gpuVisible.wakeups <= BUDGET.gpuWakeupsVisible,
     ],
-    ["Idle visible, age clock over 10 s", agesText, String(measured.firesVisible), null],
+    [
+      `Idle visible, age clock over ${(measured.visibleMs / 1_000).toFixed(0)} s`,
+      agesText,
+      String(measured.firesVisible),
+      null,
+    ],
     [
       "Idle hidden, renderer",
       rendererLimit,
@@ -1172,7 +1242,8 @@ function printLaunch(heading: string, measured: LaunchAtRest, budgets: readonly 
   );
   console.log();
   console.log(
-    "CPU and wakeups over 10 s: visible from 30 s after the page opened, hidden from 3 s after hiding:",
+    `CPU and wakeups: visible over ${(measured.visibleMs / 1_000).toFixed(0)} s from 30 s after ` +
+      "the page opened, hidden over 10 s from 3 s after hiding:",
   );
   console.log(
     formatTable(
@@ -1268,6 +1339,40 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
   );
 }
 
+/**
+ * Builds the budget rows of the visible idle sample on today's timeline in
+ * `measured`: the renderer's and the GPU's use, and the age clock's fires.
+ */
+function buildTodayTimelineRows(measured: OpenWorkflowWork): BudgetRow[] {
+  const renderer = findProcessUse(measured.todayVisible, "Tab");
+  const gpu = findProcessUse(measured.todayVisible, "GPU");
+  const formatProcessUse = (use: ProcessUse | undefined) =>
+    use === undefined
+      ? "-"
+      : `${use.cpuPercent.toFixed(1)}% CPU, ${use.wakeupsPerSecond.toFixed(1)} wakeups/s`;
+  const seconds = (measured.todayVisibleMs / 1_000).toFixed(0);
+  return [
+    [
+      `Idle visible on today's timeline, renderer over ${seconds} s`,
+      `no wakeups from the app (at most ${String(BUDGET.rendererWakeups)}/s)`,
+      formatProcessUse(renderer),
+      (renderer?.wakeupsPerSecond ?? 0) <= BUDGET.rendererWakeups,
+    ],
+    [
+      `Idle visible on today's timeline, GPU over ${seconds} s`,
+      `at most ${String(BUDGET.gpuWakeupsVisible)} wakeups/s`,
+      formatProcessUse(gpu),
+      (gpu?.wakeupsPerSecond ?? 0) <= BUDGET.gpuWakeupsVisible,
+    ],
+    [
+      `Idle visible on today's timeline, age clock over ${seconds} s`,
+      "recorded; the time now moves once a minute",
+      String(measured.firesTodayVisible),
+      null,
+    ],
+  ];
+}
+
 /** Prints what the open workflow scenario measured, against the limits spec 17 sets. */
 export function reportOpenWorkflowWork(measured: OpenWorkflowWork): void {
   const budgets: BudgetRow[] = [
@@ -1307,6 +1412,7 @@ export function reportOpenWorkflowWork(measured: OpenWorkflowWork): void {
       ...LIST_PUSH_READS,
       dayRuns: { count: 1, text: "1 a push: the day, one page of 500" },
     }),
+    ...buildTodayTimelineRows(measured),
   ];
   printLaunch(
     `## The open workflow, ${String(OPEN_WORKFLOW_RUNS)} runs yesterday, beside ` +

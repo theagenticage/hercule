@@ -8,10 +8,10 @@ import {
   findNextTimelineMinute,
   isHourLabelCovered,
   locateTimelineNow,
-  MAX_TIMELINE_DAYS_BACK,
   type TimelineBar,
   type TimelineDay,
 } from "./run-timeline";
+import { MAX_TIMELINE_DAYS_BACK } from "./timeline-limit";
 
 // Tuesday 29 September 2026, 09:41:30 UTC.
 const NOW = new Date("2026-09-29T09:41:30.000Z");

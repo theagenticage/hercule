@@ -15,7 +15,7 @@ import type {
   WorkflowAction,
   WorkflowSummary,
 } from "@hercule/contract";
-import { MAX_TIMELINE_DAYS_BACK } from "@hercule/client-core/run-timeline";
+import { MAX_TIMELINE_DAYS_BACK } from "@hercule/client-core/timeline-limit";
 import {
   buildErrorBody,
   buildSidebarHandlers,

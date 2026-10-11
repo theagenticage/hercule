@@ -19,6 +19,7 @@
  */
 import type { RunSummary, Trigger, WorkflowDefinition } from "@hercule/contract";
 import { computeDayStart } from "./list-time";
+import { MAX_TIMELINE_DAYS_BACK } from "./timeline-limit";
 import { readTimestamps } from "./run-display";
 import {
   addCalendarDays,
@@ -138,13 +139,6 @@ const findDateStart = (date: CalendarDate, timezone: string): Date => {
   }
   return start;
 };
-
-/**
- * The most days back the timeline goes: ten years. The route's search
- * validator refuses a `daysBack` above it, and `computeTimelineDay` clamps
- * to it, so the day is always one the platform's timezone data covers well.
- */
-export const MAX_TIMELINE_DAYS_BACK = 3650;
 
 /**
  * Computes the day `daysBack` days before the day `now` falls on in

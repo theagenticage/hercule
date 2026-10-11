@@ -1,6 +1,6 @@
 import { Suspense, useId, useState, type JSX } from "react";
 import type { HerculeClient } from "@hercule/client-core";
-import { MAX_TIMELINE_DAYS_BACK } from "@hercule/client-core/run-timeline";
+import { MAX_TIMELINE_DAYS_BACK } from "@hercule/client-core/timeline-limit";
 import { buildInputRows, buildTriggerRows } from "@hercule/client-core/workflow-detail-rows";
 import type { WorkflowDefinition } from "@hercule/contract";
 import {

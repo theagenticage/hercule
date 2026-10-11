@@ -8,7 +8,8 @@ import {
 } from "@hercule/client-core";
 import { buildGraphDrawing } from "@hercule/client-core/graph-model";
 import { buildNodeCard } from "@hercule/client-core/node-details";
-import { MAX_TIMELINE_DAYS_BACK, computeTimelineDay } from "@hercule/client-core/run-timeline";
+import { computeTimelineDay } from "@hercule/client-core/run-timeline";
+import { MAX_TIMELINE_DAYS_BACK } from "@hercule/client-core/timeline-limit";
 import { buildWorkflowChips } from "@hercule/client-core/workflow-detail-rows";
 import { throwScreenNotFound } from "../../../../app/last-screen";
 import {

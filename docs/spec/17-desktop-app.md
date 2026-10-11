@@ -2689,40 +2689,43 @@ The perf script's rows were measured 2026-10-11 on the reference machine with `a
 - **The summed footprint is over its row, as in most entries above.** The GPU process holds 187 MB of the 307 MB, a miss that predates this change. The renderer is within its row.
 - **Opening the list against a remote controller was not measured.**
 
-**Workflows: the open workflow,** measured 2026-10-11 with `pnpm build:desktop`'s size checks, on the branch base 581d0361 (Before) and on this change (After), for [#551](https://github.com/theagenticage/hercule/issues/551). Sizes are gzipped and counted the way the budget script counts them, 1,024 bytes to a kB.
+**Workflows: the open workflow,** measured 2026-10-11 with `pnpm build:desktop`'s size checks, on the branch base 581d0361 (Before) and on this change (After), for [#551](https://github.com/theagenticage/hercule/issues/551). Sizes are gzipped and counted the way the budget script counts them, 1,024 bytes to a kB. The After column was measured again after the review fixes: the page compiles under the React Compiler, the timeline's minute clock runs only while the timeline shows, motion left the slice for [#553](https://github.com/theagenticage/hercule/issues/553), and action steps draw their plugin's mark.
 
 | Measure | Budget | Before | After |
 |---|---|---|---|
-| The first screen's JavaScript, gzipped | grows only by the open workflow route's stub | 347.4 kB | 348.0 kB across 21 chunks |
-| The open workflow's chunk, gzipped | the YAML parser, the layout and the graph: 62 kB in the prototype | - | 66.1 kB of JavaScript, 2.7 kB of CSS |
+| The first screen's JavaScript, gzipped | grows only by the open workflow route's stub | 347.4 kB | 348.3 kB across 21 chunks |
+| The open workflow's chunk, gzipped | the YAML parser, the layout and the graph: 62 kB in the prototype | - | 68.3 kB of JavaScript, 2.5 kB of CSS |
 | Main's startup file, minified | 160 kB | 150.2 kB | 150.2 kB |
 
-- **The first screen grows by 0.6 kB.** It is the open workflow route's stub (its search check and its loader's dependencies) and its four reads in `app/queries.ts`, which [What Workflows costs](#what-workflows-costs) allows.
+- **The first screen grows by 0.9 kB.** It is the open workflow route's stub (its search check and its loader's dependencies) and its reads in `app/queries.ts`, which [What Workflows costs](#what-workflows-costs) allows. The search check caps `daysBack` with `MAX_TIMELINE_DAYS_BACK`, which lives in `@hercule/client-core/timeline-limit`, a module of its own: imported from `@hercule/client-core/run-timeline`, it put the whole timeline module on the first screen, 351.7 kB.
 - **`decodeWorkflowDefinition` moved to its own module, `packages/contract/src/groups/workflow-definition-decode.ts`, with its error messages.** The desktop build puts every module the first screen imports into one chunk. With the decode in the workflow schema's module, the YAML decode added 1.8 kB gzipped to the first screen. This supersedes the #550 bullet above that kept it in place.
 - **The YAML parser and the layout (dagre) load only with the open workflow's chunk.** In the built renderer, the parser's and the layout's code and the decode's error messages are in `_workflowId-*.js` alone: not in the first screen, and not in the list's chunk. Neither loads at launch or with the list.
-- **The open workflow's chunk is 4 kB over the prototype's 62 kB.** The prototype's figure is a reference, not a budget; the chunk is loaded only when a workflow opens.
+- **The open workflow's chunk is 6.3 kB over the prototype's 62 kB.** It grew 2.2 kB after the review fixes, with the plugin marks on action steps, the on-screen watch for the timeline's bars and the save reconciliation. The prototype's figure is a reference, not a budget; the chunk is loaded only when a workflow opens.
 
-The perf script's rows were measured 2026-10-11 on the reference machine with `apps/desktop/scripts/perf.ts --workflows-only`, in one run. Its seed is the #550 list's 50 workflows, with the last one replaced: it has an event trigger and three steps (`fetch`, then `check` and `notify` side by side), and 300 completed runs spread evenly over yesterday in the user's timezone. The launch opens that workflow beside the list, on its Runs tab. Each push cancels one live run of another workflow, so the open workflow's own runs do not change; what each push costs is the reads on screen. The one-minute load average was 6.05 before the launch.
+The perf script's rows were measured 2026-10-11 on the reference machine with `apps/desktop/scripts/perf.ts --workflows-only`, in one run. Its seed is the #550 list's 50 workflows, with the last one replaced: it has an event trigger and three steps (`fetch`, then `check` and `notify` side by side), and 300 completed runs spread evenly over yesterday in the user's timezone. The launch opens that workflow beside the list, on its Runs tab. Each push cancels one live run of another workflow, so the open workflow's own runs do not change; what each push costs is the reads on screen. The visible idle samples with the workflow open last 70 s, longer than a minute, so a clock that ticks once a minute would show in them. The machine was busy with other work: the one-minute load average was 7.09 when the run started, 20.21 before the list's launch and 32.16 before the open workflow's launch.
 
 | Row of [What Workflows costs](#what-workflows-costs) | Expected | Measured |
 |---|---|---|
 | Processes | none added | 4: browser, GPU, network utility, renderer |
-| Memory, 50 workflows listed and one open | within the app's memory row: renderer at most 100 MB, summed at most 220 MB | renderer **65 MB**, summed **308 MB**: **over**, as in the list's entry |
-| Idle, window visible, workflow open | no work: no timer of its own | renderer **0.5%** of a core, **1** wakeup a second; GPU 0; age clock fired 0 times |
+| Memory, 50 workflows listed and one open | within the app's memory row: renderer at most 100 MB, summed at most 220 MB | renderer **65 MB**, summed **307 MB**: **over**, as in the list's entry |
+| Idle, window visible, workflow open on the Runs list, 70 s | no work: no timer of its own | renderer **0.1%** of a core, **1** wakeup a second; GPU 0.0%, 1 wakeup a second; age clock fired 0 times |
+| Idle, window visible, Runs tab on today's timeline, 70 s | no work but the time now, which moves once a minute | renderer **0.0%** of a core, **1** wakeup a second; GPU 0.0%, 2 wakeups a second; age clock fired **1** time |
 | Idle, window hidden, workflow open | no work | renderer **0** wakeups; age clock fired 0 times |
 | Lists: the Runs tab's list | virtualized | **20** rows mounted of the 50 read |
 | Lists: one day of the timeline | drawn whole | **300** bars of 300, on 12 tracks |
 | Per push, on the Runs list: reads | each run read on screen read once | **1** strip read, **2** live run reads, **1** read of the list's one loaded page |
-| Per push, on the Runs list: renderer main thread | within 16 ms | **5.1 ms** |
+| Per push, on the Runs list: renderer main thread | within 16 ms | **5.3 ms** |
 | Per push, on the timeline of the 300-run day: reads | each run read on screen read once | **1** strip read, **2** live run reads, **1** read of the day |
-| Per push, on the timeline of the 300-run day: renderer main thread | within 16 ms | **7.0 ms** |
-| Per push, renderer and controller CPU | recorded | Runs list: renderer 11 ms, controller 15 ms. Timeline: renderer 16 ms, controller 14 ms |
-| Drawing the 300-run day | recorded | 92 ms of renderer main thread, from picking the timeline until 1 s after all 300 bars showed |
+| Per push, on the timeline of the 300-run day: renderer main thread | within 16 ms | **6.6 ms** |
+| Per push, renderer and controller CPU | recorded | Runs list: renderer 11 ms, controller 14 ms. Timeline: renderer 15 ms, controller 16 ms |
+| Drawing the 300-run day | recorded | 72 ms of renderer main thread, from picking the timeline until 1 s after all 300 bars showed |
 
-- **The page adds no timer.** No `setTimeout`, `setInterval`, `requestAnimationFrame` or `requestIdleCallback` is in the open workflow's route or in `screens/workflows/`. Its times read the age clock, which did not fire in the idle samples.
-- **The summed footprint is over its row, as in most entries above.** The GPU process holds 182 MB of the 308 MB, a miss that predates this change. The renderer is within its row. The same run's list launch, with no workflow open, was 61 MB and 311 MB.
+- **The page adds no timer of its own.** No `setTimeout`, `setInterval`, `requestAnimationFrame` or `requestIdleCallback` is in the open workflow's route or in `screens/workflows/`. Its times read the age clock. On the Runs list the clock did not fire in 70 s. On today's timeline it fired once in 70 s, to move the line that marks the time now; that is the one tick a minute the timeline needs. The clock runs for the timeline only while the timeline shows.
+- **The summed footprint is over its row, as in most entries above.** The GPU process holds 182 MB of the 307 MB, a miss that predates this change. The renderer is within its row. The same run's list launch, with no workflow open, was 61 MB and 302 MB.
 - **Each push reads every run read on screen once.** The page of the Runs list and the day are each read once a push, with the strips and the live runs; nothing else is read.
-- **Not measured:** opening a workflow against a remote controller; memory with a run's page open, which is a later slice; motion and the timeline's arrival, which the Performance panel measures once by hand.
+- **The load average was high during the run.** Every idle and per-push row is within its budget with room to spare, so a quieter machine would not change which rows pass; the per-push times may be a little lower on one.
+- **The perf rows were measured before a timeline bar counted its time only while on screen.** That change only removes age clock subscriptions, for bars scrolled out of view, so the timeline's rows are an upper bound.
+- **Not measured:** opening a workflow against a remote controller; memory with a run's page open, which is a later slice; the timeline's arrival, which the Performance panel measures once by hand. Motion is not measured, because it left this slice for [#553](https://github.com/theagenticage/hercule/issues/553).
 
 ## Slices
 

@@ -12,6 +12,7 @@
     "./node-details": "./src/node-details.ts",
     "./run-marks": "./src/run-marks.ts",
     "./run-timeline": "./src/run-timeline.ts",
+    "./timeline-limit": "./src/timeline-limit.ts",
     "./workflow-detail-rows": "./src/workflow-detail-rows.ts",
     "./workflow-rows": "./src/workflow-rows.ts",
     "./testing": "./src/testing.ts",
