@@ -102,6 +102,8 @@ const QueryInput = Schema.Struct({
   text: Schema.optionalKey(bounded(1, MAX_SEARCH_TEXT_LENGTH)),
   source: Schema.optionalKey(bounded(1, MAX_EVENT_SOURCE_LENGTH)),
   handling: Schema.optionalKey(atMost(EventHandling, EVENT_HANDLINGS.length)),
+  workflowId: Schema.optionalKey(Id),
+  triggerId: Schema.optionalKey(Schema.String),
   ...buildPageInputFields(EVENT_SORT_FIELDS),
 });
 
@@ -187,8 +189,11 @@ const make = Effect.gen(function* () {
   return {
     /**
      * Returns one page of the log, newest first unless the caller sends a sort
-     * key. A key with no direction sorts oldest first. Fails with `Validation`
-     * for invalid input or a cursor from another listing.
+     * key. A key with no direction sorts oldest first. With `workflowId` and
+     * `triggerId`, returns only the events that trigger holds: matched after
+     * its spawn bound was spent, and waiting to start a run. Fails with
+     * `Validation` for invalid input, for only one of `workflowId` and
+     * `triggerId`, or for a cursor from another listing.
      */
     query: (
       input: QueryInput,
@@ -196,6 +201,19 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const actor = yield* requireGrant("event.query");
         const decoded = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
+        if ((decoded.workflowId === undefined) !== (decoded.triggerId === undefined)) {
+          // A trigger id is unique only within its workflow, so one without
+          // the other names no trigger.
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: [decoded.workflowId === undefined ? "workflowId" : "triggerId"],
+                message:
+                  "workflowId and triggerId name a trigger together. Send both to list the events the trigger holds, or neither.",
+              },
+            ]),
+          );
+        }
         const direction = resolveSortDirection(decoded.sort, DEFAULT_DIRECTION);
         const limit = decoded.limit ?? DEFAULT_PAGE_LIMIT;
         const scope = { op: "event.query", sort: [{ field: "id", direction }] } as const;
@@ -228,6 +246,11 @@ const make = Effect.gen(function* () {
         }
         if (decoded.handling !== undefined && decoded.handling.length > 0) {
           where.push(buildAnyHandling(sql, decoded.handling));
+        }
+        if (decoded.workflowId !== undefined && decoded.triggerId !== undefined) {
+          where.push(
+            sql`events.id IN (SELECT event_id FROM trigger_effects WHERE workflow_id = ${uuidFromString(decoded.workflowId)} AND trigger_id = ${decoded.triggerId} AND state = 'held')`,
+          );
         }
         // Filtered in the query rather than dropped from the returned page, so
         // the page is as full as requested and the cursor at its end still

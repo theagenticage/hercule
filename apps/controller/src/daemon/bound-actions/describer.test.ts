@@ -27,11 +27,15 @@ import { PluginHost, type RegisteredSignalKind } from "../../plugins";
 import { buildPluginStack } from "../../plugins/testing";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
+import { SettingsLayer } from "../../settings";
 import { taskRepository } from "../../tasks";
 import { workflowRepository } from "../../workflows";
+import { declareStartTrigger } from "../../workflows/testing";
 import { buildDescribe } from "./describer";
 
-const layer = PermissionProfilesLayer.pipe(Layer.provideMerge(buildPluginStack()));
+const layer = Layer.mergeAll(PermissionProfilesLayer, SettingsLayer).pipe(
+  Layer.provideMerge(buildPluginStack()),
+);
 
 const AT = "2026-09-07T10:00:00.000Z";
 
@@ -712,5 +716,61 @@ describe("ignoreRule.create", () => {
 
     expect(line).toContainEqual(marked("(empty)"));
     expect(line).not.toContainEqual(marked(""));
+  });
+});
+
+type TriggerResumeInput = Extract<AnswerOperation, { op: "trigger.resume" }>["input"];
+
+describe("trigger.resume", () => {
+  /**
+   * Stores a workflow named "GitHub work" whose start trigger `labeled` may
+   * start two runs an hour. Returns the trigger's key.
+   */
+  const insertBoundedTrigger = Effect.gen(function* () {
+    const workflows = yield* workflowRepository;
+    const workflowId = yield* insertWorkflow({ name: "GitHub work", steps: [] });
+    yield* workflows.reconcileTriggers(
+      workflowId,
+      [declareStartTrigger("labeled", { spawnBound: { maxRuns: 2, windowSeconds: 3600 } })],
+      AT,
+    );
+    return { workflowId, triggerId: "labeled" };
+  });
+
+  it("names the trigger and its workflow, and says what happens to the held events", async () => {
+    const lines = await run(
+      Effect.gen(function* () {
+        const key = yield* insertBoundedTrigger;
+        const describeResume = (input: TriggerResumeInput) =>
+          describeOperation({ op: "trigger.resume", input });
+        return {
+          keeping: yield* describeResume(key),
+          discarding: yield* describeResume({ ...key, discardHeld: true }),
+          missing: yield* describeResume({ workflowId: MISSING_ID, triggerId: "labeled" }),
+        };
+      }),
+    );
+
+    const name = (workflow: string) => [
+      text("Resume the trigger "),
+      marked("labeled"),
+      text(" of "),
+      marked(workflow),
+    ];
+    // The line names no count of held events: it is read again on every
+    // read of the open record, while the count keeps changing.
+    expect(lines).toEqual({
+      keeping: [
+        ...name("GitHub work"),
+        text(", starting the events it holds as fast as "),
+        marked("2 per hour"),
+        text(" allows"),
+      ],
+      discarding: [
+        ...name("GitHub work"),
+        text(" and discard every event it holds when you answer"),
+      ],
+      missing: name(MISSING_ID),
+    });
   });
 });

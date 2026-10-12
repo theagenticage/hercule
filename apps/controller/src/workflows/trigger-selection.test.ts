@@ -5,7 +5,7 @@
  * wrote it.
  */
 import { describe, expect, it } from "vitest";
-import { ANY_CONNECTION, type Event } from "@hercule/contract";
+import { ANY_CONNECTION, DEFAULT_SPAWN_BOUND, type Event } from "@hercule/contract";
 import type { RoutableStartTrigger } from "./repository";
 import { admitsEvent } from "./trigger-selection";
 
@@ -18,6 +18,7 @@ const OTHER_CONNECTION_ID = "0199e0e7-0000-7000-8000-00000000c002";
 const buildTrigger = (fields: Partial<RoutableStartTrigger> = {}): RoutableStartTrigger => ({
   workflowId: WORKFLOW_ID,
   triggerId: "on-issue",
+  spawnBound: DEFAULT_SPAWN_BOUND,
   eventKind: "github.issue.opened",
   connectionId: undefined,
   filter: undefined,

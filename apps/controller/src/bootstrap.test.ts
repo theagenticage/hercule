@@ -17,7 +17,9 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { HOST_API, PluginError, type Plugin } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "./actor";
 import { boot, bootWith, hashToken, buildSetupUrl, type BootOutcome } from "./bootstrap";
+import { uuidFromString } from "./db";
 import { Plugins } from "./plugins";
+import { NOTE_APPEND_ACTION_ID, notesPlugin } from "./plugins/testing";
 import { PromotionState } from "./promotion";
 
 /** Listing plugins needs an actor, and a boot has none, so the test provides the user. */
@@ -324,6 +326,61 @@ describe("a boot with a plugin that will not start", () => {
     expect(
       query<{ actor: string | null }>("SELECT actor FROM events WHERE kind = 'plugin.errored'"),
     ).toEqual([{ actor: "system" }]);
+  });
+});
+
+describe("a boot after a plugin changed while the controller was stopped", () => {
+  it("marks a stored workflow that no longer validates, and clears the mark once it validates again", async () => {
+    const workflowId = "0199f0b7-0004-7000-8000-000000000000";
+    const bootWithPlugins = (
+      plugins: ReadonlyArray<Plugin>,
+      use: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.void,
+    ) =>
+      Effect.runPromise(
+        bootWith({ argv: ["--home", home], env: {}, masterKeyBackend: "file", plugins }, () => use),
+      );
+    const readMark = () =>
+      query<{ invalid_since: string | null }>("SELECT invalid_since FROM workflows")[0]
+        ?.invalid_since;
+
+    // The workflow calls the action of the `notes` plugin, which is installed.
+    await bootWithPlugins(
+      [notesPlugin],
+      Effect.flatMap(SqlClient.SqlClient, (sql) => {
+        const definition = {
+          name: "Notes",
+          steps: [
+            { id: "note", kind: "action", action: NOTE_APPEND_ACTION_ID, params: { text: "x" } },
+          ],
+        };
+        const at = new Date().toISOString();
+        return Effect.asVoid(sql`
+          INSERT INTO workflows (id, source, definition, enabled, created_at, updated_at)
+          VALUES (${uuidFromString(workflowId)}, 'name: Notes', ${JSON.stringify(definition)}, 1,
+                  ${at}, ${at})`);
+      }),
+    );
+    expect(readMark()).toBeNull();
+
+    // The plugin is gone at the next boot, so the action the workflow calls is gone too.
+    await bootWithPlugins([]);
+    expect(readMark()).toEqual(expect.any(String));
+    expect(
+      query<{ title: string }>(
+        "SELECT title FROM notifications WHERE kind = 'core.workflow-invalid'",
+      ),
+    ).toEqual([{ title: "The workflow Notes no longer validates" }]);
+
+    await bootWithPlugins([notesPlugin]);
+    expect(readMark()).toBeNull();
+    expect(
+      query<{ kind: string; actor: string }>(
+        "SELECT kind, actor FROM events WHERE kind LIKE 'workflow.%validated' ORDER BY id",
+      ),
+    ).toEqual([
+      { kind: "workflow.invalidated", actor: "system" },
+      { kind: "workflow.revalidated", actor: "system" },
+    ]);
   });
 });
 

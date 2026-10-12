@@ -15,12 +15,14 @@ import type { Fragment } from "effect/unstable/sql/Statement";
 import type {
   SkippedTicks,
   SortDirection,
+  SpawnBound,
   Trigger,
   TriggerHealth,
   TriggerKey,
   TriggerKind,
   TriggerOn,
   TriggerFiresOn,
+  TriggerPausedBy,
   TriggerStatus,
   Workflow,
   WorkflowDefinition,
@@ -43,12 +45,29 @@ import {
 } from "../db";
 import { CRON_TICK_EVENT_KIND } from "../events";
 import { CONNECTION_PARAM } from "../plugins";
+import { buildRunsInWindow, HELD_COUNT } from "./spawn-bounds";
 import type { Input } from "./validation";
 
 /** A YAML source and the definition it parses to. They are always stored together. */
 export interface ParsedSource {
   readonly source: string;
   readonly definition: WorkflowDefinition;
+}
+
+/**
+ * A stored workflow's definition and invalid mark, as validating the stored
+ * workflows again reads them. `invalidSince` is when the workflow stopped
+ * validating, and is absent while it is valid. `updatedAt` is when its source
+ * last changed; `setInvalidSince` compares it to skip a workflow saved since
+ * it was read.
+ */
+export interface StoredDefinition {
+  readonly id: string;
+  readonly name: string;
+  /** The stored JSON, not yet decoded: an older controller may have stored a shape this one refuses. */
+  readonly definition: unknown;
+  readonly invalidSince: string | undefined;
+  readonly updatedAt: string;
 }
 
 /** The fields an update sets. An absent field is left unchanged. */
@@ -78,6 +97,19 @@ export interface DeclaredTrigger {
   readonly on: TriggerOn;
   /** A start trigger's input mapping: each input name to an expression over `event`. */
   readonly inputs: Readonly<Record<string, string>> | undefined;
+  /** A start trigger's own spawn bound, or `undefined` when its source sets none. */
+  readonly spawnBound: SpawnBound | undefined;
+}
+
+/** What `reconcileTriggers` changed besides the trigger rows. */
+export interface TriggerReconciliation {
+  /**
+   * The ids of the triggers that no longer exist: the deleted ones, and the
+   * ones whose kind changed, since those were replaced.
+   */
+  readonly removedTriggerIds: ReadonlyArray<string>;
+  /** How many held events the save discarded, over all of the workflow's triggers. */
+  readonly discardedCount: number;
 }
 
 /**
@@ -91,8 +123,10 @@ export interface DeclaredTrigger {
 export type TriggerFailureStage = "evaluation" | "scheduling" | "start";
 
 /**
- * A start trigger that can start a run now: it is active and its workflow is
- * enabled. The event router tests every event against these.
+ * A start trigger the event router tests every event against: its workflow
+ * is enabled and valid, and it is active or paused by the breaker. A trigger
+ * the breaker paused still matches events, and holds each match until it is
+ * resumed.
  */
 export interface RoutableStartTrigger extends TriggerKey {
   readonly eventKind: string;
@@ -103,14 +137,29 @@ export interface RoutableStartTrigger extends TriggerKey {
   readonly inputs: Readonly<Record<string, string>>;
   /** Whether the trigger's health records an error of its filter or input mapping. */
   readonly hasEvaluationError: boolean;
+  /** The bound the trigger runs under: its own, or the default when its source sets none. */
+  readonly spawnBound: SpawnBound;
 }
+
+/**
+ * The status a start trigger is set to. A paused trigger records who paused
+ * it: someone, manually, or the breaker when it matched more events than its
+ * spawn bound allows.
+ */
+export type TriggerStatusChange =
+  | { readonly status: "active" }
+  | { readonly status: "paused"; readonly pausedBy: TriggerPausedBy };
 
 /** A cron trigger's schedule and the Scheduler's state for it. */
 export interface CronTrigger extends TriggerKey {
   readonly schedule: string;
   /** The trigger's own timezone. `undefined` means the user's timezone setting applies. */
   readonly timezone: string | undefined;
-  /** Whether a tick would start a run now: the trigger is active and its workflow is enabled. */
+  /**
+   * Whether a tick would be matched now: the trigger is active or paused by
+   * the breaker, and its workflow is enabled and valid. A tick on a trigger
+   * the breaker paused is held, not dropped.
+   */
   readonly canFire: boolean;
   /** `undefined` until the Scheduler first computes it, and again after the schedule changes. */
   readonly nextFireAt: string | undefined;
@@ -174,6 +223,7 @@ interface WorkflowRow {
   readonly id: Uint8Array;
   readonly enabled: number;
   readonly source: string;
+  readonly invalid_since: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -183,6 +233,7 @@ interface SummaryRow {
   readonly name: string;
   readonly description: string | null;
   readonly enabled: number;
+  readonly invalid_since: string | null;
   readonly updated_at: string;
 }
 
@@ -197,6 +248,13 @@ interface TriggerRow {
   readonly schedule: string | null;
   readonly timezone: string | null;
   readonly status: TriggerStatus | null;
+  readonly paused_by: TriggerPausedBy | null;
+  /** Both NULL when the source sets no spawn bound, and always for a signal trigger. */
+  readonly spawn_bound_max_runs: number | null;
+  readonly spawn_bound_window_seconds: number | null;
+  /** NULL for a signal trigger, as is `held_count`. */
+  readonly runs_in_window: number | null;
+  readonly held_count: number | null;
   readonly health_error_message: string | null;
   readonly health_error_at: string | null;
   readonly next_fire_at: string | null;
@@ -231,20 +289,56 @@ const NAME_FROM_DEFINITION = "json_extract(workflows.definition, '$.name')";
 const IS_CRON_TRIGGER = `triggers.kind = 'start' AND triggers.event_kind = '${CRON_TICK_EVENT_KIND}'
   AND triggers.schedule IS NOT NULL`;
 
-/** The columns a `TriggerRow` is read from. The query joins `workflows` for the name. */
-const TRIGGER_COLUMNS = `triggers.workflow_id, ${NAME_FROM_DEFINITION} AS workflow_name,
-  triggers.trigger_id, triggers.kind, triggers.event_kind, triggers.connection_id,
-  triggers.filter, triggers.schedule, triggers.timezone, triggers.status,
-  triggers.health_error_message, triggers.health_error_at, triggers.next_fire_at,
-  triggers.last_fired_at, triggers.skipped_from, triggers.skipped_until,
-  triggers.created_at, triggers.updated_at`;
+/** The tables a trigger is read from: its row, and its workflow for the name. */
+const TRIGGERS_WITH_WORKFLOWS = "triggers JOIN workflows ON workflows.id = triggers.workflow_id";
 
-const WORKFLOW_COLUMNS = "id, enabled, source, created_at, updated_at";
+/**
+ * The condition a start trigger meets while it may start runs, whatever its
+ * status: its workflow is enabled and valid. The conditions below add the
+ * status. Each reads `triggers` and `workflows`.
+ */
+const IS_RUNNABLE_START_TRIGGER = `triggers.kind = 'start'
+  AND workflows.enabled = 1 AND workflows.invalid_since IS NULL`;
+
+/**
+ * The condition a start trigger meets while the event router matches events
+ * against it, and while its pending rows start their runs: it is runnable,
+ * and active or paused by the breaker. The pending rows a trigger had when
+ * the breaker tripped were within its bound, so they still start.
+ */
+export const IS_ROUTABLE_START_TRIGGER = `${IS_RUNNABLE_START_TRIGGER}
+  AND (triggers.status = 'active' OR triggers.paused_by = 'breaker')`;
+
+/**
+ * The condition a start trigger meets while its held events move on to
+ * `pending` as its window has room: it is runnable and active.
+ */
+export const IS_PROMOTABLE_START_TRIGGER = `${IS_RUNNABLE_START_TRIGGER}
+  AND triggers.status = 'active'`;
+
+/**
+ * The columns of a trigger's row that decide which events it matches and
+ * what it maps them to: everything the source declares but its spawn bound.
+ */
+const MATCHING_COLUMNS = "kind, event_kind, connection_id, filter, schedule, timezone, inputs";
+
+/** `MATCHING_COLUMNS` of the stored row, in an upsert. */
+const MATCHING_COLUMNS_OF_ROW = MATCHING_COLUMNS.split(", ")
+  .map((column) => `triggers.${column}`)
+  .join(", ");
+
+/** `MATCHING_COLUMNS` of the row an upsert would insert. */
+const MATCHING_COLUMNS_OF_EXCLUDED = MATCHING_COLUMNS.split(", ")
+  .map((column) => `excluded.${column}`)
+  .join(", ");
+
+const WORKFLOW_COLUMNS = "id, enabled, source, invalid_since, created_at, updated_at";
 
 const toWorkflow = (row: WorkflowRow): Workflow => ({
   id: uuidToString(row.id),
   enabled: row.enabled === 1,
   source: row.source,
+  ...(row.invalid_since === null ? {} : { invalidSince: row.invalid_since }),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -254,6 +348,7 @@ const toSummary = (row: SummaryRow): WorkflowSummary => ({
   name: row.name,
   ...(row.description === null ? {} : { description: row.description }),
   enabled: row.enabled === 1,
+  ...(row.invalid_since === null ? {} : { invalidSince: row.invalid_since }),
   updatedAt: row.updated_at,
 });
 
@@ -311,15 +406,43 @@ const buildOnColumns = (on: TriggerOn) =>
         timezone: undefined,
       };
 
-/** Maps a trigger row to a `Trigger`. A NULL column becomes an absent field, not `null`. */
-const toTrigger = (row: TriggerRow): Trigger => ({
+/**
+ * Returns the spawn bound a trigger runs under, from its `spawn_bound_*`
+ * columns: its own, or `defaultBound` when its source sets none. The two
+ * columns are both set or both NULL, which a check on the table enforces.
+ */
+const resolveSpawnBound = (
+  row: Pick<TriggerRow, "spawn_bound_max_runs" | "spawn_bound_window_seconds">,
+  defaultBound: SpawnBound,
+): SpawnBound =>
+  row.spawn_bound_max_runs === null || row.spawn_bound_window_seconds === null
+    ? defaultBound
+    : { maxRuns: row.spawn_bound_max_runs, windowSeconds: row.spawn_bound_window_seconds };
+
+/**
+ * Maps a trigger row to a `Trigger`. A NULL column becomes an absent field,
+ * not `null`. `defaultBound` is the spawn bound of a start trigger whose
+ * source sets none.
+ */
+const toTrigger = (row: TriggerRow, defaultBound: SpawnBound): Trigger => ({
   workflowId: uuidToString(row.workflow_id),
   workflowName: row.workflow_name,
   triggerId: row.trigger_id,
   kind: row.kind,
   on: buildTriggerOn(row),
   ...(row.status === null ? {} : { status: row.status }),
-  ...(row.kind === "start" ? { health: readHealth(row) } : {}),
+  ...(row.paused_by === null ? {} : { pausedBy: row.paused_by }),
+  ...(row.kind === "start"
+    ? {
+        spawnBound: {
+          ...resolveSpawnBound(row, defaultBound),
+          isDefault: row.spawn_bound_max_runs === null,
+        },
+        runsInWindow: row.runs_in_window ?? 0,
+        heldCount: row.held_count ?? 0,
+        health: readHealth(row),
+      }
+    : {}),
   ...(row.next_fire_at === null ? {} : { nextFireAt: row.next_fire_at }),
   ...(row.last_fired_at === null ? {} : { lastFiredAt: row.last_fired_at }),
   ...(row.skipped_from === null || row.skipped_until === null
@@ -345,6 +468,25 @@ const make = Effect.gen(function* () {
   const bindOptionalText = (text: string | undefined): Fragment =>
     text === undefined ? sql`NULL` : bindExactText(text);
 
+  /**
+   * Builds the columns a `TriggerRow` is read from `TRIGGERS_WITH_WORKFLOWS`.
+   * A start trigger's runs in its window are counted for the window that
+   * ends at `now`, as `buildRunsInWindow` describes. `defaultBound` is the
+   * bound of a trigger whose source sets none.
+   */
+  const buildTriggerColumns = (defaultBound: SpawnBound, now: string): Fragment => sql`
+    triggers.workflow_id, ${sql.literal(NAME_FROM_DEFINITION)} AS workflow_name,
+    triggers.trigger_id, triggers.kind, triggers.event_kind, triggers.connection_id,
+    triggers.filter, triggers.schedule, triggers.timezone, triggers.status, triggers.paused_by,
+    triggers.spawn_bound_max_runs, triggers.spawn_bound_window_seconds,
+    CASE WHEN triggers.kind = 'start' THEN ${buildRunsInWindow(sql, defaultBound, now)} END
+      AS runs_in_window,
+    CASE WHEN triggers.kind = 'start' THEN ${sql.literal(HELD_COUNT)} END AS held_count,
+    triggers.health_error_message, triggers.health_error_at, triggers.next_fire_at,
+    triggers.last_fired_at, triggers.skipped_from, triggers.skipped_until,
+    triggers.created_at, triggers.updated_at
+  `;
+
   const read = (id: string): Effect.Effect<Option.Option<Workflow>, SqlError> =>
     Effect.map(
       sql<WorkflowRow>`
@@ -355,6 +497,16 @@ const make = Effect.gen(function* () {
 
   return {
     read,
+
+    /** Returns a workflow's name, or `None` if no workflow has the id. */
+    readName: (id: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly name: string }>`
+          SELECT ${sql.literal(NAME_FROM_DEFINITION)} AS name FROM workflows
+          WHERE id = ${uuidFromString(id)}
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => row.name),
+      ),
 
     /**
      * Returns the stored definition of a workflow: the parsed form of its
@@ -416,6 +568,57 @@ const make = Effect.gen(function* () {
               ),
           ),
 
+    /**
+     * Returns every stored workflow's definition and invalid mark, oldest
+     * first. Validating the stored workflows again reads it.
+     */
+    listStoredDefinitions: (): Effect.Effect<ReadonlyArray<StoredDefinition>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly id: Uint8Array;
+          readonly name: string;
+          readonly definition: string;
+          readonly invalid_since: string | null;
+          readonly updated_at: string;
+        }>`
+          SELECT id, ${sql.literal(NAME_FROM_DEFINITION)} AS name, definition, invalid_since,
+                 updated_at
+          FROM workflows ORDER BY created_at, id
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            id: uuidToString(row.id),
+            name: row.name,
+            definition: JSON.parse(row.definition) as unknown,
+            invalidSince: row.invalid_since ?? undefined,
+            updatedAt: row.updated_at,
+          })),
+      ),
+
+    /**
+     * Sets when a workflow stopped validating, or clears the mark with
+     * `undefined`, but only while the row still has the `updatedAt` and the
+     * mark that `seen` holds. Returns whether it wrote.
+     *
+     * The caller judged the workflow outside a transaction, so a save may
+     * have changed the row since it was read. That save validated its own
+     * source and set the mark itself, so it wins. Does not change
+     * `updated_at`, because the source did not change.
+     */
+    setInvalidSince: (
+      seen: Pick<StoredDefinition, "id" | "updatedAt" | "invalidSince">,
+      since: string | undefined,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE workflows SET invalid_since = ${since ?? null}
+          WHERE id = ${uuidFromString(seen.id)} AND updated_at = ${seen.updatedAt}
+            AND invalid_since IS ${seen.invalidSince ?? null}
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
+
     /** Inserts a new workflow, disabled, and returns it. */
     insert: (parsedSource: ParsedSource, savedAt: string): Effect.Effect<Workflow, SqlError> =>
       Effect.gen(function* () {
@@ -441,6 +644,9 @@ const make = Effect.gen(function* () {
      * together. The caller holds the transaction, so the row cannot change
      * between the read and the write.
      *
+     * Writing a source clears `invalid_since`, even when the source is the same:
+     * the caller validated it just before, so the workflow is valid now.
+     *
      * `updated_at` is when the source last changed. Enabling or disabling a
      * workflow does not change it, and neither does saving the same source.
      * The list is sorted by `updated_at`, so a workflow keeps its place in the
@@ -464,9 +670,12 @@ const make = Effect.gen(function* () {
         ];
         const assignments: Array<Fragment> = [];
         if (edit.parsedSource !== undefined) {
+          // The service writes only a source that validated, so a source
+          // write also clears the invalid mark.
           assignments.push(
             sql`source = ${bindExactText(edit.parsedSource.source)}`,
             sql`definition = ${JSON.stringify(edit.parsedSource.definition)}`,
+            sql`invalid_since = NULL`,
           );
         }
         if (changed.includes("source")) assignments.push(sql`updated_at = ${savedAt}`);
@@ -531,7 +740,8 @@ const make = Effect.gen(function* () {
         }
         const rows = yield* sql<SummaryRow>`
           SELECT id, ${sql.literal(NAME_FROM_DEFINITION)} AS name,
-                 json_extract(definition, '$.description') AS description, enabled, updated_at
+                 json_extract(definition, '$.description') AS description, enabled, invalid_since,
+                 updated_at
           FROM workflows WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}
         `;
@@ -548,34 +758,40 @@ const make = Effect.gen(function* () {
      * declares. Each trigger's `on` is stored in the columns of its row by the
      * rule described at `IS_CRON_TRIGGER`.
      *
-     * - A trigger whose id is no longer in the source is deleted.
+     * - A trigger whose id is no longer in the source is deleted, with the
+     *   events it held.
      * - A trigger with a new id is inserted, with status `active` for a start
      *   trigger and no status for a signal trigger.
-     * - A trigger whose id stays keeps its row, `created_at` and status. Its
-     *   other fields are overwritten from the source, and `updated_at` changes
-     *   only if one of them changed. A change also clears the trigger's
-     *   health, because the error it records was about the old definition.
-     *   A trigger that did not change keeps its error, which is still true.
+     * - A trigger whose id stays keeps its row, `created_at`, status and who
+     *   paused it. Its other fields are overwritten from the source, and
+     *   `updated_at` changes only if one of them changed. A change also
+     *   clears the trigger's health, because the error it records was about
+     *   the old definition. A trigger that did not change keeps its error,
+     *   which is still true.
+     * - A start trigger whose `on`, filter or inputs changed discards the
+     *   events it held, because the old definition matched them and mapped
+     *   their inputs. A change of the spawn bound alone keeps them.
      * - A cron trigger whose schedule or timezone changed has its next
      *   scheduled time cleared, so the Scheduler computes it again. A cron
      *   trigger whose schedule is replaced by an event selector loses all of
      *   its schedule state.
      * - A trigger whose id stays but whose kind changes counts as a new
      *   trigger, because a start trigger and a signal trigger are different
-     *   things. It gets a new `created_at`, and a start trigger is `active`
-     *   again.
+     *   things. It gets a new `created_at`, a start trigger is `active`
+     *   again, and the events the old trigger held are discarded.
      *
-     * Returns the ids of the triggers that no longer exist: the deleted ones,
-     * and the ones whose kind changed, since those were replaced.
+     * Returns the ids of the triggers that no longer exist, and how many held
+     * events the save discarded, the deleted triggers' included.
      */
     reconcileTriggers: (
       workflowId: string,
       triggers: ReadonlyArray<DeclaredTrigger>,
       savedAt: string,
-    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+    ): Effect.Effect<TriggerReconciliation, SqlError> =>
       Effect.gen(function* () {
         const workflow = uuidFromString(workflowId);
         const kept = triggers.map((trigger) => trigger.triggerId);
+        const isRemoved = kept.length === 0 ? sql`1 = 1` : sql`trigger_id NOT IN ${sql.in(kept)}`;
         const kindsBefore = new Map(
           (yield* sql<{ readonly trigger_id: string; readonly kind: string }>`
             SELECT trigger_id, kind FROM triggers WHERE workflow_id = ${workflow}
@@ -587,24 +803,45 @@ const make = Effect.gen(function* () {
             return kindBefore !== undefined && kindBefore !== trigger.kind;
           })
           .map((trigger) => trigger.triggerId);
+        // Deleting a trigger deletes its rows through the foreign key, so its
+        // held events are counted first.
+        const heldByRemoved = yield* sql<{ readonly count: number }>`
+          SELECT count(*) AS count FROM trigger_effects
+          WHERE workflow_id = ${workflow} AND ${isRemoved} AND state = 'held'
+        `;
+        let discardedCount = heldByRemoved[0]?.count ?? 0;
         const deleted = yield* sql<{ readonly trigger_id: string }>`
-          DELETE FROM triggers
-          WHERE workflow_id = ${workflow}
-            AND ${kept.length === 0 ? sql`1 = 1` : sql`trigger_id NOT IN ${sql.in(kept)}`}
+          DELETE FROM triggers WHERE workflow_id = ${workflow} AND ${isRemoved}
           RETURNING trigger_id
         `;
         for (const trigger of triggers) {
           const columns = buildOnColumns(trigger.on);
+          // The columns that decide which events the trigger matches and
+          // what it maps them to, in the order of `MATCHING_COLUMNS`.
+          const matching = sql`
+            ${trigger.kind}, ${bindExactText(columns.eventKind)}, ${columns.connectionId ?? null},
+            ${bindOptionalText(columns.filter)}, ${bindOptionalText(columns.schedule)},
+            ${bindOptionalText(columns.timezone)},
+            ${bindOptionalText(trigger.inputs === undefined ? undefined : JSON.stringify(trigger.inputs))}
+          `;
+          const discarded = yield* sql<{ readonly id: number }>`
+            UPDATE trigger_effects SET state = 'discarded'
+            WHERE workflow_id = ${workflow} AND trigger_id = ${trigger.triggerId}
+              AND state = 'held'
+              AND EXISTS (
+                SELECT 1 FROM triggers
+                WHERE triggers.workflow_id = ${workflow} AND triggers.trigger_id = ${trigger.triggerId}
+                  AND (${sql.literal(MATCHING_COLUMNS_OF_ROW)}) IS NOT (${matching}))
+            RETURNING id
+          `;
+          discardedCount += discarded.length;
           yield* sql`
             INSERT INTO triggers
-              (workflow_id, trigger_id, kind, event_kind, connection_id, filter, schedule,
-               timezone, inputs, status, created_at, updated_at)
+              (workflow_id, trigger_id, ${sql.literal(MATCHING_COLUMNS)},
+               spawn_bound_max_runs, spawn_bound_window_seconds, status, created_at, updated_at)
             VALUES
-              (${workflow}, ${trigger.triggerId}, ${trigger.kind},
-               ${bindExactText(columns.eventKind)}, ${columns.connectionId ?? null},
-               ${bindOptionalText(columns.filter)}, ${bindOptionalText(columns.schedule)},
-               ${bindOptionalText(columns.timezone)},
-               ${bindOptionalText(trigger.inputs === undefined ? undefined : JSON.stringify(trigger.inputs))},
+              (${workflow}, ${trigger.triggerId}, ${matching},
+               ${trigger.spawnBound?.maxRuns ?? null}, ${trigger.spawnBound?.windowSeconds ?? null},
                ${trigger.kind === "start" ? "active" : null}, ${savedAt}, ${savedAt})
             ON CONFLICT (workflow_id, trigger_id) DO UPDATE SET
               kind = excluded.kind,
@@ -614,8 +851,15 @@ const make = Effect.gen(function* () {
               schedule = excluded.schedule,
               timezone = excluded.timezone,
               inputs = excluded.inputs,
+              spawn_bound_max_runs = excluded.spawn_bound_max_runs,
+              spawn_bound_window_seconds = excluded.spawn_bound_window_seconds,
               status = CASE WHEN triggers.kind = excluded.kind THEN triggers.status
                             ELSE excluded.status END,
+              paused_by = CASE WHEN triggers.kind = excluded.kind THEN triggers.paused_by END,
+              -- The count is kept only while the held events it counted are.
+              held_at_resume = CASE
+                WHEN (${sql.literal(MATCHING_COLUMNS_OF_ROW)}) IS (${sql.literal(MATCHING_COLUMNS_OF_EXCLUDED)})
+                THEN triggers.held_at_resume END,
               created_at = CASE WHEN triggers.kind = excluded.kind THEN triggers.created_at
                                 ELSE excluded.created_at END,
               updated_at = excluded.updated_at,
@@ -641,17 +885,27 @@ const make = Effect.gen(function* () {
               skipped_until = CASE
                 WHEN (triggers.kind, triggers.event_kind) IS (excluded.kind, excluded.event_kind)
                 THEN triggers.skipped_until END
-            WHERE (triggers.kind, triggers.event_kind, triggers.connection_id, triggers.filter,
-                   triggers.schedule, triggers.timezone, triggers.inputs)
-               IS NOT (excluded.kind, excluded.event_kind, excluded.connection_id,
-                       excluded.filter, excluded.schedule, excluded.timezone, excluded.inputs)
+            WHERE (${sql.literal(MATCHING_COLUMNS_OF_ROW)}, triggers.spawn_bound_max_runs,
+                   triggers.spawn_bound_window_seconds)
+               IS NOT (${sql.literal(MATCHING_COLUMNS_OF_EXCLUDED)}, excluded.spawn_bound_max_runs,
+                       excluded.spawn_bound_window_seconds)
           `;
         }
-        return [...deleted.map((row) => row.trigger_id), ...replaced];
+        return {
+          removedTriggerIds: [...deleted.map((row) => row.trigger_id), ...replaced],
+          discardedCount,
+        };
       }),
 
+    /**
+     * Returns a page of triggers. A start trigger's spawn bound is
+     * `defaultBound` when its source sets none, and its runs in the window
+     * are counted for the window that ends at `now`.
+     */
     listTriggers: (
       request: TriggerPageRequest,
+      defaultBound: SpawnBound,
+      now: string,
     ): Effect.Effect<Page<Trigger>, CursorError | SqlError> =>
       Effect.gen(function* () {
         const scope: CursorScope = {
@@ -685,56 +939,79 @@ const make = Effect.gen(function* () {
         }
         if (request.status !== undefined) clauses.push(sql`triggers.status = ${request.status}`);
         const rows = yield* sql<TriggerRow>`
-          SELECT ${sql.literal(TRIGGER_COLUMNS)}
-          FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
+          SELECT ${buildTriggerColumns(defaultBound, now)}
+          FROM ${sql.literal(TRIGGERS_WITH_WORKFLOWS)}
           WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}
         `;
         return yield* buildPage(
           rows,
           request.limit,
-          (page) => Effect.succeed(page.map(toTrigger)),
+          (page) => Effect.succeed(page.map((row) => toTrigger(row, defaultBound))),
           (last) => encodeOwnedCursor(scope, last.createdAt, last.workflowId, last.triggerId),
         );
       }),
 
-    /** Returns one trigger, or `None` if its workflow declares no trigger with the id. */
-    readTrigger: (key: TriggerKey): Effect.Effect<Option.Option<Trigger>, SqlError> =>
+    /**
+     * Returns one trigger, or `None` if its workflow declares no trigger with
+     * the id. `defaultBound` and `now` are as in `listTriggers`.
+     */
+    readTrigger: (
+      key: TriggerKey,
+      defaultBound: SpawnBound,
+      now: string,
+    ): Effect.Effect<Option.Option<Trigger>, SqlError> =>
       Effect.map(
         sql<TriggerRow>`
-          SELECT ${sql.literal(TRIGGER_COLUMNS)}
-          FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
+          SELECT ${buildTriggerColumns(defaultBound, now)}
+          FROM ${sql.literal(TRIGGERS_WITH_WORKFLOWS)}
           WHERE triggers.workflow_id = ${uuidFromString(key.workflowId)}
             AND triggers.trigger_id = ${key.triggerId}
         `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), toTrigger),
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => toTrigger(row, defaultBound)),
+      ),
+
+    /** Returns a trigger's kind, or `None` if its workflow declares no trigger with the id. */
+    readTriggerKind: (key: TriggerKey): Effect.Effect<Option.Option<TriggerKind>, SqlError> =>
+      Effect.map(
+        sql<{ readonly kind: TriggerKind }>`
+          SELECT kind FROM triggers
+          WHERE workflow_id = ${uuidFromString(key.workflowId)} AND trigger_id = ${key.triggerId}
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => row.kind),
       ),
 
     /**
-     * Sets a start trigger's status. Returns whether the status changed:
-     * setting the status it already has writes nothing, and leaves
-     * `updated_at` as it was.
+     * Sets a start trigger's status, and who paused it. Returns whether
+     * either changed: setting what the trigger already has writes nothing,
+     * and leaves `updated_at` as it was.
      */
     setTriggerStatus: (
       key: TriggerKey,
-      status: TriggerStatus,
+      change: TriggerStatusChange,
       at: string,
-    ): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
+    ): Effect.Effect<boolean, SqlError> => {
+      const pausedBy = change.status === "paused" ? change.pausedBy : null;
+      return Effect.map(
         sql<{ readonly trigger_id: string }>`
-          UPDATE triggers SET status = ${status}, updated_at = ${at}
+          UPDATE triggers SET status = ${change.status}, paused_by = ${pausedBy}, updated_at = ${at}
           WHERE workflow_id = ${uuidFromString(key.workflowId)} AND trigger_id = ${key.triggerId}
-            AND kind = 'start' AND status IS NOT ${status}
+            AND kind = 'start' AND (status, paused_by) IS NOT (${change.status}, ${pausedBy})
           RETURNING trigger_id
         `,
         (rows) => rows.length > 0,
-      ),
+      );
+    },
 
     /**
-     * Returns every start trigger that can start a run now: active, on an
-     * enabled workflow. The event router reads them once per pass.
+     * Returns every start trigger the event router matches events against,
+     * as `IS_ROUTABLE_START_TRIGGER` describes. The event router reads them
+     * once per pass. A trigger's spawn bound is `defaultBound` when its
+     * source sets none.
      */
-    listRoutableStartTriggers: (): Effect.Effect<ReadonlyArray<RoutableStartTrigger>, SqlError> =>
+    listRoutableStartTriggers: (
+      defaultBound: SpawnBound,
+    ): Effect.Effect<ReadonlyArray<RoutableStartTrigger>, SqlError> =>
       Effect.map(
         sql<{
           readonly workflow_id: Uint8Array;
@@ -744,12 +1021,15 @@ const make = Effect.gen(function* () {
           readonly filter: string | null;
           readonly inputs: string | null;
           readonly health_error_stage: TriggerFailureStage | null;
+          readonly spawn_bound_max_runs: number | null;
+          readonly spawn_bound_window_seconds: number | null;
         }>`
           SELECT triggers.workflow_id, triggers.trigger_id, triggers.event_kind,
                  triggers.connection_id, triggers.filter, triggers.inputs,
-                 triggers.health_error_stage
-          FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
-          WHERE triggers.kind = 'start' AND triggers.status = 'active' AND workflows.enabled = 1
+                 triggers.health_error_stage, triggers.spawn_bound_max_runs,
+                 triggers.spawn_bound_window_seconds
+          FROM ${sql.literal(TRIGGERS_WITH_WORKFLOWS)}
+          WHERE ${sql.literal(IS_ROUTABLE_START_TRIGGER)}
         `,
         (rows) =>
           rows.map((row) => ({
@@ -760,23 +1040,55 @@ const make = Effect.gen(function* () {
             filter: row.filter ?? undefined,
             inputs: row.inputs === null ? {} : (JSON.parse(row.inputs) as Record<string, string>),
             hasEvaluationError: row.health_error_stage === "evaluation",
+            spawnBound: resolveSpawnBound(row, defaultBound),
           })),
       ),
 
     /**
-     * Checks whether a start trigger can start a run now: it is active and
-     * its workflow is enabled. A trigger that no longer exists cannot.
+     * Checks whether a start trigger's pending rows may start their runs: it
+     * meets `IS_ROUTABLE_START_TRIGGER`. Most rows that would fail never reach
+     * this check:
+     *
+     * - a manual pause holds the trigger's pending rows;
+     * - the pending rows of an invalid workflow are not read for delivery;
+     * - a deleted trigger's rows are deleted with it.
+     *
+     * So in practice a failing row belongs to a workflow that was disabled
+     * after the event matched.
      */
-    isRoutableStartTrigger: (key: TriggerKey): Effect.Effect<boolean, SqlError> =>
+    acceptsPendingEffects: (key: TriggerKey): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly trigger_id: string }>`
           SELECT triggers.trigger_id
-          FROM triggers JOIN workflows ON workflows.id = triggers.workflow_id
+          FROM ${sql.literal(TRIGGERS_WITH_WORKFLOWS)}
           WHERE triggers.workflow_id = ${uuidFromString(key.workflowId)}
             AND triggers.trigger_id = ${key.triggerId}
-            AND triggers.kind = 'start' AND triggers.status = 'active' AND workflows.enabled = 1
+            AND ${sql.literal(IS_ROUTABLE_START_TRIGGER)}
         `,
         (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Returns every start trigger that holds events and meets
+     * `IS_PROMOTABLE_START_TRIGGER`. Starting held events reads it. The
+     * query starts from the held rows, so it reads only the triggers that
+     * hold some.
+     */
+    listTriggersWithHeldEvents: (): Effect.Effect<ReadonlyArray<TriggerKey>, SqlError> =>
+      Effect.map(
+        sql<{ readonly workflow_id: Uint8Array; readonly trigger_id: string }>`
+          SELECT DISTINCT held.workflow_id, held.trigger_id
+          FROM trigger_effects AS held
+          JOIN triggers ON triggers.workflow_id = held.workflow_id
+                       AND triggers.trigger_id = held.trigger_id
+          JOIN workflows ON workflows.id = triggers.workflow_id
+          WHERE held.state = 'held' AND ${sql.literal(IS_PROMOTABLE_START_TRIGGER)}
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            workflowId: uuidToString(row.workflow_id),
+            triggerId: row.trigger_id,
+          })),
       ),
 
     /**
@@ -936,7 +1248,7 @@ const make = Effect.gen(function* () {
           readonly scheduling_error_message: string | null;
         }>`
           SELECT triggers.schedule, triggers.timezone,
-                 triggers.status = 'active' AND workflows.enabled = 1 AS can_fire,
+                 ${sql.literal(IS_ROUTABLE_START_TRIGGER)} AS can_fire,
                  triggers.next_fire_at, triggers.next_fire_zone, triggers.last_fired_at,
                  CASE WHEN triggers.health_error_stage = 'scheduling'
                       THEN triggers.health_error_message END AS scheduling_error_message

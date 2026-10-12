@@ -68,6 +68,7 @@ import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { sessionRepository } from "../sessions";
 import { buildAgentFieldChecks, buildModelSelection } from "./fields";
+import { AgentObserver } from "./observer";
 import { agentRepository, type AgentEdit, type StoredAgent } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -129,6 +130,7 @@ const make = Effect.gen(function* () {
   const { buildAgentRecordComposer, readProviderIdOrFail, validateProfileExists } =
     yield* buildAgentFieldChecks;
   const audit = yield* AuditLog;
+  const observer = yield* AgentObserver;
 
   /** Returns the stored agent, or fails with `NotFound` if no agent has this id. */
   const readAgentOrFail = (id: string): Effect.Effect<StoredAgent, NotFound | SqlError> =>
@@ -301,6 +303,9 @@ const make = Effect.gen(function* () {
      * assistant, or while a session this agent spawned has not exited. Such a
      * session keeps the agent's id after the delete: the session is history,
      * and it runs on its own copy of every value the agent gave it.
+     *
+     * Once the delete commits, it tells `AgentObserver`, so the stored
+     * workflows that name the agent are validated again and marked invalid.
      */
     delete: (id: Id): Effect.Effect<Record<string, never>, WriteError | NotFound | InvalidState> =>
       Effect.gen(function* () {
@@ -344,6 +349,7 @@ const make = Effect.gen(function* () {
             });
           }),
         );
+        yield* observer.agentDeleted();
         return {};
       }),
   };
@@ -357,5 +363,5 @@ export class AgentService extends Context.Service<AgentService, Effect.Success<t
 export const AgentServiceLayer: Layer.Layer<
   AgentService,
   never,
-  SqlClient.SqlClient | AuditLog | PermissionProfiles | PluginHost
+  SqlClient.SqlClient | AuditLog | PermissionProfiles | PluginHost | AgentObserver
 > = Layer.effect(AgentService)(make);
