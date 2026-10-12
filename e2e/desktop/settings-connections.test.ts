@@ -13,7 +13,7 @@
  * No Connection type in the binary can be created offline: GitHub checks a
  * pasted token against api.github.com, and Sentry against sentry.io. So the
  * table's rows are written into the scratch database while the controller
- * is stopped (see `writeConnectionRows`), and the setup test pastes a fake
+ * is stopped (see `replaceConnections`), and the setup test pastes a fake
  * token, which GitHub refuses when the machine is online and which fails to
  * reach GitHub when it is not. Both end in the same refusal under the field.
  *
@@ -27,7 +27,11 @@ import type { Locator, Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import type { HerculeClient } from "../../packages/client-core/src/index";
 import type { Connection } from "../../packages/contract/src/index";
-import { arrangeFleet, openSignedIn, writeConnectionRows, type ConnectionRow } from "./harness";
+import {
+  replaceConnections,
+  type ConnectionFixture,
+} from "../../apps/desktop/scripts/connection-fixtures";
+import { arrangeFleet, openSignedIn } from "./harness";
 
 /**
  * The Connections the table test writes, in the order the table lists them.
@@ -56,7 +60,7 @@ const ROWS = [
     statusDetail: "The feed failed 5 times in a row: 502 Bad Gateway",
     type: "acme/widgets",
   },
-] as const satisfies ReadonlyArray<ConnectionRow>;
+] as const satisfies ReadonlyArray<ConnectionFixture>;
 
 /** The token the refusal test pastes. GitHub issues no token of this shape. */
 const FAKE_TOKEN = "ghp_000000000000000000000000000000000000";
@@ -126,7 +130,7 @@ describe("Settings > Connections", () => {
   it("draws each Connection's health, renames one with Configure, and deletes one after asking", async () => {
     const arranged = await arrangeFleet();
     await arranged.restartController(() => {
-      writeConnectionRows(arranged.home, ROWS);
+      replaceConnections(arranged.home, ROWS);
     });
     const { client } = arranged;
     const { page } = await openSignedIn(arranged.url);
@@ -176,7 +180,10 @@ describe("Settings > Connections", () => {
     await expect.poll(() => readRowNames(page)).toContain("GitHub · work laptop");
 
     // Delete asks first; nothing is deleted until the dialog confirms.
-    const deleteDialog = page.getByRole("dialog", { name: "Delete team?", exact: true });
+    const deleteDialog = page.getByRole("dialog", {
+      name: "Delete acme/widgets · team?",
+      exact: true,
+    });
     await (
       await openRowMenu(page, "acme/widgets · team")
     )

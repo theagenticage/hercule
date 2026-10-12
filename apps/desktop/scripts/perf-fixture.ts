@@ -52,6 +52,7 @@ import {
   startController,
   startSetUpController,
 } from "../../../scripts/controller-process.ts";
+import { replaceConnections, type ConnectionFixture } from "./connection-fixtures.ts";
 import type { ScriptedRunner, ScriptStep } from "./scripted-runner.ts";
 import { connectFleet, type Fleet } from "./fleet.ts";
 import { pollUntil } from "./poll.ts";
@@ -127,25 +128,41 @@ const EVENT_AUTHORS = ["Marta", "Jonas", "Priya", "Tomas", "Ines"] as const;
 const DATABASE_PATH = ["data", "hercule.db"] as const;
 
 /**
- * The Connections `writeConnections` writes for the launch with Settings ›
- * Connections open: one of each health the table draws. The two of the type
- * `acme/widgets`, which no plugin in the binary declares, keep their
- * `connected` and `error` statuses, because the controller polls only
- * Connections of a type it knows, and a GitHub or Sentry Connection with no
- * token would be set to `needs-reauth` at its first poll.
+ * The Connections the launch with Settings › Connections open has: one of
+ * each health the table draws. The three of the type `acme/widgets`, which
+ * no plugin in the binary declares, keep their `connected` and `error`
+ * statuses, because the controller polls only Connections of a type it
+ * knows, and a GitHub or Sentry Connection with no token would be set to
+ * `needs-reauth` at its first poll.
  */
-const FIXTURE_CONNECTIONS = [
-  { label: "work", type: "github/github", status: "needs-reauth", detail: null },
-  { label: "acme", type: "sentry/sentry", status: "disabled", detail: null },
-  { label: "team", type: "acme/widgets", status: "connected", detail: null },
-  { label: "staging", type: "acme/widgets", status: "connected", detail: null },
+const FIXTURE_CONNECTIONS: ReadonlyArray<ConnectionFixture> = [
+  { id: "019a1234-5678-7000-8000-000000000010", label: "work", status: "needs-reauth" },
   {
-    label: "ops",
-    type: "acme/widgets",
-    status: "error",
-    detail: "The feed failed 5 times in a row: 502 Bad Gateway",
+    id: "019a1234-5678-7000-8000-000000000011",
+    label: "acme",
+    status: "disabled",
+    type: "sentry/sentry",
   },
-] as const;
+  {
+    id: "019a1234-5678-7000-8000-000000000012",
+    label: "team",
+    status: "connected",
+    type: "acme/widgets",
+  },
+  {
+    id: "019a1234-5678-7000-8000-000000000013",
+    label: "staging",
+    status: "connected",
+    type: "acme/widgets",
+  },
+  {
+    id: "019a1234-5678-7000-8000-000000000014",
+    label: "ops",
+    status: "error",
+    statusDetail: "The feed failed 5 times in a row: 502 Bad Gateway",
+    type: "acme/widgets",
+  },
+];
 
 /** What the user asks in each turn `growTranscript` plays. */
 const LONG_THREAD_QUESTION = "The checkout test fails again. Can you find out why?";
@@ -226,7 +243,7 @@ export interface ThreadFixture {
    * `backdateOpenSignals`). With `spreadRuns`, the runs of one workflow are
    * spread over a span of time too (see `spreadRuns`). With `connections`,
    * the controller holds the fixture's Connections for the launch, and
-   * without it none (see `writeConnections`). Fails when a thread is not in
+   * without it none (see `FIXTURE_CONNECTIONS`). Fails when a thread is not in
    * its expected state afterwards.
    */
   readonly prepareLaunch: (options: {
@@ -421,7 +438,11 @@ export async function runWithThreadFixture<T>(
         backdateOpenSignals(home);
         titleEvents(home);
         if (spread !== undefined) spreadRuns(home, spread);
-        writeConnections(home, connections);
+        // Only the launch with Settings › Connections open has Connections, so
+        // every other launch measures what it measured before Connections
+        // were built: a GitHub Connection adds a segment to Settings › Intake,
+        // and one that needs sign-in puts a dot on the Settings row.
+        replaceConnections(home, connections ? FIXTURE_CONNECTIONS : []);
         controller = await startController({ home, binary: findCompiledBinary(), port });
         await Promise.all(runners.map((runner) => runner.reconnect()));
         for (const runner of runners) {
@@ -600,43 +621,6 @@ function titleEvents(home: string): void {
       );
     }
     database.exec("INSERT INTO events_fts (events_fts) VALUES ('rebuild')");
-    database.exec("COMMIT");
-  } finally {
-    database.close();
-  }
-}
-
-/**
- * Deletes every Connection in the stopped controller's database in the Home
- * `home`, then, when `present` is true, writes `FIXTURE_CONNECTIONS`, a
- * millisecond apart so the table lists them in order. They have no
- * credentials and an empty config.
- *
- * Only the launch with Settings › Connections open has them, so every other
- * launch measures what it measured before Connections were built: a GitHub
- * Connection adds a segment to Settings › Intake, and one that needs sign-in
- * puts a dot on the Settings row. A Connection can only be written here,
- * because creating one asks the provider whether its credentials work.
- */
-function writeConnections(home: string, present: boolean): void {
-  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
-  try {
-    database.exec("BEGIN");
-    database.exec("DELETE FROM connections");
-    if (present) {
-      const insert = database.prepare(
-        "INSERT INTO connections (id, plugin_id, type, label, display_name, account_id, status, " +
-          "status_detail, labels, config, created_at, updated_at, feed_intervals) " +
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', '{}', ?, ?, '{}')",
-      );
-      const now = Date.now();
-      for (const [index, { label, type, status, detail }] of FIXTURE_CONNECTIONS.entries()) {
-        const at = new Date(now + index).toISOString();
-        // A fixed id in the shape of the UUIDv7 the controller hands out.
-        const id = Buffer.from(`019a12345678700080000000000000${String(10 + index)}`, "hex");
-        insert.run(id, type.split("/")[0]!, type, label, label, label, status, detail, at, at);
-      }
-    }
     database.exec("COMMIT");
   } finally {
     database.close();

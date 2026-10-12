@@ -37,6 +37,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Locator, Page } from "playwright";
 import { describe, expect, it, onTestFinished } from "vitest";
+import { replaceConnections } from "../../apps/desktop/scripts/connection-fixtures";
 import { writeSettings } from "../../apps/desktop/scripts/packaged-app";
 import {
   arrangeFleet,
@@ -45,7 +46,6 @@ import {
   launchForTest,
   openSignedIn,
   signInAndReadToken,
-  writeConnectionRows,
   type ArrangedFleet,
 } from "./harness";
 
@@ -73,7 +73,7 @@ interface KindValue {
 async function arrangeGithubConnections(): Promise<ArrangedFleet> {
   const arranged = await arrangeFleet();
   await arranged.restartController(() => {
-    writeConnectionRows(
+    replaceConnections(
       arranged.home,
       CONNECTIONS.map((connection) => ({ ...connection, status: "connected" })),
     );
