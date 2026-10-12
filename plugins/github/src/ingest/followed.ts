@@ -30,7 +30,8 @@
  *    listing is read newest first and stops at a page limit; a listing that
  *    has more since `since` than the limit allows logs a warning, because
  *    what it did not read is never emitted.
- * 3. `since` moves to the item's `updated_at`.
+ * 3. `since` moves forward to the item's `updated_at`, and never back: an
+ *    item recorded one second after its `updated_at` stays recorded there.
  *
  * Where `since` starts on an item's first read depends on why it is
  * followed:
@@ -39,11 +40,11 @@
  * - for an open signal, when the signal was raised;
  * - for a pull request the search for review requests found, when it last
  *   asked the user or one of their teams, found in its history
- *   (`findNewestReviewRequest`), so the request is emitted. When the history
- *   shows no such request, the item is recorded at its `updated_at`, emits
- *   nothing, and a warning is logged;
- * - for an own pull request, at its `updated_at`: it is recorded and emits
- *   nothing, as a newly watched repository baselines.
+ *   (`findLastReviewRequestTime`), so the request is emitted. When the history
+ *   shows no such request, the item is recorded one second after its
+ *   `updated_at`, emits nothing, and a warning is logged;
+ * - for an own pull request, one second after its `updated_at`: it is
+ *   recorded and emits nothing, as a newly watched repository baselines.
  *
  * The first poll that searches for review requests on a Connection records
  * every pull request it finds in the same way as an own pull request, so a
@@ -75,12 +76,15 @@ import {
   emitHistoryEvents,
   emitInTimeOrder,
   fetchPull,
-  findNewestReviewRequest,
+  findLastReviewRequestTime,
   isAtOrAfter,
   type ActivityPoll,
 } from "./activity";
 import { ListedComment, ListedIssue } from "./feed-objects";
-import { fetchOwnOpenPullRequests, fetchPullRequestsAskingForReview } from "./pull-searches";
+import {
+  fetchOwnOpenPullRequests,
+  fetchOpenPullRequestsAskingForUserReview,
+} from "./pull-searches";
 import {
   countRequests,
   decodeGithubValue,
@@ -143,6 +147,10 @@ const FollowedHints = Schema.Record(Schema.String, Schema.String);
 const pickEarlier = (left: string, right: string): string =>
   Date.parse(right) < Date.parse(left) ? right : left;
 
+/** Returns the later of two ISO 8601 timestamps. */
+const pickLater = (left: string, right: string): string =>
+  Date.parse(right) > Date.parse(left) ? right : left;
+
 /**
  * Records that the notifications feed saw news on an issue or a pull
  * request, new from `since`, so the next `repos` poll reads it. An item that
@@ -172,27 +180,30 @@ export const recordFollowedHints = (
  *
  * - `emit`: emits what happened at or after `start`, as for a notification
  *   or an open signal;
- * - `find-request`: emits from the newest review request to the user in the
+ * - `find-review-request`: emits from the newest review request to the user in the
  *   item's history, or records the item at `start` when there is none, as
  *   for a pull request the search for review requests found;
  * - `baseline`: records the item at `start` and emits nothing, as for an own
  *   pull request.
  */
-const FIRST_READS = ["emit", "find-request", "baseline"] as const;
+const FIRST_READS = ["emit", "find-review-request", "baseline"] as const;
+
+type FirstRead = (typeof FIRST_READS)[number];
 
 /** Why one item is followed: what its first read does, and from when. */
 interface FollowedItem {
   readonly item: Pick<GithubItem, "repo" | "kind" | "number">;
-  readonly firstRead: (typeof FIRST_READS)[number];
+  readonly firstRead: FirstRead;
   /** The time activity is new from, or the item is recorded at, on its first read. */
   readonly start: string;
 }
 
 /**
  * Adds one item to the followed set. When it is already there for another
- * reason, the reason earlier in `FIRST_READS` wins, and of two `emit`
- * reasons the earlier start wins, so nothing either reason would emit is
- * skipped.
+ * reason, the reason earlier in `FIRST_READS` wins. Of two `emit` reasons
+ * the earlier start wins, so nothing either reason would emit is skipped. Of
+ * two `baseline` reasons the later start wins, so nothing that happened
+ * before either baseline is emitted.
  */
 const addFollowedItem = (followed: Map<string, FollowedItem>, next: FollowedItem): void => {
   const ref = buildItemRef(next.item);
@@ -204,6 +215,8 @@ const addFollowedItem = (followed: Map<string, FollowedItem>, next: FollowedItem
     followed.set(ref, next);
   } else if (known.firstRead === "emit" && next.firstRead === "emit") {
     followed.set(ref, { ...known, start: pickEarlier(known.start, next.start) });
+  } else if (known.firstRead === "baseline" && next.firstRead === "baseline") {
+    followed.set(ref, { ...known, start: pickLater(known.start, next.start) });
   }
 };
 
@@ -333,7 +346,7 @@ const readFollowedItem = (
     }
 
     return Option.some({
-      since: issue.updated_at,
+      since: pickLater(since, issue.updated_at),
       ...(response.etag === undefined ? {} : { etag: response.etag }),
     });
   });
@@ -382,7 +395,7 @@ const isSameItemState = (left: FollowedItemState, right: FollowedItemState): boo
  * gets a hint at the `since` it was read from: the failed read emitted
  * nothing (`emitInTimeOrder`), so the next poll reads it again, followed or
  * not. A failed look in a pull request's history for when it asked the user
- * for a review (`findNewestReviewRequest`) records neither a hint nor a
+ * for a review (`findLastReviewRequestTime`) records neither a hint nor a
  * state, so the next poll's search finds the pull request and looks again.
  *
  * One item failing with a `PluginError` is logged as a warning and does not
@@ -411,12 +424,12 @@ export const pollFollowedItems = (
         });
       }
       const reviewRequestsBaselined = Option.isSome(
-        yield* readFeedState(store, REVIEW_REQUESTS_BASELINED_KEY, Schema.Boolean),
+        yield* readFeedState(store, REVIEW_REQUESTS_BASELINED_KEY, Schema.Literal(true)),
       );
-      for (const found of yield* fetchPullRequestsAskingForReview(token)) {
+      for (const found of yield* fetchOpenPullRequestsAskingForUserReview(token)) {
         addFollowedItem(followed, {
           item: { repo: found.repo, kind: "pr", number: found.number },
-          firstRead: reviewRequestsBaselined ? "find-request" : "baseline",
+          firstRead: reviewRequestsBaselined ? "find-review-request" : "baseline",
           start: addOneSecond(found.updatedAt),
         });
       }
@@ -483,14 +496,14 @@ export const pollFollowedItems = (
       yield* Effect.gen(function* () {
         for (const ref of order) {
           const { item, firstRead, start } = followed.get(ref)!;
-          const key = `${ITEM_PREFIX}${ref}`;
-          const stored = yield* readFeedState(store, key, FollowedItemState);
           const spent = read > 0 && sent() >= MAX_FOLLOWED_REQUESTS_PER_POLL;
           if (read === MAX_FOLLOWED_ITEMS_PER_POLL || spent) {
             waiting += 1;
             continue;
           }
           read += 1;
+          const key = `${ITEM_PREFIX}${ref}`;
+          const stored = yield* readFeedState(store, key, FollowedItemState);
           const poll: ActivityPoll = {
             repo: item.repo,
             token,
@@ -515,9 +528,11 @@ export const pollFollowedItems = (
             } else if (firstRead === "emit") {
               state = { since: start };
             } else {
-              // A failed lookup records nothing: the item has no state, so
-              // the next poll's search finds it and looks again.
-              const requestedAt = yield* findNewestReviewRequest(poll, item.number);
+              // Only a `find-review-request` item gets here: a `baseline`
+              // item without state was recorded before the loop. A failed
+              // lookup records nothing, so the next poll's search finds the
+              // item and looks again.
+              const requestedAt = yield* findLastReviewRequestTime(poll, item.number);
               if (requestedAt === undefined) {
                 yield* Effect.logWarning(
                   `The GitHub repos feed found ${buildItemPlace(item)} by searching for review requests to the Connection's account, but the newest entries of its history hold no review request to the account or one of its teams. Its request is not emitted; what happens on it from now on is.`,

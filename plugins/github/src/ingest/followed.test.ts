@@ -31,8 +31,13 @@ import { GithubRateLimited } from "./requests";
 const REPO = "acme/webshop";
 const SINCE = "2026-10-11T08:00:00Z";
 
-/** The state key that marks that the search for review requests has baselined. */
-const BASELINE_KEY = "review-requests-baselined";
+/**
+ * The state key that marks that the search for review requests has
+ * baselined. Written out rather than imported: the key is stored, so a
+ * change to it would make every Connection baseline again, and this test
+ * should fail when that happens.
+ */
+const REVIEW_REQUESTS_BASELINED_KEY = "review-requests-baselined";
 
 /** An open pull request of `acme/webshop`, as `GET .../issues/{number}` returns it. */
 const buildPull = (number: number, extra: object = {}) => ({
@@ -166,6 +171,14 @@ const pollOnce = (
     stub,
   ).then((result) => ({ result, stub, warnings }));
 };
+
+/** Returns a route that answers 500 for an item's history and everything else as `answer` does. */
+const failHistoryReads =
+  (answer: (request: HttpClientRequest.HttpClientRequest) => StubResponse) =>
+  (request: HttpClientRequest.HttpClientRequest): StubResponse =>
+    readStubRequestTarget(request).path.endsWith("/events")
+      ? { status: 500, body: { message: "Server Error" } }
+      : answer(request);
 
 /** Returns how many requests for an item's history the stub received. */
 const countHistoryReads = (stub: GithubStub): number =>
@@ -435,15 +448,11 @@ describe("pollFollowedItems", () => {
   it("reads an own pull request whose read failed again, even once it is closed", async () => {
     const harness = buildIngestHarness();
     const answer = answerItem(buildPull);
-    const failHistory = (request: HttpClientRequest.HttpClientRequest): StubResponse =>
-      readStubRequestTarget(request).path.endsWith("/events")
-        ? { status: 500, body: { message: "Server Error" } }
-        : answer(request);
     const own = [buildFoundPull(1, "2026-10-11T08:30:00Z")];
     await pollOnce(harness, answerSearches({ own }, answer));
 
     // The review request at 09:00 is read, then the history read fails.
-    await pollOnce(harness, answerSearches({ own }, failHistory));
+    await pollOnce(harness, answerSearches({ own }, failHistoryReads(answer)));
     expect(harness.events).toEqual([]);
 
     // The pull request is closed, so the search no longer finds it.
@@ -539,7 +548,67 @@ describe("pollFollowedItems, for pull requests the search finds asking for a rev
     expect(stub.requests.filter((request) => !isUserRequest(request))).toEqual([]);
     expect(harness.events).toEqual([]);
     expect(harness.state.get(FOLLOWED_1)).toEqual({ since: "2026-10-11T08:30:01.000Z" });
-    expect(harness.state.get(BASELINE_KEY)).toBe(true);
+    expect(harness.state.get(REVIEW_REQUESTS_BASELINED_KEY)).toBe(true);
+  });
+
+  it("keeps a recorded pull request's time when a read finds it unchanged, so a later edit emits no old request", async () => {
+    const harness = buildIngestHarness();
+    // marta asked for the review at 09:30, the pull request's update time.
+    const history = () => [buildReviewRequest(70, "2026-10-11T09:30:00Z")];
+    const asking = [buildFoundPull(1)];
+    await pollOnce(harness, answerSearches({ asking }, answerItem(buildPull, history)));
+
+    await pollOnce(harness, answerSearches({ asking }, answerItem(buildPull, history)));
+    expect(harness.state.get(FOLLOWED_1)).toEqual({ since: "2026-10-11T09:30:01.000Z" });
+
+    // marta edits the title at 10:00.
+    const edited = (number: number) => buildPull(number, { updated_at: "2026-10-11T10:00:00Z" });
+    await pollOnce(
+      harness,
+      answerSearches(
+        { asking: [buildFoundPull(1, "2026-10-11T10:00:00Z")] },
+        answerItem(edited, history),
+      ),
+    );
+
+    expect(harness.events).toEqual([]);
+    expect(harness.state.get(FOLLOWED_1)).toEqual({ since: "2026-10-11T10:00:00Z" });
+  });
+
+  it("records an own pull request its first search also finds at the later of the two times", async () => {
+    const harness = buildIngestHarness();
+
+    await pollOnce(
+      harness,
+      answerSearches(
+        {
+          own: [buildFoundPull(1, "2026-10-11T08:30:00Z")],
+          asking: [buildFoundPull(1, "2026-10-11T09:30:00Z")],
+        },
+        answerItem(buildPull),
+      ),
+    );
+
+    expect(harness.state.get(FOLLOWED_1)).toEqual({ since: "2026-10-11T09:30:01.000Z" });
+  });
+
+  it("records what its first search finds and marks it baselined before a rate limit stops the poll", async () => {
+    const harness = buildIngestHarness();
+    await recordHints(harness, 2);
+    const answer = answerItem(buildPull);
+    const limited = answerSearches({ asking: [buildFoundPull(3)] }, (request) =>
+      readItemNumber(request) === 1
+        ? { status: 429, body: { message: "rate limit" }, headers: { "retry-after": "60" } }
+        : answer(request),
+    );
+
+    const { result } = await pollOnce(harness, limited);
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(GithubRateLimited);
+    expect(harness.state.get(`followed/github:pr:${REPO}#3`)).toEqual({
+      since: "2026-10-11T09:30:01.000Z",
+    });
+    expect(harness.state.get(REVIEW_REQUESTS_BASELINED_KEY)).toBe(true);
   });
 
   it.each([
@@ -575,7 +644,7 @@ describe("pollFollowedItems, for pull requests the search finds asking for a rev
 
   it("emits what happened on a newly found pull request after the request, and nothing before it", async () => {
     const harness = buildIngestHarness();
-    harness.state.set(BASELINE_KEY, true);
+    harness.state.set(REVIEW_REQUESTS_BASELINED_KEY, true);
     const answer = answerItem(buildPull);
     const route = answerSearches({ asking: [buildFoundPull(1)] }, (request) =>
       readStubRequestTarget(request).path.endsWith("/comments")
@@ -600,7 +669,7 @@ describe("pollFollowedItems, for pull requests the search finds asking for a rev
 
   it("records a found pull request whose history names no request to the user, and warns once", async () => {
     const harness = buildIngestHarness();
-    harness.state.set(BASELINE_KEY, true);
+    harness.state.set(REVIEW_REQUESTS_BASELINED_KEY, true);
     const toSomeoneElse = { requested_reviewer: { login: "hubot", id: 5 } };
     const route = answerSearches(
       { asking: [buildFoundPull(1)] },
@@ -621,7 +690,7 @@ describe("pollFollowedItems, for pull requests the search finds asking for a rev
 
   it("reads a found pull request it already follows from its stored time, with no lookup", async () => {
     const harness = buildIngestHarness();
-    harness.state.set(BASELINE_KEY, true);
+    harness.state.set(REVIEW_REQUESTS_BASELINED_KEY, true);
     harness.state.set(FOLLOWED_1, { since: "2026-10-11T09:10:00Z" });
 
     const { stub } = await pollOnce(
@@ -630,6 +699,7 @@ describe("pollFollowedItems, for pull requests the search finds asking for a rev
     );
 
     // The request at 09:00 is before the stored time, so it is not emitted.
+    // The one history read is the item's own read: there is no lookup.
     expect(harness.events).toEqual([]);
     expect(countHistoryReads(stub)).toBe(1);
     expect(harness.state.get(FOLLOWED_1)).toEqual({ since: "2026-10-11T09:30:00Z" });
@@ -637,7 +707,7 @@ describe("pollFollowedItems, for pull requests the search finds asking for a rev
 
   it("reads a found pull request a notification also named once, from the notification's time", async () => {
     const harness = buildIngestHarness();
-    harness.state.set(BASELINE_KEY, true);
+    harness.state.set(REVIEW_REQUESTS_BASELINED_KEY, true);
     // The notification's time is 08:00.
     await recordHints(harness, 1);
     const answer = answerItem(buildPull);
@@ -650,6 +720,7 @@ describe("pollFollowedItems, for pull requests the search finds asking for a rev
     const { stub } = await pollOnce(harness, route);
 
     const itemRequests = stub.requests.filter((request) => !isUserRequest(request));
+    // The item is read first, and its one history read is its own: there is no lookup.
     expect(readStubRequestTarget(itemRequests[0]!).path).toBe(`/repos/${REPO}/issues/1`);
     expect(countHistoryReads(stub)).toBe(1);
     // The comment at 08:30 is after the notification's time and before the
@@ -662,7 +733,7 @@ describe("pollFollowedItems, for pull requests the search finds asking for a rev
 
   it("reads an own pull request the search for review requests also finds, rather than recording it", async () => {
     const harness = buildIngestHarness();
-    harness.state.set(BASELINE_KEY, true);
+    harness.state.set(REVIEW_REQUESTS_BASELINED_KEY, true);
     const found = [buildFoundPull(1)];
 
     await pollOnce(harness, answerSearches({ own: found, asking: found }, answerItem(buildPull)));
@@ -672,7 +743,7 @@ describe("pollFollowedItems, for pull requests the search finds asking for a rev
 
   it("leaves a found pull request in a watched repository to the watch list's poll", async () => {
     const harness = buildIngestHarness();
-    harness.state.set(BASELINE_KEY, true);
+    harness.state.set(REVIEW_REQUESTS_BASELINED_KEY, true);
     const asking = [buildFoundPull(1), buildFoundPull(2, undefined, "acme/other")];
 
     const { stub } = await pollOnce(harness, answerSearches({ asking }, answerItem(buildPull)), {
@@ -689,7 +760,7 @@ describe("pollFollowedItems, for pull requests the search finds asking for a rev
 
   it("forgets a pull request that leaves the search, and emits a new request when it is found again", async () => {
     const harness = buildIngestHarness();
-    harness.state.set(BASELINE_KEY, true);
+    harness.state.set(REVIEW_REQUESTS_BASELINED_KEY, true);
     const answer = answerItem(buildPull);
     await pollOnce(harness, answerSearches({ asking: [buildFoundPull(1)] }, answer));
 
@@ -715,7 +786,7 @@ describe("pollFollowedItems, for pull requests the search finds asking for a rev
 
   it("counts the searches and the lookups toward the request limit, and leaves the rest for the next poll", async () => {
     const harness = buildIngestHarness();
-    harness.state.set(BASELINE_KEY, true);
+    harness.state.set(REVIEW_REQUESTS_BASELINED_KEY, true);
     const found = Array.from({ length: 25 }, (_, index) => buildFoundPull(index + 1));
     const route = answerSearches({ asking: found }, answerItem(buildPull));
 
@@ -736,15 +807,11 @@ describe("pollFollowedItems, for pull requests the search finds asking for a rev
 
   it("records nothing for a found pull request whose lookup fails, and finds it again at the next poll", async () => {
     const harness = buildIngestHarness();
-    harness.state.set(BASELINE_KEY, true);
+    harness.state.set(REVIEW_REQUESTS_BASELINED_KEY, true);
     const answer = answerItem(buildPull);
     const asking = [buildFoundPull(1)];
-    const failHistory = (request: HttpClientRequest.HttpClientRequest): StubResponse =>
-      readStubRequestTarget(request).path.endsWith("/events")
-        ? { status: 500, body: { message: "Server Error" } }
-        : answer(request);
 
-    await pollOnce(harness, answerSearches({ asking }, failHistory));
+    await pollOnce(harness, answerSearches({ asking }, failHistoryReads(answer)));
 
     expect(harness.events).toEqual([]);
     expect(harness.state.has(FOLLOWED_1)).toBe(false);

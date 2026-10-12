@@ -43,11 +43,14 @@ export interface ActivityPoll {
 const MAX_HISTORY_PAGES = 10;
 
 /**
- * The most requests `findNewestReviewRequest` sends, 100 history entries a
- * page. The pull requests it is asked about still ask the user for a review,
- * so the request is most often among the newest entries.
+ * The most requests `findLastReviewRequestTime` sends, 100 history entries a
+ * page. They cover a whole history of up to 300 entries, and the newest 200
+ * of a longer one: the first request reads the oldest page, which
+ * `fetchNewestItems` uses only when it reaches it. The pull requests it is
+ * asked about still ask the user for a review, so the request is most often
+ * among the newest entries.
  */
-const MAX_REQUEST_LOOKUP_PAGES = 3;
+const MAX_REVIEW_REQUEST_LOOKUP_PAGES = 3;
 
 /**
  * The most requests one poll sends for a pull request's reviews, 100 a page,
@@ -336,17 +339,21 @@ const isReviewRequestToUser = (poll: ActivityPoll, entry: IssueEvent): boolean =
 
 /**
  * Finds when a pull request last asked the user or one of their teams for a
- * review. Reads the pull request's history newest first, at most
- * `MAX_REQUEST_LOOKUP_PAGES` pages, and stops at the first page that holds
- * such a request. Returns the `created_at` of the newest one, or undefined
- * when the pages read hold none.
+ * review. Reads the pull request's history newest first, with at most
+ * `MAX_REVIEW_REQUEST_LOOKUP_PAGES` requests, and stops at the first page
+ * that holds such a request. Returns the `created_at` of the newest one, or
+ * undefined when the pages read hold none.
+ *
+ * Deciding whether to read an older page skips an entry that does not
+ * decode; the entries read are then decoded strictly, as `emitHistoryEvents`
+ * decodes them, so one malformed entry fails the lookup.
  *
  * A request to a team is found only when the team is in `poll.teams`, which
  * stays empty when the token may not list the user's teams. Fails as
  * `fetchNewestItems` fails, and with a `PluginError` when an entry lacks the
  * fields read.
  */
-export const findNewestReviewRequest = (
+export const findLastReviewRequestTime = (
   poll: ActivityPoll,
   number: number,
 ): Effect.Effect<string | undefined, FeedError, HttpClient.HttpClient> =>
@@ -359,7 +366,7 @@ export const findNewestReviewRequest = (
         token: poll.token,
         query: { per_page: "100" },
       },
-      MAX_REQUEST_LOOKUP_PAGES,
+      MAX_REVIEW_REQUEST_LOOKUP_PAGES,
       (items) =>
         !items.some((raw) =>
           Option.exists(decodeEntry(raw), (entry) => isReviewRequestToUser(poll, entry)),

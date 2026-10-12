@@ -7,12 +7,15 @@ import { Result } from "effect";
 import { AuthError, PluginError } from "@hercule/plugin-host";
 import { TEST_TOKEN } from "../actions/testing";
 import { readStubRequestTarget, runAgainstStub, stubGithub, type StubResponse } from "../testing";
-import { fetchOwnOpenPullRequests, fetchPullRequestsAskingForReview } from "./pull-searches";
+import {
+  fetchOwnOpenPullRequests,
+  fetchOpenPullRequestsAskingForUserReview,
+} from "./pull-searches";
 import { GithubRateLimited } from "./requests";
 
 const SEARCHES = [
   { search: fetchOwnOpenPullRequests, qualifier: "author:@me" },
-  { search: fetchPullRequestsAskingForReview, qualifier: "review-requested:@me" },
+  { search: fetchOpenPullRequestsAskingForUserReview, qualifier: "review-requested:@me" },
 ];
 
 describe.each(SEARCHES)("the search for $qualifier", ({ search, qualifier }) => {
@@ -53,6 +56,27 @@ describe.each(SEARCHES)("the search for $qualifier", ({ search, qualifier }) => 
         updatedAt: "2026-10-11T09:00:00Z",
       },
     ]);
+  });
+
+  it("drops a result whose repository_url ends in no valid repository name", async () => {
+    const stub = stubGithub(() => ({
+      status: 200,
+      body: {
+        total_count: 1,
+        items: [
+          {
+            number: 87,
+            title: "Fix the cart",
+            repository_url: "https://api.github.com/repos/acme/..",
+            updated_at: "2026-10-11T09:00:00Z",
+          },
+        ],
+      },
+    }));
+
+    const result = await runAgainstStub(search(TEST_TOKEN), stub);
+
+    expect(Result.getOrThrow(result)).toEqual([]);
   });
 
   it.each<[string, StubResponse, new (...args: never) => Error]>([

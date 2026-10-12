@@ -7,6 +7,7 @@
  */
 import { Effect, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
+import { REPO_NAME_PATTERN } from "../repo-name";
 import { FoundIssue } from "./feed-objects";
 import { decodeGithubValue, fetchListing, type FeedError } from "./requests";
 
@@ -26,9 +27,15 @@ export interface FoundPullRequest {
  */
 const MAX_FOUND_PULL_REQUESTS = 100;
 
-/** Returns the repository a search result's `repository_url` points at, as lowercase `owner/repo`. */
+const REPOSITORY_URL = new RegExp(`/repos/(${REPO_NAME_PATTERN})$`);
+
+/**
+ * Returns the repository a search result's `repository_url` points at, as
+ * lowercase `owner/repo`, or undefined when the URL ends in no valid
+ * repository name.
+ */
 const parseRepositoryUrl = (url: string): string | undefined =>
-  /\/repos\/([^/]+\/[^/]+)$/.exec(url)?.[1]?.toLowerCase();
+  REPOSITORY_URL.exec(url)?.[1]?.toLowerCase();
 
 /**
  * Searches for the open pull requests that match `qualifier`, in any
@@ -86,7 +93,7 @@ export const fetchOwnOpenPullRequests = (
  * `review-requested:` qualifier includes a request to any team the user is
  * on, so one search covers the teams too.
  */
-export const fetchPullRequestsAskingForReview = (
+export const fetchOpenPullRequestsAskingForUserReview = (
   token: string,
 ): Effect.Effect<ReadonlyArray<FoundPullRequest>, FeedError, HttpClient.HttpClient> =>
   searchOpenPullRequests(token, "review-requested:@me");
