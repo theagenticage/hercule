@@ -13,12 +13,17 @@
  * - what opening and closing the split costs: the renderer's longest task,
  *   how long after the click the transition starts, and the frames the page
  *   drew while the transition ran, with the 250 rows the steps above leave
- *   in the list.
+ *   in the list;
+ * - what the list's motion costs on screen: one signal arriving, a burst of
+ *   30 arriving, and inbox zero after the user's own Done of the last
+ *   signal. For each: the frames drawn and the longest gap between them, the
+ *   renderer main thread's time and longest task, and what still runs once
+ *   the motion is over (see `measureRowMotion`).
  *
- * To do is sorted oldest first, so a raised signal lands below the rows on
- * screen. The per-push cost is then the read and the list's render, with no
- * row on screen to animate. The Performance panel rows of the cost table,
- * the per-push animation and inbox zero, are not measured here.
+ * To do is sorted oldest first, so a signal raised in the steps before the
+ * motion lands below the rows on screen, and their cost is the read and the
+ * list's render, with no row on screen to animate. The motion steps first
+ * clear To do down to a few signals, so their arrivals land on screen.
  *
  * A second scenario, `measureEverythingWork`, measures Everything on 1,000
  * events (see `seedEvents`): opening the view, scrolling the list to its end,
@@ -48,6 +53,7 @@ import {
   readProcessMemory,
   readTrace,
   TIMELINE_CATEGORY,
+  type TraceEvent,
   waitForPageSocketUrl,
 } from "./perf-measures.ts";
 import { pollUntil } from "./poll.ts";
@@ -188,6 +194,55 @@ interface SplitCost {
   readonly frameIntervalMs: number;
 }
 
+/**
+ * What one change to Intake's list cost while it moved on screen, from the
+ * change until the last of its animations ended, and in the second after.
+ */
+interface MotionCost {
+  /** How many signals were on screen when the change began, before it. */
+  readonly rowsBefore: number;
+  /** How long the motion ran, from its first frame to the frame that found no animation left, in milliseconds. */
+  readonly motionMs: number;
+  /** How many frames the page drew over the motion, both ends included. */
+  readonly frames: number;
+  /** The longest time between two of those frames, in milliseconds. */
+  readonly longestFrameGapMs: number;
+  /** The usual time between two of those frames, the median, in milliseconds. */
+  readonly frameIntervalMs: number;
+  /**
+   * How many different start times the change's animations had. Rows that
+   * start together move as one block, so a burst should have one, and its
+   * leaving rows' fade at most one more.
+   */
+  readonly starts: number;
+  /** How many animations the change ran on Intake. */
+  readonly animations: number;
+  /** The time the renderer's main thread spent running tasks, from the change to the motion's end, in milliseconds. */
+  readonly mainThreadMs: number;
+  /** The longest of those tasks, in milliseconds. */
+  readonly longestTaskMs: number;
+  /**
+   * How long the spec gives the motion, in milliseconds: `--dur-2` for rows,
+   * 800 ms plus the pane's 320 ms wait for inbox zero's arrival.
+   */
+  readonly lengthMs: number;
+  /**
+   * How long after the motion's first frame the renderer's main thread drew
+   * its last frame, up to a second after the motion ended, in milliseconds.
+   */
+  readonly lastFrameMs: number;
+  /** How many frames the renderer's main thread drew in the second after the motion. */
+  readonly framesAfter: number;
+  /** The time the renderer's main thread spent running tasks in that second, in milliseconds. */
+  readonly mainThreadAfterMs: number;
+  /** The longest of those tasks, in milliseconds. */
+  readonly longestTaskAfterMs: number;
+  /** How many animations the page still held, in any state, when the recording ended. */
+  readonly animationsAfter: number;
+  /** How many leaving rows' copies the ghost layer still held when the recording ended. */
+  readonly ghostsAfter: number;
+}
+
 /** What the Intake scenario measured. */
 export interface IntakeWork {
   /** The machine's load average over the minute before the app was spawned. */
@@ -196,6 +251,12 @@ export interface IntakeWork {
   readonly burst: BurstCost;
   readonly splitOpen: SplitCost;
   readonly splitClose: SplitCost;
+  /** One signal raised elsewhere that lands on screen. */
+  readonly arrival: MotionCost;
+  /** `BURST_SIZE` signals raised elsewhere at once, landing on screen. */
+  readonly arrivalBurst: MotionCost;
+  /** The user's own Done of the last signal on To do, which brings inbox zero. */
+  readonly inboxZero: MotionCost;
 }
 
 /**
@@ -213,7 +274,9 @@ export interface IntakeWork {
  *   the Hercule segment counts them all, plus 2 s;
  * - the split opened and then closed with the header's button: for each, a
  *   trace and the page's animation frames from the click until one frame
- *   after the transition's `--dur-3` is over (see `measureSplitToggle`).
+ *   after the transition's `--dur-3` is over (see `measureSplitToggle`);
+ * - the list's motion: one arrival and a burst landing on screen, and inbox
+ *   zero arriving (see `measureRowMotion`).
  *
  * The reads of To do are counted from the page's resource timing entries.
  * One connection to the page serves the whole scenario. The window stays
@@ -222,7 +285,8 @@ export interface IntakeWork {
  * Fails when Intake does not show with its signals within 15 s, when the
  * segment does not count a raised signal within 10 s, when the split does
  * not open or close, when the split has no transition to measure, when a
- * trace lost events, or when the app does not quit cleanly afterwards.
+ * trace lost events, when a step of the list's motion fails (see
+ * `measureRowMotion`), or when the app does not quit cleanly afterwards.
  */
 export async function measureIntakeWork(
   userDataDir: string,
@@ -324,7 +388,15 @@ export async function measureIntakeWork(
       const splitOpen = await measureSplitToggle(page, true);
       await sleep(PUSH_SETTLE_MS);
       const splitClose = await measureSplitToggle(page, false);
-      measured = { loadAtSpawn, pushes, burst, splitOpen, splitClose };
+      await sleep(PUSH_SETTLE_MS);
+      measured = {
+        loadAtSpawn,
+        pushes,
+        burst,
+        splitOpen,
+        splitClose,
+        ...(await measureRowMotion(page, fixture)),
+      };
     } finally {
       page.close();
     }
@@ -428,6 +500,336 @@ async function measureSplitToggle(page: Inspector, opens: boolean): Promise<Spli
   };
 }
 
+/** How many signals stay on To do while signals arrive, so that each arrival lands on screen. */
+const ROWS_BEFORE_ARRIVAL = 3;
+
+/**
+ * Where the pointer rests while signals arrive: over the sidebar, off
+ * Intake's list. With the pointer over the list, Intake holds changes made
+ * elsewhere until it leaves (spec 17 §Motion), so nothing would move.
+ */
+const POINTER_OFF_LIST = { x: 100, y: 400 };
+
+/**
+ * How long a measured change runs before its recording is read, in
+ * milliseconds. It covers the change's request, the read it causes, the
+ * longest motion (inbox zero's 1,120 ms) and the second after, so nothing
+ * talks to the page while the second after the motion is recorded.
+ */
+const MOTION_RECORD_MS = 3_500;
+
+/**
+ * How long inbox zero's arrival runs here, as spec 17 §Motion sets it, in
+ * milliseconds: 800 ms, after a wait of `--dur-3` (320 ms) for the pane to
+ * close, because the measured Done is made with the pane open.
+ */
+const INBOX_ZERO_ARRIVAL_MS = 800 + 320;
+
+/** The renderer's main thread draws a frame in each `BeginMainThreadFrame` event. */
+const MAIN_THREAD_FRAME = "BeginMainThreadFrame";
+
+/**
+ * Measures how Intake's list moves on screen, after the scenario's other
+ * steps, and returns what each change cost (see `measureListChange`):
+ *
+ * - one signal raised elsewhere, landing on screen;
+ * - `BURST_SIZE` signals raised elsewhere at once, landing on screen;
+ * - the user's own Done, with the E key, of the last signal on To do,
+ *   which brings inbox zero.
+ *
+ * To do is sorted oldest first, so a raised signal lands below the rows on
+ * screen. To land it on screen, `signal.markDone` first clears To do down to
+ * `ROWS_BEFORE_ARRIVAL` signals, and before inbox zero down to one. The
+ * pointer rests off the list while signals arrive. Fails when `--dur-2` is
+ * 0, as under Reduce motion, because then nothing moves, when the list does
+ * not show what a step asks for within 10 s, and when a change moves nothing.
+ */
+async function measureRowMotion(
+  page: Inspector,
+  fixture: ThreadFixture,
+): Promise<Pick<IntakeWork, "arrival" | "arrivalBurst" | "inboxZero">> {
+  const evaluate = (expression: string) =>
+    page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
+  const waitInPage = (expression: string, timeoutMessage: string) =>
+    pollUntil(async () => ((await evaluate(expression)) === true ? true : undefined), {
+      timeoutMs: 10_000,
+      intervalMs: 50,
+      timeoutMessage,
+    });
+  const rowsMs = (await evaluate(`(() => {
+    const value = getComputedStyle(document.documentElement).getPropertyValue("--dur-2").trim();
+    return value.endsWith("ms") ? parseFloat(value) : parseFloat(value) * 1000;
+  })()`)) as number;
+  if (!(rowsMs > 0)) {
+    throw new Error(
+      `--dur-2 is ${String(rowsMs)} ms, so Intake's rows do not move. Turn Reduce motion off and run the script again.`,
+    );
+  }
+  const rows = `${SIGNALS_LIST} .ask-row`;
+  const leaveOnToDo = async (count: number) => {
+    const { items } = await fixture.call<{ readonly items: readonly { readonly id: string }[] }>(
+      "GET",
+      "/signals?view=to-do",
+    );
+    await fixture.call("POST", "/signals/mark-done", {
+      signalIds: items.slice(count).map((signal) => signal.id),
+    });
+    await waitInPage(
+      `document.querySelectorAll(${JSON.stringify(rows)}).length === ${String(count)} &&
+        document.getAnimations().length === 0`,
+      `Intake's list did not settle on ${String(count)} signals`,
+    );
+    await sleep(PUSH_SETTLE_MS);
+  };
+  // Whether a row whose title starts with the given text sits inside the
+  // list's visible area.
+  const countRowsOnScreen = (title: string) => `(() => {
+    const view = document.querySelector(${JSON.stringify(`${SIGNALS_LIST} .asks-scroll`)}).getBoundingClientRect();
+    return [...document.querySelectorAll(${JSON.stringify(rows)})].filter((row) => {
+      const box = row.getBoundingClientRect();
+      return row.querySelector(".ask-title")?.textContent.startsWith(${JSON.stringify(title)}) &&
+        box.bottom > view.top && box.top < view.bottom;
+    }).length;
+  })()`;
+
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...POINTER_OFF_LIST });
+  await leaveOnToDo(ROWS_BEFORE_ARRIVAL);
+  const arrival = await measureListChange(page, {
+    change: async () => {
+      await raiseSignal(fixture, "Arrived signal");
+    },
+    lengthMs: rowsMs,
+    endsWhen: "true",
+    mustSee: "true",
+  });
+  if ((await evaluate(countRowsOnScreen("Arrived signal"))) !== 1) {
+    throw new Error("the arrived signal did not land on screen");
+  }
+  await sleep(PUSH_SETTLE_MS);
+  const arrivalBurst = await measureListChange(page, {
+    change: async () => {
+      await Promise.all(
+        Array.from({ length: BURST_SIZE }, (_, index) =>
+          raiseSignal(fixture, `Arrived burst signal ${String(index + 1)}`),
+        ),
+      );
+    },
+    lengthMs: rowsMs,
+    endsWhen: "true",
+    mustSee: "true",
+  });
+  if (((await evaluate(countRowsOnScreen("Arrived burst signal"))) as number) === 0) {
+    throw new Error("no signal of the burst landed on screen");
+  }
+
+  await leaveOnToDo(1);
+  const box = (await evaluate(`(() => {
+    const box = document.querySelector(${JSON.stringify(rows)}).getBoundingClientRect();
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  })()`)) as { x: number; y: number };
+  // A click selects the row and gives it the focus the keys need. The
+  // pointer stays over the list, where a user who clicked leaves it.
+  for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+    await page.send("Input.dispatchMouseEvent", { type, ...box, button: "left", clickCount: 1 });
+  }
+  await waitInPage(
+    `document.querySelector(${JSON.stringify(`${rows}[aria-current="true"]`)}) !== null`,
+    "a click on the last signal did not select it",
+  );
+  await sleep(PUSH_SETTLE_MS);
+  const inboxZero = await measureListChange(page, {
+    change: async () => {
+      for (const type of ["keyDown", "keyUp"]) {
+        await page.send("Input.dispatchKeyEvent", {
+          type,
+          key: "e",
+          code: "KeyE",
+          windowsVirtualKeyCode: 69,
+          ...(type === "keyDown" ? { text: "e" } : {}),
+        });
+      }
+    },
+    lengthMs: INBOX_ZERO_ARRIVAL_MS,
+    endsWhen: `document.querySelector(".asks-zero") !== null`,
+    mustSee: `document.querySelector(".asks-zero.is-arriving") !== null`,
+  });
+  return { arrival, arrivalBurst, inboxZero };
+}
+
+/** What `measureListChange` makes and checks. */
+interface ListChange {
+  /** Makes the change, from outside the page. */
+  readonly change: () => Promise<void>;
+  /** How long the spec gives the motion, in milliseconds. */
+  readonly lengthMs: number;
+  /**
+   * An expression that evaluates, in the page, to whether the change has
+   * drawn its end state. The motion ends at the first frame after the first
+   * animation where it holds and no animation runs on Intake.
+   */
+  readonly endsWhen: string;
+  /** An expression that must evaluate to true, in the page, in at least one frame of the motion. */
+  readonly mustSee: string;
+}
+
+/**
+ * Makes one change to Intake's list, and returns what the motion it caused
+ * cost:
+ *
+ * - the page's animation frames, from the change until the motion's end,
+ *   and the animations it ran on Intake, with their start times;
+ * - the renderer main thread's tasks and frames from a Chromium trace,
+ *   which runs from the change until `MOTION_RECORD_MS` after it;
+ * - the animations and the ghost layer's copies left when the trace ends.
+ *
+ * Fails when the change moves nothing on Intake, when the motion does not end
+ * within `MOTION_RECORD_MS`, when `mustSee` never held, or when the trace
+ * lost events.
+ *
+ * The page marks the change, the motion's first frame and its end with
+ * `console.timeStamp`, which puts a `TimeStamp` event in the trace, so the
+ * trace can be split at them. The recording asks for every frame while it
+ * runs, so the frames counted are those the page could draw, not only those
+ * the motion needed. It stops at the motion's end, so the frames after it
+ * are only those something else asked for.
+ */
+async function measureListChange(page: Inspector, measured: ListChange): Promise<MotionCost> {
+  const evaluate = (expression: string) =>
+    page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
+  await page.send("Tracing.start", {
+    transferMode: "ReturnAsStream",
+    traceConfig: {
+      includedCategories: [
+        TIMELINE_CATEGORY,
+        "devtools.timeline",
+        "disabled-by-default-devtools.timeline.frame",
+      ],
+    },
+  });
+  await evaluate(`(() => {
+    const intake = document.querySelector(".asks");
+    const record = {
+      rowsBefore: document.querySelectorAll(${JSON.stringify(`${SIGNALS_LIST} .ask-row`)}).length,
+      frames: [],
+      first: undefined,
+      last: undefined,
+      starts: new Set(),
+      animations: new Set(),
+      sawExpected: false,
+    };
+    globalThis.motionRecord = record;
+    const deadline = performance.now() + ${String(MOTION_RECORD_MS)};
+    console.timeStamp("motion-change");
+    const step = (at) => {
+      const running = document
+        .getAnimations()
+        .filter((animation) => animation.playState === "running" && intake.contains(animation.effect?.target ?? null));
+      for (const animation of running) {
+        record.animations.add(animation);
+        if (animation.startTime !== null) record.starts.add(Math.round(animation.startTime));
+      }
+      if (running.length > 0 && record.first === undefined) {
+        record.first = record.frames.length;
+        console.timeStamp("motion-first-frame");
+      }
+      if (${measured.mustSee}) record.sawExpected = true;
+      record.frames.push(at);
+      if (record.first !== undefined && running.length === 0 && (${measured.endsWhen})) {
+        record.last = record.frames.length - 1;
+        console.timeStamp("motion-end");
+        return;
+      }
+      if (at < deadline) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  })()`);
+  await measured.change();
+  await sleep(MOTION_RECORD_MS);
+  await page.send("Tracing.end");
+  const events = await readTrace(page);
+  const recorded = (await evaluate(`(() => {
+    const record = globalThis.motionRecord;
+    return {
+      rowsBefore: record.rowsBefore,
+      frames: record.first === undefined || record.last === undefined ? null : record.frames.slice(record.first, record.last + 1),
+      starts: record.starts.size,
+      animations: record.animations.size,
+      sawExpected: record.sawExpected,
+      animationsAfter: document.getAnimations().length,
+      ghostsAfter: document.querySelector(".asks-ghosts")?.childElementCount ?? 0,
+    };
+  })()`)) as {
+    rowsBefore: number;
+    frames: number[] | null;
+    starts: number;
+    animations: number;
+    sawExpected: boolean;
+    animationsAfter: number;
+    ghostsAfter: number;
+  };
+  if (recorded.frames === null) {
+    throw new Error(
+      recorded.animations === 0
+        ? "the change moved nothing on Intake"
+        : `the change was still moving ${String(MOTION_RECORD_MS)} ms after it was made`,
+    );
+  }
+  if (!recorded.sawExpected) {
+    throw new Error(`no frame of the motion found ${measured.mustSee}`);
+  }
+  const findMark = (message: string) => {
+    const mark = events.find(
+      (event) => event.name === "TimeStamp" && event.args?.data?.message === message,
+    );
+    if (mark === undefined) throw new Error(`the trace holds no "${message}" mark`);
+    return mark.ts;
+  };
+  const changedAt = findMark("motion-change");
+  const startedAt = findMark("motion-first-frame");
+  const endedAt = findMark("motion-end");
+  const afterEnd = endedAt + 1_000_000;
+  const tasks = findRendererMainTasks(events);
+  const mainThread = `${String(tasks[0]!.pid)}:${String(tasks[0]!.tid)}`;
+  const isBetween = (event: TraceEvent, from: number, to: number) =>
+    event.ts >= from && event.ts < to;
+  const during = tasks.filter((task) => isBetween(task, changedAt, endedAt));
+  const after = tasks.filter((task) => isBetween(task, endedAt, afterEnd));
+  const frameStarts = events
+    .filter(
+      (event) =>
+        event.name === MAIN_THREAD_FRAME &&
+        `${String(event.pid)}:${String(event.tid)}` === mainThread &&
+        isBetween(event, startedAt, afterEnd),
+    )
+    .map((event) => event.ts);
+  const sumMs = (list: readonly TraceEvent[]) =>
+    list.reduce((sum, task) => sum + task.dur! / 1_000, 0);
+  const longestMs = (list: readonly TraceEvent[]) =>
+    Math.max(0, ...list.map((task) => task.dur! / 1_000));
+  const gaps = recorded.frames
+    .slice(1)
+    .map((at, index) => at - recorded.frames![index]!)
+    .toSorted((a, b) => a - b);
+  return {
+    rowsBefore: recorded.rowsBefore,
+    motionMs: recorded.frames.at(-1)! - recorded.frames[0]!,
+    frames: recorded.frames.length,
+    longestFrameGapMs: gaps.at(-1) ?? 0,
+    frameIntervalMs: gaps[Math.floor(gaps.length / 2)] ?? 0,
+    starts: recorded.starts,
+    animations: recorded.animations,
+    mainThreadMs: sumMs(during),
+    longestTaskMs: longestMs(during),
+    lengthMs: measured.lengthMs,
+    lastFrameMs: (Math.max(startedAt, ...frameStarts) - startedAt) / 1_000,
+    framesAfter: frameStarts.filter((at) => at >= endedAt).length,
+    mainThreadAfterMs: sumMs(after),
+    longestTaskAfterMs: longestMs(after),
+    animationsAfter: recorded.animationsAfter,
+    ghostsAfter: recorded.ghostsAfter,
+  };
+}
+
 /**
  * Whether the split's transition dropped no frame: no gap between two of
  * its frames is half again as long as the usual one. A dropped frame makes a
@@ -448,9 +850,36 @@ const formatSplit = (cost: SplitCost) =>
   `${cost.transitionMs.toFixed(0)} ms transition, ` +
   `longest gap ${cost.longestFrameGapMs.toFixed(1)} ms against ${cost.frameIntervalMs.toFixed(1)} ms usual`;
 
+/** Whether a motion dropped no frame, by the same rule as the split's (see `droppedNoFrame`). */
+const droppedNoMotionFrame = (cost: MotionCost) =>
+  cost.longestFrameGapMs < 1.5 * cost.frameIntervalMs;
+
+/**
+ * Whether nothing drew after the motion's length was over: the renderer's
+ * main thread drew its last frame no later than three frames after the
+ * spec's length, which leaves room for the frame that draws the end and the
+ * one that drops the finished animations, and the page held no animation and
+ * no leaving row's copy when the recording ended.
+ */
+const isStillAfter = (cost: MotionCost) =>
+  cost.lastFrameMs <= cost.lengthMs + 3 * cost.frameIntervalMs &&
+  cost.animationsAfter === 0 &&
+  cost.ghostsAfter === 0;
+
+/** Formats a motion's cost as one table cell. */
+const formatMotion = (cost: MotionCost) =>
+  `${String(cost.animations)} animations, ${String(cost.starts)} start times; ` +
+  `${String(cost.frames)} frames over ${cost.motionMs.toFixed(0)} ms, longest gap ` +
+  `${cost.longestFrameGapMs.toFixed(1)} ms against ${cost.frameIntervalMs.toFixed(1)} ms usual; ` +
+  `main thread ${cost.mainThreadMs.toFixed(1)} ms, longest task ${cost.longestTaskMs.toFixed(1)} ms; ` +
+  `last frame ${cost.lastFrameMs.toFixed(0)} ms after the first; the second after: ` +
+  `${String(cost.framesAfter)} frames, main thread ${cost.mainThreadAfterMs.toFixed(1)} ms, ` +
+  `longest task ${cost.longestTaskAfterMs.toFixed(1)} ms; then ` +
+  `${String(cost.animationsAfter)} animations, ${String(cost.ghostsAfter)} ghosts`;
+
 /** Prints what the Intake scenario measured, against the limits spec 17 sets. */
 export function reportIntakeWork(measured: IntakeWork): void {
-  const { pushes, burst, splitOpen, splitClose } = measured;
+  const { pushes, burst, splitOpen, splitClose, arrival, arrivalBurst, inboxZero } = measured;
   // Budget, limit, measured, and whether the measurement is within the
   // limit, or null for a measure that is recorded but has no budget.
   const budgets: [string, string, string, boolean | null][] = [
@@ -496,6 +925,24 @@ export function reportIntakeWork(measured: IntakeWork): void {
       "no dropped frame",
       formatSplit(splitClose),
       droppedNoFrame(splitClose),
+    ],
+    [
+      `One arrival on screen, ${String(arrival.rowsBefore)} rows before it`,
+      "no dropped frame; nothing draws after --dur-2",
+      formatMotion(arrival),
+      droppedNoMotionFrame(arrival) && isStillAfter(arrival),
+    ],
+    [
+      `Burst of ${String(BURST_SIZE)} arriving on screen, ${String(arrivalBurst.rowsBefore)} rows before it`,
+      "one block; no dropped frame; nothing draws after --dur-2",
+      formatMotion(arrivalBurst),
+      arrivalBurst.starts === 1 && droppedNoMotionFrame(arrivalBurst) && isStillAfter(arrivalBurst),
+    ],
+    [
+      "Inbox zero, after the user's Done of the last signal, with the pane open",
+      "no dropped frame; nothing draws after 800 ms plus the pane's --dur-3",
+      formatMotion(inboxZero),
+      droppedNoMotionFrame(inboxZero) && isStillAfter(inboxZero),
     ],
   ];
 

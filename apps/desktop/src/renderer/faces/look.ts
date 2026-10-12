@@ -42,6 +42,18 @@ export const WARDROBE: ReadonlyArray<ReadonlyArray<Accessory>> = [
 ];
 
 /**
+ * Hercule's own look: sky, round, with a tache and a homburg, as the Bureau
+ * book's crew.js casts it. It is fixed, not hashed from a seed, because
+ * Hercule is one character the user meets in many places, such as inbox zero.
+ */
+export const HERCULE_LOOK: Look = Object.freeze<Look>({
+  hue: "sky",
+  shape: "round",
+  accessories: ["tache", "homburg"],
+  headwear: null,
+});
+
+/**
  * Hashes text to an unsigned 32-bit integer: FNV-1a over the UTF-16 code
  * units, then a final mix so that seeds differing in one character spread
  * over every hue. Identical to `hash` in the Bureau book's crew.js.

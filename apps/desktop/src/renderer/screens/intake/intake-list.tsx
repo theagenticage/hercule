@@ -38,6 +38,7 @@ import { AgeLabel } from "../age-label";
 import { describeMoveTitle, SIGNAL_MOVE_GLYPHS } from "./move-glyphs";
 import { SNOOZE_ANCHOR } from "./snooze-menu";
 import { SourceMark } from "./source-mark";
+import { useRowMotion } from "./use-row-motion";
 
 /** What a press on a row's own controls asks for: its checkbox, or one of its moves. */
 export type SignalRowAction = "check" | SignalMove;
@@ -108,6 +109,11 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
  *   reads its next page before the user reaches the end.
  * - `empty` shows in place of the rows when there are none, and `foot`
  *   shows under the rows, inside the scrolling list.
+ * - `scope` names what the list shows, such as the view, the tab and the
+ *   pages read. A change of rows within one scope moves, as `useRowMotion`
+ *   describes; a change of scope draws the new rows at once.
+ * - `onPointerEnter` and `onPointerLeave` are called as the pointer enters
+ *   and leaves the rows, the foot included.
  *
  * Only the rows in view, and a few past each edge, are drawn, so a list of
  * hundreds of signals costs as little as a short one. The selected row is
@@ -121,6 +127,7 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
  */
 export const IntakeList = memo(function IntakeList({
   view,
+  scope,
   sections,
   plugins,
   selectedId,
@@ -135,8 +142,11 @@ export const IntakeList = memo(function IntakeList({
   onRowAction,
   onNearEnd,
   onFocusedSelectedRow,
+  onPointerEnter,
+  onPointerLeave,
 }: {
   readonly view: SignalView;
+  readonly scope: string;
   readonly sections: ReadonlyArray<IntakeSection>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly selectedId: string | null;
@@ -153,8 +163,11 @@ export const IntakeList = memo(function IntakeList({
   readonly onNearEnd: () => void;
   /** Called once the list has put the focus on the selected row that `focusSelectedRow` asked for. */
   readonly onFocusedSelectedRow: () => void;
+  readonly onPointerEnter: () => void;
+  readonly onPointerLeave: () => void;
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const ghostsRef = useRef<HTMLDivElement>(null);
   const listId = useId();
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const { data: workflows } = useSuspenseQuery(workflowsQuery(client));
@@ -164,7 +177,8 @@ export const IntakeList = memo(function IntakeList({
     () => ({ workflows, assistants }),
     [workflows, assistants],
   );
-  const items = useMemo(() => flattenSections(sections), [sections]);
+  const listedItems = useMemo(() => flattenSections(sections), [sections]);
+  const items = useRowMotion(listedItems, scope, scrollRef, ghostsRef);
   const selectedIndex = useMemo(
     () => items.findIndex((item) => item.key === selectedId),
     [items, selectedId],
@@ -222,7 +236,7 @@ export const IntakeList = memo(function IntakeList({
     const onScreen = visible !== null && index >= visible.startIndex && index <= visible.endIndex;
     drawn.push(
       item.kind === "section" ? (
-        <SectionHeading key={key} section={item.section} />
+        <SectionHeading key={key} itemKey={item.key} section={item.section} />
       ) : (
         <SignalRow
           key={key}
@@ -253,18 +267,28 @@ export const IntakeList = memo(function IntakeList({
   }
 
   return (
-    <div ref={scrollRef} className="asks-scroll">
-      {items.length === 0 ? (
-        empty
-      ) : (
-        <div
-          className={view === "done" ? "asks-rows asks-rows--quiet" : "asks-rows"}
-          style={{ minHeight: virtualizer.getTotalSize() }}
-        >
-          {drawn}
-        </div>
-      )}
-      {foot}
+    <div className="asks-frame" onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
+      <div ref={scrollRef} className="asks-scroll">
+        {items.length === 0 ? (
+          empty
+        ) : (
+          <div
+            className={view === "done" ? "asks-rows asks-rows--quiet" : "asks-rows"}
+            style={{ minHeight: virtualizer.getTotalSize() }}
+          >
+            {drawn}
+          </div>
+        )}
+        {foot}
+      </div>
+      {/* The copies of rows that leave fade here, over the list. On Done the
+          layer carries the quiet rows' class, so a copy keeps their look. */}
+      <div
+        ref={ghostsRef}
+        className={view === "done" ? "asks-ghosts asks-rows--quiet" : "asks-ghosts"}
+        aria-hidden="true"
+        inert
+      />
     </div>
   );
 });
@@ -273,10 +297,17 @@ export const IntakeList = memo(function IntakeList({
  * Renders a section's heading: Now with its red dot, or any other section,
  * such as Signals or a day on Later and Done, with its count.
  */
-function SectionHeading({ section }: { readonly section: IntakeSection }): JSX.Element {
+function SectionHeading({
+  itemKey,
+  section,
+}: {
+  /** The heading's key in the list, which its motion finds it by. */
+  readonly itemKey: string;
+  readonly section: IntakeSection;
+}): JSX.Element {
   const now = section.key === "now";
   return (
-    <h2 className="section-h asks-sec">
+    <h2 className="section-h asks-sec" data-item-key={itemKey}>
       {now && <span className="dot dot--fail" />}
       {section.label}
       {!now && <span className="count">{section.signals.length}</span>}
@@ -348,7 +379,7 @@ const SignalRow = memo(function SignalRow({
     marked === null ? "" : `is-${marked}`,
   ];
   return (
-    <div className={classes.filter((each) => each !== "").join(" ")}>
+    <div className={classes.filter((each) => each !== "").join(" ")} data-item-key={signal.id}>
       {controls.checkable && (
         <button
           type="button"

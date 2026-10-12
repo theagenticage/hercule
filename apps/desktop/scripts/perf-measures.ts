@@ -372,9 +372,15 @@ export interface TraceEvent {
   readonly ph: string;
   readonly pid: number;
   readonly tid: number;
+  /** When the event began, in microseconds on the trace's clock. */
+  readonly ts: number;
   /** The duration, in microseconds, of an event whose phase is `X`. */
   readonly dur?: number;
-  readonly args?: { readonly name?: string };
+  readonly args?: {
+    readonly name?: string;
+    /** The text a `console.timeStamp` call in the page gave its `TimeStamp` event. */
+    readonly data?: { readonly message?: string };
+  };
 }
 
 /**

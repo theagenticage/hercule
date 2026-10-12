@@ -5,6 +5,7 @@
 import {
   useCallback,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type JSX,
@@ -36,6 +37,7 @@ import {
   signalsToDoQuery,
 } from "../../app/queries";
 import { IntakeDock } from "./intake-dock";
+import { InboxZero } from "./inbox-zero";
 import { IntakeFoot } from "./intake-foot";
 import { IntakeBar, IntakeSplit, IntakeViewSwitcher } from "./intake-frame";
 import { IntakeList, type BulkHighlight, type SignalRowAction } from "./intake-list";
@@ -44,6 +46,7 @@ import { pickSelectionAfterMove } from "./pick-selection-after-move";
 import { SignalPane, type SignalPaneHandle } from "./signal-pane";
 import { SnoozeMenu } from "./snooze-menu";
 import { useIntakeSplit } from "./use-intake-split";
+import { useHeldSignals } from "./use-held-signals";
 import { useIntakeTabs } from "./use-intake-tabs";
 import {
   IntakeMovesContext,
@@ -114,7 +117,10 @@ export function IntakeScreen({
   const { data: toDo } = useSuspenseQuery(signalsToDoQuery(client));
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const timezone = resolveDisplayTimezone(settings.user.timezone);
-  const moves = useSignalMoveRunner(client, timezone);
+  // The view and the tab shown. Switching either clears the checks, closes
+  // the snooze menu, drops the bulk bar's preview, and shows the new list
+  // with no motion.
+  const scope = `${view}:${pluginId ?? "all"}`;
   const [focusPaneFor, setFocusPaneFor] = useState<string | null>(null);
   const [focusSelectedRow, setFocusSelectedRow] = useState(false);
   const split = useIntakeSplit(selectedId, "data-signal-id");
@@ -134,25 +140,39 @@ export function IntakeScreen({
     ...(view === "done" ? signalsDoneQuery : signalsLaterQuery)(client, pluginId ?? undefined),
     enabled: view !== "to-do",
   });
+  // The signals of the view and the tab as last read, in the list's order.
+  // Later and Done are read in that order already.
+  const listed = useMemo(
+    () =>
+      view === "to-do"
+        ? groupSignalsIntoSections(toDo, pluginId).flatMap((section) => section.signals)
+        : (paged.data?.pages.flatMap((page) => page.items) ?? []),
+    [view, toDo, pluginId, paged.data],
+  );
+  // What the list shows: the view, the tab, and for Later and Done the
+  // pages read. A new page, or the first, is the user's own scrolling, so
+  // it shows the last read at once, with no motion and nothing held.
+  const listScope = view === "to-do" ? scope : `${scope}:${String(paged.data?.pages.length ?? 0)}`;
+  const [pointerOverList, setPointerOverList] = useState(false);
+  const [menu, setMenu] = useState<OpenSnoozeMenu | null>(null);
+  // A menu opened from the list draws outside it, so the changes keep
+  // waiting while the pointer is in the menu.
+  const held = useHeldSignals(
+    listed,
+    listScope,
+    pointerOverList || menu?.place === "row" || menu?.place === "bar",
+  );
+  const moves = useSignalMoveRunner(client, timezone, held);
   const sections: ReadonlyArray<IntakeSection> =
     view === "to-do"
-      ? groupSignalsIntoSections(toDo, pluginId)
-      : groupSignalsByDay(
-          paged.data?.pages.flatMap((page) => page.items) ?? [],
-          view,
-          new Date(),
-          timezone,
-        );
+      ? groupSignalsIntoSections(held.shown, pluginId)
+      : groupSignalsByDay(held.shown, view, new Date(), timezone);
   // The rows the list draws, in order, for the view and the tab shown.
   const listedSignals = sections.flatMap((section) => section.signals);
   const selectedSignal = listedSignals.find((signal) => signal.id === selectedId);
 
-  // Checks belong to one view and one tab: switching either clears them, as
-  // it closes the snooze menu and drops the bulk bar's preview.
-  const scope = `${view}:${pluginId ?? "all"}`;
   const [checks, setChecks] = useState<Checks>({ scope, ids: new Set() });
   const [preview, setPreview] = useState<SignalMove | null>(null);
-  const [menu, setMenu] = useState<OpenSnoozeMenu | null>(null);
   if (checks.scope !== scope) {
     setChecks({ scope, ids: new Set() });
     setPreview(null);
@@ -418,7 +438,12 @@ export function IntakeScreen({
     toggleSnoozeMenu,
     snoozeMenuPlace: menu?.place ?? null,
     select: openSignal,
+    registerOwnChanges: held.registerOwnChanges,
+    forgetOwnChanges: held.forgetOwnChanges,
   };
+  // Inbox zero takes the place of the empty To do list on the All tab, and
+  // shows the cleared count itself, so the foot goes with the rows.
+  const inboxZero = view === "to-do" && pluginId === null && listedSignals.length === 0;
 
   return (
     <>
@@ -453,6 +478,7 @@ export function IntakeScreen({
               </div>
               <IntakeList
                 view={view}
+                scope={listScope}
                 sections={sections}
                 plugins={plugins}
                 selectedId={selectedId}
@@ -461,10 +487,26 @@ export function IntakeScreen({
                 menuRowId={menu?.place === "row" ? (menu.signals[0]?.id ?? null) : null}
                 timezone={timezone}
                 focusSelectedRow={focusSelectedRow}
-                empty={<EmptyView view={view} tabName={tabName} loading={paged.isPending} />}
+                empty={
+                  inboxZero ? (
+                    <InboxZero
+                      timezone={timezone}
+                      arriving={held.arriving}
+                      paneShown={paneShown}
+                      onShowDone={(id) => {
+                        onPluginChange(id);
+                        onViewChange("done");
+                      }}
+                    />
+                  ) : (
+                    <EmptyView view={view} tabName={tabName} loading={paged.isPending} />
+                  )
+                }
                 foot={
                   <>
-                    {view === "to-do" && pluginId === null && <IntakeFoot timezone={timezone} />}
+                    {view === "to-do" && pluginId === null && !inboxZero && (
+                      <IntakeFoot timezone={timezone} />
+                    )}
                     <IntakeDock
                       toast={moves.toast}
                       bulk={
@@ -493,6 +535,12 @@ export function IntakeScreen({
                 onSelect={openSignal}
                 onRowAction={runRowAction}
                 onNearEnd={readNextPage}
+                onPointerEnter={() => {
+                  setPointerOverList(true);
+                }}
+                onPointerLeave={() => {
+                  setPointerOverList(false);
+                }}
                 onFocusedSelectedRow={() => {
                   setFocusSelectedRow(false);
                 }}

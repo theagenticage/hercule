@@ -3,6 +3,7 @@ export {
   buildAssistantLook,
   buildLook,
   HEADWEAR,
+  HERCULE_LOOK,
   HUES,
   SHAPES,
   WARDROBE,
