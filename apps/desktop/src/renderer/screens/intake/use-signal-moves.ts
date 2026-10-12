@@ -165,13 +165,15 @@ const readSignalsAgain = (queryClient: QueryClient, signalIds: ReadonlyArray<str
  * toast what the controller did. A failed move shows its error in the
  * toast's place, and the rows stay where they were.
  *
- * `registerOwnChanges` is told the ids of the signals a move changed, before
- * the rows leave the cache, so the list knows the change is the user's own.
+ * `ownChanges` is told the ids of the signals a move acts on before it is
+ * sent, so the list knows the change is the user's own even when a read
+ * from the controller's push comes before the answer. The ids the move did
+ * not change after all are forgotten again.
  */
 export const useSignalMoveRunner = (
   client: HerculeClient,
   timezone: string,
-  registerOwnChanges: (signalIds: ReadonlyArray<string>) => void,
+  ownChanges: Pick<IntakeMoves, "registerOwnChanges" | "forgetOwnChanges">,
 ): SignalMoveRunner => {
   const queryClient = useQueryClient();
   const [toast, setToast] = useState<MoveToast | null>(null);
@@ -186,11 +188,17 @@ export const useSignalMoveRunner = (
       const [moved] = await Promise.all([sendMove(client, input), waitOneBeat()]);
       return moved;
     },
+    onMutate: ({ plan }) => {
+      ownChanges.registerOwnChanges(plan.acted.map((signal) => signal.id));
+    },
     onSuccess: (moved, { plan, until }) => {
       // Only the signals the controller moved are the user's own changes. A
       // signal it skipped, because it was resolved elsewhere meanwhile, left
       // the list through a change the user did not make.
-      registerOwnChanges(moved);
+      const movedIds = new Set(moved);
+      ownChanges.forgetOwnChanges(
+        plan.acted.map((signal) => signal.id).filter((id) => !movedIds.has(id)),
+      );
       applyMoveToCache(queryClient, client, plan.move, moved);
       readSignalsAgain(queryClient, moved);
       const untilLabel =
@@ -200,6 +208,7 @@ export const useSignalMoveRunner = (
       showToast(describeMoveToast(plan, moved, untilLabel), false);
     },
     onError: (error, { plan }) => {
+      ownChanges.forgetOwnChanges(plan.acted.map((signal) => signal.id));
       // A move sent in several calls may have moved some signals before one
       // failed, so the lists are read again to show them where they are.
       readSignalsAgain(
@@ -250,11 +259,14 @@ export interface IntakeMoves {
   /** Selects a signal, as a click on its row does. */
   readonly select: (signalId: string) => void;
   /**
-   * Records that the user's own action changed `signalIds`, such as an
+   * Records that the user's own action changes `signalIds`, such as an
    * answer from the pane, so the list applies the change at once, even under
-   * the pointer, and inbox zero arrives when it empties To do.
+   * the pointer, and inbox zero arrives when it empties To do. Call it when
+   * the action starts, before it is sent.
    */
   readonly registerOwnChanges: (signalIds: ReadonlyArray<string>) => void;
+  /** Forgets the changes to `signalIds` an action did not make after all, such as a failed answer. */
+  readonly forgetOwnChanges: (signalIds: ReadonlyArray<string>) => void;
 }
 
 /** Carries Intake's moves from the screen to the pane. */

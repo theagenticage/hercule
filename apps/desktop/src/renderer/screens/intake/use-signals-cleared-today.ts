@@ -7,15 +7,15 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import type { Signal } from "@hercule/contract";
 import { computeNextMidnight, reachesBeforeToday } from "@hercule/client-core";
-import { ageClock, useZonedClockValue } from "../../app/age-clock";
+import { ageClock, NEVER, useClockValue } from "../../app/age-clock";
 import { signalsClearedTodayQuery } from "../../app/queries";
 
 /**
- * Returns the next midnight after `now` in `timezone`. A zone that cannot be
- * read has no midnight, so an hour later is returned instead.
+ * Returns the next midnight after `now` in `timezone`, or `NEVER` when the
+ * zone has none, so the clock sets no timer for it.
  */
 const findNextMidnight = (timezone: string, now: Date): Date =>
-  computeNextMidnight(now, timezone) ?? new Date(now.getTime() + 3_600_000);
+  computeNextMidnight(now, timezone) ?? NEVER;
 
 /**
  * Returns the Done signals read so far, newest first, and the age clock's
@@ -35,7 +35,7 @@ export function useSignalsClearedToday(timezone: string): {
   const signals = done.data?.pages.flatMap((page) => page.items) ?? [];
   // The value is the start of the next day, which changes only at midnight,
   // so a clock read during the day draws nothing again.
-  useZonedClockValue(timezone, findNextMidnight, (now) =>
+  useClockValue(timezone, true, findNextMidnight, (now) =>
     findNextMidnight(timezone, now).getTime(),
   );
   const now = ageClock.readNow();

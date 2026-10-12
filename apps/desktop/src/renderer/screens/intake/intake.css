@@ -494,6 +494,15 @@
   max-width: 412px;
   margin-top: 16px;
 }
+/* Inbox zero already fills the list's height, so a dock under it would make
+   the list scroll while the toast shows. There the dock takes no height, and
+   the toast rises from the dock's bottom edge over the picture's empty
+   bottom padding. */
+.asks-zero + .asks-dock {
+  justify-content: flex-end;
+  height: 0;
+  margin-top: 0;
+}
 .asks-toast {
   display: flex;
   align-items: center;

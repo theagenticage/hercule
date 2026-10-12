@@ -116,41 +116,53 @@
 
 /* The arrival, when the user's own move empties To do. It lasts 800ms, the
    first 120ms of which the list's last row takes to fade, and then nothing
-   runs. Each step fills backwards, so it waits for its delay in its first
-   frame, and the resting styles above are where it ends. With Reduce motion,
-   none of this applies and the picture shows still. */
+   runs. When the pane was open, every step first waits --arrival-wait, the
+   --dur-3 the list takes to widen as the pane closes, so the picture never
+   slides sideways. Each step fills backwards, so it waits for its delay in
+   its first frame, and the resting styles above are where it ends. With
+   Reduce motion, none of this applies and the picture shows still. */
 @media (prefers-reduced-motion: no-preference) {
+  .asks-zero.is-arriving {
+    --arrival-wait: 0ms;
+  }
+  .asks-zero.is-arriving.waits-for-pane {
+    --arrival-wait: var(--dur-3);
+  }
   /* The rays grow outward from their inner end, 12ms apart, clockwise from the top. */
   .asks-zero.is-arriving .asks-zero-ray {
-    animation: inbox-zero-ray 320ms var(--ease-out) backwards;
-    animation-delay: calc(120ms + var(--ray-index) * 12ms);
+    animation: inbox-zero-ray var(--dur-3) var(--ease-out) backwards;
+    animation-delay: calc(var(--arrival-wait) + 120ms + var(--ray-index) * 12ms);
   }
   /* Hercule hops in: its wrapper hops 8px while the face grows on the spring. */
   .asks-zero.is-arriving .asks-zero-face {
-    animation: inbox-zero-hop var(--dur-3) var(--ease-out) 240ms backwards;
+    animation: inbox-zero-hop var(--dur-3) var(--ease-out) backwards;
+    animation-delay: calc(var(--arrival-wait) + 240ms);
   }
   .asks-zero.is-arriving .asks-zero-face-body {
-    animation: inbox-zero-spring var(--dur-3) var(--ease-spring) 240ms backwards;
+    animation: inbox-zero-spring var(--dur-3) var(--ease-spring) backwards;
+    animation-delay: calc(var(--arrival-wait) + 240ms);
   }
   /* The sparks fly out from behind Hercule and fade, once. */
   .asks-zero.is-arriving .asks-zero-spark {
-    animation: inbox-zero-spark var(--dur-3) var(--ease-out) 380ms backwards;
+    animation: inbox-zero-spark var(--dur-3) var(--ease-out) backwards;
+    animation-delay: calc(var(--arrival-wait) + 380ms);
   }
   /* The words rise 6px each, 60ms apart. */
   .asks-zero.is-arriving .asks-zero-h,
   .asks-zero.is-arriving .asks-zero-line,
   .asks-zero.is-arriving .asks-zero-n,
   .asks-zero.is-arriving .asks-zero-tally {
-    animation: inbox-zero-rise var(--dur-2) var(--ease-out) 360ms backwards;
+    animation: inbox-zero-rise var(--dur-2) var(--ease-out) backwards;
+    animation-delay: calc(var(--arrival-wait) + 360ms);
   }
   .asks-zero.is-arriving .asks-zero-line {
-    animation-delay: 420ms;
+    animation-delay: calc(var(--arrival-wait) + 420ms);
   }
   .asks-zero.is-arriving .asks-zero-n {
-    animation-delay: 480ms;
+    animation-delay: calc(var(--arrival-wait) + 480ms);
   }
   .asks-zero.is-arriving .asks-zero-tally {
-    animation-delay: 540ms;
+    animation-delay: calc(var(--arrival-wait) + 540ms);
   }
 }
 @keyframes inbox-zero-ray {

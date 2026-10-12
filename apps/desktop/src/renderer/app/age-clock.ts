@@ -213,6 +213,13 @@ export const createAgeClock = (): AgeClock => {
 export const ageClock = createAgeClock();
 
 /**
+ * A moment so far off that the age clock never reaches it: the next change
+ * of a label that never changes again, such as the next midnight in a zone
+ * that has none.
+ */
+export const NEVER = new Date(8.64e15);
+
+/**
  * Returns `format(now)` for the age clock's current time, and draws the
  * calling component again whenever that value changes. `findNextChange` finds
  * when the value of a label counting from or to `moment` changes next, and is
@@ -235,30 +242,6 @@ export const useClockValue = <Value extends string | number | null>(
     (onChange: () => void) =>
       counting ? ageClock.watch((now) => findNextChange(moment, now), onChange) : () => {},
     [moment, counting, findNextChange],
-  );
-  return useSyncExternalStore(subscribe, () => format(ageClock.readNow()));
-};
-
-/**
- * Returns `format(now)` for the age clock's current time, for a value that
- * depends on the wall clock in `timezone`, such as what counts as "today",
- * and draws the calling component again whenever that value changes.
- * `findNextChange` returns the first moment after `now` at which the value
- * may change in `timezone`, such as the next midnight there. It must be a
- * stable function, defined once outside the component, as `useClockValue`
- * needs.
- *
- * The clock also reads the time when the window is shown or gets focus,
- * which covers a Mac that slept past such a moment.
- */
-export const useZonedClockValue = <Value extends string | number | null>(
-  timezone: string,
-  findNextChange: (timezone: string, now: Date) => Date,
-  format: (now: Date) => Value,
-): Value => {
-  const subscribe = useCallback(
-    (onChange: () => void) => ageClock.watch((now) => findNextChange(timezone, now), onChange),
-    [timezone, findNextChange],
   );
   return useSyncExternalStore(subscribe, () => format(ageClock.readNow()));
 };

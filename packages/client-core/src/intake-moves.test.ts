@@ -538,14 +538,18 @@ describe("countClearedTodayByPlugin", () => {
       // 23:30 on Monday in Amsterdam: yesterday.
       buildResolved("d", "2026-10-12T21:30:00.000Z", {}, { kind: "linear/mentioned" }),
     ];
-    const plugins = [{ id: "sentry" }, { id: "github" }, { id: "linear" }];
+    const plugins = [
+      { id: "sentry", displayName: "Sentry" },
+      { id: "github", displayName: "GitHub" },
+      { id: "linear", displayName: "Linear" },
+    ];
     expect(countClearedTodayByPlugin(done, now, AMSTERDAM, plugins)).toEqual([
-      { pluginId: "github", cleared: 2 },
-      { pluginId: "linear", cleared: 1 },
+      { pluginId: "github", name: "GitHub", cleared: 2 },
+      { pluginId: "linear", name: "Linear", cleared: 1 },
     ]);
   });
 
-  it("leaves out core and replaced signals, and puts unlisted plugins last, by id", () => {
+  it("leaves out core and replaced signals, and puts unlisted plugins last, by id, named by id", () => {
     const done = [
       buildResolved("a", today, {}, { kind: "slack/mentioned" }),
       buildResolved("b", today, {}, { kind: "proposal" }),
@@ -553,10 +557,11 @@ describe("countClearedTodayByPlugin", () => {
       buildResolved("d", today, {}, { kind: "linear/mentioned" }),
       buildResolved("e", today, {}, { kind: "github/mentioned" }),
     ];
-    expect(countClearedTodayByPlugin(done, now, AMSTERDAM, [{ id: "github" }])).toEqual([
-      { pluginId: "github", cleared: 1 },
-      { pluginId: "linear", cleared: 1 },
-      { pluginId: "slack", cleared: 1 },
+    const plugins = [{ id: "github", displayName: "GitHub" }];
+    expect(countClearedTodayByPlugin(done, now, AMSTERDAM, plugins)).toEqual([
+      { pluginId: "github", name: "GitHub", cleared: 1 },
+      { pluginId: "linear", name: "linear", cleared: 1 },
+      { pluginId: "slack", name: "slack", cleared: 1 },
     ]);
   });
 });

@@ -164,15 +164,16 @@ function SignalDetail({
       client.signal.act({ params: { id: signal.id }, payload: input }),
     onMutate: () => {
       setFailure(null);
+      moves.registerOwnChanges([signal.id]);
     },
     onSuccess: (acted) => {
       setActedHere(true);
-      moves.registerOwnChanges([signal.id]);
       // The lists need no read here: the answer writes an audit entry on the
       // `signal` topic, and its live push reads every signal list again.
       queryClient.setQueryData(signalQuery(client, signal.id).queryKey, acted);
     },
     onError: (error, input) => {
+      moves.forgetOwnChanges([signal.id]);
       setFailure({ actionId: input.actionId, message: readErrorMessage(error) });
     },
   });

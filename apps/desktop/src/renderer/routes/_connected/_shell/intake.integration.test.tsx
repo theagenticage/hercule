@@ -1309,6 +1309,90 @@ describe("Intake's motion", () => {
     });
   });
 
+  /** Waits until the app has read the signals again since `reads`, and the read has answered. */
+  const waitForSignalRead = async (calls: ReadonlyArray<Call>, reads: number) => {
+    await waitFor(() => {
+      expect(countToDoReads(calls)).toBeGreaterThan(reads);
+    });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  };
+
+  it("takes the user's own Done off the list when the push's read beats the move's answer", async () => {
+    const { handlers } = storeSignals(SIGNALS);
+    let releaseAnswer: () => void = () => {};
+    const answered = new Promise<void>((resolve) => {
+      releaseAnswer = resolve;
+    });
+    const markDone = handlers["POST /api/v1/signals/mark-done"] as Exclude<Handler, Answer>;
+    const { calls, live } = await openIntake(`/intake?signal=${REVIEW.id}`, {
+      ...handlers,
+      // The controller marks the signal done at once and pushes the change,
+      // but its answer arrives only once the test lets it.
+      "POST /api/v1/signals/mark-done": async (call) => {
+        const answer = await markDone(call);
+        await answered;
+        return answer;
+      },
+    });
+    await findPane();
+    await waitForSignalTopic(live);
+    fireEvent.pointerOver(getRow(REVIEW));
+    act(() => {
+      getRow(REVIEW).focus();
+    });
+    await userEvent.keyboard("e");
+    await waitFor(() => {
+      expect(findMove(calls, "mark-done")).toBeDefined();
+    });
+    const reads = countToDoReads(calls);
+    live.pushInvalidation("signal", [REVIEW.id]);
+    await waitForSignalRead(calls, reads);
+    expect(getRow(REVIEW)).toBeNull();
+    releaseAnswer();
+    expect((await findToast()).textContent).toBe(`Done · ${REVIEW.title}`);
+  });
+
+  it("holds a signal resolved elsewhere back from Done while the pointer is over the list", async () => {
+    const DONE = resolve(MENTION, "user", "Marked done", "2026-10-10T11:00:00.000Z");
+    const { handlers, store } = storeSignals([REVIEW, DONE]);
+    const { calls, live } = await openIntake("/intake?view=done", handlers);
+    await waitForSignalTopic(live);
+    await waitFor(() => {
+      expect(getRow(DONE)).not.toBeNull();
+    });
+    fireEvent.pointerOver(getRow(DONE));
+    const reads = countToDoReads(calls);
+    store(resolve(REVIEW, "session:01a06d02-0000-7000-8000-000000000001", "Approved #1294"));
+    live.pushInvalidation("signal", [REVIEW.id]);
+    await waitForSignalRead(calls, reads);
+    expect(getRow(REVIEW)).toBeNull();
+    fireEvent.pointerOut(getRow(DONE), { relatedTarget: document.body });
+    await waitFor(() => {
+      expect(getRow(REVIEW)).not.toBeNull();
+    });
+  });
+
+  it("keeps holding while the pointer is in a row's snooze menu", async () => {
+    const { handlers, store } = storeSignals(SIGNALS);
+    const { calls, live } = await openIntake("/intake", handlers);
+    await waitForSignalTopic(live);
+    fireEvent.pointerOver(getRow(REVIEW));
+    await clickRowMove(REVIEW, "Snooze");
+    const menu = document.querySelector<HTMLElement>(".asks-snooze[role=menu]")!;
+    fireEvent.pointerOut(getRow(REVIEW), { relatedTarget: menu });
+    const reads = countToDoReads(calls);
+    store(ARRIVAL);
+    live.pushInvalidation("signal", [ARRIVAL.id]);
+    await waitForSignalRead(calls, reads);
+    expect(getRow(ARRIVAL)).toBeNull();
+    await clickRowMove(REVIEW, "Snooze");
+    expect(document.querySelector(".asks-snooze")).toBeNull();
+    fireEvent.pointerOut(getRow(REVIEW), { relatedTarget: document.body });
+    await waitFor(() => {
+      expect(getRow(ARRIVAL)).not.toBeNull();
+    });
+  });
+
   it("keeps the selection on its signal when a signal arrives above it", async () => {
     const { handlers, store } = storeSignals(SIGNALS);
     const { live, router } = await openIntake(`/intake?signal=${MENTION.id}`, handlers);

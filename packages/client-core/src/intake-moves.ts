@@ -10,7 +10,7 @@
  * this runtime can format, as `resolveDisplayTimezone` returns one.
  */
 import { DONE_ACTION_ID, type Signal, type SignalView } from "@hercule/contract";
-import { lowerFirst, nameSignalKind } from "./intake";
+import { lowerFirst, namePlugin, nameSignalKind, type PluginName } from "./intake";
 import { formatNameList } from "./name-list";
 import { parsePluginId } from "./plugin-id";
 import {
@@ -460,6 +460,9 @@ export const parsePickedSnoozeTime = (
   return new Date(instant).toISOString();
 };
 
+/** A signal that has a resolution, as every signal in the Done view does. */
+type ResolvedSignal = Signal & { readonly resolution: NonNullable<Signal["resolution"]> };
+
 /** The two numbers the foot under the list shows. */
 interface ClearedToday {
   /** The signals resolved since midnight. */
@@ -479,7 +482,7 @@ export const countClearedToday = (
   now: Date,
   timezone: string,
 ): ClearedToday => {
-  const today = listClearedToday(done, now, timezone).map((signal) => signal.resolution!);
+  const today = listClearedToday(done, now, timezone).map((signal) => signal.resolution);
   return {
     cleared: today.length,
     leftOnTheirOwn: today.filter(
@@ -497,9 +500,9 @@ const listClearedToday = (
   done: ReadonlyArray<Signal>,
   now: Date,
   timezone: string,
-): ReadonlyArray<Signal> =>
+): ReadonlyArray<ResolvedSignal> =>
   done.filter(
-    (signal) =>
+    (signal): signal is ResolvedSignal =>
       signal.resolution !== undefined &&
       signal.replacedBy === undefined &&
       isSameDay(new Date(signal.resolution.at), now, timezone),
@@ -508,6 +511,8 @@ const listClearedToday = (
 /** How many signals of one plugin were cleared today. */
 export interface PluginClearedToday {
   readonly pluginId: string;
+  /** The plugin's name, or its id when `plugins` does not list it. */
+  readonly name: string;
   readonly cleared: number;
 }
 
@@ -516,7 +521,8 @@ export interface PluginClearedToday {
  * counts them, per plugin that raised them. Inbox zero shows one pill per
  * plugin with these numbers (spec 17 §Motion).
  *
- * Returns only plugins with at least one signal cleared today, in the order
+ * Each entry carries the plugin's name, for the pill's label. Returns only
+ * plugins with at least one signal cleared today, in the order
  * `plugins` lists them, then any plugin `plugins` does not list, by id, as
  * the tabs order them (see `buildIntakeTabs`). Core signals belong to no
  * plugin, so they are counted in no entry.
@@ -525,7 +531,7 @@ export const countClearedTodayByPlugin = (
   done: ReadonlyArray<Signal>,
   now: Date,
   timezone: string,
-  plugins: ReadonlyArray<{ readonly id: string }>,
+  plugins: ReadonlyArray<PluginName>,
 ): ReadonlyArray<PluginClearedToday> => {
   const counts = new Map<string, number>();
   for (const signal of listClearedToday(done, now, timezone)) {
@@ -534,7 +540,11 @@ export const countClearedTodayByPlugin = (
   }
   const listed = plugins.map((plugin) => plugin.id).filter((id) => counts.has(id));
   const unlisted = [...counts.keys()].filter((id) => !listed.includes(id)).sort();
-  return [...listed, ...unlisted].map((pluginId) => ({ pluginId, cleared: counts.get(pluginId)! }));
+  return [...listed, ...unlisted].map((pluginId) => ({
+    pluginId,
+    name: namePlugin(pluginId, plugins),
+    cleared: counts.get(pluginId)!,
+  }));
 };
 
 /**

@@ -369,7 +369,16 @@ export {
   type SignalMovePlan,
   type SignalPaneMove,
 } from "./intake-moves";
-export { describeInboxZero, type InboxZeroLine } from "./inbox-zero";
+export {
+  dropOwnChanges,
+  followListedSignals,
+  recordOwnChanges,
+  startHeldSignals,
+  switchHeldScope,
+  updateHolding,
+  type HeldSignals,
+} from "./held-signals";
+export { describeInboxZeroLine, type InboxZeroLine } from "./inbox-zero";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";

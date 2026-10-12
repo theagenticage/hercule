@@ -11,7 +11,7 @@ import {
 import type { HerculeClient } from "@hercule/client-core";
 import type { PluginDetail, Signal } from "@hercule/contract";
 import { ageClock } from "../../app/age-clock";
-import { pluginsQuery, settingsQuery, signalsClearedTodayQuery } from "../../app/queries";
+import { pluginsQuery, signalsClearedTodayQuery } from "../../app/queries";
 import { InboxZero } from "./inbox-zero";
 
 // 10:00 on Tuesday 13 October in Amsterdam: the morning's line.
@@ -58,14 +58,22 @@ const buildResolved = (id: number, kind: string, at: string): Signal => ({
 });
 
 /**
- * Renders inbox zero with `done` as the Done list, read whole, in a router
- * that holds the `/_connected` route it reads its client from. Every read is
- * answered from the cache; the client never answers, so a read the cache did
- * not answer would leave the picture suspended.
+ * Renders inbox zero in Amsterdam with `done` as the Done list, read whole,
+ * in a router that holds the `/_connected` route it reads its client from.
+ * Every read is answered from the cache; the client never answers, so a read
+ * the cache did not answer would leave the picture suspended.
  */
 const renderInboxZero = async (
   done: ReadonlyArray<Signal>,
-  onShowDone: (pluginId: string) => void = () => {},
+  {
+    arriving = false,
+    paneShown = false,
+    onShowDone = () => {},
+  }: {
+    readonly arriving?: boolean;
+    readonly paneShown?: boolean;
+    readonly onShowDone?: (pluginId: string) => void;
+  } = {},
 ): Promise<void> => {
   const client = new Proxy(
     {},
@@ -74,10 +82,6 @@ const renderInboxZero = async (
     },
   ) as HerculeClient;
   const queryClient = new QueryClient();
-  queryClient.setQueryData(settingsQuery(client).queryKey, {
-    controller: {},
-    user: { timezone: "Europe/Amsterdam" },
-  });
   queryClient.setQueryData(pluginsQuery(client).queryKey, [
     buildPlugin("sentry", "Sentry"),
     buildPlugin("github", "GitHub"),
@@ -92,7 +96,14 @@ const renderInboxZero = async (
   const intake = createRoute({
     getParentRoute: () => connected,
     path: "intake",
-    component: () => <InboxZero arriving={false} onShowDone={onShowDone} />,
+    component: () => (
+      <InboxZero
+        timezone="Europe/Amsterdam"
+        arriving={arriving}
+        paneShown={paneShown}
+        onShowDone={onShowDone}
+      />
+    ),
   });
   const router = createRouter({
     routeTree: root.addChildren([connected.addChildren([intake])]),
@@ -132,7 +143,7 @@ describe("InboxZero", () => {
       buildResolved(1, "github/review-requested", "2026-10-12T21:30:00.000Z"),
     ]);
 
-    expect(screen.queryByText("cleared today")).toBeNull();
+    expect(screen.queryByText(/cleared today/)).toBeNull();
     expect(screen.queryAllByRole("button")).toEqual([]);
   });
 
@@ -146,10 +157,12 @@ describe("InboxZero", () => {
         // A core signal counts, but has no pill.
         buildResolved(4, "proposal", "2026-10-13T07:20:00.000Z"),
       ],
-      onShowDone,
+      { onShowDone },
     );
 
-    expect(document.querySelector(".asks-zero-n")?.textContent).toBe("4cleared today");
+    expect(
+      screen.getByText((_, element) => element?.textContent === "4 cleared today"),
+    ).toBeDefined();
     const pills = screen.getAllByRole("button");
     // The plugins' order, not the count's: Sentry cleared nothing and has no pill.
     expect(pills.map((pill) => pill.getAttribute("aria-label"))).toEqual([
@@ -160,5 +173,50 @@ describe("InboxZero", () => {
       pills[1]!.click();
     });
     expect(onShowDone).toHaveBeenCalledWith("linear");
+  });
+
+  it("drops the arrival once it is over, so a part that mounts later does not play it", async () => {
+    // The fake timers also run in real time, so the render's own waits still end.
+    vi.useFakeTimers({
+      now: NOW,
+      toFake: ["Date", "setTimeout", "clearTimeout"],
+      shouldAdvanceTime: true,
+    });
+    await renderInboxZero([], { arriving: true });
+    const picture = document.querySelector(".asks-zero");
+    expect(picture?.classList.contains("is-arriving")).toBe(true);
+
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(picture?.classList.contains("is-arriving")).toBe(false);
+  });
+
+  it("waits for a closing pane, and stays arriving that much longer", async () => {
+    vi.useFakeTimers({
+      now: NOW,
+      toFake: ["Date", "setTimeout", "clearTimeout"],
+      shouldAdvanceTime: true,
+    });
+    // No stylesheet sets the durations in tests, so the test sets the one the wait reads.
+    document.documentElement.style.setProperty("--dur-3", "320ms");
+    try {
+      await renderInboxZero([], { arriving: true, paneShown: true });
+      const picture = document.querySelector(".asks-zero");
+      expect(picture?.classList.contains("waits-for-pane")).toBe(true);
+
+      act(() => {
+        vi.advanceTimersByTime(800);
+      });
+      expect(picture?.classList.contains("is-arriving")).toBe(true);
+
+      act(() => {
+        vi.advanceTimersByTime(320);
+      });
+      expect(picture?.classList.contains("is-arriving")).toBe(false);
+    } finally {
+      document.documentElement.style.removeProperty("--dur-3");
+    }
   });
 });

@@ -109,9 +109,9 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
  *   reads its next page before the user reaches the end.
  * - `empty` shows in place of the rows when there are none, and `foot`
  *   shows under the rows, inside the scrolling list.
- * - `scope` names the view and the tab shown. A change of rows within one
- *   scope moves, as `useRowMotion` describes; a change of scope draws the
- *   new rows at once.
+ * - `scope` names what the list shows, such as the view, the tab and the
+ *   pages read. A change of rows within one scope moves, as `useRowMotion`
+ *   describes; a change of scope draws the new rows at once.
  * - `onPointerEnter` and `onPointerLeave` are called as the pointer enters
  *   and leaves the rows, the foot included.
  *
