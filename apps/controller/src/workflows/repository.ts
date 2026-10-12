@@ -525,17 +525,20 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the id and the stored definition of every enabled workflow,
-     * oldest first. A new signal reads it to offer Hand to an agent: one
-     * action per enabled workflow with a signal input that accepts its kind.
+     * Returns the id and the stored definition of every workflow `run.start`
+     * accepts, oldest first: enabled, and not marked invalid. A new signal
+     * reads it to offer Hand to an agent, one action per such workflow with
+     * a signal input that accepts its kind. An invalid workflow is left out
+     * because `run.start` would refuse the click.
      */
-    listEnabledDefinitions: (): Effect.Effect<
+    listRunnableDefinitions: (): Effect.Effect<
       ReadonlyArray<{ readonly id: string; readonly definition: WorkflowDefinition }>,
       SqlError
     > =>
       Effect.map(
         sql<{ readonly id: Uint8Array; readonly definition: string }>`
-          SELECT id, definition FROM workflows WHERE enabled = 1 ORDER BY created_at, id
+          SELECT id, definition FROM workflows
+          WHERE enabled = 1 AND invalid_since IS NULL ORDER BY created_at, id
         `,
         (rows) =>
           rows.map((row) => ({

@@ -12,7 +12,7 @@
  * - an offer gets Dismiss;
  * - an fyi gets Done;
  * - an offer, an unsure and an fyi get one Hand to an agent action per
- *   enabled workflow with a signal input that accepts the kind.
+ *   enabled, valid workflow with a signal input that accepts the kind.
  *
  * The core also raises one offer of its own: when the user marks the last
  * five signals of one group done without answering them, `markDone` offers
@@ -644,7 +644,7 @@ const make = Effect.gen(function* () {
         const handTo =
           input.kind === "proposal"
             ? []
-            : buildHandToActions(id, input.kind, yield* workflows.listEnabledDefinitions());
+            : buildHandToActions(id, input.kind, yield* workflows.listRunnableDefinitions());
         const core = [...handTo, ...buildCoreActions(input)];
         yield* checkRaisedActions(own, core);
         const origin = yield* buildApiOrigin(caller, input);
