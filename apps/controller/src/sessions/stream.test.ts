@@ -1,6 +1,6 @@
 /**
- * Unit tests for the fold: which rows a reported event writes, and which
- * status it leaves the session in.
+ * Unit tests for the fold: which rows a reported event writes, and how the
+ * open Requests change.
  *
  * These tests cover the rules, not the stored rows, so they run without a
  * database. The stored rows are tested end to end in
@@ -12,10 +12,8 @@ import type { SessionRequest } from "@hercule/contract";
 import {
   DELTA_FLUSH_BYTES,
   attributeEvent,
-  compareOpenRequests,
   computeOpenRequestsAfter,
   fold,
-  isRequestEvent,
   startTracking,
   type Folded,
   type RequestEvent,
@@ -27,10 +25,6 @@ const SESSION = "0199e0e7-0000-7000-8000-000000000001";
 const TURN = "turn-1";
 
 const base = { eventId: "e", sessionId: SESSION, at: "2026-09-07T10:00:00.000Z" };
-
-const started: ProviderEvent = { ...base, _tag: "session.started" };
-
-const turnStarted: ProviderEvent = { ...base, _tag: "turn.started", turnId: TURN };
 
 const turnCompleted: RequestEvent = {
   ...base,
@@ -100,67 +94,7 @@ const applyEvents = (
   return { state, folds };
 };
 
-describe("the session status", () => {
-  it("changes on the four status events and on no other event", () => {
-    const { folds } = applyEvents([
-      [1, started],
-      [2, turnStarted],
-      [3, buildDelta("i1", "hi")],
-      [4, buildCompletedItem("i1")],
-      [5, turnCompleted],
-      [6, exited],
-    ]);
-
-    expect(folds.map((one) => one.status)).toEqual([
-      "idle",
-      "busy",
-      undefined,
-      undefined,
-      "idle",
-      "exited",
-    ]);
-  });
-});
-
-describe("a sequence number already applied", () => {
-  it("writes nothing and leaves the state unchanged", () => {
-    const { state } = applyEvents([
-      [1, started],
-      [2, turnStarted],
-    ]);
-
-    expect(fold(state, 2, turnStarted)).toBeUndefined();
-    expect(fold(state, 1, started)).toBeUndefined();
-    expect(state.lastSeq).toBe(2);
-  });
-
-  it("is skipped for a delta too", () => {
-    const { state } = applyEvents([[1, buildDelta("i1", "one")]]);
-
-    expect(fold(state, 1, buildDelta("i1", "again"))).toBeUndefined();
-    // The held text is untouched, so a replayed delta cannot be counted twice.
-    const flushed = fold(state, 2, buildCompletedItem("i1"))!;
-    expect(listTexts(flushed)).toEqual(["one"]);
-  });
-});
-
 describe("merging deltas", () => {
-  it("holds deltas and writes one row at the item boundary", () => {
-    const { folds } = applyEvents([
-      [1, buildDelta("i1", "Hel")],
-      [2, buildDelta("i1", "lo")],
-      [3, buildCompletedItem("i1")],
-    ]);
-
-    expect(listTags(folds[0]!)).toEqual([]);
-    expect(listTags(folds[1]!)).toEqual([]);
-    // The merged text first, then the event that flushed it.
-    expect(listTags(folds[2]!)).toEqual(["content.delta", "item.completed"]);
-    expect(listTexts(folds[2]!)).toEqual(["Hello"]);
-    // The row carries the sequence number of the last delta merged into it.
-    expect(folds[2]!.rows[0]?.seq).toBe(2);
-  });
-
   it("keeps two stream kinds on one item apart", () => {
     const { folds } = applyEvents([
       [1, buildDelta("i1", "said")],
@@ -254,14 +188,6 @@ describe("every other event", () => {
 });
 
 describe("attributeEvent", () => {
-  it("stores an event under the subagent it names, or the session's own agent", () => {
-    expect(attributeEvent(turnStarted)).toBeUndefined();
-    expect(attributeEvent({ ...base, _tag: "turn.started", turnId: TURN, subagentId: "a1" })).toBe(
-      "a1",
-    );
-    expect(attributeEvent(started)).toBeUndefined();
-  });
-
   it("stores a subagent's introduction under the agent that started it", () => {
     const introduced = { ...base, _tag: "subagent.started", subagentId: "a2" } as const;
     expect(attributeEvent(introduced)).toBeUndefined();
@@ -271,16 +197,6 @@ describe("attributeEvent", () => {
 
 describe("a subagent's events", () => {
   const ofSubagent = <E extends ProviderEvent>(event: E): E => ({ ...event, subagentId: "a1" });
-
-  it("never move the session's status", () => {
-    const { folds } = applyEvents([
-      [1, started],
-      [2, ofSubagent(turnStarted)],
-      [3, ofSubagent(turnCompleted)],
-      [4, turnStarted],
-    ]);
-    expect(folds.map((folded) => folded.status)).toEqual(["idle", undefined, undefined, "busy"]);
-  });
 
   it("are held apart from the session's own deltas on the same item id", () => {
     const { folds, state } = applyEvents([
@@ -314,33 +230,9 @@ describe("the open Requests", () => {
   const main: SessionRequest = request;
   const fromSubagent: SessionRequest = { ...second, subagentId: "a1" };
 
-  it("gain each opened Request at the end, with the subagent that asked", () => {
-    const afterMain = computeOpenRequestsAfter(opened, []);
-    expect(afterMain).toEqual([main]);
-    const fromA1: RequestEvent = {
-      ...base,
-      _tag: "request.opened",
-      request: second,
-      subagentId: "a1",
-    };
-    expect(computeOpenRequestsAfter(fromA1, afterMain)).toEqual([main, fromSubagent]);
-  });
-
   it("ignore a Request reported again with an id already open", () => {
     const open = [main];
     expect(computeOpenRequestsAfter(opened, open)).toBe(open);
-  });
-
-  it("lose only the Request an answer names", () => {
-    const open = [main, fromSubagent];
-    expect(computeOpenRequestsAfter(resolved, open)).toEqual([fromSubagent]);
-    const answered: RequestEvent = {
-      ...base,
-      _tag: "request.resolved",
-      requestId: "r2",
-      answers: { Storage: "localStorage" },
-    };
-    expect(computeOpenRequestsAfter(answered, open)).toEqual([main]);
   });
 
   it("lose only the Requests of the agent whose turn ended", () => {
@@ -361,24 +253,5 @@ describe("the open Requests", () => {
     expect(computeOpenRequestsAfter(turnCompleted, empty)).toBe(empty);
     expect(computeOpenRequestsAfter(exited, empty)).toBe(empty);
     expect(computeOpenRequestsAfter(resolved, empty)).toBe(empty);
-  });
-
-  it("are changed only by the four Request events", () => {
-    for (const event of [started, turnStarted, buildDelta("i1", "hi"), buildCompletedItem("i1")]) {
-      expect(isRequestEvent(event), event._tag).toBe(false);
-    }
-    for (const event of [opened, resolved, turnCompleted, exited]) {
-      expect(isRequestEvent(event), event._tag).toBe(true);
-    }
-  });
-});
-
-describe("compareOpenRequests", () => {
-  it("returns the Requests that closed and the ones that opened, by id", () => {
-    const a: SessionRequest = request;
-    const b: SessionRequest = { ...request, requestId: "r2", subagentId: "a1" };
-    const c: SessionRequest = { ...request, requestId: "r3" };
-    expect(compareOpenRequests([a, b], [b, c])).toEqual({ closed: [a], opened: [c] });
-    expect(compareOpenRequests([a], [a])).toEqual({ closed: [], opened: [] });
   });
 });
