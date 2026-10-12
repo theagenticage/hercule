@@ -245,6 +245,34 @@ describe("the checks feed", () => {
     expect(requests.some((path) => path.endsWith("/check-runs"))).toBe(false);
   });
 
+  it("emits one event, within the host's size limits, when a commit has 100 large check suites", async () => {
+    const repository = buildRepository();
+    const harness = await baseline(repository);
+    // GitHub sends each suite with its repository nested in it, about 9 KB as JSON.
+    const repositoryFacts = {
+      description: "y".repeat(1500),
+      urls: Array.from(
+        { length: 150 },
+        (_, index) => `https://api.github.com/repos/${REPO}/${String(index)}`,
+      ),
+    };
+    repository.suites["sha-a"] = Array.from(
+      { length: 100 },
+      (_, index) =>
+        ({
+          ...buildSuite("GitHub Actions", "completed", "success"),
+          id: index + 1,
+          repository: repositoryFacts,
+        }) as GithubCheckSuite,
+    );
+
+    // The harness fails an emit over the host's limit, as the host does, and
+    // that fails the poll.
+    await poll(harness, repository);
+
+    expect(harness.events).toHaveLength(1);
+  });
+
   it("names the failed check runs, sorted and without duplicates, on a failure verdict", async () => {
     const repository = buildRepository();
     const harness = await baseline(repository);

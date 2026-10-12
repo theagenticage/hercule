@@ -49,7 +49,7 @@ import {
   type FeedError,
 } from "./ingest/requests";
 import { buildItemPlace, parseItemRef, type GithubItem } from "./subject";
-import { cutText } from "./text";
+import { countJsonBytes, cutText } from "./text";
 
 /** How many comments before the one that mentions the user a `mentioned` signal shows. */
 const COMMENTS_BEFORE_MENTION = 3;
@@ -560,13 +560,6 @@ const ReviewComment = Schema.Struct({
 
 /** The text of a review that has no body, which is how GitHub lets a reviewer request changes. */
 const EMPTY_REVIEW_TEXT = "Requested changes";
-
-/**
- * Returns how many bytes `value` takes once written as JSON in UTF-8. The
- * contract has the same function; a plugin cannot import the contract.
- */
-const countJsonBytes = (value: unknown): number =>
-  new TextEncoder().encode(JSON.stringify(value)).byteLength;
 
 /**
  * Builds a messages block of the `first` message and the `others` after it,

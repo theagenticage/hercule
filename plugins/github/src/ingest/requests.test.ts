@@ -1,13 +1,16 @@
 /**
  * Tests `fetchNewestItems`, which reads a listing GitHub sorts oldest first
- * from its last page backwards.
+ * from its last page backwards, and `truncateRaw`, which keeps an event's
+ * `raw` within what the host accepts.
  */
 import { describe, expect, it } from "vitest";
 import { Result } from "effect";
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import { TEST_TOKEN } from "../actions/testing";
 import { readStubRequestTarget, runAgainstStub, stubGithub, type StubResponse } from "../testing";
-import { fetchNewestItems } from "./requests";
+import { MAX_EMITTED_FIELD_BYTES } from "@hercule/plugin-host";
+import { countJsonBytes } from "../text";
+import { fetchNewestItems, truncateRaw } from "./requests";
 
 const PATH = "/repos/acme/webshop/issues/7/events";
 
@@ -117,5 +120,40 @@ describe("fetchNewestItems", () => {
     expect(Result.isFailure(result) && result.failure.message).toContain(
       `GitHub sent no link to the last page of GET ${PATH}`,
     );
+  });
+});
+
+describe("truncateRaw", () => {
+  it("cuts a string longer than 2,000 characters and leaves shorter values alone", () => {
+    const raw = truncateRaw({ body: "a".repeat(5000), title: "short", count: 3, merged: false });
+
+    expect(raw).toEqual({ body: "a".repeat(2000), title: "short", count: 3, merged: false });
+  });
+
+  it("keeps the first 20 items of a list, at any depth, and a shorter list whole", () => {
+    const numbers = (count: number) => Array.from({ length: count }, (_, index) => index);
+
+    const raw = truncateRaw({
+      top: numbers(50),
+      nested: { inner: [numbers(30)] },
+      few: numbers(5),
+    });
+
+    expect(raw).toEqual({ top: numbers(20), nested: { inner: [numbers(20)] }, few: numbers(5) });
+  });
+
+  it("replaces a value that is still too large with a note that it was left out", () => {
+    // 40 lists of 20 strings of 2,000 characters: 1.6 MB after every cut above.
+    const wide = Object.fromEntries(
+      Array.from({ length: 40 }, (_, index) => [
+        `list${String(index)}`,
+        Array(20).fill("a".repeat(2000)),
+      ]),
+    );
+
+    const raw = truncateRaw(wide);
+
+    expect(countJsonBytes(raw)).toBeLessThanOrEqual(MAX_EMITTED_FIELD_BYTES);
+    expect(Object.keys(raw)).toEqual(["omitted"]);
   });
 });

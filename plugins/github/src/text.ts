@@ -11,3 +11,11 @@ export const cutText = (text: string, maximum: number): string => {
   const splitsPair = /[\uD800-\uDBFF]/.test(text.charAt(end - 1));
   return `${text.slice(0, splitsPair ? end - 1 : end)}…`;
 };
+
+/**
+ * Returns how many bytes `value` takes once written as JSON in UTF-8, which
+ * is how the host measures an event's `payload` and `raw`. The contract has
+ * the same function; a plugin cannot import the contract.
+ */
+export const countJsonBytes = (value: unknown): number =>
+  new TextEncoder().encode(JSON.stringify(value)).byteLength;

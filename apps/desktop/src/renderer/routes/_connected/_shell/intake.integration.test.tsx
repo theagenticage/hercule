@@ -1428,9 +1428,15 @@ describe("Intake's Everything view", () => {
     const views = screen.getByRole("group", { name: "View" });
     await userEvent.click(within(views).getByRole("button", { name: "Everything" }));
 
-    await waitFor(() => {
-      expect(getEventRow(events[0]!)).not.toBeNull();
-    });
+    // The screen's module is loaded by the hook above, but drawing the list
+    // for the first time has taken longer than the default second when run
+    // alone (1.4 s was seen). This stays under the test's own 5 s limit.
+    await waitFor(
+      () => {
+        expect(getEventRow(events[0]!)).not.toBeNull();
+      },
+      { timeout: 3000 },
+    );
     expect(router.state.location.search).toEqual({ view: "everything" });
     expect(readEventTitles()).toEqual(["Pull request #3", "Pull request #2", "Pull request #1"]);
     expect(findEventReads(calls)).toEqual([{ intake: ["true"] }]);
