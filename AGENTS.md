@@ -133,7 +133,7 @@ The desktop renderer (`apps/desktop/src/renderer`) follows the same rules, with 
 
 ### Check commands
 
-Install first, then run the four checks. All four must be green before a PR; CI runs the same ones.
+Install first, then run the four checks. All four must be green before a PR; CI runs the same ones, each in its own job, with the tests split over several runners.
 
 ```
 pnpm install
@@ -144,7 +144,7 @@ pnpm test        # vitest across every package: the backend on Bun, the React pa
 pnpm dep-lint    # the runner entrypoint links no controller package; each desktop layer links only what spec 17 allows; only sessions/context.ts imports the runner's user-material/; the controller's domains, and the controller daemon's folders, form a DAG
 ```
 
-Then the packaging pair, which CI runs after those four. `pnpm test:binary` runs the
+Then the packaging pair, which CI runs in a job of its own. `pnpm test:binary` runs the
 release binary rather than building one, so it needs the build before it and fails
 saying so when there is none. Building rewrites `apps/web/dist` and the generated
 file list, which is why it is not part of `pnpm test`.
