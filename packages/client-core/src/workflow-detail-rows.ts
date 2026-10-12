@@ -16,6 +16,7 @@ import {
   type RunSummary,
   type Trigger,
   type TriggerFiresOn,
+  type Workflow,
   type WorkflowDefinition,
 } from "@hercule/contract";
 import {
@@ -35,6 +36,7 @@ import {
 } from "./run-marks";
 import { decideFiresOn, describeTriggerOn } from "./trigger-display";
 import type { WaitingRunSession } from "./waiting";
+import { firesTriggers } from "./workflow-firing";
 import type { WorkflowStatusTone } from "./workflow-rows";
 
 /** Returns `text` with its first letter in upper case. */
@@ -66,8 +68,8 @@ export interface WorkflowChip {
   readonly text: string;
   /**
    * When the start trigger fires next, an ISO instant, which the screen
-   * appends as " · next Fri 14:00". Null while the workflow is off, the
-   * trigger is paused or in error, or its next fire is not known.
+   * appends as " · next Fri 14:00". Null while the workflow is disabled or
+   * invalid, the trigger is paused or in error, or its next fire is not known.
    */
   readonly nextFireAt: string | null;
   /** `fail` for a start trigger in error. */
@@ -81,14 +83,16 @@ const formatCount = (count: number, noun: string): string | undefined =>
 /**
  * Builds the chips under a workflow's name: one per start trigger among
  * `triggers`, the workflow's own, or "On demand" when it has none, then what
- * its steps run. `enabled` is whether the workflow is enabled; a disabled
- * workflow's triggers do not fire, so their chips have no next fire.
+ * its steps run. `workflow` is the workflow, as its switch shows it. The
+ * workflow is off while it is disabled or invalid; its triggers then do not
+ * fire, so their chips have no next fire.
  */
 export const buildWorkflowChips = (
   definition: WorkflowDefinition,
-  enabled: boolean,
+  workflow: Pick<Workflow, "enabled" | "invalidSince">,
   triggers: ReadonlyArray<Trigger>,
 ): ReadonlyArray<WorkflowChip> => {
+  const isOn = firesTriggers(workflow);
   const startChips = sortByDeclaration(definition, triggers)
     .filter((trigger) => trigger.kind === "start")
     .map((trigger): WorkflowChip => {
@@ -99,7 +103,7 @@ export const buildWorkflowChips = (
         key: `trigger:${trigger.triggerId}`,
         firesOn: decideFiresOn(trigger.on),
         text: isBroken ? `${words} · error` : isPaused ? `${words} · paused` : words,
-        nextFireAt: enabled && !isBroken && !isPaused ? (trigger.nextFireAt ?? null) : null,
+        nextFireAt: isOn && !isBroken && !isPaused ? (trigger.nextFireAt ?? null) : null,
         tone: isBroken ? "fail" : null,
       };
     });
@@ -252,8 +256,8 @@ export interface TriggerRow {
   /** What it fires on: a schedule in words, or an event kind with its Connection. */
   readonly firesOnText: string;
   /**
-   * Its state in words: its error, "Paused", "Off" while the workflow is off,
-   * or "On event". Empty for a signal trigger, which fires only into a run
+   * Its state in words: its error, "Paused", "Off" while the workflow is
+   * disabled or invalid, or "On event". Empty for a signal trigger, which fires only into a run
    * that waits for it, and when `nextFireAt` is set, or a schedule's next
    * fire is not known yet.
    */
@@ -275,21 +279,23 @@ export interface TriggerRow {
 
 /**
  * Builds a row for each of `triggers`, the workflow's own, in the order
- * `definition` declares them. `enabled` is whether the workflow is enabled.
+ * `definition` declares them. `workflow` is the workflow, as its switch shows
+ * it.
  *
  * The state is the first of these that holds: the trigger's error, empty for
- * a signal trigger, "Paused", "Off" while the workflow is off, its next
- * fire, and "On event" for a trigger that fires on events.
+ * a signal trigger, "Paused", "Off" while the workflow is disabled or
+ * invalid, its next fire, and "On event" for a trigger that fires on events.
  */
 export const buildTriggerRows = (
   definition: WorkflowDefinition,
-  enabled: boolean,
+  workflow: Pick<Workflow, "enabled" | "invalidSince">,
   triggers: ReadonlyArray<Trigger>,
-): ReadonlyArray<TriggerRow> =>
-  sortByDeclaration(definition, triggers).map((trigger): TriggerRow => {
+): ReadonlyArray<TriggerRow> => {
+  const isOn = firesTriggers(workflow);
+  return sortByDeclaration(definition, triggers).map((trigger): TriggerRow => {
     const { health, status, nextFireAt, on } = trigger;
     const isStart = trigger.kind === "start";
-    const isQuiet = health?.state === "error" || !isStart || status === "paused" || !enabled;
+    const isQuiet = health?.state === "error" || !isStart || status === "paused" || !isOn;
     return {
       id: trigger.triggerId,
       firesOn: decideFiresOn(on),
@@ -302,7 +308,7 @@ export const buildTriggerRows = (
             ? ""
             : status === "paused"
               ? "Paused"
-              : !enabled
+              : !isOn
                 ? "Off"
                 : isSchedule(on)
                   ? ""
@@ -314,6 +320,7 @@ export const buildTriggerRows = (
         : null,
     };
   });
+};
 
 /** One input, as its row in the Inputs tab shows it. */
 export interface InputRow {

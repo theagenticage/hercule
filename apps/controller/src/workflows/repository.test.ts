@@ -13,7 +13,12 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { ANY_CONNECTION, type Trigger, type TriggerKey } from "@hercule/contract";
+import {
+  ANY_CONNECTION,
+  DEFAULT_SPAWN_BOUND,
+  type Trigger,
+  type TriggerKey,
+} from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { workflowRepository, type DeclaredTrigger } from "./repository";
@@ -21,6 +26,12 @@ import { declareCronTrigger, declareStartTrigger } from "./testing";
 
 const FIRST_SAVE = "2026-09-22T10:00:00.000Z";
 const SECOND_SAVE = "2026-09-22T11:00:00.000Z";
+
+/** The status change of a manual pause. */
+const MANUAL_PAUSE = { status: "paused", pausedBy: "manual" } as const;
+
+/** The status change of a pause by the breaker. */
+const BREAKER_PAUSE = { status: "paused", pausedBy: "breaker" } as const;
 
 /** Inserts a workflow and its triggers, all saved at `savedAt`. Returns the workflow id. */
 const storeWorkflow = (name: string, triggers: ReadonlyArray<DeclaredTrigger>, savedAt: string) =>
@@ -37,23 +48,27 @@ const storeWorkflow = (name: string, triggers: ReadonlyArray<DeclaredTrigger>, s
 /** Lists every trigger row in one page. Returns a map from trigger id to row. */
 const readTriggers = Effect.gen(function* () {
   const workflows = yield* workflowRepository;
-  const page = yield* workflows.listTriggers({
-    limit: 100,
-    cursor: undefined,
-    direction: "desc",
-    workflowId: undefined,
-    kind: undefined,
-    on: undefined,
-    eventKind: undefined,
-    status: undefined,
-  });
+  const page = yield* workflows.listTriggers(
+    {
+      limit: 100,
+      cursor: undefined,
+      direction: "desc",
+      workflowId: undefined,
+      kind: undefined,
+      on: undefined,
+      eventKind: undefined,
+      status: undefined,
+    },
+    DEFAULT_SPAWN_BOUND,
+    SECOND_SAVE,
+  );
   return new Map(page.items.map((item) => [item.triggerId, item]));
 });
 
 /**
  * Saves a workflow with the triggers in `before`, then saves it again an hour
  * later with the triggers in `after`. The triggers listed in `pausedIds` are
- * paused between the two saves. Returns the trigger rows after the second
+ * paused by the breaker between the two saves. Returns the trigger rows after the second
  * save, keyed by trigger id.
  */
 const saveTwice = (
@@ -67,7 +82,9 @@ const saveTwice = (
       const sql = yield* SqlClient.SqlClient;
       const workflowId = yield* storeWorkflow("Twice saved", before, FIRST_SAVE);
       for (const triggerId of pausedIds) {
-        yield* sql`UPDATE triggers SET status = 'paused' WHERE trigger_id = ${triggerId}`;
+        yield* sql`
+          UPDATE triggers SET status = 'paused', paused_by = 'breaker'
+          WHERE trigger_id = ${triggerId}`;
       }
       yield* workflows.reconcileTriggers(workflowId, after, SECOND_SAVE);
       return yield* readTriggers;
@@ -80,7 +97,7 @@ describe("saving a workflow's triggers a second time", () => {
     expect(triggers.get("a")).toMatchObject({ createdAt: FIRST_SAVE, updatedAt: FIRST_SAVE });
   });
 
-  it("updates the fields and updated_at of a changed trigger, and keeps its created_at and status", async () => {
+  it("updates the fields and updated_at of a changed trigger, and keeps its created_at, its status and who paused it", async () => {
     const triggers = await saveTwice(
       [declareStartTrigger("a")],
       [declareStartTrigger("a", { on: { kind: "task.created", filter: "event.payload.id > 3" } })],
@@ -89,6 +106,7 @@ describe("saving a workflow's triggers a second time", () => {
     expect(triggers.get("a")).toMatchObject({
       on: { kind: "task.created", filter: "event.payload.id > 3" },
       status: "paused",
+      pausedBy: "breaker",
       createdAt: FIRST_SAVE,
       updatedAt: SECOND_SAVE,
     });
@@ -115,6 +133,7 @@ describe("saving a workflow's triggers a second time", () => {
     // The paused start trigger became a signal trigger, which has no status.
     expect(triggers.get("a")).toMatchObject({ kind: "signal", createdAt: SECOND_SAVE });
     expect(Object.keys(triggers.get("a") ?? {})).not.toContain("status");
+    expect(Object.keys(triggers.get("a") ?? {})).not.toContain("pausedBy");
     // The signal trigger became a start trigger, which starts out active.
     expect(triggers.get("s")).toMatchObject({
       kind: "start",
@@ -151,7 +170,7 @@ describe("the trigger ids a second save returns", () => {
         );
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
-    expect([...ended].sort()).toEqual(["dropped", "flipped"]);
+    expect([...ended.removedTriggerIds].sort()).toEqual(["dropped", "flipped"]);
   });
 });
 
@@ -168,16 +187,20 @@ describe("listing triggers page by page", () => {
         const listed: Array<readonly [string, string]> = [];
         let cursor: string | undefined;
         do {
-          const page = yield* workflows.listTriggers({
-            limit: 2,
-            cursor,
-            direction: "desc",
-            workflowId: undefined,
-            kind: undefined,
-            on: undefined,
-            eventKind: undefined,
-            status: undefined,
-          });
+          const page = yield* workflows.listTriggers(
+            {
+              limit: 2,
+              cursor,
+              direction: "desc",
+              workflowId: undefined,
+              kind: undefined,
+              on: undefined,
+              eventKind: undefined,
+              status: undefined,
+            },
+            DEFAULT_SPAWN_BOUND,
+            SECOND_SAVE,
+          );
           listed.push(...page.items.map((item) => [item.workflowId, item.triggerId] as const));
           cursor = page.nextCursor;
         } while (cursor !== undefined);
@@ -207,7 +230,9 @@ const enableWorkflow = (workflowId: string) =>
 /** Reads one trigger through the repository. Fails the test when the trigger is missing. */
 const readStoredTrigger = (key: TriggerKey) =>
   Effect.map(
-    Effect.flatMap(workflowRepository, (workflows) => workflows.readTrigger(key)),
+    Effect.flatMap(workflowRepository, (workflows) =>
+      workflows.readTrigger(key, DEFAULT_SPAWN_BOUND, SECOND_SAVE),
+    ),
     Option.getOrThrow,
   );
 
@@ -491,7 +516,7 @@ describe("recording a start trigger's failures", () => {
 });
 
 describe("listing the routable start triggers", () => {
-  it("lists only the active start triggers of enabled workflows, with their selection and mapping", async () => {
+  it("lists the active and breaker-paused start triggers of enabled, valid workflows, with their selection, mapping and spawn bound", async () => {
     const { routable, enabledId } = await run(
       Effect.gen(function* () {
         const workflows = yield* workflowRepository;
@@ -508,6 +533,7 @@ describe("listing the routable start triggers", () => {
             }),
             declareStartTrigger("unmapped"),
             declareStartTrigger("paused"),
+            declareStartTrigger("held-back"),
             declareStartTrigger("signal", { kind: "signal" }),
           ],
           FIRST_SAVE,
@@ -515,7 +541,14 @@ describe("listing the routable start triggers", () => {
         yield* enableWorkflow(enabledId);
         yield* workflows.setTriggerStatus(
           { workflowId: enabledId, triggerId: "paused" },
-          "paused",
+          MANUAL_PAUSE,
+          SECOND_SAVE,
+        );
+        // The breaker pauses a trigger only so that it holds its matches,
+        // so the event router keeps matching it.
+        yield* workflows.setTriggerStatus(
+          { workflowId: enabledId, triggerId: "held-back" },
+          BREAKER_PAUSE,
           SECOND_SAVE,
         );
         yield* workflows.recordTriggerFailure(
@@ -526,39 +559,141 @@ describe("listing the routable start triggers", () => {
         );
         // A workflow is stored disabled, so this one's active trigger cannot start a run.
         yield* storeWorkflow("Disabled", [declareStartTrigger("of-disabled")], FIRST_SAVE);
-        const routable = yield* workflows.listRoutableStartTriggers();
+        const invalidId = yield* storeWorkflow(
+          "Invalid",
+          [declareStartTrigger("of-invalid")],
+          FIRST_SAVE,
+        );
+        yield* enableWorkflow(invalidId);
+        const stored = yield* workflows.listStoredDefinitions();
+        yield* workflows.setInvalidSince(
+          stored.find((workflow) => workflow.id === invalidId)!,
+          SECOND_SAVE,
+        );
+        const routable = yield* workflows.listRoutableStartTriggers(DEFAULT_SPAWN_BOUND);
         return { routable, enabledId };
       }),
     );
 
+    const unfiltered = {
+      workflowId: enabledId,
+      spawnBound: DEFAULT_SPAWN_BOUND,
+      eventKind: "task.created",
+      connectionId: undefined,
+      filter: undefined,
+      inputs: {},
+      hasEvaluationError: false,
+    };
     expect(
       [...routable].sort((left, right) => left.triggerId.localeCompare(right.triggerId)),
     ).toEqual([
       {
-        workflowId: enabledId,
+        ...unfiltered,
         triggerId: "active",
-        eventKind: "task.created",
         connectionId: ANY_CONNECTION,
         filter: "event.payload.id > 3",
         inputs: { id: "event.payload.id" },
-        hasEvaluationError: false,
       },
-      {
-        workflowId: enabledId,
-        triggerId: "unmapped",
-        eventKind: "task.created",
-        connectionId: undefined,
-        filter: undefined,
-        inputs: {},
-        hasEvaluationError: true,
-      },
+      { ...unfiltered, triggerId: "held-back" },
+      { ...unfiltered, triggerId: "unmapped", hasEvaluationError: true },
     ]);
+  });
+
+  it("gives a trigger the spawn bound its source sets, and the default when its source sets none", async () => {
+    const bounds = await run(
+      Effect.gen(function* () {
+        const workflows = yield* workflowRepository;
+        const own = { maxRuns: 2, windowSeconds: 600 };
+        const workflowId = yield* storeWorkflow(
+          "Bounded",
+          [declareStartTrigger("own", { spawnBound: own }), declareStartTrigger("default")],
+          FIRST_SAVE,
+        );
+        yield* enableWorkflow(workflowId);
+        const key = (triggerId: string) => ({ workflowId, triggerId });
+        const fallback = { maxRuns: 7, windowSeconds: 60 };
+        const routable = yield* workflows.listRoutableStartTriggers(fallback);
+        const read = (triggerId: string) =>
+          Effect.map(
+            workflows.readTrigger(key(triggerId), fallback, SECOND_SAVE),
+            (found) => Option.getOrThrow(found).spawnBound,
+          );
+        return {
+          routable: Object.fromEntries(
+            routable.map((trigger) => [trigger.triggerId, trigger.spawnBound]),
+          ),
+          own: yield* read("own"),
+          default: yield* read("default"),
+        };
+      }),
+    );
+
+    expect(bounds).toEqual({
+      routable: {
+        own: { maxRuns: 2, windowSeconds: 600 },
+        default: { maxRuns: 7, windowSeconds: 60 },
+      },
+      own: { maxRuns: 2, windowSeconds: 600, isDefault: false },
+      default: { maxRuns: 7, windowSeconds: 60, isDefault: true },
+    });
   });
 });
 
-describe("checking that a start trigger is routable", () => {
-  it("is true only for an active start trigger of an enabled workflow", async () => {
-    const routable = await run(
+describe("setting a workflow's invalid mark", () => {
+  /** Reads the stored definition of one workflow. Fails the test when it is missing. */
+  const readStored = (workflowId: string) =>
+    Effect.flatMap(workflowRepository, (workflows) =>
+      Effect.map(workflows.listStoredDefinitions(), (stored) =>
+        stored.find((workflow) => workflow.id === workflowId)!,
+      ),
+    );
+
+  it("writes the mark only while the workflow still has the source and the mark it was read with", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const workflows = yield* workflowRepository;
+        const savedId = yield* storeWorkflow("Saved in between", [], FIRST_SAVE);
+        const markedId = yield* storeWorkflow("Marked in between", [], FIRST_SAVE);
+        const saved = yield* readStored(savedId);
+        const marked = yield* readStored(markedId);
+
+        // A save changes the source after the workflow was read.
+        yield* workflows.update(
+          savedId,
+          {
+            parsedSource: {
+              source: "name: Saved in between\nsteps: []\n# edited\n",
+              definition: { name: "Saved in between", steps: [] },
+            },
+          },
+          SECOND_SAVE,
+        );
+        // Another pass marks the workflow after it was read.
+        const firstMark = yield* workflows.setInvalidSince(marked, FIRST_SAVE);
+
+        return {
+          wroteSaved: yield* workflows.setInvalidSince(saved, SECOND_SAVE),
+          firstMark,
+          wroteMarked: yield* workflows.setInvalidSince(marked, SECOND_SAVE),
+          saved: (yield* readStored(savedId)).invalidSince,
+          marked: (yield* readStored(markedId)).invalidSince,
+        };
+      }),
+    );
+
+    expect(outcome).toEqual({
+      wroteSaved: false,
+      firstMark: true,
+      wroteMarked: false,
+      saved: undefined,
+      marked: FIRST_SAVE,
+    });
+  });
+});
+
+describe("checking that a start trigger accepts pending effects", () => {
+  it("is true only for an active or breaker-paused start trigger of an enabled workflow", async () => {
+    const allowed = await run(
       Effect.gen(function* () {
         const workflows = yield* workflowRepository;
         const enabledId = yield* storeWorkflow(
@@ -566,6 +701,7 @@ describe("checking that a start trigger is routable", () => {
           [
             declareStartTrigger("active"),
             declareStartTrigger("paused"),
+            declareStartTrigger("held-back"),
             declareStartTrigger("signal", { kind: "signal" }),
           ],
           FIRST_SAVE,
@@ -573,7 +709,12 @@ describe("checking that a start trigger is routable", () => {
         yield* enableWorkflow(enabledId);
         yield* workflows.setTriggerStatus(
           { workflowId: enabledId, triggerId: "paused" },
-          "paused",
+          MANUAL_PAUSE,
+          SECOND_SAVE,
+        );
+        yield* workflows.setTriggerStatus(
+          { workflowId: enabledId, triggerId: "held-back" },
+          BREAKER_PAUSE,
           SECOND_SAVE,
         );
         const disabledId = yield* storeWorkflow(
@@ -582,10 +723,11 @@ describe("checking that a start trigger is routable", () => {
           FIRST_SAVE,
         );
         const check = (workflowId: string, triggerId: string) =>
-          workflows.isRoutableStartTrigger({ workflowId, triggerId });
+          workflows.acceptsPendingEffects({ workflowId, triggerId });
         return {
           active: yield* check(enabledId, "active"),
           paused: yield* check(enabledId, "paused"),
+          "held-back": yield* check(enabledId, "held-back"),
           signal: yield* check(enabledId, "signal"),
           missing: yield* check(enabledId, "missing"),
           "of-disabled": yield* check(disabledId, "of-disabled"),
@@ -593,9 +735,12 @@ describe("checking that a start trigger is routable", () => {
       }),
     );
 
-    expect(routable).toEqual({
+    // A breaker-paused trigger's pending matches were within its bound when
+    // they matched, so their runs still start.
+    expect(allowed).toEqual({
       active: true,
       paused: false,
+      "held-back": true,
       signal: false,
       missing: false,
       "of-disabled": false,
@@ -610,10 +755,10 @@ describe("setting a trigger's status", () => {
         const workflows = yield* workflowRepository;
         const workflowId = yield* storeWorkflow("Toggled", [declareStartTrigger("a")], FIRST_SAVE);
         const key = { workflowId, triggerId: "a" };
-        const paused = yield* workflows.setTriggerStatus(key, "paused", SECOND_SAVE);
+        const paused = yield* workflows.setTriggerStatus(key, MANUAL_PAUSE, SECOND_SAVE);
         const pausedAgain = yield* workflows.setTriggerStatus(
           key,
-          "paused",
+          MANUAL_PAUSE,
           "2026-09-22T12:00:00.000Z",
         );
         return { paused, pausedAgain, trigger: yield* readStoredTrigger(key) };
@@ -622,7 +767,33 @@ describe("setting a trigger's status", () => {
 
     expect(paused).toBe(true);
     expect(pausedAgain).toBe(false);
-    expect(trigger).toMatchObject({ status: "paused", updatedAt: SECOND_SAVE });
+    expect(trigger).toMatchObject({ status: "paused", pausedBy: "manual", updatedAt: SECOND_SAVE });
+  });
+
+  it("reports a change when the user pauses a trigger the breaker paused, and drops who paused it on resume", async () => {
+    const { manuallyPaused, manuallyPausedTrigger, resumed, resumedTrigger } = await run(
+      Effect.gen(function* () {
+        const workflows = yield* workflowRepository;
+        const workflowId = yield* storeWorkflow("Toggled", [declareStartTrigger("a")], FIRST_SAVE);
+        const key = { workflowId, triggerId: "a" };
+        yield* workflows.setTriggerStatus(key, BREAKER_PAUSE, FIRST_SAVE);
+        const manuallyPaused = yield* workflows.setTriggerStatus(key, MANUAL_PAUSE, SECOND_SAVE);
+        const manuallyPausedTrigger = yield* readStoredTrigger(key);
+        const resumed = yield* workflows.setTriggerStatus(key, { status: "active" }, SECOND_SAVE);
+        return {
+          manuallyPaused,
+          manuallyPausedTrigger,
+          resumed,
+          resumedTrigger: yield* readStoredTrigger(key),
+        };
+      }),
+    );
+
+    expect(manuallyPaused).toBe(true);
+    expect(manuallyPausedTrigger).toMatchObject({ status: "paused", pausedBy: "manual" });
+    expect(resumed).toBe(true);
+    expect(resumedTrigger.status).toBe("active");
+    expect(Object.keys(resumedTrigger)).not.toContain("pausedBy");
   });
 
   it("never gives a signal trigger a status", async () => {
@@ -635,7 +806,7 @@ describe("setting a trigger's status", () => {
           FIRST_SAVE,
         );
         const key = { workflowId, triggerId: "s" };
-        const changed = yield* workflows.setTriggerStatus(key, "paused", SECOND_SAVE);
+        const changed = yield* workflows.setTriggerStatus(key, MANUAL_PAUSE, SECOND_SAVE);
         return { changed, trigger: yield* readStoredTrigger(key) };
       }),
     );
@@ -682,7 +853,7 @@ describe("listing the triggers that name a Connection", () => {
         );
         yield* workflows.setTriggerStatus(
           { workflowId: alphaId, triggerId: "m" },
-          "paused",
+          MANUAL_PAUSE,
           SECOND_SAVE,
         );
         const named = yield* workflows.listTriggersNamingConnection(CONNECTION_ID);
@@ -756,7 +927,7 @@ describe("listing the cron triggers to schedule", () => {
         yield* enableWorkflow(enabledId);
         yield* workflows.setTriggerStatus(
           { workflowId: enabledId, triggerId: "paused" },
-          "paused",
+          MANUAL_PAUSE,
           SECOND_SAVE,
         );
         const disabledId = yield* storeWorkflow(
@@ -872,16 +1043,20 @@ describe("moving a cron trigger on to its next scheduled time", () => {
         });
         const movedOn = yield* readStoredTrigger(key);
         const columns = yield* readTriggerColumns(key);
-        const page = yield* workflows.listTriggers({
-          limit: 10,
-          cursor: undefined,
-          direction: "desc",
-          workflowId,
-          kind: undefined,
-          on: undefined,
-          eventKind: undefined,
-          status: undefined,
-        });
+        const page = yield* workflows.listTriggers(
+          {
+            limit: 10,
+            cursor: undefined,
+            direction: "desc",
+            workflowId,
+            kind: undefined,
+            on: undefined,
+            eventKind: undefined,
+            status: undefined,
+          },
+          DEFAULT_SPAWN_BOUND,
+          SECOND_SAVE,
+        );
         return { computed, fired, skipped, movedOn, columns, listed: page.items[0] };
       }),
     );
@@ -975,7 +1150,11 @@ describe("reading a trigger", () => {
       Effect.gen(function* () {
         const workflows = yield* workflowRepository;
         const workflowId = yield* storeWorkflow("Read", [declareStartTrigger("a")], FIRST_SAVE);
-        return yield* workflows.readTrigger({ workflowId, triggerId: "absent" });
+        return yield* workflows.readTrigger(
+          { workflowId, triggerId: "absent" },
+          DEFAULT_SPAWN_BOUND,
+          SECOND_SAVE,
+        );
       }),
     );
 
@@ -991,16 +1170,20 @@ describe("listing triggers by what they fire on", () => {
   }) =>
     Effect.gen(function* () {
       const workflows = yield* workflowRepository;
-      const page = yield* workflows.listTriggers({
-        limit: 100,
-        cursor: undefined,
-        direction: "desc",
-        workflowId: undefined,
-        kind: undefined,
-        on: filter.on,
-        eventKind: filter.eventKind,
-        status: undefined,
-      });
+      const page = yield* workflows.listTriggers(
+        {
+          limit: 100,
+          cursor: undefined,
+          direction: "desc",
+          workflowId: undefined,
+          kind: undefined,
+          on: filter.on,
+          eventKind: filter.eventKind,
+          status: undefined,
+        },
+        DEFAULT_SPAWN_BOUND,
+        SECOND_SAVE,
+      );
       return page.items.map((item) => item.triggerId).sort();
     });
 

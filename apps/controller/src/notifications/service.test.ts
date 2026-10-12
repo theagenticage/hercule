@@ -1108,7 +1108,7 @@ describe("describe lines", () => {
     expect(notification.actions[0]!.describeLine).toEqual([
       {
         kind: "text",
-        text: "Cannot be taken: An answer on a notification cannot run task.delete. An answer on a notification can run one of: permission.decide, task.update, run.start, session.input, session.respondToApprovalRequest.",
+        text: "Cannot be taken: An answer on a notification cannot run task.delete. An answer on a notification can run one of: permission.decide, task.update, run.start, trigger.resume, session.input, session.respondToApprovalRequest.",
       },
     ]);
   });

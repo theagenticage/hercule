@@ -465,7 +465,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Turns one pending raise into a signal, as the module comment describes,
-     * and deletes the raise. `workflows` are the enabled workflows, read once
+     * and deletes the raise. `workflows` are the enabled, valid workflows, read once
      * by the caller for all the raises it handles.
      *
      * A raise with nothing to raise is deleted without a signal, and a log

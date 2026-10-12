@@ -15,7 +15,7 @@ import {
   type TimelineNow,
 } from "@hercule/client-core/run-timeline";
 import { buildRunRows } from "@hercule/client-core/workflow-detail-rows";
-import type { Trigger, WorkflowDefinition } from "@hercule/contract";
+import type { Trigger, Workflow, WorkflowDefinition } from "@hercule/contract";
 import { NEVER, useClockValue } from "../../../../app/age-clock";
 import { workflowDayRunsQuery, workflowRunsQuery } from "../../../../app/queries";
 import { useWaitingRunSessions } from "../../../../app/waiting";
@@ -143,7 +143,8 @@ export function RunTimelineAxis({
 /**
  * Reads one day of the workflow `workflowId`'s runs and draws them on the
  * timeline's lanes, with the next fires of its `triggers` later today.
- * `isEnabled` is whether the workflow is on: an off workflow fires nothing.
+ * `workflow` is the workflow with its switch as shown: a disabled or invalid
+ * workflow fires nothing, so it has no next fires.
  * The lanes hold the minute clock for their now line, as the axis does.
  * They are drawn afresh for each day the user steps to, so stepping plays
  * their arrival again. When the day turns at midnight, the lanes stay, so
@@ -154,7 +155,7 @@ export function RunDayLanes({
   client,
   workflowId,
   definition,
-  isEnabled,
+  workflow,
   triggers,
   shown,
   timezone,
@@ -162,7 +163,7 @@ export function RunDayLanes({
   readonly client: HerculeClient;
   readonly workflowId: string;
   readonly definition: WorkflowDefinition;
-  readonly isEnabled: boolean;
+  readonly workflow: Pick<Workflow, "enabled" | "invalidSince">;
   readonly triggers: ReadonlyArray<Trigger>;
   readonly shown: ShownDay;
   readonly timezone: string;
@@ -180,7 +181,7 @@ export function RunDayLanes({
       now={now}
       bars={bars}
       trackCount={trackCount}
-      fires={buildTimelineFires(triggers, isEnabled, day, timezone)}
+      fires={buildTimelineFires(triggers, workflow, day, timezone)}
       emptyText={day.isToday ? "No runs today" : "No runs this day"}
       timezone={timezone}
     />

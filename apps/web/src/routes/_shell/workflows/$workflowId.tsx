@@ -1,10 +1,10 @@
 import type { JSX } from "react";
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { isNotFound } from "@hercule/client-core";
+import { isNotFound, isPausedWithHeldEvents } from "@hercule/client-core";
 import { EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
-import { triggersQuery, workflowQuery } from "../../../app/queries";
+import { heldEventsQuery, triggersQuery, workflowQuery } from "../../../app/queries";
 import { prefetchWorkflowCatalog } from "./-catalog";
 import { WorkflowEditorPage } from "./-page";
 import { validateWorkflowViewSearch } from "./-view";
@@ -14,8 +14,10 @@ export const Route = createFileRoute("/_shell/workflows/$workflowId")({
   // hides its top bar.
   staticData: { title: "Workflow", ownsTopBar: true },
   validateSearch: validateWorkflowViewSearch,
-  // Loads the workflow, its triggers and the editor's autocomplete data before
-  // the page renders, so the page never waits on them.
+  // Loads the workflow, its triggers, the events each paused trigger holds,
+  // and the editor's autocomplete data before the page renders, so the page
+  // never waits on them. A failed read of held events does not stop the
+  // page: the trigger's row still counts them.
   loader: async ({ context: { client, queryClient }, params }) => {
     await Promise.all([
       queryClient.ensureQueryData(workflowQuery(client, params.workflowId)).catch((error) => {
@@ -24,7 +26,19 @@ export const Route = createFileRoute("/_shell/workflows/$workflowId")({
         // load error.
         throw isNotFound(error) ? notFound() : error;
       }),
-      queryClient.ensureQueryData(triggersQuery(client, params.workflowId)),
+      queryClient
+        .ensureQueryData(triggersQuery(client, params.workflowId))
+        .then(({ items }) =>
+          Promise.all(
+            items
+              .filter(isPausedWithHeldEvents)
+              .map((trigger) =>
+                queryClient.prefetchQuery(
+                  heldEventsQuery(client, trigger.workflowId, trigger.triggerId),
+                ),
+              ),
+          ),
+        ),
       prefetchWorkflowCatalog(client, queryClient),
     ]);
   },

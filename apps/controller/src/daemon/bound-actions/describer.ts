@@ -4,10 +4,10 @@
  * "Start a run of Bugfix". This is the `describe` half of the
  * `BoundOperations` port.
  *
- * It reads the tasks, projects, workflows, sessions, signals, Connections,
- * Permission Requests and permission profiles an operation names, and those
- * domains depend on the domains that hold Bound Actions, so those domains
- * cannot read them themselves. It reads their repositories rather than their
+ * It reads the tasks, projects, workflows, triggers, sessions, signals,
+ * Connections, Permission Requests and permission profiles an operation
+ * names, and those domains depend on the domains that hold Bound Actions,
+ * so those domains cannot read them themselves. It reads their repositories rather than their
  * services: a describe line is part of reading a notification or a signal,
  * not a read of the task or session on the caller's behalf, so their grant
  * checks do not apply.
@@ -36,6 +36,7 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   describeMatchValue,
+  describeSpawnBound,
   isId,
   listLabeledValues,
   type ApprovalDecision,
@@ -46,6 +47,7 @@ import {
   type DescribeLine,
   type DescribeLinePart,
   type OpenRequest,
+  type Trigger,
   type WorkflowDefinition,
 } from "@hercule/contract";
 import type { AnswerPlace } from "@hercule/plugin-host";
@@ -55,6 +57,7 @@ import {
   type PluginAnswerOperation,
 } from "../../bound-actions";
 import { connectionRepository } from "../../connections";
+import { nowIso } from "../../db";
 import {
   permissionRequestRepository,
   PermissionProfiles,
@@ -63,9 +66,10 @@ import {
 import { PluginHost } from "../../plugins";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
+import { Settings } from "../../settings";
 import { signalRepository } from "../../signals";
 import { taskRepository } from "../../tasks";
-import { workflowRepository } from "../../workflows";
+import { readDefaultSpawnBound, workflowRepository } from "../../workflows";
 
 /** Returns a `text` part: words of the line itself. */
 const buildTextPart = (value: string): DescribeLinePart => ({ kind: "text", text: value });
@@ -258,6 +262,39 @@ const describeNewTaskFields = (
   );
 
 /**
+ * Returns the describe line of a `trigger.resume` answer, from the trigger as
+ * it is now, such as "Resume the trigger «labeled» of «GitHub work»,
+ * starting the events it holds as fast as «30 per hour» allows". With
+ * `discardHeld` it reads "... and discard every event it holds when you
+ * answer". A trigger that no longer exists is named by its ids.
+ *
+ * The line counts no events, because the count keeps changing while the
+ * answer waits; the trigger list shows it.
+ */
+const describeTriggerResume = (
+  key: { readonly workflowId: string; readonly triggerId: string },
+  discardHeld: boolean,
+  trigger: Trigger | undefined,
+): DescribeLine => {
+  const named = [
+    buildTextPart("Resume the trigger "),
+    buildMarkedPart(key.triggerId),
+    buildTextPart(" of "),
+    buildMarkedPart(trigger?.workflowName ?? key.workflowId),
+  ];
+  if (discardHeld) {
+    return [...named, buildTextPart(" and discard every event it holds when you answer")];
+  }
+  if (trigger?.spawnBound === undefined) return named;
+  return [
+    ...named,
+    buildTextPart(", starting the events it holds as fast as "),
+    buildMarkedPart(describeSpawnBound(trigger.spawnBound)),
+    buildTextPart(" allows"),
+  ];
+};
+
+/**
  * Runs a plugin action's `describe` on a stored input and returns its parts,
  * or `undefined` when the action has no `describe` or it throws. The plugin's
  * code runs on every read of an open record, so a bug in it must not fail the
@@ -285,7 +322,7 @@ export const buildDescribe: Effect.Effect<
     operations: ReadonlyArray<CheckedOperation>,
   ) => Effect.Effect<ReadonlyArray<DescribeLine>, SqlError>,
   never,
-  SqlClient.SqlClient | PluginHost | PermissionProfiles
+  SqlClient.SqlClient | PluginHost | PermissionProfiles | Settings
 > = Effect.gen(function* () {
   const tasks = yield* taskRepository;
   const projects = yield* projectRepository;
@@ -296,6 +333,7 @@ export const buildDescribe: Effect.Effect<
   const host = yield* PluginHost;
   const permissionRequests = yield* permissionRequestRepository;
   const permissionProfiles = yield* PermissionProfiles;
+  const settings = yield* Settings;
 
   /**
    * Builds the describer for one `describe` call, reading each entity at
@@ -360,6 +398,24 @@ export const buildDescribe: Effect.Effect<
           onSome: (session) => session.openRequests,
         }),
       })),
+    );
+
+    /**
+     * Returns a trigger as `trigger.query` lists it, or `undefined` once it
+     * is gone. Its id is `<workflow id>/<trigger id>`, because a trigger id
+     * is unique only within its workflow. A workflow id holds no `/`, so the
+     * first `/` ends it.
+     */
+    const readTrigger = readOncePerId((id) =>
+      Effect.gen(function* () {
+        const split = id.indexOf("/");
+        const found = yield* workflows.readTrigger(
+          { workflowId: id.slice(0, split), triggerId: id.slice(split + 1) },
+          yield* readDefaultSpawnBound(settings),
+          yield* nowIso,
+        );
+        return Option.getOrUndefined(found);
+      }),
     );
 
     /** Returns a permission profile's name, or its id when it cannot be read. */
@@ -587,6 +643,10 @@ export const buildDescribe: Effect.Effect<
             describeOpenRequest(session.openRequests, requestId),
             session.markedName,
           ),
+        ),
+      "trigger.resume": ({ discardHeld, ...key }) =>
+        Effect.map(readTrigger(`${key.workflowId}/${key.triggerId}`), (trigger) =>
+          describeTriggerResume(key, discardHeld === true, trigger),
         ),
       "permission.decide": ({ requestId, outcome }) =>
         Effect.map(readPermissionRequestParts(requestId), (parts) =>

@@ -14,9 +14,9 @@
  * from: the signals, Tasks and Subscriptions it reached. A client turns them
  * into "What came of it" with no request per row (spec 10 section 9.10).
  *
- * Two filters from spec 11, `triggerId` and `runId`, are missing here: events
- * are not linked to triggers or runs yet, and a filter that always returns an
- * empty page would mislead the caller.
+ * The `runId` filter from spec 11 is missing here: events are not linked to
+ * runs yet, and a filter that always returns an empty page would mislead the
+ * caller.
  */
 import { Schema, Struct } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -200,6 +200,13 @@ export const event = HttpApiGroup.make("event")
         source: Schema.optionalKey(bounded(1, MAX_EVENT_SOURCE_LENGTH)),
         /** Only events with at least one of these handlings. */
         handling: Schema.optionalKey(atMost(EventHandling, EVENT_HANDLINGS.length)),
+        /**
+         * Only the events a start trigger holds: matched while its spawn
+         * bound was spent, and waiting to start a run. Set both or neither,
+         * because a trigger id is unique only within its workflow.
+         */
+        workflowId: Schema.optionalKey(Id),
+        triggerId: Schema.optionalKey(Schema.String),
         ...pageParams(EVENT_SORT_FIELDS).fields,
       }),
       success: page(EventWithFacts),

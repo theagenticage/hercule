@@ -12,13 +12,20 @@
  * 65 gives the signal grants, and one open signal whose match values migration
  * 73 sorts by name. The session's turns hold tool calls from its
  * own agent and from a subagent beside an item that is not a tool call, which
- * migration 67 counts. After the upgrade the test checks that those records,
- * their content, ordering and associations survived, that the session's
- * messages are searchable, that migration 63 read who created the session
- * from the audit entry, and that the session reads with the number of tool
- * calls its stream holds, and that the signal reads with the same values,
- * stored sorted. It is not a matrix of session states or provider
- * behaviour.
+ * migration 67 counts. A disabled workflow has two start triggers: one the
+ * edge binary paused, and one with spawned and discarded trigger effects,
+ * which migration 74 rebuilds. A second workflow's stored definition sets a
+ * spawn bound over the limits a save enforces now, which migration 74
+ * clamps. After the upgrade the test checks that those
+ * records, their content, ordering and associations survived, that the
+ * session's messages are searchable, that migration 63 read who created the
+ * session from the audit entry, that the session reads with the number of
+ * tool calls its stream holds, that the signal reads with the same values,
+ * stored sorted, that the paused trigger reads as paused manually, that
+ * each spawned trigger effect started its run when it matched, and that the
+ * trigger with the over-limit bound reads with the clamped bound while its
+ * workflow is marked invalid. It is
+ * not a matrix of session states or provider behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
  * sits outside the two-minute added-CI budget. The session and its transcript
@@ -121,6 +128,130 @@ const SEEDED_SIGNAL_ID = "0199e0e7-0000-7000-8000-0000000005a1";
 
 /** The seeded signal's match values, stored in the order a plugin built them. */
 const SEEDED_SIGNAL_MATCH = '{"repo":"example/repo","author":"dependabot[bot]"}';
+
+/**
+ * The migration that adds the `held` state and `spawned_at` to trigger
+ * effects, filling `spawned_at` on every spawned row from its run's
+ * `created_at`, or from its `matched_at` when the run is gone, and
+ * marks every paused start trigger as paused manually.
+ */
+const SPAWN_BOUNDS_MIGRATION = 74;
+
+/** The start trigger whose trigger effects the fixture seeds. It sets its own spawn bound. */
+const BOUNDED_TRIGGER = "on_task";
+
+/** The spawn bound `BOUNDED_TRIGGER` sets in the workflow's source. */
+const BOUNDED_TRIGGER_SPAWN_BOUND = { maxRuns: 5, windowSeconds: 3600 } as const;
+
+/** The start trigger the edge binary pauses. It sets no spawn bound, so the default applies. */
+const PAUSED_TRIGGER = "on_task_paused";
+
+/** The spawn bound every start trigger without its own runs under while no setting changes it. */
+const DEFAULT_SPAWN_BOUND = { maxRuns: 30, windowSeconds: 3600 } as const;
+
+/**
+ * A workflow with two start triggers on `task.created`. It is never enabled,
+ * so no event reaches its triggers and the trigger effects the fixture
+ * seeds stay as they were written.
+ */
+const BOUNDED_WORKFLOW = [
+  "name: Upgrade fixture bounds",
+  "triggers:",
+  "  - kind: start",
+  `    id: ${BOUNDED_TRIGGER}`,
+  "    on:",
+  "      kind: task.created",
+  "    spawnBound:",
+  `      maxRuns: ${String(BOUNDED_TRIGGER_SPAWN_BOUND.maxRuns)}`,
+  `      windowSeconds: ${String(BOUNDED_TRIGGER_SPAWN_BOUND.windowSeconds)}`,
+  "  - kind: start",
+  `    id: ${PAUSED_TRIGGER}`,
+  "    on:",
+  "      kind: task.created",
+  "steps:",
+  "  - id: file_task",
+  "    kind: action",
+  "    action: task.create",
+  "    params:",
+  "      title: Look at the new task",
+  "      description: Filed by the upgrade fixture.",
+].join("\n");
+
+/** The start trigger whose stored spawn bound the fixture raises over today's limits. */
+const LEGACY_BOUND_TRIGGER = "on_task_legacy";
+
+/**
+ * A workflow with one start trigger. The edge binary stores it with a bound
+ * inside today's limits, and the fixture then raises the bound in the stored
+ * definition, as an older controller that accepted any bound would have
+ * stored it.
+ */
+const LEGACY_BOUND_WORKFLOW = [
+  "name: Upgrade fixture legacy bound",
+  "triggers:",
+  "  - kind: start",
+  `    id: ${LEGACY_BOUND_TRIGGER}`,
+  "    on:",
+  "      kind: task.created",
+  "    spawnBound:",
+  "      maxRuns: 5",
+  "      windowSeconds: 3600",
+  "steps:",
+  "  - id: file_task",
+  "    kind: action",
+  "    action: task.create",
+  "    params:",
+  "      title: Look at the new task",
+  "      description: Filed by the upgrade fixture.",
+].join("\n");
+
+/** The spawn bound over today's limits that the fixture stores for `LEGACY_BOUND_TRIGGER`. */
+const LEGACY_SPAWN_BOUND = { maxRuns: 20_000, windowSeconds: Number.MAX_SAFE_INTEGER } as const;
+
+/** The bound migration 74 clamps `LEGACY_SPAWN_BOUND` to: the most a save accepts. */
+const CLAMPED_SPAWN_BOUND = { maxRuns: 10_000, windowSeconds: 30 * 86_400 } as const;
+
+/**
+ * The trigger effects seeded for `BOUNDED_TRIGGER`, in arrival order, with
+ * how many minutes before the seeding each one matched. Two spawned rows fall
+ * inside the trigger's window and one before it, so the window counts only
+ * the two. The discarded row never started a run, so it gets no `spawned_at`.
+ * A `pending` row is left out on purpose: the edge binary's delivery would
+ * start or discard it as soon as the controller boots, so its state after the
+ * upgrade would depend on timing.
+ */
+const SEEDED_TRIGGER_EFFECTS = [
+  { state: "spawned", minutesAgo: 180 },
+  { state: "discarded", minutesAgo: 20 },
+  { state: "spawned", minutesAgo: 15 },
+  { state: "spawned", minutesAgo: 10 },
+] as const;
+
+/** How many seeded spawned rows started their run inside `BOUNDED_TRIGGER_SPAWN_BOUND`'s window. */
+const SEEDED_RUNS_IN_WINDOW = 2;
+
+interface SeededTrigger {
+  readonly workflowId: string;
+  readonly triggerId: string;
+  readonly status?: string;
+  /** Absent before migration 74, which adds it, and on an active trigger. */
+  readonly pausedBy?: string;
+  /** Absent before migration 74. */
+  readonly spawnBound?: {
+    readonly maxRuns: number;
+    readonly windowSeconds: number;
+    readonly isDefault: boolean;
+  };
+  /** Absent before migration 74. */
+  readonly runsInWindow?: number;
+  /** Absent before migration 74. */
+  readonly heldCount?: number;
+}
+
+interface SeededTriggerEffect {
+  readonly state: string;
+  readonly matched_at: string;
+}
 
 interface SeededProfile {
   readonly id: string;
@@ -494,6 +625,89 @@ function persistUnsortedSignal(home: string): boolean {
   }
 }
 
+/**
+ * Writes `SEEDED_TRIGGER_EFFECTS` for `BOUNDED_TRIGGER` of the workflow
+ * `workflowId` into the database the edge binary created, when that database
+ * predates the migration that adds `spawned_at`. Returns the rows as written,
+ * in arrival order, or `undefined` when it wrote none.
+ *
+ * The rows go straight into the database because only a matched event writes
+ * one, and the workflow stays disabled so that nothing changes them. Their
+ * events and runs are not written: nothing references a trigger effect, and
+ * an effect whose event was pruned is an ordinary row. A database that
+ * already ran the migration would refuse a spawned row without `spawned_at`,
+ * and would have nothing left to migrate, so the fixture is skipped there.
+ */
+function persistTriggerEffects(
+  home: string,
+  workflowId: string,
+): ReadonlyArray<SeededTriggerEffect> | undefined {
+  if (readMigrationVersion(home) >= SPAWN_BOUNDS_MIGRATION) return undefined;
+  const now = Date.now();
+  const rows = SEEDED_TRIGGER_EFFECTS.map((row) => ({
+    state: row.state,
+    matched_at: new Date(now - row.minutesAgo * 60_000).toISOString(),
+  }));
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const insert = database.query(
+      `INSERT INTO trigger_effects (workflow_id, trigger_id, event_id, state, inputs, run_id, matched_at)
+       VALUES (?, ?, ?, ?, '{}', ?, ?)`,
+    );
+    for (const [index, row] of rows.entries()) {
+      const runId = row.state === "spawned" ? uuidBlob(Bun.randomUUIDv7()) : null;
+      insert.run(
+        uuidBlob(workflowId),
+        BOUNDED_TRIGGER,
+        1_000_000 + index,
+        row.state,
+        runId,
+        row.matched_at,
+      );
+    }
+    return rows;
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Raises the spawn bound of `LEGACY_BOUND_TRIGGER` in the stored definition
+ * of the workflow `workflowId` to `LEGACY_SPAWN_BOUND`, when the database the
+ * edge binary created predates the migration that clamps it. Returns whether
+ * it wrote.
+ *
+ * The edge binary may already refuse such a bound on a save, so the bound is
+ * written straight into the database. A database that already ran the
+ * migration would have nothing left to clamp, so the fixture is skipped there.
+ */
+function persistLegacySpawnBound(home: string, workflowId: string): boolean {
+  if (readMigrationVersion(home) >= SPAWN_BOUNDS_MIGRATION) return false;
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    database
+      .query(
+        `UPDATE workflows SET definition = json_set(definition, '$.triggers[0].spawnBound', json(?))
+         WHERE id = ?`,
+      )
+      .run(JSON.stringify(LEGACY_SPAWN_BOUND), uuidBlob(workflowId));
+    return true;
+  } finally {
+    database.close();
+  }
+}
+
+/** Lists the start triggers of the workflow `workflowId`, keyed by trigger id. */
+async function readTriggers(
+  options: { readonly home: string; readonly binary: string },
+  workflowId: string,
+): Promise<ReadonlyMap<string, SeededTrigger>> {
+  const triggers = readListedItems<SeededTrigger>(
+    await runCli(["trigger", "list", "--workflow", workflowId, "--json"], options),
+  );
+  return new Map(triggers.map((trigger) => [trigger.triggerId, trigger]));
+}
+
 /** Returns the id of the last migration the database in `home` ran. */
 function readMigrationVersion(home: string): number {
   const database = new Database(join(home, "data", "hercule.db"), { readonly: true });
@@ -699,6 +913,20 @@ describe("upgrading from the previous edge release", () => {
       ).toEqual([...TURNS]);
       expect(seededMessages.length).toBeGreaterThanOrEqual(TURNS.length);
 
+      const boundedWorkflow = expectJson<{ workflow: { id: string; enabled: boolean } }>(
+        await runCli(["workflow", "create", "--json"], { ...edge, stdin: BOUNDED_WORKFLOW }),
+      ).workflow;
+      expect(boundedWorkflow.enabled).toBe(false);
+      expectJson(
+        await runCli(["trigger", "pause", boundedWorkflow.id, PAUSED_TRIGGER, "--json"], edge),
+      );
+      const seededTriggers = await readTriggers(edge, boundedWorkflow.id);
+      expect(seededTriggers.get(BOUNDED_TRIGGER)?.status).toBe("active");
+      expect(seededTriggers.get(PAUSED_TRIGGER)?.status).toBe("paused");
+      const legacyBoundWorkflow = expectJson<{ workflow: { id: string } }>(
+        await runCli(["workflow", "create", "--json"], { ...edge, stdin: LEGACY_BOUND_WORKFLOW }),
+      ).workflow;
+
       const port = controller.port;
       expect(await controller.stop()).toBe(0);
       controller = undefined;
@@ -732,6 +960,8 @@ describe("upgrading from the previous edge release", () => {
 
       const retiredSettingsSeeded = persistRetiredSettings(home);
       const signalSeeded = persistUnsortedSignal(home);
+      const seededTriggerEffects = persistTriggerEffects(home, boundedWorkflow.id);
+      const legacyBoundSeeded = persistLegacySpawnBound(home, legacyBoundWorkflow.id);
       const edgeVersion = readMigrationVersion(home);
 
       controller = await startOnPort({ home, binary: edgeBinary, port });
@@ -917,6 +1147,58 @@ describe("upgrading from the previous edge release", () => {
       );
       expect(passages).toMatchObject([{ sessionId, excerpt: TURNS[1] }]);
 
+      // A trigger paused before migration 74 reads as paused manually, and
+      // each trigger's spawn bound comes from its source or the default.
+      // The controller validates every stored workflow again when it starts,
+      // and the fixture's workflow still validates.
+      const upgradedWorkflow = expectJson<{ id: string; enabled: boolean }>(
+        await runCli(["workflow", "read", boundedWorkflow.id, "--json"], upgraded),
+      );
+      expect(upgradedWorkflow).toMatchObject({ id: boundedWorkflow.id, enabled: false });
+      expect(upgradedWorkflow).not.toHaveProperty("invalidSince");
+      const upgradedTriggers = await readTriggers(upgraded, boundedWorkflow.id);
+      expect([...upgradedTriggers.keys()].sort()).toEqual([...seededTriggers.keys()].sort());
+      const pausedTrigger = upgradedTriggers.get(PAUSED_TRIGGER);
+      expect(pausedTrigger).toMatchObject({
+        status: "paused",
+        pausedBy: "manual",
+        spawnBound: { ...DEFAULT_SPAWN_BOUND, isDefault: true },
+        heldCount: 0,
+      });
+      const boundedTrigger = upgradedTriggers.get(BOUNDED_TRIGGER);
+      expect(boundedTrigger).toMatchObject({
+        status: "active",
+        spawnBound: { ...BOUNDED_TRIGGER_SPAWN_BOUND, isDefault: false },
+        heldCount: 0,
+      });
+      expect(boundedTrigger).not.toHaveProperty("pausedBy");
+      if (seededTriggerEffects !== undefined) {
+        // The window counts runs by when they started, which for a row spawned
+        // before the migration is when it matched.
+        expect(boundedTrigger?.runsInWindow).toBe(SEEDED_RUNS_IN_WINDOW);
+      } else {
+        console.log(
+          `Skipping the trigger effects fixture: the edge database already ran migration ${String(SPAWN_BOUNDS_MIGRATION)}.`,
+        );
+      }
+      if (legacyBoundSeeded) {
+        // The trigger runs under the clamped bound, and stays readable. Its
+        // definition keeps the old bound, so the check at boot marks the
+        // workflow invalid and tells its author to save it again.
+        const legacyWorkflow = expectJson<{ invalidSince?: string }>(
+          await runCli(["workflow", "read", legacyBoundWorkflow.id, "--json"], upgraded),
+        );
+        expect(legacyWorkflow.invalidSince).toEqual(expect.any(String));
+        const legacyTriggers = await readTriggers(upgraded, legacyBoundWorkflow.id);
+        expect(legacyTriggers.get(LEGACY_BOUND_TRIGGER)).toMatchObject({
+          spawnBound: { ...CLAMPED_SPAWN_BOUND, isDefault: false },
+        });
+      } else {
+        console.log(
+          `Skipping the legacy spawn bound fixture: the edge database already ran migration ${String(SPAWN_BOUNDS_MIGRATION)}.`,
+        );
+      }
+
       expect(await controller.stop()).toBe(0);
       controller = undefined;
       if (signalSeeded) {
@@ -942,6 +1224,62 @@ describe("upgrading from the previous edge release", () => {
         console.log(
           `Skipping the session creator fixture: the edge database already ran migration ${String(TRANSCRIPT_SEARCH_MIGRATION)}.`,
         );
+      }
+      if (edgeVersion < SPAWN_BOUNDS_MIGRATION) {
+        // The migration copies each trigger's spawn bound from its stored
+        // definition, and no trigger has been resumed since it ran.
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          expect(
+            reader
+              .query(
+                `SELECT trigger_id, paused_by, spawn_bound_max_runs, spawn_bound_window_seconds,
+                        held_at_resume
+                 FROM triggers WHERE workflow_id = ? ORDER BY trigger_id`,
+              )
+              .all(uuidBlob(boundedWorkflow.id)),
+          ).toEqual([
+            {
+              trigger_id: BOUNDED_TRIGGER,
+              paused_by: null,
+              spawn_bound_max_runs: BOUNDED_TRIGGER_SPAWN_BOUND.maxRuns,
+              spawn_bound_window_seconds: BOUNDED_TRIGGER_SPAWN_BOUND.windowSeconds,
+              held_at_resume: null,
+            },
+            {
+              trigger_id: PAUSED_TRIGGER,
+              paused_by: "manual",
+              spawn_bound_max_runs: null,
+              spawn_bound_window_seconds: null,
+              held_at_resume: null,
+            },
+          ]);
+        } finally {
+          reader.close();
+        }
+      }
+      if (seededTriggerEffects !== undefined) {
+        // Every row survives in its order and state. The fixture writes no
+        // runs, so a spawned row takes when it matched as when its run
+        // started; a discarded row started none.
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          expect(
+            reader
+              .query(
+                `SELECT state, matched_at, spawned_at FROM trigger_effects
+                 WHERE workflow_id = ? AND trigger_id = ? ORDER BY id`,
+              )
+              .all(uuidBlob(boundedWorkflow.id), BOUNDED_TRIGGER),
+          ).toEqual(
+            seededTriggerEffects.map((row) => ({
+              ...row,
+              spawned_at: row.state === "spawned" ? row.matched_at : null,
+            })),
+          );
+        } finally {
+          reader.close();
+        }
       }
     } finally {
       await controller?.stop().catch(() => -1);

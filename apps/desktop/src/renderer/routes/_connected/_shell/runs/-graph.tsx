@@ -3,7 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import { buildGraphDrawing, buildRunOverlay } from "@hercule/client-core/graph-model";
 import { buildRunNodeCard } from "@hercule/client-core/node-details";
-import type { Run, Session } from "@hercule/contract";
+import type { Run, Session, Workflow } from "@hercule/contract";
 import {
   agentsQuery,
   pluginsQuery,
@@ -16,8 +16,10 @@ import { WorkflowGraph } from "../../../../screens/workflows/workflow-graph";
 /**
  * Reads and draws `run`'s steps as a graph, with where the run is at each
  * node and edge, and a node's card on a click. `sessions` are the run's
- * sessions; `isWorkflowEnabled` tells whether a start trigger's card shows
- * when it fires next. Open thread on a card calls `onOpenSession`.
+ * sessions. `workflow` is the run's workflow, or `undefined` while it is not
+ * read yet or after it was deleted; a start trigger's card shows when it
+ * fires next only while the workflow is enabled and valid. Open thread on a
+ * card calls `onOpenSession`.
  *
  * The route's loader reads the triggers, the provider instances, the
  * plugins, the Agents and the workflow actions.
@@ -26,14 +28,14 @@ export function RunGraph({
   client,
   run,
   sessions,
-  isWorkflowEnabled,
+  workflow,
   timezone,
   onOpenSession,
 }: {
   readonly client: HerculeClient;
   readonly run: Run;
   readonly sessions: ReadonlyArray<Session>;
-  readonly isWorkflowEnabled: boolean;
+  readonly workflow: Pick<Workflow, "enabled" | "invalidSince"> | undefined;
   readonly timezone: string;
   readonly onOpenSession: (sessionId: string) => void;
 }): JSX.Element {
@@ -59,7 +61,7 @@ export function RunGraph({
           agents,
           actions,
           instances,
-          isWorkflowEnabled,
+          workflow,
           run,
           sessions,
           overlay,

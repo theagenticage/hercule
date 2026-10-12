@@ -42,8 +42,10 @@ import {
   ConnectionServiceWithReferencesLayer,
   IngestExecutorLayer,
   OpenSignalsLayer,
+  revalidateStoredWorkflowsOrLog,
   RunServiceReferenceLayer,
   SessionObserverLayer,
+  WorkflowValidityObserversLayer,
   type RunServiceReference,
 } from "./daemon";
 import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "./events";
@@ -105,7 +107,9 @@ import { seed } from "./seed";
 import { SessionService, SessionServiceLayer } from "./sessions";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 import { RunWorkspaceStepActivityLayer } from "./runs";
+import type { WorkflowValidity } from "./workflows";
 import { WorkspaceService, WorkspaceServiceLayer, type WorkspaceStepActivity } from "./workspaces";
+import type { AgentObserver } from "./agents";
 
 /** Setup tokens are created and stored like every other Hercule token. */
 export { hashToken };
@@ -254,6 +258,8 @@ export type ControllerServices =
   | WorkspaceStepActivity
   | RunServiceReference
   | ConnectionService
+  | AgentObserver
+  | WorkflowValidity
   | LocalRunnerId
   | HerculeHome
   | BootstrapConfig
@@ -369,6 +375,13 @@ export const bootWith = <A, E>(
      * session service's observer reaches the run service through
      * `RunServiceReference`, which the operation layers set once they have
      * built the run service, so the one reference is merged here for both.
+     *
+     * The plugin and connection services report the changes that can make a
+     * stored workflow invalid through their observer ports, which the
+     * workflows domain's `WorkflowValidity` implements. The workflows domain
+     * depends on both domains, so they are joined here too. The observers are
+     * merged, so the agent service, built with the operations, finds its own
+     * observer, and the boot finds `WorkflowValidity`.
      */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
@@ -379,6 +392,7 @@ export const bootWith = <A, E>(
       Layer.provideMerge(WorkspaceServiceLayer),
       Layer.provideMerge(RunWorkspaceStepActivityLayer),
       Layer.provideMerge(RunServiceReferenceLayer),
+      Layer.provideMerge(WorkflowValidityObserversLayer),
       Layer.provideMerge(withFleet),
     );
 
@@ -413,6 +427,11 @@ export const bootWith = <A, E>(
         // activates may read its own state and secrets. Before the runner,
         // because a session's provider is looked up in the catalog.
         yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? registry));
+        // After the plugins start, because a stored workflow is judged
+        // against the actions, event kinds and Connection types of the active
+        // plugins. A plugin may have changed while the controller was stopped.
+        // A failure is logged and the boot goes on.
+        yield* revalidateStoredWorkflowsOrLog;
         // After the catalog, because a provider instance is created only for
         // a provider this build registered.
         yield* ensureProviderInstances;

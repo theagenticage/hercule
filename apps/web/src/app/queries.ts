@@ -20,6 +20,7 @@ import {
   readSenderSession,
   RUNNING_STATUSES,
   UNSEEN_COUNT_READ_LIMIT,
+  HELD_EVENT_PREVIEW_LIMIT,
   type HerculeClient,
 } from "@hercule/client-core";
 import {
@@ -419,14 +420,14 @@ export const localRunnerQuery = (
   });
 
 /**
- * Reads every workflow in a single page. Users write workflows by hand, so
- * there are few of them. If they ever outgrow one page, this query needs
- * paging.
+ * Reads every workflow. Every page is read, because Settings > Bounds reads
+ * whether each trigger's workflow is enabled and valid: a list that stopped
+ * early would show the triggers of the missing workflows as active.
  */
 export const workflowsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.workflows(),
-    queryFn: () => client.workflow.query({ query: { limit: MAX_PAGE_LIMIT } }),
+    queryFn: () => readEveryPage((page) => client.workflow.query({ query: page })),
   });
 
 /**
@@ -441,13 +442,63 @@ export const workflowQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
+ * How often a read of start triggers is refetched while a screen shows it, so
+ * the use of each one's spawn bound follows its sliding window.
+ */
+const SPAWN_WINDOW_REFETCH_MS = 60_000;
+
+/**
  * Reads the triggers of one workflow, in a single page: a workflow declares
  * only a handful. The list is empty until the workflow is saved.
+ *
+ * It is refetched every minute, like `startTriggersQuery`, because each start
+ * trigger's use of its spawn bound counts the runs in a sliding window: a run
+ * leaves the window as time passes, and nothing is pushed when it does.
  */
 export const triggersQuery = (client: HerculeClient, workflowId: string) =>
   queryOptions({
     queryKey: queryKeys.triggers(workflowId),
     queryFn: () => client.trigger.query({ query: { workflowId, limit: MAX_PAGE_LIMIT } }),
+    refetchInterval: SPAWN_WINDOW_REFETCH_MS,
+  });
+
+/**
+ * Reads the oldest events a start trigger holds, the few its row on the
+ * workflow's page lists. They are read oldest first, because that is the
+ * order in which they start runs once the trigger is resumed.
+ */
+export const heldEventsQuery = (client: HerculeClient, workflowId: string, triggerId: string) =>
+  queryOptions({
+    queryKey: queryKeys.heldEvents(workflowId, triggerId),
+    queryFn: () =>
+      client.event.query({
+        query: {
+          workflowId,
+          triggerId,
+          sort: [{ field: "id", direction: "asc" }],
+          limit: HELD_EVENT_PREVIEW_LIMIT,
+        },
+      }),
+  });
+
+/**
+ * Reads every start trigger of every workflow, for Settings > Bounds and the
+ * breaker marks in the Workflows list. Every page is read, because Settings >
+ * Bounds lists them all, and a list that stopped early would hide a trigger
+ * near its limit.
+ *
+ * A `workflow` push refetches it, because a trigger's pause and resume are
+ * pushed on its workflow. A run a trigger starts is pushed on the `run`
+ * topic, which refetches no trigger read, so the list is also refetched every
+ * minute. That also keeps each trigger's use of its bound current as old runs
+ * leave the sliding window, which nothing pushes.
+ */
+export const startTriggersQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.startTriggers(),
+    queryFn: () =>
+      readEveryPage((page) => client.trigger.query({ query: { kind: "start", ...page } })),
+    refetchInterval: SPAWN_WINDOW_REFETCH_MS,
   });
 
 /**

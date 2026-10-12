@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { Cron, Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { TriggerKey } from "@hercule/contract";
+import type { TriggerKey, TriggerPausedBy } from "@hercule/contract";
 import { uuidFromString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
@@ -140,14 +140,19 @@ const readCronTicks = Effect.flatMap(SqlClient.SqlClient, (sql) =>
  */
 const firePassesAfterFirst = (
   later: ReadonlyArray<string>,
-  options: { readonly paused?: boolean; readonly enabled?: boolean } = {},
+  options: { readonly pausedBy?: TriggerPausedBy; readonly enabled?: boolean } = {},
 ) =>
   run(
     Effect.gen(function* () {
       const workflows = yield* workflowRepository;
       const workflowId = yield* storeWorkflow([declareCronTrigger("nightly")], options.enabled);
       const key = { workflowId, triggerId: "nightly" };
-      if (options.paused === true) yield* workflows.setTriggerStatus(key, "paused", SAVED_AT);
+      if (options.pausedBy !== undefined)
+        yield* workflows.setTriggerStatus(
+          key,
+          { status: "paused", pausedBy: options.pausedBy },
+          SAVED_AT,
+        );
       yield* firePass(FIRST_PASS);
       for (const now of later) yield* firePass(now);
       return {
@@ -294,7 +299,7 @@ describe("a cron trigger that changed after it was listed", () => {
         yield* firePass(FIRST_PASS);
         const now = "2026-09-23T07:00:30.000Z";
         const { scheduler, keys } = yield* listTriggersToSchedule(now);
-        yield* workflows.setTriggerStatus(key, "paused", now);
+        yield* workflows.setTriggerStatus(key, { status: "paused", pausedBy: "manual" }, now);
         for (const listed of keys) yield* scheduler.scheduleTrigger(listed, new Date(now));
         return { state: yield* readScheduleState(key), ticks: yield* readCronTicks };
       }),
@@ -330,6 +335,15 @@ describe("a live cron trigger whose next time has come", () => {
       skipped_from: null,
       skipped_until: null,
     });
+  });
+
+  it("fires while the breaker has paused it, because the event router holds the tick for it", async () => {
+    const { ticks, state } = await firePassesAfterFirst(["2026-09-23T07:00:30.000Z"], {
+      pausedBy: "breaker",
+    });
+
+    expect(ticks.map((tick) => tick.occurredAt)).toEqual([NEXT_MORNING]);
+    expect(state.last_fired_at).toBe(NEXT_MORNING);
   });
 
   it("names the time it last fired in the payload of every tick after the first", async () => {
@@ -483,9 +497,9 @@ describe("a cron trigger that cannot fire", () => {
     skipped_until: null,
   };
 
-  it("moves a paused trigger on to its next time without firing", async () => {
+  it("moves a trigger paused manually on to its next time without firing", async () => {
     const { state, ticks } = await firePassesAfterFirst(["2026-09-23T07:00:30.000Z"], {
-      paused: true,
+      pausedBy: "manual",
     });
 
     expect(ticks).toEqual([]);
@@ -501,9 +515,9 @@ describe("a cron trigger that cannot fire", () => {
     expect(state).toEqual(MOVED_ON_WITHOUT_A_NOTE);
   });
 
-  it("records no missed times for a paused trigger, however late the pass", async () => {
+  it("records no missed times for a trigger paused manually, however late the pass", async () => {
     const { state, ticks } = await firePassesAfterFirst(["2026-09-26T12:00:00.000Z"], {
-      paused: true,
+      pausedBy: "manual",
     });
 
     expect(ticks).toEqual([]);

@@ -117,7 +117,7 @@ const READS: NodeCardReads = {
       }),
     ]),
   ],
-  isWorkflowEnabled: true,
+  workflow: { enabled: true },
 };
 
 /** Builds the card of `nodeId`, failing the test when there is none. */
@@ -206,15 +206,22 @@ describe("buildNodeCard", () => {
     ]);
   });
 
-  it("leaves out the next fire of a paused trigger, and of any trigger while the workflow is off", () => {
+  it("leaves out the next fire of a paused trigger, and of any trigger while the workflow is disabled, invalid or not known", () => {
     const paused = buildCard("nightly", {
       ...READS,
       triggers: [{ ...NIGHTLY, status: "paused" }],
     });
     assert.deepStrictEqual(Object.keys(listFacts(paused)), ["Fires on", "Status", "Last fired"]);
     assert.strictEqual(listFacts(paused).Status, "Paused");
-    const off = buildCard("nightly", { ...READS, isWorkflowEnabled: false });
+    const off = buildCard("nightly", { ...READS, workflow: { enabled: false } });
     assert.deepStrictEqual(Object.keys(listFacts(off)), ["Fires on", "Last fired"]);
+    const invalid = buildCard("nightly", {
+      ...READS,
+      workflow: { enabled: true, invalidSince: CREATED },
+    });
+    assert.deepStrictEqual(Object.keys(listFacts(invalid)), ["Fires on", "Last fired"]);
+    const unknown = buildCard("nightly", { ...READS, workflow: undefined });
+    assert.deepStrictEqual(Object.keys(listFacts(unknown)), ["Fires on", "Last fired"]);
   });
 
   it("shows an event trigger's kind in words and its filter as code", () => {
@@ -584,6 +591,16 @@ describe("buildRunNodeCard", () => {
     assert.deepStrictEqual(nightly.facts, [
       { kind: "text", label: "Fires on", value: "0 2 * * *", isCode: true, isError: false },
       { kind: "time", label: "Next", at: "2026-09-30T02:00:00.000Z", direction: "future" },
+    ]);
+  });
+
+  it("leaves out a start trigger's next fire while the workflow is invalid", () => {
+    const nightly = buildRunNodeCard("nightly", {
+      ...buildReads(REVIEWING, [REVIEW_SESSION, FIX_SESSION]),
+      workflow: { enabled: true, invalidSince: CREATED },
+    });
+    assert.deepStrictEqual(nightly?.facts, [
+      { kind: "text", label: "Fires on", value: "0 2 * * *", isCode: true, isError: false },
     ]);
   });
 

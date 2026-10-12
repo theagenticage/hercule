@@ -59,6 +59,8 @@ import {
   TextGenerationDeadline,
   RunServiceReferenceLayer,
   SessionObserverLayer,
+  revalidateStoredWorkflowsOrLog,
+  WorkflowValidityObserversLayer,
   WorkspaceSweepInterval,
 } from "../daemon";
 import { CurrentActor, type Actor } from "../actor";
@@ -161,6 +163,9 @@ const buildServices = (
         Layer.provideMerge(WorkspaceServiceLayer),
         Layer.provideMerge(RunWorkspaceStepActivityLayer),
         Layer.provideMerge(RunServiceReferenceLayer),
+        // As in the real boot: a plugin's lifecycle change and a Connection's
+        // or an agent's delete validate the stored workflows again.
+        Layer.provideMerge(WorkflowValidityObserversLayer),
       ),
     ),
     // One connection map and one probe driver: the socket route and every
@@ -438,6 +443,7 @@ export const withServer = (
           yield* Effect.flatMap(PluginHost, (host) =>
             host.boot(buildPluginRegistry(options.plugins ?? [])),
           );
+          yield* revalidateStoredWorkflowsOrLog;
           yield* ensureProviderInstances;
         });
         yield* bootSteps;

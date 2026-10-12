@@ -112,6 +112,7 @@ import {
 } from "./oauth";
 import { buildDefaultLabel } from "./default-label";
 import { PluginConfigs } from "./plugin-configs";
+import { ConnectionObserver } from "./observer";
 import { ConnectionReferences, type ConnectionReference } from "./references";
 import {
   connectionRepository,
@@ -367,6 +368,7 @@ const make = Effect.gen(function* () {
   const types = yield* ConnectionTypes;
   const audit = yield* AuditLog;
   const references = yield* ConnectionReferences;
+  const observer = yield* ConnectionObserver;
   const activePlugins = yield* ActivePlugins;
   const pluginIntake = yield* PluginIntake;
 
@@ -1465,6 +1467,10 @@ const make = Effect.gen(function* () {
      * The check runs in the delete's transaction. Otherwise a resource or a
      * workflow saved between the check and the delete would name a
      * connection that no longer exists.
+     *
+     * The check does not look at every place a workflow can name a
+     * Connection, so once the delete commits it tells `ConnectionObserver`,
+     * and the stored workflows that still name it are marked invalid.
      */
     delete: (
       id: Id,
@@ -1504,6 +1510,7 @@ const make = Effect.gen(function* () {
             });
           }),
         );
+        yield* observer.connectionDeleted();
         return {};
       }).pipe(Effect.catchTag("SecretNameError", Effect.die)),
   };
@@ -1525,5 +1532,6 @@ export const ConnectionServiceLayer: Layer.Layer<
   | PluginConfigs
   | PluginIntake
   | ConnectionReferences
+  | ConnectionObserver
   | ActivePlugins
 > = Layer.effect(ConnectionService)(make);

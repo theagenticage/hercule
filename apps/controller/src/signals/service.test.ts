@@ -30,7 +30,7 @@ import {
 import { CurrentActor, type Actor } from "../actor";
 import { BoundOperations } from "../bound-actions";
 import { FakeBoundOperationsLayer } from "../bound-actions/testing";
-import { mintUuid, uuidToString } from "../db";
+import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
@@ -334,6 +334,12 @@ describe("signal.raise", () => {
         yield* insertEnabledWorkflow(buildSignalInputWorkflow("Mail bot", ["gmail/mail"]));
         // Needs a topic the action cannot fill, so run.start would refuse the click.
         yield* insertEnabledWorkflow(buildSignalInputWorkflow("Topic bot", ["offer"], null));
+        // Accepts the kind but no longer validates, so run.start would refuse the click.
+        const invalidId = yield* insertEnabledWorkflow(
+          buildSignalInputWorkflow("Invalid bot", ["offer"]),
+        );
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`UPDATE workflows SET invalid_since = ${AT} WHERE id = ${uuidFromString(invalidId)}`;
         return { signal: yield* raiseAndRead({ ...OFFER, actions: [own] }), workflowId };
       }),
     );
