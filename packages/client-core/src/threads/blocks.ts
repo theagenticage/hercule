@@ -634,11 +634,13 @@ const findFaceAgent = (
 
 /**
  * Returns `blocks` with one user block for each input in `sending`, the
- * messages on their way into the session that the transcript does not hold
- * yet (`splitQueuedInputs`). They go after every other block, but above a
- * closing status line, so the agent's status stays the last line. Each block
- * is keyed by its input, is marked `sending`, and names the session whose
- * agent sent it, when another session's agent did (`readInputSender`).
+ * messages on their way into the session (`splitQueuedInputs`), drawn from
+ * their queued inputs until the inputs read them delivered. The transcript
+ * can hold a message a moment before that (#623). They go after every other
+ * block, but above a closing status line, so the agent's status stays the
+ * last line. Each block is keyed by its input, is marked `sending`, and
+ * names the session whose agent sent it, when another session's agent did
+ * (`readInputSender`).
  *
  * Returns `blocks` itself when nothing is sending, so a memoized list keeps
  * its identity.
