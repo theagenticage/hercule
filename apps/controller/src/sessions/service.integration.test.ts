@@ -8,8 +8,7 @@
  * from, not how the domain builds it:
  *
  * - the token, of which the row stores only a hash;
- * - the spec, decoded from the JSON the row stores;
- * - the GitHub account of a connection whose token can be read.
+ * - the spec, decoded from the JSON the row stores.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -53,7 +52,6 @@ import { RunWorkspaceStepActivityLayer } from "../runs";
 import { SettingsLayer } from "../settings";
 import { subscriptionRepository } from "../subscriptions";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
-import type { GithubAccount } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
 import { SessionObserver } from "./observer";
@@ -205,11 +203,6 @@ const insertQueuedSession = (
      * carried its first input. `create` always stores the prompt.
      */
     readonly withoutInput?: boolean;
-    /**
-     * The agent step that started the session. Its input is then the
-     * prompt of the step's first iteration.
-     */
-    readonly step?: { readonly runId: string; readonly stepId: string };
   },
 ): Effect.Effect<string, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
@@ -222,7 +215,7 @@ const insertQueuedSession = (
       permissionProfileId: options.permissionProfileId ?? mintId(),
       agentId: options.agentId,
       conversationId: undefined,
-      step: options.step,
+      step: undefined,
       instanceId: options.instanceId,
       runnerId,
       workspaceId: null,
@@ -246,7 +239,6 @@ const insertQueuedSession = (
         actor: "user",
         text: "begin",
         at,
-        ...(options.step === undefined ? {} : { stepIteration: 1 }),
       });
     }
     return id;
@@ -321,19 +313,14 @@ const aGithubConnection = Effect.gen(function* () {
 /** Returns no credentials, for the instance these sessions run on. */
 const NO_SECRETS = (): Effect.Effect<Record<string, string>> => Effect.succeed({});
 
-/** The identity the connection's account in these tests commits as. */
-const ALICE = { name: "alice", email: "alice@users.noreply.github.com" };
-
 /**
  * Calls `claimStarts` the way the controller daemon does: inside the caller's
- * transaction. Without `options.localRunnerId` the controller has no local
- * runner.
+ * transaction. The controller has no local runner, and no connection has a
+ * GitHub account.
  */
 const claimStarting = (
   runnerId: string,
   room: number,
-  readGithubAccount: (connectionId: string) => Effect.Effect<GithubAccount | undefined>,
-  options: { readonly localRunnerId?: string } = {},
 ): Effect.Effect<ReadonlyArray<StartRequest>, SqlError, SessionService | SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -341,9 +328,9 @@ const claimStarting = (
     return yield* withTransaction(
       sql,
       sessions.claimStarts(runnerId, room, {
-        readGithubAccount,
+        readGithubAccount: () => Effect.succeed(undefined),
         readSecrets: NO_SECRETS,
-        localRunnerId: options.localRunnerId,
+        localRunnerId: undefined,
       }),
     );
   });
@@ -359,6 +346,12 @@ const readTokenHash = (sessionId: string) =>
         `,
     ),
     (rows) => rows[0]!.token_hash,
+  );
+
+/** Reads a session's current status. */
+const readStatus = (sessionId: string) =>
+  Effect.flatMap(sessionRepository, (rows) =>
+    Effect.map(rows.one(sessionId), (row) => Option.getOrThrow(row).status),
   );
 
 /** Returns the frames a claim returned, keyed by session id. */
@@ -383,7 +376,7 @@ describe("SessionService.claimStarts", () => {
           checkoutBranch: "feature-x",
         });
         const plain = yield* insertQueuedSession(runnerId, { instanceId, spec: specPlain });
-        const claimed = yield* claimStarting(runnerId, 2, () => Effect.succeed(undefined));
+        const claimed = yield* claimStarting(runnerId, 2);
         const inputs = yield* inputRepository;
         return {
           claimed,
@@ -439,34 +432,6 @@ describe("SessionService.claimStarts", () => {
     );
   });
 
-  it("puts the step key on the input the start of an agent step's session carries", async () => {
-    // The runner reports the result of the turn the prompt starts only when
-    // the prompt carries its step's key, whether a start or a sessionInput
-    // carries it.
-    const runId = mintId();
-    const result = await run(
-      Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
-        const runnerId = mintId();
-        const spec = buildSpec(instanceId, "fast");
-        yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec,
-          step: { runId, stepId: "implement" },
-        });
-        const [claimed] = yield* claimStarting(runnerId, 1, () => Effect.succeed(undefined));
-        return { frame: claimed!.frame, input: claimed!.input, spec };
-      }),
-    );
-
-    expect(result.input.stepIteration).toBe(1);
-    expect(result.frame.input).toStrictEqual({
-      text: "begin",
-      modelSelection: result.spec.modelSelection,
-      step: { runId, stepId: "implement", iteration: 1 },
-    });
-  });
-
   it("skips a queued session that never ran and has no waiting input, leaves it queued, and warns once", async () => {
     // A row queued before a start carried its first input. A start without
     // an input would open no turn, so the session is left for a person to
@@ -487,9 +452,9 @@ describe("SessionService.claimStarts", () => {
             instanceId,
             spec: buildSpec(instanceId, "clever"),
           });
-          const claimed = yield* claimStarting(runnerId, 2, () => Effect.succeed(undefined));
+          const claimed = yield* claimStarting(runnerId, 2);
           // Every later dispatch pass reads the row again.
-          yield* claimStarting(runnerId, 2, () => Effect.succeed(undefined));
+          yield* claimStarting(runnerId, 2);
           return {
             claimed: claimed.map((claim) => claim.sessionId),
             current,
@@ -558,7 +523,7 @@ describe("SessionService.claimStarts", () => {
         yield* workspaces.acquire(holder, workspaceId, at);
         yield* rows.setCrashGuardArmed(sessionId, true);
 
-        const claimed = yield* claimStarting(runnerId, 1, () => Effect.succeed(undefined));
+        const claimed = yield* claimStarting(runnerId, 1);
         const stream = yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count FROM session_stream WHERE session_id = ${uuidFromString(sessionId)}
         `;
@@ -617,7 +582,7 @@ describe("SessionService.claimStarts", () => {
           instanceId,
           spec: buildSpec(instanceId, "clever"),
         });
-        const claimed = yield* claimStarting(runnerId, 2, () => Effect.succeed(undefined));
+        const claimed = yield* claimStarting(runnerId, 2);
         return {
           claimed,
           first,
@@ -640,202 +605,45 @@ describe("SessionService.claimStarts", () => {
     expect(firstFrame.token).not.toBe(secondFrame.token);
   });
 
-  it("includes the connection's GitHub account, and reads it only for rows with a connection", async () => {
-    const connectionId = mintId();
+  it("leaves any number of undecodable rows queued and starts the row behind them, even with room for one", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
-        const runnerId = mintId();
-        const connected = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
-          githubConnectionId: connectionId,
-        });
-        const bare = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
-        });
-        const asked: Array<string> = [];
-        const claimed = yield* claimStarting(runnerId, 2, (id) =>
-          Effect.sync(() => {
-            asked.push(id);
-            return { token: "ghpat-alice", gitIdentity: ALICE };
-          }),
-        );
-        return { asked, claimed, connected, bare };
-      }),
-    );
-
-    // The account was read only for the row with a connection.
-    expect(result.asked).toEqual([connectionId]);
-
-    const frames = mapFramesBySession(result.claimed);
-    const account = frames.get(result.connected)!;
-    expect(account.ghToken).toBe("ghpat-alice");
-    expect(account.gitIdentity).toStrictEqual(ALICE);
-
-    const none = frames.get(result.bare)!;
-    expect("ghToken" in none).toBe(false);
-    expect("gitIdentity" in none).toBe(false);
-  });
-
-  it("omits ghToken and gitIdentity where the connection has no account", async () => {
-    const connectionId = mintId();
-    const result = await run(
-      Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
-        const runnerId = mintId();
-        const sessionId = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
-          githubConnectionId: connectionId,
-        });
-        const asked: Array<string> = [];
-        const claimed = yield* claimStarting(runnerId, 1, (id) =>
-          Effect.sync(() => {
-            asked.push(id);
-            return undefined;
-          }),
-        );
-        return { asked, claimed, sessionId };
-      }),
-    );
-
-    // The account was read, and there was none.
-    expect(result.asked).toEqual([connectionId]);
-    expect(result.claimed).toHaveLength(1);
-    expect(result.claimed[0]!.frame).toMatchObject({ sessionId: result.sessionId });
-    expect("ghToken" in result.claimed[0]!.frame).toBe(false);
-    expect("gitIdentity" in result.claimed[0]!.frame).toBe(false);
-  });
-
-  it("sets the `userMaterial` flag only for a Thread on the local runner", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
-        const spec = buildSpec(instanceId, "clever");
-        const localRunnerId = mintId();
-        const otherRunnerId = mintId();
-        const localThread = yield* insertQueuedSession(localRunnerId, { instanceId, spec });
-        const localAgentSession = yield* insertQueuedSession(localRunnerId, {
-          instanceId,
-          spec,
-          agentId: mintId(),
-        });
-        const otherThread = yield* insertQueuedSession(otherRunnerId, { instanceId, spec });
-        const noAccount = () => Effect.succeed(undefined);
-        return {
-          local: mapFramesBySession(
-            yield* claimStarting(localRunnerId, 2, noAccount, { localRunnerId }),
-          ),
-          other: mapFramesBySession(
-            yield* claimStarting(otherRunnerId, 1, noAccount, { localRunnerId }),
-          ),
-          localThread,
-          localAgentSession,
-          otherThread,
-        };
-      }),
-    );
-
-    expect(result.local.get(result.localThread)!.userMaterial).toBe(true);
-    // An Agent's session never gets the flag, and neither does a Thread on
-    // another runner. Both frames leave the key out rather than setting it to
-    // false.
-    expect("userMaterial" in result.local.get(result.localAgentSession)!).toBe(false);
-    expect("userMaterial" in result.other.get(result.otherThread)!).toBe(false);
-  });
-
-  it("leaves a row whose stored spec will not decode queued, and starts the rest of the batch", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const rows = yield* sessionRepository;
         const instanceId = yield* insertInstance("an-adapter", {});
         const runnerId = mintId();
         // Valid JSON that the current `SessionSpec` schema fails to decode.
         // This is what a queued row looks like after the schema changed
         // under it.
-        const poisoned = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
-          storedSpec: "{}",
-        });
-        const good = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
-        });
-        const claimed = yield* claimStarting(runnerId, 2, () => Effect.succeed(undefined));
-        return {
-          claimed,
-          poisoned,
-          good,
-          poisonedAfter: yield* Effect.map(rows.one(poisoned), Option.getOrUndefined),
-          goodAfter: yield* Effect.map(rows.one(good), Option.getOrUndefined),
-        };
-      }),
-    );
-
-    // The bad row is not claimed: it stays queued, where a user can see and stop it.
-    expect(result.claimed.map((claim) => claim.sessionId)).toEqual([result.good]);
-    expect(result.poisonedAfter?.status).toBe("queued");
-    // And it does not block the rows behind it.
-    expect(result.goodAfter?.status).toBe("starting");
-  });
-
-  it("starts the row behind an undecodable first row when there is room for only one", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const rows = yield* sessionRepository;
-        const instanceId = yield* insertInstance("an-adapter", {});
-        const runnerId = mintId();
-        const poisoned = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
-          storedSpec: "{}",
-        });
-        const good = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
-        });
-        const claimed = yield* claimStarting(runnerId, 1, () => Effect.succeed(undefined));
-        return {
-          claimed,
-          poisoned,
-          good,
-          poisonedAfter: yield* Effect.map(rows.one(poisoned), Option.getOrUndefined),
-        };
-      }),
-    );
-
-    // Room for one, and the oldest row cannot use it, so the next row does.
-    expect(result.claimed.map((claim) => claim.sessionId)).toEqual([result.good]);
-    expect(result.poisonedAfter?.status).toBe("queued");
-  });
-
-  it("skips any number of undecodable rows to fill the room", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
-        const runnerId = mintId();
+        const poisoned: Array<string> = [];
         for (let i = 0; i < 6; i += 1) {
-          yield* insertQueuedSession(runnerId, {
-            instanceId,
-            spec: buildSpec(instanceId, "clever"),
-            storedSpec: "{}",
-          });
+          poisoned.push(
+            yield* insertQueuedSession(runnerId, {
+              instanceId,
+              spec: buildSpec(instanceId, "clever"),
+              storedSpec: "{}",
+            }),
+          );
         }
         const good = yield* insertQueuedSession(runnerId, {
           instanceId,
           spec: buildSpec(instanceId, "clever"),
         });
-        const claimed = yield* claimStarting(runnerId, 2, () => Effect.succeed(undefined));
-        return { claimed, good };
+        const claimed = yield* claimStarting(runnerId, 1);
+        return {
+          claimed,
+          good,
+          goodAfter: yield* readStatus(good),
+          poisonedAfter: yield* Effect.forEach(poisoned, readStatus),
+        };
       }),
     );
 
-    // Six undecodable rows first, room for two, and one valid row after
-    // them: the loop reaches the valid row and claims it.
+    // Six undecodable rows first and room for one: the loop reaches the valid
+    // row behind them and gives it the one place.
     expect(result.claimed.map((claim) => claim.sessionId)).toEqual([result.good]);
+    expect(result.goodAfter).toBe("starting");
+    // The bad rows are not claimed: they stay queued, where a user can see
+    // and stop them.
+    expect(result.poisonedAfter).toEqual(Array(6).fill("queued"));
   });
 
   it("passes an interruption on instead of logging it as an unreadable connection", async () => {
@@ -1104,7 +912,7 @@ const insertRunningSession = (
       spec: buildSpec(instanceId, "clever"),
       permissionProfileId: yield* aProfile,
     });
-    const [claim] = yield* claimStarting(runnerId, 1, () => Effect.succeed(undefined));
+    const [claim] = yield* claimStarting(runnerId, 1);
     if (status !== "starting") {
       yield* rows.moved(sessionId, status, at);
       yield* inputs.markDelivered(claim!.input.id, claim!.input.sentAt, "opened", at);
@@ -1126,12 +934,6 @@ const aProfile = Effect.gen(function* () {
   `;
   return id;
 });
-
-/** Reads a session's current status. */
-const readStatus = (sessionId: string) =>
-  Effect.flatMap(sessionRepository, (rows) =>
-    Effect.map(rows.one(sessionId), (row) => Option.getOrThrow(row).status),
-  );
 
 /** Calls `endOnLostRunners` the way the controller daemon does: inside the caller's transaction. */
 const runEndOnLostRunners = (connected: ReadonlyArray<string>) =>
