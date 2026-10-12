@@ -116,6 +116,8 @@ export const AUDIT_KINDS = [
   "signal.snoozed",
   "signal.unsnoozed",
   "signal.priorityLowered",
+  "ignoreRule.created",
+  "ignoreRule.deleted",
   "permission.requested",
   "textGeneration.completed",
   "textGeneration.failed",
@@ -195,6 +197,9 @@ const RECORD_KINDS = {
   "signal.snoozed": "updated",
   "signal.unsnoozed": "updated",
   "signal.priorityLowered": "updated",
+  // An Ignore Rule has no Live Topic of its own. The records this entry
+  // names are the open signals the new rule resolved, which may be none.
+  "ignoreRule.created": "updated",
   // The record it names is the asking session, whose list of open Permission
   // Requests gained one.
   "permission.requested": "updated",

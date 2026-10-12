@@ -77,7 +77,14 @@ import {
   WorkspaceStepsLayer,
 } from "../daemon";
 import { NotificationService, NotificationServiceLayer } from "../notifications";
-import { SignalRaisesLayer, SignalService, SignalServiceLayer } from "../signals";
+import {
+  IgnoreRuleService,
+  IgnoreRuleServiceLayer,
+  SignalClaimsLayer,
+  SignalRaisesLayer,
+  SignalService,
+  SignalServiceLayer,
+} from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
@@ -289,6 +296,16 @@ const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
       .handle("snooze", ({ payload }) => withApiErrors(signals.snooze(payload)))
       .handle("unsnooze", ({ payload }) => withApiErrors(signals.unsnooze(payload)))
       .handle("lowerPriority", ({ payload }) => withApiErrors(signals.lowerPriority(payload)));
+  }),
+);
+
+const ignoreRuleRoutes = HttpApiBuilder.group(api, "ignoreRule", (handlers) =>
+  Effect.gen(function* () {
+    const ignoreRules = yield* IgnoreRuleService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(ignoreRules.query(query)))
+      .handle("create", ({ payload }) => withApiErrors(ignoreRules.create(payload)))
+      .handle("delete", ({ params }) => withApiErrors(ignoreRules.delete(params.id)));
   }),
 );
 
@@ -754,15 +771,26 @@ const TextGenerationStatusLayer = Layer.mergeAll(
 /**
  * The controller daemon's `BoundOperations`, which checks and runs the
  * operation of a chosen answer. The operation can be a task, run, live
- * session or Permission Request operation, so the port gets the run layers,
- * which include the task service, and the Permission Request use case. The
+ * session, Permission Request or Ignore Rule operation, so the port gets the
+ * run layers, which include the task service, the Permission Request use
+ * case and the Ignore Rule service. The
  * notification and signal services run answers through it, and
  * `SignalRaises` checks a plugin's answers with it. All three are provided
  * this one layer, so it is built once.
  */
+/**
+ * The Ignore Rule service, with the claims on signals. The signal service
+ * takes a claim while an action, a withdrawal or Done works on a signal, and
+ * a new Ignore Rule leaves a claimed signal open, so both services must read
+ * one set of claims. They are each provided `SignalClaimsLayer`, and a layer
+ * is built once however many times it is provided, so they share it.
+ */
+const IgnoreRuleDomainLayer = IgnoreRuleServiceLayer.pipe(Layer.provide(SignalClaimsLayer));
+
 const BoundOperationsDomainLayer = BoundOperationsLayer.pipe(
   Layer.provide(RunDomainLayer),
   Layer.provide(PermissionRequestsDomainLayer),
+  Layer.provide(IgnoreRuleDomainLayer),
 );
 
 /**
@@ -837,8 +865,9 @@ const operationServices = Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunDomainLayer)),
     Layer.mergeAll(
       NotificationServiceLayer.pipe(Layer.provide(SignalBuildFailuresLayer)),
-      SignalServiceLayer,
+      SignalServiceLayer.pipe(Layer.provide(SignalClaimsLayer)),
     ).pipe(Layer.provide(BoundOperationsDomainLayer)),
+    IgnoreRuleDomainLayer,
     SetupLayer,
     // The events service reads the registered event kinds from the plugins
     // domain. The plugins domain appends to the event log, so the events
@@ -911,6 +940,7 @@ export const handlerLayers = Layer.mergeAll(
   taskRoutes,
   notificationRoutes,
   signalRoutes,
+  ignoreRuleRoutes,
   agentRoutes,
   assistantRoutes,
   memoryRoutes,

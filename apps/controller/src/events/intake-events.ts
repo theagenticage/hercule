@@ -4,7 +4,9 @@
  *
  * - its kind is switched on for triage ("available to triage") for the
  *   Connection it came through, or
- * - a signal is behind it: it raised one, is evidence for one, or ended one.
+ * - a signal is behind it: it raised one, is evidence for one, or ended one,
+ *   or an Ignore Rule caught it before the signal it would have raised
+ *   existed.
  *
  * The switches live in the plugins domain and in each Connection's `intake`
  * column, and applying them is code, not SQL. So the switches are worked out

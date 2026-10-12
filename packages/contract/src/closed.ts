@@ -1,6 +1,8 @@
 /**
- * A struct that rejects unknown keys, in the schema itself, as `settings.update`
- * needs.
+ * A struct that rejects unknown keys, and a record that rejects keys its key
+ * schema refuses, in the schema itself.
+ *
+ * The struct is what `settings.update` needs.
  *
  * Rejecting an unknown key is a decoding option, `onExcessProperty: "error"`,
  * and the transport never sets it: `HttpApiBuilder` decodes every payload with
@@ -17,7 +19,7 @@
  * decoded side is the plain struct. Callers get the clean type; the wire gets
  * the closed one.
  */
-import { Schema, SchemaGetter } from "effect";
+import { Result, Schema, SchemaGetter, SchemaParser } from "effect";
 
 /** The same fields, every one of them optional. */
 export type Optional<Fields extends Schema.Struct.Fields> = {
@@ -52,6 +54,28 @@ export const closedStruct = <const Fields extends Schema.Struct.Fields>(fields: 
     Schema.decodeTo(struct, {
       decode: SchemaGetter.passthrough({ strict: false }),
       encode: SchemaGetter.passthrough({ strict: false }),
+    }),
+  );
+};
+
+/**
+ * A record whose decoding fails on a key that `key` refuses, with the issue
+ * `key` reports at that key's path.
+ *
+ * `Schema.Record(key, value)` does not fail on such a key: it drops the entry
+ * and decodes the rest. A request with one malformed key would then succeed as
+ * if that entry had never been sent. So the record takes any string as its key
+ * and checks each key with `key` afterwards.
+ */
+export const closedRecord = <V extends Schema.Top>(key: Schema.Codec<string, string>, value: V) => {
+  const decodeKey = SchemaParser.decodeUnknownResult(key);
+  return Schema.Record(Schema.String, value).check(
+    Schema.makeFilter((record: { readonly [name: string]: unknown }) => {
+      for (const name of Object.keys(record)) {
+        const decoded = decodeKey(name);
+        if (Result.isFailure(decoded)) return { path: [name], issue: decoded.failure };
+      }
+      return undefined;
     }),
   );
 };

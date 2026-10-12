@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
   type JSX,
+  type ReactNode,
   type Ref,
 } from "react";
 import { flushSync } from "react-dom";
@@ -21,12 +22,14 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
-import { DONE_ACTION_ID, type Signal } from "@hercule/contract";
+import { DONE_ACTION_ID, type IgnoreRuleCreateInput, type Signal } from "@hercule/contract";
 import {
   buildSignalAnswers,
+  canIgnoreSignal,
   describeAnswerKey,
   describeBuildFailure,
   describeNotScreened,
+  describeOfferedRuleMatchCount,
   describeResolvedElsewhere,
   describeSignalAsker,
   describeSignalOutcome,
@@ -37,10 +40,12 @@ import {
   findSuggestedAnswer,
   formatMessageTime,
   hasDoneAction,
+  isIgnoreRuleOffer,
   nameSignalSource,
   readErrorMessage,
   parsePluginId,
   planSignalMove,
+  readSignalKindLabels,
 } from "@hercule/client-core";
 import {
   assistantsQuery,
@@ -52,10 +57,13 @@ import {
 import { AlarmIcon } from "../../icons/alarm";
 import { ExternalIcon } from "../../icons/external";
 import { Mark } from "../../marks";
+import { IgnoreDialog } from "./ignore-dialog";
 import { SignalAnswers, type AnswerFailure } from "./signal-answers";
 import { SignalBlocks } from "./signal-blocks";
+import { SignalPaneMenu } from "./signal-pane-menu";
 import { SignalPaneMoves } from "./signal-moves";
-import { SourceMark } from "./source-mark";
+import { SignalMark, SourceMark } from "./source-mark";
+import { useOpenSignalsMatchedByRule } from "./use-open-signals-matched-by-rule";
 import { useIntakeMoves } from "./use-signal-moves";
 
 /** What Intake's keys do in the pane, called by the screen's key handler. */
@@ -151,6 +159,7 @@ function SignalDetail({
   const suggested = findSuggestedAnswer(answers);
   const [openedOpen] = useState(signal.status === "open");
   const [actedHere, setActedHere] = useState(false);
+  const [ignoring, setIgnoring] = useState(false);
   const [openReplyId, setOpenReplyId] = useState<string | null>(
     suggested?.style === "reply" ? suggested.action.id : null,
   );
@@ -192,7 +201,7 @@ function SignalDetail({
   const sourcePluginId = parsePluginId(signal.kind);
   const provenance = (
     <>
-      <SourceMark pluginId={sourcePluginId} plugins={plugins} size={14} />
+      <SignalMark signal={signal} plugins={plugins} size={14} />
       {describeSignalProvenance(signal, plugins, raisers)}
     </>
   );
@@ -240,6 +249,13 @@ function SignalDetail({
 
   const asker = describeSignalAsker(signal);
   const askedAt = formatMessageTime(new Date(signal.createdAt), timezone, new Date());
+  const askedTime =
+    askedAt === undefined ? null : <time dateTime={signal.createdAt}>{askedAt}</time>;
+  // Hercule's offer names no asker. While it is open, its line counts what
+  // the rule it offers would take off the list instead.
+  const offeredRule =
+    signal.status === "open" && isIgnoreRuleOffer(signal) ? signal.ignoreRule : undefined;
+  const canIgnore = canIgnoreSignal(signal, readSignalKindLabels(plugins, signal.kind));
   const buildFailure = describeBuildFailure(signal, plugins, raisers);
   const notScreened = describeNotScreened(signal);
   const outcome = describeSignalOutcome(signal, plugins);
@@ -299,12 +315,27 @@ function SignalDetail({
                 <ExternalIcon size={13} />
               </a>
             )}
+            {canIgnore && (
+              <SignalPaneMenu
+                sourceName={sourceName}
+                sourceUrl={sourceUrl}
+                onIgnore={() => {
+                  setIgnoring(true);
+                }}
+              />
+            )}
           </div>
           <h2 className="ad-title">{signal.title}</h2>
           <p className="ad-asked">
-            {asker}
-            {asker !== null && askedAt !== undefined && " · "}
-            {askedAt !== undefined && <time dateTime={signal.createdAt}>{askedAt}</time>}
+            {offeredRule === undefined ? (
+              <>
+                {asker}
+                {asker !== null && askedTime !== null && " · "}
+                {askedTime}
+              </>
+            ) : (
+              <OfferedRuleMatchCount rule={offeredRule} time={askedTime} />
+            )}
           </p>
         </header>
         {snoozeLine !== null && (
@@ -373,6 +404,17 @@ function SignalDetail({
         )}
         <SignalPaneMoves signal={signal} />
       </article>
+      {ignoring && (
+        <IgnoreDialog
+          signal={signal}
+          onCreated={() => {
+            setActedHere(true);
+          }}
+          onClose={() => {
+            setIgnoring(false);
+          }}
+        />
+      )}
       {signal.status === "open" ? (
         <PaneKeys
           suggestedKey={suggested === undefined ? null : describeAnswerKey(suggested, "↩")}
@@ -392,6 +434,29 @@ function SignalDetail({
           canOpen={sourceUrl !== null}
         />
       )}
+    </>
+  );
+}
+
+/**
+ * Renders the line under the title of Hercule's open offer: how many open
+ * signals the offered rule `rule` matches, "3 open now", then `time`, when
+ * the offer was raised. Until the count is read, or when it cannot be, the
+ * line shows only `time`.
+ */
+function OfferedRuleMatchCount({
+  rule,
+  time,
+}: {
+  readonly rule: IgnoreRuleCreateInput;
+  readonly time: ReactNode;
+}): JSX.Element {
+  const matched = useOpenSignalsMatchedByRule(rule);
+  return (
+    <>
+      {matched.state === "read" && describeOfferedRuleMatchCount(matched.signals.length)}
+      {matched.state === "read" && time !== null && " · "}
+      {time}
     </>
   );
 }

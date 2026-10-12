@@ -61,6 +61,7 @@ import type {
   Event,
   EventHandling,
   EventWithFacts,
+  IgnoreRuleWithCatches,
   Input,
   MemoryDocument,
   MemoryEntry,
@@ -94,6 +95,7 @@ import {
   currentConversationSessionQuery,
   eventQuery,
   eventsEverythingQuery,
+  ignoreRulesQuery,
   liveAgentSessionsQuery,
   liveRunsQuery,
   localRunnerQuery,
@@ -117,6 +119,7 @@ import {
   signalQuery,
   signalsClearedTodayQuery,
   signalsDoneQuery,
+  laterSignalsOfKindQuery,
   signalsLaterQuery,
   signalsToDoQuery,
   snoozeTimerQuery,
@@ -148,6 +151,7 @@ import { Route as AppearanceSettingsRoute } from "../routes/_connected/_shell/se
 import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/settings/assistants/index";
 import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/index";
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
+import { Route as IntakeSettingsRoute } from "../routes/_connected/_shell/settings/intake";
 import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
 import { Route as WorkflowsRoute } from "../routes/_connected/_shell/workflows/route";
 import { Route as OpenWorkflowRoute } from "../routes/_connected/_shell/workflows/$workflowId";
@@ -299,6 +303,14 @@ export interface IntakeRecords {
   readonly answerMove?: FetchLike;
 }
 
+/**
+ * What Settings > Intake reads besides the shell's lists, which hold the
+ * plugins and the Connections: the Ignore Rules, with what each caught.
+ */
+export interface IntakeSettingsRecords {
+  readonly ignoreRules: ReadonlyArray<IgnoreRuleWithCatches>;
+}
+
 /** The screens a shell specimen opens beside the sidebar. It opens at most one of them. */
 interface OpenScreens {
   readonly thread?: ThreadScreenRecords;
@@ -307,6 +319,7 @@ interface OpenScreens {
   readonly permissionProfilesSettings?: PermissionProfilesSettingsRecords;
   readonly appearanceSettings?: AppearanceSettingsRecords;
   readonly intake?: IntakeRecords;
+  readonly intakeSettings?: IntakeSettingsRecords;
   readonly workflows?: WorkflowsRecords;
   readonly run?: RunScreenRecords;
 }
@@ -447,6 +460,7 @@ const seedQueryCache = (
     permissionProfilesSettings,
     appearanceSettings,
     intake,
+    intakeSettings,
     workflows,
     run,
   }: OpenScreens,
@@ -465,6 +479,16 @@ const seedQueryCache = (
     pages: [{ items: records.later ?? [] }],
     pageParams: [undefined],
   });
+  // The Ignore dialog, and an open offer of an Ignore Rule, look for the
+  // signals a rule matches in Later of the rule's kind, read whole.
+  for (const kind of new Set(
+    [...(records.signals ?? []), ...(records.later ?? [])].map((signal) => signal.kind),
+  )) {
+    queryClient.setQueryData(
+      laterSignalsOfKindQuery(client, kind).queryKey,
+      (records.later ?? []).filter((signal) => signal.kind === kind),
+    );
+  }
   queryClient.setQueryData(signalsDoneQuery(client).queryKey, {
     pages: [{ items: records.done ?? [] }],
     pageParams: [undefined],
@@ -521,6 +545,9 @@ const seedQueryCache = (
   }
   if (appearanceSettings !== undefined) {
     queryClient.setQueryData(connectionsQuery(client).queryKey, appearanceSettings.connections);
+  }
+  if (intakeSettings !== undefined) {
+    queryClient.setQueryData(ignoreRulesQuery(client).queryKey, intakeSettings.ignoreRules);
   }
   if (intake !== undefined) {
     // The drawings' signals come from plugins, so no workflow names any of them.
@@ -658,7 +685,8 @@ function AssistantRoute(): JSX.Element {
  * attached without its loader: the loader reads the permission profiles and
  * the settings again each time the section opens, and the query cache
  * already holds both. The Permission profiles routes are attached the same
- * way, and so is Workflows, whose loader reads the lists the cache already
+ * way, and so are Settings > Intake, whose loader reads the Ignore Rules
+ * again each time the section opens, and Workflows, whose loader reads the lists the cache already
  * holds. Intake keeps a loader of its own that returns the moment it opened,
  * because the screen reads that moment, and the cache already holds the
  * records its real loader would read.
@@ -722,6 +750,12 @@ const buildRouter = (
     path: "/appearance",
     getParentRoute: () => settingsRoute,
   } as never);
+  const intakeSettingsRoute = IntakeSettingsRoute.update({
+    id: "/intake",
+    path: "/intake",
+    getParentRoute: () => settingsRoute,
+    loader: undefined,
+  } as never);
   const intakeRoute = IntakeRoute.update({
     id: "/intake",
     path: "/intake",
@@ -770,6 +804,7 @@ const buildRouter = (
         runRoute,
         settingsRoute.addChildren([
           appearanceSettingsRoute,
+          intakeSettingsRoute,
           assistantsSettingsRoute,
           permissionProfilesSettingsRoute,
           permissionProfileSettingsRoute,
@@ -821,7 +856,8 @@ const findRunDrawnSelector = (path: string): string =>
 /**
  * Checks that the page drew the sidebar's thread rows, the transcript when
  * `screens` opens a thread, an assistant's settings when it opens Settings >
- * Assistants, the theme cards when it opens Settings > Appearance, the
+ * Assistants, the theme cards when it opens Settings > Appearance, a
+ * plugin's section when it opens Settings > Intake, the
  * list's rows or its empty line when it opens Intake or Workflows, a step
  * when it opens a run's page, and the start cards with the focus in the
  * message field when it opens a draft, and started no read. Fails with the keys of the
@@ -862,9 +898,14 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
       "Settings > Appearance drew no theme cards. Check the page's console for the error.",
     );
   }
+  if (screens.intakeSettings !== undefined && document.querySelector(".set-sec") === null) {
+    throw new Error(
+      "Settings > Intake drew no plugin's section. Check the page's console for the error.",
+    );
+  }
   if (
     screens.intake !== undefined &&
-    document.querySelector(".ask-row, .asks-empty, .asks-note") === null
+    document.querySelector(".ask-row, .asks-empty, .asks-zero, .asks-note") === null
   ) {
     throw new Error(
       "Intake drew no row and no empty line. Check the page's console for the error.",
@@ -951,7 +992,7 @@ async function mountShellSpecimen(
   // the first time they show, so they arrive after the first render.
   if (screens.draft !== undefined) await waitForElement(".start");
   // The list draws its rows once it has measured its height, after the first render.
-  if (screens.intake !== undefined) await waitForElement(".ask-row, .asks-empty");
+  if (screens.intake !== undefined) await waitForElement(".ask-row, .asks-empty, .asks-zero");
   if (screens.workflows !== undefined) {
     await waitForElement(findWorkflowsDrawnSelector(path));
   }
@@ -1086,6 +1127,22 @@ export async function mountIntakeSpecimen(
   if (everything?.source !== undefined) search.set("source", everything.source);
   const path = search.size === 0 ? "/intake" : `/intake?${search.toString()}`;
   await mountShellSpecimen(records, path, { intake });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Settings > Intake open: the main pane shows the app's real Settings
+ * frame and Intake section, with a section for each plugin in `records`
+ * that raises signals or reads events, and the Ignore Rules of `settings`.
+ * Returns once the sections are in the document. Fails when the page has no
+ * `#root`, draws no sidebar row or no plugin's section, or tries to read a
+ * record the cache does not hold.
+ */
+export async function mountIntakeSettingsSpecimen(
+  records: SidebarRecords,
+  settings: IntakeSettingsRecords,
+): Promise<void> {
+  await mountShellSpecimen(records, "/settings/intake", { intakeSettings: settings });
 }
 
 /**

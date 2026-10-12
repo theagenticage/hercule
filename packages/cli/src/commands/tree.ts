@@ -10,7 +10,9 @@
  * The schema reading is deliberately shallow. A field has one of five types
  * (string, number, boolean, a list of one of those, or anything else, which is
  * given as JSON), and that is enough for every operation in the API. A deeper
- * mapping would be a schema-to-flags compiler nobody asked for.
+ * mapping would be a schema-to-flags compiler nobody asked for. The one
+ * exception the table opts into is a record of text values, given as
+ * repeated `--<flag> <field>=<value>` (see `namedValues` on the row).
  */
 import {
   CLI,
@@ -29,8 +31,12 @@ import {
 import * as Schema from "effect/Schema";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 
-/** How a flag's or positional's text is converted into a value. */
-export type FieldKind = "string" | "number" | "boolean" | "json";
+/**
+ * How a flag's or positional's text is converted into a value. A
+ * `namedValues` field converts each use of its flag into one entry of an
+ * object, written `<field>=<value>`.
+ */
+export type FieldKind = "string" | "number" | "boolean" | "json" | "namedValues";
 
 /** The part of the request a field's value is sent in. */
 export type FieldCarrier = "path" | "payload" | "query";
@@ -52,8 +58,9 @@ export interface Field {
    */
   readonly decodeShorthand: ((text: string) => unknown) | undefined;
   /**
-   * Whether the field takes a list. A flag may then be given more than once,
-   * and a positional, which is always the last one, takes one or more words.
+   * Whether the field takes a list, or named values. A flag may then be given
+   * more than once, and a positional, which is always the last one, takes one
+   * or more words.
    */
   readonly repeated: boolean;
   readonly optional: boolean;
@@ -152,6 +159,7 @@ type Ast = {
   readonly literal?: unknown;
   readonly context?: { readonly isOptional?: boolean };
   readonly propertySignatures?: ReadonlyArray<{ readonly name: PropertyKey; readonly type: Ast }>;
+  readonly indexSignatures?: ReadonlyArray<{ readonly parameter: Ast; readonly type: Ast }>;
   readonly typeParameters?: ReadonlyArray<Ast>;
 };
 
@@ -244,6 +252,18 @@ const readScalarKind = (input: Ast): FieldKind => {
   }
 };
 
+/**
+ * Checks whether the type is a record from text to text, such as
+ * `Record<string, string>`, with no named properties and no `null`. Checks on
+ * the keys, the values or the whole record are allowed; the API applies them.
+ */
+const isRecordOfText = (ast: Ast): boolean =>
+  ast._tag === "Objects" &&
+  (ast.propertySignatures ?? []).length === 0 &&
+  ast.indexSignatures?.length === 1 &&
+  ast.indexSignatures[0]!.parameter._tag === "String" &&
+  ast.indexSignatures[0]!.type._tag === "String";
+
 /** Converts a camelCase field name to kebab case: `sessionId` becomes `session-id`. */
 const toKebabCase = (name: string): string =>
   name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
@@ -263,6 +283,7 @@ const buildField = (
 ): Field => {
   const element = readElementType(ast);
   const value = element ?? ast;
+  const takesNamedValues = "namedValues" in row;
   // A positional uses the row's placeholder when its own name would not say
   // whose id it is; a flag always uses the row's spelling.
   const spelling = "flag" in row ? row.flag : (row.placeholder ?? toKebabCase(name));
@@ -271,9 +292,11 @@ const buildField = (
     spelling,
     positional: "positional" in row,
     carriedIn,
-    kind: readScalarKind(value),
+    kind: takesNamedValues ? "namedValues" : readScalarKind(value),
     decodeShorthand: readShorthandDecoder(schema),
-    repeated: element !== undefined,
+    // A list takes one value per use of its flag, and so does a field that
+    // takes named values: each `--<flag> <field>=<value>` adds one entry.
+    repeated: element !== undefined || takesNamedValues,
     // A row can make a field required on the command line even when the
     // operation's schema makes it optional. This is for a field that is the
     // only way to pass its value on the command line.
@@ -298,6 +321,9 @@ const buildField = (
  * - A field whose row is hidden gets no flag.
  * - A query field whose row makes it positional throws, because the table is
  *   wrong.
+ * - A field whose row asks for named values throws when its schema is not a
+ *   record of text values, or when the row also makes it positional,
+ *   because the table is wrong.
  */
 const buildFields = (
   id: OperationId,
@@ -326,6 +352,16 @@ const buildFields = (
       // is wrong, and this says so.
       if (carriedIn === "query" && "positional" in row) {
         throw new Error(`${id}: ${name} is a query parameter and cannot be a bare word`);
+      }
+      // A field that takes named values is repeatable. As a bare word it
+      // would take every word after it, so the table is wrong.
+      if ("namedValues" in row && "positional" in row) {
+        throw new Error(`${id}: ${name} takes named values, so it must be a flag, not a bare word`);
+      }
+      if ("namedValues" in row && !isRecordOfText(type)) {
+        throw new Error(
+          `${id}: ${name} takes named values, but its schema is not a record of text`,
+        );
       }
       return [buildField(name, type, row, carriedIn, fields?.[name])];
     });

@@ -170,6 +170,8 @@ const buildPlaceholder = (field: Field): string => {
       return "<true|false>";
     case "json":
       return "<json>";
+    case "namedValues":
+      return "<field>=<value>";
   }
 };
 

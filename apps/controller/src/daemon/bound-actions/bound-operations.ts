@@ -43,7 +43,7 @@ import { connectionRepository, ConnectionTypes } from "../../connections";
 import type { PermissionProfiles } from "../../permissions";
 import { executePluginAction, PluginHost, type RegisteredWorkflowAction } from "../../plugins";
 import { RunService } from "../../runs";
-import { truncateOutcome } from "../../signals";
+import { IgnoreRuleService, truncateOutcome } from "../../signals";
 import { TaskService } from "../../tasks";
 import { PermissionRequests } from "../permissions";
 import { Live } from "../sessions";
@@ -88,6 +88,7 @@ const make = Effect.gen(function* () {
   const runs = yield* RunService;
   const live = yield* Live;
   const permissionRequests = yield* PermissionRequests;
+  const ignoreRules = yield* IgnoreRuleService;
   const host = yield* PluginHost;
   const connections = yield* connectionRepository;
   const connectionTypes = yield* ConnectionTypes;
@@ -106,6 +107,7 @@ const make = Effect.gen(function* () {
     "session.respondToApprovalRequest": ({ sessionId, ...decided }) =>
       live.respondToApprovalRequest({ id: sessionId, ...decided }),
     "permission.decide": (input) => permissionRequests.decide(input),
+    "ignoreRule.create": (input) => ignoreRules.create(input),
   };
 
   /**
@@ -360,6 +362,7 @@ export const BoundOperationsLayer: Layer.Layer<
   | Live
   | PermissionRequests
   | PermissionProfiles
+  | IgnoreRuleService
   | PluginHost
   | ConnectionTypes
 > = Layer.effect(BoundOperations)(make);

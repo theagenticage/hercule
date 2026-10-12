@@ -601,6 +601,46 @@ describe("raising a plugin's signals from its events", () => {
     });
   });
 
+  it("does not raise a signal for a question an Ignore Rule caught, even when the question is enriched after the rule is deleted", async () => {
+    await withDeskController({ build: "draft" }, async (controller, connectionId) => {
+      const created = await post(
+        controller.base,
+        "/api/v1/ignore-rules",
+        { kind: ASKED_KIND, match: { by: "marta" } },
+        controller.token,
+      );
+      expect(created.status, await created.clone().text()).toBe(200);
+      const rule = (await created.json()) as { readonly id: string };
+      const asked = await emitDeskEvent(controller, connectionId, "desk.asked", {
+        thread: "t-15",
+        by: "marta",
+        toYou: true,
+      });
+      await waitUntilRouted(controller.harness, asked);
+      await waitUntil("caught the raise", async () =>
+        (await listPendingRaises(controller)).length === 0 ? true : undefined,
+      );
+
+      const deleted = await del(
+        controller.base,
+        `/api/v1/ignore-rules/${rule.id}`,
+        controller.token,
+      );
+      expect(deleted.status, await deleted.clone().text()).toBe(200);
+      const enriched = await post(
+        controller.base,
+        `/api/v1/events/${String(asked)}/enrich`,
+        { refs: ["desk:thread:t-15"] },
+        controller.token,
+      );
+      expect(enriched.status, await enriched.clone().text()).toBe(200);
+      await waitOutSeveralTicks();
+
+      expect(await listPendingRaises(controller)).toEqual([]);
+      expect(await listOpenSignals(controller, ASKED_KIND)).toEqual([]);
+    });
+  });
+
   it("does not write a signal or a build failure when the Connection is deleted while build runs", async () => {
     let releaseBuild!: () => void;
     const buildReleased = new Promise<void>((resolve) => (releaseBuild = resolve));

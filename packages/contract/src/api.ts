@@ -25,6 +25,7 @@ import { provider } from "./groups/provider";
 import { notification } from "./groups/notification";
 import { permission } from "./groups/permission";
 import { signal } from "./groups/signal";
+import { ignoreRule } from "./groups/ignore-rule";
 import { project } from "./groups/project";
 import { resource } from "./groups/resource";
 import { run } from "./groups/run";
@@ -56,6 +57,7 @@ export const api = HttpApi.make("hercule")
     task,
     notification,
     signal,
+    ignoreRule,
     project,
     resource,
     workspace,

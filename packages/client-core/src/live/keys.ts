@@ -72,6 +72,11 @@ export const queryKeys = {
   workspaces: (): LiveQueryKey => ["workspaces"],
   workspace: (id?: string): LiveQueryKey => (id === undefined ? ["workspace"] : ["workspace", id]),
   connections: (): LiveQueryKey => ["connections"],
+  /**
+   * The Ignore Rules, with what each caught. Not a live topic: Settings >
+   * Intake reads the list each time it opens, and after a delete.
+   */
+  ignoreRules: (): LiveQueryKey => ["ignore-rules"],
   connection: (id?: string): LiveQueryKey =>
     id === undefined ? ["connection"] : ["connection", id],
   /**
@@ -244,6 +249,13 @@ export const queryKeys = {
     filter === undefined ? ["signals"] : ["signals", filter],
   /** One signal, as `signal.read` returns it, with the describe lines of its actions. */
   signal: (id?: string): LiveQueryKey => (id === undefined ? ["signal"] : ["signal", id]),
+  /**
+   * Every snoozed signal of the kind `kind`, every page of Later. Not a live
+   * topic, and kept out of the `signals` prefix on purpose: the offer's pane
+   * and the Ignore dialog read it once when they open, so a `signal` push
+   * does not read all of Later again.
+   */
+  laterSignalsOfKind: (kind: string): LiveQueryKey => ["later-signals-of-kind", kind],
   /**
    * Keyed on the loopback endpoints detection asks among `runners`, because
    * the result depends on them. The same runners read again, with the same

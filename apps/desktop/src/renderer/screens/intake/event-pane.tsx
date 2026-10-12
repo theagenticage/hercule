@@ -121,7 +121,7 @@ function EventDetail({
                 target="_blank"
                 rel="noreferrer"
               >
-                {`Open in ${system.name}`}
+                {`Open on ${system.name}`}
                 <ExternalIcon size={13} />
               </a>
             )}
@@ -195,7 +195,7 @@ function EventDetail({
  * about in bold, and where that record stands. A handling that names no
  * record, "No action", draws its caption in bold. The block is a link to the
  * record when the app has a screen for it. A Task and a run have none yet, so
- * theirs are plain.
+ * theirs are plain, and so is an Ignore Rule the user has deleted.
  */
 function HandlingBlock({ label }: { readonly label: EventHandlingLabel }): JSX.Element {
   const caption = describeHandlingCaption(label.handling);
@@ -232,6 +232,19 @@ function HandlingBlock({ label }: { readonly label: EventHandlingLabel }): JSX.E
         className="b-work b-work--link"
         to="/threads/$sessionId"
         params={{ sessionId: target.sessionId }}
+      >
+        {words}
+      </Link>
+    );
+  }
+  if (target?.kind === "ignore-rule") {
+    // The rule is listed in its plugin's section, which the link opens on
+    // the rule's kind.
+    return (
+      <Link
+        className="b-work b-work--link"
+        to="/settings/intake"
+        search={{ kind: target.signalKind }}
       >
         {words}
       </Link>

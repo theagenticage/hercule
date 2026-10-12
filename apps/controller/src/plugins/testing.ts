@@ -519,7 +519,7 @@ const buildIntakeSignalKind = (word: string, label: string) => ({
   threadRef: '"thread"',
   namesYou: true,
   priority: "high" as const,
-  matchFields: [],
+  matchFields: [{ name: "title", label: "Title", path: "event.payload.title" }],
   ends: [],
   build: () => Effect.fail(new PluginError({ message: "The fixture builds no signals" })),
 });

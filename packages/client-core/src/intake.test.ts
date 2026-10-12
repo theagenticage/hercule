@@ -745,7 +745,13 @@ describe("buildHandlingLabels", () => {
   // Sunday 11 October 2026, 10:00 in Amsterdam.
   const now = new Date("2026-10-11T08:00:00.000Z");
   const AMSTERDAM = "Europe/Amsterdam";
-  const NO_FACTS: EventFacts = { signals: [], resolvedSignals: [], tasks: [], knownBy: [] };
+  const NO_FACTS: EventFacts = {
+    signals: [],
+    resolvedSignals: [],
+    ignoredBy: null,
+    tasks: [],
+    knownBy: [],
+  };
   const buildLabels = (facts: Partial<EventFacts>) =>
     buildHandlingLabels({ ...NO_FACTS, ...facts }, now, AMSTERDAM);
   const readWords = (facts: Partial<EventFacts>) =>
@@ -811,6 +817,44 @@ describe("buildHandlingLabels", () => {
       lead: "ended Review #12",
       detail: "Approved",
       target: { kind: "signal", signalId: "s2", view: "done" },
+    });
+  });
+
+  it("names the Ignore Rule that caught the event and links its kind in Settings", () => {
+    const [label] = buildLabels({
+      ignoredBy: {
+        ruleId: "r1",
+        kind: "github/review-requested",
+        text: "Review requested · Repo acme/webshop",
+        ruleDeleted: false,
+      },
+    });
+    expect(label).toEqual({
+      handling: "ignored",
+      key: "ignored:r1",
+      lead: "→ ignored by a rule",
+      detail: null,
+      record: "Review requested · Repo acme/webshop",
+      standing: "In Settings › Intake",
+      target: { kind: "ignore-rule", signalKind: "github/review-requested" },
+    });
+  });
+
+  it("says a rule is deleted and links nothing once the user deleted it", () => {
+    const [label] = buildLabels({
+      ignoredBy: {
+        ruleId: "r1",
+        kind: "github/review-requested",
+        text: "Review requested · Repo acme/webshop",
+        ruleDeleted: true,
+      },
+    });
+    expect(label).toMatchObject({
+      lead: "→ ignored by a deleted rule",
+      detail: null,
+      record: "Review requested · Repo acme/webshop",
+      standing: "Rule deleted",
+      target: null,
     });
   });
 
@@ -916,10 +960,12 @@ describe("buildHandlingLabels", () => {
         { ...MENTIONED, status: "open" },
       ],
       resolvedSignals: [{ signalId: "e", title: "Old", outcome: "Ok" }],
+      ignoredBy: { ruleId: "r", kind: "github/mentioned", text: "Mentioned", ruleDeleted: false },
     });
     expect(labels.map((label) => label.handling)).toEqual([
       "raised-signal",
       "ended-signal",
+      "ignored",
       "evidence",
       "on-task",
       "known-work",
@@ -967,6 +1013,7 @@ describe("EVENT_HANDLING_OPTIONS", () => {
       ...EVENT_HANDLINGS,
     ]);
     expect(EVENT_HANDLING_OPTIONS[0]!.caption).toBe("All events");
+    expect(EVENT_HANDLING_OPTIONS.map((option) => option.caption)).toContain("Ignored by a rule");
     expect(
       EVENT_HANDLING_OPTIONS.some((option) => option.caption.toLowerCase().includes("handling")),
     ).toBe(false);

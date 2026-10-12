@@ -34,6 +34,7 @@ import {
   type BoundOperation,
   type CoreNotificationKind,
   type DescribeLine,
+  NO_OPERATION_DESCRIBE_LINE,
   type Forbidden,
   type Id,
   type InvalidState,
@@ -108,9 +109,6 @@ const NOT_THE_PRODUCER = "only the producer of a notification may withdraw it";
 
 /** The kind of the notification that counts its signal kind's failed builds when it is read. */
 const SIGNAL_BUILD_FAILED_KIND: CoreNotificationKind = "core.signal-build-failed";
-
-/** The describe line of an answer that runs nothing. */
-const NO_OPERATION_DESCRIBE_LINE: DescribeLine = [{ kind: "text", text: "Does nothing" }];
 
 /**
  * The refusal for a caller who is not the user taking an answer. A session

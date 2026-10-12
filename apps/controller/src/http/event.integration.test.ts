@@ -303,6 +303,7 @@ describe("the Intake filters over HTTP", () => {
         resolvedSignals: [],
         tasks: [],
         knownBy: [],
+        ignoredBy: null,
       });
 
       const noAction = await listEvents(
@@ -315,7 +316,7 @@ describe("the Intake filters over HTTP", () => {
       expect((await listEvents(base, token, "?intake=true")).items).toEqual([]);
       expect((await listEvents(base, token, "?text=nothing-matches-this")).items).toEqual([]);
 
-      const refused = await get(base, "/api/v1/events?handling=ignored", token);
+      const refused = await get(base, "/api/v1/events?handling=pending-triage", token);
       expect(refused.status).toBe(400);
     });
   });

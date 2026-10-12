@@ -106,6 +106,13 @@ describe("the validation error line", () => {
   });
 });
 
+describe("a flag that takes named values", () => {
+  it("shows the <field>=<value> form and says the flag repeats", () => {
+    const flags = readSection(buildCommandHelp(readCommand("ignoreRule.create")), "flags:");
+    expect(flags[0]).toMatch(/^\s+--match <field>=<value>\s+required; repeatable$/);
+  });
+});
+
 describe("a repeated positional and a list with one fixed order", () => {
   it("marks a positional that takes several words with ...", () => {
     const lines = buildCommandHelp(readCommand("signal.markDone"));

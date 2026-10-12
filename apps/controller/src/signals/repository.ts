@@ -14,6 +14,7 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Fragment } from "effect/unstable/sql/Statement";
+import { DONE_ACTION_ID } from "@hercule/contract";
 import type {
   Actor,
   Block,
@@ -81,6 +82,16 @@ export interface SignalPageRequest {
  */
 const COLUMNS =
   "s.id, s.kind, s.origin, s.title, s.asker, s.place, s.priority, s.blocks, s.actions, s.match, s.build_error, s.task, s.ignore_rule, s.status, s.resolution, s.replaced_by, s.created_at, z.until AS snooze_until, z.snoozed_at";
+
+/**
+ * Writes `match` as the JSON it is stored as: its fields sorted by name. Two
+ * signals with the same values then store the same text whatever order their
+ * values were built in, even after a plugin update reorders its kind's match
+ * fields, so a group of signals is one indexed read of the `match` column.
+ * An Ignore Rule's `match` is stored the same way.
+ */
+export const encodeSignalMatch = (match: SignalMatch): string =>
+  JSON.stringify(Object.fromEntries(Object.entries(match).sort(([a], [b]) => (a < b ? -1 : 1))));
 
 /** The signals, each beside its snooze row, or beside nulls when it has none. */
 const SIGNALS_WITH_SNOOZES = "signals s LEFT JOIN signal_snoozes z ON z.signal_id = s.id";
@@ -282,7 +293,7 @@ const make = Effect.gen(function* () {
             (${id}, ${signal.kind}, ${JSON.stringify(signal.origin)}, ${signal.title},
              ${signal.asker ?? null}, ${signal.place ?? null}, ${signal.priority},
              ${JSON.stringify(signal.blocks)}, ${JSON.stringify(signal.actions)},
-             ${JSON.stringify(signal.match)}, ${encodeOptionalJson(signal.buildError)},
+             ${encodeSignalMatch(signal.match)}, ${encodeOptionalJson(signal.buildError)},
              ${encodeOptionalJson(signal.task)}, ${encodeOptionalJson(signal.ignoreRule)},
              ${signal.status}, ${encodeOptionalJson(signal.resolution)},
              ${signal.replacedBy === undefined ? null : uuidFromString(signal.replacedBy)},
@@ -531,6 +542,105 @@ const make = Effect.gen(function* () {
           AND thread_ref = ${threadRef} AND kind = ${kind}
         ORDER BY created_at, id
       `.pipe(Effect.map((rows) => rows.map(parseOpenEventSignalRow))),
+
+    /**
+     * Returns the id and match values of every open signal of `kind`.
+     * Creating an Ignore Rule reads them to find the open signals the rule
+     * takes off the list. The query reads the partial index
+     * `signals_open_kind`, so it never reads the kind's resolved signals.
+     */
+    listOpenMatches: (
+      kind: string,
+    ): Effect.Effect<
+      ReadonlyArray<{ readonly id: string; readonly match: SignalMatch }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array; readonly match: string }>`
+          SELECT id, match FROM signals WHERE kind = ${kind} AND status = 'open'
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            id: uuidToString(row.id),
+            match: JSON.parse(row.match) as SignalMatch,
+          })),
+      ),
+
+    /**
+     * Counts the Done streak of a group: the signals of `kind` with exactly
+     * the values `match`. The count is the number of the group's newest
+     * signals the user resolved with Done, back to the newest one that was
+     * not: one still open, snoozed or not, or one answered another way, in
+     * Hercule or on the source. Withdrawn signals are skipped, so they
+     * neither count nor end the streak. Signals created at the same time are
+     * ordered by id. Returns 0 when `match` is empty, because such a signal
+     * is in no group.
+     *
+     * Both statements read the index `signals_group` newest first: the
+     * first stops at the newest signal that ends the streak, and the second
+     * reads only the signals after it.
+     */
+    countDoneStreak: (kind: string, match: SignalMatch): Effect.Effect<number, SqlError> =>
+      Effect.gen(function* () {
+        const stored = encodeSignalMatch(match);
+        // `IS` rather than `=`, so a resolution with no `actionId`, as an end
+        // on the source may write, counts as an answer that ends the streak.
+        const breakers = yield* sql<{ readonly created_at: string; readonly id: Uint8Array }>`
+          SELECT created_at, id FROM signals
+          WHERE kind = ${kind} AND match = ${stored} AND match <> '{}'
+            AND NOT (status = 'resolved' AND (
+              json_extract(resolution, '$.kind') = 'withdrawn'
+              OR (json_extract(resolution, '$.kind') = 'decided'
+                  AND json_extract(resolution, '$.actionId') IS ${DONE_ACTION_ID})
+            ))
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1
+        `;
+        const breaker = breakers[0];
+        // Every signal after the breaker that was not withdrawn was marked
+        // Done, or it would be the breaker.
+        const rows = yield* sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count FROM signals
+          WHERE kind = ${kind} AND match = ${stored} AND match <> '{}'
+            AND ${breaker === undefined ? sql`1` : sql`(created_at, id) > (${breaker.created_at}, ${breaker.id})`}
+            AND NOT (status = 'resolved' AND json_extract(resolution, '$.kind') = 'withdrawn')
+        `;
+        return rows[0]?.count ?? 0;
+      }),
+
+    /**
+     * Returns every offer the core raised to suggest an Ignore Rule of
+     * `kind`, open or resolved, with its id, its status and the rule it
+     * offers. The core reads them so it never offers the same rule twice,
+     * and a new rule resolves the open offer of the same rule. The query
+     * reads the expression index `signals_ignore_rule_offer`.
+     */
+    listIgnoreRuleOffers: (
+      kind: string,
+    ): Effect.Effect<
+      ReadonlyArray<{
+        readonly id: string;
+        readonly status: Signal["status"];
+        readonly ignoreRule: NonNullable<Signal["ignoreRule"]>;
+      }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{
+          readonly id: Uint8Array;
+          readonly status: Signal["status"];
+          readonly ignore_rule: string;
+        }>`
+          SELECT id, status, ignore_rule FROM signals
+          WHERE ignore_rule IS NOT NULL AND json_extract(ignore_rule, '$.kind') = ${kind}
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            id: uuidToString(row.id),
+            status: row.status,
+            ignoreRule: JSON.parse(row.ignore_rule) as NonNullable<Signal["ignoreRule"]>,
+          })),
+      ),
 
     /** Records that the signal `newId` replaced the resolved signal `oldId`. */
     recordReplacement: (oldId: string, newId: string): Effect.Effect<void, SqlError> =>

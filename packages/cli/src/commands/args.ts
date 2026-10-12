@@ -63,6 +63,10 @@ export const formatPositionalShape = (field: Field): string =>
  * Converts the text given for a field into the field's value. Throws a
  * `UsageError` when the text is not a valid value.
  *
+ * For a field that takes named values, the text is one `<field>=<value>` and
+ * the result is an object with that one entry. The text is split at the first
+ * `=`, so a value may hold `=` itself.
+ *
  * A field whose schema has a shorthand is decoded by that schema, so the word
  * a person types becomes the value the API expects, and the typed shorthand is
  * never sent. On failure the user sees the schema's own error message: the
@@ -108,6 +112,16 @@ export const coerceFieldValue = (field: Field, text: string, help: string): unkn
       } catch {
         throw new UsageError(`${formatFieldName(field)}: ${text} is not valid JSON`, help);
       }
+    case "namedValues": {
+      const equals = text.indexOf("=");
+      if (equals < 1) {
+        throw new UsageError(
+          `${formatFieldName(field)}: ${JSON.stringify(text)} is not written <field>=<value>`,
+          help,
+        );
+      }
+      return { [text.slice(0, equals)]: text.slice(equals + 1) };
+    }
   }
 };
 
@@ -124,7 +138,28 @@ export const coerceFieldValue = (field: Field, text: string, help: string): unkn
 const parseWrittenValue = (field: Field, text: string, help: string): unknown =>
   field.nullable && text === "null" ? null : coerceFieldValue(field, text, help);
 
-const assignFieldValue = (into: Record<string, unknown>, field: Field, value: unknown): void => {
+/**
+ * Adds one value given for a field to the request part `into`. A list field
+ * collects its values in order, and a field that takes named values collects
+ * them into one object. Throws a `UsageError` when a name is given twice,
+ * because keeping either value would silently drop the other.
+ */
+const assignFieldValue = (
+  into: Record<string, unknown>,
+  field: Field,
+  value: unknown,
+  help: string,
+): void => {
+  if (field.kind === "namedValues") {
+    const collected = (into[field.name] ?? {}) as Record<string, string>;
+    const entry = value as Record<string, string>;
+    const name = Object.keys(entry)[0]!;
+    if (Object.hasOwn(collected, name)) {
+      throw new UsageError(`${formatFieldName(field)}: ${name} is given twice`, help);
+    }
+    into[field.name] = { ...collected, ...entry };
+    return;
+  }
   if (!field.repeated) {
     into[field.name] = value;
     return;
@@ -347,6 +382,7 @@ export const parseArguments = async (
       payloadField === undefined ? query : payload,
       field,
       parseWrittenValue(field, value(), help),
+      help,
     );
   }
 

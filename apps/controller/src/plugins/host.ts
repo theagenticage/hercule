@@ -843,10 +843,13 @@ const make = Effect.gen(function* () {
           })),
         ),
         signalKinds: own.flatMap((source) =>
-          source.signalKinds.map(({ kind, label, description }) => ({
+          source.signalKinds.map(({ kind, label, description, matchFields }) => ({
             kind,
             label,
             description,
+            // A field's path is how the plugin reads the value from an event,
+            // which no client needs.
+            matchFields: matchFields.map((field) => ({ name: field.name, label: field.label })),
             on: true,
             level: "default" as const,
           })),

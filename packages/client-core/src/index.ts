@@ -180,9 +180,10 @@ export {
   applyIntakeChange,
   buildIntakeOverrides,
   canResetIntakeRow,
+  declaresIntakeKind,
   describeIntakeSource,
   listIntakeSegments,
-  listPluginsWithIntake,
+  listIntakeSettingsPluginIds,
   type IntakeChange,
   type IntakeKindList,
   type IntakeKindValue,
@@ -348,6 +349,20 @@ export {
   type SignalRaiserNames,
   type UrgentSignal,
 } from "./intake";
+export {
+  canIgnoreSignal,
+  describeIgnoreDialogEffect,
+  describeIgnoreRuleCatches,
+  describeOfferedRuleMatchCount,
+  describeRuleMatchesTakenOff,
+  isIgnoreRuleOffer,
+  KIND_SWITCH_OFF_LINE,
+  LAST_MATCH_VALUE_REASON,
+  listDeclaredMatchValues,
+  listPluginIgnoreRules,
+  listSignalsMatchedByRule,
+  readSignalKindLabels,
+} from "./ignore-rules";
 export {
   applySignalMove,
   buildSnoozeChoices,

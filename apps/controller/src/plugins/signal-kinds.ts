@@ -12,6 +12,8 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   MAX_PLUGIN_MESSAGE_LENGTH,
+  MAX_SIGNAL_MATCH_FIELD_NAME_LENGTH,
+  MAX_SIGNAL_MATCH_FIELDS,
   MAX_SIGNAL_TITLE_LENGTH,
   SignalKind,
   TaskPriority,
@@ -44,7 +46,8 @@ export interface RegisteredSignalKind extends SignalKindDeclaration {
 /**
  * The data fields of a declaration that are shown to the user or stored. A
  * signal written without the plugin's `build` takes the label as its title,
- * so the label obeys a title's limit.
+ * so the label obeys a title's limit. The match fields obey an Ignore Rule's
+ * limits, so every rule the core offers from them can be created.
  */
 const SignalKindHeader = Schema.Struct({
   word: EventSourceNames.fields.id,
@@ -54,6 +57,14 @@ const SignalKindHeader = Schema.Struct({
     Schema.isMaxLength(MAX_PLUGIN_MESSAGE_LENGTH),
   ),
   priority: TaskPriority,
+  matchFields: Schema.Array(
+    Schema.Struct({
+      name: Schema.String.check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(MAX_SIGNAL_MATCH_FIELD_NAME_LENGTH),
+      ),
+    }),
+  ).check(Schema.isMaxLength(MAX_SIGNAL_MATCH_FIELDS)),
 });
 
 const decodeSignalKindHeader = Schema.decodeUnknownEffect(SignalKindHeader, { errors: "all" });
@@ -66,7 +77,9 @@ const decodeSignalKind = Schema.decodeUnknownEffect(SignalKind, { errors: "all" 
  * qualified signal kinds the plugin's other sources already registered.
  * Fails with a `PluginError` naming the kind when:
  *
- * - its word, label, description or priority is invalid, or the qualified
+ * - its word, label, description or priority is invalid, it declares more
+ *   than `MAX_SIGNAL_MATCH_FIELDS` match fields or a field name that is empty
+ *   or longer than `MAX_SIGNAL_MATCH_FIELD_NAME_LENGTH`, or the qualified
  *   kind is not a valid signal kind;
  * - another signal kind of the plugin has the same word;
  * - a `from` event kind, or an end's event kind, is not one this source

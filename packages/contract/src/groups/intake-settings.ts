@@ -15,7 +15,7 @@
  * section 8.2).
  */
 import { Schema } from "effect";
-import { closedStruct } from "../closed";
+import { closedRecord, closedStruct } from "../closed";
 import { EventKind } from "./event-record";
 import { SignalKind } from "./signal";
 
@@ -34,11 +34,11 @@ export const MAX_INTAKE_OVERRIDES = 256;
  */
 export const IntakeOverrides = closedStruct({
   /** Event kind to whether triage may read its events. */
-  eventKinds: Schema.Record(EventKind, Schema.Boolean).check(
+  eventKinds: closedRecord(EventKind, Schema.Boolean).check(
     Schema.isMaxProperties(MAX_INTAKE_OVERRIDES),
   ),
   /** Signal kind to whether it is raised. */
-  signalKinds: Schema.Record(SignalKind, Schema.Boolean).check(
+  signalKinds: closedRecord(SignalKind, Schema.Boolean).check(
     Schema.isMaxProperties(MAX_INTAKE_OVERRIDES),
   ),
 });
@@ -71,11 +71,21 @@ export const EventKindIntakeSetting = Schema.Struct({
 
 export type EventKindIntakeSetting = Schema.Schema.Type<typeof EventKindIntakeSetting>;
 
+/**
+ * One match field of a signal kind, with the label the apps show beside its
+ * value: "Repository" for `repo`.
+ */
+export const SignalMatchFieldLabel = Schema.Struct({ name: Schema.String, label: Schema.String });
+
+export type SignalMatchFieldLabel = Schema.Schema.Type<typeof SignalMatchFieldLabel>;
+
 /** One signal kind and whether it is raised. */
 export const SignalKindIntakeSetting = Schema.Struct({
   kind: SignalKind,
   label: Schema.String,
   description: Schema.String,
+  /** The kind's match fields, in the order the plugin declares them. */
+  matchFields: Schema.Array(SignalMatchFieldLabel),
   on: Schema.Boolean,
   level: IntakeSettingLevel,
 });

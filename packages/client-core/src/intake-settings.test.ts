@@ -6,7 +6,7 @@ import {
   canResetIntakeRow,
   describeIntakeSource,
   listIntakeSegments,
-  listPluginsWithIntake,
+  listIntakeSettingsPluginIds,
 } from "./intake-settings";
 
 const NO_KINDS: IntakeSettings = { eventKinds: [], signalKinds: [] };
@@ -49,12 +49,27 @@ const buildConnection = (id: string, type: string, label: string): Connection =>
 
 const SETTINGS: IntakeSettings = {
   signalKinds: [
-    { kind: "github/mentioned", label: "Mentioned", description: "", on: true, level: "default" },
-    { kind: "github/assigned", label: "Assigned", description: "", on: false, level: "plugin" },
+    {
+      kind: "github/mentioned",
+      label: "Mentioned",
+      description: "",
+      matchFields: [],
+      on: true,
+      level: "default",
+    },
+    {
+      kind: "github/assigned",
+      label: "Assigned",
+      description: "",
+      matchFields: [],
+      on: false,
+      level: "plugin",
+    },
     {
       kind: "github/ci-failed",
       label: "CI failed",
       description: "",
+      matchFields: [],
       on: true,
       level: "connection",
     },
@@ -65,18 +80,27 @@ const SETTINGS: IntakeSettings = {
   ],
 };
 
-describe("listPluginsWithIntake", () => {
+describe("listIntakeSettingsPluginIds", () => {
+  const withSignals = buildPlugin("a", "A", [], { ...NO_KINDS, signalKinds: SETTINGS.signalKinds });
+  const withEvents = buildPlugin("b", "B", [], { ...NO_KINDS, eventKinds: SETTINGS.eventKinds });
+  const withNothing = buildPlugin("c", "C", [], NO_KINDS);
+
   it("keeps the plugins that declare a signal kind or an event kind, in order", () => {
-    const withSignals = buildPlugin("a", "A", [], {
-      ...NO_KINDS,
-      signalKinds: SETTINGS.signalKinds,
-    });
-    const withEvents = buildPlugin("b", "B", [], { ...NO_KINDS, eventKinds: SETTINGS.eventKinds });
-    const withNothing = buildPlugin("c", "C", [], NO_KINDS);
-    expect(listPluginsWithIntake([withEvents, withNothing, withSignals])).toEqual([
-      withEvents,
-      withSignals,
+    expect(listIntakeSettingsPluginIds([withEvents, withNothing, withSignals], [])).toEqual([
+      "b",
+      "a",
     ]);
+  });
+
+  it("keeps a plugin that declares no kind but owns a rule, in its place", () => {
+    expect(
+      listIntakeSettingsPluginIds([withEvents, withNothing, withSignals], [{ kind: "c/gone" }]),
+    ).toEqual(["b", "c", "a"]);
+  });
+
+  it("adds the plugins of rules whose plugin is not installed, once each and sorted, after the installed", () => {
+    const rules = [{ kind: "zeta/x" }, { kind: "a/y" }, { kind: "jira/z" }, { kind: "zeta/w" }];
+    expect(listIntakeSettingsPluginIds([withSignals], rules)).toEqual(["a", "jira", "zeta"]);
   });
 });
 
@@ -194,7 +218,9 @@ describe("buildIntakeOverrides", () => {
 
   it("keeps a signal kind and an event kind of the same name apart", () => {
     const settings: IntakeSettings = {
-      signalKinds: [{ kind: "same", label: "S", description: "", on: false, level: "plugin" }],
+      signalKinds: [
+        { kind: "same", label: "S", description: "", matchFields: [], on: false, level: "plugin" },
+      ],
       eventKinds: [{ kind: "same", description: "E", on: false, level: "plugin" }],
     };
     expect(

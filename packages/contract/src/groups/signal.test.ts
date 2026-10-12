@@ -127,7 +127,7 @@ describe("raising a signal", () => {
   });
 
   it("refuses an action with an id only the core uses", () => {
-    const actions = ["done", "accept", "dismiss", "hand-to-mine"].map((id) => ({
+    const actions = ["done", "accept", "dismiss", "ignore", "hand-to-mine"].map((id) => ({
       id,
       label: `Label of ${id}`,
       operation: null,
@@ -139,6 +139,7 @@ describe("raising a signal", () => {
       ["actions", "1", "id"],
       ["actions", "2", "id"],
       ["actions", "3", "id"],
+      ["actions", "4", "id"],
     ]);
   });
 

@@ -1713,3 +1713,28 @@ describe("memory output", () => {
     ).toEqual(["decisions", "  …deploys on Tuesdays…"]);
   });
 });
+
+// A short list the API returns whole, as an array rather than a page.
+describe("a list returned as an array", () => {
+  it("prints as a table, like the items of a page, rather than as numbered keys", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: [
+          {
+            id: "0199e0e7-1111-7000-8000-0000000000a1",
+            createdAt: "2026-09-15T10:00:00.000Z",
+            expiresAt: "2026-09-15T11:00:00.000Z",
+          },
+        ],
+      },
+      lookUpCommand("runner", "join-token", "list"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([
+      "id        createdAt                 expiresAt",
+      "000000a1  2026-09-15T10:00:00.000Z  2026-09-15T11:00:00.000Z",
+    ]);
+  });
+});

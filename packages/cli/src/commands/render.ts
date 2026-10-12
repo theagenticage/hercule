@@ -946,6 +946,10 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
     renderSubagentList(items as unknown as ReadonlyArray<Subagent>),
   "input.query": (items) => renderInputList(items as unknown as ReadonlyArray<Input>),
   "signal.query": (items) => renderSignalList(items as unknown as ReadonlyArray<Signal>),
+  // The rule's text already names its kind and every value it matches, so
+  // the match itself is left to `--json`.
+  "ignoreRule.query": (items) =>
+    renderTableColumns(items, ["id", "kind", "caughtCount", "lastCaughtAt", "text"]),
 };
 
 /**
@@ -1032,11 +1036,8 @@ const renderMemoryMatches = (matches: ReadonlyArray<MemoryMatch>): ReadonlyArray
 const VALUE_RENDERERS: Partial<
   Record<OperationId, (value: unknown, controllerUrl: string) => ReadonlyArray<string>>
 > = {
-  // These queries return a short, complete array instead of a page, so the
-  // array is printed as a table, like the items of a page.
   "workflowAction.query": (value) =>
     renderTable((value as ReadonlyArray<WorkflowAction>).map(summarizeWorkflowAction)),
-  "eventKind.query": (value) => renderTable(value as ReadonlyArray<Record<string, unknown>>),
   "memory.list": (value) =>
     renderTableColumns(value as ReadonlyArray<MemoryEntry>, ["name", "size", "gist"]),
   "memory.search": (value) => renderMemoryMatches(value as ReadonlyArray<MemoryMatch>),
@@ -1109,6 +1110,9 @@ const renderLines = (
     }
     return lines;
   }
+  // A short, complete list comes back as an array instead of a page, and is
+  // printed like the items of a page.
+  if (Array.isArray(value)) return renderItems(value as ReadonlyArray<Record<string, unknown>>);
   if (typeof value === "object" && value !== null) {
     return renderKeyValues(value as Record<string, unknown>);
   }

@@ -1,8 +1,9 @@
 /**
- * Tests Settings > Intake: a section for each plugin that has intake kinds,
- * the control that picks all its Connections or one, the toggles that save as
- * they are pressed, Reset, the line that says where a value comes from, and
- * the links from a signal that open a kind or a Connection.
+ * Tests Settings > Intake: a section for each plugin that has intake kinds
+ * or Ignore Rules, the control that picks all its Connections or one, the
+ * toggles that save as they are pressed, Reset, the line that says where a
+ * value comes from, the links from a signal that open a kind or a
+ * Connection, and the Ignore Rules list.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
@@ -11,6 +12,7 @@ import {
   GITHUB_CONNECTION_TYPE,
   type Connection,
   type ConnectionDetail,
+  type IgnoreRuleWithCatches,
   type IntakeOverrides,
   type IntakeSettings,
   type IntakeSettingLevel,
@@ -90,6 +92,7 @@ const LINEAR: PluginDetail = {
         kind: "linear/assigned",
         label: "Assigned",
         description: "An issue is assigned to you",
+        matchFields: [],
         on: true,
         level: "default",
       },
@@ -97,7 +100,7 @@ const LINEAR: PluginDetail = {
   },
 };
 
-/** A plugin with no signal kind and no event kind, which gets no section. */
+/** A plugin with no signal kind and no event kind, which gets a section only when it has Ignore Rules. */
 const QUIET: PluginDetail = {
   ...LINEAR,
   id: "quiet",
@@ -141,7 +144,7 @@ const resolveSettings = (
 ): IntakeSettings => ({
   signalKinds: DECLARED_SIGNALS.map(({ kind, label, description, on }) => {
     const chosen = readLevel(kind, "signalKinds", plugin, connection);
-    return { kind, label, description, on: chosen.on ?? on, level: chosen.level };
+    return { kind, label, description, matchFields: [], on: chosen.on ?? on, level: chosen.level };
   }),
   eventKinds: DECLARED_EVENTS.map(({ kind, description, on }) => {
     const chosen = readLevel(kind, "eventKinds", plugin, connection);
@@ -799,5 +802,177 @@ describe("Settings > Intake, keeping saved choices", () => {
     await waitFor(() =>
       expect(getSwitch("Review requested").getAttribute("aria-checked")).toBe("false"),
     );
+  });
+});
+
+/** An Ignore Rule of GitHub's that has caught events. */
+const DEPENDABOT_RULE: IgnoreRuleWithCatches = {
+  id: "01a06d02-7f00-7000-8000-000000000001",
+  kind: REVIEW,
+  match: { repo: "acme/webshop", author: "dependabot[bot]" },
+  text: "Review requested · Repository acme/webshop · Author dependabot[bot]",
+  createdAt: "2026-10-01T09:00:00.000Z",
+  actor: "user",
+  caughtCount: 14,
+  lastCaughtAt: "2026-10-02T09:00:00.000Z",
+};
+
+/** An Ignore Rule of Linear's, which lists in Linear's section only. */
+const LINEAR_RULE: IgnoreRuleWithCatches = {
+  id: "01a06d02-7f00-7000-8000-000000000002",
+  kind: "linear/assigned",
+  match: { team: "Payments" },
+  text: "Assigned · Team Payments",
+  createdAt: "2026-10-01T09:00:00.000Z",
+  actor: "user",
+  caughtCount: 0,
+};
+
+/** An Ignore Rule of Jira's, a plugin that is no longer installed. */
+const JIRA_RULE: IgnoreRuleWithCatches = {
+  id: "01a06d02-7f00-7000-8000-000000000003",
+  kind: "jira/assigned",
+  match: { project: "PAY" },
+  text: "Assigned · Project PAY",
+  createdAt: "2026-10-01T09:00:00.000Z",
+  actor: "user",
+  caughtCount: 2,
+};
+
+/** An Ignore Rule of Quiet's, a plugin that declares no kind since an update removed it. */
+const QUIET_RULE: IgnoreRuleWithCatches = {
+  id: "01a06d02-7f00-7000-8000-000000000004",
+  kind: "quiet/pinged",
+  match: { room: "ops" },
+  text: "Pinged · Room ops",
+  createdAt: "2026-10-01T09:00:00.000Z",
+  actor: "user",
+  caughtCount: 0,
+};
+
+/**
+ * Returns the handlers of a controller that holds the Ignore Rules `rules`:
+ * a delete takes the rule out of `rules`, and the rules read next leave it
+ * out. When `failDelete` is set, the delete fails with that message instead.
+ */
+const buildIgnoreRuleHandlers = (
+  rules: IgnoreRuleWithCatches[],
+  failDelete: string | null = null,
+): Record<string, Handler> => ({
+  ...buildIntakeHandlers().handlers,
+  "GET /api/v1/ignore-rules": () => ({ body: rules }),
+  ...Object.fromEntries(
+    rules.map((rule) => [
+      `DELETE /api/v1/ignore-rules/${rule.id}`,
+      () => {
+        if (failDelete !== null)
+          return { status: 500, body: buildErrorBody("internal", failDelete) };
+        rules.splice(rules.indexOf(rule), 1);
+        return { body: {} };
+      },
+    ]),
+  ),
+});
+
+describe("Settings > Intake, Ignore Rules", () => {
+  it("lists each plugin's rules in its own section, with what each caught", async () => {
+    await openIntake("/settings/intake", buildIgnoreRuleHandlers([DEPENDABOT_RULE, LINEAR_RULE]));
+
+    const github = getSection("GitHub");
+    const row = within(github).getByText(DEPENDABOT_RULE.text).closest<HTMLElement>(".intake-row")!;
+    expect(within(github).getByRole("heading", { level: 3, name: "Ignore Rules" })).toBeTruthy();
+    expect(row.querySelector(".set-label span")!.textContent).toBe("Caught 14 in the last 90 days");
+    expect(within(github).queryByText(LINEAR_RULE.text)).toBeNull();
+    expect(within(getSection("Linear")).getByText(LINEAR_RULE.text)).toBeTruthy();
+  });
+
+  it("draws no rules heading for a plugin with no rule", async () => {
+    await openIntake("/settings/intake", buildIgnoreRuleHandlers([LINEAR_RULE]));
+
+    expect(
+      within(getSection("GitHub")).queryByRole("heading", { level: 3, name: "Ignore Rules" }),
+    ).toBeNull();
+  });
+
+  it("keeps a section, with its rules only, for a plugin that no longer declares a kind", async () => {
+    await openIntake("/settings/intake", buildIgnoreRuleHandlers([QUIET_RULE]));
+
+    const quiet = within(getSection("Quiet"));
+    expect(quiet.getAllByRole("heading", { level: 3 }).map((each) => each.textContent)).toEqual([
+      "Ignore Rules",
+    ]);
+    expect(quiet.getByText(QUIET_RULE.text)).toBeTruthy();
+    expect(quiet.queryByRole("switch")).toBeNull();
+  });
+
+  it("lists the rules of a plugin that is not installed, under its id, after the installed plugins, and deletes them", async () => {
+    const calls = await openIntake("/settings/intake", buildIgnoreRuleHandlers([JIRA_RULE]));
+
+    // The mark is hidden from assistive technology, so a heading is found by the name alone.
+    expect(screen.getAllByRole("heading", { level: 2 })).toEqual(
+      ["GitHub", "Linear", "jira"].map((name) => screen.getByRole("heading", { level: 2, name })),
+    );
+    const jira = within(getSection("jira"));
+    expect(jira.getAllByRole("heading", { level: 3 }).map((each) => each.textContent)).toEqual([
+      "Ignore Rules",
+    ]);
+    expect(jira.queryByRole("switch")).toBeNull();
+
+    await userEvent.click(jira.getByRole("button", { name: `Delete the rule ${JIRA_RULE.text}` }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete this Ignore Rule?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { level: 2, name: "jira" })).toBeNull(),
+    );
+    expect(calls.filter((call) => call.method === "DELETE").map((call) => call.path)).toEqual([
+      `/api/v1/ignore-rules/${JIRA_RULE.id}`,
+    ]);
+  });
+
+  it("asks before it deletes a rule, with Cancel focused, and sends nothing on Cancel", async () => {
+    const calls = await openIntake("/settings/intake", buildIgnoreRuleHandlers([DEPENDABOT_RULE]));
+
+    await userEvent.click(
+      screen.getByRole("button", { name: `Delete the rule ${DEPENDABOT_RULE.text}` }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Delete this Ignore Rule?" });
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false);
+  });
+
+  it("deletes the rule on Delete, and reads the rules again", async () => {
+    const calls = await openIntake("/settings/intake", buildIgnoreRuleHandlers([DEPENDABOT_RULE]));
+
+    await userEvent.click(
+      screen.getByRole("button", { name: `Delete the rule ${DEPENDABOT_RULE.text}` }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Delete this Ignore Rule?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByText(DEPENDABOT_RULE.text)).toBeNull());
+    expect(calls.filter((call) => call.method === "DELETE").map((call) => call.path)).toEqual([
+      `/api/v1/ignore-rules/${DEPENDABOT_RULE.id}`,
+    ]);
+    expect(
+      calls.filter((call) => call.method === "GET" && call.path === "/api/v1/ignore-rules"),
+    ).toHaveLength(2);
+  });
+
+  it("keeps the dialog open and shows why when the delete fails", async () => {
+    await openIntake(
+      "/settings/intake",
+      buildIgnoreRuleHandlers([DEPENDABOT_RULE], "the database is locked"),
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: `Delete the rule ${DEPENDABOT_RULE.text}` }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Delete this Ignore Rule?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    expect(
+      await within(dialog).findByText("Could not delete: the database is locked"),
+    ).toBeTruthy();
+    expect(screen.getByText(DEPENDABOT_RULE.text, { selector: ".set-label b" })).toBeTruthy();
   });
 });

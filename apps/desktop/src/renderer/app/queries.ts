@@ -541,6 +541,38 @@ export const signalsClearedTodayQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads every signal of the kind `kind` on Later, following the cursor to
+ * the last page. Together with To do, which the shell holds whole, it gives
+ * every open signal of the kind, so the count of signals an Ignore Rule would
+ * take off the list is never cut short by a page.
+ *
+ * Intake reads it once each time Hercule's offer or the Ignore dialog opens.
+ * Its key lies outside the `signals` prefix, so a push on the `signal` topic
+ * does not read all of Later again. The entry is dropped as soon as nothing
+ * reads it (`gcTime: 0`), so the next opening reads Later afresh.
+ */
+export const laterSignalsOfKindQuery = (client: HerculeClient, kind: string) =>
+  queryOptions({
+    queryKey: queryKeys.laterSignalsOfKind(kind),
+    queryFn: () =>
+      readEveryPage((page) => client.signal.query({ query: { view: "later", kind, ...page } })),
+    ...LIVE_KEPT_READ_OPTIONS,
+    gcTime: 0,
+  });
+
+/**
+ * Reads every Ignore Rule, with what each caught, for Settings > Intake. No
+ * live topic covers the rules, so the section reads them each time it opens,
+ * see `readOnOpen`.
+ */
+export const ignoreRulesQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.ignoreRules(),
+    queryFn: () => client.ignoreRule.query({ query: {} }),
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
  * Builds the filter of one page of the paged view `view`, `limit` signals
  * long. The query key is built from the same filter without a cursor, so
  * every page of one list shares one key.
