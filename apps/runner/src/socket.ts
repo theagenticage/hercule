@@ -315,7 +315,18 @@ export const connect = (
           }),
       ),
     );
-    const write = yield* socket.writer;
+    const writeToSocket = yield* socket.writer;
+    // Opened once the socket has stopped reading, which is when it closed.
+    const socketClosed = Latch.makeUnsafe(false);
+    /**
+     * Writes to the socket, and gives up once the socket has closed. The
+     * socket's own writer waits for the socket to open again, which a closed
+     * socket never does. A write from work that outlives this connection, such
+     * as the session supervisor's watch or a workspace step, would then wait
+     * forever, and hold up everything that work does after it.
+     */
+    const write = (chunk: string | Socket.CloseEvent): Effect.Effect<void, Socket.SocketError> =>
+      Effect.raceFirst(writeToSocket(chunk), socketClosed.await);
     // A probe, an install, a facts report or a session's work runs longer
     // than the handling of the frame that asked for it, so it is forked into
     // the connection's scope, and the next frame is handled at once.
@@ -943,18 +954,20 @@ export const connect = (
     // another protocol version, and that ends the connection too.
     yield* Effect.raceFirst(
       Effect.raceFirst(
-        socket.runString(receive, {
-          onOpen: write(
-            encodeFrameText({
-              _tag: "runnerHello",
-              protocolVersion: PROTOCOL_VERSION,
-              capabilities: CAPABILITIES,
-              binaryVersion: VERSION,
-              nonce,
-              facts: options.facts,
-            }),
-          ).pipe(Effect.ignore, Effect.andThen(Effect.sync(() => opened.openUnsafe()))),
-        }),
+        socket
+          .runString(receive, {
+            onOpen: write(
+              encodeFrameText({
+                _tag: "runnerHello",
+                protocolVersion: PROTOCOL_VERSION,
+                capabilities: CAPABILITIES,
+                binaryVersion: VERSION,
+                nonce,
+                facts: options.facts,
+              }),
+            ).pipe(Effect.ignore, Effect.andThen(Effect.sync(() => opened.openUnsafe()))),
+          })
+          .pipe(Effect.ensuring(Effect.sync(() => socketClosed.openUnsafe()))),
         handleFrames,
       ),
       reporting,
