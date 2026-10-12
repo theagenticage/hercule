@@ -89,7 +89,10 @@ export interface Controller {
   readonly pid: number;
   /** Everything the process has printed on stdout and stderr, in order. */
   output: () => string;
-  /** Sends SIGTERM, then returns the exit code. */
+  /**
+   * Sends SIGTERM, then returns the exit code. Fails, after a SIGKILL, when
+   * the process has not exited within `STOP_BOUND_MS`.
+   */
   stop: () => Promise<number>;
 }
 
@@ -148,6 +151,14 @@ export async function startController(options: {
 
 /** How long `stop` waits, at most, for the output of a process that has exited. */
 const OUTPUT_DRAIN_BOUND_MS = 5_000;
+
+/**
+ * How long `stop` waits, at most, for the controller to exit after SIGTERM.
+ * A controller stops in well under a second. Without a bound, one that never
+ * exits would hold its test until the test's own timeout, which names no
+ * step and prints none of the controller's output.
+ */
+const STOP_BOUND_MS = 30_000;
 
 /** Makes one attempt: spawns on this port and waits for it to respond. */
 async function startControllerOnPort(
@@ -226,7 +237,17 @@ async function startControllerOnPort(
     output: readOutput,
     stop: async () => {
       child.kill("SIGTERM");
-      const code = await exited;
+      // The timer is unref'd, so a script that stopped its controller can exit
+      // without waiting for the bound to pass.
+      const bound = sleep(STOP_BOUND_MS, undefined, { ref: false });
+      const code = await Promise.race([exited, bound]);
+      if (code === undefined) {
+        child.kill("SIGKILL");
+        await waitForOutput();
+        throw new Error(
+          `hercule serve did not exit within ${String(STOP_BOUND_MS / 1000)} s of SIGTERM, so it was killed:\n${readOutput()}`,
+        );
+      }
       // The process can exit before all of its output has been read from the
       // pipes, and tests check the last lines it printed while stopping. The
       // pipes close only when every process holding them has exited. The local
