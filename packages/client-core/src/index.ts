@@ -137,35 +137,30 @@ export {
   type ChoiceOption,
 } from "./config-fields";
 export {
-  listConnectionTypes,
-  listCredentialFields,
   filterGitHubConnections,
   showsAccountBesideLabel,
+  connectionNeedsAttention,
+} from "./connections";
+export {
+  listConnectionTypes,
+  listCredentialFields,
   showsPluginName,
-  buildTopicsUpdate,
-  buildRedirectUri,
   listSetupFlows,
+  type ConnectionFeed,
+  type ConnectionType,
+  type SetupFlow,
+} from "./connection-types";
+export {
   decideDeviceFlowStep,
   describeDeviceFlowWait,
   DEVICE_FLOW_ENDINGS,
   describeSignInEnding,
   describeSignInFailure,
   waitForDeviceFlow,
-  connectionNeedsAttention,
-  describeFeedName,
-  describeFeedInterval,
-  buildFeedIntervalsDraft,
-  buildFeedIntervalsPayload,
-  readConnectionIssues,
-  type ConnectionFeed,
-  type ConnectionIssues,
-  type ConnectionType,
-  type FeedIntervalsDraft,
   type DeviceFlowStep,
   type DeviceFlowWatcher,
   type SignInEnding,
-  type SetupFlow,
-} from "./connections";
+} from "./connection-device-flow";
 export {
   SUGGESTED_TOPICS,
   describeConnectionHealth,
@@ -174,9 +169,18 @@ export {
   listFlowSwitches,
   findOAuthConnection,
   decideFieldChoices,
+  buildTopicsUpdate,
+  buildRedirectUri,
+  describeFeedName,
+  describeFeedInterval,
+  buildFeedIntervalsDraft,
+  buildFeedIntervalsPayload,
+  readConnectionIssues,
   type ConnectionHealth,
   type FlowSwitch,
   type FieldChoices,
+  type ConnectionIssues,
+  type FeedIntervalsDraft,
 } from "./connection-settings";
 export {
   ApiError,

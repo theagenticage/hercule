@@ -1,14 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { Connection } from "@hercule/contract";
 import {
+  buildFeedIntervalsDraft,
+  buildFeedIntervalsPayload,
+  buildRedirectUri,
+  buildTopicsUpdate,
   decideFieldChoices,
   describeConnectionHealth,
   describeConnectionTypeName,
+  describeFeedInterval,
+  describeFeedName,
+  FEED_INTERVAL_UNREADABLE,
   findOAuthConnection,
   listFlowSwitches,
+  readConnectionIssues,
   summarizeConnectionType,
 } from "./connection-settings";
-import type { ConnectionType } from "./connections";
+import type { ConnectionFeed, ConnectionType } from "./connection-types";
 import { ApiError, readErrorMessage } from "./errors";
 
 const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
@@ -241,6 +249,199 @@ describe("decideFieldChoices", () => {
     expect(decideFieldChoices({ isError: true, error, data: choices })).toEqual({
       status: "failed",
       message: readErrorMessage(error),
+    });
+  });
+});
+
+describe("buildTopicsUpdate", () => {
+  it("returns nothing when the first topic is unchanged", () => {
+    expect(buildTopicsUpdate(["Code", "Ops"], "Code")).toBeUndefined();
+    expect(buildTopicsUpdate([], "")).toBeUndefined();
+  });
+
+  it("replaces the first topic and keeps the others", () => {
+    expect(buildTopicsUpdate(["Code", "Ops"], "Business")).toEqual(["Business", "Ops"]);
+    expect(buildTopicsUpdate([], "Code")).toEqual(["Code"]);
+  });
+
+  it("removes only the first topic when the field is cleared", () => {
+    expect(buildTopicsUpdate(["Code", "Ops"], "")).toEqual(["Ops"]);
+    expect(buildTopicsUpdate(["Code"], "")).toEqual([]);
+  });
+
+  it("trims the typed topic, and reads text of only spaces as cleared", () => {
+    expect(buildTopicsUpdate(["Code", "Ops"], " Code ")).toBeUndefined();
+    expect(buildTopicsUpdate(["Code", "Ops"], "Business ")).toEqual(["Business", "Ops"]);
+    expect(buildTopicsUpdate(["Code", "Ops"], "   ")).toEqual(["Ops"]);
+    expect(buildTopicsUpdate([], "   ")).toBeUndefined();
+  });
+
+  it("lists a topic once when the new first topic is one of the others", () => {
+    expect(buildTopicsUpdate(["Code", "Ops"], "Ops")).toEqual(["Ops"]);
+  });
+});
+
+describe("buildRedirectUri", () => {
+  it("is the callback path on the browser's origin", () => {
+    expect(buildRedirectUri("https://n.tail.ts.net")).toBe("https://n.tail.ts.net/oauth/callback");
+  });
+
+  it("does not double the slash when the origin ends in one", () => {
+    expect(buildRedirectUri("https://n.tail.ts.net/")).toBe("https://n.tail.ts.net/oauth/callback");
+  });
+});
+
+/** Returns a plugin from the plugin list, with the given contributions. */
+
+const REPOS: ConnectionFeed = {
+  name: "repos",
+  defaultIntervalSeconds: 120,
+  minIntervalSeconds: 60,
+};
+const CHECKS: ConnectionFeed = {
+  name: "check_runs",
+  defaultIntervalSeconds: 60,
+  minIntervalSeconds: 30,
+};
+
+describe("describeFeedName", () => {
+  it("capitalizes the name and turns dashes and underscores into spaces", () => {
+    expect(describeFeedName(REPOS)).toBe("Repos");
+    expect(describeFeedName(CHECKS)).toBe("Check runs");
+    expect(describeFeedName({ ...REPOS, name: "pull-requests" })).toBe("Pull requests");
+  });
+});
+
+describe("describeFeedInterval", () => {
+  it("names the default and the shortest interval when the default is above it", () => {
+    expect(describeFeedInterval(REPOS, "GitHub")).toBe(
+      "Every 120 seconds by default. At least 60 seconds.",
+    );
+  });
+
+  it("says the default is the shortest interval when the two are the same", () => {
+    const floor = { ...REPOS, defaultIntervalSeconds: 60, minIntervalSeconds: 60 };
+    expect(describeFeedInterval(floor, "GitHub")).toBe(
+      "Every 60 seconds by default, the shortest GitHub allows.",
+    );
+  });
+});
+
+describe("buildFeedIntervalsDraft", () => {
+  it("holds each stored interval as text, and an empty string for a feed on its default", () => {
+    expect(buildFeedIntervalsDraft([REPOS, CHECKS], { repos: 300 })).toEqual({
+      repos: "300",
+      check_runs: "",
+    });
+  });
+
+  it("leaves out an interval stored for a feed the type no longer declares", () => {
+    expect(buildFeedIntervalsDraft([REPOS], { repos: 300, gone: 90 })).toEqual({ repos: "300" });
+  });
+});
+
+describe("buildFeedIntervalsPayload", () => {
+  it("sends each typed interval as a number and leaves out the empty fields", () => {
+    expect(
+      buildFeedIntervalsPayload([REPOS, CHECKS], { repos: " 300 ", check_runs: "  " }),
+    ).toEqual({ feedIntervals: { repos: 300 } });
+  });
+
+  it("sends an empty map when every feed is back on its default", () => {
+    expect(buildFeedIntervalsPayload([REPOS, CHECKS], { repos: "", check_runs: "" })).toEqual({
+      feedIntervals: {},
+    });
+  });
+
+  it("leaves the minimum to the controller, so a value below it is still sent", () => {
+    expect(buildFeedIntervalsPayload([REPOS], { repos: "10" })).toEqual({
+      feedIntervals: { repos: 10 },
+    });
+  });
+
+  it("refuses text that is not a whole number of seconds, on the feed that holds it", () => {
+    expect(buildFeedIntervalsPayload([REPOS, CHECKS], { repos: "abc", check_runs: "90" })).toEqual({
+      errors: { repos: FEED_INTERVAL_UNREADABLE },
+    });
+  });
+
+  // `Number` reads every one of these as a number or as NaN, so each would
+  // otherwise save a value the user did not type or fail with a type error.
+  it.each(["1.5", "-5", "1e3", "0x10", "12 s", "+60"])("refuses %j", (typed) => {
+    expect(buildFeedIntervalsPayload([REPOS], { repos: typed })).toEqual({
+      errors: { repos: FEED_INTERVAL_UNREADABLE },
+    });
+  });
+});
+
+describe("readConnectionIssues", () => {
+  const fields = [{ name: "folder" }];
+
+  it("puts each error under the setting or the feed it names", () => {
+    const refusal = new ApiError("validation", "refused", {
+      issues: [
+        { path: ["config", "folder"], message: "must not be empty" },
+        { path: ["feedIntervals", "repos"], message: "Poll repos every 60 seconds or slower" },
+        { path: ["feedIntervals", "repos"], message: "a second error for the same feed" },
+      ],
+    });
+
+    expect(readConnectionIssues(refusal, fields, [REPOS])).toEqual({
+      config: { folder: "must not be empty" },
+      configEntries: {},
+      feedIntervals: { repos: "Poll repos every 60 seconds or slower" },
+      rest: false,
+    });
+  });
+
+  it("puts an error about one entry of a list setting under that entry", () => {
+    const refusal = new ApiError("validation", "refused", {
+      issues: [
+        { path: ["config", "repos", "1"], message: "Write the repository as owner/repo." },
+        { path: ["config", "repos", "3"], message: "Write the repository as owner/repo." },
+      ],
+    });
+
+    expect(readConnectionIssues(refusal, [{ name: "repos" }], [REPOS])).toEqual({
+      config: {},
+      configEntries: {
+        repos: {
+          1: "Write the repository as owner/repo.",
+          3: "Write the repository as owner/repo.",
+        },
+      },
+      feedIntervals: {},
+      rest: false,
+    });
+  });
+
+  it("sets rest for an error on no rendered field, or a failure that is not a validation error", () => {
+    const refusal = new ApiError("validation", "refused", {
+      issues: [
+        { path: ["feedIntervals", "gone"], message: "no feed named gone" },
+        { path: ["config", "repos"], message: "a setting, not a feed" },
+      ],
+    });
+    expect(readConnectionIssues(refusal, fields, [REPOS])).toEqual({
+      config: {},
+      configEntries: {},
+      feedIntervals: {},
+      rest: true,
+    });
+
+    const whole = new ApiError("validation", "refused", {
+      issues: [{ path: ["feedIntervals"], message: "too many feeds" }],
+    });
+    expect(readConnectionIssues(whole, fields, [REPOS]).rest).toBe(true);
+    expect(readConnectionIssues(new Error("offline"), fields, [REPOS]).rest).toBe(true);
+  });
+
+  it("finds nothing before the first save", () => {
+    expect(readConnectionIssues(null, fields, [REPOS])).toEqual({
+      config: {},
+      configEntries: {},
+      feedIntervals: {},
+      rest: false,
     });
   });
 });
