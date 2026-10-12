@@ -213,9 +213,10 @@ describe("input.update and input.cancel on a conversation's session", () => {
 });
 
 describe("the operations a conversation's session allows, as for a Thread", () => {
-  it("interrupts the running turn", async () => {
+  it("interrupts the running turn, and withdraws the approval notification", async () => {
     await withAgentFleet(async (arranged) => {
       const session = await startBusySession(arranged);
+      await parkOnRequest(arranged, session);
 
       const response = await send(
         "POST",
@@ -227,23 +228,17 @@ describe("the operations a conversation's session allows, as for a Thread", () =
       expect(response.status, await response.clone().text()).toBe(200);
       const [frame] = await waitForFrames<SessionInterrupt>(arranged.wire, "sessionInterrupt", 1);
       expect(frame!.sessionId).toBe(session.id);
-    });
-  });
-
-  it("stops the session", async () => {
-    await withAgentFleet(async (arranged) => {
-      const session = await startBusySession(arranged);
-
-      const response = await send(
-        "POST",
-        arranged.harness.base,
-        `/api/v1/sessions/${session.id}/stop`,
-        { token: arranged.token },
-      );
-
-      expect(response.status, await response.clone().text()).toBe(200);
-      const [frame] = await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
-      expect(frame!.sessionId).toBe(session.id);
+      // Withdrawn by the interrupt itself, before the runner reports the
+      // turn's end.
+      const [withdrawn] = await readApprovalNotifications(arranged, session.id);
+      expect(withdrawn).toMatchObject({
+        status: "resolved",
+        resolution: {
+          kind: "withdrawn",
+          origin: "core",
+          reason: "The turn was interrupted before the request was answered.",
+        },
+      });
     });
   });
 
@@ -280,34 +275,7 @@ describe("the operations a conversation's session allows, as for a Thread", () =
     });
   });
 
-  it("withdraws the approval notification when the turn is interrupted", async () => {
-    await withAgentFleet(async (arranged) => {
-      const session = await startBusySession(arranged);
-      await parkOnRequest(arranged, session);
-
-      const response = await send(
-        "POST",
-        arranged.harness.base,
-        `/api/v1/sessions/${session.id}/interrupt`,
-        { token: arranged.token, body: {} },
-      );
-
-      expect(response.status, await response.clone().text()).toBe(200);
-      // Withdrawn by the interrupt itself, before the runner reports the
-      // turn's end.
-      const [withdrawn] = await readApprovalNotifications(arranged, session.id);
-      expect(withdrawn).toMatchObject({
-        status: "resolved",
-        resolution: {
-          kind: "withdrawn",
-          origin: "core",
-          reason: "The turn was interrupted before the request was answered.",
-        },
-      });
-    });
-  });
-
-  it("withdraws the approval notification when the session is stopped", async () => {
+  it("stops the session, and withdraws the approval notification", async () => {
     await withAgentFleet(async (arranged) => {
       const session = await startBusySession(arranged);
       await parkOnRequest(arranged, session);
@@ -320,6 +288,8 @@ describe("the operations a conversation's session allows, as for a Thread", () =
       );
 
       expect(response.status, await response.clone().text()).toBe(200);
+      const [frame] = await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+      expect(frame!.sessionId).toBe(session.id);
       expect(
         (await waitForResolvedApprovalNotification(arranged, session.id)).resolution,
       ).toMatchObject({

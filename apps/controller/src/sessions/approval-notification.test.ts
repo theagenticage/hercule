@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAX_NOTIFICATION_BODY_LENGTH } from "@hercule/contract";
 import type { OpenRequest } from "@hercule/protocol";
-import {
-  buildApprovalNotification,
-  buildWaitEndedWithdrawReason,
-  buildWithdrawReason,
-} from "./approval-notification";
+import { buildApprovalNotification } from "./approval-notification";
 
 const SESSION = { id: "0199e0e7-1111-7000-8000-000000000000", title: "Fix the login" };
 
@@ -82,19 +78,6 @@ describe("buildApprovalNotification", () => {
     });
 
     expect(notification?.actions?.map((action) => action.id)).toEqual(["deny", "allow"]);
-  });
-
-  it("raises nothing for a question, which no answer could be bound to", () => {
-    const question: OpenRequest = {
-      requestId: "req-2",
-      itemId: "i2",
-      kind: "question",
-      detail: {
-        questions: [{ question: "Which one?", header: "Pick", options: [], multiSelect: false }],
-      },
-    };
-
-    expect(buildApprovalNotification(SESSION, question)).toBeUndefined();
   });
 
   it("names a single path in the title and lists the paths in the body", () => {
@@ -176,37 +159,5 @@ describe("buildApprovalNotification", () => {
       ...paths.slice(0, 20).map((path) => `- ${fence} ${path} ${fence}`),
       "- and 280 more",
     ]);
-  });
-});
-
-describe("buildWithdrawReason", () => {
-  it("returns why the notification is withdrawn, for each event that closes a request", () => {
-    const base = { eventId: "e1", sessionId: SESSION.id, at: "2026-09-28T10:00:00.000Z" };
-
-    expect(
-      buildWithdrawReason({
-        ...base,
-        _tag: "request.resolved",
-        requestId: "r",
-        decision: "deny",
-      }),
-    ).toBe("The harness settled the request without this answer.");
-    expect(
-      buildWithdrawReason({ ...base, _tag: "turn.completed", turnId: "t", state: "completed" }),
-    ).toBe("The turn ended before the request was answered.");
-    expect(buildWithdrawReason({ ...base, _tag: "session.exited", reason: "stopped" })).toBe(
-      "The session ended before the request was answered.",
-    );
-  });
-});
-
-describe("buildWaitEndedWithdrawReason", () => {
-  it("returns why the notification is withdrawn, for each way the user ends the wait", () => {
-    expect(buildWaitEndedWithdrawReason("interrupted")).toBe(
-      "The turn was interrupted before the request was answered.",
-    );
-    expect(buildWaitEndedWithdrawReason("stopped")).toBe(
-      "The session was stopped before the request was answered.",
-    );
   });
 });

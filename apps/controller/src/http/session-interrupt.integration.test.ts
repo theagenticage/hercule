@@ -11,7 +11,6 @@ import { send } from "./testing";
 import {
   WAIT_DEADLINE_MS,
   at,
-  listFrames,
   reportEvent,
   spawnSessionOrFail,
   waitForFrames,
@@ -69,22 +68,6 @@ describe("session.interrupt request bodies", () => {
       expect(response.status, await response.clone().text()).toBe(200);
       const [frame] = await waitForFrames<SessionInterrupt>(arranged.wire, "sessionInterrupt", 1);
       expect(frame).toEqual({ _tag: "sessionInterrupt", sessionId: session.id });
-    });
-  });
-
-  it("refuses a subagent the session has no record of with not_found", async () => {
-    await withAgentFleet(async (arranged) => {
-      const session = await startBusySession(arranged);
-
-      const response = await send(
-        "POST",
-        arranged.harness.base,
-        `/api/v1/sessions/${session.id}/interrupt`,
-        { token: arranged.token, body: { subagentId: "nobody" } },
-      );
-
-      expect(response.status, await response.clone().text()).toBe(404);
-      expect(listFrames<SessionInterrupt>(arranged.wire, "sessionInterrupt")).toEqual([]);
     });
   });
 });

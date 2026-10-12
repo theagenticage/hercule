@@ -192,7 +192,7 @@ export const createBareSubagent = (
  *   introduces the subagent, and an adapter lists only subagents it
  *   introduces (spec 06 section 13.2).
  */
-export const findSubagentsNamedBy = (
+const findSubagentsNamedBy = (
   event: ProviderEvent,
 ): { readonly owner: SubagentId | undefined; readonly listed: ReadonlyArray<SubagentId> } => {
   const owner = event._tag === "subagent.started" ? event.subagentId : attributeEvent(event);
@@ -294,7 +294,7 @@ export const computeSubagentsAfter = (
   sessionId: string,
   event: ProviderEvent,
   records: ReadonlyMap<SubagentId, StoredSubagent>,
-  facts: SubagentEventFacts = {},
+  facts: SubagentEventFacts,
 ): ReadonlyArray<StoredSubagent> => {
   if (event._tag === "session.started") {
     return [...records.values()].flatMap((record) => {

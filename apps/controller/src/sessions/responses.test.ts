@@ -17,17 +17,15 @@ const OPEN: OpenRequest = {
 };
 
 describe("validateAnswers", () => {
-  it("refuses answers that leave out a question whose header an object inherits", () => {
+  it("refuses answers that leave out a question whose header an object inherits, and accepts them once it is answered", () => {
     const refused = Effect.runSync(Effect.flip(validateAnswers(OPEN, { Storage: "localStorage" })));
 
     expect(refused.error.details.issues.map((issue) => issue.path)).toEqual([
       ["answers", "constructor"],
     ]);
-  });
-
-  it("accepts that question once it is answered", () => {
+    // The same answers with that question answered pass, so the refusal
+    // above comes from the missing answer and not from something else.
     const answers = { constructor: "the default one", Storage: "localStorage" };
-
     expect(Effect.runSync(Effect.exit(validateAnswers(OPEN, answers)))._tag).toBe("Success");
   });
 });

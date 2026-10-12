@@ -59,7 +59,8 @@ const formatMegabytes = (bytes: number, round: (value: number) => number): strin
 
 /**
  * Returns why a turn with `attachments` cannot go to `recipient`, or
- * `undefined` when it can. A turn without attachments is never refused.
+ * `undefined` when it can. `attachments` holds at least one image:
+ * `findAttachmentRefusal` never calls this for a turn without any.
  *
  * The checks run in this order, because each makes the next moot:
  *
@@ -75,7 +76,6 @@ export const describeAttachmentRefusal = (
   recipient: AttachmentRecipient,
   attachments: ReadonlyArray<AttachmentSize>,
 ): string | undefined => {
-  if (attachments.length === 0) return undefined;
   if (!recipient.capabilities.includes(ATTACHMENTS_CAPABILITY))
     return (
       `Runner \`${recipient.runnerName}\` runs an older Hercule that can't take images. ` +

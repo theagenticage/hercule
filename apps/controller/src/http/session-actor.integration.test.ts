@@ -418,10 +418,10 @@ describe("a session may not spawn a Thread", () => {
       expect(refused.status).toBe(403);
       // The error still names `session.spawn`, but here it comes from the
       // Thread rule in the spawn operation, not from the static grant check.
-      expect(await parseRefusal(refused)).toMatchObject({
-        code: "forbidden",
-        grant: "session.spawn",
-      });
+      // Only the message tells the two apart.
+      const refusal = await parseRefusal(refused);
+      expect(refusal).toMatchObject({ code: "forbidden", grant: "session.spawn" });
+      expect(refusal.message).toContain("no session may open one");
     });
   });
 });
