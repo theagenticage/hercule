@@ -1,16 +1,32 @@
 import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { queryKeys, type HerculeClient, readErrorMessage } from "@hercule/client-core";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  describeBreakerPauses,
+  INVALID_WORKFLOW_EXPLANATION,
+  queryKeys,
+  type HerculeClient,
+  readErrorMessage,
+} from "@hercule/client-core";
 import type { WorkflowSummary } from "@hercule/contract";
 import { Switch, cn } from "@hercule/ui";
+import { startTriggersQuery } from "../../../app/queries";
 import { SaveStatus } from "../../../screens/save-status";
 
 /**
- * Renders one workflow in the list: its name, its description, a switch that
- * turns its triggers on or off, and how long ago its source changed. The
- * whole row links to the workflow's page. The row owns the switch's
- * mutation, because nothing above the row needs it.
+ * Renders one workflow in the list. The row shows:
+ *
+ * - its name and description;
+ * - "paused by the breaker" while the breaker has paused any of its start
+ *   triggers, because those triggers start no runs until the user resumes
+ *   them on the workflow's page;
+ * - "invalid" once it stopped validating;
+ * - a switch that turns its triggers on or off;
+ * - how long ago its source changed.
+ *
+ * The whole row links to the workflow's page. The row owns the switch's
+ * mutation, because nothing above the row needs it. It reads the start
+ * triggers itself; the route's loader has put them in the cache.
  */
 export function WorkflowRow({
   client,
@@ -23,6 +39,10 @@ export function WorkflowRow({
   readonly age: string;
 }): JSX.Element {
   const queryClient = useQueryClient();
+  const breakerPauses = describeBreakerPauses(
+    useSuspenseQuery(startTriggersQuery(client)).data,
+    workflow.id,
+  );
 
   const setEnabled = useMutation({
     mutationFn: (enabled: boolean) =>
@@ -49,6 +69,16 @@ export function WorkflowRow({
           {workflow.name}
         </Link>
         <span className="min-w-0 flex-1 truncate text-muted">{workflow.description}</span>
+        {breakerPauses === undefined ? null : (
+          <span title={breakerPauses.title} className="shrink-0 text-fine text-attn">
+            {breakerPauses.text}
+          </span>
+        )}
+        {workflow.invalidSince === undefined ? null : (
+          <span title={INVALID_WORKFLOW_EXPLANATION} className="shrink-0 text-fine text-fail">
+            invalid
+          </span>
+        )}
         {/* Placed after the link that covers the row, so the switch sits on
             top of it: a click toggles the switch and does not open the
             workflow. `aria-disabled` makes the switch ignore clicks while the

@@ -121,6 +121,7 @@ export function WorkflowEditorPage({
             draft,
             storedSource,
             isStoredOff: stored?.enabled === false,
+            isStoredInvalid: stored?.invalidSince !== undefined,
             isDeletedElsewhere,
             isJustCreated,
             save: { status: save.status, source: save.variables, error: save.error },

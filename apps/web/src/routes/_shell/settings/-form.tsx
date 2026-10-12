@@ -10,9 +10,12 @@ import { settingsQuery } from "../../../app/queries";
  * failed.
  *
  * The response holds all settings, so it replaces the cached copy directly and
- * no screen has to refetch what it just wrote. The controller's own read is
- * marked stale, because it reports facts worked out from controller settings
- * (such as the model text generation now uses).
+ * no screen has to refetch what it just wrote. Two reads are marked stale,
+ * because they report facts worked out from controller settings:
+ *
+ * - the controller's own read, such as the model text generation now uses;
+ * - every trigger list, whose start triggers report the spawn bound they run
+ *   under, which is the default bound unless their source sets one.
  */
 export function useSaveSettings(client: HerculeClient): {
   readonly save: (patch: SettingsPatch) => void;
@@ -26,6 +29,7 @@ export function useSaveSettings(client: HerculeClient): {
     onSuccess: (updated) => {
       queryClient.setQueryData(settingsQuery(client).queryKey, updated);
       void queryClient.invalidateQueries({ queryKey: queryKeys.controller() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.triggers() });
     },
   });
 

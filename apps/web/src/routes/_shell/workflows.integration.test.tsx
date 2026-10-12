@@ -19,6 +19,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { formatAge, queryKeys, parseWorkflowSourceWithRanges } from "@hercule/client-core";
 import type {
   DeclaredEventKind,
+  EventWithFacts,
   Issue,
   Trigger,
   Workflow,
@@ -318,6 +319,7 @@ const buildSummary = (workflow: Workflow): WorkflowSummary => {
     name: readTopLevelValue(workflow.source, "name") ?? "",
     ...(description === undefined ? {} : { description }),
     enabled: workflow.enabled,
+    ...(workflow.invalidSince === undefined ? {} : { invalidSince: workflow.invalidSince }),
     updatedAt: workflow.updatedAt,
   };
 };
@@ -670,6 +672,61 @@ describe("Workflows > the list", () => {
       // them.
       expect(readPageText(row)).toContain(formatAge(workflow.updatedAt, new Date()));
     }
+  });
+
+  it("marks a workflow that stopped validating as invalid, and says why in a tooltip", async () => {
+    await openApp({
+      path: "/workflows",
+      workflows: LISTED_WORKFLOWS.map((workflow) =>
+        workflow.id === NIGHTLY.id
+          ? { ...workflow, invalidSince: "2026-10-01T08:00:00.000Z" }
+          : workflow,
+      ),
+    });
+    await screen.findByRole("link", { name: NIGHTLY_NAME });
+
+    const mark = within(getWorkflowRow(NIGHTLY_NAME)).getByText("invalid");
+    expect(mark.className).toContain("text-fail");
+    expect(mark.getAttribute("title")).toBe(
+      "A plugin, agent or Connection it uses changed, or this controller checks it more strictly. Its triggers start no runs until you fix and save it.",
+    );
+    expect(within(getWorkflowRow(TRIAGE_NAME)).queryByText("invalid")).toBeNull();
+  });
+
+  it("marks a workflow whose start trigger the breaker paused, and names the trigger", async () => {
+    const trigger = (triggerId: string, change: Partial<Trigger>): Trigger => ({
+      workflowId: NIGHTLY.id,
+      workflowName: NIGHTLY_NAME,
+      triggerId,
+      kind: "start",
+      on: { kind: "github.issue.opened", connectionId: "any" },
+      status: "active",
+      createdAt: NIGHTLY.createdAt,
+      updatedAt: NIGHTLY.updatedAt,
+      ...change,
+    });
+    await openApp({
+      path: "/workflows",
+      overrides: {
+        "GET /api/v1/triggers": {
+          body: {
+            items: [
+              trigger("on_issue", { status: "paused", pausedBy: "breaker" }),
+              // A trigger paused manually waits for no answer, so it adds no mark.
+              trigger("on_push", { status: "paused", pausedBy: "manual" }),
+            ],
+          },
+        },
+      },
+    });
+    await screen.findByRole("link", { name: NIGHTLY_NAME });
+
+    const mark = within(getWorkflowRow(NIGHTLY_NAME)).getByText("paused by the breaker");
+    expect(mark.className).toContain("text-attn");
+    expect(mark.getAttribute("title")).toBe(
+      "The breaker paused its trigger on_issue, which matched more events than its spawn bound allows. Open the workflow to resume it.",
+    );
+    expect(within(getWorkflowRow(TRIAGE_NAME)).queryByText("paused by the breaker")).toBeNull();
   });
 
   it("turns a workflow on and off with its switch, sending only `enabled`", async () => {
@@ -1268,6 +1325,20 @@ describe("Workflows > the switch in the list", () => {
 });
 
 describe("Workflows > the page header", { timeout: EDITOR_TEST_TIMEOUT_MS }, () => {
+  it("says that a stored workflow is invalid, why, and what fixes it", async () => {
+    await openApp({
+      path: `/workflows/${TRIAGE.id}`,
+      workflows: [{ ...TRIAGE, invalidSince: "2026-10-01T08:00:00.000Z" }],
+    });
+    await findEditor();
+
+    const status = within(getPageHeader()).getByRole("alert");
+    expect(status.textContent).toBe(
+      "Invalid. A plugin, agent or Connection it uses changed, or this controller checks it more strictly. Its triggers start no runs until you fix and save it.",
+    );
+    expect(status.className).toContain("text-fail");
+  });
+
   // Save uses `aria-disabled` instead of `disabled`, so it keeps the focus
   // after a save finishes.
   it("disables Save while the text matches the stored text", async () => {
@@ -2107,27 +2178,111 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     updatedAt: TRIAGE.updatedAt,
   };
 
+  /** Returns an event a trigger holds, received `minute` minutes after 15:00 UTC on 4 Oct. */
+  const buildHeldEvent = (
+    id: number,
+    title: string | null,
+    minute: number,
+    author: string | null = null,
+  ): EventWithFacts => ({
+    id,
+    source: "github",
+    connectionId: CONNECTION_ID,
+    system: "github",
+    kind: "github.pull_request.labeled",
+    occurredAt: `2026-10-04T15:${String(minute).padStart(2, "0")}:00.000Z`,
+    receivedAt: `2026-10-04T15:${String(minute).padStart(2, "0")}:00.000Z`,
+    dedupKey: `delivery-${String(id)}`,
+    refs: [],
+    url: null,
+    payload: {},
+    actor: null,
+    title,
+    author,
+    signals: [],
+    resolvedSignals: [],
+    ignoredBy: null,
+    tasks: [],
+    knownBy: [],
+  });
+
+  /** The events `on_label` holds, oldest first: more than its row lists. */
+  const HELD_EVENTS: readonly EventWithFacts[] = [
+    buildHeldEvent(101, "Fix the login redirect", 1, "marta"),
+    buildHeldEvent(102, null, 2),
+    buildHeldEvent(103, "Retry flaky uploads", 3),
+    buildHeldEvent(104, "Drop the legacy flag", 4),
+  ];
+
+  /** `on_label` after its breaker tripped: paused, holding `HELD_EVENTS`. */
+  const TRIPPED: Trigger = {
+    ...ON_LABEL,
+    status: "paused",
+    pausedBy: "breaker",
+    spawnBound: { maxRuns: 30, windowSeconds: 3600, isDefault: true },
+    runsInWindow: 30,
+    heldCount: HELD_EVENTS.length,
+  };
+
   /**
    * Returns the routes of a stub controller that holds `triggers` for the
-   * triage workflow, and pauses and resumes them like the real one.
+   * triage workflow, and pauses and resumes them like the real one:
+   * - A pause leaves the trigger paused manually, with its held events.
+   * - A resume makes it active. Its held events stay, to start runs in turn,
+   *   unless the resume discards them. Its `pausedBy` stays too, because an
+   *   active trigger's row does not read it.
+   * - `event.query` for a trigger returns the oldest of `heldEvents` it
+   *   holds, up to the limit asked for.
    */
-  const buildTriggerRoutes = (triggers: readonly Trigger[]): Readonly<Record<string, Handler>> => {
+  const buildTriggerRoutes = (
+    triggers: readonly Trigger[],
+    heldEvents: readonly EventWithFacts[] = HELD_EVENTS,
+  ): Readonly<Record<string, Handler>> => {
     const held = [...triggers];
-    const setStatus = (triggerId: string, status: "active" | "paused"): Answer => {
+    const replaceTrigger = (triggerId: string, change: (trigger: Trigger) => Trigger): Answer => {
       const index = held.findIndex((trigger) => trigger.triggerId === triggerId);
       const trigger = held[index];
       if (trigger === undefined) throw new Error(`the controller holds no trigger ${triggerId}`);
-      held[index] = { ...trigger, status };
+      held[index] = change(trigger);
       return { body: held[index] };
     };
     return {
       "GET /api/v1/triggers": () => ({ body: { items: held } }),
+      "GET /api/v1/events": (call) => {
+        const search = new URLSearchParams(call.search);
+        const trigger = held.find(
+          (candidate) =>
+            candidate.workflowId === search.get("workflowId") &&
+            candidate.triggerId === search.get("triggerId"),
+        );
+        const count = trigger?.heldCount ?? 0;
+        const limit = Number(search.get("limit") ?? count);
+        return { body: { items: heldEvents.slice(0, Math.min(count, limit)) } };
+      },
       ...Object.fromEntries(
         triggers.flatMap((trigger) => {
           const path = `/api/v1/workflows/${TRIAGE.id}/triggers/${trigger.triggerId}`;
           return [
-            [`POST ${path}/pause`, () => setStatus(trigger.triggerId, "paused")],
-            [`POST ${path}/resume`, () => setStatus(trigger.triggerId, "active")],
+            [
+              `POST ${path}/pause`,
+              () =>
+                replaceTrigger(trigger.triggerId, (current) => ({
+                  ...current,
+                  status: "paused",
+                  pausedBy: "manual",
+                })),
+            ],
+            [
+              `POST ${path}/resume`,
+              (call: Call) =>
+                replaceTrigger(trigger.triggerId, (current) => ({
+                  ...current,
+                  status: "active",
+                  ...((call.body as { readonly discardHeld?: boolean }).discardHeld === true
+                    ? { heldCount: 0 }
+                    : {}),
+                })),
+            ],
           ];
         }),
       ),
@@ -2217,12 +2372,33 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
     );
   });
 
+  it("says no trigger fires while the workflow is invalid, and that held events wait for it", async () => {
+    await openApp({
+      path: `/workflows/${TRIAGE.id}`,
+      workflows: LISTED_WORKFLOWS.map((workflow) =>
+        workflow.id === TRIAGE.id
+          ? { ...workflow, enabled: true, invalidSince: "2026-10-01T08:00:00.000Z" }
+          : workflow,
+      ),
+      overrides: buildTriggerRoutes([WEEKDAYS, { ...ON_LABEL, heldCount: 2 }]),
+    });
+    const panel = await findTriggersPanel();
+
+    expect(readPageText(panel)).toContain("Triggers The workflow is invalid, so no trigger fires.");
+    expect(readPageText(getTriggerRow(panel, "weekdays"))).toBe(
+      "weekdays 0 9 * * 1-5 active Pause",
+    );
+    expect(readPageText(getTriggerRow(panel, "on_label"))).toContain(
+      "2 held · They start runs in order once the workflow is valid again, as fast as the bound allows.",
+    );
+  });
+
   it("marks a paused trigger, offers Resume, and shows no next fire time", async () => {
     await openTriggers([{ ...WEEKDAYS, status: "paused" }]);
     const row = getTriggerRow(await findTriggersPanel(), "weekdays");
 
     expect(row.querySelector('[data-mark="paused"]')).not.toBeNull();
-    expect(readPageText(row)).toBe("weekdays 0 9 * * 1-5 paused Resume");
+    expect(readPageText(row)).toBe("weekdays 0 9 * * 1-5 paused manually Resume");
   });
 
   it("marks a trigger whose filter fails, and says why and when", async () => {
@@ -2266,14 +2442,27 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
 
   it("pauses and resumes a start trigger, and shows its new status", async () => {
     const user = userEvent.setup();
-    const { api, queryClient } = await openTriggers([ON_LABEL]);
+    const { api, queryClient, live } = await openTriggers([ON_LABEL], {
+      overrides: { "GET /api/v1/notifications": { body: { items: [] } } },
+    });
     const panel = await findTriggersPanel();
+    // The first push on each new subscription reads its queries again, so
+    // the count starts once the sidebar's notifications were read that way.
+    await waitFor(() => {
+      expect(live.topics()).toEqual(expect.arrayContaining(["workflow", "notification"]));
+    });
+    await waitForIdleRequests(queryClient);
+    const notificationReads = () =>
+      api.calls.filter((call) => call.path === "/api/v1/notifications").length;
+    const readsBefore = notificationReads();
 
     await user.click(
       within(getTriggerRow(panel, "on_label")).getByRole("button", { name: "Pause" }),
     );
     await waitForIdleRequests(queryClient);
-    expect(readPageText(getTriggerRow(panel, "on_label"))).toContain("paused Resume");
+    expect(readPageText(getTriggerRow(panel, "on_label"))).toContain("paused manually Resume");
+    // Only a resume answers a decision, so a pause leaves the notifications alone.
+    expect(notificationReads()).toBe(readsBefore);
 
     await user.click(
       within(getTriggerRow(panel, "on_label")).getByRole("button", { name: "Resume" }),
@@ -2283,8 +2472,127 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
 
     expect(listWrites(api).map(describeWrite)).toEqual([
       [`POST /api/v1/workflows/${TRIAGE.id}/triggers/on_label/pause`, undefined],
-      [`POST /api/v1/workflows/${TRIAGE.id}/triggers/on_label/resume`, undefined],
+      [`POST /api/v1/workflows/${TRIAGE.id}/triggers/on_label/resume`, {}],
     ]);
+  });
+
+  it("tells a trigger the breaker paused apart, with its bound, and offers Resume first", async () => {
+    await openTriggers([TRIPPED]);
+    const row = getTriggerRow(await findTriggersPanel(), "on_label");
+
+    expect(row.querySelector('[data-mark="paused"]')).not.toBeNull();
+    expect(readPageText(row)).toMatch(
+      /^on_label github\.pull_request\.labeled · connection 0000c0de 30 of 30 per hour paused by the breaker Resume /,
+    );
+    expect(within(row).getByText("30 of 30 per hour").getAttribute("title")).toBe(
+      "30 runs started in the last hour, or about to start. The bound is the default from Settings > Bounds.",
+    );
+    expect(within(row).getByText("paused by the breaker").className).toContain("text-attn");
+    // Resume is the answer the breaker waits for, so it is the primary button.
+    expect(within(row).getByRole("button", { name: "Resume" }).className).toContain("text-ink");
+  });
+
+  it("lists the oldest events a paused trigger holds, with their authors, and counts the rest", async () => {
+    const { api } = await openTriggers([TRIPPED]);
+    const row = getTriggerRow(await findTriggersPanel(), "on_label");
+
+    expect(readPageText(row)).toContain(
+      "4 held · They start runs in order once you resume the trigger, as fast as the bound allows.",
+    );
+    const list = await within(row).findByRole("list", { name: "Held events" });
+    expect(within(list).getAllByRole("listitem").map(readPageText)).toEqual([
+      "Fix the login redirect marta 4 Oct 17:01",
+      "github.pull_request.labeled 4 Oct 17:02",
+      "Retry flaky uploads 4 Oct 17:03",
+      "and 1 more",
+    ]);
+    // An event with no title is named by its kind, set in mono like other kinds.
+    expect(within(list).getByText("github.pull_request.labeled").className).toContain("font-mono");
+    const read = api.calls.find((call) => call.path === "/api/v1/events");
+    const search = new URLSearchParams(read?.search);
+    expect(search.get("workflowId")).toBe(TRIAGE.id);
+    expect(search.get("triggerId")).toBe("on_label");
+    expect(search.get("limit")).toBe("3");
+  });
+
+  it("counts the held events of an active trigger as starting, and lists none", async () => {
+    const { api } = await openTriggers([{ ...ON_LABEL, heldCount: 2 }]);
+    const row = getTriggerRow(await findTriggersPanel(), "on_label");
+
+    expect(readPageText(row)).toContain(
+      "2 held · They start runs in order, as fast as the bound allows.",
+    );
+    expect(within(row).queryByRole("list", { name: "Held events" })).toBeNull();
+    expect(
+      within(row).queryByRole("button", { name: "Resume and discard held events" }),
+    ).toBeNull();
+    expect(api.calls.filter((call) => call.path === "/api/v1/events")).toEqual([]);
+  });
+
+  it("resumes a tripped trigger with its held events, and reads the notifications again", async () => {
+    const user = userEvent.setup();
+    const { api, queryClient, live } = await openTriggers([TRIPPED], {
+      overrides: { "GET /api/v1/notifications": { body: { items: [] } } },
+    });
+    const panel = await findTriggersPanel();
+    // The first push on each new subscription reads its queries again, so
+    // the count starts once the sidebar's notifications were read that way.
+    await waitFor(() => {
+      expect(live.topics()).toEqual(expect.arrayContaining(["workflow", "notification"]));
+    });
+    await waitForIdleRequests(queryClient);
+    const notificationReads = () =>
+      api.calls.filter((call) => call.path === "/api/v1/notifications").length;
+    const readsBefore = notificationReads();
+
+    await user.click(
+      within(getTriggerRow(panel, "on_label")).getByRole("button", { name: "Resume" }),
+    );
+    await waitForIdleRequests(queryClient);
+
+    expect(listWrites(api).map(describeWrite)).toEqual([
+      [`POST /api/v1/workflows/${TRIAGE.id}/triggers/on_label/resume`, {}],
+    ]);
+    // The resume answers the breaker's decision, so the count in the sidebar is read again.
+    expect(notificationReads()).toBeGreaterThan(readsBefore);
+    const row = getTriggerRow(panel, "on_label");
+    expect(readPageText(row)).toContain("active Pause");
+    expect(readPageText(row)).toContain(
+      "4 held · They start runs in order, as fast as the bound allows.",
+    );
+  });
+
+  it("asks before resuming with the held events discarded, and sends discardHeld", async () => {
+    const user = userEvent.setup();
+    const { api, queryClient } = await openTriggers([TRIPPED]);
+    const panel = await findTriggersPanel();
+    const discard = await within(getTriggerRow(panel, "on_label")).findByRole("button", {
+      name: "Resume and discard held events",
+    });
+
+    await user.click(discard);
+    const question = within(getTriggerRow(panel, "on_label")).getByRole("group", {
+      name: "Discard the 4 held events and resume? They stay in the event log, but start no runs.",
+    });
+    expect(discard.hidden).toBe(true);
+    await user.click(within(question).getByRole("button", { name: "Cancel" }));
+    expect(document.activeElement).toBe(discard);
+    expect(listWrites(api)).toEqual([]);
+
+    await user.click(discard);
+    await user.click(
+      within(getTriggerRow(panel, "on_label")).getByRole("button", {
+        name: "Resume and discard held events",
+      }),
+    );
+    await waitForIdleRequests(queryClient);
+
+    expect(listWrites(api).map(describeWrite)).toEqual([
+      [`POST /api/v1/workflows/${TRIAGE.id}/triggers/on_label/resume`, { discardHeld: true }],
+    ]);
+    const row = getTriggerRow(panel, "on_label");
+    expect(readPageText(row)).toContain("active Pause");
+    expect(readPageText(row)).not.toContain("held");
   });
 
   it("shows under the row why a pause failed, and keeps the status", async () => {
