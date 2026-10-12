@@ -136,6 +136,9 @@ const findTestsThatReplaceModulesOrGlobals = (): Array<string> =>
 
 const isolatedTests = findTestsThatReplaceModulesOrGlobals();
 
+/** Migrates the database every controller test copies, once per test run. */
+const templateDatabaseSetup = "apps/controller/src/db/template.global-setup.ts";
+
 export default defineConfig({
   test: {
     projects: [
@@ -144,6 +147,7 @@ export default defineConfig({
           name: "node",
           environment: "node",
           isolate: false,
+          globalSetup: [templateDatabaseSetup],
           include: ["**/*.test.{ts,tsx}"],
           exclude: [...nodeExclude, ...isolatedTests],
         },
@@ -152,6 +156,7 @@ export default defineConfig({
         test: {
           name: "node-isolated",
           environment: "node",
+          globalSetup: [templateDatabaseSetup],
           include: isolatedTests,
           exclude: nodeExclude,
         },
