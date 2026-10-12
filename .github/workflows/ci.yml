@@ -72,11 +72,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: pnpm exec vitest run --project react --project desktop-main --project desktop-renderer --shard=${{ matrix.shard }}/2
+      - run: pnpm exec vitest run --project react --project desktop-main --project desktop-renderer --shard=${{ matrix.shard }}/3
 
   check:
     runs-on: ubuntu-latest

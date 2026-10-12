@@ -695,11 +695,13 @@ describe("the liveness check", () => {
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
-        // Ten intervals, which is two silence limits: a runner that answers
-        // stays online, and only a pong counts as an answer. The limit is
-        // five intervals, so a pong that a busy machine delays by a few
-        // intervals still arrives in time.
-        for (let beat = 0; beat < 10; beat++) {
+        // Twenty-five intervals, which is longer than the silence limit: a
+        // runner that answers stays online, and only a pong counts as an
+        // answer. The limit is twenty intervals, a full second, because the
+        // fake runner and the controller share one process: a pause of that
+        // process on a busy CI machine delays the pong and the silence check
+        // alike, and a shorter limit closed the connection during one.
+        for (let beat = 0; beat < 25; beat++) {
           const ping = await wire.next();
           expect(ping._tag, JSON.stringify(ping)).toBe("ping");
           wire.send({ _tag: "pong" });
@@ -712,7 +714,7 @@ describe("the liveness check", () => {
 
         wire.close();
       },
-      { pings: { ...FAST, silence: Duration.millis(200) } },
+      { pings: { interval: Duration.millis(50), silence: Duration.seconds(1) } },
     );
   });
 
