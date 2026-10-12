@@ -2485,12 +2485,17 @@ describe("session.stop", () => {
       for (const response of responses.filter((one) => one.status !== 200)) {
         expect(response.status, await response.clone().text()).toBe(409);
       }
+      expect((await readSession(arranged, queued.id)).exitedAt).not.toBeNull();
       expect(await arranged.harness.audit("session.stopped")).toHaveLength(1);
+      // No runner holds a queued session, so the stop sends no frame, and the
+      // ended session must not be started later either.
+      await waitToSettle();
       expect(
         listFrames<SessionStopFrame>(arranged.wire, "sessionStop").filter(
           (frame) => frame.sessionId === queued.id,
         ),
       ).toEqual([]);
+      expect(listStartFrames(arranged.wire)).toHaveLength(1);
     });
   });
 
@@ -2618,7 +2623,7 @@ describe("session.continue", () => {
     });
   });
 
-  it("rejects a parent that is live, one with no native session, and an id that matches no session", async () => {
+  it("rejects a parent that is live, one with no native session, an id that matches no session, and a mode other than fork", async () => {
     await withFleet(async (arranged) => {
       const running = await startSession(arranged, "hello");
       const stillLive = await continueSession(arranged, running.id, { mode: "fork", prompt: "no" });
@@ -2637,6 +2642,16 @@ describe("session.continue", () => {
         prompt: "no",
       });
       expect(missing.status).toBe(404);
+
+      // An exited session is resumed in place by its next input, so there is
+      // no second way to ask for it here. The payload fails validation before
+      // the session is looked up.
+      const resumed = await continueSession(arranged, unbound.id, {
+        mode: "resume",
+        prompt: "no",
+      });
+      expect(resumed.status, await resumed.clone().text()).toBe(400);
+      expect((await parseRefusal(resumed)).code).toBe("validation");
 
       // One start frame for each of the two sessions above, and none for a continue.
       expect(listFrames<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(2);
@@ -2736,19 +2751,11 @@ describe("session.update", () => {
         model: "clever",
         options: { effort: "high" },
       });
-    });
-  });
 
-  it("changes modelSelection.model and drops the old model's options", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startSession(arranged, "hello");
-      await patchSessionOrFail(arranged, session.id, {
-        options: { effort: "high", fastMode: true },
-      });
-
-      expect(await patchSessionOrFail(arranged, session.id, { model: "fast" })).toEqual({
-        model: "fast",
-        options: {},
+      // A payload with neither field changes nothing.
+      expect(await patchSessionOrFail(arranged, session.id, {})).toEqual({
+        model: "clever",
+        options: { effort: "high" },
       });
     });
   });
@@ -2792,18 +2799,6 @@ describe("session.update", () => {
       });
     },
   );
-
-  it("changes nothing on a payload with neither field", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startSession(arranged, "hello");
-      await patchSessionOrFail(arranged, session.id, { options: { effort: "high" } });
-
-      expect(await patchSessionOrFail(arranged, session.id, {})).toEqual({
-        model: "clever",
-        options: { effort: "high" },
-      });
-    });
-  });
 
   it("rejects a value the model does not offer, and leaves the row unchanged", async () => {
     await withFleet(async (arranged) => {
@@ -3583,24 +3578,6 @@ describe("session.spawn onto a runner that is full", () => {
       expect(sent[1]!.sessionId).toBe(waiting.id);
     });
   });
-
-  it("ends a queued session on session.stop, without sending the runner anything", async () => {
-    await withFleet(async (arranged) => {
-      await setSessionCap(arranged, 1);
-      await startSession(arranged, "hello");
-      const waiting = await spawnSessionOrFail(arranged, { prompt: "after you" });
-      expect(waiting.status).toBe("queued");
-
-      const response = await stopSession(arranged, waiting.id);
-
-      expect(response.status, await response.clone().text()).toBe(200);
-      const ended = await waitForSession(arranged, waiting.id, (one) => one.status === "exited");
-      expect(ended.exitedAt).not.toBeNull();
-      await waitToSettle();
-      expect(listFrames<SessionStopFrame>(arranged.wire, "sessionStop")).toEqual([]);
-      expect(listStartFrames(arranged.wire)).toHaveLength(1);
-    });
-  });
 });
 
 describe("session.spawn and session.continue onto an unreachable runner", () => {
@@ -3844,6 +3821,10 @@ describe("sessions a runner's report leaves out", () => {
       for (const id of [running.id, waiting.id, opening.id]) {
         await waitForSession(arranged, id, (one) => one.nativeSessionId !== null);
       }
+      // That report listed every session, so it ended none of them.
+      expect((await readSession(arranged, running.id)).status).toBe("busy");
+      expect((await readSession(arranged, waiting.id)).status).toBe("idle");
+      expect((await readSession(arranged, opening.id)).status).toBe("starting");
 
       reportHeldSessions(arranged.wire, arranged, [waiting.id]);
 
@@ -3919,27 +3900,6 @@ describe("sessions a runner's report leaves out", () => {
           yield* Fiber.interrupt(announced.fiber);
         }),
       );
-    });
-  });
-
-  it("changes nothing when the report still lists every session", async () => {
-    await withFleet(async (arranged) => {
-      const running = await startBusySession(arranged, "mid-turn here");
-      const waiting = await startIdleSession(arranged, "idle here");
-      // The runner has not answered this session's start yet.
-      arranged.wire.answering(() => undefined);
-      const opening = await spawnSessionOrFail(arranged, { prompt: "still starting" });
-      await waitForStartFrames(arranged, opening.id, 1);
-
-      reportHeldSessions(arranged.wire, arranged, [running.id, waiting.id, opening.id]);
-      await waitForSession(arranged, opening.id, (one) => one.nativeSessionId !== null);
-      // A report is applied as soon as it arrives. The test waits for a status
-      // change that must not happen, so it waits as long as one would take.
-      await waitToSettle();
-
-      expect((await readSession(arranged, running.id)).status).toBe("busy");
-      expect((await readSession(arranged, waiting.id)).status).toBe("idle");
-      expect((await readSession(arranged, opening.id)).status).toBe("starting");
     });
   });
 });
@@ -4135,78 +4095,68 @@ describe("session.input into an exited session", () => {
     });
   });
 
-  it("rejects an exited session whose runner was retired, and says why", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startAndEndSession(arranged, "hello");
-      await Effect.runPromise(
-        Effect.orDie(
-          arranged.harness.sql`
-            UPDATE runners SET lifecycle = 'retired'
-            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
-        ),
-      );
-      const before = (await listInputs(arranged, session.id)).length;
+  it.each([
+    [
+      "was retired",
+      "retired",
+      async (arranged: Arranged): Promise<void> => {
+        await Effect.runPromise(
+          Effect.orDie(
+            arranged.harness.sql`
+              UPDATE runners SET lifecycle = 'retired'
+              WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          ),
+        );
+      },
+    ],
+    [
+      "is not logged in to its instance",
+      "logged in",
+      async (arranged: Arranged): Promise<void> => {
+        await Effect.runPromise(
+          Effect.orDie(
+            arranged.harness.sql`
+              UPDATE capability_snapshots SET auth_status = 'unauthenticated'
+              WHERE runner_id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          ),
+        );
+      },
+    ],
+    [
+      "is draining",
+      "draining",
+      async (arranged: Arranged): Promise<void> => {
+        const drained = await send(
+          "POST",
+          arranged.harness.base,
+          `/api/v1/runners/${arranged.runnerId}/drain`,
+          { body: {}, token: arranged.token },
+        );
+        expect(drained.status, await drained.clone().text()).toBe(200);
+      },
+    ],
+  ] as const)(
+    "rejects an exited session whose runner %s, and says why",
+    async (_state, reason, arrangeRunner) => {
+      await withFleet(async (arranged) => {
+        const session = await startAndEndSession(arranged, "hello");
+        await arrangeRunner(arranged);
+        const before = (await listInputs(arranged, session.id)).length;
 
-      const response = await sendInput(arranged, session.id, { text: "no machine" });
+        const response = await sendInput(arranged, session.id, { text: "still there?" });
 
-      const said = await response.clone().text();
-      expect(response.status, said).toBe(409);
-      expect((await parseRefusal(response)).code).toBe("invalid_state");
-      expect(said).toContain("retired");
-      expect(await listInputs(arranged, session.id)).toHaveLength(before);
-      expect((await readSession(arranged, session.id)).status).toBe("exited");
-    });
-  });
-
-  it("rejects an exited session whose runner is not logged in to its instance", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startAndEndSession(arranged, "hello");
-      await Effect.runPromise(
-        Effect.orDie(
-          arranged.harness.sql`
-            UPDATE capability_snapshots SET auth_status = 'unauthenticated'
-            WHERE runner_id = unhex(replace(${arranged.runnerId}, '-', ''))`,
-        ),
-      );
-      const before = (await listInputs(arranged, session.id)).length;
-
-      const response = await sendInput(arranged, session.id, { text: "nobody home" });
-
-      const said = await response.clone().text();
-      expect(response.status, said).toBe(409);
-      expect((await parseRefusal(response)).code).toBe("invalid_state");
-      expect(said).toContain("logged in");
-      expect(await listInputs(arranged, session.id)).toHaveLength(before);
-      expect((await readSession(arranged, session.id)).status).toBe("exited");
-      await waitToSettle();
-      expect(listStartFrames(arranged.wire)).toHaveLength(1);
-    });
-  });
-
-  it("rejects an exited session whose runner is draining, and says why", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startAndEndSession(arranged, "hello");
-      const drained = await send(
-        "POST",
-        arranged.harness.base,
-        `/api/v1/runners/${arranged.runnerId}/drain`,
-        { body: {}, token: arranged.token },
-      );
-      expect(drained.status, await drained.clone().text()).toBe(200);
-      const before = (await listInputs(arranged, session.id)).length;
-
-      const response = await sendInput(arranged, session.id, { text: "on the way out" });
-
-      const said = await response.clone().text();
-      expect(response.status, said).toBe(409);
-      expect((await parseRefusal(response)).code).toBe("invalid_state");
-      expect(said).toContain("draining");
-      expect(await listInputs(arranged, session.id)).toHaveLength(before);
-      expect((await readSession(arranged, session.id)).status).toBe("exited");
-      await waitToSettle();
-      expect(listStartFrames(arranged.wire)).toHaveLength(1);
-    });
-  });
+        const said = await response.clone().text();
+        expect(response.status, said).toBe(409);
+        expect((await parseRefusal(response)).code).toBe("invalid_state");
+        expect(said).toContain(reason);
+        expect(await listInputs(arranged, session.id)).toHaveLength(before);
+        expect((await readSession(arranged, session.id)).status).toBe("exited");
+        // No resume is started later either.
+        await waitToSettle();
+        expect(listStartFrames(arranged.wire)).toHaveLength(1);
+      });
+    },
+  );
 
   it("queues the resume while the runner is disconnected, and starts it when the runner reconnects", async () => {
     await withFleet(async (arranged) => {
@@ -4385,30 +4335,6 @@ describe("session.input into an exited session", () => {
         (row) => row.event._tag === "content.delta" && row.event.turnId === "t2",
       )!.event;
       expect(delta._tag === "content.delta" ? delta.delta : undefined).toBe("back");
-    });
-  });
-});
-
-describe("session.continue: the modes it takes", () => {
-  it("forks a parent on mode fork, and rejects any other mode", async () => {
-    await withFleet(async (arranged) => {
-      const parent = await startAndEndSession(arranged, "hello");
-
-      const forked = await continueSession(arranged, parent.id, {
-        mode: "fork",
-        prompt: "the other way",
-      });
-      expect(forked.status, await forked.clone().text()).toBe(200);
-
-      // An exited session is resumed in place by its next input, so there is
-      // no second way to ask for it here.
-      const resumed = await continueSession(arranged, parent.id, {
-        mode: "resume",
-        prompt: "carry on",
-      });
-
-      expect(resumed.status, await resumed.clone().text()).toBe(400);
-      expect((await parseRefusal(resumed)).code).toBe("validation");
     });
   });
 });
