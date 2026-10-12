@@ -197,6 +197,7 @@ const COMMANDS: Record<string, string> = {
   "connection.update": "connection update",
   "connection.delete": "connection delete",
   "connection.setCredentials": "connection set-credentials",
+  "connection.listChoices": "connection list-choices",
   "connection.startOAuth": "connection start-oauth",
   "connection.startDeviceFlow": "connection start-device-flow",
   "connection.pollDeviceFlow": "connection poll-device-flow",
@@ -361,6 +362,7 @@ const RESOLVES: Record<string, string> = {
   "connection.update id": "connection.query",
   "connection.delete id": "connection.query",
   "connection.setCredentials id": "connection.query",
+  "connection.listChoices id": "connection.query",
 
   "agent.query permissionProfileId": "profile.query",
   "agent.read id": "agent.query",

@@ -20,5 +20,6 @@ discovery, no dynamic loading and no install step. The plugins shipped so far:
 | `@hercule/plugin-codex` | the `codex` provider |
 | `@hercule/plugin-pi` | the `pi` provider |
 | `@hercule/plugin-github` | the `github` connection type, the event source that polls GitHub, and the workflow actions on issues and pull requests |
+| `@hercule/plugin-sentry` | the `sentry` connection type, the event source that polls Sentry for issues, the signals for new, returning and escalating issues, and the workflow actions that resolve, archive and assign an issue |
 
 The runner entrypoint imports no plugin host and no plugin package.

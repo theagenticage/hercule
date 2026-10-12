@@ -22,6 +22,7 @@ import {
   MAX_EVENT_SYSTEM_LENGTH,
   MAX_EVENT_TITLE_LENGTH,
   MAX_EVENT_URL_LENGTH,
+  truncateMessage,
 } from "@hercule/contract";
 import {
   MAX_EMITTED_FIELD_BYTES,
@@ -39,7 +40,7 @@ import {
 } from "../connections";
 import { appendIngestedEvent, decodeAgainstKind } from "../events";
 import { resourceRepository, type StoredResource } from "../resources";
-import { describeFieldIssues, truncateMessage } from "./errors";
+import { describeFieldIssues } from "./errors";
 import type { RegisteredEventSource } from "./event-sources";
 import { OpenSignals } from "./open-signals";
 

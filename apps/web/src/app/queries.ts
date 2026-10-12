@@ -308,6 +308,27 @@ export const connectionsQuery = (client: HerculeClient) =>
     queryFn: () => client.connection.query({ query: { limit: MAX_PAGE_LIMIT } }),
   });
 
+/**
+ * Reads the choices one config field of a connection loads from the account,
+ * such as the teams of a Sentry organization. The account changes without
+ * telling Hercule, so nothing is kept: each time a form opens it asks again,
+ * and the entry is dropped when the form closes. A failure is not tried again,
+ * so the form falls back to the plain widget at once.
+ */
+export const connectionChoicesQuery = (
+  client: HerculeClient,
+  connectionId: string,
+  field: string,
+) =>
+  queryOptions({
+    queryKey: queryKeys.connectionChoices(connectionId, field),
+    queryFn: async () =>
+      (await client.connection.listChoices({ params: { id: connectionId, field } })).choices,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
 export const providersQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.providers(),

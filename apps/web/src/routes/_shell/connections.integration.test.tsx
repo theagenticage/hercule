@@ -963,6 +963,238 @@ describe("Connections > configuring a connection", () => {
   });
 });
 
+describe("Connections > configuring a setting that loads its choices", () => {
+  /** A type with a team to pick, a list of projects to pick, and a plain note. */
+  const DESK_TYPE = {
+    type: "deskfront/desk",
+    displayName: "Deskfront",
+    setup: [{ kind: "credentials", fields: [{ name: "token", label: "Access token" }] }],
+    configSchema: {
+      type: "object",
+      properties: {
+        team: { type: "string", title: "Team", "x-choices": true },
+        projects: {
+          type: "array",
+          items: { type: "string" },
+          title: "Projects",
+          "x-choices": true,
+        },
+        note: { type: "string", title: "Note" },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  };
+
+  const DESK: Connection = {
+    ...PAPER,
+    id: "0199c0ff-ffff-7000-8000-000000000006",
+    type: DESK_TYPE.type,
+    label: "desk",
+    displayName: "acct:desk-work",
+    labels: [],
+    config: { team: "t2", projects: ["p1"], note: "keep" },
+  };
+
+  const CHOICES_PATH = `GET /api/v1/connections/${DESK.id}/choices`;
+
+  const TEAMS = [
+    { value: "t1", label: "Backend" },
+    { value: "t2", label: "Web" },
+    { value: "t3", label: "Design" },
+  ];
+  const PROJECTS = [
+    { value: "p1", label: "Checkout" },
+    { value: "p2", label: "Search" },
+  ];
+
+  /** Opens the Configure form of `connection`, with the choices it is told to load. */
+  const openDesk = async (
+    answers: Readonly<Record<string, Handler>>,
+    connection: Connection = DESK,
+  ) => {
+    const user = userEvent.setup();
+    const app = await openApp([connection], {
+      "GET /api/v1/plugins": { body: [...CATALOG, buildPlugin("deskfront", DESK_TYPE)] },
+      [`PATCH /api/v1/connections/${connection.id}`]: { body: connection },
+      ...answers,
+    });
+    await user.click(
+      within(await findConnectionRow(connection)).getByRole("button", { name: "Configure" }),
+    );
+    return { ...app, user };
+  };
+
+  const loaded: Record<string, Handler> = {
+    [`${CHOICES_PATH}/team`]: { body: { choices: TEAMS } },
+    [`${CHOICES_PATH}/projects`]: { body: { choices: PROJECTS } },
+  };
+
+  it("draws a single value as a dropdown of labels, with the stored value selected", async () => {
+    const { api, user } = await openDesk(loaded);
+
+    const team = await screen.findByRole<HTMLSelectElement>("combobox", { name: "Team" });
+    await waitFor(() => {
+      expect(
+        within(team)
+          .getAllByRole("option")
+          .map((option) => option.textContent),
+      ).toEqual(["Not set", "Backend", "Web", "Design"]);
+    });
+    expect(team.value).toBe("t2");
+    // 3 choices are few enough that no filter box shows.
+    expect(screen.queryByLabelText("Filter Team")).toBeNull();
+
+    await user.selectOptions(team, "Design");
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    // The note is a plain field and is saved as it was.
+    expect(api.calls.find((call) => call.method === "PATCH")?.body).toEqual({
+      label: "desk",
+      config: { team: "t3", projects: ["p1"], note: "keep" },
+    });
+  });
+
+  it("draws a list as checkboxes of labels, and saves the values ticked", async () => {
+    const { api, user } = await openDesk(loaded);
+
+    const projects = await screen.findByRole("group", { name: "Projects" });
+    const checkout = await within(projects).findByRole<HTMLInputElement>("checkbox", {
+      name: "Checkout",
+    });
+    expect(checkout.checked).toBe(true);
+    expect(
+      within(projects).getByRole<HTMLInputElement>("checkbox", { name: "Search" }).checked,
+    ).toBe(false);
+
+    await user.click(within(projects).getByRole("checkbox", { name: "Search" }));
+    await user.click(checkout);
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(api.calls.find((call) => call.method === "PATCH")?.body).toEqual({
+      label: "desk",
+      config: { team: "t2", projects: ["p2"], note: "keep" },
+    });
+  });
+
+  it("keeps a stored value the account no longer has, selected and marked 'Not found'", async () => {
+    const { user } = await openDesk(loaded, {
+      ...DESK,
+      config: { team: "gone", projects: ["p1", "old"] },
+    });
+
+    const team = await screen.findByRole<HTMLSelectElement>("combobox", { name: "Team" });
+    await waitFor(() => {
+      expect(team.value).toBe("gone");
+    });
+    expect(
+      within(team).getByRole<HTMLOptionElement>("option", { name: "Not found: gone" }).selected,
+    ).toBe(true);
+
+    const projects = screen.getByRole("group", { name: "Projects" });
+    const old = await within(projects).findByRole<HTMLInputElement>("checkbox", {
+      name: "Not found: old",
+    });
+    expect(old.checked).toBe(true);
+    // The user can remove it.
+    await user.click(old);
+    expect(old.checked).toBe(false);
+  });
+
+  it("shows a filter box above 10 choices, and narrows the list by label", async () => {
+    const many = Array.from({ length: 11 }, (_, at) => ({
+      value: `t${String(at)}`,
+      label: at === 7 ? "Payments" : `Team ${String(at)}`,
+    }));
+    const { user } = await openDesk({
+      ...loaded,
+      [`${CHOICES_PATH}/team`]: { body: { choices: many } },
+    });
+
+    const filter = await screen.findByLabelText("Filter Team");
+    const team = screen.getByRole("combobox", { name: "Team" });
+    // The stored value "t2" is among the choices, so it stays listed whatever is typed.
+    await user.type(filter, "pay");
+
+    expect(
+      within(team)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["Not set", "Team 2", "Payments"]);
+    // The projects have 2 choices, so they get no filter box.
+    expect(screen.queryByLabelText("Filter Projects")).toBeNull();
+  });
+
+  it("falls back to the plain widget, with the reason above it, when the choices cannot load", async () => {
+    const reason = "Deskfront refused the token. Reconnect the connection.";
+    const refused: Handler = {
+      status: 409,
+      body: { error: { code: "invalid_state", message: reason } },
+    };
+    const { api, user } = await openDesk({
+      [`${CHOICES_PATH}/team`]: refused,
+      [`${CHOICES_PATH}/projects`]: refused,
+    });
+
+    const team = await screen.findByLabelText<HTMLInputElement>("Team");
+    expect(team.tagName).toBe("INPUT");
+    expect(team.value).toBe("t2");
+    // The reason sits above the input it is about, not below it.
+    const [first] = screen.getAllByText(reason);
+    expect(first?.compareDocumentPosition(team)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByLabelText<HTMLInputElement>("Projects entry 1").value).toBe("p1");
+
+    // The value can still be edited and saved.
+    await user.clear(team);
+    await user.type(team, "t9");
+    await user.click(within(getFormWithField("Name")).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(api.calls.find((call) => call.method === "PATCH")?.body).toMatchObject({
+      config: { team: "t9" },
+    });
+  });
+
+  it("asks the account only for the fields that load choices", async () => {
+    const { api } = await openDesk(loaded);
+    await screen.findByRole("combobox", { name: "Team" });
+
+    const paths = api.calls
+      .filter((call) => call.path.includes("/choices/"))
+      .map((call) => call.path);
+    expect(paths.sort()).toEqual([
+      `/api/v1/connections/${DESK.id}/choices/projects`,
+      `/api/v1/connections/${DESK.id}/choices/team`,
+    ]);
+  });
+
+  it("leaves every setting out of the setup form, and asks for no choices", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp([], {
+      "GET /api/v1/plugins": { body: [...CATALOG, buildPlugin("deskfront", DESK_TYPE)] },
+    });
+
+    await user.click(
+      within(await findTypeOffer("Deskfront")).getByRole("button", { name: "Connect" }),
+    );
+
+    // Setup asks for the credential alone. The settings, the ones that load
+    // choices and the plain note, are all edited under Configure.
+    const form = getFormWithField("Access token");
+    expect(within(form).queryByLabelText("Team")).toBeNull();
+    expect(within(form).queryByLabelText("Projects")).toBeNull();
+    expect(within(form).queryByLabelText("Note")).toBeNull();
+    expect(api.calls.filter((call) => call.path.includes("/choices/"))).toEqual([]);
+  });
+});
+
 describe("Connections > configuring how often a connection is polled", () => {
   /** A Glasshouse connection whose `repos` feed the user slowed down to every 5 minutes. */
   const SLOWED: Connection = { ...GLASS, feedIntervals: { repos: 300 } };

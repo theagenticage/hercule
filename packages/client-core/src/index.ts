@@ -131,6 +131,10 @@ export {
   type ConfigField,
   type ConfigJson,
   type ConfigValue,
+  buildChoiceOptions,
+  filterChoiceOptions,
+  showsChoiceFilter,
+  type ChoiceOption,
 } from "./config-fields";
 export {
   listConnectionTypes,

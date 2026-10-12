@@ -33,6 +33,8 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   DONE_ACTION_ID,
   formatIssue,
+  summarizeCause,
+  truncateMessage,
   type BoundAction,
   type Event,
   type NotificationSubject,
@@ -48,13 +50,7 @@ import { mintUuid, nowIso, uuidToString, withTransaction } from "../db";
 import { AuditLog, readPipelineEvent } from "../events";
 import { buildEvaluationContext, evaluateExpression, formatExpressionValue } from "../expressions";
 import { Notifier } from "../notifications";
-import {
-  PluginHost,
-  signalBuilds,
-  summarizeCause,
-  truncateMessage,
-  type RegisteredSignalKind,
-} from "../plugins";
+import { PluginHost, signalBuilds, type RegisteredSignalKind } from "../plugins";
 import { buildHandToActions, checkSignalFits, listOwnActionIssues } from "./actions";
 import { signalRepository, type PendingRaise } from "./repository";
 

@@ -2,6 +2,7 @@ import { useState, type FormEvent, type JSX } from "react";
 import { Button, Checkbox, Field, FormSection, Input, Select, StringList } from "@hercule/ui";
 import {
   buildConfigDraft,
+  buildChoiceOptions,
   buildConfigPayload,
   type ConfigDraft,
   type ConfigField,
@@ -9,6 +10,17 @@ import {
   type ConfigJson,
   type ConfigValue,
 } from "@hercule/client-core";
+import type { ConfigChoice } from "@hercule/contract";
+import { ChoicePicker } from "./choice-picker";
+
+/**
+ * Where the choices of a field that loads them from the account stand. The
+ * parent reads them; a field without `loadsChoices` takes none.
+ */
+export type FieldChoices =
+  | { readonly status: "loading" }
+  | { readonly status: "loaded"; readonly choices: ReadonlyArray<ConfigChoice> }
+  | { readonly status: "failed"; readonly message: string };
 
 /**
  * The form generated from a plugin's config schema. Before the save, the form
@@ -108,6 +120,7 @@ export function ConfigFieldRow({
   value,
   error,
   entryErrors,
+  choices,
   onChange,
 }: {
   readonly inputId: string;
@@ -117,6 +130,11 @@ export function ConfigFieldRow({
   readonly error: string | undefined;
   /** For a list setting, the error of each entry by position, shown under that entry. */
   readonly entryErrors: Readonly<Record<number, string>> | undefined;
+  /**
+   * For a field with `loadsChoices`, where its choices stand. Without it, or
+   * for any other field, the field is drawn as a plain widget of its kind.
+   */
+  readonly choices?: FieldChoices | undefined;
   readonly onChange: (value: ConfigValue) => void;
 }): JSX.Element {
   if (field.kind === "boolean") {
@@ -140,13 +158,40 @@ export function ConfigFieldRow({
     <Field id={field.kind === "stringList" ? undefined : inputId} label={field.label} error={error}>
       {/* The description goes above the input, so an error appears directly under the input. */}
       <Description field={field} />
-      <ConfigWidget
-        inputId={inputId}
-        field={field}
-        value={value}
-        entryErrors={entryErrors}
-        onChange={onChange}
-      />
+      {/* A disabled select holds the place of the picker, so the row keeps its
+          height when the choices arrive. */}
+      {choices?.status === "loading" ? (
+        <Select id={inputId} disabled value="">
+          <option value="">Loading choices…</option>
+        </Select>
+      ) : null}
+      {/* When the choices cannot be loaded, the plain widget stays so the
+          user can still edit the value; the reason sits above it. */}
+      {choices?.status === "failed" ? (
+        <p className="text-fine text-fail" role="alert">
+          {choices.message}
+        </p>
+      ) : null}
+      {choices?.status === "loaded" ? (
+        <ChoicePicker
+          inputId={inputId}
+          label={field.label}
+          options={buildChoiceOptions(choices.choices, value)}
+          value={value}
+          multiple={field.kind === "stringList"}
+          required={field.required}
+          onChange={onChange}
+        />
+      ) : null}
+      {choices === undefined || choices.status === "failed" ? (
+        <ConfigWidget
+          inputId={inputId}
+          field={field}
+          value={value}
+          entryErrors={entryErrors}
+          onChange={onChange}
+        />
+      ) : null}
     </Field>
   );
 }

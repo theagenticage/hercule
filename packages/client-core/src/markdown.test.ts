@@ -936,23 +936,31 @@ describe("parseMarkdown deep nesting", () => {
   });
 });
 
+/**
+ * The time limit of each worst-case input below. Each input parses in under
+ * 100 ms on a laptop, but a CI machine running the whole suite in parallel has
+ * taken over a second. A parser that needs quadratic time on these inputs
+ * takes far longer than this limit, so the limit still catches one.
+ */
+const WORST_CASE_TIME_LIMIT_MS = 5000;
+
 describe("parseMarkdown worst-case input", () => {
   it("parses an unterminated HTML comment followed by many blank lines in linear time", () => {
     const started = performance.now();
     parseMarkdown(`<!--${"\n".repeat(200_000)}x`);
-    expect(performance.now() - started).toBeLessThan(1000);
+    expect(performance.now() - started).toBeLessThan(WORST_CASE_TIME_LIMIT_MS);
   });
 
   it("parses a long run of footnote-like brackets in linear time", () => {
     const started = performance.now();
     parseMarkdown("[^".repeat(100_000));
-    expect(performance.now() - started).toBeLessThan(1000);
+    expect(performance.now() - started).toBeLessThan(WORST_CASE_TIME_LIMIT_MS);
   });
 
   it("parses many definitions and many references in linear time", () => {
     const started = performance.now();
     parseMarkdown("[^a]: x\n".repeat(20_000) + "[^a] ".repeat(20_000));
-    expect(performance.now() - started).toBeLessThan(1000);
+    expect(performance.now() - started).toBeLessThan(WORST_CASE_TIME_LIMIT_MS);
   });
 
   it("parses a definition with many lazy continuation lines in linear time", () => {
@@ -962,12 +970,12 @@ describe("parseMarkdown worst-case input", () => {
     // take seconds if reading the definition costs more than linear time.
     const started = performance.now();
     parseMarkdown(`[^a]: first\n${"lazy\n".repeat(20_000)}`);
-    expect(performance.now() - started).toBeLessThan(1000);
+    expect(performance.now() - started).toBeLessThan(WORST_CASE_TIME_LIMIT_MS);
   });
 
   it("parses many paragraphs cut by headings, with no definition, in linear time", () => {
     const started = performance.now();
     parseMarkdown("a\n# h\n".repeat(50_000));
-    expect(performance.now() - started).toBeLessThan(1000);
+    expect(performance.now() - started).toBeLessThan(WORST_CASE_TIME_LIMIT_MS);
   });
 });

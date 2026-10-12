@@ -37,7 +37,6 @@ import {
   type ConnectionsRuntime,
   type ConnectionTypeContribution,
   type FeedDeclaration,
-  type OAuthDeclaration,
 } from "@hercule/plugin-host";
 import { announce, nowIso, withTransaction } from "../db";
 import { PromotionState } from "../promotion";
@@ -49,6 +48,7 @@ import {
   parseTokens,
   refreshAccess,
   serializeTokens,
+  type RefreshClient,
   type TokenSet,
 } from "./oauth";
 import { PluginConfigs } from "./plugin-configs";
@@ -67,7 +67,8 @@ import { connectionRepository, type StoredConnection } from "./repository";
  */
 export interface RegisteredConnectionType {
   readonly pluginId: string;
-  readonly contribution: ConnectionType & Pick<ConnectionTypeContribution, "validate">;
+  readonly contribution: ConnectionType &
+    Pick<ConnectionTypeContribution, "validate" | "listChoices">;
   readonly feeds: Readonly<Record<string, FeedDeclaration>>;
 }
 
@@ -244,13 +245,41 @@ const make = Effect.gen(function* () {
   };
 
   /**
+   * Returns the token endpoint and the client a connection of this type
+   * refreshes with, or `None` when it has none: a redirect flow whose plugin
+   * has no client id and secret set, or a type with neither flow.
+   *
+   * - The type's `oauth` declaration refreshes with the plugin's client and
+   *   its secret.
+   * - The type's `device` declaration refreshes with its public client id and
+   *   no secret.
+   *
+   * A type declares at most one of the two.
+   */
+  const findRefreshEndpoint = (
+    row: StoredConnection,
+    type: ConnectionType,
+  ): Effect.Effect<Option.Option<{ readonly tokenUrl: string; readonly client: RefreshClient }>> =>
+    Effect.gen(function* () {
+      const { oauth, device } = type;
+      if (oauth !== undefined) {
+        const client = yield* Effect.orDie(findOAuthClient(row.pluginId));
+        return Option.map(client, (found) => ({ tokenUrl: oauth.tokenUrl, client: found }));
+      }
+      if (device !== undefined) {
+        return Option.some({ tokenUrl: device.tokenUrl, client: { clientId: device.clientId } });
+      }
+      return Option.none();
+    });
+
+  /**
    * Exchanges the refresh token for a new token set, stores it and returns
    * it. It runs while holding this connection's semaphore and reads the stored
    * tokens again first, so a caller that waited for another caller's refresh
    * gets the new tokens without refreshing again.
    *
-   * - With no refresh token or no OAuth client, it marks the connection
-   *   `needs-reauth` and fails.
+   * - With no refresh token or no client to refresh with, it marks the
+   *   connection `needs-reauth` and fails.
    * - When the token endpoint rejects the refresh, it marks the connection
    *   `needs-reauth` and fails.
    * - When the token endpoint cannot be reached, it fails and leaves the
@@ -260,7 +289,7 @@ const make = Effect.gen(function* () {
    */
   const refreshTokens = (
     row: StoredConnection,
-    oauth: OAuthDeclaration,
+    type: ConnectionType,
   ): Effect.Effect<TokenSet, ConnectionUnavailable> =>
     Effect.gen(function* () {
       const stored = yield* Effect.orDie(
@@ -276,38 +305,44 @@ const make = Effect.gen(function* () {
       const millis = yield* Clock.currentTimeMillis;
       if (!isStale(tokens, millis)) return tokens;
 
-      const client = yield* Effect.orDie(findOAuthClient(row.pluginId));
-      if (tokens.refreshToken === undefined || Option.isNone(client)) {
+      const endpoint = yield* findRefreshEndpoint(row, type);
+      const { refreshToken } = tokens;
+      if (refreshToken === undefined || Option.isNone(endpoint)) {
         return yield* markTokensNeedReauth(row.id, held, "this connection cannot be refreshed");
       }
-      const answer = yield* refreshAccess({
-        tokenUrl: oauth.tokenUrl,
-        client: client.value,
-        refreshToken: tokens.refreshToken,
-      }).pipe(
-        Effect.provide(FetchHttpClient.layer),
-        Effect.catchTag("ProviderRefused", (error) =>
-          markTokensNeedReauth(row.id, held, error.message),
-        ),
-        Effect.catchTag("ProviderUnreachable", (error) =>
-          Effect.fail(new ConnectionUnavailable({ message: error.message })),
-        ),
+      // The request and the write that stores its answer are uninterruptible
+      // together. A provider that rotates its refresh token invalidates the old
+      // one the moment it answers, so a caller cancelled between the answer and
+      // the write (a timeout, a cancelled run) would lose the only tokens that
+      // still work. `refreshAccess` bounds the request with its own timeout,
+      // so this cannot hold the caller or the lock for long.
+      return yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const answer = yield* refreshAccess({ ...endpoint.value, refreshToken }).pipe(
+            Effect.provide(FetchHttpClient.layer),
+            Effect.catchTag("ProviderRefused", (error) =>
+              markTokensNeedReauth(row.id, held, error.message),
+            ),
+            Effect.catchTag("ProviderUnreachable", (error) =>
+              Effect.fail(new ConnectionUnavailable({ message: error.message })),
+            ),
+          );
+          // When the response has no refresh token, the old one is still valid.
+          const next: TokenSet = { ...answer, refreshToken: answer.refreshToken ?? refreshToken };
+          yield* writeWhileTokensHeld(
+            row.id,
+            held,
+            Effect.orDie(
+              secrets.set(
+                { kind: "connection", id: row.id },
+                OAUTH_TOKENS,
+                Redacted.make(serializeTokens(next)),
+              ),
+            ),
+          );
+          return next;
+        }),
       );
-      // When the response has no refresh token, the old one is still valid.
-      const keep = answer.refreshToken ?? tokens.refreshToken;
-      const next: TokenSet = { ...answer, refreshToken: keep };
-      yield* writeWhileTokensHeld(
-        row.id,
-        held,
-        Effect.orDie(
-          secrets.set(
-            { kind: "connection", id: row.id },
-            OAUTH_TOKENS,
-            Redacted.make(serializeTokens(next)),
-          ),
-        ),
-      );
-      return next;
     });
 
   /**
@@ -315,17 +350,24 @@ const make = Effect.gen(function* () {
    * it has expired or is about to. The core does the refresh, so a caller that
    * asks for credentials gets a working token or a `ConnectionUnavailable`.
    *
-   * Only a type with an `oauth` declaration can refresh. A token from a device
-   * flow has no expiry, so it never needs a refresh; if a provider ever sends
-   * one with an expiry anyway, the connection needs reauth once it lapses.
+   * A token from a redirect flow or a device flow is refreshed when it has an
+   * expiry and a refresh token. A token with no expiry, such as GitHub's,
+   * never needs a refresh. A type that declares neither flow cannot refresh,
+   * so its connection needs reauth once the token lapses.
    *
    * A refresh passes the promotion gate as one unit, before the provider is
    * called: it waits while a promotion freezes the controller, and never
    * happens once it is sealed. The provider's answer and the write that
-   * stores it cannot be split. Many providers rotate the refresh token and
-   * invalidate the old one, so a refresh whose new tokens are not in the
-   * copy would leave the new machine holding a refresh token that no longer
-   * works.
+   * stores it are never separated by a promotion's freeze: many providers rotate the
+   * refresh token and invalidate the old one, so a refresh whose new tokens
+   * are not in the copy would leave the new machine holding a refresh token
+   * that no longer works.
+   *
+   * Cancelling the caller does not cancel a refresh that has started. The
+   * request, its 30-second timeout and the write that stores the answer run
+   * to their end first, for the same reason: the provider has already
+   * invalidated the old tokens by the time it answers. So a cancelled caller
+   * can wait up to the timeout before it stops.
    */
   const readFreshAccessToken = (
     row: StoredConnection,
@@ -336,8 +378,8 @@ const make = Effect.gen(function* () {
       const tokens = yield* parseStoredTokens(row.id, held);
       const millis = yield* Clock.currentTimeMillis;
       if (!isStale(tokens, millis)) return { accessToken: tokens.accessToken };
-      const oauth = (yield* findRegisteredType(row))?.contribution.oauth;
-      if (oauth === undefined) {
+      const type = (yield* findRegisteredType(row))?.contribution;
+      if (type?.oauth === undefined && type?.device === undefined) {
         return yield* markTokensNeedReauth(
           row.id,
           held,
@@ -347,7 +389,7 @@ const make = Effect.gen(function* () {
       // The gate is passed before the permit is taken, so no caller holds
       // the permit while it waits for a freeze to end.
       const fresh = yield* promotion.whenServing(
-        readOrCreateRefreshPermit(row.id).withPermits(1)(refreshTokens(row, oauth)),
+        readOrCreateRefreshPermit(row.id).withPermits(1)(refreshTokens(row, type)),
       );
       return { accessToken: fresh.accessToken };
     });

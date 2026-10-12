@@ -13,10 +13,10 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import type { Event } from "@hercule/contract";
+import { summarizeCause, type Event } from "@hercule/contract";
 import { decodeAgainst, PluginError, SignalDraft } from "@hercule/plugin-host";
 import { ConnectionTypes, type StoredConnection } from "../connections";
-import { describeFieldIssues, summarizeCause } from "./errors";
+import { describeFieldIssues } from "./errors";
 import type { RegisteredSignalKind } from "./signal-kinds";
 
 /**

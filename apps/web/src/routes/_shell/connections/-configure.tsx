@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type JSX } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Field, FormSection, Input } from "@hercule/ui";
 import {
   buildConfigDraft,
@@ -12,14 +12,17 @@ import {
   buildConfigPayload,
   queryKeys,
   type ConfigDraft,
+  type ConfigField,
   type ConfigJson,
+  type ConfigValue,
   type ConnectionType,
   type FeedIntervalsDraft,
   type HerculeClient,
   readErrorMessage,
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
-import { ConfigFieldRow } from "../../../screens/plugins/config-form";
+import { connectionChoicesQuery } from "../../../app/queries";
+import { ConfigFieldRow, type FieldChoices } from "../../../screens/plugins/config-form";
 import { SaveStatus } from "../../../screens/save-status";
 import { FeedIntervalFields } from "./-feed-intervals";
 
@@ -28,6 +31,49 @@ import { FeedIntervalFields } from "./-feed-intervals";
  * a topic is an ordinary label, so the user can type any other topic.
  */
 const TOPICS = ["Code", "Business", "Personal", "Ops"];
+
+/**
+ * One setting of the connection. A setting that loads its choices from the
+ * account reads them here, where they are drawn, and the row falls back to the
+ * plain widget when they cannot be loaded. The read starts when the form
+ * opens, not before: the connection list does not need the account's data.
+ */
+function ConnectionConfigRow({
+  client,
+  connectionId,
+  field,
+  ...row
+}: {
+  readonly client: HerculeClient;
+  readonly connectionId: string;
+  readonly field: ConfigField;
+  readonly value: ConfigValue;
+  readonly error: string | undefined;
+  readonly entryErrors: Readonly<Record<number, string>> | undefined;
+  readonly onChange: (value: ConfigValue) => void;
+}): JSX.Element {
+  const loadsChoices = field.loadsChoices === true;
+  const read = useQuery({
+    ...connectionChoicesQuery(client, connectionId, field.name),
+    enabled: loadsChoices,
+  });
+  const choices: FieldChoices | undefined = !loadsChoices
+    ? undefined
+    : read.isError
+      ? { status: "failed", message: readErrorMessage(read.error) }
+      : read.data === undefined
+        ? { status: "loading" }
+        : { status: "loaded", choices: read.data };
+
+  return (
+    <ConfigFieldRow
+      inputId={`${connectionId}-${field.name}`}
+      field={field}
+      choices={choices}
+      {...row}
+    />
+  );
+}
 
 /**
  * The form that edits an existing connection: its name, its topic, the
@@ -169,9 +215,10 @@ export function ConfigureConnection({
       {fields.length === 0 ? null : (
         <FormSection heading={readConfigHeading(type?.configSchema)}>
           {fields.map((field) => (
-            <ConfigFieldRow
+            <ConnectionConfigRow
               key={field.name}
-              inputId={`${connection.id}-${field.name}`}
+              client={client}
+              connectionId={connection.id}
               field={field}
               value={draft[field.name] ?? ""}
               error={unreadableConfig[field.name] ?? issues.config[field.name]}
