@@ -99,7 +99,10 @@ export function ConfigureConnection({
                   onChange={(event) => onNameChange(event.target.value)}
                 />
               </FormField>
-              <FormField label="Topic">
+              <FormField
+                label="Topic"
+                hint="Tasks from this Connection are filed under this topic. Leave it empty for none."
+              >
                 <input
                   list={`${id}-topics`}
                   autoComplete="off"

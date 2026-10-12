@@ -86,6 +86,20 @@ describe("summarizeConnectionType", () => {
     expect(summarizeConnectionType(type)).toBe("P · sign in with T or paste a token");
   });
 
+  it("words the credentials setup as its switch does, from the fields it asks for", () => {
+    const type = withSetup([
+      { kind: "device" },
+      {
+        kind: "credentials",
+        fields: [
+          { name: "token", label: "Token" },
+          { name: "org", label: "Organization slug" },
+        ],
+      },
+    ]);
+    expect(summarizeConnectionType(type)).toBe("P · sign in with T or enter credentials");
+  });
+
   it("describes a pairing setup", () => {
     expect(summarizeConnectionType(withSetup([{ kind: "pairing" }]))).toBe(
       "P · pair a chat account",

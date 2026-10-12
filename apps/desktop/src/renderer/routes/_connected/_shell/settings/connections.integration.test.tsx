@@ -383,7 +383,7 @@ describe("Settings > Connections", () => {
     ).toEqual([
       ["GitHub", "sign in with GitHub or paste a token"],
       // The plugin is named unlike its type, so its name comes first.
-      ["Paper", "Paper Trail · paste a token"],
+      ["Paper", "Paper Trail · enter your API key"],
     ]);
   });
 

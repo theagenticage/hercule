@@ -79,7 +79,7 @@ export const describeSetupFlow = (flow: SetupFlow, type: ConnectionType): string
     case "oauth":
       return `sign in with ${type.displayName}`;
     case "credentials":
-      return "paste a token";
+      return describeCredentialsSetup(type);
     case "pairing":
       return "pair a chat account";
   }
@@ -115,20 +115,20 @@ const lowerFirstWord = (label: string): string =>
   /^[A-Z]{2}/.test(label) ? label : label.charAt(0).toLowerCase() + label.slice(1);
 
 /**
- * Returns the label of the button that switches to the credentials flow, from
- * the fields that flow asks for:
+ * Returns what the credentials flow asks of the user, worded for the middle
+ * of a sentence, from the fields that flow asks for:
  *
- * - one token field: "Paste a token instead";
- * - one other field: "Enter your API key instead";
- * - several fields, or none: "Enter credentials instead".
+ * - one token field: "paste a token";
+ * - one other field: "enter your API key";
+ * - several fields, or none: "enter credentials".
  */
-const buildCredentialsSwitchLabel = (type: ConnectionType): string => {
+const describeCredentialsSetup = (type: ConnectionType): string => {
   const fields = listCredentialFields(type);
   const [field] = fields;
-  if (fields.length !== 1 || field === undefined) return "Enter credentials instead";
+  if (fields.length !== 1 || field === undefined) return "enter credentials";
   return /\btoken\b/i.test(field.label)
-    ? "Paste a token instead"
-    : `Enter your ${lowerFirstWord(field.label)} instead`;
+    ? "paste a token"
+    : `enter your ${lowerFirstWord(field.label)}`;
 };
 
 /**
@@ -153,8 +153,10 @@ export const listFlowSwitches = (
     switch (flow) {
       case "pairing":
         return [];
-      case "credentials":
-        return [{ flow, label: buildCredentialsSwitchLabel(type) }];
+      case "credentials": {
+        const setup = describeCredentialsSetup(type);
+        return [{ flow, label: `${setup.charAt(0).toUpperCase()}${setup.slice(1)} instead` }];
+      }
       case "device":
         return [
           {

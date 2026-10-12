@@ -296,13 +296,9 @@ function SetupForm({
   return (
     <form onSubmit={submit}>
       {state.flow === "device" ? (
-        <p className="setup-lead">
-          {`Hercule shows a code to enter on ${type.displayName}, where you approve Hercule.`}
-        </p>
+        <p className="setup-lead">{`You get a code to enter on ${type.displayName}.`}</p>
       ) : state.flow === "oauth" ? (
-        <p className="setup-lead">
-          {`Your browser opens ${type.displayName}, where you sign in and approve Hercule.`}
-        </p>
+        <p className="setup-lead">{`You sign in to ${type.displayName} in your browser.`}</p>
       ) : null}
       {type.setup.map((step, index) =>
         // A checklist step holds the provider's own instructions, shown as written.
