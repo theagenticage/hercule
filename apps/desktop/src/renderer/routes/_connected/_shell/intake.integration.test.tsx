@@ -4,7 +4,7 @@
  * elsewhere while its pane is open, the split's handle, the To do count on
  * the sidebar, and the Everything view of the events behind the signals.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
@@ -1408,6 +1408,13 @@ describe("Intake's motion", () => {
 });
 
 describe("Intake's Everything view", () => {
+  // Intake loads Everything's screen lazily, and the first import compiles
+  // it with the React Compiler. On a busy CI runner that compile can outlast
+  // a test's one-second wait for the screen, so it happens once, here.
+  beforeAll(async () => {
+    await import("../../../screens/intake/everything-screen");
+  });
+
   it("switches to Everything, which reads Intake's events newest first and states the horizon", async () => {
     const events = [1, 2, 3].map((id) => buildListedEvent(id));
     const { calls, router } = await openEverything(events, "/intake");

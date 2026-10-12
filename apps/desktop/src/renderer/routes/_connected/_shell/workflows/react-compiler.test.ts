@@ -67,7 +67,10 @@ const compileSource = (file: string): Skip[] => {
 };
 
 describe("the React Compiler", () => {
-  it("compiles every component and hook of the workflow pages", () => {
+  // Compiling every file takes under a second on a laptop, but has passed
+  // the default limit of 5 s on a busy CI runner. The work is bounded, so a
+  // longer limit hides no hang.
+  it("compiles every component and hook of the workflow pages", { timeout: 30_000 }, () => {
     const files = FOLDERS.flatMap(listSources);
     expect(files.length).toBeGreaterThan(5);
 
