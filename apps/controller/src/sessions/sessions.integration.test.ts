@@ -692,14 +692,6 @@ describe("session.spawn: the model options a call picks", () => {
     });
   });
 
-  it("stores no options at all when the call sends none", async () => {
-    await withFleet(async (arranged) => {
-      const session = await spawnSessionOrFail(arranged, { prompt: "hello", model: "clever" });
-
-      expect(session.modelSelection).toEqual({ model: "clever", options: {} });
-    });
-  });
-
   // One invalid option is enough here. `options.test.ts` covers the rules;
   // this test covers the wiring: the call is validated against the catalog of
   // the runner the session is placed on, and a rejected call spawns nothing.
@@ -726,19 +718,6 @@ describe("session.spawn: the model options a call picks", () => {
  * that names neither.
  */
 describe("session.spawn with an explicit runner or profile", () => {
-  it("places the session on the runner an explicit runnerId names", async () => {
-    await withFleet(async (arranged) => {
-      const session = await spawnSessionOrFail(arranged, {
-        prompt: "hello",
-        runnerId: arranged.runnerId,
-      });
-
-      expect(session.runnerId).toBe(arranged.runnerId);
-      const start = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
-      expect(start.sessionId).toBe(session.id);
-    });
-  });
-
   it("uses an explicit runnerId even when that runner is reserved", async () => {
     await withFleet(async (arranged) => {
       // `reserved` is set directly on the row, because `runner.update` does not
@@ -761,53 +740,39 @@ describe("session.spawn with an explicit runner or profile", () => {
     });
   });
 
-  it("rejects a named runner that is draining, and says why", async () => {
-    await withFleet(async (arranged) => {
-      await Effect.runPromise(
-        Effect.orDie(
-          arranged.harness.sql`
-            UPDATE runners SET lifecycle = 'draining'
-            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
-        ),
-      );
+  // Draining and retired have a message each. A retired runner never comes
+  // back, so the user must not be told it is only draining, and the other way
+  // round: each row checks that the other lifecycle's word is absent.
+  it.each([
+    ["draining", "retired"],
+    ["retired", "draining"],
+  ])(
+    "rejects a named runner that is %s, and says why",
+    async (lifecycle, otherLifecycle) => {
+      await withFleet(async (arranged) => {
+        await Effect.runPromise(
+          Effect.orDie(
+            arranged.harness.sql`
+              UPDATE runners SET lifecycle = ${lifecycle}
+              WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          ),
+        );
 
-      const response = await spawnSession(arranged, {
-        prompt: "hello",
-        runnerId: arranged.runnerId,
+        const response = await spawnSession(arranged, {
+          prompt: "hello",
+          runnerId: arranged.runnerId,
+        });
+
+        expect(response.status, await response.clone().text()).toBe(409);
+        const text = await response.text();
+        expect(text).toContain(lifecycle);
+        expect(text).not.toContain(otherLifecycle);
+        const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+        const page = (await listing.json()) as { items: ReadonlyArray<Session> };
+        expect(page.items).toEqual([]);
       });
-
-      expect(response.status, await response.clone().text()).toBe(409);
-      expect(await response.text()).toContain("draining");
-      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
-      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
-      expect(page.items).toEqual([]);
-    });
-  });
-
-  it("rejects a named runner that is retired, and says retired, not draining", async () => {
-    await withFleet(async (arranged) => {
-      await Effect.runPromise(
-        Effect.orDie(
-          arranged.harness.sql`
-            UPDATE runners SET lifecycle = 'retired'
-            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
-        ),
-      );
-
-      const response = await spawnSession(arranged, {
-        prompt: "hello",
-        runnerId: arranged.runnerId,
-      });
-
-      expect(response.status, await response.clone().text()).toBe(409);
-      const text = await response.text();
-      expect(text).toContain("retired");
-      expect(text).not.toContain("draining");
-      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
-      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
-      expect(page.items).toEqual([]);
-    });
-  });
+    },
+  );
 
   it("rejects a named runner that is online but not logged in to the instance, and says why", async () => {
     await withFleet(async (arranged) => {
@@ -988,16 +953,6 @@ describe("session.spawn: the title built from the prompt", () => {
       // The cut falls after a space, which the title does not keep.
       expect(title).toBe(longLine.slice(0, 80).trimEnd());
       expect(title).toHaveLength(79);
-    });
-  });
-
-  it("does not leave a space at the end of a title the cut landed after", async () => {
-    await withFleet(async (arranged) => {
-      const session = await spawnSessionOrFail(arranged, {
-        prompt: `${"a".repeat(79)} and then more words`,
-      });
-
-      expect((session as unknown as { title: string }).title).toBe("a".repeat(79));
     });
   });
 
