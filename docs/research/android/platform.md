@@ -25,8 +25,8 @@ The prototype targets one phone. **[Device]**
 | Piece | Where |
 |---|---|
 | JDK 21 | Homebrew `openjdk@21`, `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`. Homebrew's default JDK (26) is too new for AGP. |
-| Android SDK | `ANDROID_HOME=~/Library/Android/sdk`. Installed: platforms 36 and 37.0, build-tools 36.0.0 and 37.0.0, platform-tools, the emulator, and the system image `android-36;google_apis_playstore;arm64-v8a` |
-| Emulator | AVD `hercule-api36` (Pixel 8, Android 16). Start it with `emulator -avd hercule-api36 -no-window -no-audio`. Stop it with `adb -s <serial> emu kill`. |
+| Android SDK | `ANDROID_HOME=~/Library/Android/sdk`. Installed: platforms 36 and 37.0, build-tools 36.0.0 and 37.0.0, platform-tools, the emulator, and the system images `android-36;google_apis_playstore;arm64-v8a` and `android-36.1;google_apis_playstore;arm64-v8a` |
+| Emulator | AVD `hercule-api36-1` (Pixel 8, Android 16 QPR2, SDK 36.1, the phone's level). Start it with `emulator -avd hercule-api36-1 -no-window -no-audio`. Stop it with `adb -s <serial> emu kill`. The probe's Live Update was promoted there (`promoted flag: true`). The older AVD `hercule-api36` (SDK 36.0) cannot request promotion, so do not use it. |
 | Google's `android` CLI | Lives in `cmdline-tools/latest/bin`. Use `android sdk install <package>`, because `sdkmanager` is deprecated and package names now use slashes: `platforms/android-37.0`. Pass `--no-metrics` to every command. |
 
 The variables are set in `~/.zprofile`.
@@ -114,7 +114,7 @@ A Live Update is promoted only when all of these hold:
 - it is not a group summary;
 - it requests promotion with `setRequestPromotedOngoing(true)`.
 
-`ProgressStyle` and `FLAG_PROMOTED_ONGOING` arrived in API 36. `setRequestPromotedOngoing`, `setShortCriticalText` and `NotificationManager.canPostPromotedNotifications()` arrived in 36.1. The user can turn promotion off per app (`Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS`).
+`ProgressStyle`, `FLAG_PROMOTED_ONGOING`, `setShortCriticalText` and `NotificationManager.canPostPromotedNotifications()` are in API 36. `setRequestPromotedOngoing` is only in 36.1: platform 37's `android.jar` has it and platform 36's does not. `NotificationCompat` and `NotificationManagerCompat` in androidx.core 1.19.1 wrap all four and check the version themselves, so an app with `minSdk 36` calls them without version branches and lint's `NewApi` check stays quiet. An SDK 36.0 device cannot request promotion, so Live Updates need a 36.1 device or emulator. The user can turn promotion off per app (`Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS`).
 
 Google's guidance is that a Live Update is for ongoing work the user started, not for alerts or chat. A running thread waiting on its next step fits that. A one-off Request on a thread that is not otherwise tracked is an ordinary high-priority notification.
 
