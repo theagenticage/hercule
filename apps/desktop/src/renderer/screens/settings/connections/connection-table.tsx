@@ -24,7 +24,8 @@ import "./connections.css";
  *   is that account's name (`showsAccountBesideLabel`). The line is then
  *   left out rather than repeat the name;
  * - its health in words. A failing Connection reads its status detail in
- *   the fail colour, with a dot, on a tinted row;
+ *   the fail colour, with a dot, on a tinted row. The detail wraps rather
+ *   than end in an ellipsis, because the user needs all of it;
  * - the ⋯ menu, whose items call `onReconnect`, `onConfigure` and
  *   `onDelete` with the Connection.
  *
@@ -87,7 +88,7 @@ export function ConnectionTable({
                 {health.failing ? (
                   <span className="health health--fail" title={health.text}>
                     <i className="dot dot--fail" />
-                    <span>{health.text}</span>
+                    {health.text}
                   </span>
                 ) : (
                   <span className="health">{health.text}</span>

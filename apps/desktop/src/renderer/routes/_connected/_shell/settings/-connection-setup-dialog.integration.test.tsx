@@ -391,6 +391,9 @@ describe("the setup of a Connection with a device code", () => {
       { status: "pending", interval: 5 },
       { status: "done" },
     ]);
+    expect(
+      view.getByText("Hercule shows a code to enter on GitHub, where you approve Hercule."),
+    ).toBeTruthy();
     await signIn(dialog);
 
     expect(view.getByText("WDJB-MJHT").tagName).toBe("B");
@@ -520,6 +523,9 @@ describe("the setup of a Connection with OAuth", () => {
     const dialog = await openSetup("Mailbox");
     const view = within(dialog);
 
+    expect(
+      view.getByText("Your browser opens Mailbox, where you sign in and approve Hercule."),
+    ).toBeTruthy();
     expect(view.getByText("http://controller.test/oauth/callback")).toBeTruthy();
     await userEvent.click(view.getByRole("button", { name: "Sign in with Mailbox" }));
 

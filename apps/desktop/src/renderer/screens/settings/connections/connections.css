@@ -11,10 +11,15 @@
    the frame's 760px column, so the book's 900px column is not used either
    (spec 17 §Settings, Connections). */
 
+/* The book's, plus the wrap, which the book's always-wide column never
+   needs. When the lead line does not fit beside the heading, as in a narrow
+   window, it moves under it, 3px below, as a section's lead sits under its
+   heading elsewhere in Settings. */
 .connection-list .sec-top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 3px 10px;
   margin-bottom: 12px;
 }
 .connection-list .sec-top h2 {
@@ -28,7 +33,7 @@
 }
 
 /* The Health column is the book's 176px, room for a short status detail.
-   A longer one ends in an ellipsis, and its tooltip shows it whole. */
+   A longer one wraps onto more lines (see `.health--fail`). */
 .connection-list .tbl-h,
 .connection-list .conn {
   display: grid;
@@ -95,10 +100,20 @@
   color: var(--fail-ink);
   font-weight: var(--w-medium);
 }
-/* Not in the book. A status detail is the controller's words, of any length. */
-.connection-list .health > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* Not in the book, whose status detail is short. Here it is the controller's
+   error message, of any length, and the user needs all of it, so it wraps
+   instead of ending in an ellipsis. The dot floats beside the first line,
+   centred on it, so the lines after it start under the dot, at the same left
+   edge as the rest of the row's text. On one line this draws as the book's
+   flex row does: the dot centred, then 8px, then the text. */
+.connection-list .health--fail {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.connection-list .health--fail > .dot {
+  float: left;
+  margin: calc((1lh - 7px) / 2) 8px 0 0;
 }
 
 /* A narrow window (spec 17 §Settings, The frame). While the body is narrower
@@ -134,8 +149,7 @@
     align-self: start;
   }
   .connection-list .nm b,
-  .connection-list .nm span,
-  .connection-list .health > span {
+  .connection-list .nm span {
     overflow-wrap: anywhere;
     white-space: normal;
   }

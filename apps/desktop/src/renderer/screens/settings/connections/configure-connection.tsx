@@ -85,88 +85,90 @@ export function ConfigureConnection({
           onSave();
         }}
       >
-        {/* Disabled while saving, so nothing typed after Save is lost when
-            the save closes the dialog. */}
-        <fieldset className="pop-sec configure-connection-body" disabled={saving}>
-          <div className="configure-connection-group">
-            <FormField label="Name" error={nameError ?? null}>
-              <input
-                aria-required
-                spellCheck={false}
-                autoComplete="off"
-                value={name}
-                onChange={(event) => onNameChange(event.target.value)}
-              />
-            </FormField>
-            <FormField label="Topic">
-              <input
-                list={`${id}-topics`}
-                autoComplete="off"
-                value={topic}
-                onChange={(event) => onTopicChange(event.target.value)}
-              />
-              <datalist id={`${id}-topics`}>
-                {SUGGESTED_TOPICS.map((suggestion) => (
-                  <option key={suggestion} value={suggestion} />
-                ))}
-              </datalist>
-            </FormField>
-            {missingType === undefined ? null : (
-              <p className="configure-connection-note">
-                {`The plugin that declared ${missingType} is not installed, so only the name and topic can be changed. Its settings and polling are kept as they are.`}
-              </p>
+        <div className="pop-sec configure-connection-body">
+          {/* Disabled while saving, so nothing typed after Save is lost when
+              the save closes the dialog. */}
+          <fieldset className="configure-connection-fields" disabled={saving}>
+            <div className="configure-connection-group">
+              <FormField label="Name" error={nameError ?? null}>
+                <input
+                  aria-required
+                  spellCheck={false}
+                  autoComplete="off"
+                  value={name}
+                  onChange={(event) => onNameChange(event.target.value)}
+                />
+              </FormField>
+              <FormField label="Topic">
+                <input
+                  list={`${id}-topics`}
+                  autoComplete="off"
+                  value={topic}
+                  onChange={(event) => onTopicChange(event.target.value)}
+                />
+                <datalist id={`${id}-topics`}>
+                  {SUGGESTED_TOPICS.map((suggestion) => (
+                    <option key={suggestion} value={suggestion} />
+                  ))}
+                </datalist>
+              </FormField>
+              {missingType === undefined ? null : (
+                <p className="configure-connection-note">
+                  {`The plugin that declared ${missingType} is not installed, so only the name and topic can be changed. Its settings and polling are kept as they are.`}
+                </p>
+              )}
+            </div>
+
+            {settings === undefined ? null : (
+              <section className="configure-connection-group" aria-labelledby={`${id}-settings`}>
+                <h3 id={`${id}-settings`}>{settings.heading}</h3>
+                {settings.rows}
+              </section>
             )}
-          </div>
 
-          {settings === undefined ? null : (
-            <section className="configure-connection-group" aria-labelledby={`${id}-settings`}>
-              <h3 id={`${id}-settings`}>{settings.heading}</h3>
-              {settings.rows}
-            </section>
-          )}
-
-          {feeds.length === 0 ? null : (
-            <section className="configure-connection-group" aria-labelledby={`${id}-polling`}>
-              <h3 id={`${id}-polling`}>Polling</h3>
-              {feeds.map((feed) => {
-                const inputId = `${id}-feed-${feed.name}`;
-                const error = intervalErrors[feed.name];
-                return (
-                  <LabelledField
-                    key={feed.name}
-                    labelId={`${inputId}-label`}
-                    inputId={inputId}
-                    label={describeFeedName(feed)}
-                    hint={describeFeedInterval(feed, typeName)}
-                    error={error}
-                  >
-                    <span
-                      className={
-                        error === undefined
-                          ? "field config-field-narrow"
-                          : "field config-field-narrow is-bad"
-                      }
+            {feeds.length === 0 ? null : (
+              <section className="configure-connection-group" aria-labelledby={`${id}-polling`}>
+                <h3 id={`${id}-polling`}>Polling</h3>
+                {feeds.map((feed) => {
+                  const inputId = `${id}-feed-${feed.name}`;
+                  const error = intervalErrors[feed.name];
+                  return (
+                    <LabelledField
+                      key={feed.name}
+                      labelId={`${inputId}-label`}
+                      inputId={inputId}
+                      label={describeFeedName(feed)}
+                      hint={describeFeedInterval(feed, typeName)}
+                      error={error}
                     >
-                      {/* A text field, not a number field, so text such as
-                          "abc" reaches the form, which can say what is wrong. */}
-                      <input
-                        id={inputId}
-                        aria-describedby={buildHintId(`${inputId}-label`)}
-                        aria-invalid={error === undefined ? undefined : true}
-                        inputMode="numeric"
-                        autoComplete="off"
-                        placeholder={String(feed.defaultIntervalSeconds)}
-                        value={intervals[feed.name] ?? ""}
-                        onChange={(event) => onIntervalChange(feed.name, event.target.value)}
-                      />
-                      <span className="fine">seconds</span>
-                    </span>
-                  </LabelledField>
-                );
-              })}
-            </section>
-          )}
-        </fieldset>
+                      <span
+                        className={
+                          error === undefined
+                            ? "field config-field-narrow"
+                            : "field config-field-narrow is-bad"
+                        }
+                      >
+                        {/* A text field, not a number field, so text such as
+                            "abc" reaches the form, which can say what is wrong. */}
+                        <input
+                          id={inputId}
+                          aria-describedby={buildHintId(`${inputId}-label`)}
+                          aria-invalid={error === undefined ? undefined : true}
+                          inputMode="numeric"
+                          autoComplete="off"
+                          placeholder={String(feed.defaultIntervalSeconds)}
+                          value={intervals[feed.name] ?? ""}
+                          onChange={(event) => onIntervalChange(feed.name, event.target.value)}
+                        />
+                        <span className="fine">seconds</span>
+                      </span>
+                    </LabelledField>
+                  );
+                })}
+              </section>
+            )}
+          </fieldset>
+        </div>
 
         <div className="pop-sec configure-connection-foot">
           {failure === null ? null : (

@@ -259,7 +259,8 @@ export function ConnectionSetup({
 }
 
 /**
- * Renders the form of one flow: the type's own instructions, then the
+ * Renders the form of one flow: for a sign-in, a line on what the sign-in
+ * does, then the type's own instructions, then the
  * credential fields, or the redirect URI to register for OAuth, then Cancel
  * and the button that sends the form, and `switches`, the links to the
  * type's other flows. While the credentials are being sent, the fields
@@ -294,6 +295,15 @@ function SetupForm({
     : `Sign in with ${type.displayName}`;
   return (
     <form onSubmit={submit}>
+      {state.flow === "device" ? (
+        <p className="setup-lead">
+          {`Hercule shows a code to enter on ${type.displayName}, where you approve Hercule.`}
+        </p>
+      ) : state.flow === "oauth" ? (
+        <p className="setup-lead">
+          {`Your browser opens ${type.displayName}, where you sign in and approve Hercule.`}
+        </p>
+      ) : null}
       {type.setup.map((step, index) =>
         // A checklist step holds the provider's own instructions, shown as written.
         step.kind === "checklist" ? (

@@ -6,8 +6,12 @@
 .setup-dialog {
   width: 448px;
 }
+/* In a short window the body scrolls inside the dialog, under its header,
+   as the project picker's rows do. */
 .pop-sec.setup-dialog-body {
+  min-height: 0;
   padding: 14px;
+  overflow-y: auto;
 }
 /* The book's marked rows and warnings sit under a step's heading; here the
    dialog's header is above them. */
@@ -15,8 +19,9 @@
 .setup-dialog-body > .warn {
   margin-top: 0;
 }
-/* Text in the dialog: the type's own instructions, kept as written with
-   their line breaks, and what the setup asks of the user. Muted, as the
+/* Text in the dialog: what a sign-in does, the type's own instructions,
+   kept as written with their line breaks, and what the setup asks of the
+   user. Muted, as the
    confirm dialog's text. */
 .setup-lead {
   margin: 0 0 10px;
