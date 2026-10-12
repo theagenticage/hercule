@@ -157,8 +157,9 @@ jobs:
       # install.sh runs on macOS only, so its tests that run it past the
       # platform check are skipped in the `test-node` job, on Linux. The file name
       # also matches the runner's tests of the harness installers, which run
-      # here too.
-      - run: pnpm exec vitest run --project node install.test.ts
+      # here too. They run on Bun, like every backend test: the projects'
+      # global setup migrates the test database with `bun:sqlite`.
+      - run: bun --bun run vitest run --project node --project node-isolated install.test.ts
 
       # Builds the release package and the test package, and checks the
       # renderer's bundle budget and main's startup file.
