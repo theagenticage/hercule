@@ -615,6 +615,12 @@ export {
   EventSelector,
   isSchedule,
   Schedule,
+  DEFAULT_SPAWN_BOUND,
+  describeSpawnBound,
+  describeWindowLength,
+  MAX_SPAWN_BOUND_RUNS,
+  MAX_SPAWN_BOUND_WINDOW_SECONDS,
+  SpawnBound,
   TriggerFiresOn,
   TriggerOn,
   listEntrySteps,
@@ -672,6 +678,8 @@ export {
   TriggerHealth,
   TriggerKey,
   TriggerKind,
+  TriggerPausedBy,
+  TriggerResumeCall,
   TriggerStatus,
 } from "./groups/trigger";
 export { readShorthandDecoder } from "./shorthand";

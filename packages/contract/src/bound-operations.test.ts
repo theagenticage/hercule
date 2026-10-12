@@ -63,6 +63,7 @@ describe("the operations an answer may run", () => {
       "permission.decide",
       "task.update",
       "run.start",
+      "trigger.resume",
       "session.input",
       "session.respondToApprovalRequest",
     ]);
@@ -170,6 +171,8 @@ describe("dispatchAnswerOperation", () => {
       `session.respondToApprovalRequest of ${decision} to ${requestId}`,
     "permission.decide": ({ requestId, outcome }) =>
       `permission.decide of ${outcome} to ${requestId}`,
+    "trigger.resume": ({ workflowId, triggerId }) =>
+      `trigger.resume of ${triggerId} in ${workflowId}`,
   };
 
   it("calls the handler for the operation with the operation's input", () => {

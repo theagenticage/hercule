@@ -1345,8 +1345,18 @@ export const CLI = {
       { args: ["--since", "2026-09-15T00:00:00.000Z"] },
       { args: ["--intake", "true", "--text", "dependabot"] },
       { args: ["--intake", "true", "--handling", "raised-signal", "--handling", "evidence"] },
+      { args: ["--workflow", "1f3a9c2e", "--trigger", "new_issue"] },
     ],
     fields: {
+      workflowId: {
+        flag: "workflow",
+        help: "With --trigger, lists only the events that trigger holds: matched after its spawn bound was spent, and waiting to start a run. The workflow by its id or a tail of eight or more characters.",
+        resolves: "workflow.query",
+      },
+      triggerId: {
+        flag: "trigger",
+        help: "With --workflow, lists only the events this trigger holds. The trigger's id in the workflow's source, such as new_issue.",
+      },
       connectionId: {
         flag: "connection",
         help: "Only events that arrived through this Connection, by its full id.",
@@ -1713,7 +1723,7 @@ export const CLI = {
 
   "trigger.query": {
     command: "trigger list",
-    help: "Lists the triggers of every workflow, newest first. Each row shows what the trigger fires on, an event kind or a schedule, and whether a start trigger is active or paused. Triggers are defined in their workflow's source, so change one with `hercule workflow update`.",
+    help: "Lists the triggers of every workflow, newest first. Each row shows what the trigger fires on, an event kind or a schedule, and whether a start trigger is active or paused. A start trigger also shows its spawn bound, how much of it the current window used (the runs started in it plus the matches about to start one), and the events it holds after its bound tripped. Triggers are defined in their workflow's source, so change one with `hercule workflow update`.",
     examples: [
       { args: [] },
       { args: ["--workflow", "1f3a9c2e"] },
@@ -1747,7 +1757,7 @@ export const CLI = {
   },
   "trigger.pause": {
     command: "trigger pause",
-    help: "Pauses a start trigger, so it starts no run until you resume it with `hercule trigger resume`. Events that arrive while it is paused are dropped, not kept for later, and a cron trigger's scheduled times pass without firing. The workflow's source does not change, and saving a new source keeps the pause. Pausing a paused trigger changes nothing.",
+    help: "Pauses a start trigger, so it starts no run until you resume it with `hercule trigger resume`. Events that arrive while it is paused are dropped, not kept for later, and a cron trigger's scheduled times pass without firing. The workflow's source does not change, and saving a new source keeps the pause. Pausing keeps the events the trigger already matched: the events it holds stay held, and matches about to start a run are held too. Pausing a trigger that is already paused manually changes nothing.",
     examples: [{ args: ["1f3a9c2e", "weekday_morning"] }],
     fields: {
       workflowId: {
@@ -1766,8 +1776,11 @@ export const CLI = {
   },
   "trigger.resume": {
     command: "trigger resume",
-    help: "Resumes a paused start trigger, so it starts runs again from the next event it matches. Events that arrived while it was paused do not start runs, and a cron trigger fires next at its next scheduled time. Resuming an active trigger changes nothing.",
-    examples: [{ args: ["1f3a9c2e", "weekday_morning"] }],
+    help: "Resumes a paused start trigger, so it starts runs again. Events that arrived while it was paused manually do not start runs, and a cron trigger fires next at its next scheduled time. The events it holds start runs in the order they arrived, as fast as its spawn bound allows, and new matches queue behind them; --discard-held discards them instead. If the held events then grow by more than the bound's run count, the breaker trips again. List the held events with `hercule event list --workflow <id> --trigger <id>`. Resuming answers the open breaker notification about the trigger. Resuming an active trigger changes nothing, unless --discard-held has held events to discard.",
+    examples: [
+      { args: ["1f3a9c2e", "weekday_morning"] },
+      { args: ["1f3a9c2e", "new_issue", "--discard-held", "true"] },
+    ],
     fields: {
       workflowId: {
         positional: true,
@@ -1777,6 +1790,10 @@ export const CLI = {
       triggerId: {
         positional: true,
         help: "The trigger's id in the workflow's source, such as weekday_morning.",
+      },
+      discardHeld: {
+        flag: "discard-held",
+        help: "true discards the events the trigger holds before it resumes, so none of them starts a run. They stay in the event log.",
       },
     },
     errors: {
