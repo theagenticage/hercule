@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Logger, PubSub, Schema, Stream } from "effect";
+import { Duration, Effect, Fiber, Logger, PubSub, Schema, Stream } from "effect";
 import { locateRunnerFile } from "@hercule/home";
 import {
   AGENT_STEPS_CAPABILITY,
@@ -1174,11 +1174,14 @@ describe("session frames on one connection", () => {
     roots.push(root);
     const stub = await stubController();
     const storageDir = joinPath(root, "storage");
+    const sessions = makeSupervising([fake.adapter]);
+    // The daemon forks the watch once, before its first connection.
+    watches.push(Effect.runFork(sessions.watch));
     const pending = runConnection(buildPin(stub), {
       providersDir: joinPath(root, "providers"),
       scratchDir: joinPath(root, "scratch"),
       attachmentsDir: joinPath(root, "attachments"),
-      sessions: makeSupervising([fake.adapter]),
+      sessions,
       workspaceSteps: makeWorkspaceSteps({
         storageDir,
         workspaces,
@@ -1192,8 +1195,10 @@ describe("session frames on one connection", () => {
   };
 
   const roots: Array<string> = [];
+  const watches: Array<Fiber.Fiber<void>> = [];
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const watch of watches.splice(0)) await Effect.runPromise(Fiber.interrupt(watch));
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 

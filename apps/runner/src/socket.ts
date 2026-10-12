@@ -164,7 +164,10 @@ export interface ConnectOptions {
   readonly credentials: CredentialRelay;
   /** The provider logins on this machine. They outlive this connection. */
   readonly providerLogins: Logins;
-  /** The sessions on this machine. They outlive this connection. */
+  /**
+   * The sessions on this machine. They outlive this connection, and the
+   * caller has forked their `watch` already.
+   */
   readonly sessions: Supervising;
   /** `<home>/runner/bin`, holding the `hercule` symlink every session gets on `PATH`. */
   readonly binDir: string;
@@ -898,13 +901,13 @@ export const connect = (
       yield* Effect.logInfo("The runner connected to the controller").pipe(
         Effect.annotateLogs({ controllerUrl: pin.controllerUrl, runnerId: pin.runnerId }),
       );
-      // Start the relay only now. A session that survived a reconnect can
-      // produce events at once, and a peer that has not proved its identity
-      // must not receive any of them. The relay subscribes when it starts, so
-      // events published before this point are lost, like everything produced
-      // while the socket was down: the runner has no outbox yet that keeps
-      // events for replay (spec 03 section 2.3).
-      yield* Effect.forkIn(supervisor.relay, connection);
+      // Attach only now. A session that survived a reconnect can produce
+      // events at once, and a peer that has not proved its identity must not
+      // receive any of them. The supervisor watched every event while no
+      // connection was attached, but the ones produced then are lost on the
+      // way to the controller: the runner has no outbox yet that keeps events
+      // for replay (spec 03 section 2.3).
+      yield* supervisor.attach.pipe(Scope.provide(connection));
       yield* supervisor.report;
       // Like the sessions report: the controller settles every listed step
       // whose record ended while this runner was away. One frame holds at

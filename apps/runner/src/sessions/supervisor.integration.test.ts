@@ -42,7 +42,7 @@ import {
   makeRemote,
   runGitOrThrow,
 } from "../workspaces/testing";
-import { makeSupervising } from "./supervisor";
+import { makeSupervising, type SessionSupervisor, type Supervising } from "./supervisor";
 import { makeAttachmentCache, type AttachmentCache } from "../attachments";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 
@@ -301,9 +301,31 @@ const buildConnection = (fake: Fake, cache?: AttachmentCache) => {
   // supervisor is built from it with `forConnection`. Sessions outlive the
   // socket that started them, and so does the shutdown that stops them all.
   const runner = makeSupervising([fake.adapter]);
+  watchers.set(fake, { runner, scope, watching: false });
   const supervisor = runner.forConnection({ scope, machine, send, workspaceSteps: steps });
   return { supervisor, runner, sent, machine, under, steps, scope };
 };
+
+/** The runner each fake belongs to, and whether that runner's watch runs yet. */
+const watchers = new Map<
+  Fake,
+  { readonly runner: Supervising; readonly scope: Scope.Scope; watching: boolean }
+>();
+
+/**
+ * Forks the watch of the fake's runner the first time it is called for that
+ * fake, the way the daemon forks it once at startup. The watch keeps running
+ * after the caller is done, between connections too, as it does in a runner.
+ * It reads the clock of the caller that forked it.
+ */
+const startWatching = (fake: Fake): Effect.Effect<void> =>
+  Effect.suspend(() => {
+    const watcher = watchers.get(fake);
+    if (watcher === undefined) return Effect.die("the fake has no runner; use buildConnection");
+    if (watcher.watching) return Effect.void;
+    watcher.watching = true;
+    return Effect.asVoid(Effect.forkIn(watcher.runner.watch, watcher.scope));
+  });
 
 /**
  * How long a wait on the relay may take. This is wall-clock time, not a number
@@ -345,23 +367,28 @@ const awaitMarker = (fake: Fake): Effect.Effect<void> =>
     });
   });
 
-/** Runs `body` with the relay forked beside it, the way a connection runs it. */
-const runWithRelay = <A>(
+/**
+ * Runs `body` with the connection attached, the way a connection is attached
+ * once the controller has proved its identity, and detaches it afterwards.
+ * Starts the runner's watch first, if it is not running yet.
+ */
+const runConnected = <A>(
   fake: Fake,
-  supervisor: { readonly relay: Effect.Effect<void> },
+  supervisor: SessionSupervisor,
   body: Effect.Effect<A>,
 ): Promise<A> =>
   Effect.runPromise(
-    Effect.gen(function* () {
-      const relaying = yield* Effect.forkChild(supervisor.relay);
-      // Wait for proof, not for a fixed time: `forkChild` returns the fiber
-      // before it has run, so a session started now would publish its
-      // `session.started` to a PubSub with no subscriber yet.
-      yield* awaitMarker(fake);
-      const value = yield* body;
-      yield* Fiber.interrupt(relaying);
-      return value;
-    }),
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* startWatching(fake);
+        // Wait for proof, not for a fixed time: `forkIn` returns the fiber
+        // before it has run, so a session started now would publish its
+        // `session.started` to a PubSub with no subscriber yet.
+        yield* awaitMarker(fake);
+        yield* supervisor.attach;
+        return yield* body;
+      }),
+    ),
   );
 
 const listSessionEvents = (sent: ReadonlyArray<RunnerToController>): ReadonlyArray<SessionEvent> =>
@@ -388,7 +415,7 @@ describe("one session, start to exit", () => {
     const fake = createFake();
     const { supervisor, sent, machine } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -445,7 +472,7 @@ describe("one session, start to exit", () => {
     const { supervisor, sent, machine } = buildConnection(fake);
 
     const scratch = join(machine.scratchDir, SESSION);
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -477,7 +504,7 @@ describe("an event too large for one frame", () => {
     const { supervisor, sent } = buildConnection(fake);
     const text = "x".repeat(MAX_FRAME_BYTES + 1);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -523,7 +550,7 @@ describe("the input a start carries", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelay(fake, supervisor, supervisor.start(START));
+    await runConnected(fake, supervisor, supervisor.start(START));
 
     expect(fake.inputs).toEqual([START_INPUT]);
     expect(listInputResults(sent)).toEqual([
@@ -538,7 +565,7 @@ describe("the input a start carries", () => {
       sendInput: () => Effect.fail("the harness is not ready for input"),
     });
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -588,7 +615,7 @@ describe("the images of an input", () => {
     const { supervisor, sent, machine } = buildConnection(fake, cache);
     const dir = join(machine.attachmentsDir, SESSION);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -624,7 +651,7 @@ describe("the images of an input", () => {
     const dir = join(machine.attachmentsDir, SESSION);
 
     try {
-      await runWithRelay(
+      await runConnected(
         fake,
         supervisor,
         Effect.gen(function* () {
@@ -650,7 +677,7 @@ describe("the images of an input", () => {
     const reason = 'the image "screenshot.png" could not be fetched from the controller: HTTP 404';
     const { supervisor, sent } = buildConnection(fake, { fetch: () => Effect.fail(reason) });
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -696,7 +723,7 @@ describe("a start interrupted while its harness is starting", () => {
       },
     });
 
-    const exit = await runWithRelay(
+    const exit = await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -728,7 +755,7 @@ describe("a start the controller sends twice", () => {
     const { supervisor, sent, machine } = buildConnection(fake);
     const scratch = join(machine.scratchDir, SESSION);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -756,7 +783,7 @@ describe("a start the controller sends twice", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -785,7 +812,7 @@ describe("an exit that arrives after the id was started again", () => {
     const { supervisor, sent, machine } = buildConnection(fake);
     const scratch = join(machine.scratchDir, SESSION);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -862,7 +889,7 @@ describe("a stale exit's release racing a fresh start under the same id", () => 
       },
     });
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -895,7 +922,7 @@ describe("a start for a session this machine tore down when it exited", () => {
       spec: { ...SPEC, continue: { nativeSessionId: NATIVE, mode: "resume" } },
     };
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -925,18 +952,18 @@ describe("a session that ended while the socket was down", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.flatMap(supervisor.start(START), () =>
         waitUntil("sent the start", () => listSessionEvents(sent).length === 1),
       ),
     );
-    // The harness ends between connections. No relay is running, so its exit
-    // reaches no controller, and the supervisor's entry outlives the session.
-    // Nothing sends the exit again, because there is no outbox.
+    // The harness ends between connections. The watch removes the session's
+    // entry, but the exit reaches no controller, and nothing sends it again,
+    // because there is no outbox.
     await Effect.runPromise(fake.adapter.stopSession(SESSION, "stopped"));
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.flatMap(supervisor.start(START), () =>
@@ -950,6 +977,40 @@ describe("a session that ended while the socket was down", () => {
       "session.started",
     ]);
   });
+
+  it("is started again at once when the supervisor stopped it, as its absolute timeout does", async () => {
+    const fake = createFake();
+    const { supervisor, sent, machine } = buildConnection(fake);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.flatMap(supervisor.start(START), () =>
+        waitUntil("sent the start", () => listSessionEvents(sent).length === 1),
+      ),
+    );
+    // The supervisor stops the harness between connections, the way a timer
+    // that fires as a laptop wakes does. The exit reaches no controller.
+    await Effect.runPromise(supervisor.stop({ _tag: "sessionStop", sessionId: SESSION }));
+    await Effect.runPromise(
+      waitUntil(
+        "removed the stopped session's directory",
+        () => !existsSync(join(machine.scratchDir, SESSION)),
+      ),
+    );
+    // The test clock never moves, so a start that waited for an exit the
+    // supervisor had missed would never be answered.
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.flatMap(supervisor.start({ ...START, requestId: REQUEST }), () =>
+        waitOnWallClock("sent the second start", () => listSessionEvents(sent).length === 2),
+      ),
+    );
+
+    expect(fake.contexts).toHaveLength(2);
+    expect(listInputResults(sent).map((result) => result.ok)).toEqual([true, true]);
+  });
 });
 
 describe("a session that cannot run here", () => {
@@ -958,7 +1019,7 @@ describe("a session that cannot run here", () => {
     fake.fails = "no fake-harness on this machine";
     const { supervisor, sent, machine } = buildConnection(fake);
 
-    await runWithRelay(fake, supervisor, supervisor.start(START));
+    await runConnected(fake, supervisor, supervisor.start(START));
 
     const events = listSessionEvents(sent).map((frame) => frame.event);
     expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
@@ -986,7 +1047,7 @@ describe("a session that cannot run here", () => {
     const fake = createFake();
     const { supervisor, sent, machine } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       supervisor.start({
@@ -1015,7 +1076,7 @@ describe("a session that cannot run here", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelay(fake, supervisor, supervisor.start({ ...START, providerId: "codex" }));
+    await runConnected(fake, supervisor, supervisor.start({ ...START, providerId: "codex" }));
 
     const events = listSessionEvents(sent).map((frame) => frame.event);
     expect(events[0]).toMatchObject({ message: "no adapter for codex in this runner build" });
@@ -1028,7 +1089,7 @@ describe("a session that cannot run here", () => {
     const { supervisor, sent, machine } = buildConnection(fake);
     fake.dies = true;
 
-    await runWithRelay(fake, supervisor, supervisor.start(START));
+    await runConnected(fake, supervisor, supervisor.start(START));
 
     // Every other frame handler on this connection catches its own defects. A
     // start that did not would leave the controller waiting in `starting`
@@ -1046,7 +1107,7 @@ describe("a session that cannot run here", () => {
     const { supervisor, sent } = buildConnection(fake);
     const workspaceId = "0199e0e7-0000-7000-8000-0000000000ee";
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       // A workspace this runner does not hold, so the session has nowhere to run.
@@ -1064,7 +1125,7 @@ describe("a session that cannot run here", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1097,7 +1158,7 @@ describe("what the runner sends back for input, interrupts and answers", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1122,7 +1183,7 @@ describe("what the runner sends back for input, interrupts and answers", () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1142,7 +1203,7 @@ describe("what the runner sends back for input, interrupts and answers", () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1164,7 +1225,7 @@ describe("what the runner sends back for input, interrupts and answers", () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1192,7 +1253,7 @@ describe("what the runner sends back for input, interrupts and answers", () => {
     const { supervisor } = buildConnection(fake);
     const answers = { Storage: "localStorage", Features: ["Sync", "Search"] } as const;
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1211,25 +1272,27 @@ describe("what the runner sends back for input, interrupts and answers", () => {
 });
 
 /**
- * Like `runWithRelay`, but with the test clock in place of the wall clock. Only
- * the two supervision timers read the test clock. Every wait on the relay stays
- * on the wall clock, because it waits for another fiber to run, and moving
+ * Like `runConnected`, but with the test clock in place of the wall clock. The
+ * watch is forked here when it is not running yet, so it reads the test clock
+ * too. Only the supervision timers read it. Every wait on the watch stays on
+ * the wall clock, because it waits for another fiber to run, and moving
  * virtual time does not make that happen.
  */
-const runWithRelayOnTestClock = <A>(
+const runConnectedOnTestClock = <A>(
   fake: Fake,
-  supervisor: { readonly relay: Effect.Effect<void> },
+  supervisor: SessionSupervisor,
   body: Effect.Effect<A>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.provide(
-      Effect.gen(function* () {
-        const relaying = yield* Effect.forkChild(supervisor.relay);
-        yield* TestClock.withLive(awaitMarker(fake));
-        const value = yield* body;
-        yield* Fiber.interrupt(relaying);
-        return value;
-      }),
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startWatching(fake);
+          yield* TestClock.withLive(awaitMarker(fake));
+          yield* supervisor.attach;
+          return yield* body;
+        }),
+      ),
       TestClock.layer(),
     ),
   );
@@ -1301,7 +1364,7 @@ describe("a harness that goes silent mid-turn", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1328,7 +1391,7 @@ describe("a harness that goes silent mid-turn", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1360,7 +1423,7 @@ describe("a harness that goes silent mid-turn", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1384,7 +1447,7 @@ describe("a harness that goes silent mid-turn", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1623,7 +1686,7 @@ describe("a session parked on an open request", () => {
       const fake = createFake();
       const { supervisor, sent } = buildConnection(fake);
 
-      await runWithRelayOnTestClock(
+      await runConnectedOnTestClock(
         fake,
         supervisor,
         Effect.gen(function* () {
@@ -1663,7 +1726,7 @@ describe("a session that exits while a subagent's turn and Request are open", ()
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1711,7 +1774,7 @@ describe("a session that has run for as long as it may", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1746,7 +1809,7 @@ describe("a session that has run for as long as it may", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1769,7 +1832,7 @@ describe("a session that has run for as long as it may", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1817,7 +1880,7 @@ describe("a session that sits idle between turns", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1843,7 +1906,7 @@ describe("a session that sits idle between turns", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1878,7 +1941,7 @@ describe("a session that sits idle between turns", () => {
       sendInput: () => Effect.fail("the harness is not ready for input"),
     });
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1909,7 +1972,7 @@ describe("a session that sits idle between turns", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1954,7 +2017,7 @@ describe("a session that sits idle between turns", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -1992,7 +2055,7 @@ describe("a session that sits idle between turns", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2029,7 +2092,7 @@ describe("a session that sits idle between turns", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2062,7 +2125,7 @@ describe("a session that sits idle between turns", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2097,7 +2160,7 @@ describe("a session that sits idle between turns", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2121,7 +2184,7 @@ describe("a session that sits idle between turns", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2173,7 +2236,7 @@ describe("an announced shutdown", () => {
     const fake = createFake();
     const { supervisor, runner, sent } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2200,7 +2263,7 @@ describe("an announced shutdown", () => {
     const fake = createFake();
     const { supervisor, runner, sent } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2232,7 +2295,7 @@ describe("an announced shutdown", () => {
     const fake = createFake();
     const { supervisor, runner, sent } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2286,7 +2349,7 @@ describe("a stop that arrives while a session is still starting", () => {
       },
     });
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2349,7 +2412,7 @@ describe("a stop that arrives while a session is still starting", () => {
       releaseWorkspace = resolve;
     });
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2403,7 +2466,7 @@ describe("a start that follows a stop of the same id", () => {
       }),
     });
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2496,7 +2559,7 @@ describe("a start that follows a stop of the same id", () => {
             ),
     });
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2567,7 +2630,7 @@ describe("a shutdown that happens before a start has added its entry", () => {
       }),
     });
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2603,7 +2666,7 @@ describe("the secrets a start frame carries", () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2622,7 +2685,7 @@ describe("the secrets a start frame carries", () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2710,7 +2773,7 @@ describe("an agent step's turn", () => {
     const { supervisor, sent, steps } = buildConnection(fake);
     const verdict = { verdict: "accept", confidence: 0.9, summary: "A typo fix." };
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2746,7 +2809,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2784,7 +2847,7 @@ describe("an agent step's turn", () => {
     const { supervisor, sent } = buildConnection(fake);
     const subagent = { subagentId: SUBAGENT };
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2843,7 +2906,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2872,7 +2935,7 @@ describe("an agent step's turn", () => {
     const { supervisor, sent } = buildConnection(fake);
     const verdict = { verdict: "accept", confidence: 0.9, summary: "x".repeat(MAX_FRAME_BYTES) };
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2904,7 +2967,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2926,7 +2989,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2956,7 +3019,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -2988,7 +3051,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent, steps } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -3009,7 +3072,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent, steps } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -3035,7 +3098,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent, steps } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -3058,7 +3121,7 @@ describe("an agent step's turn", () => {
     const { supervisor, sent, steps } = buildConnection(fake);
     const gate = Deferred.makeUnsafe<void>();
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -3098,7 +3161,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent, steps } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -3130,7 +3193,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent, steps } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -3160,7 +3223,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent, steps } = buildConnection(fake);
 
-    await runWithRelayOnTestClock(
+    await runConnectedOnTestClock(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -3201,7 +3264,7 @@ describe("an agent step's turn", () => {
       sendInput: () => Effect.fail("the harness is not ready for input"),
     });
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -3225,7 +3288,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -3255,7 +3318,7 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent, steps } = buildConnection(fake);
 
-    await runWithRelay(
+    await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
@@ -3297,7 +3360,7 @@ it("reports current checkout facts after start and resume before any turn ends, 
   const reports = (): ReadonlyArray<WorkspaceReport> =>
     sent.filter((message): message is WorkspaceReport => message._tag === "workspaceReport");
 
-  await runWithRelay(
+  await runConnected(
     fake,
     supervisor,
     Effect.gen(function* () {
@@ -3346,4 +3409,30 @@ it("reports current checkout facts after start and resume before any turn ends, 
   expect(readFileSync(setupMarker, "utf8")).toBe("setup\n");
   expect(fake.contexts).toHaveLength(2);
   expect(fake.contexts.map((context) => context.cwd)).toEqual([cwd, cwd]);
+});
+
+describe("an agent step's turn that ends while no connection is attached", () => {
+  it("saves the step's outcome, and a later connection is answered from it", async () => {
+    const fake = createFake();
+    const { supervisor, sent, steps } = buildConnection(fake);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.flatMap(supervisor.start(STEP_SESSION_START), () =>
+        waitUntil("sent the start", () => listSessionEvents(sent).length === 1),
+      ),
+    );
+    emitText(fake, "i-1", "All tests pass.");
+    emitStepTurnEnd(fake, { state: "completed" });
+    await Effect.runPromise(
+      waitUntil("finished the step", () => steps.listInFlight().length === 0),
+    );
+    await runConnected(fake, supervisor, steps.start(STEP_START));
+
+    expect(listStepResults(sent).at(-1)?.outcome).toEqual({
+      status: "completed",
+      output: { exitStatus: "completed", text: "All tests pass." },
+    });
+  });
 });
