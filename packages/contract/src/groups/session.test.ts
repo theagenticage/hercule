@@ -2,7 +2,8 @@
  * Tests the open Request a session record carries: the request as the harness
  * opened it, and the subagent that asked it, by id and by name. Also tests
  * that every session prompt and input takes text, images, or both, never
- * neither, and that the live session statuses are every status but `exited`.
+ * neither, that an input refuses a field it does not name, and that the live
+ * session statuses are every status but `exited`.
  */
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
@@ -168,6 +169,19 @@ describe("text and images in a session prompt or input", () => {
     expect(
       Schema.decodeUnknownExit(SessionInputPayload)({ text: "", attachments: eleven })._tag,
     ).toBe("Failure");
+  });
+});
+
+describe("SessionInputPayload", () => {
+  // An input picks a model with `model` and `options`. A caller that sends a
+  // whole `modelSelection` instead must be told so, not have it dropped.
+  it("refuses a field it does not name, such as modelSelection", () => {
+    const exit = Schema.decodeUnknownExit(SessionInputPayload)({
+      text: "hello",
+      modelSelection: { model: "fast" },
+    });
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("modelSelection");
   });
 });
 
