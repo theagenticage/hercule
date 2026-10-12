@@ -7,6 +7,7 @@ import {
   queryKeys,
   buildRedirectUri,
   listSetupFlows,
+  buildFlowSwitchLabel,
   type ConnectionType,
   type HerculeClient,
   type SetupFlow,
@@ -15,22 +16,6 @@ import {
 import type { Connection } from "@hercule/contract";
 import { SaveStatus } from "../../../screens/save-status";
 import { DeviceSignIn } from "./-device";
-
-/**
- * Returns the label of the button that switches the setup to `flow`, for a
- * type that offers more than one flow.
- */
-const buildFlowSwitchLabel = (flow: SetupFlow, type: ConnectionType): string => {
-  switch (flow) {
-    case "device":
-    case "oauth":
-      return `Sign in with ${type.displayName} instead`;
-    case "credentials":
-      return "Paste a token instead";
-    case "pairing":
-      return "Pair a chat account instead";
-  }
-};
 
 /**
  * The form that sets up a connection: either a new one, or a fresh credential

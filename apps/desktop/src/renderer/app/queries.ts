@@ -436,6 +436,23 @@ export const connectionQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
+ * Reads the choices a Connection's setting offers, for the picker that draws
+ * the setting in Settings > Connections. The choices come from the account
+ * behind the Connection, so they are read each time the picker opens and
+ * dropped as soon as it closes; a failed read is not tried again, because the
+ * picker falls back to a plain field.
+ */
+export const connectionChoicesQuery = (client: HerculeClient, connectionId: string, field: string) =>
+  queryOptions({
+    queryKey: queryKeys.connectionChoices(connectionId, field),
+    queryFn: async () =>
+      (await client.connection.listChoices({ params: { id: connectionId, field } })).choices,
+    gcTime: 0,
+    retry: false,
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
  * Reads every assistant: for the sidebar, the assistant screen, and the one
  * the first run's room seats in the lobby.
  */

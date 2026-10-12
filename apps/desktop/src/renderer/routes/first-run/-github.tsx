@@ -5,8 +5,8 @@ import {
   countMinutesLeft,
   describeCodeExpiry,
   describeDeviceFlowWait,
-  describeGitHubSignInEnding,
-  describeGitHubSignInFailure,
+  describeSignInEnding,
+  describeSignInFailure,
   findGitHubAccount,
   queryKeys,
   readErrorMessage,
@@ -93,7 +93,7 @@ export function GitHubCard({
         });
       },
       onError: (error) => {
-        settleStart(request, describeGitHubSignInFailure(readErrorMessage(error)));
+        settleStart(request, describeSignInFailure(readErrorMessage(error)));
       },
     });
   };
@@ -120,7 +120,7 @@ export function GitHubCard({
         if (step.kind === "ended") {
           setFlow((current) =>
             current.kind === "code"
-              ? describeGitHubSignInEnding(step, current.codeMinutes)
+              ? describeSignInEnding(step, current.codeMinutes, "GitHub")
               : current,
           );
         }
