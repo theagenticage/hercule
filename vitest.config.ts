@@ -1,8 +1,10 @@
+import { globSync, readFileSync } from "node:fs";
 import { defineConfig } from "vitest/config";
 
 /**
- * Six projects: the React code of the web app and the UI library, everything
- * else, the desktop app's two halves, the suite that runs the release binary,
+ * Seven projects: the React code of the web app and the UI library, everything
+ * else (split in two, see `isolatedTests` below), the desktop app's two
+ * halves, the suite that runs the release binary,
  * and the suite that runs the packaged desktop app. A few tests run in both
  * `react` and `node`; see `bothEngineTests` below.
  *
@@ -94,6 +96,46 @@ const binaryTests = [
   "e2e/upgrade.test.ts",
 ];
 
+/** The test files that neither the `node` nor the `node-isolated` project runs. */
+const nodeExclude = [
+  "**/node_modules/**",
+  "**/dist/**",
+  // Agent worktrees are whole copies of this repository.
+  "**/.claude/**",
+  ...reactSources.map((folder) => `${folder}/**`),
+  ...binaryTests,
+  "apps/desktop/**",
+  "e2e/desktop/**",
+];
+
+/**
+ * Finds the test files that replace a module (`vi.mock`, `vi.doMock`) or a
+ * global (`vi.stubGlobal`, `vi.spyOn(globalThis, ...)`). Returns their paths
+ * relative to the repository root.
+ *
+ * The `node` project shares one module cache across the files a worker runs
+ * (`isolate: false`): loading Effect and the controller once per worker rather
+ * than once per file makes the project about a third faster. A replaced module
+ * would then stay replaced, or stay real, for whichever file runs next. A
+ * replaced global can be missed altogether: Effect's fetch client keeps the
+ * first `fetch` it reads, which in a shared cache may be another file's. So
+ * these files run in `node-isolated`, which gives each file its own module
+ * cache. They are found by reading the files, so a new one cannot land in the
+ * shared cache by mistake.
+ */
+const findTestsThatReplaceModulesOrGlobals = (): Array<string> =>
+  globSync("**/*.test.{ts,tsx}", {
+    // Depending on the Node version, this receives a path or a directory entry.
+    exclude: (entry: string | { name: string }) =>
+      /(^|\/)(node_modules|\.claude|\.git|dist|out)$/.test(
+        typeof entry === "string" ? entry : entry.name,
+      ),
+  }).filter((file) =>
+    /\bvi\.(mock|doMock|stubGlobal)\(|\bspyOn\(globalThis\b/.test(readFileSync(file, "utf8")),
+  );
+
+const isolatedTests = findTestsThatReplaceModulesOrGlobals();
+
 export default defineConfig({
   test: {
     projects: [
@@ -101,17 +143,17 @@ export default defineConfig({
         test: {
           name: "node",
           environment: "node",
+          isolate: false,
           include: ["**/*.test.{ts,tsx}"],
-          exclude: [
-            "**/node_modules/**",
-            "**/dist/**",
-            // Agent worktrees are whole copies of this repository.
-            "**/.claude/**",
-            ...reactSources.map((folder) => `${folder}/**`),
-            ...binaryTests,
-            "apps/desktop/**",
-            "e2e/desktop/**",
-          ],
+          exclude: [...nodeExclude, ...isolatedTests],
+        },
+      },
+      {
+        test: {
+          name: "node-isolated",
+          environment: "node",
+          include: isolatedTests,
+          exclude: nodeExclude,
         },
       },
       {

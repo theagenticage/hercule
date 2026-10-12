@@ -149,8 +149,8 @@ Never edit source or tests while Vitest is running in the checkout.
 
 1. Run the smallest owner and sibling tests with
    `vitest run --project <project> <path-or-filter>`. Backend tests (the
-   `node` project) run on Bun:
-   `bun --bun run vitest run --project node <path-or-filter>`.
+   `node` and `node-isolated` projects) run on Bun:
+   `bun --bun run vitest run --project node --project node-isolated <path-or-filter>`.
 2. For removed source greps or plan assertions, run the executable script or
    dry-run that owns the real contract.
 3. Run targeted formatting (`prettier --write <paths>`), then

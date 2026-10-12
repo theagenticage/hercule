@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: bun --bun run vitest run --project node --shard=${{ matrix.shard }}/3
+      - run: bun --bun run vitest run --project node --project node-isolated --shard=${{ matrix.shard }}/3
 
   test-react:
     runs-on: ubuntu-latest
