@@ -675,16 +675,22 @@ describe("whether an input waits on a session", () => {
           text: "a",
           at,
         });
+        const queued = yield* sessions.one(sessionId);
         yield* inputs.claim(sent.id, at);
         const onTheWire = yield* sessions.one(sessionId);
         yield* inputs.cancelWithReason(sent.id, at, "the session exited");
         const cancelled = yield* sessions.one(sessionId);
-        return [empty, onTheWire, cancelled].map((row) =>
+        return [empty, queued, onTheWire, cancelled].map((row) =>
           Option.map(row, (one) => one.inputWaiting),
         );
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
 
-    expect(waiting).toEqual([Option.some(false), Option.some(true), Option.some(false)]);
+    expect(waiting).toEqual([
+      Option.some(false),
+      Option.some(true),
+      Option.some(true),
+      Option.some(false),
+    ]);
   });
 });
