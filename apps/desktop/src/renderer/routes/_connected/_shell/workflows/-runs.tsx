@@ -16,7 +16,7 @@ import {
 } from "@hercule/client-core/run-timeline";
 import { buildRunRows } from "@hercule/client-core/workflow-detail-rows";
 import type { Trigger, WorkflowDefinition } from "@hercule/contract";
-import { useClockValue } from "../../../../app/age-clock";
+import { NEVER, useClockValue } from "../../../../app/age-clock";
 import { workflowDayRunsQuery, workflowRunsQuery } from "../../../../app/queries";
 import { useWaitingRunSessions } from "../../../../app/waiting";
 import {
@@ -28,9 +28,6 @@ import { RUN_ROW_HEIGHT, RunListRow } from "../../../../screens/workflows/workfl
 
 /** How many rows past the visible ones the Runs list keeps mounted on each side. */
 const OVERSCAN = 8;
-
-/** A moment so far off that the age clock never reaches it. */
-const NEVER = new Date(8.64e15);
 
 /**
  * Returns the start of the minute after `now`, when the now line next moves.

@@ -1,0 +1,208 @@
+/* Inbox zero: Hercule in a brass sunburst, the line under it, and what was
+   cleared today, centred in the list's scroller (spec 17 §Motion). The drawing
+   is buildZero in docs/design/intake-directions/asks/asks.js. */
+.asks-zero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /* The scroller is not a flex container, so the picture fills its height this way. */
+  min-height: 100%;
+  padding: 24px 36px 48px;
+  text-align: center;
+}
+.asks-zero-art {
+  position: relative;
+  width: 216px;
+  height: 216px;
+}
+
+/* Each ray hangs from the art's centre and is turned to its angle. It starts
+   63.25px out and is 1.5px longer than the drawing's stroke, which is how far
+   the stroke's round caps reach beyond its ends at 64px and 100px or 84px. */
+.asks-zero-ray {
+  position: absolute;
+  top: 50%;
+  left: calc(50% - 0.75px);
+  width: 1.5px;
+  height: 37.5px;
+  border-radius: 0.75px;
+  background: var(--brass);
+  transform-origin: 50% 0;
+  transform: rotate(var(--angle)) translateY(-63.25px) translateY(-100%);
+}
+.asks-zero-ray--short {
+  height: 21.5px;
+}
+/* A spark rests unseen; it shows only while inbox zero arrives. */
+.asks-zero-spark {
+  position: absolute;
+  top: calc(50% - 2px);
+  left: calc(50% - 2px);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--brass);
+  opacity: 0;
+}
+.asks-zero-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.asks-zero-face-body {
+  display: block;
+  width: 88px;
+  height: 88px;
+}
+.asks-zero-face-body > svg {
+  display: block;
+}
+
+.asks-zero-h {
+  margin: 10px 0 0;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.asks-zero-line {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: var(--t-14);
+}
+.asks-zero-n {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 26px 0 0;
+  color: var(--muted);
+  font-size: var(--t-14);
+}
+.asks-zero-num {
+  color: var(--ink);
+  font-family: var(--font-deco);
+  font-size: 64px;
+  line-height: 1;
+  font-variant-numeric: lining-nums proportional-nums;
+}
+.asks-zero-tally {
+  display: flex;
+  gap: 2px;
+  margin-top: 12px;
+}
+.asks-zero-tally button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px 0 7px;
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  transition:
+    background var(--dur-1),
+    color var(--dur-1);
+}
+.asks-zero-tally button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.asks-zero-tally .br {
+  color: var(--ink);
+  opacity: 0.7;
+}
+
+/* The arrival, when the user's own move empties To do. It lasts 800ms, the
+   first 120ms of which the list's last row takes to fade, and then nothing
+   runs. When the pane was open, every step first waits --arrival-wait, the
+   --dur-3 the list takes to widen as the pane closes, so the picture never
+   slides sideways. Each step fills backwards, so it waits for its delay in
+   its first frame, and the resting styles above are where it ends. With
+   Reduce motion, none of this applies and the picture shows still. */
+@media (prefers-reduced-motion: no-preference) {
+  .asks-zero.is-arriving {
+    --arrival-wait: 0ms;
+  }
+  .asks-zero.is-arriving.waits-for-pane {
+    --arrival-wait: var(--dur-3);
+  }
+  /* The rays grow outward from their inner end, 12ms apart, clockwise from the top. */
+  .asks-zero.is-arriving .asks-zero-ray {
+    animation: inbox-zero-ray var(--dur-3) var(--ease-out) backwards;
+    animation-delay: calc(var(--arrival-wait) + 120ms + var(--ray-index) * 12ms);
+  }
+  /* Hercule hops in: its wrapper hops 8px while the face grows on the spring. */
+  .asks-zero.is-arriving .asks-zero-face {
+    animation: inbox-zero-hop var(--dur-3) var(--ease-out) backwards;
+    animation-delay: calc(var(--arrival-wait) + 240ms);
+  }
+  .asks-zero.is-arriving .asks-zero-face-body {
+    animation: inbox-zero-spring var(--dur-3) var(--ease-spring) backwards;
+    animation-delay: calc(var(--arrival-wait) + 240ms);
+  }
+  /* The sparks fly out from behind Hercule and fade, once. */
+  .asks-zero.is-arriving .asks-zero-spark {
+    animation: inbox-zero-spark var(--dur-3) var(--ease-out) backwards;
+    animation-delay: calc(var(--arrival-wait) + 380ms);
+  }
+  /* The words rise 6px each, 60ms apart. */
+  .asks-zero.is-arriving .asks-zero-h,
+  .asks-zero.is-arriving .asks-zero-line,
+  .asks-zero.is-arriving .asks-zero-n,
+  .asks-zero.is-arriving .asks-zero-tally {
+    animation: inbox-zero-rise var(--dur-2) var(--ease-out) backwards;
+    animation-delay: calc(var(--arrival-wait) + 360ms);
+  }
+  .asks-zero.is-arriving .asks-zero-line {
+    animation-delay: calc(var(--arrival-wait) + 420ms);
+  }
+  .asks-zero.is-arriving .asks-zero-n {
+    animation-delay: calc(var(--arrival-wait) + 480ms);
+  }
+  .asks-zero.is-arriving .asks-zero-tally {
+    animation-delay: calc(var(--arrival-wait) + 540ms);
+  }
+}
+@keyframes inbox-zero-ray {
+  from {
+    transform: rotate(var(--angle)) translateY(-63.25px) scaleY(0) translateY(-100%);
+  }
+}
+@keyframes inbox-zero-hop {
+  from {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes inbox-zero-spring {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+@keyframes inbox-zero-spark {
+  from {
+    opacity: 0;
+    transform: rotate(var(--angle)) translateY(-18px) scale(0.5);
+  }
+  20% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: rotate(var(--angle)) translateY(-56px);
+  }
+}
+@keyframes inbox-zero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}

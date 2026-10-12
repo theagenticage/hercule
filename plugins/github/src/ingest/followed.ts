@@ -5,6 +5,9 @@
  *
  * - one of the user's own open pull requests, in any repository, so changes
  *   requested on it reach the user;
+ * - an open pull request that asks the user or one of their teams for a
+ *   review, in any repository, found by search, so the request reaches the
+ *   user even when GitHub's notification inbox does not hold it;
  * - the thread of an open signal from this Connection, so the event that
  *   ends the signal is seen, such as the user's review or a merge;
  * - an item the `notifications` feed saw news on since the last poll, such
@@ -27,13 +30,28 @@
  *    listing is read newest first and stops at a page limit; a listing that
  *    has more since `since` than the limit allows logs a warning, because
  *    what it did not read is never emitted.
- * 3. `since` moves to the item's `updated_at`.
+ * 3. `since` moves forward to the item's `updated_at`, and never back: an
+ *    item recorded one second after its `updated_at` stays recorded there.
  *
  * Where `since` starts on an item's first read depends on why it is
- * followed: for a notification, at the notifications feed's cursor before
- * the news; for an open signal, when the signal was raised. An own pull
- * request seen for the first time is recorded at its `updated_at` and emits
- * nothing, as a newly watched repository baselines.
+ * followed:
+ *
+ * - for a notification, at the notifications feed's cursor before the news;
+ * - for an open signal, when the signal was raised;
+ * - for a pull request the search for review requests found, when it last
+ *   asked the user or one of their teams, found in its history
+ *   (`findLastReviewRequestTime`), so the request is emitted. When the history
+ *   shows no such request, the item is recorded one second after its
+ *   `updated_at`, emits nothing, and a warning is logged;
+ * - for an own pull request, one second after its `updated_at`: it is
+ *   recorded and emits nothing, as a newly watched repository baselines.
+ *
+ * The first poll that searches for review requests on a Connection records
+ * every pull request it finds in the same way as an own pull request, so a
+ * Connection's first sync emits no review request that was already waiting.
+ * When an item is followed for several reasons, a notification or an open
+ * signal wins over the search for review requests, which wins over the
+ * search for own pull requests.
  * A notification's hint from before an item's stored `since` moves `since`
  * back to the hint and drops the ETag, so the news it names is read.
  *
@@ -58,11 +76,15 @@ import {
   emitHistoryEvents,
   emitInTimeOrder,
   fetchPull,
+  findLastReviewRequestTime,
   isAtOrAfter,
   type ActivityPoll,
 } from "./activity";
 import { ListedComment, ListedIssue } from "./feed-objects";
-import { fetchOwnOpenPullRequests } from "./own-pulls";
+import {
+  fetchOwnOpenPullRequests,
+  fetchOpenPullRequestsAskingForUserReview,
+} from "./pull-searches";
 import {
   countRequests,
   decodeGithubValue,
@@ -83,6 +105,9 @@ const HINTS_KEY = "followed-hints";
 /** The key of the last item read, where the next poll's turn starts after. */
 const LAST_READ_KEY = "followed-last-read";
 
+/** The key set once the pull requests found by the search for review requests have been recorded without emitting. */
+const REVIEW_REQUESTS_BASELINED_KEY = "review-requests-baselined";
+
 /**
  * How many followed items one poll reads. An item that did not change costs
  * one free 304. A changed one costs about four requests: the item, its
@@ -94,9 +119,10 @@ export const MAX_FOLLOWED_ITEMS_PER_POLL = 20;
 /**
  * How many requests the followed items may send in one poll before no
  * further item is started. The item being read when the count is reached
- * still finishes, at most 18 more requests: the item, 3 pages of comments, 3
- * of reviews, 10 of history and the pull request. With the search for the user's own pull
- * requests, a poll sends at most about 100 requests here, about 50 seconds.
+ * still finishes, at most 21 more requests: 3 pages of history to find a
+ * review request, the item, 3 pages of comments, 3 of reviews, 10 of history
+ * and the pull request. With the two searches counted, a poll sends at most
+ * 100 requests here, about 50 seconds.
  * Exported for the tests.
  */
 export const MAX_FOLLOWED_REQUESTS_PER_POLL = 80;
@@ -121,6 +147,10 @@ const FollowedHints = Schema.Record(Schema.String, Schema.String);
 const pickEarlier = (left: string, right: string): string =>
   Date.parse(right) < Date.parse(left) ? right : left;
 
+/** Returns the later of two ISO 8601 timestamps. */
+const pickLater = (left: string, right: string): string =>
+  Date.parse(right) > Date.parse(left) ? right : left;
+
 /**
  * Records that the notifications feed saw news on an issue or a pull
  * request, new from `since`, so the next `repos` poll reads it. An item that
@@ -144,27 +174,49 @@ export const recordFollowedHints = (
     yield* store.set(HINTS_KEY, next);
   });
 
-/** Why one item is followed: where its `since` starts on its first read. */
+/**
+ * What the first read of a followed item does, from the reason that knows
+ * the most to the one that knows the least:
+ *
+ * - `emit`: emits what happened at or after `start`, as for a notification
+ *   or an open signal;
+ * - `find-review-request`: emits from the newest review request to the user in the
+ *   item's history, or records the item at `start` when there is none, as
+ *   for a pull request the search for review requests found;
+ * - `baseline`: records the item at `start` and emits nothing, as for an own
+ *   pull request.
+ */
+const FIRST_READS = ["emit", "find-review-request", "baseline"] as const;
+
+type FirstRead = (typeof FIRST_READS)[number];
+
+/** Why one item is followed: what its first read does, and from when. */
 interface FollowedItem {
   readonly item: Pick<GithubItem, "repo" | "kind" | "number">;
-  /** The time activity is new from, when the item is read for the first time. */
+  readonly firstRead: FirstRead;
+  /** The time activity is new from, or the item is recorded at, on its first read. */
   readonly start: string;
-  /** True when the first read records the item and emits nothing, as for an own pull request. */
-  readonly baseline: boolean;
 }
 
 /**
  * Adds one item to the followed set. When it is already there for another
- * reason, a reason with a start wins over a baseline, and of two starts the
- * earlier wins, so nothing either reason would emit is skipped.
+ * reason, the reason earlier in `FIRST_READS` wins. Of two `emit` reasons
+ * the earlier start wins, so nothing either reason would emit is skipped. Of
+ * two `baseline` reasons the later start wins, so nothing that happened
+ * before either baseline is emitted.
  */
 const addFollowedItem = (followed: Map<string, FollowedItem>, next: FollowedItem): void => {
   const ref = buildItemRef(next.item);
   const known = followed.get(ref);
-  if (known === undefined || (known.baseline && !next.baseline)) {
+  if (
+    known === undefined ||
+    FIRST_READS.indexOf(next.firstRead) < FIRST_READS.indexOf(known.firstRead)
+  ) {
     followed.set(ref, next);
-  } else if (!known.baseline && !next.baseline) {
+  } else if (known.firstRead === "emit" && next.firstRead === "emit") {
     followed.set(ref, { ...known, start: pickEarlier(known.start, next.start) });
+  } else if (known.firstRead === "baseline" && next.firstRead === "baseline") {
+    followed.set(ref, { ...known, start: pickLater(known.start, next.start) });
   }
 };
 
@@ -294,7 +346,7 @@ const readFollowedItem = (
     }
 
     return Option.some({
-      since: issue.updated_at,
+      since: pickLater(since, issue.updated_at),
       ...(response.etag === undefined ? {} : { etag: response.etag }),
     });
   });
@@ -342,7 +394,9 @@ const isSameItemState = (left: FollowedItemState, right: FollowedItemState): boo
  * when the item was not reached. An item whose read fails, for any reason,
  * gets a hint at the `since` it was read from: the failed read emitted
  * nothing (`emitInTimeOrder`), so the next poll reads it again, followed or
- * not.
+ * not. A failed look in a pull request's history for when it asked the user
+ * for a review (`findLastReviewRequestTime`) records neither a hint nor a
+ * state, so the next poll's search finds the pull request and looks again.
  *
  * One item failing with a `PluginError` is logged as a warning and does not
  * stop the others: an item outside the watch list is not something the user
@@ -365,14 +419,24 @@ export const pollFollowedItems = (
       for (const own of yield* fetchOwnOpenPullRequests(token)) {
         addFollowedItem(followed, {
           item: { repo: own.repo, kind: "pr", number: own.number },
+          firstRead: "baseline",
           start: addOneSecond(own.updatedAt),
-          baseline: true,
+        });
+      }
+      const reviewRequestsBaselined = Option.isSome(
+        yield* readFeedState(store, REVIEW_REQUESTS_BASELINED_KEY, Schema.Literal(true)),
+      );
+      for (const found of yield* fetchOpenPullRequestsAskingForUserReview(token)) {
+        addFollowedItem(followed, {
+          item: { repo: found.repo, kind: "pr", number: found.number },
+          firstRead: reviewRequestsBaselined ? "find-review-request" : "baseline",
+          start: addOneSecond(found.updatedAt),
         });
       }
       for (const signal of yield* context.openSignals()) {
         const item = parseItemRef(signal.threadRef);
         if (item !== undefined)
-          addFollowedItem(followed, { item, start: signal.raisedAt, baseline: false });
+          addFollowedItem(followed, { item, firstRead: "emit", start: signal.raisedAt });
       }
       const hints: Readonly<Record<string, string>> = Option.getOrElse(
         yield* readFeedState(store, HINTS_KEY, FollowedHints),
@@ -386,7 +450,7 @@ export const pollFollowedItems = (
         const item = parseItemRef(ref);
         // A hint the plugin cannot parse, or one in a repository the watch list's poll covers, is not read here.
         if (item === undefined || watched.has(item.repo)) usedHints.add(ref);
-        else addFollowedItem(followed, { item, start: since, baseline: false });
+        else addFollowedItem(followed, { item, firstRead: "emit", start: since });
       }
       for (const [ref, { item }] of followed) {
         if (watched.has(item.repo)) followed.delete(ref);
@@ -399,6 +463,20 @@ export const pollFollowedItems = (
         }
       }
 
+      // The items to record are recorded before any item is read, and only
+      // then is the search for review requests marked as baselined. A read
+      // that fails with a rate limit then cannot leave a search result
+      // unrecorded, which the next poll would emit the waiting request of.
+      const storedKeys = new Set(keys);
+      const recorded = new Set<string>();
+      for (const [ref, { firstRead, start }] of followed) {
+        const key = `${ITEM_PREFIX}${ref}`;
+        if (firstRead !== "baseline" || storedKeys.has(key)) continue;
+        yield* store.set(key, { since: start });
+        recorded.add(ref);
+      }
+      if (!reviewRequestsBaselined) yield* store.set(REVIEW_REQUESTS_BASELINED_KEY, true);
+
       let lastRead: string | undefined;
       // Saved after the loop even when a rate limit stops it, so the turn
       // moves on and the hints used so far are not read again. The hints
@@ -410,41 +488,22 @@ export const pollFollowedItems = (
       });
 
       const order = orderFromLastPolled(
-        [...followed.keys()],
+        [...followed.keys()].filter((ref) => !recorded.has(ref)),
         Option.getOrUndefined(yield* readFeedState(store, LAST_READ_KEY, Schema.String)),
       );
       let read = 0;
       let waiting = 0;
       yield* Effect.gen(function* () {
         for (const ref of order) {
-          const { item, start, baseline } = followed.get(ref)!;
-          const key = `${ITEM_PREFIX}${ref}`;
-          const stored = yield* readFeedState(store, key, FollowedItemState);
-          if (Option.isNone(stored) && baseline) {
-            yield* store.set(key, { since: start });
-            continue;
-          }
+          const { item, firstRead, start } = followed.get(ref)!;
           const spent = read > 0 && sent() >= MAX_FOLLOWED_REQUESTS_PER_POLL;
           if (read === MAX_FOLLOWED_ITEMS_PER_POLL || spent) {
             waiting += 1;
             continue;
           }
           read += 1;
-          const state = Option.match(stored, {
-            onNone: () => ({ since: start }),
-            // A hint from before the stored `since` is news the item's
-            // last read did not cover, such as a mention on an own pull
-            // request that was recorded after it. The read goes back to the
-            // hint, without the ETag, whose 304 would hide that news. An
-            // open signal's start does not do this: it is earlier than
-            // `since` after every first read.
-            onSome: (known) => {
-              const hint = hints[ref];
-              return hint !== undefined && Date.parse(hint) < Date.parse(known.since)
-                ? { since: hint }
-                : known;
-            },
-          });
+          const key = `${ITEM_PREFIX}${ref}`;
+          const stored = yield* readFeedState(store, key, FollowedItemState);
           const poll: ActivityPoll = {
             repo: item.repo,
             token,
@@ -452,15 +511,47 @@ export const pollFollowedItems = (
             identity,
             teams,
           };
-          const next = yield* emitInTimeOrder(poll, (held) =>
-            readFollowedItem(held, item.number, state),
-          ).pipe(
-            // A failed read emits nothing, so the next poll must read the
-            // item again from the same `since`. A hint makes sure of that
-            // even for an item followed for another reason, such as an own
-            // pull request that is closed before the next poll and so drops
-            // out of the search.
-            Effect.tapError(() => recordFollowedHints(store, [{ ref, since: state.since }])),
+          const next = yield* Effect.gen(function* () {
+            let state: FollowedItemState;
+            if (Option.isSome(stored)) {
+              // A hint from before the stored `since` is news the item's
+              // last read did not cover, such as a mention on an own pull
+              // request that was recorded after it. The read goes back to
+              // the hint, without the ETag, whose 304 would hide that news.
+              // An open signal's start does not do this: it is earlier than
+              // `since` after every first read.
+              const hint = hints[ref];
+              state =
+                hint !== undefined && Date.parse(hint) < Date.parse(stored.value.since)
+                  ? { since: hint }
+                  : stored.value;
+            } else if (firstRead === "emit") {
+              state = { since: start };
+            } else {
+              // Only a `find-review-request` item gets here: a `baseline`
+              // item without state was recorded before the loop. A failed
+              // lookup records nothing, so the next poll's search finds the
+              // item and looks again.
+              const requestedAt = yield* findLastReviewRequestTime(poll, item.number);
+              if (requestedAt === undefined) {
+                yield* Effect.logWarning(
+                  `The GitHub repos feed found ${buildItemPlace(item)} by searching for review requests to the Connection's account, but the newest entries of its history hold no review request to the account or one of its teams. Its request is not emitted; what happens on it from now on is.`,
+                );
+                return Option.some({ since: start });
+              }
+              state = { since: requestedAt };
+            }
+            return yield* emitInTimeOrder(poll, (held) =>
+              readFollowedItem(held, item.number, state),
+            ).pipe(
+              // A failed read emits nothing, so the next poll must read the
+              // item again from the same `since`. A hint makes sure of that
+              // even for an item followed for another reason, such as an
+              // own pull request that is closed before the next poll and so
+              // drops out of the search.
+              Effect.tapError(() => recordFollowedHints(store, [{ ref, since: state.since }])),
+            );
+          }).pipe(
             Effect.catchIf(
               (error): error is PluginError => error instanceof PluginError,
               (error) =>

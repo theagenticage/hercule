@@ -4,7 +4,7 @@
  * elsewhere while its pane is open, the split's handle, the To do count on
  * the sidebar, and the Everything view of the events behind the signals.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
@@ -203,7 +203,8 @@ const resolve = (
 /**
  * Returns handlers that play the controller's signals on one stored list:
  * To do lists the open ones, and each read answers with the stored record.
- * `store` changes a stored signal, as an answer on the source would.
+ * `store` changes a stored signal, as an answer on the source would, or adds
+ * one, as a new event would.
  */
 const storeSignals = (initial: ReadonlyArray<Signal>) => {
   let stored = [...initial];
@@ -223,7 +224,9 @@ const storeSignals = (initial: ReadonlyArray<Signal>) => {
     }
   }
   const store = (changed: Signal): void => {
-    stored = stored.map((signal) => (signal.id === changed.id ? changed : signal));
+    stored = stored.some((signal) => signal.id === changed.id)
+      ? stored.map((signal) => (signal.id === changed.id ? changed : signal))
+      : [...stored, changed];
   };
   /** Changes each stored signal the call names with `change`, and returns their ids. */
   const moveSignals = (call: Call, change: (signal: Signal) => Signal): ReadonlyArray<string> => {
@@ -446,9 +449,12 @@ describe("Intake's list", () => {
     expect(pane.querySelector(".ad-kind .src")!.textContent).toBe("Triage · Proposal");
   });
 
-  it("says the list is empty when nothing is on To do", async () => {
+  it("shows inbox zero, still, when To do is empty as Intake opens", async () => {
     await openIntake("/intake", storeSignals([]).handlers);
-    expect(screen.getByText("Nothing on your list.")).toBeTruthy();
+    const zero = getList().querySelector(".asks-zero")!;
+    expect(zero).not.toBeNull();
+    expect(zero.classList.contains("is-arriving")).toBe(false);
+    expect(screen.queryByText("Nothing on your list.")).toBeNull();
   });
 
   it("puts Intake's To do count on its sidebar row and on the Hercule segment", async () => {
@@ -1211,7 +1217,204 @@ const findEventReads = (calls: ReadonlyArray<Call>) =>
     Object.fromEntries(Object.entries(query).filter(([key]) => key !== "since")),
   );
 
+describe("Intake's motion", () => {
+  /** An urgent signal that arrives while Intake is open, which the list puts under Now. */
+  const ARRIVAL = buildSignal("01a06d02-7a00-7000-8000-000000000041", 41, "12:30", {
+    title: "Deploy failed on staging",
+    priority: "urgent",
+  });
+
+  /** Returns how many times the app has read To do. */
+  const countToDoReads = (calls: ReadonlyArray<Call>) =>
+    calls.filter((call) => call.method === "GET" && call.path === "/api/v1/signals").length;
+  /** Waits until the app listens for changes to signals, so a push reaches it. */
+  const waitForSignalTopic = (live: { readonly readTopics: () => readonly string[] }) =>
+    waitFor(() => {
+      expect(live.readTopics()).toContain("signal");
+    });
+  const findZero = () =>
+    waitFor(() => {
+      const zero = getList().querySelector(".asks-zero");
+      expect(zero).not.toBeNull();
+      return zero!;
+    });
+
+  it("plays inbox zero's arrival when the user's own Done clears To do", async () => {
+    await openIntake(`/intake?signal=${REVIEW.id}`, storeSignals([REVIEW]).handlers);
+    await userEvent.click(within(await findPane()).getByRole("button", { name: "Done" }));
+    expect((await findZero()).classList.contains("is-arriving")).toBe(true);
+    // Inbox zero counts what was cleared today itself, so the foot is gone.
+    expect(document.querySelector(".asks-cleared")).toBeNull();
+  });
+
+  it("plays inbox zero's arrival when the user's answer in the pane clears To do", async () => {
+    const { handlers, store } = storeSignals([REVIEW]);
+    const { live } = await openIntake(`/intake?signal=${REVIEW.id}`, {
+      ...handlers,
+      [`POST /api/v1/signals/${REVIEW.id}/act`]: () => {
+        const acted = resolve(REVIEW, "user", "Approved #1294");
+        store(acted);
+        return { body: acted };
+      },
+    });
+    const pane = await findPane();
+    await userEvent.click(within(pane).getByRole("button", { name: "Approve" }));
+    await within(pane).findByRole("status");
+    // The answer leaves the list only with the read its live push starts.
+    live.pushInvalidation("signal", [REVIEW.id]);
+    expect((await findZero()).classList.contains("is-arriving")).toBe(true);
+  });
+
+  it("shows inbox zero still when the last signal is resolved elsewhere", async () => {
+    const { handlers, store } = storeSignals([REVIEW]);
+    const { live } = await openIntake("/intake", handlers);
+    await waitForSignalTopic(live);
+    store(resolve(REVIEW, "session:01a06d02-0000-7000-8000-000000000001", "Approved #1294"));
+    live.pushInvalidation("signal", [REVIEW.id]);
+    expect((await findZero()).classList.contains("is-arriving")).toBe(false);
+  });
+
+  it("does not play the arrival again when the user comes back to To do", async () => {
+    await openIntake(`/intake?signal=${REVIEW.id}`, storeSignals([REVIEW]).handlers);
+    await userEvent.click(within(await findPane()).getByRole("button", { name: "Done" }));
+    expect((await findZero()).classList.contains("is-arriving")).toBe(true);
+    const views = screen.getByRole("group", { name: "View" });
+    await userEvent.click(within(views).getByRole("button", { name: /^Done/ }));
+    await waitFor(() => {
+      expect(getList().querySelector(".asks-zero")).toBeNull();
+    });
+    await userEvent.click(within(views).getByRole("button", { name: /^To do/ }));
+    expect((await findZero()).classList.contains("is-arriving")).toBe(false);
+  });
+
+  it("holds a new signal back while the pointer is over the list, and shows it once it leaves", async () => {
+    const { handlers, store } = storeSignals(SIGNALS);
+    const { calls, live } = await openIntake("/intake", handlers);
+    await waitForSignalTopic(live);
+    fireEvent.pointerOver(getRow(REVIEW));
+    const reads = countToDoReads(calls);
+    store(ARRIVAL);
+    live.pushInvalidation("signal", [ARRIVAL.id]);
+    await waitFor(() => {
+      expect(countToDoReads(calls)).toBeGreaterThan(reads);
+    });
+    // The read has answered once the To do count on the tab shows it.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^To do/ }).textContent).toBe("To do4");
+    });
+    expect(getRow(ARRIVAL)).toBeNull();
+    fireEvent.pointerOut(getRow(REVIEW), { relatedTarget: document.body });
+    await waitFor(() => {
+      expect(getRow(ARRIVAL)).not.toBeNull();
+    });
+  });
+
+  /** Waits until the app has read the signals again since `reads`, and the read has answered. */
+  const waitForSignalRead = async (calls: ReadonlyArray<Call>, reads: number) => {
+    await waitFor(() => {
+      expect(countToDoReads(calls)).toBeGreaterThan(reads);
+    });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  };
+
+  it("takes the user's own Done off the list when the push's read beats the move's answer", async () => {
+    const { handlers } = storeSignals(SIGNALS);
+    let releaseAnswer: () => void = () => {};
+    const answered = new Promise<void>((resolve) => {
+      releaseAnswer = resolve;
+    });
+    const markDone = handlers["POST /api/v1/signals/mark-done"] as Exclude<Handler, Answer>;
+    const { calls, live } = await openIntake(`/intake?signal=${REVIEW.id}`, {
+      ...handlers,
+      // The controller marks the signal done at once and pushes the change,
+      // but its answer arrives only once the test lets it.
+      "POST /api/v1/signals/mark-done": async (call) => {
+        const answer = await markDone(call);
+        await answered;
+        return answer;
+      },
+    });
+    await findPane();
+    await waitForSignalTopic(live);
+    fireEvent.pointerOver(getRow(REVIEW));
+    act(() => {
+      getRow(REVIEW).focus();
+    });
+    await userEvent.keyboard("e");
+    await waitFor(() => {
+      expect(findMove(calls, "mark-done")).toBeDefined();
+    });
+    const reads = countToDoReads(calls);
+    live.pushInvalidation("signal", [REVIEW.id]);
+    await waitForSignalRead(calls, reads);
+    expect(getRow(REVIEW)).toBeNull();
+    releaseAnswer();
+    expect((await findToast()).textContent).toBe(`Done · ${REVIEW.title}`);
+  });
+
+  it("holds a signal resolved elsewhere back from Done while the pointer is over the list", async () => {
+    const DONE = resolve(MENTION, "user", "Marked done", "2026-10-10T11:00:00.000Z");
+    const { handlers, store } = storeSignals([REVIEW, DONE]);
+    const { calls, live } = await openIntake("/intake?view=done", handlers);
+    await waitForSignalTopic(live);
+    await waitFor(() => {
+      expect(getRow(DONE)).not.toBeNull();
+    });
+    fireEvent.pointerOver(getRow(DONE));
+    const reads = countToDoReads(calls);
+    store(resolve(REVIEW, "session:01a06d02-0000-7000-8000-000000000001", "Approved #1294"));
+    live.pushInvalidation("signal", [REVIEW.id]);
+    await waitForSignalRead(calls, reads);
+    expect(getRow(REVIEW)).toBeNull();
+    fireEvent.pointerOut(getRow(DONE), { relatedTarget: document.body });
+    await waitFor(() => {
+      expect(getRow(REVIEW)).not.toBeNull();
+    });
+  });
+
+  it("keeps holding while the pointer is in a row's snooze menu", async () => {
+    const { handlers, store } = storeSignals(SIGNALS);
+    const { calls, live } = await openIntake("/intake", handlers);
+    await waitForSignalTopic(live);
+    fireEvent.pointerOver(getRow(REVIEW));
+    await clickRowMove(REVIEW, "Snooze");
+    const menu = document.querySelector<HTMLElement>(".asks-snooze[role=menu]")!;
+    fireEvent.pointerOut(getRow(REVIEW), { relatedTarget: menu });
+    const reads = countToDoReads(calls);
+    store(ARRIVAL);
+    live.pushInvalidation("signal", [ARRIVAL.id]);
+    await waitForSignalRead(calls, reads);
+    expect(getRow(ARRIVAL)).toBeNull();
+    await clickRowMove(REVIEW, "Snooze");
+    expect(document.querySelector(".asks-snooze")).toBeNull();
+    fireEvent.pointerOut(getRow(REVIEW), { relatedTarget: document.body });
+    await waitFor(() => {
+      expect(getRow(ARRIVAL)).not.toBeNull();
+    });
+  });
+
+  it("keeps the selection on its signal when a signal arrives above it", async () => {
+    const { handlers, store } = storeSignals(SIGNALS);
+    const { live, router } = await openIntake(`/intake?signal=${MENTION.id}`, handlers);
+    await findPane();
+    store(ARRIVAL);
+    live.pushInvalidation("signal", [ARRIVAL.id]);
+    await waitFor(() => {
+      expect(getRow(ARRIVAL)).not.toBeNull();
+    });
+    expect(readSelected(router.state.location.search)).toBe(MENTION.id);
+    expect(getRow(MENTION).getAttribute("aria-current")).toBe("true");
+  });
+});
+
 describe("Intake's Everything view", () => {
+  // Intake loads Everything's screen lazily, and the first import compiles
+  // it with the React Compiler. On a busy CI runner that compile can outlast
+  // a test's one-second wait for the screen, so it happens once, here.
+  beforeAll(async () => {
+    await import("../../../screens/intake/everything-screen");
+  });
+
   it("switches to Everything, which reads Intake's events newest first and states the horizon", async () => {
     const events = [1, 2, 3].map((id) => buildListedEvent(id));
     const { calls, router } = await openEverything(events, "/intake");

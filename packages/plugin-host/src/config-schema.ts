@@ -39,6 +39,14 @@ export const secret = (words: {
 /** The key the derived JSON Schema uses to mark a secret property. */
 const SECRET_MARKER = "x-secret";
 
+/**
+ * The key the derived JSON Schema uses to mark a property whose choices load
+ * from the external account. A plugin author writes
+ * `Schema.String.annotate({ choices: true })` or
+ * `Schema.Array(Schema.String).annotate({ choices: true })`.
+ */
+const CHOICES_MARKER = "x-choices";
+
 /** Reads a string annotation. Annotations are typed `unknown`, so the type is checked here. */
 const readAnnotation = (ast: SchemaAST.AST, word: "title" | "description"): string | undefined => {
   const value = ast.annotations?.[word];
@@ -50,9 +58,34 @@ const readAnnotation = (ast: SchemaAST.AST, word: "title" | "description"): stri
  * as `Schema.Finite` - has its annotation on that refinement rather than on
  * itself, so both places are checked.
  */
-const isSecret = (ast: SchemaAST.AST): boolean =>
+const isMarkedSecret = (ast: SchemaAST.AST): boolean =>
   ast.annotations?.secret === true ||
   (ast.checks ?? []).some((check) => check.annotations?.secret === true);
+
+/**
+ * Checks whether a field is marked `choices: true`. Like `isMarkedSecret`, it also
+ * looks at the schema's refinements, which is where an annotation lands on a
+ * schema such as `Schema.String.check(...)`.
+ */
+const isMarkedChoices = (ast: SchemaAST.AST): boolean =>
+  ast.annotations?.choices === true ||
+  (ast.checks ?? []).some((check) => check.annotations?.choices === true);
+
+/**
+ * Lists the names of the fields a plugin marked `choices: true`: the fields
+ * whose choices the connection type loads from the external account. The
+ * controller uses this to refuse a type that marks a field but has no
+ * `listChoices`, and to refuse a request for the choices of any other field.
+ *
+ * Reads the schema rather than its JSON Schema, for the reason
+ * `listSecretFields` gives.
+ */
+export const listChoiceFields = (schema: Schema.Top): ReadonlyArray<string> => {
+  if (!SchemaAST.isObjects(schema.ast)) return [];
+  return schema.ast.propertySignatures.flatMap(({ name, type }) =>
+    typeof name === "string" && isMarkedChoices(type) ? [name] : [],
+  );
+};
 
 /**
  * Lists the fields a plugin marked secret, with the title and description the
@@ -74,7 +107,7 @@ export const listSecretFields = (
   // properties to mark, and `deriveConfigJsonSchema` rejects it separately.
   if (!SchemaAST.isObjects(schema.ast)) return [];
   return schema.ast.propertySignatures.flatMap(({ name, type }) => {
-    if (typeof name !== "string" || !isSecret(type)) return [];
+    if (typeof name !== "string" || !isMarkedSecret(type)) return [];
     return [
       {
         name,
@@ -132,6 +165,33 @@ const findUnsupportedReason = (property: JsonSchema.JsonSchema): string | undefi
 };
 
 /**
+ * Returns why a property cannot load its choices from the account, or
+ * `undefined` when it can. Only a string or a list of strings can, because
+ * the picker stores the chosen `value`, which is a string.
+ */
+const findUnsupportedChoicesReason = (property: JsonSchema.JsonSchema): string | undefined => {
+  const items = property.items as JsonSchema.JsonSchema | undefined;
+  const isStringList = property.type === "array" && items?.type === "string";
+  return property.type === "string" || isStringList
+    ? undefined
+    : "is marked choices, which only a string or a list of strings can be";
+};
+
+/**
+ * Returns why a property that loads its choices cannot be required, or
+ * `undefined` when it is optional. The choices need working credentials, so the
+ * setup form leaves the field out and a new Connection starts with it unset.
+ * A required field would make that config invalid.
+ */
+const findRequiredChoicesReason = (
+  name: string,
+  required: ReadonlyArray<string>,
+): string | undefined =>
+  required.includes(name)
+    ? "is marked choices, so it must be optional (Schema.optionalKey): a new Connection starts with it unset, and the type must work with it unset"
+    : undefined;
+
+/**
  * Derives the JSON Schema the catalog stores and the web app builds a form
  * from. Fails with `UnsupportedConfigSchema` when the form cannot render the
  * schema. Only a flat object of scalars renders, so anything deeper is caught
@@ -155,6 +215,8 @@ export const deriveConfigJsonSchema = (
   }
 
   const marked = new Set(listSecretFields(schema).map((field) => field.name));
+  const choiceFields = new Set(listChoiceFields(schema));
+  const required = (root.required as ReadonlyArray<string> | undefined) ?? [];
   const rendered: Record<string, JsonSchema.JsonSchema> = {};
   for (const [name, property] of Object.entries(properties)) {
     const reason = marked.has(name)
@@ -162,22 +224,31 @@ export const deriveConfigJsonSchema = (
         ? undefined
         : "is marked secret, which only a string can be: nothing else has a masked input"
       : findUnsupportedReason(property);
-    if (reason !== undefined) {
+    const failure =
+      reason ??
+      (choiceFields.has(name)
+        ? (findUnsupportedChoicesReason(property) ?? findRequiredChoicesReason(name, required))
+        : undefined);
+    if (failure !== undefined) {
       return Result.fail(
-        new UnsupportedConfigSchema({ message: `the config property "${name}" ${reason}` }),
+        new UnsupportedConfigSchema({ message: `the config property "${name}" ${failure}` }),
       );
     }
-    rendered[name] = marked.has(name) ? { ...property, [SECRET_MARKER]: true } : property;
+    rendered[name] = {
+      ...property,
+      ...(marked.has(name) ? { [SECRET_MARKER]: true } : {}),
+      ...(choiceFields.has(name) ? { [CHOICES_MARKER]: true } : {}),
+    };
   }
 
   // A secret-marked field is not part of the config at all: its value lives in
   // the secrets table, so a config without it is complete.
-  const required = root.required as ReadonlyArray<string> | undefined;
-
   return Result.succeed({
     ...root,
     properties: rendered,
-    ...(required === undefined ? {} : { required: required.filter((name) => !marked.has(name)) }),
+    ...(root.required === undefined
+      ? {}
+      : { required: required.filter((name) => !marked.has(name)) }),
   });
 };
 

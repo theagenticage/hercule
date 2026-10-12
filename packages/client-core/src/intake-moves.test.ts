@@ -4,6 +4,7 @@ import {
   applySignalMove,
   buildSnoozeChoices,
   countClearedToday,
+  countClearedTodayByPlugin,
   decideSignalPaneMoves,
   decideSignalRowControls,
   describeBulkDoneTitle,
@@ -521,6 +522,47 @@ describe("countClearedToday", () => {
       cleared: 0,
       leftOnTheirOwn: 0,
     });
+  });
+});
+
+describe("countClearedTodayByPlugin", () => {
+  // 00:30 on Tuesday 13 October in Amsterdam, still Monday in UTC.
+  const now = new Date("2026-10-12T22:30:00.000Z");
+  const today = "2026-10-12T22:20:00.000Z";
+
+  it("counts each plugin's signals cleared today, in the order the plugins are listed", () => {
+    const done = [
+      buildResolved("a", today, {}, { kind: "linear/mentioned" }),
+      buildResolved("b", today),
+      buildResolved("c", today),
+      // 23:30 on Monday in Amsterdam: yesterday.
+      buildResolved("d", "2026-10-12T21:30:00.000Z", {}, { kind: "linear/mentioned" }),
+    ];
+    const plugins = [
+      { id: "sentry", displayName: "Sentry" },
+      { id: "github", displayName: "GitHub" },
+      { id: "linear", displayName: "Linear" },
+    ];
+    expect(countClearedTodayByPlugin(done, now, AMSTERDAM, plugins)).toEqual([
+      { pluginId: "github", name: "GitHub", cleared: 2 },
+      { pluginId: "linear", name: "Linear", cleared: 1 },
+    ]);
+  });
+
+  it("leaves out core and replaced signals, and puts unlisted plugins last, by id, named by id", () => {
+    const done = [
+      buildResolved("a", today, {}, { kind: "slack/mentioned" }),
+      buildResolved("b", today, {}, { kind: "proposal" }),
+      buildResolved("c", today, {}, { replacedBy: "01a06d02-7f00-7000-8000-000000000009" }),
+      buildResolved("d", today, {}, { kind: "linear/mentioned" }),
+      buildResolved("e", today, {}, { kind: "github/mentioned" }),
+    ];
+    const plugins = [{ id: "github", displayName: "GitHub" }];
+    expect(countClearedTodayByPlugin(done, now, AMSTERDAM, plugins)).toEqual([
+      { pluginId: "github", name: "GitHub", cleared: 1 },
+      { pluginId: "linear", name: "linear", cleared: 1 },
+      { pluginId: "slack", name: "slack", cleared: 1 },
+    ]);
   });
 });
 

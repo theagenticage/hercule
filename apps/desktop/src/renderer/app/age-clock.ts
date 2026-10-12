@@ -213,6 +213,13 @@ export const createAgeClock = (): AgeClock => {
 export const ageClock = createAgeClock();
 
 /**
+ * A moment so far off that the age clock never reaches it: the next change
+ * of a label that never changes again, such as the next midnight in a zone
+ * that has none.
+ */
+export const NEVER = new Date(8.64e15);
+
+/**
  * Returns `format(now)` for the age clock's current time, and draws the
  * calling component again whenever that value changes. `findNextChange` finds
  * when the value of a label counting from or to `moment` changes next, and is

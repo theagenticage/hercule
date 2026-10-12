@@ -882,16 +882,27 @@ interface ContributionRow {
   readonly definition: string;
 }
 
+/**
+ * Reads the rows of one extension point, ordered by owner and id. With
+ * `owner`, reads only that plugin's rows, so a test of one shipped plugin does
+ * not change when another shipped plugin contributes to the same point.
+ */
 const readContributionRows = (
   sql: ServerHarness["sql"],
   extensionPoint: string,
+  owner?: string,
 ): Promise<ReadonlyArray<ContributionRow>> =>
   Effect.runPromise(
     Effect.orDie(
-      sql<ContributionRow>`
-        SELECT owner, extension_point, id, definition FROM plugin_contributions
-        WHERE extension_point = ${extensionPoint} ORDER BY owner, id
-      `,
+      owner === undefined
+        ? sql<ContributionRow>`
+            SELECT owner, extension_point, id, definition FROM plugin_contributions
+            WHERE extension_point = ${extensionPoint} ORDER BY owner, id
+          `
+        : sql<ContributionRow>`
+            SELECT owner, extension_point, id, definition FROM plugin_contributions
+            WHERE extension_point = ${extensionPoint} AND owner = ${owner} ORDER BY owner, id
+          `,
     ),
   );
 
@@ -950,7 +961,7 @@ describe("the event kinds the shipped github plugin declares", () => {
       async ({ base, sql }) => {
         const token = await completeSetup(base);
 
-        const rows = await readContributionRows(sql, "event-source");
+        const rows = await readContributionRows(sql, "event-source", "github");
         expect(rows).toHaveLength(1);
         const row = rows[0]!;
         expect(row.owner).toBe("github");
@@ -978,7 +989,7 @@ describe("the event kinds the shipped github plugin declares", () => {
   it("declares each kind with a description and a payload schema that includes the subject", async () => {
     await withServer(
       async ({ sql }) => {
-        const rows = await readContributionRows(sql, "event-source");
+        const rows = await readContributionRows(sql, "event-source", "github");
         const definition = JSON.parse(rows[0]!.definition) as {
           readonly kinds: Record<string, { description: string; schema: JsonSchema }>;
         };
@@ -1006,12 +1017,12 @@ describe("the event kinds the shipped github plugin declares", () => {
   it("leaves the same row when the controller boots a second time", async () => {
     await withServer(
       async ({ sql, reboot }) => {
-        const before = await readContributionRows(sql, "event-source");
+        const before = await readContributionRows(sql, "event-source", "github");
         expect(before).toHaveLength(1);
 
         await reboot();
 
-        expect(await readContributionRows(sql, "event-source")).toEqual(before);
+        expect(await readContributionRows(sql, "event-source", "github")).toEqual(before);
       },
       { plugins: shipped },
     );

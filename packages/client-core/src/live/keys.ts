@@ -74,6 +74,17 @@ export const queryKeys = {
   connections: (): LiveQueryKey => ["connections"],
   connection: (id?: string): LiveQueryKey =>
     id === undefined ? ["connection"] : ["connection", id],
+  /**
+   * The choices one config field of a connection loads from the account. Not a
+   * live topic, and kept out of the `connection` prefix on purpose: the account
+   * changes without telling Hercule, so a form reads them each time it opens,
+   * and a connection push must not load them again while the user picks.
+   */
+  connectionChoices: (connectionId: string, field: string): LiveQueryKey => [
+    "connection-choices",
+    connectionId,
+    field,
+  ],
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
   /**

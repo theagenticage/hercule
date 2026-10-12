@@ -59,8 +59,12 @@
  *    the Hercule face showing. Its first screen is Intake's list, and its
  *    memory and idle are read with Intake open. One more plain launch, which
  *    opens Intake again, measures what a signal raised costs, alone and in
- *    a burst, and what opening and closing the split costs (see
- *    `perf-intake.ts`).
+ *    a burst, what opening and closing the split costs, and what the
+ *    list's motion and inbox zero cost on screen (see `perf-intake.ts`).
+ *    Pass `--intake-only` to run only that launch, on 40 threads and the
+ *    signals of this step:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --intake-only
  * 6. The last plain launch opens another idle thread, into which the fixture
  *    has played 20 subagents, 4 of them still running, and measures what
  *    spec 17 §What subagents cost asks for: memory with the side pane closed
@@ -1160,6 +1164,12 @@ const WORKFLOWS_ONLY = process.argv.includes("--workflows-only");
 const EVERYTHING_ONLY = process.argv.includes("--everything-only");
 
 /**
+ * Whether the run measures only Intake at work (see `measureIntakeWork`), on
+ * 40 threads, and skips every other launch and the workflow list.
+ */
+const INTAKE_ONLY = process.argv.includes("--intake-only");
+
+/**
  * Writes the events of Intake, and measures Everything in a plain launch that
  * opens Intake again. The fixture gives the events their titles and arrival
  * times in `prepareLaunch`.
@@ -1255,6 +1265,15 @@ const launches = await runWithThreadFixture(async (fixture) => {
     await fixture.growTo(40);
     writeSettings(userDataDir, { controllerUrl: fixture.url });
     await signInOnce(userDataDir);
+    if (INTAKE_ONLY) {
+      await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
+      await raiseSnoozedSignal(fixture);
+      await fixture.prepareLaunch({ twoMinuteRow: false });
+      await openIntakeOnce(userDataDir);
+      await warmUpApp(userDataDir);
+      reportIntakeWork(await measureIntakeWork(userDataDir, fixture));
+      return null;
+    }
     if (EVERYTHING_ONLY) {
       await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
       await raiseSnoozedSignal(fixture);

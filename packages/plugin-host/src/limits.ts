@@ -13,6 +13,31 @@ import { Schema } from "effect";
  */
 export const MAX_EVENT_TITLE_LENGTH = 512;
 
+/** The longest idempotency key an emitter may write. */
+export const MAX_DEDUP_KEY_LENGTH = 200;
+
+/** The longest system name. It is the name of a system, not a sentence. */
+export const MAX_EVENT_SYSTEM_LENGTH = 64;
+
+/** The longest source URL. It is where a person opens the event, not a document. */
+export const MAX_EVENT_URL_LENGTH = 2048;
+
+/**
+ * The longest author a plugin's event may name. A signal written from the
+ * event alone takes it as its asker, so it is the limit of a signal's asker
+ * too.
+ */
+export const MAX_EVENT_AUTHOR_LENGTH = 256;
+
+/** The longest External Ref. It is an identity, not a document. */
+export const MAX_EXTERNAL_REF_LENGTH = 512;
+
+/**
+ * The grammar of an External Ref, `<system>:<kind>:<identity>`, written once:
+ * a lowercase system, and no whitespace anywhere.
+ */
+export const EXTERNAL_REF_PATTERN = /^[a-z0-9][a-z0-9-]*:[^\s:]+:\S+$/;
+
 /** The longest title of a signal. A title is a line, not a paragraph. */
 export const MAX_SIGNAL_TITLE_LENGTH = 512;
 

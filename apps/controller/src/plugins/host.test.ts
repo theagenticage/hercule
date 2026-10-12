@@ -536,6 +536,137 @@ describe("a secret field declared outside a provider", () => {
 });
 
 /**
+ * A config field marked `choices` loads its values from the external account
+ * through the connection type's `listChoices`. Registration refuses a mark
+ * with no loader behind it, and a mark anywhere a Connection's form is not
+ * the place the choices are shown.
+ */
+describe("a config field that loads its choices from the account", () => {
+  const TEAM_FIELD = Schema.Struct({
+    team: Schema.optionalKey(Schema.String.annotate({ title: "Team", choices: true })),
+  });
+
+  /** Boots a plugin with one connection type, and returns the plugin's status and contributions. */
+  const bootConnectionType = (
+    parts: Record<string, unknown>,
+    manifestConfigSchema: Schema.Top = Schema.Struct({}),
+  ) => {
+    const plugin: Plugin = {
+      manifest: {
+        id: "teams",
+        displayName: "Plugin teams",
+        hostApi: HOST_API,
+        capabilities: ["connections"],
+        configSchema: manifestConfigSchema,
+      },
+      register: (host) =>
+        registerConnectionType(host, {
+          type: "desk",
+          displayName: "Desk",
+          setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }],
+          validate: () => Effect.succeed({ displayName: "Desk", accountId: "desk-1" }),
+          ...parts,
+        }),
+      activate: () => Effect.succeed(Effect.void),
+    };
+    return run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([plugin]);
+        return {
+          status: Option.getOrNull(yield* host.status("teams")) as {
+            readonly _tag: string;
+            readonly message?: string;
+            readonly reason?: { readonly message: string };
+          } | null,
+          detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.read("teams")),
+        };
+      }),
+    );
+  };
+
+  it("registers a type that has the loader, and keeps the mark in the catalog", async () => {
+    const { status, detail } = await bootConnectionType({
+      configSchema: TEAM_FIELD,
+      listChoices: () => Effect.succeed([{ value: "t1", label: "Backend" }]),
+    });
+
+    expect(status?._tag).toBe("active");
+    expect(detail.contributions).toHaveLength(1);
+    expect(detail.contributions[0]?.definition).toMatchObject({
+      configSchema: { properties: { team: { type: "string", "x-choices": true } } },
+    });
+  });
+
+  it("marks the plugin errored when a type marks a field but has no loader, naming the type", async () => {
+    const { status, detail } = await bootConnectionType({ configSchema: TEAM_FIELD });
+
+    expect(status?._tag).toBe("errored");
+    expect(status?.message).toContain("teams/desk");
+    expect(status?.message).toContain("listChoices");
+    expect(detail.contributions).toEqual([]);
+  });
+
+  it("marks the plugin errored when the marked field is not a string or a list of strings", async () => {
+    const { status } = await bootConnectionType({
+      configSchema: Schema.Struct({ limit: Schema.Finite.annotate({ choices: true }) }),
+      listChoices: () => Effect.succeed([]),
+    });
+
+    expect(status?._tag).toBe("errored");
+    expect(status?.message).toContain("limit");
+  });
+
+  it("marks the plugin errored when the marked field is required, naming the field", async () => {
+    const { status, detail } = await bootConnectionType({
+      configSchema: Schema.Struct({ team: Schema.String.annotate({ choices: true }) }),
+      listChoices: () => Effect.succeed([]),
+    });
+
+    expect(status?._tag).toBe("errored");
+    expect(status?.message).toContain("teams/desk");
+    expect(status?.message).toContain('"team"');
+    expect(status?.message).toContain("must be optional");
+    expect(detail.contributions).toEqual([]);
+  });
+
+  it("marks the plugin errored when a provider definition marks a field, naming the provider", async () => {
+    const choosy = createPluginFixture({
+      id: "choosy",
+      definitions: [
+        {
+          ...buildProviderDefinition("choosy-provider", {}),
+          configSchema: TEAM_FIELD,
+        },
+      ],
+    });
+
+    const { status, detail } = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([choosy.plugin]);
+        return {
+          status: Option.getOrNull(yield* host.status("choosy")),
+          detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.read("choosy")),
+        };
+      }),
+    );
+
+    if (status?._tag !== "errored") throw new Error("the plugin should have failed to start");
+    expect(status.message).toContain("choosy-provider");
+    expect(status.message).toContain("connection type only");
+    expect(detail.contributions).toEqual([]);
+  });
+
+  it("refuses the plugin when its own config marks a field, and says where one belongs", async () => {
+    const { status } = await bootConnectionType({}, TEAM_FIELD);
+
+    expect(status?._tag).toBe("refused");
+    expect(status?.reason?.message).toContain("connection type only");
+  });
+});
+
+/**
  * An `oauth` or `device` step is a flow the setup screen offers, and its
  * declaration is where that flow sends the user and asks for tokens. One
  * without the other cannot work, so registration refuses the type and names

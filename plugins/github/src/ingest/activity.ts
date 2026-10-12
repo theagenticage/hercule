@@ -6,7 +6,7 @@
  * them. Both build them here, so one fact has one dedup key whichever feed
  * finds it.
  */
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import type { EmittedEvent, IngestContext, PluginError } from "@hercule/plugin-host";
 import { readReviewVerdict, type ReviewVerdict } from "../github-objects";
@@ -41,6 +41,16 @@ export interface ActivityPoll {
  * left unread, and a warning says so.
  */
 const MAX_HISTORY_PAGES = 10;
+
+/**
+ * The most requests `findLastReviewRequestTime` sends, 100 history entries a
+ * page. They cover a whole history of up to 300 entries, and the newest 200
+ * of a longer one: the first request reads the oldest page, which
+ * `fetchNewestItems` uses only when it reaches it. The pull requests it is
+ * asked about still ask the user for a review, so the request is most often
+ * among the newest entries.
+ */
+const MAX_REVIEW_REQUEST_LOOKUP_PAGES = 3;
 
 /**
  * The most requests one poll sends for a pull request's reviews, 100 a page,
@@ -322,6 +332,53 @@ const readRequestedReviewer = (
   }
   return undefined;
 };
+
+/** Checks whether an entry of an item's history asks the user or one of their teams for a review. */
+const isReviewRequestToUser = (poll: ActivityPoll, entry: IssueEvent): boolean =>
+  entry.event === "review_requested" && readRequestedReviewer(poll, entry) !== undefined;
+
+/**
+ * Finds when a pull request last asked the user or one of their teams for a
+ * review. Reads the pull request's history newest first, with at most
+ * `MAX_REVIEW_REQUEST_LOOKUP_PAGES` requests, and stops at the first page
+ * that holds such a request. Returns the `created_at` of the newest one, or
+ * undefined when the pages read hold none.
+ *
+ * Deciding whether to read an older page skips an entry that does not
+ * decode; the entries read are then decoded strictly, as `emitHistoryEvents`
+ * decodes them, so one malformed entry fails the lookup.
+ *
+ * A request to a team is found only when the team is in `poll.teams`, which
+ * stays empty when the token may not list the user's teams. Fails as
+ * `fetchNewestItems` fails, and with a `PluginError` when an entry lacks the
+ * fields read.
+ */
+export const findLastReviewRequestTime = (
+  poll: ActivityPoll,
+  number: number,
+): Effect.Effect<string | undefined, FeedError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const decodeEntry = Schema.decodeUnknownOption(IssueEvent);
+    const listing = yield* fetchNewestItems(
+      {
+        method: "GET",
+        path: `/repos/${poll.repo}/issues/${String(number)}/events`,
+        token: poll.token,
+        query: { per_page: "100" },
+      },
+      MAX_REVIEW_REQUEST_LOOKUP_PAGES,
+      (items) =>
+        !items.some((raw) =>
+          Option.exists(decodeEntry(raw), (entry) => isReviewRequestToUser(poll, entry)),
+        ),
+    );
+    const entries = yield* decodeGithubValue(
+      Schema.Array(IssueEvent),
+      listing.items,
+      "the entries of an item's history",
+    );
+    return entries.findLast((entry) => isReviewRequestToUser(poll, entry))?.created_at;
+  });
 
 /**
  * Returns the reviews a pull request asks of the user and their teams now,

@@ -5,6 +5,7 @@
  */
 export { githubTokens, type GithubToken } from "./github";
 export { CALLBACK_PATH, OAUTH_TOKENS } from "./oauth";
+export { ActivePlugins } from "./active-plugins";
 export { PluginConfigs } from "./plugin-configs";
 export { ConnectionReferences, type ConnectionReference } from "./references";
 export {

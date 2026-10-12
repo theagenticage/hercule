@@ -16,8 +16,11 @@
  */
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
+import { TestClock } from "effect/testing";
 import {
   ConnectionValidationFailed,
   HOST_API,
@@ -796,6 +799,39 @@ describe("the access token a plugin asks the core for", () => {
     }, QUIET_LOOP_TIMINGS);
   });
 
+  it("stores the tokens the provider issued, and uses them later, when the caller is cancelled as the provider answers", async () => {
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      makeTokensExpireNow(provider);
+      const one = await connect(base, token);
+      const surface = readConnectionsSurface(registry.oauth);
+      let providerAnswered = (): void => {};
+      const answered = new Promise<void>((resolve) => {
+        providerAnswered = resolve;
+      });
+      const issue = provider.answers["refresh_token"];
+      provider.answers["refresh_token"] = () => {
+        providerAnswered();
+        return issue?.() ?? buildJsonResponse({ error: "invalid_grant" }, 400);
+      };
+
+      // The response is still on its way to the controller when the cancel
+      // lands. A provider that rotates its refresh token has already
+      // invalidated the old one, so dropping this answer would lose the only
+      // tokens that work.
+      const caller = Effect.runFork(surface.credentials(one.id));
+      await answered;
+      await Effect.runPromise(Fiber.interrupt(caller));
+
+      const asked = provider.requests.length;
+      expect(await Effect.runPromise(surface.credentials(one.id))).toMatchObject({
+        accessToken: REFRESHED_TOKEN,
+      });
+      expect(provider.requests).toHaveLength(asked);
+      const response = await get(base, `/api/v1/connections/${one.id}`, token);
+      expect(await response.json()).toMatchObject({ status: "connected" });
+    });
+  });
+
   it("fails, and leaves the connection status unchanged, when the provider cannot be reached", async () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       makeTokensExpireNow(provider);
@@ -810,6 +846,46 @@ describe("the access token a plugin asks the core for", () => {
 
       expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
       // The provider never rejected the credential, so there is nothing to reconnect.
+      const response = await get(base, `/api/v1/connections/${one.id}`, token);
+      expect(await response.json()).toMatchObject({ status: "connected" });
+    });
+  });
+
+  it("gives up on a token endpoint that never answers, leaves the status as it is, and lets the next caller refresh", async () => {
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      makeTokensExpireNow(provider);
+      const one = await connect(base, token);
+      const surface = readConnectionsSurface(registry.oauth);
+      const working = provider.answers["refresh_token"];
+      let requestArrived = (): void => {};
+      const arrived = new Promise<void>((resolve) => {
+        requestArrived = resolve;
+      });
+      provider.answers["refresh_token"] = () => {
+        requestArrived();
+        return new Promise<Response>(() => {});
+      };
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          // The test clock starts at zero, before the token was issued, so
+          // move it past the token's expiry.
+          yield* TestClock.setTime(Date.now() + 60_000);
+          const hung = yield* Effect.forkChild(Effect.flip(surface.credentials(one.id)));
+          yield* Effect.promise(() => arrived);
+          yield* Effect.yieldNow;
+          yield* TestClock.adjust(Duration.seconds(30));
+
+          expect(yield* Fiber.join(hung)).toMatchObject({ _tag: "ConnectionUnavailable" });
+
+          // The failed refresh released the connection's lock, so this one runs.
+          if (working === undefined) throw new Error("the provider has no refresh answer");
+          provider.answers["refresh_token"] = working;
+          expect(yield* surface.credentials(one.id)).toMatchObject({
+            accessToken: REFRESHED_TOKEN,
+          });
+        }).pipe(Effect.provide(TestClock.layer())),
+      );
       const response = await get(base, `/api/v1/connections/${one.id}`, token);
       expect(await response.json()).toMatchObject({ status: "connected" });
     });

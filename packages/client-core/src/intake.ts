@@ -83,7 +83,7 @@ export const nameSignalKind = (kind: string): string =>
   CORE_KIND_LABELS[kind] ?? upperFirst(kind.slice(kind.indexOf("/") + 1).replaceAll("-", " "));
 
 /** Returns the name of the plugin `pluginId`, or the id itself when the plugin is not listed. */
-const namePlugin = (pluginId: string, plugins: ReadonlyArray<PluginName>): string =>
+export const namePlugin = (pluginId: string, plugins: ReadonlyArray<PluginName>): string =>
   plugins.find((plugin) => plugin.id === pluginId)?.displayName ?? pluginId;
 
 /** What a client draws as a plugin's mark: the plugin's own paths, or the initial of its name. */

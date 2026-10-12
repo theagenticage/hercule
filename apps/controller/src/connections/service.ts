@@ -27,6 +27,7 @@
  * the controller passes an id it read from a stored row.
  */
 import type * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -40,6 +41,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   decodeAgainst,
+  listChoiceFields,
   type ConnectionValidationFailed,
   type ExternalAccount,
 } from "@hercule/plugin-host";
@@ -53,14 +55,20 @@ import {
   ConnectionStatus,
   ConnectionUpdateInput,
   DEFAULT_PAGE_LIMIT,
+  ConfigChoice,
   Id,
+  MAX_CONFIG_CHOICES,
   createDecodeValidationError,
   createInvalidStateError,
   createNotFoundError,
   createValidationError,
+  formatIssue,
   listDecodeIssues,
   MAX_PLUGIN_MESSAGE_LENGTH,
+  summarizeCause,
+  truncateMessage,
   type Connection,
+  type ConnectionChoices,
   type ConnectionDetail,
   type ConnectionDevicePoll,
   type ConnectionDeviceStart,
@@ -84,6 +92,7 @@ import {
 import { AuditLog } from "../events";
 import { applyIntakeOverrides, normalizeIntakeOverrides, PluginIntake } from "../intake-settings";
 import { Secrets, type SecretNameRef, type SecretOwner } from "../secrets";
+import { ActivePlugins } from "./active-plugins";
 import { deviceSetupRepository } from "./device-setups";
 import {
   buildAuthorizationUrl,
@@ -130,7 +139,14 @@ const CredentialsInput = Schema.Struct({ id: Id, ...ConnectionCredentialsInput.f
 
 export type CredentialsInput = Schema.Schema.Type<typeof CredentialsInput>;
 
+/** The input of `connection.listChoices`: the connection and the name of one config field. */
+const ListChoicesInput = Schema.Struct({ id: Id, field: Schema.String });
+
+export type ListChoicesInput = Schema.Schema.Type<typeof ListChoicesInput>;
+
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
+const decodeListChoices = Schema.decodeUnknownEffect(ListChoicesInput);
+const decodeChoices = Schema.decodeUnknownEffect(Schema.Array(ConfigChoice));
 const decodeCreate = Schema.decodeUnknownEffect(ConnectionCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeCredentials = Schema.decodeUnknownEffect(CredentialsInput);
@@ -351,6 +367,7 @@ const make = Effect.gen(function* () {
   const types = yield* ConnectionTypes;
   const audit = yield* AuditLog;
   const references = yield* ConnectionReferences;
+  const activePlugins = yield* ActivePlugins;
   const pluginIntake = yield* PluginIntake;
 
   const buildSecretOwner = (id: string): SecretOwner => ({ kind: "connection", id });
@@ -1064,6 +1081,106 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Loads the choices for one config field from the external account, with
+     * the connection's credentials and stored config. Nothing is cached and
+     * nothing is written: each call asks the plugin, which calls the account.
+     *
+     * Fails with:
+     *
+     * - `validation` when the field does not load its choices from the
+     *   account;
+     * - `invalid_state` when the plugin is not running (disabled, or failed
+     *   to start), the credentials cannot be read, the plugin fails or dies
+     *   while listing the choices, returns choices of the wrong shape, or
+     *   returns more than `MAX_CONFIG_CHOICES`. The message is the plugin's
+     *   own where the plugin failed or died.
+     *
+     * The choices are cleaned before they are returned: an entry with an empty
+     * `value` is dropped, because it cannot be stored as a selection, and of
+     * several entries with the same `value` only the first is kept, because a
+     * picker with two identical values cannot tell them apart.
+     *
+     * The credentials are read through the same runtime an ingest read uses,
+     * so an expired access token is refreshed first. The plugin is called
+     * outside any transaction, because it waits on the network.
+     */
+    listChoices: (
+      input: ListChoicesInput,
+    ): Effect.Effect<
+      ConnectionChoices,
+      Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("connection.listChoices");
+        const decoded = yield* Effect.mapError(
+          decodeListChoices(input),
+          createDecodeValidationError,
+        );
+        const row = yield* readStoredConnectionOrFail(decoded.id);
+        const { contribution } = yield* readStoredTypeOrFail(row);
+        const { configSchema, listChoices } = contribution;
+        if (
+          configSchema === undefined ||
+          listChoices === undefined ||
+          !listChoiceFields(configSchema).includes(decoded.field)
+        ) {
+          const message = `the config field ${decoded.field} of the type ${row.type} does not load its choices from the account`;
+          return yield* Effect.fail(createValidationError([{ path: ["field"], message }], message));
+        }
+        if (!(yield* activePlugins.isActive(row.pluginId))) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              `the plugin ${row.pluginId} is not running (disabled, or failed to start), so it cannot load choices: enable it, or see why it failed in Settings › Plugins`,
+            ),
+          );
+        }
+        const credentials = yield* types
+          .runtimeFor(row.pluginId)
+          .credentials(row.id)
+          .pipe(Effect.mapError((error) => createInvalidStateError(error.message)));
+        const config = yield* Effect.mapError(decodeAgainst(configSchema, row.config), (error) =>
+          createInvalidStateError(
+            `the connection's config does not fit its type: ${listDecodeIssues(error)
+              .map((issue) => issue.message)
+              .join("; ")}`,
+          ),
+        );
+        // `suspend` turns a plugin that throws before it returns an effect
+        // into a defect, which is handled like one inside the effect.
+        const listed = yield* Effect.suspend(() =>
+          listChoices(decoded.field, { credentials, config }),
+        ).pipe(
+          Effect.provide(FetchHttpClient.layer),
+          Effect.mapError((error) => createInvalidStateError(truncateMessage(error.message))),
+          Effect.catchDefect((defect) =>
+            Effect.fail(createInvalidStateError(summarizeCause(Cause.die(defect)))),
+          ),
+        );
+        if (listed.length > MAX_CONFIG_CHOICES) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              `the account has ${String(listed.length)} choices for ${decoded.field}, and a picker holds at most ${String(MAX_CONFIG_CHOICES)}: the field should take a narrower list`,
+            ),
+          );
+        }
+        const choices = yield* Effect.mapError(decodeChoices(listed), (error) =>
+          createInvalidStateError(
+            truncateMessage(
+              `the plugin ${row.pluginId} returned choices of the wrong shape: ${listDecodeIssues(error).map(formatIssue).join("; ")}`,
+            ),
+          ),
+        );
+        const seen = new Set<string>();
+        return {
+          choices: choices.filter(({ value }) => {
+            if (value === "" || seen.has(value)) return false;
+            seen.add(value);
+            return true;
+          }),
+        };
+      }),
+
+    /**
      * Starts an OAuth flow: stores everything the callback will need, and
      * returns the authorization URL to send the browser to. No connection
      * exists yet. A flow the user abandons leaves a setup row, which a later
@@ -1408,4 +1525,5 @@ export const ConnectionServiceLayer: Layer.Layer<
   | PluginConfigs
   | PluginIntake
   | ConnectionReferences
+  | ActivePlugins
 > = Layer.effect(ConnectionService)(make);

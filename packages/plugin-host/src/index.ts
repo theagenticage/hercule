@@ -20,6 +20,7 @@ export {
   decodeAgainst,
   secret,
   listSecretFields,
+  listChoiceFields,
   excludeSecretFields,
   UnsupportedConfigSchema,
 } from "./config-schema";
@@ -33,6 +34,7 @@ export {
   DeviceDeclaration,
   OAuthDeclaration,
   SetupStep,
+  type ConfigChoice,
   type ConnectionRegistration,
   type ConnectionReport,
   type ConnectionsRuntime,
@@ -79,13 +81,19 @@ export {
 } from "./contributions";
 
 export {
+  EXTERNAL_REF_PATTERN,
   MAX_BLOCK_MESSAGES,
   MAX_BLOCK_NAME_LENGTH,
   MAX_BLOCK_URL_LENGTH,
   MAX_CHECK_LOG_LENGTH,
   MAX_CHECK_LOG_LINES,
   MAX_CHECK_ROWS,
+  MAX_DEDUP_KEY_LENGTH,
+  MAX_EVENT_AUTHOR_LENGTH,
+  MAX_EVENT_SYSTEM_LENGTH,
   MAX_EVENT_TITLE_LENGTH,
+  MAX_EVENT_URL_LENGTH,
+  MAX_EXTERNAL_REF_LENGTH,
   MAX_MESSAGE_TEXT_LENGTH,
   MAX_SIGNAL_BYTES,
   MAX_SIGNAL_TITLE_LENGTH,

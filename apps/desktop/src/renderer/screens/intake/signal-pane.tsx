@@ -164,6 +164,7 @@ function SignalDetail({
       client.signal.act({ params: { id: signal.id }, payload: input }),
     onMutate: () => {
       setFailure(null);
+      moves.registerOwnChanges([signal.id]);
     },
     onSuccess: (acted) => {
       setActedHere(true);
@@ -172,6 +173,7 @@ function SignalDetail({
       queryClient.setQueryData(signalQuery(client, signal.id).queryKey, acted);
     },
     onError: (error, input) => {
+      moves.forgetOwnChanges([signal.id]);
       setFailure({ actionId: input.actionId, message: readErrorMessage(error) });
     },
   });

@@ -805,6 +805,139 @@ describe("ConnectionsRuntime.credentials", () => {
   });
 });
 
+describe("the access token of a connection set up by a device flow", () => {
+  const REFRESHED_TOKEN = "good-refreshed";
+
+  /**
+   * Makes the token endpoint behave like Sentry's. The device code exchange
+   * issues a token that expires in `expiresIn` seconds, with a refresh token.
+   * A refresh answers with new tokens and rotates the refresh token: the
+   * endpoint accepts `refresh-1` once, and refuses every later refresh.
+   */
+  const useRotatingRefreshToken = (provider: DeviceProvider, expiresIn: number): void => {
+    provider.answers.token = () => {
+      const request = provider.tokenRequests.at(-1);
+      if (request?.["grant_type"] !== "refresh_token") {
+        return buildJsonResponse({
+          access_token: GOOD_TOKEN,
+          refresh_token: "refresh-1",
+          token_type: "bearer",
+          expires_in: expiresIn,
+        });
+      }
+      return refreshRequests(provider).length === 1 && request["refresh_token"] === "refresh-1"
+        ? buildJsonResponse({
+            access_token: REFRESHED_TOKEN,
+            refresh_token: "refresh-2",
+            token_type: "bearer",
+            expires_in: 30 * 24 * 60 * 60,
+          })
+        : buildJsonResponse({ error: "invalid_grant" }, 400);
+    };
+  };
+
+  const refreshRequests = (provider: DeviceProvider): ReadonlyArray<Record<string, string>> =>
+    provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token");
+
+  /** Signs in through the device flow and returns the new connection's id. */
+  const signIn = async (
+    { base, sql }: ServerHarness,
+    token: string,
+    provider: DeviceProvider,
+  ): Promise<string> => {
+    const { setupId } = await startDeviceOrFail(base, token);
+    await allowPoll(sql, setupId);
+    expect(await pollDeviceFlow(base, token, setupId)).toMatchObject({ status: "done" });
+    expect(provider.tokenRequests).toHaveLength(1);
+    const [one] = await listConnections(base, token);
+    if (one === undefined) throw new Error("the poll created no connection");
+    return one.id;
+  };
+
+  it("is refreshed with the type's public client id and no client secret, and the new token is stored", async () => {
+    await withDevice(async (harness, registry, token, provider) => {
+      useRotatingRefreshToken(provider, 60);
+      const id = await signIn(harness, token, provider);
+      const surface = readConnectionsSurface(registry.device);
+
+      const refreshed = await Effect.runPromise(surface.credentials(id));
+
+      expect(refreshed).toEqual({ accessToken: REFRESHED_TOKEN });
+      expect(refreshRequests(provider)).toEqual([
+        { grant_type: "refresh_token", refresh_token: "refresh-1", client_id: CLIENT_ID },
+      ]);
+      // The new token set was stored, so the next call does not refresh again.
+      expect(await Effect.runPromise(surface.credentials(id))).toEqual({
+        accessToken: REFRESHED_TOKEN,
+      });
+      expect(refreshRequests(provider)).toHaveLength(1);
+    });
+  });
+
+  it.each([
+    { expiresIn: 15 * 60, refreshed: false },
+    { expiresIn: 5 * 60, refreshed: true },
+  ])(
+    "refreshes a token 10 minutes before it expires, not earlier: with $expiresIn seconds left, refreshed is $refreshed",
+    async ({ expiresIn, refreshed }) => {
+      await withDevice(async (harness, registry, token, provider) => {
+        useRotatingRefreshToken(provider, expiresIn);
+        const id = await signIn(harness, token, provider);
+
+        await Effect.runPromise(readConnectionsSurface(registry.device).credentials(id));
+
+        expect(refreshRequests(provider)).toHaveLength(refreshed ? 1 : 0);
+      });
+    },
+  );
+
+  it("is refreshed once when two callers find it expired at the same time, because the provider refuses the old refresh token", async () => {
+    await withDevice(async (harness, registry, token, provider) => {
+      useRotatingRefreshToken(provider, 60);
+      const id = await signIn(harness, token, provider);
+      const surface = readConnectionsSurface(registry.device);
+
+      const both = await Effect.runPromise(
+        Effect.all([surface.credentials(id), surface.credentials(id)], {
+          concurrency: "unbounded",
+        }),
+      );
+
+      expect(refreshRequests(provider)).toHaveLength(1);
+      expect(both).toEqual([{ accessToken: REFRESHED_TOKEN }, { accessToken: REFRESHED_TOKEN }]);
+    });
+  });
+
+  it("fails, and marks the connection needs-reauth, when the provider refuses the refresh", async () => {
+    await withDevice(async (harness, registry, token, provider) => {
+      useRotatingRefreshToken(provider, 60);
+      const id = await signIn(harness, token, provider);
+      provider.answers.token = () => buildJsonResponse({ error: "invalid_grant" }, 400);
+
+      const failure = await Effect.runPromise(
+        Effect.flip(readConnectionsSurface(registry.device).credentials(id)),
+      );
+
+      expect(failure).toMatchObject({ _tag: "ConnectionUnavailable" });
+      expect(await listConnections(harness.base, token)).toMatchObject([
+        { id, status: "needs-reauth" },
+      ]);
+    });
+  });
+
+  it("is never refreshed when the provider sent no expiry and no refresh token, as GitHub does", async () => {
+    await withDevice(async (harness, registry, token, provider) => {
+      approve(provider);
+      const id = await signIn(harness, token, provider);
+
+      expect(
+        await Effect.runPromise(readConnectionsSurface(registry.device).credentials(id)),
+      ).toEqual({ accessToken: GOOD_TOKEN });
+      expect(provider.tokenRequests).toHaveLength(1);
+    });
+  });
+});
+
 /** Waits until a condition holds, checking every few milliseconds, for at most two seconds. */
 const waitFor = async (condition: () => boolean): Promise<void> => {
   const deadline = Date.now() + 2000;
