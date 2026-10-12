@@ -3695,13 +3695,19 @@ describe("the timeouts a session starts with", () => {
     });
   });
 
-  it("uses the same values for a session continued from another", async () => {
+  it("reads the settings again for a session continued from another", async () => {
     await withFleet(async (arranged) => {
       await setControllerSettings(arranged, {
         "session.inactivityTimeoutMinutes": 5,
         "session.absoluteTimeoutMinutes": 60,
       });
       const parent = await startAndEndSession(arranged, "hello");
+      // Changed after the parent started, so a continue that copied the
+      // parent's timeouts would start with the old values.
+      await setControllerSettings(arranged, {
+        "session.inactivityTimeoutMinutes": 10,
+        "session.absoluteTimeoutMinutes": 120,
+      });
 
       const response = await continueSession(arranged, parent.id, {
         mode: "fork",
@@ -3710,9 +3716,8 @@ describe("the timeouts a session starts with", () => {
       expect(response.status, await response.clone().text()).toBe(200);
 
       const starts = await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 2);
-      const expected = { inactivityMs: 300_000, absoluteMs: 3_600_000 };
-      expect(starts[0]!.spec.timeouts).toEqual(expected);
-      expect(starts[1]!.spec.timeouts).toEqual(expected);
+      expect(starts[0]!.spec.timeouts).toEqual({ inactivityMs: 300_000, absoluteMs: 3_600_000 });
+      expect(starts[1]!.spec.timeouts).toEqual({ inactivityMs: 600_000, absoluteMs: 7_200_000 });
     });
   });
 });
