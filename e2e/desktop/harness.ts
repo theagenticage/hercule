@@ -16,7 +16,7 @@
  * binary, `./hercule`, started in a scratch Hercule Home by
  * `scripts/controller-process.ts`. Run `pnpm build:binary` first as well.
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -31,6 +31,7 @@ import {
   IDENTITY_PORT,
   IDENTITY_PORT_COUNT,
   type Assistant,
+  type Connection,
   type Session,
 } from "../../packages/contract/src/index";
 import { connectFleet, type Fleet } from "../../apps/desktop/scripts/fleet";
@@ -54,6 +55,7 @@ import {
 import { pollUntil } from "../../apps/desktop/scripts/poll";
 import { buildAppEnv } from "../../apps/desktop/scripts/processes";
 import {
+  buildCleanEnv,
   findCompiledBinary,
   PASSWORD,
   startController,
@@ -312,6 +314,55 @@ export async function arrangeFleet(): Promise<ArrangedFleet> {
         .toBe(status);
     },
   };
+}
+
+/** One Connection row for `writeConnectionRows` to write. */
+export interface ConnectionRow {
+  readonly id: string;
+  /** The Connection's label, which is also written as its account name. */
+  readonly label: string;
+  readonly status: Connection["status"];
+  readonly statusDetail?: string;
+  /** The qualified type, `<pluginId>/<word>`. `github/github` when absent. */
+  readonly type?: string;
+}
+
+/**
+ * Writes `rows` into the connections table of the controller whose Hercule
+ * Home is `home`, in order, with no credentials and an empty config. The controller
+ * must be stopped, because it holds its database locked while it runs (see
+ * `ArrangedFleet.restartController`). Fails when the write fails.
+ *
+ * Creating a Connection through the API asks the provider whether the
+ * credentials work, which a test cannot reach, so tests write the rows
+ * instead. A Connection of a type the binary declares, with status
+ * `connected` or `error`, does not keep that status: the controller polls
+ * it, finds no token, and sets it to `needs-reauth` within seconds. A row
+ * whose type no plugin in the binary declares is never polled.
+ */
+export function writeConnectionRows(home: string, rows: ReadonlyArray<ConnectionRow>): void {
+  const written = spawnSync(
+    "bun",
+    [
+      "--eval",
+      String.raw`
+    import { Database } from "bun:sqlite";
+    const database = new Database(process.argv[1]);
+    const now = Date.now();
+    const insert = database.query("INSERT INTO connections (id,plugin_id,type,label,display_name,account_id,status,status_detail,labels,config,created_at,updated_at,feed_intervals) VALUES (?,?,?,?,?,?,?,?,'[]','{}',?,?,'{}')");
+    for (const [index, { id, label, status, statusDetail, type }] of JSON.parse(process.argv[2]).entries()) {
+      // A millisecond apart, so the rows list in the order they are given.
+      const at = new Date(now + index).toISOString();
+      insert.run(Buffer.from(id.replaceAll("-", ""), "hex"), type.split("/")[0], type, label, label, label, status, statusDetail ?? null, at, at);
+    }
+    database.close();
+  `,
+      join(home, "data", "hercule.db"),
+      JSON.stringify(rows.map((row) => ({ type: "github/github", ...row }))),
+    ],
+    { encoding: "utf8", env: buildCleanEnv() },
+  );
+  expect(written.status, written.stderr).toBe(0);
 }
 
 /**

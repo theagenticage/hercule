@@ -196,7 +196,7 @@ export {
   type IntakeSegment,
 } from "./intake-settings";
 export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
-export { isWebLink } from "./web-link";
+export { formatUrlWithoutScheme, isWebLink } from "./web-link";
 export {
   parseMarkdown,
   type ColumnAlignment,

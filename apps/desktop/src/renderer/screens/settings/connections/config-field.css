@@ -1,0 +1,91 @@
+/* A plugin's settings drawn as form fields, in Configure of Settings >
+   Connections. Not in the book, which draws no settings form: each widget is
+   the book's own control (`.fl`, `.field`, `.field--select`, `.toggle`,
+   `.options`), and only the layout around it is new here. */
+
+/* A number needs only a few characters, so its field is as narrow as a
+   feed's poll interval field. */
+.fl > .field.config-field-narrow {
+  justify-self: start;
+  width: 140px;
+}
+/* A unit after the number, such as "seconds", inside the field's box. */
+.config-field-narrow > .fine {
+  flex: none;
+}
+
+/* A boolean setting: its name and description on the left and the switch on
+   the right, as a settings row draws a switch, without the row's rule. */
+.config-switch-field {
+  display: grid;
+  gap: 6px;
+}
+.config-switch {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.config-switch-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.config-switch-text b {
+  font-weight: var(--w-medium);
+}
+.config-switch-text span {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+/* A list setting: one field per entry with Remove beside it, and Add under
+   the entries. An entry's error sits under its own field. */
+.config-list {
+  display: grid;
+  gap: 6px;
+}
+.config-list-entry {
+  display: grid;
+  gap: 6px;
+}
+.config-list-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.config-list-row > .field {
+  flex: 1;
+  min-width: 0;
+}
+/* Pulled back by the button's padding, so its plus lines up with the left
+   edge of the fields above it. */
+.config-list-add {
+  justify-self: start;
+  margin-left: -10px;
+}
+
+/* The filter above a long list of choices, with the lens before the text. */
+.choice-filter > .ic {
+  flex: none;
+  color: var(--faint);
+}
+
+/* The checkboxes of a list setting that loads its choices, in a field-like
+   box that scrolls once the list is long. The rows keep the options' hover,
+   inset 4px from the box's edge. The box resets the 8px the options reach
+   past the text on each side, because here the box is the edge. */
+.options.choice-list {
+  max-height: 220px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border-radius: var(--r-md);
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.choice-list-empty {
+  margin: 0;
+  padding: 6px 8px;
+}

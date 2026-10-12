@@ -5,10 +5,7 @@ import { listConnectionTypes, type ConnectionType } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
 import { connectionsQuery, pluginsQuery } from "../../../../app/queries";
-import {
-  AddConnectionMenu,
-  ConnectionTable,
-} from "../../../../screens/settings/connections";
+import { AddConnectionMenu, ConnectionTable } from "../../../../screens/settings/connections";
 import { SettingsHeaderActions } from "../../../../screens/settings/settings-frame";
 import { ConfigureConnectionDialog } from "./-configure-connection-dialog";
 import { ConnectionSetupDialog } from "./-connection-setup-dialog";

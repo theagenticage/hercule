@@ -47,7 +47,6 @@ const CONTROLLER = {
 /** The rows of the Settings list that lead nowhere yet. */
 const INERT_ROWS = [
   "Threads",
-  "Connections",
   "Providers",
   "Machines",
   "Identities",
@@ -181,7 +180,7 @@ describe("the Settings list", () => {
       });
       const list = await findSettingsList();
 
-      const row = within(list).getByRole("button", { name: /Connections/ });
+      const row = within(list).getByRole("link", { name: /Connections/ });
       expect(within(row).getByRole("img", { name: "A Connection needs attention" })).toBeTruthy();
     },
   );

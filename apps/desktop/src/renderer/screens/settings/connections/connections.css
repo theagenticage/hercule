@@ -1,0 +1,206 @@
+/* Settings > Connections, from the Bureau book's Connections page
+   (desktop/settings-connections.html). The table keeps the book's class
+   names, `.sec-top`, `.tbl-h`, `.conn`, `.mk`, `.nm` and `.health`, so each
+   rule maps 1:1 to the book's rule of the same name. Those names are short
+   enough to collide with other screens, so every rule is scoped under the
+   section, `.connection-list`. The values are the book's.
+
+   The book's table has seven columns. The app draws four: the mark, the
+   Connection, its health and ⋯. No operation reads a Default Topic or event
+   counts, so those columns are left out. With four columns the table fits
+   the frame's 760px column, so the book's 900px column is not used either
+   (spec 17 §Settings, Connections). */
+
+.connection-list .sec-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.connection-list .sec-top h2 {
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.connection-list .sec-top span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* The Health column is the book's 176px, room for a short status detail.
+   A longer one ends in an ellipsis, and its tooltip shows it whole. */
+.connection-list .tbl-h,
+.connection-list .conn {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 176px 28px;
+  align-items: center;
+  gap: 14px;
+}
+.connection-list .tbl-h {
+  padding: 0 4px 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.connection-list .conn {
+  min-height: 52px;
+  padding: 6px 4px;
+  border-top: 1px solid var(--line-soft);
+}
+.connection-list .conn.is-fail {
+  background: linear-gradient(90deg, var(--fail-tint), transparent 70%);
+  border-radius: var(--r-md);
+}
+.connection-list .conn.is-fail + .conn {
+  border-top-color: transparent;
+}
+.connection-list .mk {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+}
+.connection-list .nm {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+/* Not in the book, whose names are short. A label can be long, so the name
+   ends in an ellipsis, as the line under it does. */
+.connection-list .nm b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.connection-list .nm span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.connection-list .health {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.connection-list .health--fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+/* Not in the book. A status detail is the controller's words, of any length. */
+.connection-list .health > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Not in the book, which always draws Connections. The note that takes the
+   table's place, drawn as Settings > Assistants draws its own. */
+.connection-list-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 64px 24px;
+  color: var(--muted);
+  text-align: center;
+}
+.connection-list-empty b {
+  color: var(--ink);
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.connection-list-empty span {
+  max-width: 380px;
+}
+
+/* A narrow window (spec 17 §Settings, The frame). While the body is narrower
+   than 520px, the Health column narrows so the name keeps its room. */
+@container (width < 520px) {
+  .connection-list .tbl-h,
+  .connection-list .conn {
+    grid-template-columns: 34px minmax(0, 1fr) 104px 28px;
+  }
+}
+
+/* ---------- Menus ---------- */
+/* Not in the book, which draws neither menu. The row's ⋯ menu and Add a
+   Connection's menu are glass popovers (`.pop`), with their items drawn as
+   Intake's pane menu draws its own. Each opens 6px under its button, its
+   right edge on the button's. */
+.conn-menu {
+  inset: auto;
+  min-width: 180px;
+  margin: 6px 0 0;
+  padding: 6px;
+  border-radius: var(--r-lg);
+  position-area: block-end span-inline-start;
+}
+.conn-menu [role="menuitem"] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  font-size: var(--t-13);
+  text-align: left;
+}
+.conn-menu [role="menuitem"].is-active {
+  background: var(--hover);
+}
+.conn-menu [role="menuitem"]:focus-visible {
+  outline: none;
+}
+.conn-menu [role="menuitem"][aria-disabled="true"] {
+  color: var(--faint);
+  cursor: default;
+}
+/* A button reads as pressed while its menu is open. */
+.conn-more:has(+ :popover-open),
+.add-conn:has(+ :popover-open) {
+  background: var(--selected);
+  color: var(--ink);
+}
+
+/* Add a Connection's items have two lines: the type's name, and under it
+   what setting it up takes. Spec 14's narrow menu width. */
+.add-conn-menu {
+  width: 320px;
+}
+.add-conn-menu [role="menuitem"] {
+  height: auto;
+  padding: 7px 8px;
+}
+.add-conn-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+}
+.add-conn-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.add-conn-text b {
+  font-weight: var(--w-medium);
+}
+.add-conn-text span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

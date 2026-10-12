@@ -442,7 +442,11 @@ export const connectionQuery = (client: HerculeClient, id: string) =>
  * dropped as soon as it closes; a failed read is not tried again, because the
  * picker falls back to a plain field.
  */
-export const connectionChoicesQuery = (client: HerculeClient, connectionId: string, field: string) =>
+export const connectionChoicesQuery = (
+  client: HerculeClient,
+  connectionId: string,
+  field: string,
+) =>
   queryOptions({
     queryKey: queryKeys.connectionChoices(connectionId, field),
     queryFn: async () =>

@@ -1,6 +1,6 @@
 /**
- * Decides whether an address that came from outside the product may be shown
- * as a link.
+ * Rules for addresses that came from outside the product: whether one may be
+ * shown as a link, and how it is shown as text.
  */
 
 /**
@@ -19,4 +19,15 @@ export const isWebLink = (url: string): boolean => {
   } catch {
     return false;
   }
+};
+
+/**
+ * Returns `url` without its scheme, query or fragment, such as
+ * `github.com/login/device`, for a line that names where a link leads. Returns
+ * `url` unchanged when it does not parse as an absolute URL.
+ */
+export const formatUrlWithoutScheme = (url: string): string => {
+  if (!URL.canParse(url)) return url;
+  const { host, pathname } = new URL(url);
+  return `${host}${pathname === "/" ? "" : pathname}`;
 };

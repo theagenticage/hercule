@@ -351,9 +351,9 @@ describe("summarizeConnectionType", () => {
   });
 
   it("leaves out a plugin named like its type", () => {
-    expect(
-      summarizeConnectionType({ ...withSetup([{ kind: "device" }]), pluginName: "T" }),
-    ).toBe("sign in with T");
+    expect(summarizeConnectionType({ ...withSetup([{ kind: "device" }]), pluginName: "T" })).toBe(
+      "sign in with T",
+    );
   });
 
   it("shows the type's id for a setup this build cannot show", () => {
