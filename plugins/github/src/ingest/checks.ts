@@ -43,7 +43,7 @@ import { isUserAccount, type GithubIdentity } from "../identity";
 import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";
 import { computeDigest } from "./digest";
 import { ListedPull } from "./feed-objects";
-import { fetchOwnOpenPullRequests } from "./own-pulls";
+import { fetchOwnOpenPullRequests } from "./pull-searches";
 import {
   decodeGithubValue,
   fetchFeedResponse,

@@ -1,10 +1,11 @@
 /**
  * Tests the followed items: the issues and pull requests outside the watch
  * list that the `repos` feed reads one by one, because a notification named
- * them, an open signal is about them, or they are the user's own.
+ * them, an open signal is about them, they are the user's own, or a search
+ * finds them asking the user or one of their teams for a review.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Result } from "effect";
+import { Effect, Logger, Result } from "effect";
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import { TEST_TOKEN } from "../actions/testing";
 import {
@@ -15,14 +16,23 @@ import {
   runAgainstStub,
   stubGithub,
   TEST_ACCOUNT,
+  type GithubStub,
   TEST_IDENTITY,
   type StubResponse,
 } from "../testing";
-import { MAX_FOLLOWED_ITEMS_PER_POLL, pollFollowedItems, recordFollowedHints } from "./followed";
+import {
+  MAX_FOLLOWED_ITEMS_PER_POLL,
+  MAX_FOLLOWED_REQUESTS_PER_POLL,
+  pollFollowedItems,
+  recordFollowedHints,
+} from "./followed";
 import { GithubRateLimited } from "./requests";
 
 const REPO = "acme/webshop";
 const SINCE = "2026-10-11T08:00:00Z";
+
+/** The state key that marks that the search for review requests has baselined. */
+const BASELINE_KEY = "review-requests-baselined";
 
 /** An open pull request of `acme/webshop`, as `GET .../issues/{number}` returns it. */
 const buildPull = (number: number, extra: object = {}) => ({
@@ -49,13 +59,54 @@ const buildPullDetail = (number: number) => ({
   requested_reviewers: [TEST_ACCOUNT],
 });
 
+/** A pull request of `repo`, as `GET /search/issues` lists it. */
+const buildFoundPull = (number: number, updatedAt = "2026-10-11T09:30:00Z", repo = REPO) => ({
+  number,
+  title: `Pull ${String(number)}`,
+  repository_url: `https://api.github.com/repos/${repo}`,
+  updated_at: updatedAt,
+});
+
+/** A comment by marta on pull request `number` of `acme/webshop`, as `GET .../comments` lists it. */
+const buildComment = (id: number, number: number, createdAt: string, body = "Looks good.") => ({
+  id,
+  html_url: `https://github.com/${REPO}/pull/${String(number)}#issuecomment-${String(id)}`,
+  issue_url: `https://api.github.com/repos/${REPO}/issues/${String(number)}`,
+  user: { login: "marta", id: 9 },
+  body,
+  created_at: createdAt,
+  updated_at: createdAt,
+});
+
+/**
+ * A history entry in which marta asks for a review: by default from the
+ * user, or from whoever `target` names, such as `{ requested_team: { slug } }`.
+ */
+const buildReviewRequest = (
+  id: number,
+  createdAt: string,
+  target: object = { requested_reviewer: TEST_ACCOUNT },
+) => ({
+  id,
+  event: "review_requested",
+  created_at: createdAt,
+  actor: { login: "marta", id: 9 },
+  ...target,
+});
+
 /**
  * Answers the requests for item `number`: the item itself, as an issue and
- * as a pull request, no comments, no reviews, and a history with one review
- * request to the user.
+ * as a pull request, no comments, no reviews, and the history `history`
+ * returns, by default one review request to the user at 09:00 whose id is
+ * the item's number.
  */
 const answerItem =
-  (item: (number: number) => object) =>
+  (
+    item: (number: number) => object,
+    history: (number: number) => ReadonlyArray<object> = (number) => [
+      buildReviewRequest(number, "2026-10-11T09:00:00Z"),
+    ],
+  ) =>
   (request: HttpClientRequest.HttpClientRequest): StubResponse => {
     const { path } = readStubRequestTarget(request);
     const match = /\/(issues|pulls)\/(\d+)(\/\w+)?$/.exec(path);
@@ -67,34 +118,58 @@ const answerItem =
           body: match?.[1] === "pulls" ? buildPullDetail(number) : item(number),
         };
       case "/events":
-        return {
-          status: 200,
-          body: [
-            {
-              id: number,
-              event: "review_requested",
-              created_at: "2026-10-11T09:00:00Z",
-              actor: { login: "marta", id: 9 },
-              requested_reviewer: TEST_ACCOUNT,
-            },
-          ],
-        };
+        return { status: 200, body: history(number) };
       default:
         return { status: 200, body: [] };
     }
   };
 
-/** Polls the followed items once against `route`, with no watch list and no teams. */
+/**
+ * Returns a route that answers the search for the user's own pull requests
+ * with `found.own`, the search for pull requests asking the user for a
+ * review with `found.asking`, and the user's teams with none. Every other
+ * request goes to `route`.
+ */
+const answerSearches =
+  (
+    found: { readonly own?: ReadonlyArray<object>; readonly asking?: ReadonlyArray<object> },
+    route: (request: HttpClientRequest.HttpClientRequest) => StubResponse,
+  ) =>
+  (request: HttpClientRequest.HttpClientRequest): StubResponse => {
+    const { path, query } = readStubRequestTarget(request);
+    if (path !== "/search/issues") return answerUserRequests(route)(request);
+    const items = (query["q"]?.endsWith("author:@me") ? found.own : found.asking) ?? [];
+    return { status: 200, body: { total_count: items.length, items } };
+  };
+
+/**
+ * Polls the followed items once against `route`, by default with no watch
+ * list and no teams. Returns the poll's result, the stub, and the warnings
+ * the poll logged.
+ */
 const pollOnce = (
   harness: ReturnType<typeof buildIngestHarness>,
   route: (request: HttpClientRequest.HttpClientRequest) => StubResponse,
+  { watchList = [], teams = [] }: { watchList?: Array<string>; teams?: Array<string> } = {},
 ) => {
   const stub = stubGithub(route);
+  const warnings: Array<string> = [];
+  const captureWarnings = Logger.layer([
+    Logger.make(({ logLevel, message }) => {
+      if (logLevel === "Warn") warnings.push([message].flat().join(" "));
+    }),
+  ]);
   return runAgainstStub(
-    pollFollowedItems(TEST_TOKEN, harness.context, [], TEST_IDENTITY, new Set()),
+    pollFollowedItems(TEST_TOKEN, harness.context, watchList, TEST_IDENTITY, new Set(teams)).pipe(
+      Effect.provide(captureWarnings),
+    ),
     stub,
-  ).then((result) => ({ result, stub }));
+  ).then((result) => ({ result, stub, warnings }));
 };
+
+/** Returns how many requests for an item's history the stub received. */
+const countHistoryReads = (stub: GithubStub): number =>
+  stub.requests.filter((request) => readStubRequestTarget(request).path.endsWith("/events")).length;
 
 /** Returns the number of the item a request is about, or undefined for a request about the user. */
 const readItemNumber = (request: HttpClientRequest.HttpClientRequest): number | undefined => {
@@ -237,17 +312,7 @@ describe("pollFollowedItems", () => {
         if (!path.endsWith("/comments")) return answer(request);
         return {
           status: 200,
-          body: [
-            {
-              id: number,
-              html_url: `https://github.com/${REPO}/pull/${String(number)}#issuecomment-${String(number)}`,
-              issue_url: `https://api.github.com/repos/${REPO}/issues/${String(number)}`,
-              user: { login: "marta", id: 9 },
-              body: "Looks good.",
-              created_at: "2026-10-11T09:00:00Z",
-              updated_at: "2026-10-11T09:00:00Z",
-            },
-          ],
+          body: [buildComment(number, number, "2026-10-11T09:00:00Z")],
         };
       }),
     );
@@ -350,26 +415,10 @@ describe("pollFollowedItems", () => {
 
   it("records an own pull request seen for the first time, and emits what happens on it after", async () => {
     const harness = buildIngestHarness();
-    let updatedAt = "2026-10-11T08:30:00Z";
-    const route = (request: HttpClientRequest.HttpClientRequest): StubResponse =>
-      readStubRequestTarget(request).path === "/search/issues"
-        ? {
-            status: 200,
-            body: {
-              total_count: 1,
-              items: [
-                {
-                  number: 1,
-                  title: "Pull 1",
-                  repository_url: `https://api.github.com/repos/${REPO}`,
-                  updated_at: updatedAt,
-                },
-              ],
-            },
-          }
-        : answerUserRequests(answerItem((number) => buildPull(number)))(request);
+    const route = (updatedAt: string) =>
+      answerSearches({ own: [buildFoundPull(1, updatedAt)] }, answerItem(buildPull));
 
-    const { stub } = await pollOnce(harness, route);
+    const { stub } = await pollOnce(harness, route("2026-10-11T08:30:00Z"));
 
     expect(stub.requests.filter((request) => !isUserRequest(request))).toEqual([]);
     expect(harness.events).toEqual([]);
@@ -378,47 +427,27 @@ describe("pollFollowedItems", () => {
     });
 
     // The review request at 09:00 comes after the baseline.
-    updatedAt = "2026-10-11T09:30:00Z";
-    await pollOnce(harness, route);
+    await pollOnce(harness, route("2026-10-11T09:30:00Z"));
 
     expect(harness.events.map((event) => event.kind)).toEqual(["github.pr.review-requested"]);
   });
 
   it("reads an own pull request whose read failed again, even once it is closed", async () => {
     const harness = buildIngestHarness();
-    let own = true;
-    let failing = false;
-    const route = (request: HttpClientRequest.HttpClientRequest): StubResponse => {
-      const { path } = readStubRequestTarget(request);
-      if (path === "/search/issues") {
-        const items = own
-          ? [
-              {
-                number: 1,
-                title: "Pull 1",
-                repository_url: `https://api.github.com/repos/${REPO}`,
-                updated_at: "2026-10-11T08:30:00Z",
-              },
-            ]
-          : [];
-        return { status: 200, body: { total_count: items.length, items } };
-      }
-      if (failing && path.endsWith("/events")) {
-        return { status: 500, body: { message: "Server Error" } };
-      }
-      return answerUserRequests(answerItem((number) => buildPull(number)))(request);
-    };
-    await pollOnce(harness, route);
+    const answer = answerItem(buildPull);
+    const failHistory = (request: HttpClientRequest.HttpClientRequest): StubResponse =>
+      readStubRequestTarget(request).path.endsWith("/events")
+        ? { status: 500, body: { message: "Server Error" } }
+        : answer(request);
+    const own = [buildFoundPull(1, "2026-10-11T08:30:00Z")];
+    await pollOnce(harness, answerSearches({ own }, answer));
 
     // The review request at 09:00 is read, then the history read fails.
-    failing = true;
-    await pollOnce(harness, route);
+    await pollOnce(harness, answerSearches({ own }, failHistory));
     expect(harness.events).toEqual([]);
 
     // The pull request is closed, so the search no longer finds it.
-    own = false;
-    failing = false;
-    await pollOnce(harness, route);
+    await pollOnce(harness, answerSearches({}, answer));
 
     expect(harness.events.map((event) => event.kind)).toEqual(["github.pr.review-requested"]);
   });
@@ -426,24 +455,8 @@ describe("pollFollowedItems", () => {
   it("goes back to a notification's hint from before an own pull request's last read", async () => {
     const harness = buildIngestHarness();
     const answer = answerItem((number) => buildPull(number));
-    const route = (request: HttpClientRequest.HttpClientRequest): StubResponse => {
+    const route = answerSearches({ own: [buildFoundPull(1)] }, (request) => {
       const { path } = readStubRequestTarget(request);
-      if (path === "/search/issues") {
-        return {
-          status: 200,
-          body: {
-            total_count: 1,
-            items: [
-              {
-                number: 1,
-                title: "Pull 1",
-                repository_url: `https://api.github.com/repos/${REPO}`,
-                updated_at: "2026-10-11T09:30:00Z",
-              },
-            ],
-          },
-        };
-      }
       if (path === `/repos/${REPO}/issues/1`) {
         return request.headers["if-none-match"] === '"e1"'
           ? { status: 304 }
@@ -454,20 +467,12 @@ describe("pollFollowedItems", () => {
         return {
           status: 200,
           body: [
-            {
-              id: 400,
-              html_url: `https://github.com/${REPO}/pull/1#issuecomment-400`,
-              issue_url: `https://api.github.com/repos/${REPO}/issues/1`,
-              user: { login: "marta", id: 9 },
-              body: `@${TEST_IDENTITY.login} can you look?`,
-              created_at: "2026-10-11T09:10:00Z",
-              updated_at: "2026-10-11T09:10:00Z",
-            },
+            buildComment(400, 1, "2026-10-11T09:10:00Z", `@${TEST_IDENTITY.login} can you look?`),
           ],
         };
       }
-      return answerUserRequests(answer)(request);
-    };
+      return answer(request);
+    });
     // The first poll records the pull request; the second reads it and keeps its ETag.
     await pollOnce(harness, route);
     await pollOnce(harness, route);
@@ -514,5 +519,239 @@ describe("pollFollowedItems", () => {
       "github.pr.review-submitted",
       "github.pr.review-requested",
     ]);
+  });
+});
+
+describe("pollFollowedItems, for pull requests the search finds asking for a review", () => {
+  const FOLLOWED_1 = `followed/github:pr:${REPO}#1`;
+
+  it("records what its first search finds, emits nothing, and marks the search baselined", async () => {
+    const harness = buildIngestHarness();
+
+    const { stub } = await pollOnce(
+      harness,
+      answerSearches(
+        { asking: [buildFoundPull(1, "2026-10-11T08:30:00Z")] },
+        answerItem(buildPull),
+      ),
+    );
+
+    expect(stub.requests.filter((request) => !isUserRequest(request))).toEqual([]);
+    expect(harness.events).toEqual([]);
+    expect(harness.state.get(FOLLOWED_1)).toEqual({ since: "2026-10-11T08:30:01.000Z" });
+    expect(harness.state.get(BASELINE_KEY)).toBe(true);
+  });
+
+  it.each([
+    {
+      whom: "the user",
+      target: { requested_reviewer: TEST_ACCOUNT },
+      teams: [],
+      payload: { reviewer: "you", toYou: true },
+    },
+    {
+      whom: "one of the user's teams",
+      target: { requested_team: { slug: "reviewers" } },
+      teams: ["acme/reviewers"],
+      payload: { reviewer: "team", team: "acme/reviewers", toYou: false },
+    },
+  ])(
+    "emits the request to $whom that put a pull request in a later search",
+    async ({ target, teams, payload }) => {
+      const harness = buildIngestHarness();
+      const answer = answerItem(buildPull, () => [
+        buildReviewRequest(70, "2026-10-11T09:00:00Z", target),
+      ]);
+      // The first search finds nothing, so what the next one finds is new.
+      await pollOnce(harness, answerSearches({}, answer));
+
+      await pollOnce(harness, answerSearches({ asking: [buildFoundPull(1)] }, answer), { teams });
+
+      expect(harness.events).toMatchObject([
+        { kind: "github.pr.review-requested", dedupKey: "pr.review-requested:70", payload },
+      ]);
+    },
+  );
+
+  it("emits what happened on a newly found pull request after the request, and nothing before it", async () => {
+    const harness = buildIngestHarness();
+    harness.state.set(BASELINE_KEY, true);
+    const answer = answerItem(buildPull);
+    const route = answerSearches({ asking: [buildFoundPull(1)] }, (request) =>
+      readStubRequestTarget(request).path.endsWith("/comments")
+        ? {
+            status: 200,
+            body: [
+              buildComment(401, 1, "2026-10-11T08:50:00Z"),
+              buildComment(402, 1, "2026-10-11T09:10:00Z"),
+            ],
+          }
+        : answer(request),
+    );
+
+    await pollOnce(harness, route);
+
+    // The request is at 09:00, between the two comments.
+    expect(harness.events.map((event) => event.dedupKey)).toEqual([
+      "pr.review-requested:1",
+      "pr.commented:402",
+    ]);
+  });
+
+  it("records a found pull request whose history names no request to the user, and warns once", async () => {
+    const harness = buildIngestHarness();
+    harness.state.set(BASELINE_KEY, true);
+    const toSomeoneElse = { requested_reviewer: { login: "hubot", id: 5 } };
+    const route = answerSearches(
+      { asking: [buildFoundPull(1)] },
+      answerItem(buildPull, () => [buildReviewRequest(70, "2026-10-11T09:00:00Z", toSomeoneElse)]),
+    );
+    const namesPull = (warning: string) => warning.includes(`${REPO}#1`);
+
+    const first = await pollOnce(harness, route);
+
+    expect(harness.events).toEqual([]);
+    expect(harness.state.get(FOLLOWED_1)).toEqual({ since: "2026-10-11T09:30:01.000Z" });
+    expect(first.warnings.filter(namesPull)).toHaveLength(1);
+
+    const second = await pollOnce(harness, route);
+
+    expect(second.warnings.filter(namesPull)).toEqual([]);
+  });
+
+  it("reads a found pull request it already follows from its stored time, with no lookup", async () => {
+    const harness = buildIngestHarness();
+    harness.state.set(BASELINE_KEY, true);
+    harness.state.set(FOLLOWED_1, { since: "2026-10-11T09:10:00Z" });
+
+    const { stub } = await pollOnce(
+      harness,
+      answerSearches({ asking: [buildFoundPull(1)] }, answerItem(buildPull)),
+    );
+
+    // The request at 09:00 is before the stored time, so it is not emitted.
+    expect(harness.events).toEqual([]);
+    expect(countHistoryReads(stub)).toBe(1);
+    expect(harness.state.get(FOLLOWED_1)).toEqual({ since: "2026-10-11T09:30:00Z" });
+  });
+
+  it("reads a found pull request a notification also named once, from the notification's time", async () => {
+    const harness = buildIngestHarness();
+    harness.state.set(BASELINE_KEY, true);
+    // The notification's time is 08:00.
+    await recordHints(harness, 1);
+    const answer = answerItem(buildPull);
+    const route = answerSearches({ asking: [buildFoundPull(1)] }, (request) =>
+      readStubRequestTarget(request).path.endsWith("/comments")
+        ? { status: 200, body: [buildComment(401, 1, "2026-10-11T08:30:00Z")] }
+        : answer(request),
+    );
+
+    const { stub } = await pollOnce(harness, route);
+
+    const itemRequests = stub.requests.filter((request) => !isUserRequest(request));
+    expect(readStubRequestTarget(itemRequests[0]!).path).toBe(`/repos/${REPO}/issues/1`);
+    expect(countHistoryReads(stub)).toBe(1);
+    // The comment at 08:30 is after the notification's time and before the
+    // request at 09:00. The request has the key a search alone gives it.
+    expect(harness.events.map((event) => event.dedupKey)).toEqual([
+      "pr.commented:401",
+      "pr.review-requested:1",
+    ]);
+  });
+
+  it("reads an own pull request the search for review requests also finds, rather than recording it", async () => {
+    const harness = buildIngestHarness();
+    harness.state.set(BASELINE_KEY, true);
+    const found = [buildFoundPull(1)];
+
+    await pollOnce(harness, answerSearches({ own: found, asking: found }, answerItem(buildPull)));
+
+    expect(harness.events.map((event) => event.dedupKey)).toEqual(["pr.review-requested:1"]);
+  });
+
+  it("leaves a found pull request in a watched repository to the watch list's poll", async () => {
+    const harness = buildIngestHarness();
+    harness.state.set(BASELINE_KEY, true);
+    const asking = [buildFoundPull(1), buildFoundPull(2, undefined, "acme/other")];
+
+    const { stub } = await pollOnce(harness, answerSearches({ asking }, answerItem(buildPull)), {
+      watchList: [REPO],
+    });
+
+    const paths = stub.requests
+      .filter((request) => !isUserRequest(request))
+      .map((request) => readStubRequestTarget(request).path);
+    expect(paths).not.toEqual([]);
+    expect(paths.filter((path) => !path.startsWith("/repos/acme/other/"))).toEqual([]);
+    expect(harness.state.has(FOLLOWED_1)).toBe(false);
+  });
+
+  it("forgets a pull request that leaves the search, and emits a new request when it is found again", async () => {
+    const harness = buildIngestHarness();
+    harness.state.set(BASELINE_KEY, true);
+    const answer = answerItem(buildPull);
+    await pollOnce(harness, answerSearches({ asking: [buildFoundPull(1)] }, answer));
+
+    // The user reviewed, so the search no longer finds the pull request.
+    await pollOnce(harness, answerSearches({}, answer));
+    expect(harness.state.has(FOLLOWED_1)).toBe(false);
+
+    // marta asks again at 10:00.
+    const askedAgain = answerItem(buildPull, () => [
+      buildReviewRequest(1, "2026-10-11T09:00:00Z"),
+      buildReviewRequest(2, "2026-10-11T10:00:00Z"),
+    ]);
+    await pollOnce(
+      harness,
+      answerSearches({ asking: [buildFoundPull(1, "2026-10-11T10:00:00Z")] }, askedAgain),
+    );
+
+    expect(harness.events.map((event) => event.dedupKey)).toEqual([
+      "pr.review-requested:1",
+      "pr.review-requested:2",
+    ]);
+  });
+
+  it("counts the searches and the lookups toward the request limit, and leaves the rest for the next poll", async () => {
+    const harness = buildIngestHarness();
+    harness.state.set(BASELINE_KEY, true);
+    const found = Array.from({ length: 25 }, (_, index) => buildFoundPull(index + 1));
+    const route = answerSearches({ asking: found }, answerItem(buildPull));
+
+    const first = await pollOnce(harness, route);
+
+    // Each item costs six requests: the lookup, the item, its comments,
+    // reviews and history, and the pull request. The two searches come first.
+    const read = Math.ceil((MAX_FOLLOWED_REQUESTS_PER_POLL - 2) / 6);
+    expect(harness.events).toHaveLength(read);
+    expect(first.warnings).toContainEqual(
+      expect.stringContaining(`so ${String(found.length - read)} wait for the next poll`),
+    );
+
+    await pollOnce(harness, route);
+
+    expect(harness.events).toHaveLength(found.length);
+  });
+
+  it("records nothing for a found pull request whose lookup fails, and finds it again at the next poll", async () => {
+    const harness = buildIngestHarness();
+    harness.state.set(BASELINE_KEY, true);
+    const answer = answerItem(buildPull);
+    const asking = [buildFoundPull(1)];
+    const failHistory = (request: HttpClientRequest.HttpClientRequest): StubResponse =>
+      readStubRequestTarget(request).path.endsWith("/events")
+        ? { status: 500, body: { message: "Server Error" } }
+        : answer(request);
+
+    await pollOnce(harness, answerSearches({ asking }, failHistory));
+
+    expect(harness.events).toEqual([]);
+    expect(harness.state.has(FOLLOWED_1)).toBe(false);
+    expect(harness.state.has("followed-hints")).toBe(false);
+
+    await pollOnce(harness, answerSearches({ asking }, answer));
+
+    expect(harness.events.map((event) => event.dedupKey)).toEqual(["pr.review-requested:1"]);
   });
 });
