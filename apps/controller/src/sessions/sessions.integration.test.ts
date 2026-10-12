@@ -527,11 +527,11 @@ const endSession = async (arranged: Arranged, session: Session, seq: number): Pr
 const startAndEndSession = async (arranged: Arranged, prompt: string): Promise<Session> =>
   endSession(arranged, await startSession(arranged, prompt), 2);
 
-/** Interrupts a session, or with `subagentId` one of its subagents, over HTTP. */
-const interruptSession = (arranged: Arranged, id: string, subagentId?: string): Promise<Response> =>
+/** Interrupts a session over HTTP. */
+const interruptSession = (arranged: Arranged, id: string): Promise<Response> =>
   send("POST", arranged.harness.base, `/api/v1/sessions/${id}/interrupt`, {
     token: arranged.token,
-    body: subagentId === undefined ? {} : { subagentId },
+    body: {},
   });
 
 const stopSession = (arranged: Arranged, id: string): Promise<Response> =>
@@ -2989,21 +2989,45 @@ describe("session.update", () => {
     });
   });
 
-  it("changes both at once, validating the options against the model the same call names", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startSession(arranged, "hello");
-      await patchSessionOrFail(arranged, session.id, {
-        options: { effort: "high", fastMode: true },
-      });
-
-      expect(
+  // "medium" is an effort `clever` offers and `fast` does not, so only validating
+  // against the model named in the same call refuses the second row.
+  it.each([
+    [
+      "accepts an effort the new model offers",
+      "low",
+      200,
+      { model: "fast", options: { effort: "low" } },
+    ],
+    [
+      "refuses an effort only the old model offers",
+      "medium",
+      400,
+      { model: "clever", options: { effort: "high", fastMode: true } },
+    ],
+  ])(
+    "changes both at once, validating the options against the model the same call names: %s",
+    async (_what, effort, status, stored) => {
+      await withFleet(async (arranged) => {
+        const session = await startSession(arranged, "hello");
         await patchSessionOrFail(arranged, session.id, {
+          options: { effort: "high", fastMode: true },
+        });
+
+        const response = await patchSession(arranged, session.id, {
           model: "fast",
-          options: { effort: "low" },
-        }),
-      ).toEqual({ model: "fast", options: { effort: "low" } });
-    });
-  });
+          options: { effort },
+        });
+
+        expect(response.status, await response.clone().text()).toBe(status);
+        if (status === 400) {
+          const refused = await parseRefusal(response);
+          expect(refused.code).toBe("validation");
+          expect(refused.paths).toContainEqual(["options", "effort"]);
+        }
+        expect((await readSession(arranged, session.id)).modelSelection).toEqual(stored);
+      });
+    },
+  );
 
   it("changes nothing on a payload with neither field", async () => {
     await withFleet(async (arranged) => {
