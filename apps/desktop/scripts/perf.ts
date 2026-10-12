@@ -15,16 +15,16 @@
  * 1. Through Playwright, to sign in on the sign-in screen, as a user does
  *    once. The app saves the token with the mock keychain, so the run never
  *    touches the real Keychain.
- * 2. Eight measured launches: with 40 threads, with 40 threads and one row
- *    that shows minutes, with 40 threads and Settings › Profile open, the
- *    same with Settings › Assistants open (see `openSettingsSection`), with
+ * 2. The measured launches: with 40 threads, with 40 threads and one row
+ *    that shows minutes, with 40 threads and each section in
+ *    `SETTINGS_SECTIONS` open in turn (see `openSettingsSection`), with
  *    40 threads and the sidebar's Hercule face showing (see
  *    `showOrchestrationFace`), and, after spawning 460 more, with 500 threads,
  *    then with a thread of 500 transcript rows open (see step 3), and last
  *    with Intake open on 200 signals (see step 5).
  *    Spec 17 §What Settings costs asks for Settings' memory and idle to be
  *    read with a section open; each section in `SETTINGS_SECTIONS` adds one
- *    launch. Spec 17 §What the Hercule face costs and §What Intake costs ask
+ *    launch, Intake and Connections among them. Spec 17 §What the Hercule face costs and §What Intake costs ask
  *    the same of the face and of Intake.
  *    Before each of them the fixture restarts the controller with every idle
  *    thread's creation and last activity, and every open signal's creation,
@@ -256,9 +256,11 @@ const LONG_THREAD_ROWS = 500;
 /**
  * The sections of Settings that get a measured launch each, with the section
  * open, by the name that the section's row in the Settings list and its
- * header title show.
+ * header title show. Only the Connections launch has Connections in the
+ * controller: one of each health the table draws (see `prepareLaunch` in
+ * `perf-fixture.ts`).
  */
-const SETTINGS_SECTIONS = ["Profile", "Assistants", "Intake"] as const;
+const SETTINGS_SECTIONS = ["Profile", "Assistants", "Intake", "Connections"] as const;
 
 type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
@@ -1173,8 +1175,16 @@ const INTAKE_ONLY = process.argv.includes("--intake-only");
  * Writes the events of Intake, and measures Everything in a plain launch that
  * opens Intake again. The fixture gives the events their titles and arrival
  * times in `prepareLaunch`.
+ *
+ * The launch opens Intake on To do, waits for its list to draw a row, and
+ * reads the memory of Intake on To do to compare Everything with. So it first
+ * raises `INTAKE_SIGNALS` signals onto To do. Without them, the full run would
+ * find To do empty: Intake at work, measured just before, ends at inbox zero.
+ * The signals Intake at work marked done stay on Done, and the snoozed signal
+ * stays on Later, so neither changes To do.
  */
 async function measureEverything(fixture: ThreadFixture, userDataDir: string): Promise<void> {
+  await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
   await seedEvents(fixture);
   await fixture.prepareLaunch({ twoMinuteRow: false });
   await openIntakeOnce(userDataDir);
@@ -1204,7 +1214,7 @@ async function measureLaunches(fixture: ThreadFixture, userDataDir: string) {
       readonly showsOrchestrationFace?: boolean;
     } = {},
   ) => {
-    await fixture.prepareLaunch({ twoMinuteRow });
+    await fixture.prepareLaunch({ twoMinuteRow, connections: settingsSection === "Connections" });
     if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
     if (opensIntake) await openIntakeOnce(userDataDir);
     await warmUpApp(userDataDir);
@@ -1275,7 +1285,7 @@ const launches = await runWithThreadFixture(async (fixture) => {
       return null;
     }
     if (EVERYTHING_ONLY) {
-      await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
+      // The full run reaches Everything with this snoozed signal on Later.
       await raiseSnoozedSignal(fixture);
       await measureEverything(fixture, userDataDir);
       return null;

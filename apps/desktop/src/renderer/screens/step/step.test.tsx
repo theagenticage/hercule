@@ -35,7 +35,7 @@ describe("MarkedRow", () => {
 });
 
 describe("FormField", () => {
-  it("shows the hint, and the error in its place once there is one", () => {
+  it("shows the hint, and the error under it once there is one", () => {
     const { container, rerender } = render(
       <FormField label="Remote URL" hint="Where runners clone from.">
         <input />
@@ -49,7 +49,8 @@ describe("FormField", () => {
         <input />
       </FormField>,
     );
-    expect(screen.queryByText("Where runners clone from.")).toBeNull();
+    // The hint stays, because it explains the field rather than the error.
+    expect(screen.getByText("Where runners clone from.")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toBe("Not a remote.");
     expect(screen.getByText("Not a remote.").className).toBe("fl-err");
     expect(container.querySelector(".field")?.className).toBe("field is-bad");

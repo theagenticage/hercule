@@ -141,6 +141,35 @@
   line-height: 1.45;
 }
 
+/* Not in the book, which always draws records: the note that takes the
+   place of a section's records while it has none, such as Assistants with
+   no assistant or Connections with no Connection. */
+.set-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 64px 24px;
+  color: var(--muted);
+  text-align: center;
+}
+.set-empty b {
+  color: var(--ink);
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.set-empty span {
+  max-width: 380px;
+}
+
+/* Not in the book: a quiet line above the section's records, such as why a
+   Connection's dialog closed. */
+.set-col > .set-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
 /* Not in the book: a failed create, above the section's records, such as
    Assistants' tabs and Permission profiles' list. */
 .set-col > .set-err {

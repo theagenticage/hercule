@@ -2,7 +2,8 @@
  * The parts a first-run step is drawn from: marked rows and cards, numbered
  * steps, a device code to copy, a wait line, a warning and a labelled field.
  * The provider login and the New project form draw them too, both in the
- * first run's card and in their dialogs in New thread. Every part is
+ * first run's card and in their dialogs in New thread, and Settings >
+ * Connections draws its forms with the labelled field. Every part is
  * presentational: it takes values and callbacks and reads nothing.
  */
 import { useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
@@ -185,7 +186,9 @@ export function DeviceCodeSteps({
       <NumberedStep number={2}>
         {openText}
         <br />
-        <button type="button" className="btn btn--sm" onClick={onOpen}>
+        {/* The button that asked for the code is gone, and the focus with it, so
+            the focus moves to the next thing to do. */}
+        <button type="button" className="btn btn--sm" onClick={onOpen} autoFocus>
           <ExternalIcon size={14} />
           {openLabel}
         </button>
@@ -226,19 +229,88 @@ export function Warning({
 }
 
 /**
- * Renders a labelled field: `label` above the field box, which holds
- * `children` (an `<input>`, and anything drawn after it), and under the box
- * either `error` or `hint`. `aside` sits at the label's far end, such as
- * "optional". A field with an `error` draws a red edge. `error` is `null`
- * when there is none. The hint and the error can hold
- * markup, such as a command set in monospace.
+ * Renders a labelled field in the book's form style (`.fl`): `label` above
+ * `children`, then `hint` under them, then `error` when there is one. `aside`
+ * sits at the label's far end, such as "optional". The hint stays visible
+ * beside an error, because the hint explains the field and the error says
+ * what is wrong with its value; both can hold markup. The error is an alert,
+ * so a screen reader reads it out when it appears.
  *
- * The `<label>` holds the label and the field but not the aside, the hint
- * or the error, so the input's accessible name is the label alone. The aside
- * stays out for a second reason: a label belongs to the first control inside
- * it, so a button in the aside would take the label from the input. The
- * stylesheet draws the aside in the label's row. The error is an
- * alert, so a screen reader reads it out when it appears.
+ * It draws no field box of its own, so `children` can be any control: a text
+ * field, a select, a list of fields or a list of checkboxes. How the label
+ * names the control follows from the ids given:
+ *
+ * - With `inputId`, the label is a `<label>` for the control with that id.
+ * - With only `labelId`, the label is plain text with that id, and a control
+ *   group among `children` names itself with `aria-labelledby={labelId}`.
+ * - With neither, a `<label>` holds the label and `children`, and names the
+ *   first control among them.
+ *
+ * The aside, the hint and the error stay outside every `<label>`, so a
+ * control's accessible name is the label alone. The aside stays out for a
+ * second reason: a label belongs to the first control inside it, so a button
+ * in the aside would take the label from the control. The stylesheet draws
+ * the aside in the label's row.
+ *
+ * With `labelId`, the hint has the id `buildHintId(labelId)`, so a control
+ * can name it in `aria-describedby`.
+ */
+export function LabelledField({
+  labelId,
+  inputId,
+  label,
+  aside,
+  hint,
+  error,
+  children,
+}: {
+  readonly labelId?: string | undefined;
+  readonly inputId?: string | undefined;
+  readonly label: string;
+  readonly aside?: ReactNode;
+  readonly hint?: ReactNode;
+  /** The error under the field; `null` and `undefined` both mean there is none. */
+  readonly error?: ReactNode;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <div className="fl">
+      {inputId === undefined && labelId === undefined ? (
+        <label>
+          <span className="fl-label">{label}</span>
+          {children}
+        </label>
+      ) : (
+        <>
+          <span className="fl-label" id={labelId}>
+            {inputId === undefined ? label : <label htmlFor={inputId}>{label}</label>}
+          </span>
+          {children}
+        </>
+      )}
+      {aside === undefined ? null : <span className="fl-aside">{aside}</span>}
+      {hint === undefined ? null : (
+        <span className="fl-hint" id={labelId === undefined ? undefined : buildHintId(labelId)}>
+          {hint}
+        </span>
+      )}
+      {error === undefined || error === null ? null : (
+        <span className="fl-err" role="alert">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Returns the id of the hint of the `LabelledField` whose label has the id `labelId`. */
+export const buildHintId = (labelId: string): string => `${labelId}-hint`;
+
+/**
+ * Renders a `LabelledField` whose control sits in the book's field box:
+ * `children` are an `<input>`, and anything drawn after it. The `<label>`
+ * holds the label and the box, so the input needs no id. A field with an
+ * `error` draws a red edge; `error` is `null` when there is none.
  */
 export function FormField({
   label,
@@ -254,19 +326,8 @@ export function FormField({
   readonly children: ReactNode;
 }): JSX.Element {
   return (
-    <div className="fl">
-      <label>
-        <span className="fl-label">{label}</span>
-        <span className={error === null ? "field" : "field is-bad"}>{children}</span>
-      </label>
-      {aside === undefined ? null : <span className="fl-aside">{aside}</span>}
-      {error !== null ? (
-        <span className="fl-err" role="alert">
-          {error}
-        </span>
-      ) : hint === undefined ? null : (
-        <span className="fl-hint">{hint}</span>
-      )}
-    </div>
+    <LabelledField label={label} aside={aside} hint={hint} error={error}>
+      <span className={error === null ? "field" : "field is-bad"}>{children}</span>
+    </LabelledField>
   );
 }

@@ -689,7 +689,7 @@ describe("the sidebar's faces", () => {
     expect(workflows.classList.contains("is-on")).toBe(true);
   });
 
-  it("draws Fleet and Connections as rows that do nothing yet", async () => {
+  it("draws Fleet as a row that does nothing yet", async () => {
     const { calls, router, live } = await startSidebar({
       path: `/threads/${FIXTURE_THREAD_IDS.flaky}`,
     });
@@ -698,12 +698,10 @@ describe("the sidebar's faces", () => {
     const nav = screen.getByRole("navigation", { name: "Hercule" });
     const sent = calls.length;
 
-    for (const name of ["Fleet", "Connections"]) {
-      const row = within(nav).getByRole("button", { name });
-      expect(row.getAttribute("aria-disabled"), name).toBe("true");
-      expect(row.getAttribute("title"), name).toBe("Not built yet");
-      await userEvent.click(row);
-    }
+    const row = within(nav).getByRole("button", { name: "Fleet" });
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    expect(row.getAttribute("title")).toBe("Not built yet");
+    await userEvent.click(row);
     expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
     expect(calls).toHaveLength(sent);
   });
@@ -719,7 +717,7 @@ describe("the sidebar's faces", () => {
     await userEvent.click(getSegment("Hercule"));
     const nav = screen.getByRole("navigation", { name: "Hercule" });
 
-    const row = within(nav).getByRole("button", { name: /Connections/ });
+    const row = within(nav).getByRole("link", { name: /Connections/ });
     expect(within(row).getByRole("img", { name: "A Connection needs attention" })).toBeTruthy();
     expect(within(nav).getByRole("button", { name: "Fleet" })).toBeTruthy();
   });
@@ -743,7 +741,7 @@ describe("the sidebar's faces", () => {
 
     // A suspended screen is hidden, and a hidden element has no role.
     const nav = screen.getByRole("navigation", { name: "Hercule" });
-    expect(within(nav).getByRole("button", { name: /Connections/ })).toBeTruthy();
+    expect(within(nav).getByRole("link", { name: /Connections/ })).toBeTruthy();
   });
 
   it("moves between the segments with the arrow keys, keeping one of them in the tab order", async () => {

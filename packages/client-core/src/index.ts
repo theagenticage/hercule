@@ -137,35 +137,51 @@ export {
   type ChoiceOption,
 } from "./config-fields";
 export {
-  listConnectionTypes,
-  listCredentialFields,
   filterGitHubConnections,
   showsAccountBesideLabel,
+  connectionNeedsAttention,
+} from "./connections";
+export {
+  listConnectionTypes,
+  listCredentialFields,
   showsPluginName,
-  buildTopicsUpdate,
-  buildRedirectUri,
   listSetupFlows,
+  type ConnectionFeed,
+  type ConnectionType,
+  type SetupFlow,
+} from "./connection-types";
+export {
   decideDeviceFlowStep,
   describeDeviceFlowWait,
   DEVICE_FLOW_ENDINGS,
-  describeGitHubSignInEnding,
-  describeGitHubSignInFailure,
+  describeSignInEnding,
+  describeSignInFailure,
   waitForDeviceFlow,
-  connectionNeedsAttention,
+  type DeviceFlowStep,
+  type DeviceFlowWatcher,
+  type SignInEnding,
+} from "./connection-device-flow";
+export {
+  SUGGESTED_TOPICS,
+  describeConnectionHealth,
+  describeConnectionTypeName,
+  summarizeConnectionType,
+  listFlowSwitches,
+  findOAuthConnection,
+  decideFieldChoices,
+  buildTopicsUpdate,
+  buildRedirectUri,
   describeFeedName,
   describeFeedInterval,
   buildFeedIntervalsDraft,
   buildFeedIntervalsPayload,
   readConnectionIssues,
-  type ConnectionFeed,
+  type ConnectionHealth,
+  type FlowSwitch,
+  type FieldChoices,
   type ConnectionIssues,
-  type ConnectionType,
   type FeedIntervalsDraft,
-  type DeviceFlowStep,
-  type DeviceFlowWatcher,
-  type GitHubSignInEnding,
-  type SetupFlow,
-} from "./connections";
+} from "./connection-settings";
 export {
   ApiError,
   ConnectionError,
@@ -190,7 +206,7 @@ export {
   type IntakeSegment,
 } from "./intake-settings";
 export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
-export { isWebLink } from "./web-link";
+export { formatUrlWithoutScheme, isWebLink } from "./web-link";
 export {
   parseMarkdown,
   type ColumnAlignment,
