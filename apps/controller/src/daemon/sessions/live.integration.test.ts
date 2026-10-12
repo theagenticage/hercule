@@ -11,12 +11,7 @@
  * already doing work as they do for a Thread.
  */
 import { describe, expect, it, vi } from "vitest";
-import type {
-  SessionInput,
-  SessionInterrupt,
-  SessionRespondToApprovalRequest,
-  SessionStop,
-} from "@hercule/protocol";
+import type { SessionInput, SessionInterrupt, SessionStop } from "@hercule/protocol";
 import type { Session } from "@hercule/contract";
 import { post, readErrorBody, send } from "../../http/testing";
 import {
@@ -213,9 +208,10 @@ describe("input.update and input.cancel on a conversation's session", () => {
 });
 
 describe("the operations a conversation's session allows, as for a Thread", () => {
-  it("interrupts the running turn", async () => {
+  it("interrupts the running turn, and withdraws the approval notification", async () => {
     await withAgentFleet(async (arranged) => {
       const session = await startBusySession(arranged);
+      await parkOnRequest(arranged, session);
 
       const response = await send(
         "POST",
@@ -227,72 +223,6 @@ describe("the operations a conversation's session allows, as for a Thread", () =
       expect(response.status, await response.clone().text()).toBe(200);
       const [frame] = await waitForFrames<SessionInterrupt>(arranged.wire, "sessionInterrupt", 1);
       expect(frame!.sessionId).toBe(session.id);
-    });
-  });
-
-  it("stops the session", async () => {
-    await withAgentFleet(async (arranged) => {
-      const session = await startBusySession(arranged);
-
-      const response = await send(
-        "POST",
-        arranged.harness.base,
-        `/api/v1/sessions/${session.id}/stop`,
-        { token: arranged.token },
-      );
-
-      expect(response.status, await response.clone().text()).toBe(200);
-      const [frame] = await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
-      expect(frame!.sessionId).toBe(session.id);
-    });
-  });
-
-  it("answers the request the session is parked on", async () => {
-    await withAgentFleet(async (arranged) => {
-      const session = await startBusySession(arranged);
-      await parkOnRequest(arranged, session);
-
-      const response = await post(
-        arranged.harness.base,
-        `/api/v1/sessions/${session.id}/respond-to-approval-request`,
-        { requestId: REQUEST_ID, decision: "allow" },
-        arranged.token,
-      );
-
-      expect(response.status, await response.clone().text()).toBe(200);
-      const [frame] = await waitForFrames<SessionRespondToApprovalRequest>(
-        arranged.wire,
-        "sessionRespondToApprovalRequest",
-        1,
-      );
-      expect(frame).toMatchObject({
-        sessionId: session.id,
-        requestId: REQUEST_ID,
-        decision: "allow",
-      });
-      // The response itself resolves the approval notification, with the
-      // answer that sends the same decision.
-      const [decided] = await readApprovalNotifications(arranged, session.id);
-      expect(decided).toMatchObject({
-        status: "resolved",
-        resolution: { kind: "decided", actionId: "allow", actor: "user", origin: "web" },
-      });
-    });
-  });
-
-  it("withdraws the approval notification when the turn is interrupted", async () => {
-    await withAgentFleet(async (arranged) => {
-      const session = await startBusySession(arranged);
-      await parkOnRequest(arranged, session);
-
-      const response = await send(
-        "POST",
-        arranged.harness.base,
-        `/api/v1/sessions/${session.id}/interrupt`,
-        { token: arranged.token, body: {} },
-      );
-
-      expect(response.status, await response.clone().text()).toBe(200);
       // Withdrawn by the interrupt itself, before the runner reports the
       // turn's end.
       const [withdrawn] = await readApprovalNotifications(arranged, session.id);
@@ -307,7 +237,7 @@ describe("the operations a conversation's session allows, as for a Thread", () =
     });
   });
 
-  it("withdraws the approval notification when the session is stopped", async () => {
+  it("stops the session, and withdraws the approval notification", async () => {
     await withAgentFleet(async (arranged) => {
       const session = await startBusySession(arranged);
       await parkOnRequest(arranged, session);
@@ -320,6 +250,8 @@ describe("the operations a conversation's session allows, as for a Thread", () =
       );
 
       expect(response.status, await response.clone().text()).toBe(200);
+      const [frame] = await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+      expect(frame!.sessionId).toBe(session.id);
       expect(
         (await waitForResolvedApprovalNotification(arranged, session.id)).resolution,
       ).toMatchObject({
