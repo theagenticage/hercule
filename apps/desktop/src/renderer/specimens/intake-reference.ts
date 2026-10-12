@@ -16,8 +16,8 @@
  * 4. removes what the design draws ahead of the app, listed below;
  * 5. changes the design's words where spec 17 §Intake gives other ones,
  *    listed below;
- * 6. adds the avatar spec 17 draws before a message's author, which the
- *    design does not draw.
+ * 6. adds the avatar spec 17 draws before a message's author, and the
+ *    pane's "More" button, neither of which the design draws.
  *
  * It fails when the design has no review row, because the design has changed
  * and the comparison would no longer compare what it claims to.
@@ -90,6 +90,41 @@ replaceTextAfterIcon(source, "GitHub · Review requested");
 while (source.nextElementSibling?.classList.contains("spacer") === false) {
   source.nextElementSibling.remove();
 }
+// Spec 17 gives the pane a menu, "More", after the Open button, for a
+// plugin's signal with match values, and the review request has them. The
+// design draws no menu, so the button is added with the book's more icon,
+// drawn into a copy of the Open button's icon, and the app's rules from
+// intake.css are copied in.
+const openButton = findElement(kindLine, "[data-open]");
+const moreIcon = findElement(openButton, "svg").cloneNode() as SVGSVGElement;
+moreIcon.setAttribute("width", "14");
+moreIcon.setAttribute("height", "14");
+moreIcon.replaceChildren(
+  ...["3.6", "8", "12.4"].map((cx) => {
+    const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    dot.setAttribute("cx", cx);
+    dot.setAttribute("cy", "8");
+    dot.setAttribute("r", ".6");
+    dot.setAttribute("fill", "currentColor");
+    return dot;
+  }),
+);
+const moreButton = document.createElement("button");
+moreButton.className = "icon-btn icon-btn--sm ad-more";
+moreButton.setAttribute("aria-label", "More");
+moreButton.append(moreIcon);
+openButton.after(moreButton);
+const moreStyle = document.createElement("style");
+moreStyle.textContent = `
+  .ad-kind .btn--quiet:has(+ .ad-more) {
+    margin-right: -6px;
+  }
+  .ad-more {
+    margin-right: -6px;
+  }
+`;
+document.head.append(moreStyle);
+
 const asked = findElement(document, ".asks-detail .ad-asked");
 const askedTime = document.createElement("time");
 askedTime.textContent = "07:18";

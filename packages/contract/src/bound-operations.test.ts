@@ -66,7 +66,12 @@ describe("the operations an answer may run", () => {
       "session.input",
       "session.respondToApprovalRequest",
     ]);
-    expect(SIGNAL_OPERATIONS).toEqual(["task.create", "task.update", "run.start"]);
+    expect(SIGNAL_OPERATIONS).toEqual([
+      "task.create",
+      "task.update",
+      "ignoreRule.create",
+      "run.start",
+    ]);
   });
 
   // An answer runs as the user, without checking the producer's grants, so it

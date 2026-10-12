@@ -30,8 +30,11 @@
 .pop-sec.confirm-dialog-body {
   padding: 14px;
 }
+/* A paragraph may name a record by a long value with no space, so it wraps
+   anywhere rather than overflow the dialog. */
 .confirm-dialog-body > p {
   margin: 0 0 10px;
+  overflow-wrap: anywhere;
   color: var(--muted);
   line-height: 1.5;
 }

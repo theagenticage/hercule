@@ -3,7 +3,7 @@
  * fake `BoundOperations` port: who may raise, act on, withdraw, mark done,
  * snooze and lower a signal, the actions the core lays out beside the
  * raiser's, how each view filters and pages, and what each write records in
- * the audit log.
+ * the audit log, and the Ignore Rule the core offers after a streak of Done.
  *
  * What an operation really does when the user takes an action, a plugin
  * action with a typed reply, and the real describe lines are tested over
@@ -18,46 +18,97 @@ import {
   DONE_ACTION_ID,
   isQualifiedId,
   MAX_BOUND_INPUT_BYTES,
+  MAX_SIGNAL_MATCH_VALUE_LENGTH,
   type BoundAction,
   type Grant,
   type Signal,
+  type SignalMatch,
   type SignalRaiseInput,
+  type SignalResolution,
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { BoundOperations } from "../bound-actions";
 import { FakeBoundOperationsLayer } from "../bound-actions/testing";
+import { mintUuid, uuidToString } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { PluginHost, type RegisteredSignalKind } from "../plugins";
 import { workflowRepository } from "../workflows";
-import { signalRepository, SignalService, SignalServiceLayer } from "./index";
+import { ignoreRuleRepository } from "./ignore-rule-repository";
+import {
+  IgnoreRuleService,
+  IgnoreRuleServiceLayer,
+  signalRepository,
+  SignalClaimsLayer,
+  SignalService,
+  SignalServiceLayer,
+} from "./index";
 
-type Deps = SignalService | SqlClient.SqlClient;
+type Deps = SignalService | IgnoreRuleService | SqlClient.SqlClient;
 
 /** The signal kind of the one plugin the stub host knows. */
 const PLUGIN_KIND = "acme/asked";
 
 /**
- * A plugin host that knows one signal kind, of the plugin Acme. The signal
- * service reads the host only to name the plugin in a Done's describe line.
+ * A plugin host that knows one signal kind, of the plugin Acme, with two
+ * match fields. The signal service reads the host to name the plugin in a
+ * Done's describe line and to word its Ignore Rule offer; the Ignore Rule
+ * service reads it to check a new rule.
  */
 const PluginHostStub = Layer.mock(PluginHost)({
   findSignalKind: (kind) =>
     Effect.succeed(
       kind === PLUGIN_KIND
-        ? Option.some({ kind, pluginId: "acme", pluginDisplayName: "Acme" } as RegisteredSignalKind)
+        ? Option.some({
+            kind,
+            pluginId: "acme",
+            pluginDisplayName: "Acme",
+            label: "Question asked",
+            matchFields: [
+              { name: "repo", label: "Repository", path: "event.payload.repo" },
+              { name: "author", label: "Author", path: "event.payload.author" },
+            ],
+          } as unknown as RegisteredSignalKind)
         : Option.none(),
     ),
 });
 
-const layer = SignalServiceLayer.pipe(
-  Layer.provide(PluginHostStub),
-  Layer.provide(FakeBoundOperationsLayer),
-  Layer.provideMerge(AuditLogLayer),
-  Layer.provideMerge(TestDatabase),
-);
+/**
+ * The fake `BoundOperations` port, except that `ignoreRule.create` really
+ * creates the rule, so taking Ignore on the core's offer can be tested here.
+ */
+const IgnoreRuleCreatingOperationsLayer = Layer.effect(BoundOperations)(
+  Effect.gen(function* () {
+    const fake = yield* BoundOperations;
+    const ignoreRules = yield* IgnoreRuleService;
+    return BoundOperations.of({
+      ...fake,
+      run: (operation) =>
+        operation.op === "ignoreRule.create"
+          ? Effect.asVoid(ignoreRules.create(operation.input))
+          : fake.run(operation),
+    });
+  }),
+).pipe(Layer.provide(FakeBoundOperationsLayer));
+
+/**
+ * The signal service and the Ignore Rule service, sharing one set of signal
+ * claims as they do in the controller, so a rule created while an action
+ * runs sees the action's claim.
+ */
+const buildSignalServices = (operations: Layer.Layer<BoundOperations, never, IgnoreRuleService>) =>
+  SignalServiceLayer.pipe(
+    Layer.provide(operations),
+    Layer.provideMerge(IgnoreRuleServiceLayer),
+    Layer.provide(SignalClaimsLayer),
+    Layer.provide(PluginHostStub),
+    Layer.provideMerge(AuditLogLayer),
+    Layer.provideMerge(TestDatabase),
+  );
+
+const layer = buildSignalServices(IgnoreRuleCreatingOperationsLayer);
 
 const USER: Actor = {
   _tag: "user",
@@ -137,15 +188,7 @@ const buildHeldOperations = () => {
   return {
     run: <A, E>(effect: Effect.Effect<A, E, Deps>): Promise<A> =>
       Effect.runPromise(
-        Effect.provide(
-          effect,
-          SignalServiceLayer.pipe(
-            Layer.provide(PluginHostStub),
-            Layer.provide(Layer.succeed(BoundOperations, port)),
-            Layer.provideMerge(AuditLogLayer),
-            Layer.provideMerge(TestDatabase),
-          ),
-        ),
+        Effect.provide(effect, buildSignalServices(Layer.succeed(BoundOperations, port))),
       ),
     started: Effect.promise(() => started),
     release: Effect.sync(() => markReleased()),
@@ -365,6 +408,44 @@ describe("signal.raise", () => {
     const issues = (error as { error: { details: { issues: ReadonlyArray<{ path: unknown }> } } })
       .error.details.issues;
     expect(issues[0]?.path).toEqual(["actions", "0", "operation", "op"]);
+  });
+
+  it("refuses an action that runs ignoreRule.create, because only the core's offer binds it", async () => {
+    const { error, stored } = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const error = yield* Effect.flip(
+          as(TRIAGE)(
+            signals.raise({
+              ...OFFER,
+              actions: [
+                {
+                  id: "hide",
+                  label: "Hide these",
+                  operation: {
+                    op: "ignoreRule.create",
+                    input: { kind: PLUGIN_KIND, match: BOT_MATCH },
+                  },
+                },
+              ],
+            }),
+          ),
+        );
+        return { error, stored: yield* as(USER)(signals.query({})) };
+      }),
+    );
+
+    expect(error).toMatchObject({
+      error: {
+        code: "validation",
+        details: { issues: [{ path: ["actions", "0", "operation", "op"] }] },
+      },
+    });
+    expect(
+      (error as { error: { details: { issues: ReadonlyArray<{ message: string }> } } }).error
+        .details.issues[0]!.message,
+    ).toContain("only the core binds it");
+    expect(stored.items).toEqual([]);
   });
 
   it("refuses a proposal whose task Accept could not bind, as the signal it would store", async () => {
@@ -1093,5 +1174,419 @@ describe("signal.lowerPriority", () => {
       { _tag: "event" },
       ...ids.map((id) => ({ _tag: "record", topic: "signal", id, kind: "updated" })),
     ]);
+  });
+});
+
+/** The values of one group of the plugin's signals: one repository, one author. */
+const BOT_MATCH: SignalMatch = { repo: "acme/web", author: "dependabot[bot]" };
+const OTHER_MATCH: SignalMatch = { repo: "acme/web", author: "renovate[bot]" };
+
+/**
+ * Writes `count` open signals of the plugin's kind with the values `match`,
+ * as an event would raise them, and returns their ids oldest first. Each is
+ * created `firstSecond` seconds after `AT` or later, one second apart, because
+ * the streak is counted from the newest signal back. Each carries `actions`,
+ * the core's Done unless given.
+ */
+const insertAskedSignals = (
+  match: SignalMatch,
+  count: number,
+  firstSecond = 0,
+  actions: ReadonlyArray<BoundAction> = [{ id: DONE_ACTION_ID, label: "Done", operation: null }],
+) =>
+  Effect.gen(function* () {
+    const repository = yield* signalRepository;
+    const ids: Array<string> = [];
+    for (let index = 0; index < count; index++) {
+      const id = uuidToString(mintUuid());
+      yield* repository.insert(
+        {
+          id,
+          kind: PLUGIN_KIND,
+          origin: {
+            type: "event",
+            eventId: 1,
+            connectionId: "0199e0e7-0000-7000-8000-00000000c002",
+            threadRef: `acme/web#${id}`,
+          },
+          title: "Review acme/web#1",
+          priority: "normal",
+          blocks: [],
+          actions,
+          match,
+          status: "open",
+          createdAt: new Date(Date.parse(AT) + (firstSecond + index) * 1000).toISOString(),
+        },
+        [],
+      );
+      ids.push(id);
+    }
+    return ids;
+  });
+
+/** Marks the signals done as the user. */
+const markDone = (ids: ReadonlyArray<string>) =>
+  Effect.flatMap(service, (signals) => as(USER)(signals.markDone({ signalIds: ids })));
+
+/** Returns the core's Ignore Rule offers, open or resolved, oldest first. */
+const listIgnoreRuleOffers = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const signals = yield* service;
+  const rows = yield* sql<{ readonly id: Uint8Array }>`
+    SELECT id FROM signals WHERE ignore_rule IS NOT NULL ORDER BY created_at, id
+  `;
+  return yield* Effect.forEach(rows, (row) => as(USER)(signals.read(uuidToString(row.id))));
+});
+
+/** Resolves a signal directly, as an end on the source would. */
+const resolveDirectly = (id: string, resolution: Partial<SignalResolution>) =>
+  Effect.flatMap(signalRepository, (repository) =>
+    repository.resolve(id, {
+      kind: "decided",
+      outcome: "Answered on the source",
+      actor: "user",
+      origin: "core",
+      at: AT,
+      ...resolution,
+    }),
+  );
+
+describe("the core's Ignore Rule offer", () => {
+  it("offers a rule once the user marked the last five of a group done without answering", async () => {
+    const { offers, entries } = await run(
+      Effect.gen(function* () {
+        yield* markDone(yield* insertAskedSignals(BOT_MATCH, 5));
+        return {
+          offers: yield* listIgnoreRuleOffers,
+          entries: yield* readEventsOfKind("signal.raised"),
+        };
+      }),
+    );
+
+    expect(offers).toHaveLength(1);
+    const offer = offers[0]!;
+    expect(offer).toMatchObject({
+      kind: "offer",
+      status: "open",
+      priority: "normal",
+      title:
+        "Ignore Question asked where Repository is acme/web and Author is dependabot[bot]? You marked the last 5 done without answering.",
+      origin: {
+        type: "api",
+        actor: "system",
+        eventIds: [],
+        reason: "You marked the last 5 done without answering.",
+      },
+      ignoreRule: { kind: PLUGIN_KIND, match: BOT_MATCH },
+      match: {},
+    });
+    expect(
+      offer.actions.map(({ id, label, primary, operation }) => ({ id, label, primary, operation })),
+    ).toEqual([
+      {
+        id: "ignore",
+        label: "Ignore",
+        primary: true,
+        operation: { op: "ignoreRule.create", input: { kind: PLUGIN_KIND, match: BOT_MATCH } },
+      },
+      { id: "dismiss", label: "Dismiss", primary: undefined, operation: null },
+    ]);
+    expect(entries.map((entry) => [entry.actor, entry.payload])).toEqual([
+      ["system", { signalId: offer.id, kind: "offer" }],
+    ]);
+  });
+
+  it("offers nothing after four, or when the newest signal is still open", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        yield* markDone(yield* insertAskedSignals(BOT_MATCH, 4));
+        const afterFour = (yield* listIgnoreRuleOffers).length;
+        const ids = yield* insertAskedSignals(OTHER_MATCH, 6);
+        yield* markDone(ids.slice(0, 5));
+        return { afterFour, withNewerOpen: (yield* listIgnoreRuleOffers).length };
+      }),
+    );
+
+    expect(offers).toEqual({ afterFour: 0, withNewerOpen: 0 });
+  });
+
+  it("skips a withdrawn signal, and counts an answer other than Done as the end of the streak", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        const bot = yield* insertAskedSignals(BOT_MATCH, 6);
+        yield* resolveDirectly(bot[2]!, { kind: "withdrawn", outcome: "Request removed" });
+        yield* markDone(bot.filter((_, index) => index !== 2));
+        const other = yield* insertAskedSignals(OTHER_MATCH, 6);
+        yield* resolveDirectly(other[3]!, { actionId: "approve" });
+        yield* markDone(other.filter((_, index) => index !== 3));
+        return yield* listIgnoreRuleOffers;
+      }),
+    );
+
+    expect(offers.map((offer) => offer.ignoreRule)).toEqual([
+      { kind: PLUGIN_KIND, match: BOT_MATCH },
+    ]);
+  });
+
+  it("groups signals whose values were built in another order, as after a plugin update reorders its match fields", async () => {
+    const reordered: SignalMatch = { author: "dependabot[bot]", repo: "acme/web" };
+    const offers = await run(
+      Effect.gen(function* () {
+        // Three Dones in the old order and two in the new one make a streak of five.
+        const old = yield* insertAskedSignals(BOT_MATCH, 3);
+        yield* markDone([...old, ...(yield* insertAskedSignals(reordered, 2, 3))]);
+        // A newer open signal in the new order ends the streak of the old order.
+        const other = yield* insertAskedSignals(OTHER_MATCH, 5, 10);
+        yield* insertAskedSignals({ author: "renovate[bot]", repo: "acme/web" }, 1, 20);
+        yield* markDone(other);
+        return yield* listIgnoreRuleOffers;
+      }),
+    );
+
+    expect(offers.map((offer) => offer.ignoreRule)).toEqual([
+      { kind: PLUGIN_KIND, match: BOT_MATCH },
+    ]);
+  });
+
+  it("offers nothing for a group whose rule ignoreRule.create would refuse", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        // A field the kind no longer declares, as after a plugin update removed it.
+        yield* markDone(yield* insertAskedSignals({ ...BOT_MATCH, team: "core" }, 5));
+        // A value longer than a rule accepts, stored before that limit existed.
+        const long = { ...OTHER_MATCH, author: "x".repeat(MAX_SIGNAL_MATCH_VALUE_LENGTH + 1) };
+        yield* markDone(yield* insertAskedSignals(long, 5, 10));
+        return yield* listIgnoreRuleOffers;
+      }),
+    );
+
+    expect(offers).toEqual([]);
+  });
+
+  it("counts every Done of the streak in the title, not only the last five", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        yield* markDone(yield* insertAskedSignals(BOT_MATCH, 7));
+        return yield* listIgnoreRuleOffers;
+      }),
+    );
+
+    expect(offers.map((offer) => offer.title)).toEqual([
+      "Ignore Question asked where Repository is acme/web and Author is dependabot[bot]? You marked the last 7 done without answering.",
+    ]);
+  });
+
+  it("orders signals created at the same time by id, so an older id that is still open does not end the streak", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        // UUIDs as text sort in the order of their bytes, which is the order
+        // the database compares them in.
+        const sql = yield* SqlClient.SqlClient;
+        const bot = [...(yield* insertAskedSignals(BOT_MATCH, 6, 0))].sort();
+        const other = [...(yield* insertAskedSignals(OTHER_MATCH, 6, 10))].sort();
+        yield* sql`UPDATE signals SET created_at = ${AT}`;
+        yield* markDone(bot.slice(1));
+        const afterOldestOpen = (yield* listIgnoreRuleOffers).length;
+        yield* markDone(other.slice(0, 5));
+        return { afterOldestOpen, offers: yield* listIgnoreRuleOffers };
+      }),
+    );
+
+    expect(offers.afterOldestOpen).toBe(1);
+    expect(offers.offers.map((offer) => offer.ignoreRule?.match)).toEqual([BOT_MATCH]);
+  });
+
+  it("counts a snoozed signal as open, so it ends the streak", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const bot = yield* insertAskedSignals(BOT_MATCH, 6);
+        yield* as(USER)(
+          signals.snooze({ signalIds: [bot[5]!], until: "2999-01-01T00:00:00.000Z" }),
+        );
+        yield* markDone(bot.slice(0, 5));
+        return yield* listIgnoreRuleOffers;
+      }),
+    );
+
+    expect(offers).toEqual([]);
+  });
+
+  it("skips a signal a newer one replaced, even the newest of the group", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        const bot = yield* insertAskedSignals(BOT_MATCH, 6);
+        yield* resolveDirectly(bot[5]!, {
+          kind: "withdrawn",
+          outcome: "Replaced by a newer one",
+          actor: "system",
+        });
+        yield* markDone(bot.slice(0, 5));
+        return yield* listIgnoreRuleOffers;
+      }),
+    );
+
+    expect(offers.map((offer) => offer.ignoreRule)).toEqual([
+      { kind: PLUGIN_KIND, match: BOT_MATCH },
+    ]);
+  });
+
+  it("offers nothing again after the user took Ignore and later deleted the rule", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const rules = yield* ignoreRuleRepository;
+        yield* markDone(yield* insertAskedSignals(BOT_MATCH, 5, 0));
+        const [offer] = yield* listIgnoreRuleOffers;
+        yield* as(USER)(signals.act({ id: offer!.id, actionId: "ignore" }));
+        const [rule] = yield* rules.list(PLUGIN_KIND);
+        yield* rules.delete(rule!.id);
+        yield* markDone(yield* insertAskedSignals(BOT_MATCH, 5, 10));
+        return yield* listIgnoreRuleOffers;
+      }),
+    );
+
+    expect(offers.map((offer) => [offer.status, offer.resolution?.actionId])).toEqual([
+      ["resolved", "ignore"],
+    ]);
+  });
+
+  it("never offers the same rule again, while its offer is open or after it was dismissed", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        yield* markDone(yield* insertAskedSignals(BOT_MATCH, 5, 0));
+        yield* markDone(yield* insertAskedSignals(BOT_MATCH, 5, 10));
+        const [offer] = yield* listIgnoreRuleOffers;
+        yield* as(USER)(signals.act({ id: offer!.id, actionId: "dismiss" }));
+        yield* markDone(yield* insertAskedSignals(BOT_MATCH, 5, 20));
+        return yield* listIgnoreRuleOffers;
+      }),
+    );
+
+    expect(offers.map((offer) => offer.status)).toEqual(["resolved"]);
+  });
+
+  it("offers nothing when a rule with the same values exists", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        const rules = yield* ignoreRuleRepository;
+        yield* rules.insert({
+          id: uuidToString(mintUuid()),
+          kind: PLUGIN_KIND,
+          match: BOT_MATCH,
+          text: "Question asked · Repository acme/web · Author dependabot[bot]",
+          createdAt: AT,
+          actor: "user",
+        });
+        yield* markDone(yield* insertAskedSignals(BOT_MATCH, 5));
+        return yield* listIgnoreRuleOffers;
+      }),
+    );
+
+    expect(offers).toEqual([]);
+  });
+
+  it("offers one rule per group when one call marks two groups done, and none for a core kind", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        const bot = yield* insertAskedSignals(BOT_MATCH, 5, 0);
+        const other = yield* insertAskedSignals(OTHER_MATCH, 5, 10);
+        const fyis = [];
+        for (let index = 0; index < 5; index++) fyis.push(yield* raiseId(FYI));
+        yield* markDone([...bot, ...other, ...fyis]);
+        return yield* listIgnoreRuleOffers;
+      }),
+    );
+
+    expect(offers.map((offer) => offer.ignoreRule?.match)).toEqual(
+      expect.arrayContaining([BOT_MATCH, OTHER_MATCH]),
+    );
+    expect(offers).toHaveLength(2);
+  });
+
+  it("creates the rule when the user takes Ignore, and resolves the offer and the open signals it matches", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        yield* markDone(yield* insertAskedSignals(BOT_MATCH, 5, 0));
+        const [matched] = yield* insertAskedSignals(BOT_MATCH, 1, 10);
+        const [unmatched] = yield* insertAskedSignals(OTHER_MATCH, 1, 11);
+        const [offer] = yield* listIgnoreRuleOffers;
+        const acted = yield* as(USER)(signals.act({ id: offer!.id, actionId: "ignore" }));
+        return {
+          acted,
+          matched: yield* as(USER)(signals.read(matched!)),
+          unmatched: yield* as(USER)(signals.read(unmatched!)),
+          rules: yield* Effect.flatMap(ignoreRuleRepository, (rules) => rules.list(PLUGIN_KIND)),
+        };
+      }),
+    );
+
+    const text = "Question asked · Repository acme/web · Author dependabot[bot]";
+    expect(result.rules.map(({ match, text, actor }) => ({ match, text, actor }))).toEqual([
+      { match: BOT_MATCH, text, actor: "user" },
+    ]);
+    expect(result.acted.resolution).toMatchObject({
+      kind: "decided",
+      actionId: "ignore",
+      outcome: `Ignored · rule ${text}`,
+      actor: "user",
+    });
+    expect(result.matched.resolution).toMatchObject({ kind: "decided", actionId: "ignore" });
+    expect(result.unmatched.status).toBe("open");
+  });
+
+  it("counts an answer on the source that names no action as the end of the streak", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        const bot = yield* insertAskedSignals(BOT_MATCH, 6);
+        // The resolution `resolveDirectly` writes names no action.
+        yield* resolveDirectly(bot[3]!, {});
+        yield* markDone(bot.filter((_, index) => index !== 3));
+        return yield* listIgnoreRuleOffers;
+      }),
+    );
+
+    expect(offers).toEqual([]);
+  });
+
+  it("shows an empty match value as (empty) in the offer's title", async () => {
+    const offers = await run(
+      Effect.gen(function* () {
+        yield* markDone(yield* insertAskedSignals({ repo: "acme/web", author: "" }, 5));
+        return yield* listIgnoreRuleOffers;
+      }),
+    );
+
+    expect(offers.map((offer) => offer.title)).toEqual([
+      "Ignore Question asked where Repository is acme/web and Author is (empty)? You marked the last 5 done without answering.",
+    ]);
+  });
+
+  it("leaves a signal open when the user creates a rule that matches it while an action on it runs, and the action resolves it", async () => {
+    const held = buildHeldOperations();
+    const { acted, entries } = await held.run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const rules = yield* Effect.service(IgnoreRuleService);
+        const [id] = yield* insertAskedSignals(BOT_MATCH, 1, 0, [PLUGIN_ACTION]);
+        const acting = yield* Effect.forkChild(
+          as(USER)(signals.act({ id: id!, actionId: PLUGIN_ACTION.id })),
+        );
+        yield* held.started;
+        yield* as(USER)(rules.create({ kind: PLUGIN_KIND, match: BOT_MATCH }));
+        const whileActing = yield* as(USER)(signals.read(id!));
+        yield* held.release;
+        return {
+          acted: { whileActing, after: yield* Fiber.join(acting) },
+          entries: yield* readEventsOfKind("ignoreRule.created"),
+        };
+      }),
+    );
+
+    expect(acted.whileActing.status).toBe("open");
+    expect(acted.after.resolution).toMatchObject({ kind: "decided", actionId: "approve" });
+    expect(entries.map((entry) => entry.payload["signalIds"])).toEqual([[]]);
   });
 });

@@ -378,7 +378,8 @@ export interface EventSourceContribution {
  *   event.
  * - `priority` is the default; `build` may change it.
  * - `matchFields` are what an Ignore Rule may match on. Each `path` returns
- *   the field's value.
+ *   the field's value. A kind declares at most `MAX_SIGNAL_MATCH_FIELDS`, each
+ *   with a name of at most `MAX_SIGNAL_MATCH_FIELD_NAME_LENGTH` characters.
  * - `ends` are the events that end an open signal of this kind.
  * - `build` turns the event into the signal's content. It is the one piece
  *   of plugin code, and it may read the external system.

@@ -11,6 +11,7 @@
  */
 import type {
   Connection,
+  IgnoreRule,
   IntakeOverrideLevel,
   IntakeOverrides,
   IntakeSettingLevel,
@@ -18,6 +19,7 @@ import type {
   PluginDetail,
 } from "@hercule/contract";
 import { readJsonObject } from "./json-shape";
+import { parsePluginId } from "./plugin-id";
 
 /** The two lists of kinds a plugin's Intake settings hold. */
 export type IntakeKindList = keyof IntakeOverrides;
@@ -49,14 +51,34 @@ export interface IntakeSegment {
   readonly label: string;
 }
 
+/** Checks whether the plugin `plugin` declares at least one signal kind or event kind. */
+export const declaresIntakeKind = (plugin: Pick<PluginDetail, "intake">): boolean =>
+  plugin.intake.eventKinds.length > 0 || plugin.intake.signalKinds.length > 0;
+
 /**
- * Returns the plugins that get a section on Settings > Intake: those that
- * declare at least one signal kind or event kind, in the order given.
+ * Returns the ids of the plugins that get a section on Settings > Intake:
+ *
+ * - every plugin in `plugins` that declares an intake kind or owns at least
+ *   one rule in `rules`, in the order of `plugins`;
+ * - then, sorted, the plugin of each rule whose plugin is not in `plugins`.
+ *
+ * An Ignore Rule outlives its kind: a plugin update that removes the kind,
+ * or removing the plugin, keeps the rule (spec 10 §9.9). Its section stays,
+ * so the user can still see the rule and delete it.
  */
-export const listPluginsWithIntake = (
-  plugins: ReadonlyArray<PluginDetail>,
-): ReadonlyArray<PluginDetail> =>
-  plugins.filter(({ intake }) => intake.eventKinds.length > 0 || intake.signalKinds.length > 0);
+export const listIntakeSettingsPluginIds = (
+  plugins: ReadonlyArray<Pick<PluginDetail, "id" | "intake">>,
+  rules: ReadonlyArray<Pick<IgnoreRule, "kind">>,
+): ReadonlyArray<string> => {
+  const ruled = new Set(rules.flatMap(({ kind }) => parsePluginId(kind) ?? []));
+  const installed = new Set(plugins.map(({ id }) => id));
+  return [
+    ...plugins
+      .filter((plugin) => declaresIntakeKind(plugin) || ruled.has(plugin.id))
+      .map(({ id }) => id),
+    ...[...ruled].filter((id) => !installed.has(id)).sort(),
+  ];
+};
 
 /**
  * Returns the Connections whose type the plugin declares, in the order

@@ -757,7 +757,8 @@ export type EventHandlingTarget =
   | { readonly kind: "signal"; readonly signalId: string; readonly view: SignalView }
   | { readonly kind: "task"; readonly taskId: string }
   | { readonly kind: "session"; readonly sessionId: string }
-  | { readonly kind: "run"; readonly runId: string };
+  | { readonly kind: "run"; readonly runId: string }
+  | { readonly kind: "ignore-rule"; readonly signalKind: string };
 
 /**
  * One handling of an event, as a row or the pane shows it. A row draws
@@ -810,19 +811,38 @@ const describeSignalStanding = (
 };
 
 /**
+ * Builds the label of an event an Ignore Rule caught. The row reads "→
+ * ignored by a rule", or "→ ignored by a deleted rule" once the user has
+ * deleted it; the rule's text is too long for the row, so only the pane shows
+ * it. The label links the rule's kind on Settings > Intake, where the rule is
+ * listed. A deleted rule is listed nowhere, so its label links nothing.
+ */
+const buildIgnoredLabel = (fact: NonNullable<EventFacts["ignoredBy"]>): EventHandlingLabel => ({
+  handling: "ignored",
+  key: `ignored:${fact.ruleId}`,
+  lead: fact.ruleDeleted ? "→ ignored by a deleted rule" : "→ ignored by a rule",
+  detail: null,
+  record: fact.text,
+  standing: fact.ruleDeleted ? "Rule deleted" : "In Settings › Intake",
+  target: fact.ruleDeleted ? null : { kind: "ignore-rule", signalKind: fact.kind },
+});
+
+/**
  * Builds the labels of what came of an event, in the order spec 10 §9.10
  * fixes, whatever order the facts come in:
  *
  * - a plugin's signal the event raised: "→ signal · on your To do list";
  * - a signal the event ended: "ended Review this PR · Approved on GitHub";
+ * - the Ignore Rule that caught it: "→ ignored by a rule", or "→ ignored by
+ *   a deleted rule" once the user has deleted the rule;
  * - a core signal that lists the event: "→ proposal · Fix the flaky test";
  * - a Task whose provenance carries the event: "→ Fix the flaky test";
  * - a live Subscription that received it: "known to Release thread", or
  *   "known to a Thread" when the caller may not read the holder's title;
  * - "no action", only when none of the others applies.
  *
- * Ignored events, pending triage and the Screener's two states wait for the
- * features that produce them, so no label is built for them. A signal's state
+ * Pending triage and the Screener's two states wait for the features that
+ * produce them, so no label is built for them. A signal's state
  * is read as of `now` in `timezone`, which names the day a snoozed signal
  * comes back.
  */
@@ -855,6 +875,7 @@ export const buildHandlingLabels = (
       standing: fact.outcome,
       target: { kind: "signal", signalId: fact.signalId, view: "done" },
     })),
+    ...(facts.ignoredBy === null ? [] : [buildIgnoredLabel(facts.ignoredBy)]),
     ...evidence.map((fact): EventHandlingLabel => ({
       handling: "evidence",
       key: `evidence:${fact.signalId}`,
@@ -929,6 +950,7 @@ export interface EventHandlingOption {
 const EVENT_HANDLING_CAPTIONS: Readonly<Record<EventHandling, string>> = {
   "raised-signal": "Raised a signal",
   "ended-signal": "Ended a signal",
+  ignored: "Ignored by a rule",
   evidence: "Evidence for a signal",
   "on-task": "Added to a Task",
   "known-work": "Known to running work",
@@ -951,8 +973,12 @@ export const EVENT_HANDLING_OPTIONS: ReadonlyArray<EventHandlingOption> = [
 /** How many days the controller keeps events when the `retention.events` setting is not set. */
 const DEFAULT_EVENT_RETENTION_DAYS = 90;
 
-/** Names the span the `retention.events` setting keeps: "the last 90 days", or "the last day" for one. */
-const describeRetentionSpan = (retentionDays: number | undefined): string => {
+/**
+ * Names the span the `retention.events` setting keeps: "the last 90 days", or
+ * "the last day" for one. A setting that is not set reads as the default of
+ * 90 days.
+ */
+export const describeRetentionSpan = (retentionDays: number | undefined): string => {
   const days = retentionDays ?? DEFAULT_EVENT_RETENTION_DAYS;
   return days === 1 ? "the last day" : `the last ${String(days)} days`;
 };

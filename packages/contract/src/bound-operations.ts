@@ -34,6 +34,7 @@
 import type { AnswerPlace } from "@hercule/plugin-host";
 import { Effect, Schema } from "effect";
 import { createValidationError, listSchemaIssues, type Validation } from "./errors";
+import { IgnoreRuleCreateInput } from "./groups/ignore-rule";
 import { PermissionDecideCall } from "./groups/permission";
 import { RunStartCall } from "./groups/run";
 import { SessionInputCall, SessionRespondToApprovalRequestCall } from "./groups/session";
@@ -68,6 +69,7 @@ const ANSWER_OPERATION_INPUTS = {
   "session.input": SessionInputCall,
   "session.respondToApprovalRequest": SessionRespondToApprovalRequestCall,
   "permission.decide": PermissionDecideCall,
+  "ignoreRule.create": IgnoreRuleCreateInput,
 } as const satisfies Record<AnswerOperationId, Schema.Top>;
 
 /** The decoded input of the operation `Op` when an answer runs it. */

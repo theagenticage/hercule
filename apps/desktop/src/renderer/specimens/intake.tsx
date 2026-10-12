@@ -1,6 +1,6 @@
 /**
- * The Intake specimen: the app's real shell with Intake open, drawn from one
- * scene of intake-fixture.ts, for a check by eye.
+ * The Intake specimen: the app's real shell with Intake open, or Settings >
+ * Intake, drawn from one scene of intake-fixture.ts, for a check by eye.
  * `node scripts/capture-intake.ts` captures every scene in both themes.
  *
  * The page takes its scene from `?scene=<name>`, such as `?scene=review`, and
@@ -11,7 +11,7 @@
 // its module loads.
 import "./fixed-clock";
 import { INTAKE_SCENES, type IntakeScene } from "./intake-fixture";
-import { mountIntakeSpecimen } from "./shell-page";
+import { mountIntakeSettingsSpecimen, mountIntakeSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
 
 /** Returns the scene the page's `?scene=` names. Fails when it names none of the scenes. */
@@ -29,7 +29,9 @@ function readScene(): IntakeScene {
 const scene = readScene();
 // The capture script reads this to know which scenes there are to capture.
 document.documentElement.dataset.scenes = INTAKE_SCENES.map((each) => each.name).join(" ");
-await mountIntakeSpecimen(scene.records, scene.intake);
+await ("intake" in scene
+  ? mountIntakeSpecimen(scene.records, scene.intake)
+  : mountIntakeSettingsSpecimen(scene.records, scene.intakeSettings));
 await scene.play?.();
 // A toast rises as it shows. The capture waits for that to end, so it never
 // catches the toast half drawn. Animations that never end are left alone.

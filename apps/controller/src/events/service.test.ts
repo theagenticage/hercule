@@ -245,6 +245,32 @@ const insertRunStep = (runId: number, stepId: string, eventId: number) =>
       VALUES (${bytesOf(runId)}, ${stepId}, 1, 'completed', ${AT}, ${eventId})`,
   );
 
+/** Writes an Ignore Rule of `acme/asked` with the text given. */
+const insertIgnoreRule = (n: number, text: string) =>
+  Effect.flatMap(
+    SqlClient.SqlClient,
+    (sql) =>
+      sql`
+      INSERT INTO ignore_rules (id, kind, match, text, actor, created_at)
+      VALUES (${bytesOf(n)}, 'acme/asked', '{"author":"bot"}', ${text}, 'user', ${AT})`,
+  );
+
+/** Records that the Ignore Rule `ruleId` caught the event, with a copy of `ruleText`. */
+const insertIgnoreRuleCatch = (
+  eventId: number,
+  ruleId: number,
+  ruleText: string,
+  kind = "acme/asked",
+  at = AT,
+) =>
+  Effect.flatMap(
+    SqlClient.SqlClient,
+    (sql) =>
+      sql`
+      INSERT INTO ignore_rule_catches (event_id, rule_id, kind, rule_text, at)
+      VALUES (${eventId}, ${bytesOf(ruleId)}, ${kind}, ${ruleText}, ${at})`,
+  );
+
 /** Returns the ids of the events a query returns, in the order returned. */
 const queryIds = (input: QueryInput = {}) =>
   Effect.gen(function* () {
@@ -264,6 +290,7 @@ const handling = (...handlings: ReadonlyArray<EventHandling>): QueryInput => ({
  * - `raised`: raised an Acme signal;
  * - `evidence`: listed by a core `unsure` signal;
  * - `ended`: ended an Acme signal;
+ * - `ignored`: caught by an Ignore Rule;
  * - `onTask`: on a Task, and on a deleted Task;
  * - `known`: received by a live session Subscription;
  * - `knownEnded`: received only by an ended Subscription;
@@ -274,6 +301,7 @@ const arrangeHandlings = Effect.gen(function* () {
   const raised = yield* insertEvent({ title: "raised" });
   const evidence = yield* insertEvent({ title: "evidence" });
   const ended = yield* insertEvent({ title: "ended" });
+  const ignored = yield* insertEvent({ title: "ignored" });
   const onTask = yield* insertEvent({ title: "on task" });
   const known = yield* insertEvent({ title: "known" });
   const knownEnded = yield* insertEvent({ title: "known ended" });
@@ -287,6 +315,8 @@ const arrangeHandlings = Effect.gen(function* () {
     eventIds: [],
     resolution: { eventId: ended, outcome: "Merged" },
   });
+  yield* insertIgnoreRule(5, "Asked · Author bot");
+  yield* insertIgnoreRuleCatch(ignored, 5, "Asked · Author bot");
   yield* insertTask(10, "Fix it", onTask);
   yield* insertTask(11, "Gone", deletedTask, true);
   yield* insertSession(20, "Triage session");
@@ -294,7 +324,7 @@ const arrangeHandlings = Effect.gen(function* () {
   yield* insertSessionInput(40, 20, 30, known);
   yield* insertSubscription(31, "session", 20, { ended: true });
   yield* insertSessionInput(41, 20, 31, knownEnded);
-  return { raised, evidence, ended, onTask, known, knownEnded, deletedTask, none };
+  return { raised, evidence, ended, ignored, onTask, known, knownEnded, deletedTask, none };
 });
 
 describe("event.query handling filters", () => {
@@ -323,6 +353,16 @@ describe("event.query handling filters", () => {
       Effect.gen(function* () {
         const arranged = yield* arrangeHandlings;
         return [yield* queryIds(handling("ended-signal")), arranged.ended] as const;
+      }),
+    );
+    expect(found).toEqual([expected]);
+  });
+
+  it("finds the event an Ignore Rule caught with ignored", async () => {
+    const [found, expected] = await run(
+      Effect.gen(function* () {
+        const arranged = yield* arrangeHandlings;
+        return [yield* queryIds(handling("ignored")), arranged.ignored] as const;
       }),
     );
     expect(found).toEqual([expected]);
@@ -363,7 +403,7 @@ describe("event.query handling filters", () => {
     expect(found[0]).toEqual([found[1]]);
   });
 
-  it("finds the events nothing came of with no-action, including the ones with only an ended Subscription or a deleted Task", async () => {
+  it("finds the events nothing came of with no-action, including the ones with only an ended Subscription or a deleted Task, and not the one an Ignore Rule caught", async () => {
     const [found, arranged] = await run(
       Effect.gen(function* () {
         const arranged = yield* arrangeHandlings;
@@ -394,7 +434,7 @@ describe("event.query handling filters", () => {
         return yield* queryIds({ handling: [] });
       }),
     );
-    expect(found).toHaveLength(8);
+    expect(found).toHaveLength(9);
   });
 });
 
@@ -540,6 +580,55 @@ describe("event.query facts", () => {
     },
   );
 
+  it("names the Ignore Rule that caught an event, by the text the catch keeps, and says when the rule was deleted", async () => {
+    const [live, deleted] = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const liveEvent = yield* insertEvent();
+        const deletedEvent = yield* insertEvent();
+        yield* insertIgnoreRule(1, "Asked · Author bot");
+        yield* insertIgnoreRuleCatch(liveEvent, 1, "Asked · Author bot");
+        yield* insertIgnoreRuleCatch(deletedEvent, 2, "Asked · Author gone");
+        const events = yield* EventService;
+        const byId = new Map((yield* events.query({})).items.map((item) => [item.id, item]));
+        yield* sql`DELETE FROM ignore_rules WHERE id = ${bytesOf(1)}`;
+        const afterDelete = (yield* events.query({})).items.find((item) => item.id === liveEvent);
+        return [
+          [byId.get(liveEvent)!.ignoredBy, afterDelete!.ignoredBy],
+          byId.get(deletedEvent)!.ignoredBy,
+        ] as const;
+      }),
+    );
+    expect(live).toEqual([
+      { ruleId: idOf(1), kind: "acme/asked", text: "Asked · Author bot", ruleDeleted: false },
+      { ruleId: idOf(1), kind: "acme/asked", text: "Asked · Author bot", ruleDeleted: true },
+    ]);
+    expect(deleted).toEqual({
+      ruleId: idOf(2),
+      kind: "acme/asked",
+      text: "Asked · Author gone",
+      ruleDeleted: true,
+    });
+  });
+
+  it("names the first catch of an event that rules of two kinds caught", async () => {
+    const ignoredBy = await run(
+      Effect.gen(function* () {
+        const eventId = yield* insertEvent();
+        yield* insertIgnoreRuleCatch(eventId, 2, "Pinged · Author bot", "acme/pinged", LATER);
+        yield* insertIgnoreRuleCatch(eventId, 1, "Asked · Author bot", "acme/asked", AT);
+        const events = yield* EventService;
+        return (yield* events.query({})).items[0]!.ignoredBy;
+      }),
+    );
+    expect(ignoredBy).toEqual({
+      ruleId: idOf(1),
+      kind: "acme/asked",
+      text: "Asked · Author bot",
+      ruleDeleted: true,
+    });
+  });
+
   it("returns empty fact lists for an event nothing came of", async () => {
     const [item] = await run(
       Effect.gen(function* () {
@@ -548,7 +637,13 @@ describe("event.query facts", () => {
         return (yield* events.query({})).items;
       }),
     );
-    expect(item).toMatchObject({ signals: [], resolvedSignals: [], tasks: [], knownBy: [] });
+    expect(item).toMatchObject({
+      signals: [],
+      resolvedSignals: [],
+      ignoredBy: null,
+      tasks: [],
+      knownBy: [],
+    });
   });
 
   it("reads each list of facts with one query, whatever the size of the page", async () => {
@@ -574,10 +669,10 @@ describe("event.query facts", () => {
       }),
     );
     // One page query, then one query each for the signals, the signals ended,
-    // the Tasks and the Subscriptions.
+    // the Ignore Rule catches, the Tasks and the Subscriptions.
     expect(statements.filter((text) => text.includes("FROM events"))).toHaveLength(1);
     expect(statements.filter((text) => text.includes("task_provenance"))).toHaveLength(1);
-    expect(statements).toHaveLength(5);
+    expect(statements).toHaveLength(6);
   });
 });
 
@@ -726,6 +821,20 @@ describe("event.query intake", () => {
       }),
     );
     expect(found).toEqual([]);
+  });
+
+  it("includes an event an Ignore Rule caught even when its kind is off", async () => {
+    const [found, expected] = await run(
+      Effect.gen(function* () {
+        yield* insertPlugin("acme");
+        yield* insertConnection(1, "acme", NONE);
+        const caught = yield* insertEvent({ connection: 1, kind: "acme.thing.noisy" });
+        yield* insertEvent({ connection: 1, kind: "acme.thing.noisy" });
+        yield* insertIgnoreRuleCatch(caught, 5, "Asked · Author bot");
+        return [yield* queryIds({ intake: true }), caught] as const;
+      }),
+    );
+    expect(found).toEqual([expected]);
   });
 
   it("includes an event with a signal behind it even when its kind is off", async () => {
@@ -906,6 +1015,14 @@ describe("event.query plans", () => {
     expect(plan).not.toContain("SCAN events");
   });
 
+  it("reads the ignored filter by listing the caught event ids, then looking those events up", async () => {
+    // A catch's key is its event's id, so the catches table is its own index.
+    const plan = await explainPageQuery(handling("ignored"));
+    expect(plan).toContain("ignore_rule_catches");
+    expect(plan).toContain("SEARCH events USING INTEGER PRIMARY KEY");
+    expect(plan).not.toContain("SCAN events");
+  });
+
   it.each([["session_inputs_event"], ["run_steps_event"]] as const)(
     "reads the known-work filter by searching %s",
     async (index) => {
@@ -932,8 +1049,9 @@ describe("event.query plans", () => {
 
   it("reads the facts of a page through indexes", async () => {
     const plans = await explainQuery({}, insertEvent());
-    // The page, then the signals, the signals ended, the Tasks and the Subscriptions.
-    expect(plans).toHaveLength(5);
+    // The page, then the signals, the signals ended, the Ignore Rule catches,
+    // the Tasks and the Subscriptions.
+    expect(plans).toHaveLength(6);
     expect(plans.flatMap(listScans)).toEqual([]);
     expect(plans[2]).toContain("signals_resolution_event");
   });

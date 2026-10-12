@@ -471,10 +471,12 @@ describe("the Intake settings of a plugin", () => {
         [mentioned]: "on@default",
       });
       const firstSignalKind = detail.intake.signalKinds[0] as
-        | { label: string; description: string }
+        | { label: string; description: string; matchFields: unknown }
         | undefined;
       expect(firstSignalKind?.label).toBe("Asked");
       expect(firstSignalKind?.description).not.toBe("");
+      // A match field's path is how the plugin reads its value, so it is left out.
+      expect(firstSignalKind?.matchFields).toEqual([{ name: "title", label: "Title" }]);
       expect(detail.intake.eventKinds[0]).toMatchObject({ description: "Something was opened." });
 
       // The listing carries the same settings.

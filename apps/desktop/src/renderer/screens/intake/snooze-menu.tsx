@@ -13,6 +13,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { buildSnoozeChoices, parsePickedSnoozeTime } from "@hercule/client-core";
+import { moveMenuFocus } from "./move-menu-focus";
 import type { SnoozeMenuPlace } from "./use-signal-moves";
 import "../thread/menus.css";
 
@@ -122,16 +123,7 @@ export function SnoozeMenu({
     }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
-    // A disabled choice cannot be taken, so the arrow keys pass over it.
-    const items = [
-      ...event.currentTarget.querySelectorAll<HTMLElement>(
-        "[role='menuitem']:not([aria-disabled='true'])",
-      ),
-    ];
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    const step = event.key === "ArrowDown" ? 1 : -1;
-    const next = items[(at + step + items.length) % items.length];
-    next?.focus();
+    const next = moveMenuFocus(event.currentTarget, event.key);
     setActiveKey(next === undefined ? null : Number(next.dataset.key));
   };
 
@@ -148,7 +140,7 @@ export function SnoozeMenu({
       popover="manual"
       role="menu"
       aria-label="Snooze until"
-      className="pop asks-snooze"
+      className="pop intake-menu asks-snooze"
       data-place={place}
       onKeyDown={handleKeys}
     >

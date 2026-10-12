@@ -1,7 +1,7 @@
 /**
  * What came of an event: the signals it raised or is evidence for, the
- * signals it ended, the Tasks it is on, and the live Subscriptions that
- * received it (spec 10 section 9.10).
+ * signals it ended, the Ignore Rule that caught it, the Tasks it is on, and
+ * the live Subscriptions that received it (spec 10 section 9.10).
  *
  * `event.query` uses the same definitions twice: once as the `handling`
  * filter, which asks of each event "is there such a fact?", and once to list
@@ -10,7 +10,8 @@
  * counts.
  *
  * This domain cannot import the signals, tasks, subscriptions, sessions or
- * runs domains, because they import this one. So it reads their tables.
+ * runs domains, because they import this one. So it reads their tables,
+ * including the signals domain's Ignore Rule tables.
  */
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -20,6 +21,7 @@ import {
   CORE_SIGNAL_KINDS,
   type EventFacts,
   type EventHandling,
+  type EventIgnoredByFact,
   type EventKnownByFact,
   type EventResolvedSignalFact,
   type EventSignalFact,
@@ -79,6 +81,16 @@ const buildFactSources = (sql: SqlClient.SqlClient) => ({
     // SQLite uses it only when the query says the same.
     where: [sql`json_extract(s.resolution, '$.eventId') IS NOT NULL`],
     eventId: sql`json_extract(s.resolution, '$.eventId')`,
+    filterBy: "facts-first",
+  } satisfies FactSource,
+  /**
+   * An Ignore Rule's catch: the rule stopped the signal the event would have
+   * raised. An event has one catch per kind a rule stopped.
+   */
+  ignoreRuleCatches: {
+    from: sql`ignore_rule_catches c`,
+    where: [],
+    eventId: sql`c.event_id`,
     filterBy: "facts-first",
   } satisfies FactSource,
   /** A Task that has not been deleted, and whose provenance names the event. */
@@ -146,13 +158,16 @@ const buildHasFact = (
 /**
  * Builds the condition that the event the outer query is reading is one of
  * Intake's events because a signal is behind it: it raised a signal, is
- * evidence for one, or ended one.
+ * evidence for one, or ended one. An event an Ignore Rule caught counts too,
+ * because the rule stopped the signal it would have raised (spec 10 section
+ * 9.10).
  */
 export const buildHasSignalBehind = (sql: SqlClient.SqlClient): Fragment => {
   const sources = buildFactSources(sql);
   return sql.or([
     buildHasFact(sql, sources.signalsNamingEvent),
     buildHasFact(sql, sources.signalsEndedByEvent),
+    buildHasFact(sql, sources.ignoreRuleCatches),
   ]);
 };
 
@@ -188,6 +203,8 @@ const buildHasHandling = (sql: SqlClient.SqlClient, handling: EventHandling): Fr
       return buildHasFact(sql, sources.signalsNamingEvent, [sql`s.kind IN ${coreKinds}`]);
     case "ended-signal":
       return buildHasFact(sql, sources.signalsEndedByEvent);
+    case "ignored":
+      return buildHasFact(sql, sources.ignoreRuleCatches);
     case "on-task":
       return buildHasFact(sql, sources.tasksFromEvent);
     case "known-work":
@@ -241,6 +258,15 @@ interface ResolvedSignalRow {
   readonly outcome: string;
 }
 
+interface IgnoredByRow {
+  readonly event_id: number;
+  readonly rule_id: Uint8Array;
+  readonly kind: string;
+  readonly rule_text: string;
+  /** 1 when the rule was deleted after it caught the event, 0 while it exists. */
+  readonly rule_deleted: number;
+}
+
 interface TaskRow {
   readonly event_id: number;
   readonly task_id: Uint8Array;
@@ -266,7 +292,7 @@ export interface HolderTitleAccess {
 /**
  * Reads the facts of the events with these ids, in one query for each kind of
  * fact whatever the number of events. The result has an entry for every id,
- * with empty lists for an event that reached nothing.
+ * with empty lists and a null `ignoredBy` for an event that reached nothing.
  *
  * Each list is in the order its facts were created, oldest first, so a
  * reader sees them in a fixed order.
@@ -311,6 +337,16 @@ export const readEventFacts = (
       WHERE ${buildIsOnPage(sources.signalsEndedByEvent)}
       ORDER BY s.created_at, s.id
     `;
+    // The rule's text is the copy the catch keeps, so a deleted rule is still
+    // named. An event caught for two kinds is named by its first catch, so
+    // the rows are read newest first and the oldest is the one the map keeps.
+    const ignoredByRows = yield* sql<IgnoredByRow>`
+      SELECT c.event_id AS event_id, c.rule_id AS rule_id, c.kind AS kind,
+             c.rule_text AS rule_text, r.id IS NULL AS rule_deleted
+      FROM ${sources.ignoreRuleCatches.from} LEFT JOIN ignore_rules r ON r.id = c.rule_id
+      WHERE ${buildIsOnPage(sources.ignoreRuleCatches)}
+      ORDER BY c.at DESC, c.kind DESC
+    `;
     // A Task whose provenance names the event twice is one fact.
     const taskRows = yield* sql<TaskRow>`
       SELECT tp.event_id AS event_id, t.id AS task_id, t.title AS title
@@ -352,6 +388,17 @@ export const readEventFacts = (
       title: row.title,
       outcome: row.outcome,
     }));
+    const ignoredBy = new Map(
+      ignoredByRows.map((row): [number, EventIgnoredByFact] => [
+        row.event_id,
+        {
+          ruleId: uuidToString(row.rule_id),
+          kind: row.kind,
+          text: row.rule_text,
+          ruleDeleted: row.rule_deleted === 1,
+        },
+      ]),
+    );
     const tasks = groupByEvent(taskRows, (row): EventTaskFact => ({
       taskId: uuidToString(row.task_id),
       title: row.title,
@@ -368,6 +415,7 @@ export const readEventFacts = (
         {
           signals: signals.get(id) ?? [],
           resolvedSignals: resolvedSignals.get(id) ?? [],
+          ignoredBy: ignoredBy.get(id) ?? null,
           tasks: tasks.get(id) ?? [],
           knownBy: knownBy.get(id) ?? [],
         },

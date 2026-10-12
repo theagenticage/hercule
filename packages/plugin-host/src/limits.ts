@@ -41,6 +41,16 @@ export const EXTERNAL_REF_PATTERN = /^[a-z0-9][a-z0-9-]*:[^\s:]+:\S+$/;
 /** The longest title of a signal. A title is a line, not a paragraph. */
 export const MAX_SIGNAL_TITLE_LENGTH = 512;
 
+/**
+ * The most match fields a signal kind declares. An Ignore Rule matches on at
+ * most this many values, so a rule the core offers from a kind's fields can
+ * always be created.
+ */
+export const MAX_SIGNAL_MATCH_FIELDS = 16;
+
+/** The longest name of a match field. A name is a short key, such as `repo`. */
+export const MAX_SIGNAL_MATCH_FIELD_NAME_LENGTH = 64;
+
 /** The longest text of one message in a block, in characters. The producer sets `truncated` when it cuts. */
 export const MAX_MESSAGE_TEXT_LENGTH = 16 * 1024;
 

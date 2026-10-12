@@ -45,19 +45,21 @@ import { MAX_SEARCH_TEXT_LENGTH } from "./task";
  *
  * - `raised-signal`: the event raised a plugin's signal.
  * - `ended-signal`: the event ended a signal on its source.
+ * - `ignored`: an Ignore Rule stopped the signal the event would have raised.
  * - `evidence`: a core signal, such as triage's proposal, lists the event.
  * - `on-task`: a Task's provenance carries the event.
  * - `known-work`: a live Subscription received the event.
  * - `no-action`: none of the above.
  *
- * Four more join later, each with what it is worked out from: `ignored` with
- * Ignore Rules, the Screener's two with Screening, and `pending-triage` with
- * the setting that names the triage workflow. Until then nothing could
- * produce them, so they are not values a caller can send.
+ * Three more join later, each with what it is worked out from: the
+ * Screener's two with Screening, and `pending-triage` with the setting that
+ * names the triage workflow. Until then nothing could produce them, so they
+ * are not values a caller can send.
  */
 export const EVENT_HANDLINGS = [
   "raised-signal",
   "ended-signal",
+  "ignored",
   "evidence",
   "on-task",
   "known-work",
@@ -121,13 +123,30 @@ export const EventKnownByFact = Schema.Struct({
 export type EventKnownByFact = Schema.Schema.Type<typeof EventKnownByFact>;
 
 /**
+ * The Ignore Rule that caught the event: the signal the event would have
+ * raised was never created. `text` is the rule's text as it was when it
+ * caught the event, so the fact still names a rule the user has since
+ * deleted. `ruleDeleted` is true once the rule is gone.
+ */
+export const EventIgnoredByFact = Schema.Struct({
+  ruleId: Id,
+  kind: SignalKind,
+  text: Schema.String,
+  ruleDeleted: Schema.Boolean,
+});
+
+export type EventIgnoredByFact = Schema.Schema.Type<typeof EventIgnoredByFact>;
+
+/**
  * What came of one event: the signals it raised or is evidence for, the
- * signals it ended, the Tasks it is on, and the live Subscriptions that
- * received it. Each list is empty when the event reached nothing of its kind.
+ * signals it ended, the first Ignore Rule that caught it, the Tasks it is on, and
+ * the live Subscriptions that received it. Each list is empty when the event
+ * reached nothing of its kind, and `ignoredBy` is null when no rule caught it.
  */
 export const EventFacts = Schema.Struct({
   signals: Schema.Array(EventSignalFact),
   resolvedSignals: Schema.Array(EventResolvedSignalFact),
+  ignoredBy: Schema.NullOr(EventIgnoredByFact),
   tasks: Schema.Array(EventTaskFact),
   knownBy: Schema.Array(EventKnownByFact),
 });

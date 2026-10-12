@@ -618,8 +618,11 @@ input.field[type="password"]:not(:placeholder-shown) {
 }
 /* Not in the book, whose choices are never disabled. A choice the user
    cannot change, such as a checkout picked while its project is being
-   added, at half opacity like a disabled toggle. */
-.choice-box input:disabled {
+   added, at half opacity like a disabled toggle. A choice marked
+   `aria-disabled` stays focusable, so its title can say why it cannot
+   change, and looks the same. */
+.choice-box input:disabled,
+.choice-box input[aria-disabled="true"] {
   opacity: 0.5;
 }
 .choice-box .ic {
@@ -641,17 +644,20 @@ input.field[type="password"]:not(:placeholder-shown) {
   gap: 2px;
   margin: 0 -8px 4px;
 }
+/* Not in the book. The text column may shrink below its longest word, and
+   a word wider than the row breaks, so a long value never widens the row. */
 .option {
   display: grid;
-  grid-template-columns: 14px 1fr;
+  grid-template-columns: 14px minmax(0, 1fr);
   align-items: center;
+  overflow-wrap: anywhere;
   gap: 2px 8px;
   padding: 6px 8px;
   border-radius: var(--r-md);
   transition: background var(--dur-1);
 }
 /* Not in the book. A row whose choice cannot change shows no hover. */
-.option:hover:not(:has(input:disabled)) {
+.option:hover:not(:has(input:disabled, input[aria-disabled="true"])) {
   background: var(--hover);
 }
 .option b {

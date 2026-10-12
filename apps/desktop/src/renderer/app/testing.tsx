@@ -506,17 +506,21 @@ const answerSessionQuery = (records: SidebarRecords, call: Call): Answer => {
  * - `later`: the open signals snoozed until after now, soonest first;
  * - `done`: the resolved signals, newest first.
  *
- * A `source` keeps the signals of that plugin's kinds.
+ * A `source` keeps the signals of that plugin's kinds, and a `kind` keeps the
+ * signals of that one kind.
  */
 export const answerSignalQuery = (signals: readonly Signal[], call: Call): Answer => {
   const query = new URLSearchParams(call.search);
   const view = query.get("view") ?? "to-do";
   const source = query.get("source");
+  const kind = query.get("kind");
   const now = Date.now();
   const snoozed = (signal: Signal): boolean =>
     signal.snooze !== undefined && Date.parse(signal.snooze.until) > now;
   const fromSource = signals.filter(
-    (signal) => source === null || signal.kind.startsWith(`${source}/`),
+    (signal) =>
+      (source === null || signal.kind.startsWith(`${source}/`)) &&
+      (kind === null || signal.kind === kind),
   );
   const items =
     view === "done"
@@ -563,6 +567,8 @@ export const buildSidebarHandlers = (
   // The shell reads To do for Intake's count, and the plugins for its sources.
   "GET /api/v1/signals": (call) => answerSignalQuery(records.signals ?? [], call),
   "GET /api/v1/plugins": { body: records.plugins ?? [] },
+  // Settings > Intake reads the Ignore Rules each time it opens.
+  "GET /api/v1/ignore-rules": { body: [] },
   // Intake reads the workflows, whose names label the signals their runs raised.
   "GET /api/v1/workflows": { body: { items: [] } },
   // Settings > Assistants reads the picked assistant's memory.

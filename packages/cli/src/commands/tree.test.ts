@@ -292,6 +292,21 @@ describe("a command's fields against the schema", () => {
       "provider-instance",
     ]);
   });
+
+  // Only a row that opts in makes a record field take named values: a record
+  // read from stdin is still one JSON document.
+  it("reads named values only where the row asks for them", () => {
+    expect(
+      findCommandByWords(["ignore-rule", "create"])!.payload.find(
+        (field) => field.name === "match",
+      ),
+    ).toMatchObject({ kind: "namedValues", repeated: true, optional: false });
+    expect(
+      findCommandByWords(["connection", "set-credentials"])!.payload.find(
+        (field) => field.name === "credentials",
+      ),
+    ).toMatchObject({ kind: "json", stdin: true });
+  });
 });
 
 describe("the placeholders a usage line shows", () => {
@@ -330,6 +345,7 @@ describe("the placeholders a usage line shows", () => {
     "signal snooze": "<signal-id>...",
     "signal unsnooze": "<signal-id>...",
     "signal lower-priority": "<signal-id>...",
+    "ignore-rule create": "<kind>",
   };
 
   it("names whose id a positional holds when the field name alone would not", () => {

@@ -5,19 +5,25 @@
  *
  * For one pending raise, `SignalRaises.raise`:
  *
- * 1. runs the plugin's `build` outside any transaction, because `build` may
+ * 1. checks the Ignore Rules of the kind (spec 10 §9.9). When one matches the
+ *    signal's match values, it deletes the raise and records the oldest
+ *    matching rule's catch, in one transaction. No signal is written, and
+ *    `build` does not run;
+ * 2. runs the plugin's `build` outside any transaction, because `build` may
  *    call the source;
- * 2. binds the draft's actions to the plugin and to the signal's Connection,
+ * 3. binds the draft's actions to the plugin and to the signal's Connection,
  *    adds the core's own actions (Done, and one Hand to an agent per workflow
  *    that takes the kind), and checks the whole signal against the contract;
- * 3. when `build` fails, times out or throws, or its draft does not pass the
+ * 4. when `build` fails, times out or throws, or its draft does not pass the
  *    check, writes the signal from the event instead: the event's title and
  *    author, no body, and the core's actions only. The signal keeps the
  *    error, and a `core.signal-build-failed` decision tells the user, once
  *    until they dismiss it;
- * 4. in one transaction, deletes the raise, writes the signal, and withdraws
+ * 5. in one transaction, deletes the raise, writes the signal, and withdraws
  *    the older open signals of the same kind on the same thread, which the
- *    new one replaces.
+ *    new one replaces. The transaction checks the Ignore Rules again, because
+ *    the user may have created one while `build` ran, and records the catch
+ *    in place of the signal when one matches.
  *
  * The controller daemon's signal raise delivery calls it for each pending
  * raise, oldest event first.
@@ -33,10 +39,13 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   DONE_ACTION_ID,
   formatIssue,
+  isMatchedByRule,
+  MAX_SIGNAL_MATCH_VALUE_LENGTH,
   summarizeCause,
   truncateMessage,
   type BoundAction,
   type Event,
+  type IgnoreRule,
   type NotificationSubject,
   type Signal,
   type SignalMatch,
@@ -52,6 +61,7 @@ import { buildEvaluationContext, evaluateExpression, formatExpressionValue } fro
 import { Notifier } from "../notifications";
 import { PluginHost, signalBuilds, type RegisteredSignalKind } from "../plugins";
 import { buildHandToActions, checkSignalFits, listOwnActionIssues } from "./actions";
+import { ignoreRuleRepository } from "./ignore-rule-repository";
 import { signalRepository, type PendingRaise } from "./repository";
 
 /** The outcome a replaced signal keeps. */
@@ -59,14 +69,6 @@ const REPLACED_OUTCOME = "Replaced by a newer one";
 
 /** The reason a build-failed decision is withdrawn with once a build of its kind works again. */
 const BUILD_WORKS_AGAIN = "a later signal of this kind was built";
-
-/**
- * The longest match value a signal keeps, in characters. A match value is
- * compared whole by an Ignore Rule, so a longer one is left out rather than
- * cut. A path that returns a whole body would otherwise make the signal
- * larger than `MAX_SIGNAL_BYTES`.
- */
-const MAX_MATCH_VALUE_LENGTH = 1024;
 
 /** The workflows whose Hand to an agent actions a signal may get. */
 type EnabledWorkflows = ReadonlyArray<{
@@ -127,14 +129,16 @@ const bindDraftActions = (
 /**
  * Returns the value of each of the kind's match fields for the event, as
  * text. A field is left out, with a log line, when its path fails, returns a
- * list or a map, or returns text longer than `MAX_MATCH_VALUE_LENGTH`. A
+ * list or a map, or returns text longer than `MAX_SIGNAL_MATCH_VALUE_LENGTH`. A
  * field whose path returns nothing is left out without one. An Ignore Rule
  * on a field that was left out never matches the signal.
  */
 const buildMatch = (kind: RegisteredSignalKind, event: Event): Effect.Effect<SignalMatch> =>
   Effect.gen(function* () {
     const context = buildEvaluationContext(event);
-    const match: Record<string, string> = {};
+    // Collected as entries, because assigning a field named `__proto__` would
+    // set the object's prototype rather than add a value.
+    const entries: Array<[string, string]> = [];
     for (const field of kind.matchFields) {
       const leftOut = (why: string) =>
         Effect.logWarning(
@@ -157,13 +161,15 @@ const buildMatch = (kind: RegisteredSignalKind, event: Event): Effect.Effect<Sig
         continue;
       }
       const text = String(found);
-      if (text.length > MAX_MATCH_VALUE_LENGTH) {
-        yield* leftOut(`returned ${text.length} characters, more than ${MAX_MATCH_VALUE_LENGTH}`);
+      if (text.length > MAX_SIGNAL_MATCH_VALUE_LENGTH) {
+        yield* leftOut(
+          `returned ${text.length} characters, more than ${MAX_SIGNAL_MATCH_VALUE_LENGTH}`,
+        );
         continue;
       }
-      match[field.name] = text;
+      entries.push([field.name, text]);
     }
-    return match;
+    return Object.fromEntries(entries);
   });
 
 const make = Effect.gen(function* () {
@@ -175,6 +181,51 @@ const make = Effect.gen(function* () {
   const notifier = yield* Notifier;
   const audit = yield* AuditLog;
   const operations = yield* BoundOperations;
+  const ignoreRules = yield* ignoreRuleRepository;
+
+  /**
+   * Returns the oldest Ignore Rule of `kind` that matches `match`, a
+   * signal's match values, or `undefined` when none does. A rule holds at
+   * least one value, so a signal with no match values is never caught. A
+   * rule whose kind no plugin declares any more is never read, because its
+   * raises are dropped before this check.
+   */
+  const findCatchingRule = (
+    kind: string,
+    match: SignalMatch,
+  ): Effect.Effect<IgnoreRule | undefined, SqlError> =>
+    Effect.map(ignoreRules.list(kind), (rules) =>
+      rules.find((rule) => isMatchedByRule(match, rule.match)),
+    );
+
+  /**
+   * Records that `rule` stopped the raise's event from raising a signal,
+   * stamped with the time it is recorded. The caller records it in the
+   * transaction that read the rule, so the catch is never older than the
+   * rule.
+   */
+  const recordCatch = (raise: PendingRaise, rule: IgnoreRule): Effect.Effect<void, SqlError> =>
+    Effect.flatMap(nowIso, (at) =>
+      ignoreRules.insertCatch({
+        eventId: raise.eventId,
+        ruleId: rule.id,
+        kind: raise.kind,
+        ruleText: rule.text,
+        at,
+      }),
+    );
+
+  /**
+   * Checks whether the event of the raise already raised its signal, or was
+   * caught by a rule for the raise's kind. Either way the raise has nothing
+   * left to write. A caught event stays caught after its rule is deleted, so
+   * a raise the event's enrichment adds again does not bring the signal back.
+   */
+  const isRaiseSettled = (raise: PendingRaise): Effect.Effect<boolean, SqlError> =>
+    Effect.gen(function* () {
+      if (yield* signals.hasSignalForEvent(raise.eventId, raise.kind)) return true;
+      return yield* ignoreRules.hasCatch(raise.eventId, raise.kind);
+    });
 
   /**
    * Puts together the signal a raise writes, with the content given, and
@@ -271,7 +322,10 @@ const make = Effect.gen(function* () {
    * - the Connection is gone, because the user deleted it while `build`
    *   ran. The raise is dropped with a log line, so no signal or build
    *   failure points at a Connection that no longer exists;
-   * - the event's signal of this kind already exists;
+   * - the event's signal of this kind already exists, or a rule already
+   *   caught the event for this kind;
+   * - an Ignore Rule the user created while `build` ran matches the signal.
+   *   The rule's catch is recorded instead;
    * - an open signal on the thread was raised from a later event. That
    *   signal is newer, so it stays, and the raise is dropped.
    */
@@ -294,7 +348,9 @@ const make = Effect.gen(function* () {
             `The raise of a ${raise.kind} signal from the event ${raise.eventId} was dropped, because its Connection was deleted while its signal was built`,
           );
         }
-        if (yield* signals.hasSignalForEvent(raise.eventId, raise.kind)) return;
+        if (yield* isRaiseSettled(raise)) return;
+        const rule = yield* findCatchingRule(raise.kind, signal.match);
+        if (rule !== undefined) return yield* recordCatch(raise, rule);
         const open = yield* signals.listOpenOnThread(
           raise.connectionId,
           raise.threadRef,
@@ -417,14 +473,18 @@ const make = Effect.gen(function* () {
      * the signal written from its event does not fit the contract. A raise
      * whose signal already exists is deleted without a second signal: the
      * controller stopped between the commit and the delete, or the event was
-     * routed again.
+     * routed again. A raise an Ignore Rule catches is deleted without a
+     * signal, and the rule's catch is recorded in its place. A raise whose
+     * event a rule already caught for its kind is deleted without a signal,
+     * even when the rule was deleted since, so enriching a caught event does
+     * not raise its signal after all.
      *
      * Fails only on a database error, and the raise then stays pending for
      * the next try. A failure of `build`, including a defect, never fails it.
      */
     raise: (raise: PendingRaise, workflows: EnabledWorkflows): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        if (yield* signals.hasSignalForEvent(raise.eventId, raise.kind)) {
+        if (yield* isRaiseSettled(raise)) {
           yield* signals.deleteRaise(raise.eventId, raise.kind);
           return;
         }
@@ -447,6 +507,28 @@ const make = Effect.gen(function* () {
           match: yield* buildMatch(kind.value, event.value),
           createdAt: yield* nowIso,
         };
+
+        // Most raises match no rule, so the rules are read outside a
+        // transaction, and a write transaction opens only for a catch. It
+        // reads the rules again, because the user may have deleted the rule
+        // since. A rule created after this read is still found by
+        // `writeSignal`, which reads the rules again before it writes.
+        if ((yield* findCatchingRule(raise.kind, parts.match)) !== undefined) {
+          const caught = yield* withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const rule = yield* findCatchingRule(raise.kind, parts.match);
+              if (rule === undefined) return false;
+              // An end on the thread may have dropped the raise since it was
+              // listed. Then the event raises nothing, so there is no catch.
+              if (yield* signals.deleteRaise(raise.eventId, raise.kind)) {
+                yield* recordCatch(raise, rule);
+              }
+              return true;
+            }),
+          );
+          if (caught) return;
+        }
 
         // The rule decided while the plugin was active. When the plugin has
         // stopped since, its code no longer runs, so the signal is written

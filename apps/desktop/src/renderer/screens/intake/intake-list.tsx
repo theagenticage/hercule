@@ -24,7 +24,6 @@ import {
   describeSignalRow,
   formatClock,
   isBackFromSnooze,
-  parsePluginId,
   SIGNAL_MOVE_LABELS,
   type IntakeSection,
   type PluginIdentity,
@@ -37,7 +36,7 @@ import { CheckIcon } from "../../icons/check";
 import { AgeLabel } from "../age-label";
 import { describeMoveTitle, SIGNAL_MOVE_GLYPHS } from "./move-glyphs";
 import { SNOOZE_ANCHOR } from "./snooze-menu";
-import { SourceMark } from "./source-mark";
+import { SignalMark } from "./source-mark";
 import { useRowMotion } from "./use-row-motion";
 
 /** What a press on a row's own controls asks for: its checkbox, or one of its moves. */
@@ -408,7 +407,7 @@ const SignalRow = memo(function SignalRow({
         }}
       >
         <span className="ask-mark">
-          <SourceMark pluginId={parsePluginId(signal.kind)} plugins={plugins} size={16} />
+          <SignalMark signal={signal} plugins={plugins} size={16} />
         </span>
         <span className="ask-text">
           <span className="ask-title">{signal.title}</span>

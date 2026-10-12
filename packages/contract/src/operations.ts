@@ -201,6 +201,21 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/signals/lower-priority",
   },
+  // An Ignore Rule has no grant family of its own: it is part of how signals
+  // are raised. `create` and `delete` are the user's only, which the service
+  // checks, because a grant alone does not tell the user from an agent.
+  "ignoreRule.query": { requires: "signal.read", method: "GET", path: "/api/v1/ignore-rules" },
+  "ignoreRule.create": {
+    requires: "signal.write",
+    method: "POST",
+    path: "/api/v1/ignore-rules",
+    usableIn: ["signal.answer"],
+  },
+  "ignoreRule.delete": {
+    requires: "signal.write",
+    method: "DELETE",
+    path: "/api/v1/ignore-rules/:id",
+  },
 
   "project.query": { requires: "project.read", method: "GET", path: "/api/v1/projects" },
   "project.read": { requires: "project.read", method: "GET", path: "/api/v1/projects/:id" },

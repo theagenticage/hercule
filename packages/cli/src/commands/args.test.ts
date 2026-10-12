@@ -306,3 +306,61 @@ describe("signal content on stdin", () => {
     expect(args.payload).toEqual({ actionId: "reply", text: "Thanks, merging now." });
   });
 });
+
+// A field whose CLI row asks for named values takes one `--<flag> <field>=<value>` per value.
+describe("a field that takes named values", () => {
+  const ignoreRuleCreate = lookUpCommand("ignore-rule", "create");
+  const KIND = "github/review-requested";
+  const HELP = "ignore-rule create";
+  const parseMatches = (...matches: ReadonlyArray<string>) =>
+    parseArguments(
+      ignoreRuleCreate,
+      [KIND, ...matches.flatMap((match) => ["--match", match])],
+      refuseStdinRead,
+    );
+
+  it("collects each use of the flag into one object", async () => {
+    const args = await parseMatches("repo=acme/webshop", "author=dependabot[bot]");
+    expect(args.positionals).toEqual([KIND]);
+    expect(args.payload).toEqual({ match: { repo: "acme/webshop", author: "dependabot[bot]" } });
+  });
+
+  it("splits at the first =, so a value may hold = itself, also in the --flag=value form", async () => {
+    const args = await parseArguments(
+      ignoreRuleCreate,
+      [KIND, "--match=title=a=b", "--match", "body="],
+      refuseStdinRead,
+    );
+    expect(args.payload["match"]).toEqual({ title: "a=b", body: "" });
+  });
+
+  it("refuses a value with no =, naming the flag and the form it takes", async () => {
+    await expect(parseMatches("repo")).rejects.toThrow(
+      new UsageError('--match: "repo" is not written <field>=<value>', HELP),
+    );
+  });
+
+  it("refuses a value with no name before the =", async () => {
+    await expect(parseMatches("=acme/webshop")).rejects.toThrow(
+      new UsageError('--match: "=acme/webshop" is not written <field>=<value>', HELP),
+    );
+  });
+
+  it("refuses a name given twice, rather than keep one of the two values", async () => {
+    await expect(parseMatches("repo=acme/webshop", "repo=acme/shop")).rejects.toThrow(
+      new UsageError("--match: repo is given twice", HELP),
+    );
+  });
+
+  it("is required when the schema requires it", async () => {
+    await expect(parseMatches()).rejects.toThrow(/missing required --match/);
+  });
+
+  // Only the row's opt-in makes a record field take named values, so the
+  // stdin fields that hold a record still take one JSON object.
+  it("leaves a record field whose row does not ask for named values as JSON", async () => {
+    const setCredentials = lookUpCommand("connection", "set-credentials");
+    const args = await parseArguments(setCredentials, [ID], stubStdin('{"pat":"ghp_yyy"}\n'));
+    expect(args.payload["credentials"]).toEqual({ pat: "ghp_yyy" });
+  });
+});

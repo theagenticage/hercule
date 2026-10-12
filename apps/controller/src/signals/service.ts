@@ -14,6 +14,10 @@
  * - an offer, an unsure and an fyi get one Hand to an agent action per
  *   enabled workflow with a signal input that accepts the kind.
  *
+ * The core also raises one offer of its own: when the user marks the last
+ * five signals of one group done without answering them, `markDone` offers
+ * an Ignore Rule for that group, with Ignore and Dismiss.
+ *
  * Only the user takes an action, through `act`. Each action's operation is
  * checked, run and described through the `BoundOperations` port, which the
  * controller daemon implements.
@@ -48,12 +52,15 @@ import {
   DISMISS_ACTION_ID,
   DONE_ACTION_ID,
   HAND_TO_ACTION_PREFIX,
+  IGNORE_ACTION_ID,
   MAX_BOUND_INPUT_BYTES,
   type Signal,
   Validation,
+  hasSameValues,
   type BoundAction,
   type CoreSignalKind,
   type DescribeLine,
+  NO_OPERATION_DESCRIBE_LINE,
   type Forbidden,
   type Id,
   type InvalidState,
@@ -98,7 +105,16 @@ import { PluginHost } from "../plugins";
 import { runRepository } from "../runs";
 import { sessionRepository } from "../sessions";
 import { workflowRepository } from "../workflows";
-import { buildHandToActions, checkSignalFits, listOwnActionIssues } from "./actions";
+import {
+  buildHandToActions,
+  checkSignalFits,
+  DISMISS_ACTION,
+  listOwnActionIssues,
+} from "./actions";
+import { SignalClaims } from "./claims";
+import { ignoreRuleOffers } from "./ignore-rule-offers";
+import { ignoreRuleRepository } from "./ignore-rule-repository";
+import { buildIgnoredOutcome } from "./outcome";
 import { signalRepository } from "./repository";
 
 /** The input of `signal.act`: the signal's id, the action to take and its typed reply. */
@@ -112,9 +128,6 @@ export interface WithdrawInput extends SignalWithdrawInput {
 }
 
 const NO_SUCH_SIGNAL = "no such signal";
-
-/** The describe line of an action that runs nothing. */
-const NO_OPERATION_DESCRIBE_LINE: DescribeLine = [{ kind: "text", text: "Does nothing" }];
 
 /**
  * The describe line of the core's Done on a core kind. A plugin's kind adds
@@ -172,13 +185,6 @@ const SIGNALS_BUSY_FOR_MARK_DONE =
  * id given twice as given once.
  */
 const removeDuplicateIds = (ids: ReadonlyArray<string>): ReadonlyArray<string> => [...new Set(ids)];
-
-/** The core's Dismiss: an action that resolves the signal and runs nothing. */
-const DISMISS_ACTION: BoundAction = {
-  id: DISMISS_ACTION_ID,
-  label: "Dismiss",
-  operation: null,
-};
 
 /**
  * An action's describe line before the describer runs: the checked operation
@@ -277,43 +283,12 @@ const make = Effect.gen(function* () {
   const sessions = yield* sessionRepository;
   const runs = yield* runRepository;
   const workflows = yield* workflowRepository;
+  const rules = yield* ignoreRuleRepository;
   const audit = yield* AuditLog;
   const operations = yield* BoundOperations;
   const host = yield* PluginHost;
-
-  // The signals an action or a withdrawal is running on. A plugin action runs
-  // outside any transaction, so this set is what stops a second click, or a
-  // withdrawal, from acting on a signal whose first action has not resolved
-  // it yet.
-  const actingOn = new Set<string>();
-
-  /**
-   * Runs `effect` while it holds the claim on every one of the signals, and
-   * gives the claims up when `effect` ends, however it ends. Fails with
-   * `InvalidState`, with the message `refusal`, when another caller holds the
-   * claim on any of them, and then takes none. Checking and taking the claims
-   * is one synchronous step, so two requests that arrive together cannot both
-   * take one.
-   */
-  const withSignalsClaimed = <A, E, R>(
-    signalIds: ReadonlyArray<string>,
-    refusal: string,
-    effect: Effect.Effect<A, E, R>,
-  ): Effect.Effect<A, E | InvalidState, R> =>
-    Effect.acquireUseRelease(
-      Effect.suspend(() => {
-        if (signalIds.some((id) => actingOn.has(id))) {
-          return Effect.fail(createInvalidStateError(refusal));
-        }
-        for (const id of signalIds) actingOn.add(id);
-        return Effect.void;
-      }),
-      () => effect,
-      () =>
-        Effect.sync(() => {
-          for (const id of signalIds) actingOn.delete(id);
-        }),
-    );
+  const claims = yield* SignalClaims;
+  const offers = yield* ignoreRuleOffers;
 
   const readOrFail = (id: string): Effect.Effect<Signal, NotFound | SqlError> =>
     Effect.flatMap(
@@ -508,6 +483,8 @@ const make = Effect.gen(function* () {
    * - Accept: "Accepted <task title>";
    * - Hand to an agent: "Handed to <workflow name>";
    * - Dismiss: "Dismissed";
+   * - Ignore, on the core's Ignore Rule offer: "Ignored · rule <text>",
+   *   with the text of the rule it just created;
    * - a plugin action: its own `outcome` line, when it writes one;
    * - anything else: the action's label.
    *
@@ -525,6 +502,13 @@ const make = Effect.gen(function* () {
         return `Accepted ${signal.task.title}`;
       }
       if (action.id === DISMISS_ACTION_ID) return "Dismissed";
+      if (action.id === IGNORE_ACTION_ID && signal.ignoreRule !== undefined) {
+        const offered = signal.ignoreRule;
+        const created = (yield* rules.list(offered.kind)).find((rule) =>
+          hasSameValues(rule.match, offered.match),
+        );
+        return created === undefined ? action.label : buildIgnoredOutcome(created.text);
+      }
       if (action.id.startsWith(HAND_TO_ACTION_PREFIX)) {
         const workflowId = action.id.slice(HAND_TO_ACTION_PREFIX.length);
         const definition = yield* workflows.readDefinition(workflowId);
@@ -739,7 +723,7 @@ const make = Effect.gen(function* () {
     act: (input: ActInput): Effect.Effect<Signal, BoundOperationError> =>
       Effect.gen(function* () {
         const caller = yield* requireUserActor("signal.act", ONLY_THE_USER);
-        return yield* withSignalsClaimed(
+        return yield* claims.withSignalsClaimed(
           [input.id],
           SIGNAL_BUSY_FOR_ACT,
           Effect.gen(function* () {
@@ -837,7 +821,7 @@ const make = Effect.gen(function* () {
             return yield* readOrFail(input.id);
           }),
         );
-        return yield* withSignalsClaimed(
+        return yield* claims.withSignalsClaimed(
           [input.id],
           SIGNAL_BUSY_FOR_WITHDRAW,
           withdrawInTransaction,
@@ -849,6 +833,10 @@ const make = Effect.gen(function* () {
      * with the core's Done action, which sends nothing to the source, and
      * returns the ids it resolved and the ones it skipped because they had
      * already resolved.
+     *
+     * In the same transaction, the core offers an Ignore Rule for each group
+     * of a plugin kind whose last five signals the user has now marked done
+     * without answering (spec 10 §9.9, "The core suggests rules").
      *
      * Fails with:
      *
@@ -875,7 +863,7 @@ const make = Effect.gen(function* () {
         const ids = removeDuplicateIds(input.signalIds);
         // The claims are taken before the signals are read, as in `act`, so
         // Done never resolves a signal whose action is still on its way.
-        return yield* withSignalsClaimed(
+        return yield* claims.withSignalsClaimed(
           ids,
           SIGNALS_BUSY_FOR_MARK_DONE,
           withTransaction(
@@ -918,6 +906,10 @@ const make = Effect.gen(function* () {
                   at,
                 });
               }
+              yield* offers.offerIgnoreRules(
+                open.filter((signal) => resolved.has(signal.id)),
+                at,
+              );
               return { done, skipped };
             }),
           ),
@@ -1066,5 +1058,5 @@ export class SignalService extends Context.Service<SignalService, Effect.Success
 export const SignalServiceLayer: Layer.Layer<
   SignalService,
   never,
-  SqlClient.SqlClient | AuditLog | BoundOperations | PluginHost
+  SqlClient.SqlClient | AuditLog | BoundOperations | PluginHost | SignalClaims
 > = Layer.effect(SignalService)(make);

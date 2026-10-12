@@ -9,17 +9,39 @@ import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   countJsonBytes,
+  DISMISS_ACTION_ID,
   createValidationError,
   HAND_TO_ACTION_PREFIX,
   listSchemaIssues,
   MAX_SIGNAL_BYTES,
   Signal,
   Validation,
+  type AnswerOperationId,
   type BoundAction,
   type Issue,
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { BoundOperations } from "../bound-actions";
+
+/** The core's Dismiss: an action that takes the signal off the list and runs nothing. */
+export const DISMISS_ACTION: BoundAction = {
+  id: DISMISS_ACTION_ID,
+  label: "Dismiss",
+  operation: null,
+};
+
+/**
+ * The operations only the core binds on a signal, each with the refusal a
+ * raiser that binds it gets. The user's click runs an action as the user, so
+ * a raiser that could bind `ignoreRule.create` could hide signals from the
+ * user under any label. The core binds it on its own Ignore Rule offer only.
+ */
+const CORE_ONLY_OPERATIONS: ReadonlyMap<string, string> = new Map([
+  [
+    "ignoreRule.create" satisfies AnswerOperationId<"signal.answer">,
+    "An action cannot run ignoreRule.create: only the core binds it, on the offer it raises after the user marked five signals of one group done in a row. A rule hides signals from the user, and the click would create it as the user. To suggest a rule, describe it in the signal; the user creates it from Intake.",
+  ],
+]);
 
 /**
  * Returns one Hand to an agent action for each workflow that has a signal
@@ -108,6 +130,7 @@ export const listActionIssues = (
  * Checks the raiser's own actions before they are stored on a signal:
  *
  * - none is ambiguous beside the core's actions (`listActionIssues`);
+ * - none binds an operation only the core binds (`CORE_ONLY_OPERATIONS`);
  * - each one's operation passes the `BoundOperations` check for a signal's
  *   answer;
  * - a typed reply sits only on an action with an operation.
@@ -132,6 +155,11 @@ export const listOwnActionIssues = (
               "A typed reply fills the input of the action's operation, and this action has none. Leave out field.",
           });
         }
+        continue;
+      }
+      const coreOnly = CORE_ONLY_OPERATIONS.get(action.operation.op);
+      if (coreOnly !== undefined) {
+        issues.push({ path: [...path, "operation", "op"], message: coreOnly });
         continue;
       }
       const refusal = yield* operations

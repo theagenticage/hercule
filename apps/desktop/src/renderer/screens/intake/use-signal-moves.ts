@@ -121,7 +121,7 @@ const isViewQuery = (queryKey: readonly unknown[], view: SignalView): boolean =>
   queryKey[0] === "signals" && (queryKey[1] as SignalFilter | undefined)?.view === view;
 
 /**
- * Applies the move to To do and to every paged list of Later in the cache, as
+ * Applies the move to To do and to every list of Later in the cache, as
  * `applySignalMove` describes, so the moved rows leave at once rather than
  * when the lists are read again. Done needs no change: a signal arrives
  * there only with the read.

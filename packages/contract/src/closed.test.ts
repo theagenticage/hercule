@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Schema } from "effect";
-import { closedStruct } from "./closed";
+import { closedRecord, closedStruct } from "./closed";
 import { listDecodeIssues } from "./errors";
 import { SettingsPatch } from "./groups/settings";
 
@@ -57,5 +57,29 @@ describe("settings.update's payload", () => {
 
   it("rejects a declared key whose value is wrong", () => {
     expect(decode(SettingsPatch)({ controller: { "backup.time": "25:00" } })._tag).toBe("Failure");
+  });
+});
+
+describe("a closed record", () => {
+  const Example = closedRecord(
+    Schema.String.check(Schema.isLengthBetween(1, 3, { message: "Write 1 to 3 characters." })),
+    Schema.Number,
+  );
+
+  it("decodes keys its key schema accepts", () => {
+    expect(decode(Example)({ a: 1, abc: 2 })).toMatchObject({
+      _tag: "Success",
+      value: { a: 1, abc: 2 },
+    });
+  });
+
+  it("fails on a key its key schema refuses, rather than dropping it, and reports it at its path", () => {
+    const failed = Schema.decodeUnknownExit(Example)({ a: 1, abcd: 2 });
+    expect(failed._tag).toBe("Failure");
+    if (failed._tag !== "Failure") return;
+    const error = Cause.squash(failed.cause) as Schema.SchemaError;
+    expect(listDecodeIssues(error)).toEqual([
+      { path: ["abcd"], message: "Write 1 to 3 characters." },
+    ]);
   });
 });

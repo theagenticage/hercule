@@ -35,7 +35,9 @@ import * as Option from "effect/Option";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  describeMatchValue,
   isId,
+  listLabeledValues,
   type ApprovalDecision,
   type PermissionDecisionOutcome,
   dispatchAnswerOperation,
@@ -590,6 +592,31 @@ export const buildDescribe: Effect.Effect<
         Effect.map(readPermissionRequestParts(requestId), (parts) =>
           describePermissionDecision(outcome, parts.grant, parts.session, parts.profile),
         ),
+      // A kind no loaded plugin declares any more shows its id and the
+      // fields' names, because its labels are gone with the plugin.
+      "ignoreRule.create": ({ kind, match }) =>
+        Effect.map(host.findSignalKind(kind), (registered) => {
+          const wording = Option.getOrElse(registered, () => ({ label: kind, matchFields: [] }));
+          const source = Option.match(registered, {
+            onNone: () => "The source",
+            onSome: (found) => found.pluginDisplayName,
+          });
+          return [
+            buildTextPart("Ignores "),
+            buildMarkedPart(wording.label),
+            buildTextPart(" where "),
+            ...joinParts(
+              listLabeledValues(wording, match).map(({ label, value }) => [
+                buildTextPart(`${label} is `),
+                buildMarkedPart(describeMatchValue(value)),
+              ]),
+              " and ",
+            ),
+            buildTextPart(
+              `. ${source} still sends them; they show in Everything. Also takes matching open signals off your list.`,
+            ),
+          ];
+        }),
     } satisfies AnswerOperationHandlers<AnswerPlace, Effect.Effect<DescribeLine, SqlError>>;
 
     return (operation: CheckedOperation): Effect.Effect<DescribeLine, SqlError> =>

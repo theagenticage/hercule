@@ -23,6 +23,7 @@ import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import {
   CapExceeded,
+  Conflict,
   Forbidden,
   Internal,
   InvalidState,
@@ -300,11 +301,17 @@ export type BoundAction = Schema.Schema.Type<typeof BoundAction>;
  * with the current names: "Start a run of Bugfix". The producer can neither
  * write nor hide it, so a label cannot mislead the user about the click. For
  * the same reason no value the operation sends is shortened. An answer that
- * runs nothing reads "Does nothing".
+ * runs nothing reads `NO_OPERATION_DESCRIBE_LINE`.
  */
 export const DescribeLine = Schema.Array(DescribeLinePart);
 
 export type DescribeLine = Schema.Schema.Type<typeof DescribeLine>;
+
+/**
+ * The describe line of an answer that runs nothing, such as a Dismiss or a
+ * "Neither". Notifications and Signals share it, so both read the same.
+ */
+export const NO_OPERATION_DESCRIBE_LINE: DescribeLine = [{ kind: "text", text: "Does nothing" }];
 
 /**
  * One answer of a stored decision. The core adds the describe line to the
@@ -520,6 +527,7 @@ export const notification = HttpApiGroup.make("notification")
         NotFound,
         InvalidState,
         CapExceeded,
+        Conflict,
         Internal,
       ],
     }),

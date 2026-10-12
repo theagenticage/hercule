@@ -23,6 +23,7 @@ import {
   PermissionProfiles,
   PermissionProfilesLayer,
 } from "../../permissions";
+import { PluginHost, type RegisteredSignalKind } from "../../plugins";
 import { buildPluginStack } from "../../plugins/testing";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
@@ -621,5 +622,95 @@ describe("permission.decide", () => {
       text(" to session "),
       marked(MISSING_ID),
     ]);
+  });
+});
+
+describe("ignoreRule.create", () => {
+  /**
+   * A plugin host that declares one signal kind, `acme/review-requested` of
+   * the plugin Acme, and no other. Only this operation's line reads it.
+   */
+  const PluginHostStub = Layer.mock(PluginHost)({
+    findSignalKind: (kind) =>
+      Effect.succeed(
+        kind === "acme/review-requested"
+          ? Option.some({
+              kind,
+              pluginId: "acme",
+              pluginDisplayName: "Acme",
+              label: "Review requested",
+              matchFields: [
+                { name: "repo", label: "Repository", path: "event.payload.repo" },
+                { name: "author", label: "Author", path: "event.author" },
+              ],
+            } as unknown as RegisteredSignalKind)
+          : Option.none(),
+      ),
+  });
+
+  const SOURCE_NOTE =
+    " still sends them; they show in Everything. Also takes matching open signals off your list.";
+
+  it("names the kind, each field and its value, and the plugin that still sends them", async () => {
+    const line = await run(
+      Effect.provide(
+        describeOperation({
+          op: "ignoreRule.create",
+          input: {
+            kind: "acme/review-requested",
+            match: { repo: "acme/webshop", author: "dependabot[bot]" },
+          },
+        }),
+        PluginHostStub,
+      ),
+    );
+
+    expect(line).toEqual([
+      text("Ignores "),
+      marked("Review requested"),
+      text(" where "),
+      text("Repository is "),
+      marked("acme/webshop"),
+      text(" and "),
+      text("Author is "),
+      marked("dependabot[bot]"),
+      text(`. Acme${SOURCE_NOTE}`),
+    ]);
+  });
+
+  it("names the kind and the fields by their ids when no plugin declares the kind", async () => {
+    const line = await run(
+      Effect.provide(
+        describeOperation({
+          op: "ignoreRule.create",
+          input: { kind: "gone/review-requested", match: { repo: "acme/webshop" } },
+        }),
+        PluginHostStub,
+      ),
+    );
+
+    expect(line).toEqual([
+      text("Ignores "),
+      marked("gone/review-requested"),
+      text(" where "),
+      text("repo is "),
+      marked("acme/webshop"),
+      text(`. The source${SOURCE_NOTE}`),
+    ]);
+  });
+
+  it("shows an empty value as (empty), so a field never reads with nothing after it", async () => {
+    const line = await run(
+      Effect.provide(
+        describeOperation({
+          op: "ignoreRule.create",
+          input: { kind: "acme/review-requested", match: { repo: "acme/webshop", author: "" } },
+        }),
+        PluginHostStub,
+      ),
+    );
+
+    expect(line).toContainEqual(marked("(empty)"));
+    expect(line).not.toContainEqual(marked(""));
   });
 });

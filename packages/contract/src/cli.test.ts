@@ -111,6 +111,9 @@ const COMMANDS: Record<string, string> = {
   "signal.snooze": "signal snooze",
   "signal.unsnooze": "signal unsnooze",
   "signal.lowerPriority": "signal lower-priority",
+  "ignoreRule.query": "ignore-rule list",
+  "ignoreRule.create": "ignore-rule create",
+  "ignoreRule.delete": "ignore-rule delete",
 
   "project.query": "project list",
   "project.read": "project read",
@@ -309,6 +312,7 @@ const RESOLVES: Record<string, string> = {
   "signal.snooze signalIds": "signal.query",
   "signal.unsnooze signalIds": "signal.query",
   "signal.lowerPriority signalIds": "signal.query",
+  "ignoreRule.delete id": "ignoreRule.query",
 
   "project.read id": "project.query",
   "project.update id": "project.query",

@@ -26,6 +26,7 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
+import { closedRecord } from "../closed";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { IntakeOverrides, IntakeSettings } from "./intake-settings";
@@ -90,7 +91,7 @@ export const MAX_FEED_INTERVALS = 32;
  * name and each value against the feeds the type declares: the name must be
  * one of them, and the value must be at least that feed's shortest interval.
  */
-const FeedIntervals = Schema.Record(
+const FeedIntervals = closedRecord(
   bounded(1, MAX_CONTRIBUTION_NAME_LENGTH),
   Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_FEED_INTERVAL_SECONDS })),
 ).check(Schema.isMaxProperties(MAX_FEED_INTERVALS));

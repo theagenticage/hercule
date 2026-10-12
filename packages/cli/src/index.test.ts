@@ -1743,3 +1743,77 @@ describe("the run commands", () => {
     expect(printed).not.toMatch(/^plan/m);
   });
 });
+
+// The three Ignore Rule commands, from argv to the request sent and the lines printed.
+describe("hercule ignore-rule", () => {
+  /** Returns an Ignore Rule, as `ignore-rule create` returns it. */
+  const buildIgnoreRule = (tail: string) => ({
+    id: buildId(tail),
+    kind: "github/review-requested",
+    match: { repo: "acme/webshop", author: "dependabot[bot]" },
+    text: "Review requested · Repository acme/webshop · Author dependabot[bot]",
+    createdAt: "2026-10-10T09:00:00.000Z",
+    actor: "user",
+  });
+
+  /** Returns an Ignore Rule with what it caught, as `ignore-rule list` returns it. */
+  const buildListedIgnoreRule = (tail: string) => ({
+    ...buildIgnoreRule(tail),
+    caughtCount: 142,
+    lastCaughtAt: "2026-10-11T09:00:00.000Z",
+  });
+
+  it("lists the rules as a table, with the kind filter in the query", async () => {
+    const { io, fetch, run } = createStubCli(() => [buildListedIgnoreRule("aaaaaaa1")]);
+
+    expect(await run("ignore-rule", "list", "--kind", "github/review-requested")).toBe(0);
+
+    expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/ignore-rules" });
+    expect(fetch.calls[0]!.query.get("kind")).toBe("github/review-requested");
+    // The rule's text names the kind and the values, so the match is not printed again.
+    expect(io.stdout).toEqual([
+      "id        kind                     caughtCount  lastCaughtAt              text",
+      "aaaaaaa1  github/review-requested  142          2026-10-11T09:00:00.000Z  Review requested · Repository acme/webshop · Author dependabot[bot]",
+    ]);
+  });
+
+  it("creates a rule from the kind and one --match per value", async () => {
+    const { fetch, run } = createStubCli(() => buildIgnoreRule("aaaaaaa1"));
+
+    expect(
+      await run(
+        "ignore-rule",
+        "create",
+        "github/review-requested",
+        "--match",
+        "repo=acme/webshop",
+        "--match",
+        "author=dependabot[bot]",
+      ),
+    ).toBe(0);
+
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/ignore-rules",
+      body: {
+        kind: "github/review-requested",
+        match: { repo: "acme/webshop", author: "dependabot[bot]" },
+      },
+    });
+  });
+
+  it("deletes the rule a tail names, found through the rule list", async () => {
+    const rule = buildListedIgnoreRule("aaaaaaa1");
+    const { fetch, run } = createStubCli((request) =>
+      request.method === "GET" ? [rule, buildListedIgnoreRule("bbbbbbb2")] : {},
+    );
+
+    expect(await run("ignore-rule", "delete", "0aaaaaaa1")).toBe(0);
+
+    expect(fetch.calls.map(({ method, path }) => ({ method, path }))).toEqual([
+      { method: "GET", path: "/api/v1/ignore-rules" },
+      { method: "DELETE", path: `/api/v1/ignore-rules/${rule.id}` },
+    ]);
+  });
+});

@@ -41,9 +41,10 @@
  *   and disabled;
  * - `toast-bulk`: Marta's review request marked done, then the next row
  *   checked, so the toast stands above the bulk bar;
- * - `everything`: the Everything view, sixteen events newest first: the
- *   fifth row went on to a Task and a session as well, so its line ends in
- *   "+1", and one has no title, so its kind stands in for it;
+ * - `everything`: the Everything view, eighteen events newest first: the
+ *   third row was caught by an Ignore Rule, the seventh went on to a Task
+ *   and a session as well, so its line ends in "+1", and one has no title,
+ *   so its kind stands in for it;
  * - `everything-end`: the same list scrolled to its end, with the line that
  *   says no older event is left;
  * - `everything-pane`: the event that came to the most open, with every
@@ -52,7 +53,22 @@
  *   it finds;
  * - `everything-filter`: the "What came of it" filter on Raised a signal;
  * - `everything-no-match`: a search that finds no event;
- * - `everything-empty`: no event received yet.
+ * - `everything-empty`: no event received yet;
+ * - `offer`: the core's offer to ignore Dependabot's review requests on the
+ *   webshop, open with Hercule's face, Ignore and Dismiss, and how many open
+ *   signals it matches;
+ * - `menu`: Marta's review request with the pane's "More" menu open;
+ * - `ignore-dialog`: the Ignore dialog that menu opens, with both of the
+ *   signal's values checked;
+ * - `everything-ignored`: the "What came of it" filter on Ignored by a rule,
+ *   one event caught by a rule that still exists and one by a deleted rule;
+ * - `everything-ignored-pane`: the event an Ignore Rule caught, with the
+ *   link to the rule in the pane;
+ * - `everything-ignored-deleted-pane`: the event a since deleted rule caught;
+ * - `settings-ignore-rules`: Settings > Intake, with the GitHub plugin's
+ *   Ignore Rules under its kinds, and below them the section of a removed
+ *   plugin, which holds its Ignore Rules only;
+ * - `settings-delete-rule`: the same, with Delete asking first.
  *
  * Done also holds a signal a newer one replaced, from yesterday, so the
  * `done` and `hover-done` scenes show its "Replaced by a newer one" line.
@@ -65,16 +81,18 @@ import {
   type Connection,
   type Event,
   type EventWithFacts,
+  type IgnoreRuleWithCatches,
   type PluginDetail,
   type PluginMark,
   type Signal,
   type SignalAction,
+  type SignalKindIntakeSetting,
 } from "@hercule/contract";
 import type { FetchLike } from "@hercule/client-core";
 import { stopSpecimenClockAt } from "./fixed-clock";
 import { buildPlugin, GITHUB_PLUGIN } from "./plugins-fixture";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
-import type { IntakeRecords, SidebarRecords } from "./shell-page";
+import type { IntakeRecords, IntakeSettingsRecords, SidebarRecords } from "./shell-page";
 
 /**
  * The marks of Sentry, Linear and Slack, as their plugins would declare them:
@@ -98,10 +116,70 @@ const SLACK_MARK: PluginMark = {
   ],
 };
 
+/** The labels of GitHub's match fields, as the plugin declares them. */
+const REPOSITORY = { name: "repo", label: "Repository" };
+const AUTHOR = { name: "author", label: "Author" };
+
+/**
+ * Builds the setting of the GitHub signal kind `word`, raised, as the plugin
+ * declares it: its label, its description and its match fields.
+ */
+const buildGitHubKindSetting = (
+  word: string,
+  label: string,
+  description: string,
+  matchFields: SignalKindIntakeSetting["matchFields"],
+): SignalKindIntakeSetting => ({
+  kind: `github/${word}`,
+  label,
+  description,
+  matchFields,
+  on: true,
+  level: "default",
+});
+
+/**
+ * The GitHub plugin with the signal kinds it declares. Settings > Intake
+ * lists them, and the Ignore dialog names a signal's values with the labels
+ * of their match fields.
+ */
+const GITHUB_DECLARING_KINDS: PluginDetail = {
+  ...GITHUB_PLUGIN,
+  intake: {
+    eventKinds: [],
+    signalKinds: [
+      buildGitHubKindSetting(
+        "review-requested",
+        "Review requested",
+        "Someone asked you to review a pull request.",
+        [REPOSITORY, AUTHOR],
+      ),
+      buildGitHubKindSetting(
+        "mentioned",
+        "Mentioned",
+        "Someone mentioned you by name in a comment on an issue or a pull request.",
+        [REPOSITORY, AUTHOR],
+      ),
+      buildGitHubKindSetting(
+        "changes-requested",
+        "Changes requested",
+        "A reviewer asked for changes on your pull request.",
+        [REPOSITORY, { name: "reviewer", label: "Reviewer" }],
+      ),
+      buildGitHubKindSetting(
+        "checks-failed",
+        "Checks failed",
+        "The checks on your pull request failed.",
+        [REPOSITORY, { name: "check", label: "Check" }],
+      ),
+    ],
+  },
+};
+
 /** The installed plugins, which name each signal's source, in the design's order. */
 const INTAKE_PLUGINS: ReadonlyArray<PluginDetail> = [
   buildPlugin("sentry", "Sentry", SENTRY_MARK),
-  GITHUB_PLUGIN,
+  GITHUB_DECLARING_KINDS,
   buildPlugin("linear", "Linear", LINEAR_MARK),
   buildPlugin("slack", "Slack", SLACK_MARK),
 ];
@@ -245,6 +323,7 @@ const CHANGES = buildSignal(2, 201, {
   title: "Move the promo banner to the CMS",
   asker: "Sanne",
   place: "webshop #1298",
+  match: { repo: "rogier/webshop", reviewer: "sanne" },
   // Snoozed for an hour, and back on To do since then.
   snooze: { until: minutesAgo(140), snoozedAt: minutesAgo(200) },
   blocks: [
@@ -289,6 +368,7 @@ const REVIEW = buildSignal(3, 143, {
   title: "Retry Stripe webhooks with backoff",
   asker: "Marta",
   place: "payments-api #1294",
+  match: { repo: "rogier/payments-api", author: "marta" },
   blocks: [
     {
       type: "change",
@@ -342,6 +422,7 @@ const CHECKS = buildSignal(4, 80, {
   title: "Show VAT per line on invoices",
   asker: "GitHub Actions",
   place: "webshop #1300",
+  match: { repo: "rogier/webshop", check: "test" },
   blocks: [
     {
       type: "checks",
@@ -428,6 +509,72 @@ const SLACK = buildSignal(6, 12, {
 /** The signals on To do, in the order the controller lists them: oldest first. */
 const TO_DO: ReadonlyArray<Signal> = [ALERT, CHANGES, REVIEW, CHECKS, MENTION, SLACK];
 
+/** What the core offers to ignore: Dependabot's review requests on the webshop. */
+const DEPENDABOT_RULE = {
+  kind: "github/review-requested",
+  match: { repo: "rogier/webshop", author: "dependabot[bot]" },
+};
+
+/** Dependabot asked Rogier to review a dependency bump, one more like the five he marked done. */
+const DEPENDABOT = buildSignal(9, 30, {
+  kind: "github/review-requested",
+  title: "Bump stripe from 14.2.0 to 14.3.0",
+  asker: "dependabot[bot]",
+  place: "webshop #1301",
+  match: DEPENDABOT_RULE.match,
+  actions: [
+    buildAction(
+      "approve",
+      "Approve",
+      "github/pr.review",
+      "Approves pull request **#1301** in **rogier/webshop** as **rogier**",
+      { primary: true },
+    ),
+    buildDone("GitHub"),
+  ],
+});
+
+/**
+ * The core's offer of an Ignore Rule, raised when Rogier marked the fifth of
+ * Dependabot's review requests done without answering it. Its title, its
+ * answers and their describe lines are the ones the controller writes.
+ */
+const OFFER: Signal = {
+  id: "01a0ec64-7a00-7000-8000-000000000010",
+  kind: "offer",
+  origin: {
+    type: "api",
+    actor: "system",
+    eventIds: [],
+    reason: "You marked the last 5 done without answering.",
+  },
+  title:
+    "Ignore Review requested where Repository is rogier/webshop and Author is dependabot[bot]? You marked the last 5 done without answering.",
+  priority: "normal",
+  blocks: [],
+  actions: [
+    {
+      id: "ignore",
+      label: "Ignore",
+      primary: true,
+      operation: { op: "ignoreRule.create", input: DEPENDABOT_RULE },
+      describeLine: buildDescribeLine(
+        "Ignores **Review requested** where Repository is **rogier/webshop** and Author is **dependabot[bot]**. GitHub still sends them; they show in Everything. Also takes matching open signals off your list.",
+      ),
+    },
+    {
+      id: "dismiss",
+      label: "Dismiss",
+      operation: null,
+      describeLine: buildDescribeLine("Does nothing"),
+    },
+  ],
+  match: {},
+  ignoreRule: DEPENDABOT_RULE,
+  status: "open",
+  createdAt: minutesAgo(6),
+};
+
 /** Returns the moment at `clock`, `HH:MM` in UTC, `days` after the specimen's day. */
 const atClock = (days: number, clock: string): string => {
   const [hours = 0, minutes = 0] = clock.split(":").map(Number);
@@ -443,6 +590,7 @@ const LAZY_IMAGES = buildSignal(7, 100, {
   title: "Lazy-load product images",
   asker: "Pieter",
   place: "webshop #1296",
+  match: { repo: "rogier/webshop", author: "pieter" },
   snooze: { until: atClock(0, "14:00"), snoozedAt: minutesAgo(96) },
   blocks: [
     {
@@ -619,6 +767,59 @@ const buildEvent = (signal: Signal, url: string): Event => {
   };
 };
 
+/**
+ * Rogier's Ignore Rules, as `ignoreRule.query` lists them: Dependabot's
+ * review requests on the webshop, which caught the newest bump, the
+ * webshop's failed lint check, and Renovate's grouped branch on the payments
+ * API, whose text is long and holds one long word, so the capture shows how
+ * a rule's text wraps. Their text is the one the controller writes from the
+ * GitHub plugin's labels. The last is a rule of Jira's, a plugin Rogier
+ * removed, whose section stays so the rule can still be deleted.
+ */
+const IGNORE_RULES: ReadonlyArray<IgnoreRuleWithCatches> = [
+  {
+    id: "01a0ec64-7f00-7000-8000-000000000001",
+    kind: "github/review-requested",
+    match: { repo: "rogier/webshop", author: "dependabot[bot]" },
+    text: "Review requested · Repository rogier/webshop · Author dependabot[bot]",
+    createdAt: minutesAgo(9 * 24 * 60),
+    actor: "user",
+    caughtCount: 14,
+    lastCaughtAt: minutesAgo(31),
+  },
+  {
+    id: "01a0ec64-7f00-7000-8000-000000000002",
+    kind: "github/checks-failed",
+    match: { repo: "rogier/webshop", check: "lint" },
+    text: "Checks failed · Repository rogier/webshop · Check lint",
+    createdAt: minutesAgo(2 * 24 * 60),
+    actor: "user",
+    caughtCount: 0,
+  },
+  {
+    id: "01a0ec64-7f00-7000-8000-000000000003",
+    kind: "github/changes-requested",
+    match: {
+      repo: "rogier/payments-api",
+      branch: "renovate/all-minor-and-patch-dependency-updates-grouped-weekly",
+    },
+    text: "Changes requested · Repository rogier/payments-api · Branch renovate/all-minor-and-patch-dependency-updates-grouped-weekly",
+    createdAt: minutesAgo(24 * 60),
+    actor: "user",
+    caughtCount: 3,
+    lastCaughtAt: minutesAgo(4 * 60),
+  },
+  {
+    id: "01a0ec64-7f00-7000-8000-000000000004",
+    kind: "jira/assigned",
+    match: { project: "PAY" },
+    text: "Assigned · Project PAY",
+    createdAt: minutesAgo(30 * 24 * 60),
+    actor: "user",
+    caughtCount: 0,
+  },
+];
+
 const TASK_ID = "01a0ec64-7b00-7000-8000-000000000001";
 const SESSION_ID = "01a0ec64-7c00-7000-8000-000000000001";
 
@@ -644,6 +845,7 @@ const buildListedEvent = (
   actor: null,
   signals: [],
   resolvedSignals: [],
+  ignoredBy: null,
   tasks: [],
   knownBy: [],
   ...event,
@@ -662,6 +864,7 @@ const buildSignalEvent = (signal: Signal, url: string): EventWithFacts => ({
   ...buildEvent(signal, url),
   signals: [raisedSignal(signal)],
   resolvedSignals: [],
+  ignoredBy: null,
   tasks: [],
   knownBy: [],
 });
@@ -681,12 +884,38 @@ const EVENTS: ReadonlyArray<EventWithFacts> = [
     author: "Pieter",
     url: "https://github.com/rogier/webshop/commit/9f3c2ab",
   }),
+  buildListedEvent(40, 31, {
+    source: "github",
+    kind: "github.pr.review-requested",
+    title: "Bump vite from 6.2.1 to 6.2.2",
+    author: "dependabot[bot]",
+    url: "https://github.com/rogier/webshop/pull/1302",
+    ignoredBy: {
+      ruleId: IGNORE_RULES[0]!.id,
+      kind: IGNORE_RULES[0]!.kind,
+      text: IGNORE_RULES[0]!.text,
+      ruleDeleted: false,
+    },
+  }),
   buildSignalEvent(MENTION, "https://linear.app/acme/issue/PAY-212"),
   buildListedEvent(31, 52, {
     source: "linear",
     kind: "linear.issue.updated",
     title: "PAY-219 moved to In progress",
     author: "Sanne",
+  }),
+  buildListedEvent(41, 70, {
+    source: "github",
+    kind: "github.pr.review-requested",
+    title: "Update dependency eslint to v9.24.0",
+    author: "renovate[bot]",
+    url: "https://github.com/rogier/payments-api/pull/1297",
+    ignoredBy: {
+      ruleId: "01a0ec64-7f00-7000-8000-000000000009",
+      kind: "github/review-requested",
+      text: "Review requested · Repository rogier/payments-api · Author renovate[bot]",
+      ruleDeleted: true,
+    },
   }),
   {
     ...buildSignalEvent(CHECKS, "https://github.com/rogier/webshop/pull/1300"),
@@ -795,14 +1024,28 @@ const buildEverythingScene = (
   ...(play !== undefined && { play }),
 });
 
-/** One state of Intake the specimen draws. */
-export interface IntakeScene {
+/**
+ * One state of Intake the specimen draws: Intake itself, which `intake`
+ * opens, or Settings > Intake, which `intakeSettings` opens.
+ */
+export type IntakeScene = IntakeSceneParts &
+  (
+    | {
+        /** What Intake opens on: the selected signal, its event, the view, and how moves are answered. */
+        readonly intake: IntakeRecords;
+      }
+    | {
+        /** What Settings > Intake reads besides the shell's lists. */
+        readonly intakeSettings: IntakeSettingsRecords;
+      }
+  );
+
+/** What every scene has, whichever screen it opens. */
+interface IntakeSceneParts {
   /** The scene's name in `?scene=` and in its capture's file name. */
   readonly name: string;
   /** The shell's records, with the signals on To do, Later and Done, and the plugins. */
   readonly records: SidebarRecords;
-  /** What Intake opens on: the selected signal, its event, the view, and how moves are answered. */
-  readonly intake: IntakeRecords;
   /**
    * Plays what the user does after Intake opens, such as pressing `H`.
    * Resolves once the page shows the result. None when left out.
@@ -823,6 +1066,12 @@ const RECORDS: SidebarRecords = {
   done: DONE,
   plugins: INTAKE_PLUGINS,
   connections: INTAKE_CONNECTIONS,
+};
+
+/** The records with the core's offer on To do, and Dependabot's review request it would ignore. */
+const OFFER_RECORDS: SidebarRecords = {
+  ...RECORDS,
+  signals: [ALERT, CHANGES, REVIEW, CHECKS, MENTION, DEPENDABOT, SLACK, OFFER],
 };
 
 /** Waits until the page holds an element that matches `selector`. Fails after five seconds. */
@@ -905,6 +1154,12 @@ const buildScene = (
   ...(play !== undefined && { play }),
   ...(hover !== undefined && { hover: selectRow(hover) }),
 });
+
+/** Opens the pane's "More" menu, as a click on its button does. */
+const openPaneMenu = async (): Promise<void> => {
+  ((await waitForElement(".ad-more")) as HTMLElement).click();
+  await waitForElement(".ad-menu:popover-open");
+};
 
 /** Returns the selector of the row of `signal`, which the pointer rests on in a hover scene. */
 const selectRow = (signal: Signal): string => `.ask-row[data-signal-id="${signal.id}"]`;
@@ -1018,4 +1273,36 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
   }),
   buildEverythingScene("everything-no-match", { events: [], text: "invoice" }),
   buildEverythingScene("everything-empty", { events: [] }),
+  { name: "offer", records: OFFER_RECORDS, intake: { signal: OFFER, event: null } },
+  buildScene("menu", REVIEW, REVIEW_URL, { play: openPaneMenu }),
+  buildScene("ignore-dialog", REVIEW, REVIEW_URL, {
+    play: async () => {
+      await openPaneMenu();
+      const ignore = [...document.querySelectorAll<HTMLElement>(".ad-menu [role=menuitem]")].find(
+        (item) => item.textContent.startsWith("Ignore signals like this"),
+      );
+      ignore?.click();
+      await waitForElement("dialog[open] .options");
+    },
+  }),
+  buildEverythingScene("everything-ignored", {
+    events: EVENTS.filter((event) => event.ignoredBy !== null),
+    handling: "ignored",
+  }),
+  buildEverythingScene("everything-ignored-pane", { events: EVENTS, selectedEventId: 40 }),
+  buildEverythingScene("everything-ignored-deleted-pane", { events: EVENTS, selectedEventId: 41 }),
+  {
+    name: "settings-ignore-rules",
+    records: RECORDS,
+    intakeSettings: { ignoreRules: IGNORE_RULES },
+  },
+  {
+    name: "settings-delete-rule",
+    records: RECORDS,
+    intakeSettings: { ignoreRules: IGNORE_RULES },
+    play: async () => {
+      ((await waitForElement(".intake-row .btn--quiet")) as HTMLElement).click();
+      await waitForElement("dialog[open]");
+    },
+  },
 ];

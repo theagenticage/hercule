@@ -101,6 +101,20 @@ export type FieldRow =
       readonly flag: string;
       readonly help: string;
     }
+  | {
+      /**
+       * Makes the flag take one named value per use, written
+       * `--<flag> <field>=<value>` and repeatable, and sends them together as
+       * one object: `--match repo=acme/webshop --match author=bot` sends
+       * `{ repo: "acme/webshop", author: "bot" }`. The field's schema must be
+       * a record of text values. Without this option such a field takes one
+       * JSON object instead, which is what the stdin fields that hold a
+       * record still do.
+       */
+      readonly namedValues: true;
+      readonly flag: string;
+      readonly help: string;
+    }
   /**
    * Leaves the field off the command line. Give the reason in a comment, as
    * for a hidden operation.
@@ -915,6 +929,58 @@ export const CLI = {
         placeholder: "signal-id",
         help: "A signal's id, or a tail of eight or more characters of a signal on To do. Give several to lower them in one call.",
         resolves: "signal.query",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+
+  "ignoreRule.query": {
+    command: "ignore-rule list",
+    help: "Lists your Ignore Rules and how many events each has caught. The count covers the events still in the log. Use it to find the id that `hercule ignore-rule delete` takes.",
+    examples: [{ args: [] }, { args: ["--kind", "github/review-requested"] }],
+    fields: {
+      kind: {
+        flag: "kind",
+        help: "Only the rules of this signal kind, such as github/review-requested.",
+      },
+    },
+  },
+  "ignoreRule.create": {
+    command: "ignore-rule create",
+    help: "Stops signals of one kind with these values from being raised. It also takes the matching open ones off your list. The events still arrive and show in Everything. Each value must be one of the kind's match fields; to stop the whole kind, switch it off with `hercule plugin update-intake` instead. Returns the rule.",
+    examples: [
+      {
+        args: [
+          "github/review-requested",
+          "--match",
+          "repo=acme/webshop",
+          "--match",
+          "author=dependabot[bot]",
+        ],
+      },
+    ],
+    fields: {
+      kind: {
+        positional: true,
+        help: "The plugin's signal kind, such as github/review-requested. A core kind cannot be ignored.",
+      },
+      match: {
+        namedValues: true,
+        flag: "match",
+        help: "A value the rule matches, written <field>=<value>, such as repo=acme/webshop. Repeat it for each field; a signal must match every one.",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "ignoreRule.delete": {
+    command: "ignore-rule delete",
+    help: "Deletes an Ignore Rule. Events it already caught stay caught, and the signals it took off your list stay resolved.",
+    examples: [{ args: ["0b1c2d3e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The rule's id, or a tail of eight or more characters.",
+        resolves: "ignoreRule.query",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
@@ -3589,6 +3655,11 @@ export const NOUNS = {
     summary:
       "Signals: what asks for the user's move on the Intake, raised by triage and by agents.",
     flow: "hercule signal list to see To do, hercule signal read for one in full, hercule signal act to take an action, hercule signal raise to put one on the Intake, hercule signal withdraw when its question is gone.",
+  },
+  "ignore-rule": {
+    summary:
+      "Ignore Rules: the user's rules that keep signals of one kind, with given values, from being raised.",
+    flow: "hercule ignore-rule list to see the rules and what they caught, hercule ignore-rule create to add one, hercule ignore-rule delete to remove one.",
   },
   project: {
     summary: "Projects: groupings of related work and its materials. No behaviour, no defaults.",

@@ -343,6 +343,9 @@ export function IntakeScreen({
 
   const handleKeys = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (isTextField(event.target)) return;
+    // A key pressed in a dialog or a menu the pane opened, such as the
+    // Ignore dialog, belongs to it. Esc there closes it, not the pane.
+    if ((event.target as Element).closest("dialog, [role='menu']") !== null) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     const extending = event.shiftKey;

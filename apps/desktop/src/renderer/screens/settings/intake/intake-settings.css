@@ -25,8 +25,8 @@
   white-space: nowrap;
 }
 
-/* The heading of one list, under the control: Signals, and Events available to
-   triage. Quieter than the plugin's heading, and set as the book sets the head
+/* The heading of one list, under the control: Signals, Events available to
+   triage, and Ignore Rules. Quieter than the plugin's heading, and set as the book sets the head
    of a table (`.tbl-h`): small, faint and medium. */
 .set-sec > .intake-list-head {
   margin: 22px 0 0;
@@ -88,12 +88,24 @@
   font-weight: var(--w-medium);
 }
 
-/* Reset, then the switch, at the row's right end. */
+/* Reset, then the switch, at the row's right end; or a rule's Delete. */
 .intake-controls {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: none;
+}
+/* A quiet button that ends the row, such as a rule's Delete, sets its text
+   flush with the switches' right edge above it, as the pane's Open button
+   does (`.ad-kind .btn--quiet`): its padding hangs past the edge. */
+.intake-controls > .btn--quiet:last-child {
+  margin-right: -10px;
+}
+/* A rule's text has no length limit, and a value may be one long word, such
+   as a branch name. It wraps, breaking inside a word only when it must, so
+   the row never runs wider than the column and the rule always shows whole. */
+.intake-rule-text {
+  overflow-wrap: anywhere;
 }
 
 /* A narrow window: the row stacks (settings.css), and the controls stay at its start. */

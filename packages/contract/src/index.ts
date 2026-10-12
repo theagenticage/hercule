@@ -168,6 +168,8 @@ export {
   IntakeOverrides,
   IntakeSettingLevel,
   IntakeSettings,
+  SignalKindIntakeSetting,
+  SignalMatchFieldLabel,
 } from "./groups/intake-settings";
 export {
   PERMISSION_DECISION_OUTCOMES,
@@ -417,6 +419,7 @@ export {
   MAX_NOTIFICATION_TITLE_LENGTH,
   MAX_WITHDRAW_REASON_LENGTH,
   DescribeLine,
+  NO_OPERATION_DESCRIBE_LINE,
   MuteKey,
   NOTIFICATION_SORT_FIELDS,
   Notification,
@@ -443,6 +446,7 @@ export {
   CORE_SIGNAL_KINDS,
   DISMISS_ACTION_ID,
   DONE_ACTION_ID,
+  IGNORE_ACTION_ID,
   HAND_TO_ACTION_PREFIX,
   isCoreSignalKind,
   KNOWN_BLOCK_TYPES,
@@ -461,6 +465,9 @@ export {
   MAX_SIGNAL_BYTES,
   MAX_SIGNAL_EVENT_IDS,
   MAX_SIGNAL_KIND_LENGTH,
+  MAX_SIGNAL_MATCH_FIELD_NAME_LENGTH,
+  MAX_SIGNAL_MATCH_FIELDS,
+  MAX_SIGNAL_MATCH_VALUE_LENGTH,
   MAX_SIGNAL_OUTCOME_LENGTH,
   MAX_SIGNAL_IDS,
   MAX_SIGNAL_PLACE_LENGTH,
@@ -497,6 +504,19 @@ export {
   UnknownBlock,
   type CoreSignalKind,
 } from "./groups/signal";
+export {
+  IgnoreRule,
+  IgnoreRuleCreateInput,
+  IgnoreRuleFilter,
+  IgnoreRuleWithCatches,
+  buildIgnoreRuleText,
+  describeMatchValue,
+  hasSameValues,
+  isMatchedByRule,
+  listLabeledValues,
+  readMatchValue,
+  type SignalKindLabels,
+} from "./groups/ignore-rule";
 export {
   MAX_PROJECT_DESCRIPTION_LENGTH,
   MAX_PROJECT_NAME_LENGTH,
@@ -558,6 +578,7 @@ export {
   EVENT_HANDLINGS,
   EventFacts,
   EventResolvedSignalFact,
+  EventIgnoredByFact,
   EventHandling,
   EventKnownByFact,
   EventSignalFact,

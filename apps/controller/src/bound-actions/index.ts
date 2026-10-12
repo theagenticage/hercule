@@ -21,6 +21,7 @@ import {
   type BoundAction,
   type BoundOperation,
   type CapExceeded,
+  type Conflict,
   type DescribeLine,
   type Forbidden,
   type InvalidState,
@@ -44,6 +45,7 @@ export type BoundOperationError =
   | NotFound
   | InvalidState
   | CapExceeded
+  | Conflict
   | SettingError
   | Schema.SchemaError
   | SqlError;

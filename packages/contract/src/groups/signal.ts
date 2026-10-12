@@ -33,6 +33,7 @@ import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import {
   CapExceeded,
+  Conflict,
   Forbidden,
   Internal,
   InvalidState,
@@ -71,6 +72,8 @@ export {
   MAX_CHECK_ROWS,
   MAX_MESSAGE_TEXT_LENGTH,
   MAX_SIGNAL_BYTES,
+  MAX_SIGNAL_MATCH_FIELD_NAME_LENGTH,
+  MAX_SIGNAL_MATCH_FIELDS,
   MAX_SIGNAL_TITLE_LENGTH,
 } from "@hercule/plugin-host";
 
@@ -148,6 +151,13 @@ export const ACCEPT_ACTION_ID = "accept";
 export const DISMISS_ACTION_ID = "dismiss";
 
 /**
+ * The id of the Ignore action on the core's Ignore Rule offer, which creates
+ * the offered rule. A signal the new rule takes off the list is resolved with
+ * this id as well.
+ */
+export const IGNORE_ACTION_ID = "ignore";
+
+/**
  * The start of the id of each Hand to action the core adds to an offer, an
  * `unsure` or an `fyi`: `hand-to-` and the id of the workflow it starts.
  */
@@ -155,13 +165,14 @@ export const HAND_TO_ACTION_PREFIX = "hand-to-";
 
 /**
  * Checks whether an action id belongs to an action only the core adds:
- * Accept, Dismiss, Done, or a Hand to action. A raiser may not use one, so
+ * Accept, Dismiss, Done, Ignore, or a Hand to action. A raiser may not use one, so
  * clients and the core can tell the core's actions apart by their ids.
  */
 const isCoreActionId = (id: string): boolean =>
   id === ACCEPT_ACTION_ID ||
   id === DISMISS_ACTION_ID ||
   id === DONE_ACTION_ID ||
+  id === IGNORE_ACTION_ID ||
   id.startsWith(HAND_TO_ACTION_PREFIX);
 
 /**
@@ -413,6 +424,14 @@ export const SignalResolution = Schema.Struct({
 export type SignalResolution = Schema.Schema.Type<typeof SignalResolution>;
 
 /**
+ * The longest match value a signal keeps, in characters. A match value is
+ * compared whole by an Ignore Rule, so a longer one is left out rather than
+ * cut. A path that returns a whole body would otherwise make the signal
+ * larger than `MAX_SIGNAL_BYTES`.
+ */
+export const MAX_SIGNAL_MATCH_VALUE_LENGTH = 1024;
+
+/**
  * Each match field's value, worked out when the signal is written. An Ignore
  * Rule matches signals by them. Empty for a core kind.
  */
@@ -592,8 +611,10 @@ export type SignalLowerPriorityResult = Schema.Schema.Type<typeof SignalLowerPri
  * - `task` on any other kind, which nothing would create;
  * - a `task` larger than `MAX_BOUND_INPUT_BYTES` of JSON, because Accept
  *   binds the task as its input;
- * - an action with an id only the core uses: `accept`, `dismiss`, `done`, or
- *   one that starts with `hand-to-`;
+ * - an action with an id only the core uses: `accept`, `dismiss`, `done`,
+ *   `ignore`, or one that starts with `hand-to-`;
+ * - an action that runs `ignoreRule.create`, which only the core's own
+ *   Ignore Rule offer binds, because a rule hides signals from the user;
  * - a signal larger than `MAX_SIGNAL_BYTES` of JSON.
  */
 export const SignalRaiseInput = Schema.Struct({
@@ -629,7 +650,7 @@ export const SignalRaiseInput = Schema.Struct({
             ? [
                 {
                   path: [index, "id"],
-                  issue: `The id ${action.id} belongs to an action the core adds. Give your action another id: not ${ACCEPT_ACTION_ID}, ${DISMISS_ACTION_ID} or ${DONE_ACTION_ID}, and not one that starts with ${HAND_TO_ACTION_PREFIX}.`,
+                  issue: `The id ${action.id} belongs to an action the core adds. Give your action another id: not ${ACCEPT_ACTION_ID}, ${DISMISS_ACTION_ID}, ${DONE_ACTION_ID} or ${IGNORE_ACTION_ID}, and not one that starts with ${HAND_TO_ACTION_PREFIX}.`,
                 },
               ]
             : [],
@@ -748,6 +769,7 @@ export const signal = HttpApiGroup.make("signal")
         NotFound,
         InvalidState,
         CapExceeded,
+        Conflict,
         Internal,
       ],
     }),

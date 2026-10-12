@@ -2,7 +2,9 @@
  * Tests Intake: the list of signals on To do in its sections, the pane of the
  * selected signal, Intake's keys, answering a signal, a signal resolved
  * elsewhere while its pane is open, the split's handle, the To do count on
- * the sidebar, and the Everything view of the events behind the signals.
+ * the sidebar, the Everything view of the events behind the signals, and
+ * Ignore Rules: Hercule's offer of one, the Ignore dialog, and the events a
+ * rule caught.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -1135,6 +1137,7 @@ const buildListedEvent = (id: number, over: Partial<EventWithFacts> = {}): Event
   receivedAt: new Date(Date.UTC(2026, 9, 10, 12, 0) - (1000 - id) * 60_000).toISOString(),
   signals: [],
   resolvedSignals: [],
+  ignoredBy: null,
   tasks: [],
   knownBy: [],
   ...over,
@@ -1144,7 +1147,7 @@ const buildListedEvent = (id: number, over: Partial<EventWithFacts> = {}): Event
  * Returns the handlers that play `event.query` over `stored`, newest first,
  * `pageSize` events to a page, with a cursor to the next page while events
  * are left. The text, source and handling filters work as the controller's do,
- * for the two handlings the tests filter by.
+ * for the three handlings the tests filter by.
  */
 const storeEvents = (stored: ReadonlyArray<EventWithFacts>, pageSize = 20) => {
   const handlers: Record<string, Handler> = {
@@ -1165,6 +1168,7 @@ const storeEvents = (stored: ReadonlyArray<EventWithFacts>, pageSize = 20) => {
               `${event.title ?? ""} ${event.author ?? ""}`.toLowerCase().includes(text)) &&
             (handlings.length === 0 ||
               (handlings.includes("raised-signal") && event.signals.length > 0) ||
+              (handlings.includes("ignored") && event.ignoredBy !== null) ||
               (handlings.includes("no-action") &&
                 event.signals.length + event.tasks.length + event.knownBy.length === 0)),
         )
@@ -1541,6 +1545,7 @@ describe("Intake's Everything view", () => {
       "All events",
       "Raised a signal",
       "Ended a signal",
+      "Ignored by a rule",
       "Evidence for a signal",
       "Added to a Task",
       "Known to running work",
@@ -1898,6 +1903,7 @@ describe("Intake's Everything view", () => {
             kind: "github/review-requested",
             label: "Review requested",
             description: "A review is requested of you",
+            matchFields: [],
             on: true,
             level: "default",
           },
@@ -2026,7 +2032,7 @@ describe("Intake's Everything view", () => {
     expect(pane.querySelector(".b-fields")!.textContent).toBe(
       "ConnectionGitHub · acme-botReferencesgithub:pr:acme/webshop#1",
     );
-    const open = within(pane).getByRole("link", { name: /Open in GitHub/ });
+    const open = within(pane).getByRole("link", { name: /Open on GitHub/ });
     expect(open.getAttribute("href")).toBe("https://github.com/acme/webshop/pull/1");
   });
 
@@ -2112,9 +2118,349 @@ describe("Intake's search params", () => {
 
   it("drops an event, a text, a source and a handling it does not accept", async () => {
     const { router } = await openIntake(
-      "/intake?view=everything&event=0&text=&source=&handling=ignored",
+      "/intake?view=everything&event=0&text=&source=&handling=archived",
     );
 
     expect(router.state.matches.at(-1)!.search).toEqual({ view: "everything" });
+  });
+});
+
+/** The kind and the match values of the Ignore Rule the tests below offer and create. */
+const DEPENDABOT_RULE = {
+  kind: "github/review-requested",
+  match: { repo: "acme/webshop", author: "dependabot[bot]" },
+};
+
+/** Builds an open review request from dependabot, raised from event `eventId`. */
+const buildDependabotSignal = (id: string, eventId: number, over: Partial<Signal> = {}): Signal =>
+  buildSignal(id, eventId, "08:00", {
+    title: `Bump a dependency, #${String(eventId)}`,
+    asker: "dependabot[bot]",
+    match: DEPENDABOT_RULE.match,
+    actions: [DONE],
+    ...over,
+  });
+
+const DEPENDABOT_A = buildDependabotSignal("01a06d02-7a00-7000-8000-0000000000d1", 21);
+const DEPENDABOT_B = buildDependabotSignal("01a06d02-7a00-7000-8000-0000000000d2", 22);
+/** A dependabot review request snoozed for a day, which shows on Later. */
+const DEPENDABOT_LATER = buildDependabotSignal("01a06d02-7a00-7000-8000-0000000000d3", 23, {
+  snooze: { until: "2099-01-01T09:00:00.000Z", snoozedAt: "2026-10-10T08:00:00.000Z" },
+});
+/** Marta's review request in the same repository, which a rule on the repository alone matches. */
+const MARTA_WEBSHOP = buildDependabotSignal("01a06d02-7a00-7000-8000-0000000000d4", 24, {
+  asker: "Marta",
+  match: { repo: "acme/webshop", author: "Marta" },
+});
+
+/** Hercule's offer of the rule on dependabot's review requests, as the controller raises it. */
+const OFFER: Signal = {
+  id: "01a06d02-7a00-7000-8000-0000000000e1",
+  kind: "offer",
+  origin: {
+    type: "api",
+    actor: "system",
+    eventIds: [],
+    reason: "You marked the last 5 done without answering.",
+  },
+  title:
+    "Ignore Review requested where Repository is acme/webshop and Author is dependabot[bot]? You marked the last 5 done without answering.",
+  priority: "normal",
+  blocks: [],
+  actions: [
+    buildAction("ignore", {
+      primary: true,
+      operation: { op: "ignoreRule.create", input: DEPENDABOT_RULE },
+    }),
+    buildAction("dismiss", { operation: null }),
+  ],
+  match: {},
+  ignoreRule: DEPENDABOT_RULE,
+  status: "open",
+  createdAt: "2026-10-10T11:20:00.000Z",
+};
+
+const IGNORE_SIGNALS = [DEPENDABOT_A, DEPENDABOT_B, DEPENDABOT_LATER, MARTA_WEBSHOP, OFFER];
+
+/** GitHub declaring the review request kind with the labels of its match fields, as the plugin does. */
+const GITHUB_DECLARING_REVIEW: PluginDetail = {
+  ...GITHUB,
+  intake: {
+    eventKinds: [],
+    signalKinds: [
+      {
+        kind: DEPENDABOT_RULE.kind,
+        label: "Review requested",
+        description: "A review is requested of you",
+        matchFields: [
+          { name: "repo", label: "Repository" },
+          { name: "author", label: "Author" },
+        ],
+        on: true,
+        level: "default",
+      },
+    ],
+  },
+};
+
+/** Returns `storeSignals` of the signals above, with GitHub declaring the review request kind. */
+const storeIgnoreSignals = (): ReturnType<typeof storeSignals> => {
+  const stored = storeSignals(IGNORE_SIGNALS);
+  stored.handlers["GET /api/v1/plugins"] = { body: [GITHUB_DECLARING_REVIEW] };
+  return stored;
+};
+
+/**
+ * Opens the Ignore dialog from the menu of the pane `pane`, and returns the
+ * dialog. jsdom has no popover API, so the menu counts as hidden there and
+ * is found by its class, and the click skips the check that the item takes
+ * the pointer.
+ */
+const openIgnoreDialog = async (pane: HTMLElement): Promise<HTMLElement> => {
+  await userEvent.click(within(pane).getByRole("button", { name: "More" }));
+  const menu = document.querySelector<HTMLElement>(".ad-menu[role=menu]")!;
+  await userEvent.click(
+    within(menu).getByRole("menuitem", { name: "Ignore signals like this…", hidden: true }),
+    { pointerEventsCheck: 0 },
+  );
+  return screen.findByRole("dialog", { name: "Ignore signals like this" });
+};
+
+describe("Intake's Ignore Rules", () => {
+  it("draws Hercule's offer with Hercule's face, and counts the open signals its rule matches", async () => {
+    await openIntake(`/intake?signal=${OFFER.id}`, storeIgnoreSignals().handlers);
+    const pane = await findPane();
+
+    expect(getRow(OFFER).querySelector(".ask-mark svg.cr")).not.toBeNull();
+    expect(pane.querySelector(".ad-kind .src")!.textContent).toBe("Hercule · Offer");
+    // The three dependabot signals, one of them on Later; Marta's has another author.
+    await waitFor(() => {
+      expect(pane.querySelector(".ad-asked")!.textContent).toMatch(/^3 open now · /);
+    });
+    const ignore = within(pane).getByRole("button", { name: "Ignore" });
+    expect(ignore.querySelector(".btn--accent")).not.toBeNull();
+    expect(within(pane).getByRole("button", { name: "Dismiss" })).not.toBeNull();
+    // An offer has no match values, so it offers no rule of its own.
+    expect(within(pane).queryByRole("button", { name: "More" })).toBeNull();
+  });
+
+  it("answers the offer with Ignore through the controller", async () => {
+    const { calls } = await openIntake(`/intake?signal=${OFFER.id}`, storeIgnoreSignals().handlers);
+    const pane = await findPane();
+    await userEvent.click(within(pane).getByRole("button", { name: "Ignore" }));
+    await waitFor(() => {
+      expect(calls.find(isAct)?.body).toEqual({ actionId: "ignore" });
+    });
+    expect(calls.find(isAct)?.path).toBe(`/api/v1/signals/${OFFER.id}/act`);
+  });
+
+  it("opens the Ignore dialog from the pane's menu, with every match value checked", async () => {
+    await openIntake(`/intake?signal=${DEPENDABOT_A.id}`, storeIgnoreSignals().handlers);
+    const pane = await findPane();
+
+    const dialog = await openIgnoreDialog(pane);
+
+    const boxes = within(dialog).getAllByRole("checkbox");
+    expect(boxes.map((box) => box.closest("label")!.textContent)).toEqual([
+      "Repositoryacme/webshop",
+      "Authordependabot[bot]",
+    ]);
+    expect(boxes.every((box) => (box as HTMLInputElement).checked)).toBe(true);
+    expect(
+      within(dialog).getByText(
+        "From now on, Hercule ignores review requested signals that have every checked value.",
+      ),
+    ).not.toBeNull();
+    expect(
+      await within(dialog).findByText("This also takes 3 open signals off your list."),
+    ).not.toBeNull();
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Create" }));
+    const link = within(dialog).getByRole("link", { name: "switch the kind off" });
+    expect(link.parentElement!.textContent).toBe(
+      "To stop every signal of this kind, switch the kind off.",
+    );
+    expect(link.getAttribute("href")).toBe("/settings/intake?kind=github%2Freview-requested");
+  });
+
+  it("lists only the fields the kind declares, in the declared order", async () => {
+    const signal = buildDependabotSignal("01a06d02-7a00-7000-8000-0000000000d5", 25, {
+      match: { branch: "main", author: "dependabot[bot]", repo: "acme/webshop" },
+    });
+    const { handlers } = storeSignals([signal]);
+    handlers["GET /api/v1/plugins"] = { body: [GITHUB_DECLARING_REVIEW] };
+    await openIntake(`/intake?signal=${signal.id}`, handlers);
+    const dialog = await openIgnoreDialog(await findPane());
+
+    const boxes = within(dialog).getAllByRole("checkbox");
+    expect(boxes.map((box) => box.closest("label")!.textContent)).toEqual([
+      "Repositoryacme/webshop",
+      "Authordependabot[bot]",
+    ]);
+  });
+
+  it("reads Later of the kind once while the dialog is open, not on every push", async () => {
+    const { calls, live } = await openIntake(
+      `/intake?signal=${DEPENDABOT_A.id}`,
+      storeIgnoreSignals().handlers,
+    );
+    const dialog = await openIgnoreDialog(await findPane());
+    await within(dialog).findByText("This also takes 3 open signals off your list.");
+    const countLaterOfKindReads = () =>
+      calls.filter(
+        (call) =>
+          call.method === "GET" &&
+          call.path === "/api/v1/signals" &&
+          new URLSearchParams(call.search).get("kind") === DEPENDABOT_RULE.kind,
+      ).length;
+    expect(countLaterOfKindReads()).toBe(1);
+
+    live.pushInvalidation("signal", [DEPENDABOT_B.id]);
+    // The push reads To do again; once that read is answered, Later of the
+    // kind has had every chance to be read again too.
+    const toDoReads = calls.filter((call) => call.path === "/api/v1/signals").length;
+    await waitFor(() => {
+      expect(calls.filter((call) => call.path === "/api/v1/signals").length).toBeGreaterThan(
+        toDoReads,
+      );
+    });
+    expect(countLaterOfKindReads()).toBe(1);
+  });
+
+  it("keeps the last checked value, counts again on every change, and creates the rule", async () => {
+    const { handlers } = storeIgnoreSignals();
+    const { calls } = await openIntake(`/intake?signal=${DEPENDABOT_A.id}`, {
+      ...handlers,
+      "POST /api/v1/ignore-rules": (call) => ({
+        body: {
+          id: "01a06d02-7f00-7000-8000-0000000000f1",
+          ...(call.body as object),
+          text: "Review requested · Repository acme/webshop",
+          createdAt: "2026-10-10T11:30:00.000Z",
+          actor: "user",
+        },
+      }),
+    });
+    const pane = await findPane();
+    const dialog = await openIgnoreDialog(pane);
+    const [repo, author] = within(dialog).getAllByRole<HTMLInputElement>("checkbox");
+
+    await userEvent.click(author!);
+    // The last checked value stays focusable, says why it cannot be
+    // unchecked, and stays checked when clicked.
+    expect(repo!.getAttribute("aria-disabled")).toBe("true");
+    expect(repo!.title).toBe("A rule needs at least one value, so this one stays checked.");
+    await userEvent.click(repo!);
+    expect(repo!.checked).toBe(true);
+    // Marta's review request is in the repository too.
+    expect(
+      await within(dialog).findByText("This also takes 4 open signals off your list."),
+    ).not.toBeNull();
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    const created = calls.filter(
+      (call) => call.method === "POST" && call.path === "/api/v1/ignore-rules",
+    );
+    expect(created.map((call) => call.body)).toEqual([
+      { kind: DEPENDABOT_RULE.kind, match: { repo: "acme/webshop" } },
+    ]);
+  });
+
+  it("still marks a signal done once the dialog has read Later of the signal's kind", async () => {
+    const { calls } = await openIntake(
+      `/intake?signal=${DEPENDABOT_A.id}`,
+      storeIgnoreSignals().handlers,
+    );
+    const pane = await findPane();
+    const dialog = await openIgnoreDialog(pane);
+    await within(dialog).findByText("This also takes 3 open signals off your list.");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    await userEvent.click(within(pane).getByRole("button", { name: "Done" }));
+    expect(findMove(calls, "mark-done")?.body).toEqual({ signalIds: [DEPENDABOT_A.id] });
+    expect((await findToast()).textContent).toBe(`Done · ${DEPENDABOT_A.title}`);
+  });
+
+  it("shows why the controller refused the rule, and keeps the dialog open", async () => {
+    await openIntake(`/intake?signal=${DEPENDABOT_A.id}`, {
+      ...storeIgnoreSignals().handlers,
+      "POST /api/v1/ignore-rules": {
+        status: 409,
+        body: buildErrorBody("conflict", "A rule with these values already exists."),
+      },
+    });
+    const pane = await findPane();
+    const dialog = await openIgnoreDialog(pane);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+    expect(
+      await within(dialog).findByText("Not created: A rule with these values already exists."),
+    ).not.toBeNull();
+  });
+});
+
+describe("Intake's Everything view, ignored events", () => {
+  beforeAll(async () => {
+    await import("../../../screens/intake/everything-screen");
+  }, 0);
+
+  const RULE_ID = "01a06d02-7f00-7000-8000-0000000000f2";
+  const RULE_TEXT = "Review requested · Repository acme/webshop · Author dependabot[bot]";
+  const IGNORED = buildListedEvent(1, {
+    title: "Bump vite from 6.2.1 to 6.2.2",
+    author: "dependabot[bot]",
+    ignoredBy: { ruleId: RULE_ID, kind: DEPENDABOT_RULE.kind, text: RULE_TEXT, ruleDeleted: false },
+  });
+  const IGNORED_BY_DELETED = buildListedEvent(2, {
+    title: "Bump eslint",
+    author: "dependabot[bot]",
+    ignoredBy: { ruleId: RULE_ID, kind: DEPENDABOT_RULE.kind, text: RULE_TEXT, ruleDeleted: true },
+  });
+
+  it("labels an ignored event's row as ignored by a rule, and filters by Ignored by a rule", async () => {
+    const { calls } = await openEverything(
+      [IGNORED, buildListedEvent(3)],
+      "/intake?view=everything&handling=ignored",
+    );
+    await waitFor(() => {
+      expect(readEventTitles()).toEqual(["Bump vite from 6.2.1 to 6.2.2"]);
+    });
+    expect(findEventReads(calls).at(-1)).toEqual({ intake: ["true"], handling: ["ignored"] });
+    expect(getEventRow(IGNORED).querySelector(".ask-sub")!.textContent).toBe(
+      "dependabot[bot] · → ignored by a rule",
+    );
+  });
+
+  it("links the pane's block to the rule's kind on Settings > Intake", async () => {
+    await openEverything([IGNORED], "/intake?view=everything&event=1");
+    const pane = await findEventPane();
+
+    const block = await waitFor(() => {
+      const found = pane.querySelector<HTMLElement>(".ad-came-list .b-work");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(block.textContent).toBe(`Ignored by a rule${RULE_TEXT}In Settings › Intake`);
+    expect(block.getAttribute("href")).toBe("/settings/intake?kind=github%2Freview-requested");
+  });
+
+  it("draws the block of a deleted rule plain, and says it is deleted", async () => {
+    await openEverything([IGNORED_BY_DELETED], "/intake?view=everything&event=2");
+    const pane = await findEventPane();
+
+    const block = await waitFor(() => {
+      const found = pane.querySelector<HTMLElement>(".ad-came-list .b-work");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(block.textContent).toBe(`Ignored by a rule${RULE_TEXT}Rule deleted`);
+    expect(block.tagName).toBe("DIV");
+    expect(getEventRow(IGNORED_BY_DELETED).querySelector(".ask-sub")!.textContent).toBe(
+      "dependabot[bot] · → ignored by a deleted rule",
+    );
   });
 });

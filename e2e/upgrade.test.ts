@@ -9,13 +9,15 @@
  * turns and the audit entry of its creation, the timezone first-run setup
  * persisted, a project name and a repository remote, two user settings that
  * migration 60 deletes, and the shipped permission profiles that migration
- * 65 gives the signal grants. The session's turns hold tool calls from its
+ * 65 gives the signal grants, and one open signal whose match values migration
+ * 73 sorts by name. The session's turns hold tool calls from its
  * own agent and from a subagent beside an item that is not a tool call, which
  * migration 67 counts. After the upgrade the test checks that those records,
  * their content, ordering and associations survived, that the session's
  * messages are searchable, that migration 63 read who created the session
  * from the audit entry, and that the session reads with the number of tool
- * calls its stream holds. It is not a matrix of session states or provider
+ * calls its stream holds, and that the signal reads with the same values,
+ * stored sorted. It is not a matrix of session states or provider
  * behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
@@ -110,6 +112,15 @@ const SIGNAL_GRANTS_MIGRATION = 65;
 const SIGNAL_PROFILES = ["assistant", "worker", "unrestricted"] as const;
 
 const SIGNAL_GRANTS = ["signal.read", "signal.write"] as const;
+
+/** The migration that sorts the fields of each signal's stored `match` by name. */
+const SORTED_MATCH_MIGRATION = 73;
+
+/** The id of the seeded signal. */
+const SEEDED_SIGNAL_ID = "0199e0e7-0000-7000-8000-0000000005a1";
+
+/** The seeded signal's match values, stored in the order a plugin built them. */
+const SEEDED_SIGNAL_MATCH = '{"repo":"example/repo","author":"dependabot[bot]"}';
 
 interface SeededProfile {
   readonly id: string;
@@ -452,6 +463,37 @@ function persistRetiredSettings(home: string): boolean {
   }
 }
 
+/**
+ * Stores one open signal of a plugin kind with `SEEDED_SIGNAL_MATCH` in the
+ * database the edge binary created, when that database predates the
+ * migration that sorts a signal's match values. Returns whether it stored it.
+ *
+ * The row is written straight into the database because only an event of an
+ * installed plugin raises such a signal. An edge database that already ran
+ * the migration would not sort the row, so the fixture is skipped there.
+ */
+function persistUnsortedSignal(home: string): boolean {
+  if (readMigrationVersion(home) >= SORTED_MATCH_MIGRATION) return false;
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const origin = { type: "api", actor: "user", eventIds: [], reason: "Upgrade fixture" };
+    database
+      .query(
+        `INSERT INTO signals (id, kind, origin, title, priority, blocks, actions, match, status, created_at)
+         VALUES (?, 'github/review-requested', ?, 'Review example/repo#1', 'normal', '[]', '[]', ?, 'open', ?)`,
+      )
+      .run(
+        uuidBlob(SEEDED_SIGNAL_ID),
+        JSON.stringify(origin),
+        SEEDED_SIGNAL_MATCH,
+        new Date().toISOString(),
+      );
+    return true;
+  } finally {
+    database.close();
+  }
+}
+
 /** Returns the id of the last migration the database in `home` ran. */
 function readMigrationVersion(home: string): number {
   const database = new Database(join(home, "data", "hercule.db"), { readonly: true });
@@ -689,6 +731,7 @@ describe("upgrading from the previous edge release", () => {
       });
 
       const retiredSettingsSeeded = persistRetiredSettings(home);
+      const signalSeeded = persistUnsortedSignal(home);
       const edgeVersion = readMigrationVersion(home);
 
       controller = await startOnPort({ home, binary: edgeBinary, port });
@@ -701,6 +744,17 @@ describe("upgrading from the previous edge release", () => {
       } else {
         console.log(
           `Skipping the retired settings fixture: the edge database already ran migration ${String(RETIRED_SETTINGS_MIGRATION)}.`,
+        );
+      }
+
+      if (signalSeeded) {
+        const seededSignal = expectJson<{ match: Record<string, string> }>(
+          await runCli(["signal", "read", SEEDED_SIGNAL_ID, "--json"], edge),
+        );
+        expect(seededSignal.match).toEqual(JSON.parse(SEEDED_SIGNAL_MATCH));
+      } else {
+        console.log(
+          `Skipping the sorted match fixture: the edge database already ran migration ${String(SORTED_MATCH_MIGRATION)}.`,
         );
       }
 
@@ -847,6 +901,13 @@ describe("upgrading from the previous edge release", () => {
         expect(read).toMatchObject({ id: listed?.id, name, grants: listed?.grants });
       }
 
+      if (signalSeeded) {
+        const upgradedSignal = expectJson<{ match: Record<string, string> }>(
+          await runCli(["signal", "read", SEEDED_SIGNAL_ID, "--json"], upgraded),
+        );
+        expect(upgradedSignal.match).toEqual(JSON.parse(SEEDED_SIGNAL_MATCH));
+      }
+
       // The messages written before the upgrade are searchable after it.
       const passages = readListedItems<{ sessionId: string; excerpt: string }>(
         await runCli(
@@ -858,6 +919,16 @@ describe("upgrading from the previous edge release", () => {
 
       expect(await controller.stop()).toBe(0);
       controller = undefined;
+      if (signalSeeded) {
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          expect(
+            reader.query("SELECT match FROM signals WHERE id = ?").get(uuidBlob(SEEDED_SIGNAL_ID)),
+          ).toEqual({ match: '{"author":"dependabot[bot]","repo":"example/repo"}' });
+        } finally {
+          reader.close();
+        }
+      }
       if (edgeVersion < TRANSCRIPT_SEARCH_MIGRATION) {
         const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
         try {
