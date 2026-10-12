@@ -275,26 +275,9 @@ describe("placeSession from an Agent", () => {
     });
   });
 
-  it("uses the call's model without the agent's options, which belong to the agent's model", async () => {
+  it("uses the call's model and access mode over the agent's, without the agent's options, which belong to the agent's model", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, { model: "fast", options: { effort: "high" } });
-
-      const session = await spawnSessionOrFail(arranged, {
-        agentId: agent.id,
-        prompt: "assess this",
-        model: "swift",
-      });
-
-      // An option belongs to the model that offers it. Keeping `effort` for a
-      // model that does not declare it would run the session with a value
-      // nobody chose for that model.
-      expect(session.modelSelection).toEqual({ model: "swift", options: {} });
-    });
-  });
-
-  it("lets values in the spawn call override the agent's", async () => {
-    await withFleet(async (arranged) => {
-      const agent = await createAssessor(arranged);
 
       const session = await spawnSessionOrFail(arranged, {
         agentId: agent.id,
@@ -303,8 +286,11 @@ describe("placeSession from an Agent", () => {
         accessMode: "full-access",
       });
 
-      expect(session.modelSelection.model).toBe("swift");
       expect(session.requestedAccessMode).toBe("full-access");
+      // An option belongs to the model that offers it. Keeping `effort` for a
+      // model that does not declare it would run the session with a value
+      // nobody chose for that model.
+      expect(session.modelSelection).toEqual({ model: "swift", options: {} });
     });
   });
 
