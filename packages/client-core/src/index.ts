@@ -189,7 +189,22 @@ export {
   type IntakeKindValue,
   type IntakeSegment,
 } from "./intake-settings";
-export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
+export {
+  describeHeldEvents,
+  describeTrigger,
+  describeTriggerOn,
+  HELD_EVENT_PREVIEW_LIMIT,
+  type TriggerReading,
+} from "./trigger-display";
+export {
+  buildDiscardHeldQuestion,
+  buildSpawnBoundRows,
+  describeBreakerPauses,
+  isPausedWithHeldEvents,
+  parseSpawnBoundDraft,
+  type SpawnBoundDraft,
+  type SpawnBoundRow,
+} from "./spawn-bounds";
 export { isWebLink } from "./web-link";
 export {
   parseMarkdown,
@@ -801,4 +816,8 @@ export {
   markDraftSaved,
   type WorkflowDraft,
 } from "./workflow-draft";
-export { decideWorkflowHeaderStatus, type WorkflowHeaderStatus } from "./workflow-header-status";
+export {
+  decideWorkflowHeaderStatus,
+  INVALID_WORKFLOW_EXPLANATION,
+  type WorkflowHeaderStatus,
+} from "./workflow-header-status";

@@ -19,6 +19,7 @@ import {
   type StepRecord,
   type Trigger,
   type TriggerFiresOn,
+  type Workflow,
   type WorkflowAction,
   type WorkflowDefinition,
 } from "@hercule/contract";
@@ -36,6 +37,7 @@ import { findOldestOpenRequest } from "./threads/oldest-request";
 import { formatRequestQuestion } from "./threads/request-question";
 import { countUsedTokens } from "./token-usage";
 import { decideFiresOn, describeTriggerOn } from "./trigger-display";
+import { firesTriggers } from "./workflow-firing";
 
 /**
  * One row of a node's card:
@@ -136,8 +138,12 @@ export interface NodeCardReads {
   readonly actions: ReadonlyArray<Pick<WorkflowAction, "id" | "displayName">>;
   /** The provider instances, whose catalogs name each model. */
   readonly instances: ReadonlyArray<ProviderInstance>;
-  /** Whether the workflow is enabled. A disabled workflow's triggers do not fire, so they have no next fire. */
-  readonly isWorkflowEnabled: boolean;
+  /**
+   * The workflow, or `undefined` while it is not read yet or after it was
+   * deleted. The triggers of a disabled or invalid workflow do not fire, so
+   * they show no next fire. Nor do they while the workflow is not known.
+   */
+  readonly workflow: Pick<Workflow, "enabled" | "invalidSince"> | undefined;
 }
 
 const KIND_TEXTS: Readonly<Record<NodeKind, string>> = {
@@ -273,33 +279,36 @@ const listDeclaredTriggerFacts = (trigger: TriggerDeclaration): ReadonlyArray<No
 
 /**
  * Returns the Next row of a start trigger from its record, or no row when
- * it has no record or no next fire, or does not fire: the trigger is paused
- * or the workflow is disabled.
+ * it has no record or no next fire, or does not fire: the trigger is paused,
+ * or the workflow is disabled, invalid or not known.
  */
 const listNextFireFacts = (
   record: Trigger | undefined,
-  isWorkflowEnabled: boolean,
+  workflow: Pick<Workflow, "enabled" | "invalidSince"> | undefined,
 ): ReadonlyArray<NodeFact> =>
-  record?.nextFireAt === undefined || record.status === "paused" || !isWorkflowEnabled
+  record?.nextFireAt === undefined ||
+  record.status === "paused" ||
+  workflow === undefined ||
+  !firesTriggers(workflow)
     ? []
     : [{ kind: "time", label: "Next", at: record.nextFireAt, direction: "future" }];
 
 /**
  * Returns the rows of a trigger. A start trigger's Status, Next and Last
  * fired come from its record in `reads.triggers`; Next is left out while
- * the trigger is paused or the workflow is disabled, because then it does
- * not fire.
+ * the trigger is paused or the workflow is disabled or invalid, because then
+ * it does not fire.
  */
 const listTriggerFacts = (
   trigger: TriggerDeclaration,
-  { triggers, isWorkflowEnabled }: NodeCardReads,
+  { triggers, workflow }: NodeCardReads,
 ): ReadonlyArray<NodeFact> => {
   if (trigger.kind === "signal") return listDeclaredTriggerFacts(trigger);
   const record = triggers.find((each) => each.triggerId === trigger.id);
   return [
     ...listDeclaredTriggerFacts(trigger),
     ...(record?.status === "paused" ? [buildFact("Status", "Paused")] : []),
-    ...listNextFireFacts(record, isWorkflowEnabled),
+    ...listNextFireFacts(record, workflow),
     ...(record?.lastFiredAt === undefined
       ? []
       : [
@@ -509,7 +518,8 @@ const listSessionFacts = (
  *   calls, Cost), and its prompt;
  * - for a start trigger, what it fires on and its filter, and Next from its
  *   record in `reads.triggers`. A trigger since removed from the workflow has
- *   no record, so no Next;
+ *   no record, so no Next, and neither has one while the trigger is paused or
+ *   the workflow is disabled, invalid or not known;
  * - for a signal trigger, what it listens for and what it matches.
  */
 export const buildRunNodeCard = (nodeId: string, reads: RunNodeCardReads): NodeCard | undefined => {
@@ -529,7 +539,7 @@ export const buildRunNodeCard = (nodeId: string, reads: RunNodeCardReads): NodeC
         ...(trigger.kind === "start"
           ? listNextFireFacts(
               reads.triggers.find((each) => each.triggerId === trigger.id),
-              reads.isWorkflowEnabled,
+              reads.workflow,
             )
           : []),
       ],

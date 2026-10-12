@@ -1,6 +1,14 @@
 import { isNotFound, readValidationIssues } from "./errors";
 import type { WorkflowDraft } from "./workflow-draft";
 
+/**
+ * Explains what an invalid workflow is: a workflow that validated when it was
+ * saved, but stopped validating because something it names changed after, or
+ * because a newer controller checks workflows more strictly.
+ */
+export const INVALID_WORKFLOW_EXPLANATION =
+  "A plugin, agent or Connection it uses changed, or this controller checks it more strictly. Its triggers start no runs until you fix and save it.";
+
 /** The status line beside Save in a workflow page's header. */
 export interface WorkflowHeaderStatus {
   readonly text: string;
@@ -15,6 +23,8 @@ export interface WorkflowHeaderFacts {
   readonly storedSource: string;
   /** Whether the stored workflow is turned off. False for a new, unsaved workflow. */
   readonly isStoredOff: boolean;
+  /** Whether the stored workflow stopped validating after it was saved. */
+  readonly isStoredInvalid: boolean;
   /** Whether the workflow was deleted by someone other than this page. */
   readonly isDeletedElsewhere: boolean;
   /** Whether this page was opened right after creating the workflow. */
@@ -39,6 +49,7 @@ export const decideWorkflowHeaderStatus = ({
   draft,
   storedSource,
   isStoredOff,
+  isStoredInvalid,
   isDeletedElsewhere,
   isJustCreated,
   save,
@@ -64,6 +75,10 @@ export const decideWorkflowHeaderStatus = ({
   if (draft.baseSource !== storedSource && save.status !== "pending") {
     return { text: "Changed elsewhere. Saving replaces that change.", tone: "attn" };
   }
+  // Shown before "Saved.", because a save that succeeded clears the mark once
+  // the stored workflow is read again, and until then the old mark still
+  // holds for what is stored.
+  if (isStoredInvalid) return { text: `Invalid. ${INVALID_WORKFLOW_EXPLANATION}`, tone: "fail" };
   if (save.status === "success" && isSaveAboutSource) return { text: "Saved.", tone: "muted" };
   // A new workflow's page shows that it was created turned off, until the
   // author edits the source or turns the workflow on.
