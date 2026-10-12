@@ -483,8 +483,20 @@ jobs:
       # the tag points at now. So each publish deletes the release and its
       # tag, and creates both again. An install in the minute between finds no
       # release and refuses.
+      #
+      # GitHub also refuses to create the tag on a commit whose workflow files
+      # differ from those on `main`. So when `main` has moved on since this
+      # run started, the job publishes nothing and leaves the current release
+      # in place: deleting it first would leave no release at all, and the
+      # `upgrade` job, which every later run needs, fails without one. The run
+      # for the newer commit publishes instead.
       - name: Publish the edge prerelease
         run: |
+          main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [ "$main_sha" != "$GITHUB_SHA" ]; then
+            echo "::notice::main is at ${main_sha::7} now, not ${GITHUB_SHA::7}, so the run for the newer commit publishes edge."
+            exit 0
+          fi
           title="$TAG (${GITHUB_SHA::7})"
           notes="$RUNNER_TEMP/notes.md"
           cat > "$notes" <<EOF
