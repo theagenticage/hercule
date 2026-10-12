@@ -1495,11 +1495,17 @@ describe("input.steer", () => {
       arranged.wire.answering(() => undefined);
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
       await waitForStartFrames(arranged, session.id, 1);
-      const [prompt] = await listInputs(arranged, session.id);
+      // The start already carries the prompt, so steering the prompt is refused
+      // as already sent. A second input stays queued, so only the session's
+      // status can refuse it.
+      const queued = await sendInput(arranged, session.id, { text: "steer me" });
+      expect(queued.status, await queued.clone().text()).toBe(200);
+      const { inputId } = (await queued.json()) as { inputId: string };
 
-      const response = await steerInput(arranged, session.id, prompt!.id);
+      const response = await steerInput(arranged, session.id, inputId);
 
       expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).toContain("only a busy session can be steered");
       expect(listInputFrames(arranged.wire)).toEqual([]);
     });
   });
