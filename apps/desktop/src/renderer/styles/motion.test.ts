@@ -303,6 +303,24 @@ const stylesheets = readdirSync(RENDERER, { recursive: true, encoding: "utf8" })
 
 const declarations = stylesheets.flatMap(({ path, css }) => parseDeclarations(path, css));
 
+/** Checks whether `declaration` starts motion: a transition or an animation outside a keyframe. */
+const isMotion = (declaration: Declaration): boolean =>
+  /^(transition|animation)/.test(declaration.property) &&
+  !declaration.blocks.some((block) => block.startsWith("@keyframes"));
+
+/** Returns `declaration` as the blocks it sits in and its value, for comparing in a test. */
+const describeMotion = (declaration: Declaration) => ({
+  rule: declaration.blocks.join(" › "),
+  [declaration.property]: declaration.value,
+});
+
+/** Returns the declarations of `@keyframes name` in `file`, each as its keyframe, property and value. */
+const readKeyframes = (file: string, name: string) =>
+  declarations
+    .filter((declaration) => declaration.file === file)
+    .filter((declaration) => declaration.blocks[0] === `@keyframes ${name}`)
+    .map(({ blocks, property, value }) => ({ at: blocks[1], [property]: value }));
+
 describe("the renderer's motion", () => {
   it("reads the stylesheets the app ships", () => {
     // Guards the scan itself: a wrong folder would find nothing and pass.
@@ -346,13 +364,6 @@ describe("the renderer's motion", () => {
     // pieces settle from 14px above with transform and opacity, each over
     // --dur-3, and nothing else moves. The lights coming on with the
     // controller fade the veil over the same time.
-    const isMotion = (declaration: Declaration): boolean =>
-      /^(transition|animation)/.test(declaration.property) &&
-      !declaration.blocks.some((block) => block.startsWith("@keyframes"));
-    const describeMotion = (declaration: Declaration) => ({
-      rule: declaration.blocks.join(" › "),
-      [declaration.property]: declaration.value,
-    });
     const room = declarations.filter(
       (declaration) => declaration.file === "screens/office/office.css" && isMotion(declaration),
     );
@@ -380,18 +391,129 @@ describe("the renderer's motion", () => {
         "animation-delay": "var(--dur-3)",
       },
     ]);
-    expect(
-      declarations
-        .filter((declaration) => declaration.file === "screens/office/office.css")
-        .filter((declaration) => declaration.blocks[0] === "@keyframes room-settle")
-        .map(({ property, value }) => ({ [property]: value })),
-    ).toEqual([{ opacity: "0" }, { transform: "translateY(-14px)" }]);
+    expect(readKeyframes("screens/office/office.css", "room-settle")).toEqual([
+      { at: "from", opacity: "0" },
+      { at: "from", transform: "translateY(-14px)" },
+    ]);
     // The card and its steps draw no motion of their own.
     expect(
       declarations.filter(
         (declaration) =>
           ["screens/first-run/first-run.css", "screens/step/step.css"].includes(declaration.file) &&
           isMotion(declaration),
+      ),
+    ).toEqual([]);
+  });
+
+  it("animates the workflows only on a change, each motion once, on transform and opacity", () => {
+    // Spec 17, Workflows' motion: a changed mark pops in on --ease-spring, a
+    // run joining a strip steps the older marks left 11px, the open pane
+    // settles in from 14px right, the graph's cards brighten, dim and ring,
+    // and the timeline's first eight bars arrive 30ms apart, each mark
+    // popping --dur-2 after its line. Hover transitions are not pinned here.
+    const isAnimation = (declaration: Declaration): boolean =>
+      isMotion(declaration) && declaration.property.startsWith("animation");
+    const readAnimations = (file: string) =>
+      declarations
+        .filter(
+          (declaration) =>
+            declaration.file === `screens/workflows/${file}` && isAnimation(declaration),
+        )
+        .map(describeMotion);
+    expect(readAnimations("workflow-list.css")).toEqual([
+      {
+        rule: `${NO_PREFERENCE} › :is(.table-mark, .column-mark).is-new > .mark, .strip > .strip-run.is-new`,
+        animation: "mark-in var(--dur-3) var(--ease-spring)",
+      },
+      {
+        rule: `${NO_PREFERENCE} › .strip.is-advanced > .strip-run:not(.is-new)`,
+        animation: "strip-step var(--dur-3) var(--ease-out)",
+      },
+    ]);
+    expect(readAnimations("workflow-detail.css")).toEqual([
+      {
+        rule: `${NO_PREFERENCE} › .open-pane:not(.run-page)`,
+        animation: "open-pane-in var(--dur-3) var(--ease-out)",
+      },
+    ]);
+    expect(readAnimations("workflow-graph.css")).toEqual([
+      {
+        rule: `${NO_PREFERENCE} › .node.is-brightening`,
+        animation: "node-brighten var(--dur-3) var(--ease-out)",
+      },
+      {
+        rule: `${NO_PREFERENCE} › .node.is-dimming`,
+        animation: "node-dim var(--dur-3) var(--ease-out)",
+      },
+      {
+        rule: `${NO_PREFERENCE} › .node-ring.is-new`,
+        animation: "node-ring-in var(--dur-3) var(--ease-out)",
+      },
+      {
+        rule: `${NO_PREFERENCE} › .node-mark.is-new > .mark`,
+        animation: "mark-in var(--dur-3) var(--ease-spring)",
+      },
+      {
+        rule: `${NO_PREFERENCE} › .node:is(.is-waiting, .is-failed) > .node-ring.is-new::after`,
+        animation: "node-ring-ping var(--dur-3) var(--ease-out)",
+      },
+    ]);
+    expect(readAnimations("run-timeline.css")).toEqual([
+      {
+        rule: `${NO_PREFERENCE} › .lanes.is-arriving`,
+        animation: "lanes-in var(--dur-3) var(--ease-out)",
+      },
+      {
+        rule: `${NO_PREFERENCE} › .run-bar.is-arriving > .run-bar-line`,
+        animation: "bar-line-sweep var(--dur-3) var(--ease-out) backwards",
+      },
+      {
+        rule: `${NO_PREFERENCE} › .run-bar.is-arriving > .run-bar-line`,
+        "animation-delay": "calc(var(--order) * 30ms)",
+      },
+      {
+        rule: `${NO_PREFERENCE} › .run-bar.is-arriving > .mark, .run-bar.is-arriving > .dot--mark`,
+        animation: "mark-in var(--dur-2) var(--ease-spring) backwards",
+      },
+      {
+        rule: `${NO_PREFERENCE} › .run-bar.is-arriving > .mark, .run-bar.is-arriving > .dot--mark`,
+        "animation-delay": "calc(var(--order) * 30ms + var(--dur-2))",
+      },
+      {
+        rule: `${NO_PREFERENCE} › .run-bar.is-new > .mark, .run-bar.is-new > .dot--mark`,
+        animation: "mark-in var(--dur-3) var(--ease-spring)",
+      },
+    ]);
+    expect(readKeyframes("marks/mark.css", "mark-in")).toEqual([
+      { at: "from", opacity: "0" },
+      { at: "from", transform: "scale(0.6)" },
+    ]);
+    expect(readKeyframes("screens/workflows/workflow-list.css", "strip-step")).toEqual([
+      { at: "from", transform: "translateX(calc(var(--joined-runs) * 11px))" },
+    ]);
+    expect(readKeyframes("screens/workflows/workflow-detail.css", "open-pane-in")).toEqual([
+      { at: "from", opacity: "0" },
+      { at: "from", transform: "translateX(14px)" },
+    ]);
+    expect(readKeyframes("screens/workflows/run-timeline.css", "lanes-in")).toEqual([
+      { at: "from", opacity: "0" },
+    ]);
+    expect(readKeyframes("screens/workflows/run-timeline.css", "bar-line-sweep")).toEqual([
+      { at: "from", opacity: "0" },
+      { at: "from", transform: "scaleX(0)" },
+    ]);
+    // The other workflow stylesheets play no animation of their own.
+    expect(
+      declarations.filter(
+        (declaration) =>
+          declaration.file.startsWith("screens/workflows/") &&
+          ![
+            "workflow-list.css",
+            "workflow-detail.css",
+            "workflow-graph.css",
+            "run-timeline.css",
+          ].some((file) => declaration.file.endsWith(file)) &&
+          isAnimation(declaration),
       ),
     ).toEqual([]);
   });

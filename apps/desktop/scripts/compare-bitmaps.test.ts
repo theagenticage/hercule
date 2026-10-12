@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDiffBitmap,
+  CHANNEL_TOLERANCE,
   compareBitmaps,
   OUTSIDE_CELLS,
   type Bitmap,
@@ -39,16 +40,28 @@ describe("compareBitmaps", () => {
     expect(compareBitmaps(buildWhiteBitmap(), buildWhiteBitmap(), CELLS)).toEqual([]);
   });
 
-  it("reports one channel of one pixel off by 1 in its cell, with that pixel's box", () => {
+  it("finds no difference in a channel off by the tolerance, and draws none", () => {
+    const app = buildWhiteBitmap();
+    const at = (7 * DPR * WIDTH + 25 * DPR) * 4;
+    app.pixels[at + 1] = 255 - CHANNEL_TOLERANCE;
+
+    expect(compareBitmaps(buildWhiteBitmap(), app, CELLS)).toEqual([]);
+    // White fades to white, where a differing pixel would be magenta.
+    expect([...buildDiffBitmap(buildWhiteBitmap(), app).pixels.subarray(at, at + 4)]).toEqual([
+      255, 255, 255, 255,
+    ]);
+  });
+
+  it("reports one channel of one pixel off by one past the tolerance in its cell, with that pixel's box", () => {
     const app = buildWhiteBitmap();
     const [x, y] = [25 * DPR, 7 * DPR + 1];
-    app.pixels[(y * WIDTH + x) * 4 + 1] = 254;
+    app.pixels[(y * WIDTH + x) * 4 + 1] = 254 - CHANNEL_TOLERANCE;
 
     expect(compareBitmaps(buildWhiteBitmap(), app, CELLS)).toEqual([
       {
         cell: "mark/working",
         pixels: 1,
-        maxDiff: 1,
+        maxDiff: CHANNEL_TOLERANCE + 1,
         box: { left: x, top: y, right: x, bottom: y },
       },
     ]);

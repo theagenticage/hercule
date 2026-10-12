@@ -67,10 +67,12 @@ const compileSource = (file: string): Skip[] => {
 };
 
 describe("the React Compiler", () => {
-  // Compiling every file takes under a second on a laptop, but has passed
-  // the default limit of 5 s on a busy CI runner. The work is bounded, so a
-  // longer limit hides no hang.
-  it("compiles every component and hook of the workflow pages", { timeout: 30_000 }, () => {
+  // The test has no time limit. Compiling some thirty files takes 0.7 s on a
+  // Mac, but several seconds on a CI runner busy with the other test files,
+  // and it failed there at the default limit of 5 s. A limit guards nothing
+  // here: the test is synchronous, so a timer cannot stop it, and the
+  // compile always ends.
+  it("compiles every component and hook of the workflow pages", { timeout: 0 }, () => {
     const files = FOLDERS.flatMap(listSources);
     expect(files.length).toBeGreaterThan(5);
 

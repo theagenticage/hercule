@@ -115,6 +115,7 @@ import {
   openScreenOnce,
   readCpuMs,
   readProcessMemory,
+  readTrace,
   sampleIdleUse,
   waitForPageSocketUrl,
   warmUpApp,
@@ -195,6 +196,18 @@ const RUNS_PATH = "/api/v1/runs";
 
 /** The path every session read goes to; "From runs" reads it with `thread=false`. */
 const SESSIONS_PATH = "/api/v1/sessions";
+
+/**
+ * The trace category that holds Chromium's `Animation` events: one async
+ * event per CSS animation, from its start to its end, with an instant event
+ * for each change of its state. An instant event carries `compositeFailed`
+ * when the compositor could not run the animation. DevTools' Performance
+ * panel shows such an animation as "Animation not composited".
+ */
+const ANIMATION_CATEGORY = "blink.animations";
+
+/** How long after a run joins a strip the trace of its motion ends, so both its pushes are in it. */
+const JOIN_SETTLE_MS = 2_000;
 
 /**
  * Builds the definition of the open workflow, the seed's last, numbered
@@ -549,6 +562,8 @@ interface LaunchAtRest {
 export interface WorkflowWork extends LaunchAtRest {
   readonly opening: OpeningCost;
   readonly pushes: PushCost;
+  /** The motion of a run joining a strip: its two pushes, pending and then running. */
+  readonly joinMotion: MotionCost;
 }
 
 /** Calls `method` on the app's one window, through main's inspector at `inspectorUrl`. */
@@ -684,6 +699,89 @@ async function measurePushes(
   };
 }
 
+/** One CSS animation a trace recorded. */
+export interface TracedAnimation {
+  /** The animation's name, from its `@keyframes`. */
+  readonly name: string;
+  /** The element it ran on, as Chromium names it, such as `SPAN class='strip-run'`. */
+  readonly element: string;
+  /** Whether the compositor ran it alone: Chromium reported no reason it could not. */
+  readonly isComposited: boolean;
+  /** When it started, in milliseconds on the trace's clock. */
+  readonly startedAtMs: number;
+  /** When it ended, in milliseconds on the trace's clock. */
+  readonly endedAtMs: number;
+}
+
+/** The CSS animations that played during a piece of work. */
+export interface MotionCost {
+  readonly animations: readonly TracedAnimation[];
+}
+
+/** One `Animation` event of a Chromium trace, with only the fields `traceAnimations` reads. */
+interface AnimationEvent {
+  readonly name: string;
+  /** `b` where the animation starts, `n` for a change of its state, `e` where it ends. */
+  readonly ph: string;
+  /** When the event happened, in microseconds. */
+  readonly ts: number;
+  /** The animation's id, the same on all of its events. */
+  readonly id2?: { readonly local?: string };
+  readonly args?: {
+    readonly data?: {
+      /** The animation's name, from its `@keyframes`, on its start event. */
+      readonly displayName?: string;
+      /** The element the animation runs on, on its start event. */
+      readonly nodeName?: string;
+      /** A bitmask of the reasons the compositor could not run the animation. */
+      readonly compositeFailed?: number;
+    };
+  };
+}
+
+/**
+ * Records a Chromium trace on `page` while `work` runs, and returns the CSS
+ * animations that played in it: each one's name and element, whether the
+ * compositor ran it alone, and when it started and ended. Fails when the
+ * trace holds an animation without its start or its end.
+ */
+async function traceAnimations(page: Inspector, work: () => Promise<void>): Promise<MotionCost> {
+  await page.send("Tracing.start", {
+    transferMode: "ReturnAsStream",
+    traceConfig: { includedCategories: [ANIMATION_CATEGORY] },
+  });
+  await work();
+  await page.send("Tracing.end");
+  const events = (await readTrace(page)) as unknown as AnimationEvent[];
+  const eventsByAnimation = new Map<string, AnimationEvent[]>();
+  for (const event of events) {
+    if (event.name !== "Animation") continue;
+    const id = event.id2?.local ?? "";
+    const animationEvents = eventsByAnimation.get(id) ?? [];
+    animationEvents.push(event);
+    eventsByAnimation.set(id, animationEvents);
+  }
+  const animations = [...eventsByAnimation.values()].map((animationEvents): TracedAnimation => {
+    const start = animationEvents.find((event) => event.ph === "b");
+    const end = animationEvents.find((event) => event.ph === "e");
+    if (start === undefined || end === undefined) {
+      throw new Error(
+        `the trace holds an animation without its start or its end: ${JSON.stringify(animationEvents)}`,
+      );
+    }
+    return {
+      name: start.args?.data?.displayName ?? "(unnamed)",
+      element: start.args?.data?.nodeName ?? "(unknown)",
+      isComposited: animationEvents.every(
+        (event) => (event.args?.data?.compositeFailed ?? 0) === 0,
+      ),
+      startedAtMs: start.ts / 1_000,
+      endedAtMs: end.ts / 1_000,
+    };
+  });
+  return { animations };
+}
+
 /** Returns the renderer's process id in `memory`, and fails when there is no renderer. */
 function findRendererPid(memory: readonly ProcessMemory[]): number {
   const pid = memory.find((sample) => sample.label === "Tab")?.pid;
@@ -705,7 +803,9 @@ function findRendererPid(memory: readonly ProcessMemory[]): number {
  *   30 s after the page opened, and over 10 s with the window hidden (see
  *   `sampleVisibleAndHidden`), with the age clock's fires in each;
  * - with the window shown again, what the 10 pushes of `pushRunIds` cost
- *   (see `measurePushes`).
+ *   (see `measurePushes`);
+ * - the animations that play when a re-run of the first of `pushRunIds`
+ *   joins its workflow's strip (see `traceAnimations`).
  *
  * Nothing stays attached to the page until the idle samples are over, as in
  * `perf.ts`; the pushes then share one connection. The window stays shown
@@ -791,6 +891,19 @@ export async function measureWorkflowWork(
       // clears the reads only now, and those reads are not counted as the
       // first push's.
       const pushes = await measurePushes(page, fixture, rendererPid, pushRunIds);
+      // A re-run of a cancelled run starts a run of the same live workflow,
+      // which joins that workflow's strip.
+      let rerunId = "";
+      const joinMotion = await traceAnimations(page, async () => {
+        ({ runId: rerunId } = await fixture.call<{ runId: string }>(
+          "POST",
+          `/runs/${pushRunIds[0]!}/rerun`,
+          {},
+        ));
+        await sleep(JOIN_SETTLE_MS);
+      });
+      // Cancelling the re-run leaves the workflow's runs as the pushes left them.
+      await fixture.call("POST", `/runs/${rerunId}/cancel`, {});
       measured = {
         loadAtSpawn,
         memory,
@@ -800,6 +913,7 @@ export async function measureWorkflowWork(
         ...fires,
         opening,
         pushes,
+        joinMotion,
       };
     } finally {
       page.close();
@@ -828,6 +942,8 @@ export interface OpenWorkflowWork extends LaunchAtRest {
   readonly dayTracks: number;
   /** What the pushes cost with the Runs tab on the timeline of that day. */
   readonly timelinePushes: PushCost;
+  /** The animations of stepping back to that day from today, the timeline's arrival. */
+  readonly dayArrival: MotionCost;
   /** Each process's use with the window visible and the Runs tab on today's timeline, over `todayVisibleMs`. */
   readonly todayVisible: readonly ProcessUse[];
   readonly todayVisibleMs: number;
@@ -863,6 +979,8 @@ const COUNT_DAY_BARS = `document.querySelectorAll(".open-pane .lanes .run-bar").
  *   day drew, and on how many tracks;
  * - 3 s later, once the day has settled, what the pushes of
  *   `timelinePushRunIds` cost on that day;
+ * - the animations that play when the timeline steps on to today and,
+ *   3 s later, back to that day: the day's arrival (see `traceAnimations`);
  * - each process's CPU and wakeups over 70 s with the window visible, from
  *   3 s after stepping on to today's timeline, with the age clock's fires.
  *   Today's timeline draws the time now, which moves once a minute.
@@ -958,6 +1076,29 @@ export async function measureOpenWorkflowWork(
       );
       await sleep(SHOW_SETTLE_MS);
       const timelinePushes = await measurePushes(page, fixture, rendererPid, timelinePushRunIds);
+
+      // Step on to today and back, tracing the step back: the day's arrival.
+      await evaluate(`${DAY_AFTER_BUTTON}.click()`);
+      await pollUntil(async () => ((await evaluate(COUNT_DAY_BARS)) === 0 ? true : undefined), {
+        timeoutMs: 15_000,
+        intervalMs: 50,
+        timeoutMessage: "the timeline did not show today",
+      });
+      await sleep(SHOW_SETTLE_MS);
+      const dayArrival = await traceAnimations(page, async () => {
+        await evaluate(
+          `document.querySelector('.open-pane button[aria-label="Show the day before"]').click()`,
+        );
+        await pollUntil(
+          async () => ((await evaluate(COUNT_DAY_BARS)) === OPEN_WORKFLOW_RUNS ? true : undefined),
+          {
+            timeoutMs: 15_000,
+            intervalMs: 50,
+            timeoutMessage: `the timeline did not draw yesterday's ${String(OPEN_WORKFLOW_RUNS)} runs again`,
+          },
+        );
+        await sleep(1_000);
+      });
       measuredBeforeToday = {
         loadAtSpawn,
         memory,
@@ -973,6 +1114,7 @@ export async function measureOpenWorkflowWork(
         dayBars: (await evaluate(COUNT_DAY_BARS)) as number,
         dayTracks,
         timelinePushes,
+        dayArrival,
       };
     } finally {
       page.close();
@@ -1427,6 +1569,59 @@ const LIST_PUSH_READS = {
   },
 } as const;
 
+/** What a piece of work's motion may play, by spec 17's limits on it. */
+interface MotionBudget {
+  /** How many animations of each name must play at least, so a motion that never played fails. */
+  readonly required: Readonly<Record<string, number>>;
+  /** How many animations may play at most. */
+  readonly limit: number;
+  /**
+   * How long each animation may last, from its start to its end, in
+   * milliseconds; none for a staggered motion, because the trace counts an
+   * animation's delay in its length.
+   */
+  readonly eachLimitMs?: number;
+  /** How long all of them may take, from the first start to the last end, in milliseconds; none when the work spans several changes. */
+  readonly spanLimitMs?: number;
+}
+
+/**
+ * Builds the budget row of the motion in `motion`, named `label`: every
+ * animation `budget` requires played, no more than its limit did, each on
+ * the compositor alone and within its time.
+ */
+function buildMotionRow(label: string, motion: MotionCost, budget: MotionBudget): BudgetRow {
+  const { animations } = motion;
+  const counts = new Map<string, number>();
+  for (const { name } of animations) counts.set(name, (counts.get(name) ?? 0) + 1);
+  const onMainThread = animations.filter((animation) => !animation.isComposited);
+  const longestMs = Math.max(0, ...animations.map((each) => each.endedAtMs - each.startedAtMs));
+  const spanMs =
+    animations.length === 0
+      ? 0
+      : Math.max(...animations.map((each) => each.endedAtMs)) -
+        Math.min(...animations.map((each) => each.startedAtMs));
+  const required = Object.entries(budget.required);
+  return [
+    label,
+    `${required.map(([name, count]) => `${name} at least ${String(count)}`).join(", ")}; ` +
+      `at most ${String(budget.limit)} animations` +
+      (budget.eachLimitMs === undefined ? "" : `, each within ${String(budget.eachLimitMs)} ms`) +
+      (budget.spanLimitMs === undefined ? "" : `, all within ${String(budget.spanLimitMs)} ms`) +
+      ", each on the compositor alone",
+    `${String(animations.length)} (` +
+      [...counts].map(([name, count]) => `${name} ${String(count)}`).join(", ") +
+      `), longest ${longestMs.toFixed(0)} ms, all within ${spanMs.toFixed(0)} ms; ` +
+      `${String(onMainThread.length)} not on the compositor alone` +
+      onMainThread.map((animation) => `, ${animation.name} on ${animation.element}`).join(""),
+    required.every(([name, count]) => (counts.get(name) ?? 0) >= count) &&
+      animations.length <= budget.limit &&
+      (budget.eachLimitMs === undefined || longestMs <= budget.eachLimitMs) &&
+      (budget.spanLimitMs === undefined || spanMs <= budget.spanLimitMs) &&
+      onMainThread.length === 0,
+  ];
+}
+
 /** Prints what the workflow list scenario measured, against the limits spec 17 sets. */
 export function reportWorkflowWork(measured: WorkflowWork): void {
   const { opening, pushes } = measured;
@@ -1469,6 +1664,16 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
       rounds === 0 ? null : runReads <= (1 + LIVE_RUN_READS) * rounds,
     ],
     ...buildPushRows("Per push", pushes, LIST_PUSH_READS),
+    // A run joins a strip in two pushes: as a starting dot, then as a mark.
+    // Each push pops the changed marks, and the first steps the older ones,
+    // at most 21 animations a push. Two pushes close together draw once.
+    // Each animation lasts --dur-3, 320ms, and a frame or two of the trace's
+    // own rounding.
+    buildMotionRow("A run joins a strip, its two pushes", measured.joinMotion, {
+      required: { "strip-step": 1, "mark-in": 1 },
+      limit: 2 * 21,
+      eachLimitMs: 360,
+    }),
   ];
   printLaunch(
     `## Workflows at work, ${String(WORKFLOW_COUNT)} workflows listed, ` +
@@ -1551,6 +1756,14 @@ export function reportOpenWorkflowWork(measured: OpenWorkflowWork): void {
     ...buildPushRows("Per push, timeline", measured.timelinePushes, {
       ...LIST_PUSH_READS,
       dayRuns: { count: 1, text: "1 a push: the day, one page of 500" },
+    }),
+    // The lanes' fade, and a sweep and a mark's pop for each of the first 8
+    // bars: exactly 17, all within the 640ms spec 17 allows. The bars start
+    // one after another, so only the whole span has a limit.
+    buildMotionRow("The 300-run day's arrival", measured.dayArrival, {
+      required: { "lanes-in": 1, "bar-line-sweep": 8, "mark-in": 8 },
+      limit: 1 + 2 * 8,
+      spanLimitMs: 640,
     }),
     ...buildTodayTimelineRows(measured),
   ];

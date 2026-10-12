@@ -17,6 +17,23 @@
   container: open-pane / inline-size;
 }
 
+/* Opening a workflow settles its pane in from the right (spec 17,
+   "Workflows' motion", item 2). The pane is drawn afresh for each workflow
+   ($workflowId.tsx), so opening another one plays it again, and widening
+   the pane to full keeps it, so that plays nothing. A run's page is an open
+   pane too, but it opens as a page and stays still. */
+@media (prefers-reduced-motion: no-preference) {
+  .open-pane:not(.run-page) {
+    animation: open-pane-in var(--dur-3) var(--ease-out);
+  }
+}
+@keyframes open-pane-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+
 /* An opaque band as tall as the floating header, so the pills never float
    over half a line. */
 .open-pane > .pill-room {

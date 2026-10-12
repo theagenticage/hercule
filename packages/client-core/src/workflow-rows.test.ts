@@ -499,7 +499,7 @@ describe("buildWorkflowRows Starts on, the strip and Success", () => {
     assert.deepStrictEqual(row.startsOnIsCode, [true, false]);
   });
 
-  it("draws the strip oldest first, a cancelled run with no mark", () => {
+  it("draws the strip oldest first with its run ids, a cancelled run with no mark", () => {
     const row = buildOneRow("Ship", {
       newestRuns: [
         buildRun("r4", "ship", 40, { status: "running", activeStepIds: ["review"] }),
@@ -510,6 +510,7 @@ describe("buildWorkflowRows Starts on, the strip and Success", () => {
     });
 
     assert.deepStrictEqual(row.strip, ["done", "failed", "cancelled", "working"]);
+    assert.deepStrictEqual(row.stripRunIds, ["r1", "r2", "r3", "r4"]);
   });
 
   it("gives completed runs out of completed and failed ones as a percentage", () => {

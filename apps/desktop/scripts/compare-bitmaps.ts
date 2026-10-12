@@ -27,11 +27,20 @@ export interface CellRect {
 /** The name a difference gets when it lies in no cell, so that no difference can go unreported. */
 export const OUTSIDE_CELLS = "(outside cells)";
 
+/**
+ * The largest difference in one colour channel, 0-255, that still counts as
+ * the same pixel. Chromium's compositing rounds colours a few levels
+ * differently once an element has animated: after the open workflow pane
+ * fades in, its graph is drawn up to 3 levels off for the life of the page.
+ * No eye sees that, and a wrong token or a moved piece differs by far more.
+ */
+export const CHANNEL_TOLERANCE = 8;
+
 /** How one cell differs between the two captures. */
 export interface CellDifference {
   /** The cell's name, or `OUTSIDE_CELLS`. */
   readonly cell: string;
-  /** How many device pixels differ in at least one channel. */
+  /** How many device pixels differ by more than `CHANNEL_TOLERANCE` in at least one channel. */
   readonly pixels: number;
   /** The largest difference in one colour channel, 0-255. */
   readonly maxDiff: number;
@@ -45,8 +54,8 @@ export interface CellDifference {
 }
 
 /**
- * Compares two captures pixel by pixel, with no tolerance: a pixel differs
- * when any of its four channels differs by 1 or more.
+ * Compares two captures pixel by pixel: a pixel differs when any of its four
+ * channels differs by more than `CHANNEL_TOLERANCE`.
  *
  * Returns one entry per cell that holds a differing pixel, in the order of
  * `cells`, then one entry named `OUTSIDE_CELLS` if a differing pixel lies in
@@ -67,14 +76,8 @@ export function compareBitmaps(
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const at = (y * width + x) * 4;
-      let diff = 0;
-      for (let channel = 0; channel < 4; channel++) {
-        diff = Math.max(
-          diff,
-          Math.abs(reference.pixels[at + channel]! - app.pixels[at + channel]!),
-        );
-      }
-      if (diff === 0) continue;
+      const diff = measureChannelDiff(reference, app, at);
+      if (diff <= CHANNEL_TOLERANCE) continue;
       const cell = findCell(cells, x, y);
       const entry = found.get(cell);
       if (entry === undefined) {
@@ -108,12 +111,7 @@ export function buildDiffBitmap(reference: Bitmap, app: Bitmap): Bitmap {
   assertSameSize(reference, app);
   const pixels = new Uint8Array(reference.pixels.length);
   for (let at = 0; at < pixels.length; at += 4) {
-    const differs =
-      reference.pixels[at] !== app.pixels[at] ||
-      reference.pixels[at + 1] !== app.pixels[at + 1] ||
-      reference.pixels[at + 2] !== app.pixels[at + 2] ||
-      reference.pixels[at + 3] !== app.pixels[at + 3];
-    if (differs) {
+    if (measureChannelDiff(reference, app, at) > CHANNEL_TOLERANCE) {
       pixels.set(MAGENTA, at);
       continue;
     }
@@ -139,6 +137,15 @@ interface MutableDifference {
   pixels: number;
   maxDiff: number;
   readonly box: { left: number; top: number; right: number; bottom: number };
+}
+
+/** Returns the largest difference, 0-255, between the two captures' channels of the pixel whose first byte is at `at`. */
+function measureChannelDiff(reference: Bitmap, app: Bitmap, at: number): number {
+  let diff = 0;
+  for (let channel = 0; channel < 4; channel++) {
+    diff = Math.max(diff, Math.abs(reference.pixels[at + channel]! - app.pixels[at + channel]!));
+  }
+  return diff;
 }
 
 /** Returns the name of the first cell that holds the device pixel at `x`, `y`, or `OUTSIDE_CELLS`. */

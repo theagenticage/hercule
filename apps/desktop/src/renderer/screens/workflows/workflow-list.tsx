@@ -92,6 +92,7 @@ const renderTableItem = (
       startsOnFiresOn={item.row.startsOnFiresOn}
       startsOnIsCode={item.row.startsOnIsCode}
       strip={item.row.strip}
+      stripRunIds={item.row.stripRunIds}
       successText={item.row.successText}
       statusText={item.row.statusText}
       statusTone={item.row.statusTone}
