@@ -131,7 +131,8 @@ const SEEDED_SIGNAL_MATCH = '{"repo":"example/repo","author":"dependabot[bot]"}'
 
 /**
  * The migration that adds the `held` state and `spawned_at` to trigger
- * effects, filling `spawned_at` from `matched_at` on every spawned row, and
+ * effects, filling `spawned_at` on every spawned row from its run's
+ * `created_at`, or from its `matched_at` when the run is gone, and
  * marks every paused start trigger as paused manually.
  */
 const SPAWN_BOUNDS_MIGRATION = 74;
@@ -1258,8 +1259,9 @@ describe("upgrading from the previous edge release", () => {
         }
       }
       if (seededTriggerEffects !== undefined) {
-        // Every row survives in its order and state. A spawned row's run
-        // started when it matched; a discarded row started none.
+        // Every row survives in its order and state. The fixture writes no
+        // runs, so a spawned row takes when it matched as when its run
+        // started; a discarded row started none.
         const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
         try {
           expect(

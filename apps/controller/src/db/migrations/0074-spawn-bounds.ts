@@ -8,8 +8,10 @@
  *   started, because the sliding window counts runs by when they started,
  *   not by when their event matched. A held event that starts a run hours
  *   after it matched must still count against the window it started in.
- *   Every row already spawned takes its `matched_at`, since its run started
- *   within a routing tick of the match.
+ *   Every row already spawned takes its run's `created_at`, which is when
+ *   the delivery started it: usually within a routing tick of the match, but
+ *   later when the controller was stopped in between. A row whose run is gone
+ *   takes its `matched_at`, the closest time left.
  * - `triggers.paused_by`: who paused a start trigger, `manual` or `breaker`.
  *   Every trigger paused before this migration was paused manually, because
  *   nothing else could pause one.
@@ -59,7 +61,10 @@ export default Effect.gen(function* () {
       (id, workflow_id, trigger_id, event_id, state, inputs, run_id, matched_at, spawned_at)
     SELECT
       id, workflow_id, trigger_id, event_id, state, inputs, run_id, matched_at,
-      CASE WHEN state = 'spawned' THEN matched_at END
+      CASE WHEN state = 'spawned' THEN COALESCE(
+        (SELECT runs.created_at FROM runs WHERE runs.id = trigger_effects.run_id),
+        matched_at
+      ) END
     FROM trigger_effects
   `;
   yield* sql`DROP TABLE trigger_effects`;

@@ -3,8 +3,8 @@
  * head:
  *
  * - a trigger effect spawned before the migration keeps its run and takes
- *   its `matched_at` as `spawned_at`; a pending one stays pending, without a
- *   `spawned_at`;
+ *   the run's `created_at` as `spawned_at`, or its own `matched_at` when the
+ *   run is gone; a pending one stays pending, without a `spawned_at`;
  * - the table accepts the new state `held`, and a spawned effect without a
  *   `spawned_at` is refused;
  * - a trigger paused before the migration was paused manually, an active
@@ -33,11 +33,15 @@ const BEFORE = migrations.filter(([id]) => id < 74);
 const UP_TO_SPAWN_BOUNDS = migrations.filter(([id]) => id <= 74);
 
 const MATCHED_AT = "2026-10-01T09:00:00.000Z";
+/** When the stored run started: hours after its match, as after a stopped controller. */
+const RUN_CREATED_AT = "2026-10-01T12:00:00.000Z";
 const SAVED_AT = "2026-10-01T08:00:00.000Z";
 
 /** The id of the one workflow the test stores. Any 16 bytes will do. */
 const WORKFLOW_ID = new Uint8Array(16).fill(1);
 const RUN_ID = new Uint8Array(16).fill(2);
+/** The run of a spawned effect whose run row was deleted. */
+const GONE_RUN_ID = new Uint8Array(16).fill(3);
 
 /**
  * The stored definition: the trigger `active` sets a spawn bound, `legacy`
@@ -84,9 +88,13 @@ describe("the spawn bounds migration", () => {
                  (${WORKFLOW_ID}, 'legacy', 'start', 'task.created', 'active', ${SAVED_AT}, ${SAVED_AT}),
                  (${WORKFLOW_ID}, 'paused', 'start', 'task.created', 'paused', ${SAVED_AT}, ${SAVED_AT})`;
         yield* sql`
+          INSERT INTO runs (id, plan, inputs, origin, status, created_at, started_at)
+          VALUES (${RUN_ID}, '{}', '{}', '{}', 'running', ${RUN_CREATED_AT}, ${RUN_CREATED_AT})`;
+        yield* sql`
           INSERT INTO trigger_effects (workflow_id, trigger_id, event_id, state, inputs, run_id, matched_at)
           VALUES (${WORKFLOW_ID}, 'active', 1, 'spawned', '{}', ${RUN_ID}, ${MATCHED_AT}),
-                 (${WORKFLOW_ID}, 'active', 2, 'pending', '{}', NULL, ${MATCHED_AT})`;
+                 (${WORKFLOW_ID}, 'active', 2, 'pending', '{}', NULL, ${MATCHED_AT}),
+                 (${WORKFLOW_ID}, 'active', 5, 'spawned', '{}', ${GONE_RUN_ID}, ${MATCHED_AT})`;
         yield* runMigrations(UP_TO_SPAWN_BOUNDS);
 
         const effects = yield* sql<{
@@ -128,8 +136,9 @@ describe("the spawn bounds migration", () => {
     );
 
     expect(checked.effects).toEqual([
-      { event_id: 1, state: "spawned", has_run: 1, spawned_at: MATCHED_AT },
+      { event_id: 1, state: "spawned", has_run: 1, spawned_at: RUN_CREATED_AT },
       { event_id: 2, state: "pending", has_run: 0, spawned_at: null },
+      { event_id: 5, state: "spawned", has_run: 1, spawned_at: MATCHED_AT },
     ]);
     expect(checked.triggers).toEqual([
       {
