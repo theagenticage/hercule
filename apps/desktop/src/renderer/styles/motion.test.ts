@@ -432,7 +432,7 @@ describe("the renderer's motion", () => {
     ]);
     expect(readAnimations("workflow-detail.css")).toEqual([
       {
-        rule: `${NO_PREFERENCE} › .open-pane`,
+        rule: `${NO_PREFERENCE} › .open-pane:not(.run-page)`,
         animation: "open-pane-in var(--dur-3) var(--ease-out)",
       },
     ]);
