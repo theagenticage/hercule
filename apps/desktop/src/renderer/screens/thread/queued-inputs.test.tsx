@@ -1,7 +1,8 @@
 /**
- * Tests the queued inputs against the stubbed controller: one row per input,
- * which one runs next, Steer and Cancel, what a row shows when one of them
- * fails, and the row of an input another session's agent queued.
+ * Tests the queued inputs against the stubbed controller: one row per waiting
+ * input, which one runs next, Steer and Cancel and when each is offered, what
+ * a row shows when one of them fails, and the row of an input another
+ * session's agent queued.
  */
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
@@ -54,6 +55,24 @@ describe("the queued inputs", () => {
     expect(readRows()).toEqual([OLDER.text, NEWER.text]);
     expect(within(readRow(OLDER)).getByText("queued · runs next")).toBeTruthy();
     expect(within(readRow(NEWER)).getByText("queued")).toBeTruthy();
+  });
+
+  it("leaves out an input the runner was handed, which the transcript shows as sending", async () => {
+    await renderQueue({}, [{ ...OLDER, sentAt: "2026-09-10T09:03:51.000Z" }, NEWER]);
+
+    expect(readRows()).toEqual([NEWER.text]);
+    expect(within(readRow(NEWER)).getByText("queued · runs next")).toBeTruthy();
+  });
+
+  it("offers Cancel but no Steer while no turn runs", async () => {
+    await renderThreadPart(QueuedInputs, {
+      thread: { ...queued, session: { ...queued.session, status: "idle" } },
+      handlers: { [`GET ${INPUTS}`]: () => ({ body: { items: [NEWER, OLDER] } }) },
+    });
+
+    expect(readRows()).toEqual([OLDER.text, NEWER.text]);
+    expect(within(readRow(OLDER)).queryByRole("button", { name: "Steer" })).toBeNull();
+    expect(within(readRow(OLDER)).getByRole("button", { name: "Cancel" })).toBeTruthy();
   });
 
   it("draws an input's images as small tiles before its text, read from the controller", async () => {

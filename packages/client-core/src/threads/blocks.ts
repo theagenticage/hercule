@@ -11,7 +11,7 @@
  * So each message is placed by its `item.started` row, and its text is
  * gathered from its rows wherever they sit.
  */
-import type { TranscriptRow } from "@hercule/contract";
+import type { Input, TranscriptRow } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
 import type { AgentState } from "./agent-state";
 import { findOpenItem } from "./open-item";
@@ -76,6 +76,11 @@ export interface UserBlock extends ThreadUserMessage {
   readonly kind: "user";
   readonly key: string;
   readonly at: string;
+  /**
+   * True for a message on its way into the session, which the transcript
+   * does not hold yet (`appendSendingMessages`). Absent once it does.
+   */
+  readonly sending?: true;
 }
 
 /** The items of one turn between two messages. */
@@ -624,4 +629,33 @@ const findFaceAgent = (
     running.lastStartedItemId === null ? undefined : agents.get(running.lastStartedItemId);
   // A message with no text is not drawn, so it cannot hold the face.
   return lastStarted?.completed === true && lastStarted.text !== "" ? lastStarted : undefined;
+};
+
+/**
+ * Returns `blocks` with one user block for each input in `sending`, the
+ * messages on their way into the session that the transcript does not hold
+ * yet (`splitQueuedInputs`). They go after every other block, but above a
+ * closing status line, so the agent's status stays the last line. Each block
+ * is keyed by its input, and is marked `sending`.
+ *
+ * Returns `blocks` itself when nothing is sending, so a memoized list keeps
+ * its identity.
+ */
+export const appendSendingMessages = (
+  blocks: readonly ThreadBlock[],
+  sending: readonly Input[],
+): readonly ThreadBlock[] => {
+  if (sending.length === 0) return blocks;
+  const messages = sending.map((input): UserBlock => ({
+    kind: "user",
+    key: `sending:${input.id}`,
+    itemId: input.id,
+    text: input.text,
+    attachments: input.attachments,
+    steered: false,
+    at: input.createdAt,
+    sending: true,
+  }));
+  const closing = blocks.at(-1)?.kind === "pending" ? blocks.length - 1 : blocks.length;
+  return [...blocks.slice(0, closing), ...messages, ...blocks.slice(closing)];
 };

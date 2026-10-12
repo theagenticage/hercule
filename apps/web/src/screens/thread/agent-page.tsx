@@ -36,6 +36,7 @@ import { TallyPill } from "../subagents/tally-pill";
 import { useStickToBottom } from "../use-stick-to-bottom";
 import { ConversationSessionNotice } from "./conversation-session-notice";
 import { QueuedInputs } from "./queued-inputs";
+import { SendingMessages } from "./sending-messages";
 import { RequestDock } from "./request-dock";
 import { AgentChrome } from "./thread-chrome";
 import { Turn } from "./turn";
@@ -159,6 +160,9 @@ export function AgentPage({
               />
             );
           })}
+          {subagent === undefined ? (
+            <SendingMessages client={client} sessionId={sessionId} />
+          ) : null}
         </div>
         {/* The foot has the page's background, so the transcript scrolling
             beneath it never shows through beside the tally or between the

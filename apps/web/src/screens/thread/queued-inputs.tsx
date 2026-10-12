@@ -2,10 +2,12 @@ import type { JSX } from "react";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   canSteerOrCancelQueuedInputs,
+  canSteerQueuedInputs,
   queryKeys,
   type HerculeClient,
   readErrorMessage,
   readInputSender,
+  splitQueuedInputs,
 } from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
 import { Button, useBlobImageSource, type LightboxImage } from "@hercule/ui";
@@ -15,13 +17,16 @@ import { useAttachmentImages } from "../use-attachment-images";
 import { useSenderReading } from "./use-sender-reading";
 
 /**
- * The list of queued messages above the composer, each with Steer and Cancel,
- * and with small thumbnails of its images before its text. A message another
- * session's agent queued starts with "From" and its sender, set apart from the
- * message by a "·", so it never looks like one the owner queued; the owner can steer or cancel it all the same.
+ * The list of waiting messages above the composer, each with Cancel, and
+ * with Steer while a turn runs (`canSteerQueuedInputs`), and with small
+ * thumbnails of its images before its text. A message another session's
+ * agent queued starts with "From" and its sender, set apart from the message
+ * by a "·", so it never looks like one the owner queued; the owner can steer
+ * or cancel it all the same.
  * The query returns the session's whole input history; this component shows
- * only the inputs still `queued`, because sent, delivered or cancelled ones
- * can no longer be acted on.
+ * only the queued inputs that wait (`splitQueuedInputs`). One on its way into
+ * the session shows under the transcript instead (`SendingMessages`), and
+ * sent, delivered or cancelled ones can no longer be acted on.
  *
  * On a session that answers an assistant's conversation, the rows have no
  * Steer and no Cancel: each queued input is a message the conversation
@@ -37,22 +42,23 @@ export function QueuedInputs({
   const queryClient = useQueryClient();
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const rows = useQuery(inputsQuery(client, sessionId)).data?.items ?? [];
-  const queued = rows.filter((row) => row.status === "queued");
+  const { waiting } = splitQueuedInputs(session, rows);
 
   const reread = (): Promise<void> =>
     queryClient.invalidateQueries({ queryKey: queryKeys.inputs(sessionId) });
 
-  if (queued.length === 0) return null;
+  if (waiting.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-1.5">
-      {queued.map((row) => (
+      {waiting.map((row) => (
         <QueuedRow
           key={row.id}
           client={client}
           sessionId={sessionId}
           row={row}
-          actionable={canSteerOrCancelQueuedInputs(session)}
+          offersSteer={canSteerQueuedInputs(session)}
+          offersCancel={canSteerOrCancelQueuedInputs(session)}
           onDone={reread}
         />
       ))}
@@ -64,14 +70,17 @@ function QueuedRow({
   client,
   sessionId,
   row,
-  actionable,
+  offersSteer,
+  offersCancel,
   onDone,
 }: {
   readonly client: HerculeClient;
   readonly sessionId: string;
   readonly row: Input;
-  /** Whether the row offers Steer and Cancel. */
-  readonly actionable: boolean;
+  /** Whether the row offers Steer. */
+  readonly offersSteer: boolean;
+  /** Whether the row offers Cancel. */
+  readonly offersCancel: boolean;
   readonly onDone: () => Promise<void>;
 }): JSX.Element {
   const steer = useMutation({
@@ -102,15 +111,15 @@ function QueuedRow({
           </span>
         )}
         <span className="min-w-0 flex-1 truncate text-row text-ink">{row.text}</span>
-        {actionable ? (
-          <>
-            <Button disabled={steer.isPending || cancel.isPending} onClick={() => steer.mutate()}>
-              Steer
-            </Button>
-            <Button disabled={steer.isPending || cancel.isPending} onClick={() => cancel.mutate()}>
-              Cancel
-            </Button>
-          </>
+        {offersSteer ? (
+          <Button disabled={steer.isPending || cancel.isPending} onClick={() => steer.mutate()}>
+            Steer
+          </Button>
+        ) : null}
+        {offersCancel ? (
+          <Button disabled={steer.isPending || cancel.isPending} onClick={() => cancel.mutate()}>
+            Cancel
+          </Button>
         ) : null}
       </div>
       {row.reason === null ? null : <p className="text-fine text-faint">{row.reason}</p>}
