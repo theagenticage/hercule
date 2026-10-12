@@ -1,8 +1,8 @@
 /**
  * Tests for the frames the sessions domain builds: the complete `sessionStart`
- * frames `starting` returns, and the one-line builders for the frames sent
- * later in a session's life. Also tests `endOnLostRunners`, and the
- * transcript search `queryPassages`.
+ * frames `claimStarts` returns, and the defect `inputFrame` fails with on a
+ * step's prompt that has no step key. Also tests `endOnLostRunners`,
+ * `setGeneratedTitle`, and the transcript search `queryPassages`.
  *
  * The tests check the frame's shape on the wire and where each field comes
  * from, not how the domain builds it:
@@ -728,89 +728,8 @@ describe("SessionService.claimStarts", () => {
   });
 });
 
-describe("the frame builders on SessionService", () => {
-  it("stopping returns exactly the sessionStop frame", async () => {
-    const sessionId = mintId();
-    const frame = await run(
-      Effect.gen(function* () {
-        const sessions = yield* SessionService;
-        return sessions.stopping(sessionId);
-      }),
-    );
-    expect(frame).toStrictEqual({ _tag: "sessionStop", sessionId });
-  });
-
-  it("inputFrame returns exactly the sessionInput frame for the stored row", async () => {
-    const row: StoredInput = {
-      id: mintId(),
-      sessionId: mintId(),
-      source: "user",
-      actor: "user:0199e0e7-0000-7000-8000-000000000000",
-      text: "pick the failing test",
-      attachments: [],
-      status: "queued",
-      delivery: null,
-      createdAt: at,
-      deliveredAt: null,
-      sentAt: null,
-      reason: null,
-      stepIteration: null,
-    };
-    const modelSelection: ModelSelection = { model: "fast", options: { verbose: true } };
-    const frame = await run(
-      Effect.gen(function* () {
-        const sessions = yield* SessionService;
-        return sessions.inputFrame(
-          { id: row.sessionId, runId: null, stepId: null, modelSelection },
-          row,
-        );
-      }),
-    );
-
-    expect(frame).toStrictEqual({
-      _tag: "sessionInput",
-      requestId: row.id,
-      sessionId: row.sessionId,
-      input: { text: row.text, modelSelection: modelSelection },
-    });
-  });
-
-  it("inputFrame puts the step key on the prompt of an agent step", async () => {
-    const row: StoredInput = {
-      id: mintId(),
-      sessionId: mintId(),
-      source: "user",
-      actor: "run:0199e0e7-0000-7000-8000-000000000001",
-      text: "implement the change",
-      attachments: [],
-      status: "queued",
-      delivery: null,
-      createdAt: at,
-      deliveredAt: null,
-      sentAt: null,
-      reason: null,
-      stepIteration: 2,
-    };
-    const runId = mintId();
-    const modelSelection: ModelSelection = { model: "fast", options: {} };
-    const frame = await run(
-      Effect.gen(function* () {
-        const sessions = yield* SessionService;
-        return sessions.inputFrame(
-          { id: row.sessionId, runId, stepId: "implement", modelSelection },
-          row,
-        );
-      }),
-    );
-
-    expect(frame.input).toStrictEqual({
-      text: row.text,
-      modelSelection,
-      step: { runId, stepId: "implement", iteration: 2 },
-    });
-  });
-
-  it("inputFrame fails with a defect on a step prompt whose session no step started", async () => {
+describe("SessionService.inputFrame", () => {
+  it("fails with a defect on a step prompt whose session no step started", async () => {
     const row: StoredInput = {
       id: mintId(),
       sessionId: mintId(),
@@ -841,51 +760,6 @@ describe("the frame builders on SessionService", () => {
         }),
       ),
     ).rejects.toThrow("holds the prompt of an agent step, but no step started it");
-  });
-
-  it("interrupting returns exactly the sessionInterrupt frame", async () => {
-    const sessionId = mintId();
-    const frame = await run(
-      Effect.gen(function* () {
-        const sessions = yield* SessionService;
-        return sessions.interrupting(sessionId, undefined);
-      }),
-    );
-    expect(frame).toStrictEqual({ _tag: "sessionInterrupt", sessionId });
-  });
-
-  it("respondingToApprovalRequest returns exactly the sessionRespondToApprovalRequest frame with the three fields", async () => {
-    const sessionId = mintId();
-    const requestId = mintId();
-    const frame = await run(
-      Effect.gen(function* () {
-        const sessions = yield* SessionService;
-        return sessions.respondingToApprovalRequest(sessionId, requestId, "allow_always");
-      }),
-    );
-    expect(frame).toStrictEqual({
-      _tag: "sessionRespondToApprovalRequest",
-      sessionId,
-      requestId,
-      decision: "allow_always",
-    });
-  });
-
-  it("respondingToQuestion returns exactly the sessionRespondToQuestion frame with the three fields", async () => {
-    const sessionId = mintId();
-    const requestId = mintId();
-    const frame = await run(
-      Effect.gen(function* () {
-        const sessions = yield* SessionService;
-        return sessions.respondingToQuestion(sessionId, requestId, { Storage: "SQLite" });
-      }),
-    );
-    expect(frame).toStrictEqual({
-      _tag: "sessionRespondToQuestion",
-      sessionId,
-      requestId,
-      answers: { Storage: "SQLite" },
-    });
   });
 });
 
