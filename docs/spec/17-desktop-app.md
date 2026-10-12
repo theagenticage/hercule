@@ -2895,6 +2895,18 @@ The perf script's rows were measured 2026-10-12 on the reference machine with `a
 - **The offer's pane and the Ignore dialog read Later of the rule's kind once** when they open, every page of it, to count the open signals a rule would take. To do is already held by the shell. The read is kept under its own key, outside the signal lists, so a push for the `signal` topic does not read it again, and it is dropped when the last pane or dialog that reads it closes, so the next opening reads it fresh.
 - Nothing else reads more than before.
 
+**Spawn bounds and invalid workflows,** measured 2026-10-13 with `pnpm build:desktop`'s size checks, on `main` (Before) and the working tree of branch `t3/issue-87-clean-implementation` (After), for [#87](https://github.com/theagenticage/hercule/issues/87). The desktop app gains no screen in this change: it only stops showing a next fire time, or the runs a trigger will start, for a workflow marked invalid. It adds no desktop process, timer, polling or live topic, and it changes nothing per streamed token. Runtime memory, CPU and wakeups were not remeasured, because nothing in them changes.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Renderer JavaScript for the first screen, gzipped | 250 kB, guide | 323.5 kB across 22 chunks | 323.8 kB across 22 chunks |
+| An open workflow's chunk, gzipped | its own chunk | 46.97 kB | 47.01 kB |
+| A run's page chunk, gzipped | its own chunk | 12.56 kB | 12.56 kB |
+| Main's startup file, minified | 160 kB, guide | 150.2 kB | 150.2 kB |
+
+- **The first screen grows by 0.3 kB:** the contract's spawn bound, `pausedBy`, held count and `invalidSince` load with it. The renderer was already over its guide before this change.
+- Nothing reads more than before.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.

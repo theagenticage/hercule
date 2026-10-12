@@ -97,7 +97,16 @@ These are decided by the definition alone, because a policy's checkouts are writ
 
 A stored workflow can stop validating without being edited: its plugin is disabled, its agent or a Connection named in a default is deleted. The controller re-validates every workflow that references the mutated thing at the moment of the mutation. A workflow that fails is marked **invalid**: a health warning on the workflow, one Notification, and its start triggers no longer match while it is invalid (matched events show as ignored in the events view, [./08-events-and-connections.md](./08-events-and-connections.md)). A manual run of an invalid workflow is rejected with the validation error. The mark clears on the next successful validation (the plugin is re-enabled, or the workflow is saved with a fix). Runs are never spawned only to fail at stamp: one notification, not a failed-run flood.
 
-*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* The invalid mark is not built yet, and neither is the events view that shows matched events as ignored. Until they are, a start trigger of a workflow that no longer validates still matches, and each match writes a run that fails at once with `validation-error` (section 7.1).
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* ~~The invalid mark is not built yet, and neither is the events view that shows matched events as ignored. Until they are, a start trigger of a workflow that no longer validates still matches, and each match writes a run that fails at once with `validation-error` (section 7.1).~~
+
+*(Amended 2026-10-12, [#87](https://github.com/theagenticage/hercule/issues/87).)* **The invalid mark as built.**
+
+- **Stored as a time.** The workflow row holds when it stopped validating; `Workflow` and `WorkflowSummary` return it as `invalidSince`, absent while the workflow is valid.
+- **When the controller re-validates.** It validates every stored workflow again, not only those that reference the changed thing: after a plugin is enabled, disabled, configured, retried or reset (once its runtime status has changed), after an Agent or a Connection is deleted, and once at startup after the plugins boot.
+- **On the transition to invalid** it raises one informational `core.workflow-invalid` Notification, with the workflow as subject and what did not validate as body. A workflow that stays invalid raises no more; one that becomes valid and then invalid again raises a new one. The Notification is not withdrawn when the mark clears.
+- **While invalid**, its start triggers are not routed, so matches start no run and write no trigger effect, and its cron triggers do not fire. `run.start` refuses it with `validation`, listing what did not validate.
+- **The mark clears** on the next validation that passes: a save, or one of the re-validations above, which writes a `workflow.revalidated` audit entry with the system actor.
+- **Not built:** the events view that shows the matched events as ignored. `ignored` is not an event handling yet ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 9.10).
 
 ## 2. Triggers
 
@@ -122,7 +131,7 @@ interface StartTrigger {
   kind: "start"
   on: EventSelector | Schedule         // a Schedule makes it a cron trigger
   inputs?: Record<string, CelExpression> // input name -> expression over `event`
-  spawnBound?: { maxRuns: number; windowSeconds: number }   // default ~30 per hour
+  spawnBound?: { maxRuns: number; windowSeconds: number }   // default ~30 per hour; as built, the setting `spawnBound.default`, else 30 per 3600 s (section 2.5)
   status: "active" | "paused"          // row state keyed by (workflowId, triggerId), not in the source; paused by the user or by a tripped breaker; enable/disable lives on the Workflow
 }
 
@@ -252,7 +261,9 @@ Example: in the pattern above, a `pr_merged` event for PR 42 arrives while `open
 
 Every start trigger carries a spawn bound: the number of runs it may spawn per window, default about 30 per hour, configurable per trigger. Signal triggers do not spawn runs and carry none. Exceeding the bound trips a breaker: the trigger's `status` becomes `paused`, events that matched but did not spawn are held visibly against the trigger, a Notification is raised, and the user resumes with one click, optionally discarding the backlog. Nothing is dropped silently, and a tripped breaker is the intended review moment. Breaker semantics, the held-event view and the Notification are specified in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) ([ADR 0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md)). Spawn bounds are the only core-enforced bound in v1: there are no run caps, spend gates or quiet hours (pausing a workflow or trigger covers quiet hours).
 
-*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* Spawn bounds are not built yet ([#87](https://github.com/theagenticage/hercule/issues/87)). A start trigger starts a run for every event it matches, and a `spawnBound` in the source is accepted and not enforced. Only the user pauses a trigger, with `trigger.pause`, and `trigger.resume` takes no `discardHeld` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). Nothing is held: the events a paused trigger would have matched start no run, before or after it is resumed.
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* ~~Spawn bounds are not built yet ([#87](https://github.com/theagenticage/hercule/issues/87)). A start trigger starts a run for every event it matches, and a `spawnBound` in the source is accepted and not enforced. Only the user pauses a trigger, with `trigger.pause`, and `trigger.resume` takes no `discardHeld` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). Nothing is held: the events a paused trigger would have matched start no run, before or after it is resumed.~~
+
+*(Amended 2026-10-12, [#87](https://github.com/theagenticage/hercule/issues/87).)* Spawn bounds are built, as [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 5 describes. A trigger's effective bound is its `spawnBound` in the source; without one, the controller setting `spawnBound.default`, which Settings > Bounds edits; without that, 30 runs per 3600 seconds. A save copies it to the trigger's row, so changing the source changes the bound at once. A bound accepts at most 10,000 runs in a window of at most 30 days. A paused trigger records who paused it, `pausedBy`: a trigger paused manually drops its matches, as before; a trigger the breaker paused holds them.
 
 ## 3. Inputs
 

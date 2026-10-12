@@ -8,7 +8,7 @@ The pipeline has three roles with a hard boundary between them.
 
 - **Emitters** produce normalized events. Event-source plugins (GitHub, Gmail) emit through the `events` host API capability (see [./05-plugins.md](./05-plugins.md)). Core emitters (cron scheduler, manual synthetic events, platform events) call the same internal emit path. An emitter never dispatches, never knows about triggers or subscriptions, and never reaches the store directly.
 - **The event log** is one append-only table in the controller database ([./04-state-store.md](./04-state-store.md)). Every emitted event is persisted, whether or not anything matches it.
-- **The matcher** is one durable-cursor consumer of the log. It reads events past its cursor, evaluates every active start trigger of every enabled workflow and every live subscription, fans out to all matches, inserts effect rows, and advances the cursor in the same transaction (section 4).
+- **The matcher** is one durable-cursor consumer of the log. It reads events past its cursor, evaluates every active start trigger of every enabled workflow *(and, amended 2026-10-12, [#87](https://github.com/theagenticage/hercule/issues/87), every start trigger the breaker paused, section 4)* and every live subscription, fans out to all matches, inserts effect rows, and advances the cursor in the same transaction (section 4).
 
 There is no in-memory event routing and no separate delivered-events table. Effects that must leave the database (chat posts, external API calls) go through outbox rows with retry, owned by [./04-state-store.md](./04-state-store.md). Delivery to external systems is at-least-once; state changes inside the database are exactly-once.
 
@@ -67,7 +67,7 @@ The event's `id` **is** the log position (`INTEGER PRIMARY KEY`); there is no se
 
 The matcher is one consumer with one durable cursor over the event log. For each event past the cursor, in one transaction:
 
-1. Evaluate every **active start trigger** of an enabled workflow ([./07-workflows.md](./07-workflows.md)): the trigger's ~~`source: EventSelector`~~ `on: EventSelector` *(amended 2026-09-29, [#276](https://github.com/theagenticage/hercule/issues/276); a cron trigger's `on` is a `Schedule` and admits only its own ticks)* (defined in 07: kind, optional `connectionId`, CEL condition over `event`) admits the event. Connection selection semantics are in section 8.3.
+1. Evaluate every **active start trigger** of an enabled workflow ([./07-workflows.md](./07-workflows.md)): the trigger's ~~`source: EventSelector`~~ `on: EventSelector` *(amended 2026-09-29, [#276](https://github.com/theagenticage/hercule/issues/276); a cron trigger's `on` is a `Schedule` and admits only its own ticks)* (defined in 07: kind, optional `connectionId`, CEL condition over `event`) admits the event. Connection selection semantics are in section 8.3. *(Amended 2026-10-12, [#87](https://github.com/theagenticage/hercule/issues/87).)* A trigger the breaker paused is evaluated too, so its matches are held (section 4.1); a trigger the user paused, or one of a workflow marked invalid, is not.
 2. Evaluate every **live subscription** (section 7): kind/shape condition matches and the correlation resolves (event-side expression value equals the holder-side expression value).
 3. **Fan out to all matches.** Delivery is non-exclusive: one event may spawn several runs and signal several subscribers.
 4. Insert **effect rows**:
@@ -90,7 +90,7 @@ The warning is a `health` field on the trigger row (and on the subscription row 
 *(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* **Triggers as built.** The event router evaluates start triggers now, through a routing table of its own beside the one for subscriptions ([./07-workflows.md](./07-workflows.md) section 2.1).
 
 - It writes step 4's pending run, a **trigger effect**, in the routing transaction. A delivery starts the run from it later, one effect per transaction, in arrival order.
-- Held-event rows are not written: they arrive with spawn bounds ([#87](https://github.com/theagenticage/hercule/issues/87), section 4.1).
+- ~~Held-event rows are not written: they arrive with spawn bounds ([#87](https://github.com/theagenticage/hercule/issues/87), section 4.1).~~ *(Amended 2026-10-12, [#87](https://github.com/theagenticage/hercule/issues/87).)* A held event is a trigger effect in the state `held`, written in the same routing transaction (section 4.1).
 - `core.trigger-error` is raised now, by the rule above, with one addition: a move from `ok` to `error` raises no notification when one about the same trigger was raised in the hour before. A filter that fails on every other event moves the health to `error` each time, and would otherwise raise one notification per event. As for an unreachable runner ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.2), the check reads the notifications already created, so it needs no counter and no timer. The trigger's health still shows every failure. Its subject is the trigger, `{ kind: "trigger", workflowId, triggerId }`, and its body is the error.
 - A trigger's health records two more failures than its expressions, by the same rules and under the same kind, each with a title of its own: a cron schedule the Scheduler cannot read, because its timezone is not a known one, and a run the database refused to start, or whose start failed because of a bug in the controller ([./07-workflows.md](./07-workflows.md) sections 2.1 and 2.2).
 - The health records which of the three failed: the evaluation, the scheduling or the start. Only the same stage clears it: a clean evaluation clears an evaluation error, the Scheduler clears a scheduling error when it next computes the trigger's fire time, and a run that starts clears a start error. So a trigger whose filter is fine but whose runs cannot start stays in `error`, instead of moving between `ok` and `error` on every event. A failure at another stage than the recorded one counts as a move to `error`, with a notification of its own.
@@ -110,7 +110,15 @@ The warning is a `health` field on the trigger row (and on the subscription row 
 
 Spawn bounds live on start triggers: `{ maxRuns, windowSeconds }` per trigger, default ~30 runs per hour. Exceeding it trips the trigger into a paused state; the matcher then writes held-event rows instead of pending runs, so matched events are kept visibly, a Notification fires, and the user resumes with one click (optionally discarding the backlog). The full breaker semantics~~, the resume operation, and the "Needs a call" surface~~ and the resume operation *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): that surface is retired; the breaker's Notification goes to Check-in)* belong to [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md).
 
-*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* Not built yet ([#87](https://github.com/theagenticage/hercule/issues/87)): a start trigger starts a run for every event it matches ([./07-workflows.md](./07-workflows.md) section 2.5).
+*(Amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82).)* ~~Not built yet ([#87](https://github.com/theagenticage/hercule/issues/87)): a start trigger starts a run for every event it matches ([./07-workflows.md](./07-workflows.md) section 2.5).~~
+
+*(Amended 2026-10-12, [#87](https://github.com/theagenticage/hercule/issues/87).)* **Spawn bounds as built.** For each match of a start trigger, the routing transaction writes one trigger effect:
+
+- `held`, when the breaker paused the trigger or the trigger still has held rows, so a held backlog keeps its order;
+- `pending`, when the trigger is under its bound;
+- otherwise the breaker trips: the trigger becomes `paused` with `pausedBy: "breaker"`, the match is written `held`, and one `core.breaker-tripped` decision is raised.
+
+The bound, the window count and the resume are in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 5. A cron trigger the breaker paused keeps firing, and its ticks are held the same way.
 
 ### 4.2 Enrichment re-match
 

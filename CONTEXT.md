@@ -395,7 +395,7 @@ The one consumer of the event log. It walks the events past its own durable curs
 _Avoid_: matcher, dispatcher, event bus
 
 **Routing Table**:
-The routes one kind of destination owns: one per live session-held subscription, one per live run-held subscription, or one per active start trigger of an enabled workflow. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
+The routes one kind of destination owns: one per live session-held subscription, one per live run-held subscription, or one per start trigger of an enabled, valid workflow that is active or paused by the breaker. Prepared inside the routing transaction, so a subscription created or cancelled while a pass runs is wholly before it or wholly after it.
 
 **Delivery**:
 The downstream consumer of one kind of row. It reads its own rows, whoever wrote them, and acts on the ones that can act now; idempotent, so a crash between a write and its delivery loses nothing.
@@ -405,7 +405,7 @@ The Queued Input the Event Router writes for a holder session when a route's con
 _Avoid_: wake-up (keep that word for the one a restart lost, in text a person reads)
 
 **Trigger Effect**:
-One start trigger's match on one event, holding the inputs the trigger mapped from it. The Event Router writes it `pending`; a delivery starts its run later, in a transaction of its own, and marks it `spawned` with the run's id, or `discarded` when its event was pruned, or its trigger paused or its workflow disabled, before then, or when its start died of a bug. So a routing pass only writes rows and never waits on a run. Unique per trigger and event, so a second pass over the same event writes nothing.
+One start trigger's match on one event, holding the inputs the trigger mapped from it. The Event Router writes it `pending`, or `held` when the trigger's Spawn Bound is spent; a delivery turns the oldest `held` rows into `pending` as the bound's window has room. A delivery starts the run of a `pending` row later, in a transaction of its own, and marks it `spawned` with the run's id and the time, or `discarded` when its event was pruned, or the user paused its trigger, or the trigger is gone, or its workflow was disabled, before then, or when its start died of a bug. Resuming a trigger with `discardHeld` marks its `held` rows `discarded`. So a routing pass only writes rows and never waits on a run. Unique per trigger and event, so a second pass over the same event writes nothing.
 _Avoid_: pending run (the run does not exist until the effect is delivered)
 
 **Expression**:
@@ -413,7 +413,7 @@ A CEL source stored on a subscription or a trigger and evaluated against one eve
 _Avoid_: rule, predicate string
 
 **Workflow**:
-A named, stored, editable source of execution plans. Owns its triggers; can be as small as one trigger plus one action. Editing a workflow never affects in-flight runs.
+A named, stored, editable source of execution plans. Owns its triggers; can be as small as one trigger plus one action. Editing a workflow never affects in-flight runs. A stored workflow is **invalid** while it no longer validates because a plugin, Agent or Connection it uses changed after it was saved, or because a newer controller checks it more strictly: its triggers start no runs until it validates again.
 _Avoid_: recipe
 
 **Trigger**:
@@ -485,7 +485,7 @@ A live, correlated claim on future events, held by a run or a session ("deliver 
 _Avoid_: watch, listener
 
 **Spawn Bound**:
-A trigger's limit on how many runs it may spawn per window. Exceeding it trips the trigger into a paused state with its matched events held visibly for user review; never a silent drop.
+A trigger's limit on how many runs it may spawn per window. Exceeding it trips the trigger into a paused state with its matched events held visibly for user review; never a silent drop. A trigger whose source sets none takes the default from Settings > Bounds. The **breaker** is what trips it: it pauses the trigger with `pausedBy: breaker`, which still matches events and holds them, unlike a pause by the user, which drops them. A **held event** is a matched event waiting, as a `held` Trigger Effect, for the user to resume the trigger.
 _Avoid_: rate limit (bare), throttle
 
 **Notification**:
