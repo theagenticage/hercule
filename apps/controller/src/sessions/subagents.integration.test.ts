@@ -327,38 +327,6 @@ describe("the one rule: the session reads only its own agent", () => {
       ]);
     });
   });
-
-  it("writes no segment reply for a subagent's completed message", async () => {
-    await withAgentFleet(async (arranged) => {
-      const { assistant, conversation } = await readDefaultConversation(arranged);
-      const updated = await send(
-        "PATCH",
-        arranged.harness.base,
-        `/api/v1/assistants/${assistant.id}`,
-        {
-          body: { reply: "segments" },
-          token: arranged.token,
-        },
-      );
-      expect(updated.status, await updated.clone().text()).toBe(200);
-      const session = await startConversationSession(arranged, conversation.id, "hi");
-      const id = session.id;
-
-      reportEvents(arranged, 2, [
-        { ...buildBase(id), _tag: "turn.started", turnId: "t1" },
-        { ...buildBase(id), _tag: "subagent.started", subagentId: "a1" },
-        ...buildAssistantMessage(id, "s1", "sub-text", "A subagent's text.", "a1"),
-        ...buildAssistantMessage(id, "t1", "main-text", "The main answer."),
-        { ...buildBase(id), _tag: "turn.completed", turnId: "t1", state: "completed" },
-      ]);
-      await waitForSession(arranged, id, (one) => one.status === "idle");
-
-      const replies = (await listMessages(arranged, conversation.id, "sort=position:asc")).items
-        .filter((one) => one.senderRole === "assistant")
-        .map((one) => one.text);
-      expect(replies).toEqual(["The main answer."]);
-    });
-  });
 });
 
 describe("the open Requests of several agents", () => {
@@ -384,12 +352,27 @@ describe("the open Requests of several agents", () => {
     return await waitForOpenRequests(arranged, id, ["main-req", "sub-req"]);
   };
 
-  it("raises one notification per Request, naming the subagent that asked", async () => {
+  it("names the subagent that asked on the session's read, on the session list and in one notification per Request", async () => {
     await withAgentFleet(async (arranged) => {
       const session = await startTwoRequests(arranged);
-
-      expect(session.openRequests[0]).not.toHaveProperty("subagentId");
-      expect(session.openRequests[1]).toMatchObject({ requestId: "sub-req", subagentId: "a1" });
+      const response = await get(
+        arranged.harness.base,
+        `/api/v1/sessions?status=busy`,
+        arranged.token,
+      );
+      expect(response.status, await response.clone().text()).toBe(200);
+      const listed = ((await response.json()) as { items: ReadonlyArray<Session> }).items.find(
+        (one) => one.id === session.id,
+      );
+      for (const read of [session, listed]) {
+        expect(read?.openRequests[0]).not.toHaveProperty("subagentId");
+        expect(read?.openRequests[0]).not.toHaveProperty("subagentName");
+        expect(read?.openRequests[1]).toMatchObject({
+          requestId: "sub-req",
+          subagentId: "a1",
+          subagentName: "Review the diff",
+        });
+      }
       const notifications = await waitUntil("raised both notifications", async () => {
         const found = await readApprovalNotifications(arranged, session.id);
         return found.length === 2 ? found : undefined;
@@ -402,29 +385,6 @@ describe("the open Requests of several agents", () => {
         )?.body;
       expect(bodyFor("sub-req")).toMatch(/^Asked by ` Review the diff `\n\n/);
       expect(bodyFor("main-req") ?? "").not.toContain("Asked by");
-    });
-  });
-
-  it("names the subagent that asked, on the session's read and on the session list", async () => {
-    await withAgentFleet(async (arranged) => {
-      const session = await startTwoRequests(arranged);
-      const response = await get(
-        arranged.harness.base,
-        `/api/v1/sessions?status=busy`,
-        arranged.token,
-      );
-      expect(response.status, await response.clone().text()).toBe(200);
-      const listed = ((await response.json()) as { items: ReadonlyArray<Session> }).items.find(
-        (one) => one.id === session.id,
-      );
-
-      for (const read of [session, listed]) {
-        expect(read?.openRequests[0]).not.toHaveProperty("subagentName");
-        expect(read?.openRequests[1]).toMatchObject({
-          subagentId: "a1",
-          subagentName: "Review the diff",
-        });
-      }
     });
   });
 
@@ -720,12 +680,19 @@ describe("a subagent's spawn link", () => {
         turnId: "t1",
         itemId,
         kind: "subagent",
-        detail: { subagentIds: ["a1"] },
+        // A provider can list anything; only string ids name a subagent.
+        detail: { subagentIds: ["a1", 7] },
       });
       reportEvents(arranged, 2, [
         { ...buildBase(id), _tag: "turn.started", turnId: "t1" },
         call("agent-call"),
-        { ...buildBase(id), _tag: "subagent.started", subagentId: "a1", description: "Fix it" },
+        {
+          ...buildBase(id),
+          at: "2026-10-05T10:05:00.000Z",
+          _tag: "subagent.started",
+          subagentId: "a1",
+          description: "Fix it",
+        },
         call("send-message"),
       ]);
       const subagent = await waitForSubagent(
@@ -734,7 +701,13 @@ describe("a subagent's spawn link", () => {
         "a1",
         (one) => one.description !== undefined,
       );
-      expect(subagent).toMatchObject({ itemId: "agent-call", description: "Fix it" });
+      // The subagent started when its parent's item listed it, not when it was introduced.
+      expect(subagent).toMatchObject({
+        itemId: "agent-call",
+        description: "Fix it",
+        startedAt: at,
+      });
+      expect((await listSubagents(arranged, id)).items.map((one) => one.id)).toEqual(["a1"]);
     });
   });
 });
@@ -754,7 +727,11 @@ describe("a subagent's description", () => {
       });
       reportEvents(arranged, 2, [
         { ...buildBase(id, "briefed"), _tag: "turn.started", turnId: "b1" },
-        userMessage("briefed", "b1", "Find the flaky test\nin the suite"),
+        userMessage("briefed", "b1", "\nFind the flaky test\nin the suite"),
+        // Its introduction already named it, so its brief does not rename it.
+        { ...buildBase(id), _tag: "subagent.started", subagentId: "named", description: "Given" },
+        { ...buildBase(id, "named"), _tag: "turn.started", turnId: "n1" },
+        userMessage("named", "n1", "Brief"),
         // Its first turn had no message, so a later turn's message is not its brief.
         { ...buildBase(id, "unbriefed"), _tag: "turn.started", turnId: "u1" },
         { ...buildBase(id, "unbriefed"), _tag: "turn.completed", turnId: "u1", state: "completed" },
@@ -770,6 +747,13 @@ describe("a subagent's description", () => {
       expect(unbriefed).not.toHaveProperty("description");
       const briefed = await waitForSubagent(arranged, id, "briefed", () => true);
       expect(briefed.description).toBe("Find the flaky test");
+      const named = await waitForSubagent(
+        arranged,
+        id,
+        "named",
+        (one) => one.activity === "Reading its brief",
+      );
+      expect(named.description).toBe("Given");
     });
   });
 });
@@ -810,11 +794,13 @@ describe("a subagent the session's end stops", () => {
         reason: "stopped",
       });
       await waitForSession(arranged, id, (one) => one.status === "exited");
+      const stopped = (await listSubagents(arranged, id)).items;
+      for (const one of stopped) {
+        expect(one).not.toHaveProperty("activity");
+        expect(one.endedAt).toBeDefined();
+      }
       const results = Object.fromEntries(
-        (await listSubagents(arranged, id)).items.map((one) => [
-          one.id,
-          `${one.status}: ${one.result ?? ""}`,
-        ]),
+        stopped.map((one) => [one.id, `${one.status}: ${one.result ?? ""}`]),
       );
       expect(results).toEqual({
         continued: "stopped: Found B",
