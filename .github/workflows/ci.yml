@@ -26,12 +26,61 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # The checks of `AGENTS.md` run as parallel jobs rather than one after
+  # another, and the test suites are split over several runners with
+  # `--shard`. Run in one job they took about 20 minutes; a pull request now
+  # waits only for the slowest job.
+  #
+  # Every job is bounded by `timeout-minutes`. The bound stops a hung test
+  # from holding the runner for GitHub's default of six hours, and a job that
+  # times out keeps its logs, which a cancelled job does not.
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm typecheck
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm lint
+
+  # The two halves of `pnpm test`. Each needs its own runtime (see
+  # `vitest.config.ts`), so each is its own job, split into shards.
+  test-node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # One failing shard must not cancel the others: a pull request should
+      # see every failing test in one run.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: bun --bun run vitest run --project node --shard=${{ matrix.shard }}/3
+
+  test-react:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm exec vitest run --project react --project desktop-main --project desktop-renderer --shard=${{ matrix.shard }}/2
+
   check:
     runs-on: ubuntu-latest
-    # The job takes about 18 minutes. The bound stops a hung test from holding
-    # the runner for GitHub's default of six hours, and a job that times out
-    # keeps its logs, which a cancelled job does not.
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -40,10 +89,6 @@ jobs:
           fetch-depth: 0
 
       - uses: ./.github/actions/setup
-
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test
 
       # Mode isolation: the runner entrypoint links no controller package
       # (spec 15 section 3, ADR 0018).
@@ -110,7 +155,7 @@ jobs:
       - uses: ./.github/actions/setup
 
       # install.sh runs on macOS only, so its tests that run it past the
-      # platform check are skipped in the check job, on Linux. The file name
+      # platform check are skipped in the `test-node` job, on Linux. The file name
       # also matches the runner's tests of the harness installers, which run
       # here too.
       - run: pnpm exec vitest run --project node install.test.ts
@@ -219,7 +264,16 @@ jobs:
   edge-build:
     # A failed upgrade must not publish. `edge-linux` and `edge-linux-install`
     # stay in this list; this job only adds `upgrade`.
-    needs: [check, desktop, edge-linux, edge-linux-install, upgrade]
+    needs:
+      - typecheck
+      - lint
+      - test-node
+      - test-react
+      - check
+      - desktop
+      - edge-linux
+      - edge-linux-install
+      - upgrade
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
     timeout-minutes: 30
@@ -280,7 +334,10 @@ jobs:
           security import "$p12" -k "$keychain" -P "$SIGNING_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -x
           # Lets codesign use the private key without a password dialog.
           security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
-          # codesign looks for identities in the keychains on this list.
+          # codesign looks for identities in the keychains on this list. The
+          # existing list is split into words on purpose: each keychain is
+          # its own argument.
+          # shellcheck disable=SC2046
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | xargs)
           # macOS's own LibreSSL, not Homebrew's OpenSSL 3 that comes first on
           # the PATH: OpenSSL 3 cannot read a .p12 encrypted with the legacy
