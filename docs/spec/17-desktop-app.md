@@ -2895,6 +2895,15 @@ The perf script's rows were measured 2026-10-12 on the reference machine with `a
 - **The offer's pane and the Ignore dialog read Later of the rule's kind once** when they open, every page of it, to count the open signals a rule would take. To do is already held by the shell. The read is kept under its own key, outside the signal lists, so a push for the `signal` topic does not read it again, and it is dropped when the last pane or dialog that reads it closes, so the next opening reads it fresh.
 - Nothing else reads more than before.
 
+**A message on its way into the session,** measured 2026-10-12 with `pnpm build:desktop`'s size checks, on the branch base 4e8be802 (Before) and on this change (After), for [#620](https://github.com/theagenticage/hercule/issues/620). This change adds no desktop process, timer, polling or live topic, and it changes nothing per streamed token: the thread's page reads the queued inputs the composer already reads and keeps live, and adds no block while nothing is sending, so the blocks keep their identity. Runtime memory, CPU and wakeups were not remeasured, because nothing in them changes.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Renderer JavaScript for the first screen, gzipped | 250 kB, guide | 322.6 kB across 22 chunks | 323.0 kB across 22 chunks |
+| Main's startup file, minified | 160 kB, guide | 150.2 kB | 150.2 kB |
+
+- **The first screen grows by 0.4 kB**: the rule that splits the queued inputs and the block for a message being sent. The renderer was already over its guide before this change.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
