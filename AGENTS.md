@@ -167,7 +167,7 @@ And one more, any time:
 pnpm format        # prettier --write
 ```
 
-`bun check` needs the Bun in `.bun-version`: Bun 1.4.0 fails with `Script not found "check"`. `bun check` is TypeScript 7. The `typescript` package stays on 6.0, because typescript-eslint and `scripts/dep-lint.ts` need its JavaScript API, which TypeScript 7 does not have. 6.0 is the release built to behave like 7, so the editor and `bun check` should agree; when they do not, `bun check` decides, because CI runs it. A rule that needs types goes in `.oxlintrc.json`, any other rule in `eslint.config.js`, and a comment that turns off an oxlint rule is written `// oxlint-disable-next-line typescript/<rule>`.
+`bun check` needs the Bun in `.bun-version`: Bun 1.4.0 fails with `Script not found "check"`. `bun check` is TypeScript 7. The `typescript` package stays on 6.0, because typescript-eslint and `scripts/dep-lint.ts` need its JavaScript API, which TypeScript 7 does not have. 6.0 is the release built to behave like 7, so the editor and `bun check` should agree; when they do not, `bun check` decides, because CI runs it. A rule that needs types goes in `.oxlintrc.json`, any other rule in `eslint.config.js`, and a comment that turns off an oxlint rule is written `// oxlint-disable-next-line typescript/<rule>`. oxlint does not report such a comment once the rule no longer fires, because its check for unused comments also reports every `eslint-disable` comment, so remove one by hand when the code it covered changes.
 
 Toolchain versions are pinned exactly, in `package.json` (`packageManager`, every dependency), in `.bun-version`, and in `.npmrc` (`save-exact=true`). Upgrading any of them is a deliberate, reviewed change.
 
