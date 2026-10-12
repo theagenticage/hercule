@@ -213,6 +213,9 @@ function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Elem
     // The controller saves only a source that parses, so this is a bug.
     throw new Error(`The saved source of the workflow "${workflowId}" does not parse.`);
   }
+  // The workflow with its switch's value, so what it shows follows a toggle
+  // before the save answers.
+  const shownWorkflow = { ...workflow, enabled: enabled.value };
 
   return (
     <section ref={setPane} className="open-pane" aria-labelledby={headingId}>
@@ -223,7 +226,7 @@ function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Elem
         description={definition.description}
         isEnabled={enabled.value}
         error={enabled.error}
-        chips={buildWorkflowChips(definition, enabled.value, triggers)}
+        chips={buildWorkflowChips(definition, shownWorkflow, triggers)}
         timezone={timezone}
         onToggle={() => {
           enabled.save(!enabled.value);
@@ -237,7 +240,7 @@ function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Elem
             agents,
             actions,
             instances,
-            isWorkflowEnabled: enabled.value,
+            workflow: shownWorkflow,
           })
         }
         plugins={plugins}
@@ -249,7 +252,7 @@ function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Elem
         workflowId={workflowId}
         source={workflow.source}
         definition={definition}
-        isEnabled={enabled.value}
+        workflow={shownWorkflow}
         switches={switches}
         runsView={runsView}
         daysBack={daysBack}

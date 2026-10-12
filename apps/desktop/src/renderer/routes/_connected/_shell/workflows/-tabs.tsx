@@ -2,7 +2,7 @@ import { Suspense, useId, useState, type JSX } from "react";
 import type { HerculeClient } from "@hercule/client-core";
 import { MAX_TIMELINE_DAYS_BACK } from "@hercule/client-core/timeline-limit";
 import { buildInputRows, buildTriggerRows } from "@hercule/client-core/workflow-detail-rows";
-import type { WorkflowDefinition } from "@hercule/contract";
+import type { Workflow, WorkflowDefinition } from "@hercule/contract";
 import {
   RunsViewPicker,
   TimelineDayStepper,
@@ -28,8 +28,9 @@ import type { TriggerSwitches } from "./-switches";
  *
  * - `source` is the workflow's saved source, which `definition` parses from;
  *   the Source tab shows it.
- * - `isEnabled` is the workflow's switch as shown, and `switches` are its
- *   start triggers' pause switches.
+ * - `workflow` is the workflow with its switch as shown. Its triggers are
+ *   off while it is disabled or invalid. `switches` are its start triggers'
+ *   pause switches.
  * - `runsView` and `daysBack` come from the URL: how the Runs tab shows its
  *   runs, and the day the timeline shows, counted back from today.
  * - `pane` is the open workflow's pane, which the Runs list scrolls in, or
@@ -43,7 +44,7 @@ export function WorkflowTabs({
   workflowId,
   source,
   definition,
-  isEnabled,
+  workflow,
   switches,
   runsView,
   daysBack,
@@ -54,7 +55,7 @@ export function WorkflowTabs({
   readonly workflowId: string;
   readonly source: string;
   readonly definition: WorkflowDefinition;
-  readonly isEnabled: boolean;
+  readonly workflow: Pick<Workflow, "enabled" | "invalidSince">;
   readonly switches: TriggerSwitches;
   readonly runsView: RunsView;
   readonly daysBack: number;
@@ -67,7 +68,7 @@ export function WorkflowTabs({
   const shown = useShownDay(daysBack, timezone, isTimelineShown);
   const { pickView, showDay } = useRunsNavigation();
   const { triggers } = switches;
-  const triggerRows = buildTriggerRows(definition, isEnabled, triggers);
+  const triggerRows = buildTriggerRows(definition, workflow, triggers);
   const inputRows = buildInputRows(definition);
 
   const panelProps = {
@@ -133,7 +134,7 @@ export function WorkflowTabs({
                 client={client}
                 workflowId={workflowId}
                 definition={definition}
-                isEnabled={isEnabled}
+                workflow={workflow}
                 triggers={triggers}
                 shown={shown}
                 timezone={timezone}
