@@ -883,7 +883,7 @@ export const connect = (
     );
 
     /**
-     * Waits for the proof, then starts the session relay and the periodic
+     * Waits for the proof, then attaches the session supervisor and starts the periodic
      * reports. The deadline applies only until the proof arrives. A deadline
      * that could fire on a proven connection would disconnect a healthy
      * runner every ten seconds.
