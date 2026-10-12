@@ -74,8 +74,10 @@ function Connections(): JSX.Element {
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const types = listConnectionTypes(plugins);
   const [dialog, setDialog] = useState<ConnectionsDialog | null>(null);
-  const closeDialog = (): void => {
-    setDialog(null);
+  // A dialog closes only itself: a reply that lands after the user closed a
+  // dialog, such as a late Delete, must not close the one opened since.
+  const closeDialog = (closing: ConnectionsDialog): void => {
+    setDialog((current) => (current === closing ? null : current));
   };
   const findType = (connection: Connection): ConnectionType | undefined =>
     types.find((type) => type.type === connection.type);
@@ -137,21 +139,27 @@ function Connections(): JSX.Element {
         <ConnectionSetupDialog
           type={dialog.type}
           {...(connection === undefined ? {} : { connection })}
-          onClose={closeDialog}
+          onClose={() => {
+            closeDialog(dialog);
+          }}
         />
       )}
       {dialog?.kind === "configure" && connection !== undefined && (
         <ConfigureConnectionDialog
           connection={connection}
           type={findType(connection)}
-          onClose={closeDialog}
+          onClose={() => {
+            closeDialog(dialog);
+          }}
         />
       )}
       {dialog?.kind === "delete" && connection !== undefined && (
         <DeleteConnectionDialog
           connection={connection}
           type={findType(connection)}
-          onClose={closeDialog}
+          onClose={() => {
+            closeDialog(dialog);
+          }}
         />
       )}
     </>

@@ -16,6 +16,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_GITHUB_CONNECTION,
+  holdAnswer,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -286,6 +287,32 @@ describe("Settings > Connections", () => {
     });
     expect(getRow("GitHub · rogier")).toBeUndefined();
     expect(document.querySelector(".set-note")).toBeNull();
+  });
+
+  it("keeps a dialog opened since when an earlier Delete answers late", async () => {
+    let stored: Connection[] = [HEALTHY, SIGN_IN];
+    const held = holdAnswer();
+    await openConnections({
+      connections: stored,
+      handlers: {
+        "GET /api/v1/connections": () => ({ body: { items: stored } }),
+        [`DELETE /api/v1/connections/${SIGN_IN.id}`]: held.handler,
+      },
+    });
+    await chooseItem(await openRowMenu("GitHub · work"), "Delete…");
+    const deleting = await screen.findByRole("dialog", { name: "Delete GitHub · work?" });
+    await userEvent.click(within(deleting).getByRole("button", { name: "Delete" }));
+    await userEvent.click(within(deleting).getByRole("button", { name: "Cancel" }));
+    await chooseItem(await openRowMenu("GitHub · rogier"), "Configure…");
+    await screen.findByRole("dialog", { name: "Configure GitHub · rogier" });
+
+    stored = [HEALTHY];
+    held.answer({ body: {} });
+
+    await waitFor(() => {
+      expect(getRow("GitHub · work")).toBeUndefined();
+    });
+    expect(screen.getByRole("dialog", { name: "Configure GitHub · rogier" })).toBeDefined();
   });
 
   it("closes a dialog whose Connection is removed elsewhere, and says why", async () => {
