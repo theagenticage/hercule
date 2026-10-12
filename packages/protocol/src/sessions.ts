@@ -765,7 +765,8 @@ const SubagentStarted = defineEvent("subagent.started", {
  * id: with a decision, or with the answers to its questions.
  */
 export type RequestResolution =
-  { readonly decision: ApprovalDecision } | { readonly answers: QuestionAnswers };
+  | { readonly decision: ApprovalDecision }
+  | { readonly answers: QuestionAnswers };
 
 export const ProviderEvent = Schema.Union([
   SessionStarted,

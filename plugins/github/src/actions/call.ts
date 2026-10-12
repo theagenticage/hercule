@@ -49,7 +49,8 @@ import { GITHUB_CONNECTION_TYPE } from "../connection-type";
  * `signal.answer` and writes its own describe line, and usually its outcome.
  */
 type GithubActionPlacement =
-  Pick<WorkflowStepAction, "usableIn"> | Pick<AnswerAction, "usableIn" | "describe" | "outcome">;
+  | Pick<WorkflowStepAction, "usableIn">
+  | Pick<AnswerAction, "usableIn" | "describe" | "outcome">;
 
 /**
  * A GitHub workflow action as this plugin writes it: its id, names, schemas

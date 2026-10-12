@@ -126,7 +126,11 @@ export interface CoreNotification {
  *   decision lists the subject, or the open ones do not offer the answer.
  */
 export type AnsweredDecisionsOutcome =
-  "decided" | "already-decided" | "already-handled" | "already-withdrawn" | "none";
+  | "decided"
+  | "already-decided"
+  | "already-handled"
+  | "already-withdrawn"
+  | "none";
 
 /**
  * The refusal for a user who calls `notification.create`. The user holds every

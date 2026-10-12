@@ -96,7 +96,9 @@ interface Preparation {
 /** Returns the native thread named by a notification or a server request. */
 export const readCodexThreadId = (frame: CodexThreadFrame): string | undefined => {
   const params = frame.params as
-    { readonly threadId?: unknown; readonly thread?: { readonly id?: unknown } } | null | undefined;
+    | { readonly threadId?: unknown; readonly thread?: { readonly id?: unknown } }
+    | null
+    | undefined;
   const id = params?.threadId ?? params?.thread?.id;
   return typeof id === "string" && id !== "" ? id : undefined;
 };

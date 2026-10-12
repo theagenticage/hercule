@@ -19,7 +19,9 @@ import type { WaitingRunSession } from "./waiting";
  * shows its words in the mark's place.
  */
 export type RunMarkState =
-  Extract<Pose, "waiting" | "working" | "done" | "failed"> | "cancelled" | "starting";
+  | Extract<Pose, "waiting" | "working" | "done" | "failed">
+  | "cancelled"
+  | "starting";
 
 /**
  * Checks whether a run in `state` has a mark of its own. Returns false for

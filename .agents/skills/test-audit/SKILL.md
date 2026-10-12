@@ -153,7 +153,7 @@ Never edit source or tests while Vitest is running in the checkout.
    `bun --bun run vitest run --project node --project node-isolated <path-or-filter>`.
 2. For removed source greps or plan assertions, run the executable script or
    dry-run that owns the real contract.
-3. Run targeted formatting (`prettier --write <paths>`), then
+3. Run targeted formatting (`pnpm exec oxfmt <paths>`), then
    `git diff --check`.
 4. Run the full gate from `AGENTS.md`: `pnpm typecheck`, `pnpm lint`,
    `pnpm test`, `pnpm dep-lint`.

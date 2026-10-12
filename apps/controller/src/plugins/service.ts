@@ -51,7 +51,12 @@ type PluginWriteKind =
  * does not come through a transport is checked like a request.
  */
 type PluginWriteError =
-  Unauthenticated | Forbidden | NotFound | Validation | SqlError | Schema.SchemaError;
+  | Unauthenticated
+  | Forbidden
+  | NotFound
+  | Validation
+  | SqlError
+  | Schema.SchemaError;
 
 type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
 

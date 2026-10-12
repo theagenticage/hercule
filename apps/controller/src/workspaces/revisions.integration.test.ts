@@ -268,7 +268,8 @@ describe("workspace revisions through the public API and runner socket", () => {
         if (earlyResponse !== undefined)
           expect(earlyResponse.status, "inspection returned before asking the runner").toBe(200);
         return listFramesTagged(arranged.wire, "workspaceInspect")[0] as
-          { _tag: "workspaceInspect"; requestId: string; workspaceId: string } | undefined;
+          | { _tag: "workspaceInspect"; requestId: string; workspaceId: string }
+          | undefined;
       });
       expect(inspection.workspaceId).toBe(primary.id);
       const report: WorkspaceReport = await Effect.runPromise(manager.inspect(primary.id));
@@ -442,7 +443,8 @@ describe("workspace revisions through the public API and runner socket", () => {
         "inspection during preparation",
         () =>
           listFramesTagged(arranged.wire, "workspaceInspect")[0] as
-            { requestId: string } | undefined,
+            | { requestId: string }
+            | undefined,
       );
       arranged.wire.send({
         _tag: "workspaceInspection",
@@ -539,7 +541,8 @@ describe("workspace revisions through the public API and runner socket", () => {
           "ordered inspection",
           () =>
             listFramesTagged(arranged.wire, "workspaceInspect")[before] as
-              { requestId: string } | undefined,
+              | { requestId: string }
+              | undefined,
         );
         arranged.wire.send({ _tag: "workspaceInspection", requestId: request.requestId, report });
         const response = await pending;
@@ -599,7 +602,8 @@ describe("workspace revisions through the public API and runner socket", () => {
         "unavailable inspection while preparing",
         () =>
           listFramesTagged(arranged.wire, "workspaceInspect")[0] as
-            { requestId: string } | undefined,
+            | { requestId: string }
+            | undefined,
       );
       const message = "The selected checkout is missing. Restore its files and inspect again.";
       arranged.wire.send({
@@ -678,7 +682,8 @@ describe("workspace revisions through the public API and runner socket", () => {
         "readable preparation inspection",
         () =>
           listFramesTagged(arranged.wire, "workspaceInspect")[0] as
-            { requestId: string } | undefined,
+            | { requestId: string }
+            | undefined,
       );
       arranged.wire.send({
         _tag: "workspaceInspection",
@@ -767,7 +772,8 @@ describe("workspace revisions through the public API and runner socket", () => {
         "missing managed main inspection",
         () =>
           listFramesTagged(arranged.wire, "workspaceInspect")[0] as
-            { requestId: string } | undefined,
+            | { requestId: string }
+            | undefined,
       );
       arranged.wire.send({
         _tag: "workspaceInspection",

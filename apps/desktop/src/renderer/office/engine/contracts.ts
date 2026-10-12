@@ -206,7 +206,13 @@ export interface CameraView {
  * threads with no project; the others are the fixed rooms and the corridors.
  */
 export type RoomKind =
-  "project" | "triage-room" | "your-office" | "secretariat" | "lounge" | "lobby" | "hall";
+  | "project"
+  | "triage-room"
+  | "your-office"
+  | "secretariat"
+  | "lounge"
+  | "lobby"
+  | "hall";
 
 /** A room the user can jump to. */
 export interface RoomInfo {

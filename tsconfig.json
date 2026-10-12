@@ -16,8 +16,7 @@
     "scripts/**/*.ts",
     "install.test.ts",
     "vitest.config.ts",
-    "eslint.config.js",
-    "prettier.config.js"
+    "eslint.config.js"
   ],
   "exclude": [
     "**/node_modules",

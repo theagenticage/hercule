@@ -142,7 +142,8 @@ const buildField = (
 
 /** The run form of a stored workflow: its fields, or why the form cannot have any. */
 export type RunFormReading =
-  { readonly fields: ReadonlyArray<RunInputField> } | { readonly refusal: string };
+  | { readonly fields: ReadonlyArray<RunInputField> }
+  | { readonly refusal: string };
 
 /**
  * Returns the run form's fields for a stored workflow's source, one per
@@ -198,7 +199,8 @@ export const buildRunInputDraft = (fields: ReadonlyArray<RunInputField>): RunInp
 
 /** The result of reading a draft: the inputs to send, or the fields whose text cannot be read. */
 export type RunInputsReading =
-  { readonly inputs: RunInputs } | { readonly errors: Readonly<Record<string, string>> };
+  | { readonly inputs: RunInputs }
+  | { readonly errors: Readonly<Record<string, string>> };
 
 /**
  * Converts a draft into the `inputs` of a run. An empty field and a checkbox

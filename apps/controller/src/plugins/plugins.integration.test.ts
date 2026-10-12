@@ -471,7 +471,8 @@ describe("the Intake settings of a plugin", () => {
         [mentioned]: "on@default",
       });
       const firstSignalKind = detail.intake.signalKinds[0] as
-        { label: string; description: string } | undefined;
+        | { label: string; description: string }
+        | undefined;
       expect(firstSignalKind?.label).toBe("Asked");
       expect(firstSignalKind?.description).not.toBe("");
       expect(detail.intake.eventKinds[0]).toMatchObject({ description: "Something was opened." });

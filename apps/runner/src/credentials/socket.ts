@@ -21,7 +21,8 @@ const MAX_QUESTION_BYTES = 64 * 1024;
 
 /** A credential request: the remote, plus exactly one of a session token or a workspace id. */
 export type CredentialAsk = { readonly remote: string } & (
-  { readonly sessionToken: string } | { readonly workspaceId: string }
+  | { readonly sessionToken: string }
+  | { readonly workspaceId: string }
 );
 
 /** The helper's request: one JSON line. The reply is also one JSON line. */

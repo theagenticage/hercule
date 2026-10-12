@@ -105,7 +105,12 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
  * is always a `SessionInputResult`.
  */
 export type Request =
-  ProbeRequest | InstallRequest | LoginStart | LoginCode | WorkspaceInspect | TextGenerationRequest;
+  | ProbeRequest
+  | InstallRequest
+  | LoginStart
+  | LoginCode
+  | WorkspaceInspect
+  | TextGenerationRequest;
 
 /**
  * What came of sending a frame the runner answers:
@@ -115,7 +120,8 @@ export type Request =
  *   when the connection ended or no answer came in time.
  */
 export type SendOutcome<A> =
-  { readonly _tag: "notSent" } | { readonly _tag: "sent"; readonly answer: Option.Option<A> };
+  | { readonly _tag: "notSent" }
+  | { readonly _tag: "sent"; readonly answer: Option.Option<A> };
 
 const NOT_SENT: SendOutcome<never> = { _tag: "notSent" };
 

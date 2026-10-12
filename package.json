@@ -7,8 +7,8 @@
   "scripts": {
     "prepare": "bun run scripts/gen-version.ts && bun run scripts/gen-web-bundle.ts",
     "typecheck": "bun check -p tsconfig.json && bun check -p packages/ui/tsconfig.json && bun check -p apps/web/tsconfig.json && bun check -p apps/desktop/tsconfig.renderer.json && bun check -p apps/desktop/tsconfig.node.json && bun check -p e2e/desktop/tsconfig.json",
-    "lint": "oxlint --type-aware --deny-warnings && eslint . --max-warnings 0 && prettier --check .",
-    "format": "prettier --write .",
+    "lint": "oxlint --type-aware --deny-warnings && eslint . --max-warnings 0 && oxfmt --check",
+    "format": "oxfmt",
     "test": "bun --bun run vitest run --project node --project node-isolated && vitest run --project react --project desktop-main --project desktop-renderer",
     "test:binary": "bun --bun run vitest run --project binary",
     "dep-lint": "bun run scripts/dep-lint.ts",
@@ -30,10 +30,10 @@
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.12.0",
     "jsdom": "30.0.1",
+    "oxfmt": "0.72.0",
     "oxlint": "1.87.0",
     "oxlint-tsgolint": "7.0.2004",
     "playwright": "1.63.0",
-    "prettier": "3.9.6",
     "typescript": "6.0.3",
     "typescript-eslint": "8.69.0",
     "vitest": "4.1.11"

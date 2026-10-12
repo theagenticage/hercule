@@ -30,7 +30,12 @@ import { Placement } from "./placement";
 
 /** An error placement or the live session operations refuse a step's session with. */
 type SessionRefusal =
-  InvalidState | NotFound | Validation | GrantsError | SettingError | Schema.SchemaError;
+  | InvalidState
+  | NotFound
+  | Validation
+  | GrantsError
+  | SettingError
+  | Schema.SchemaError;
 
 /** Returns the message of a refusal, with each issue of a `Validation` after it. */
 const describeSessionRefusal = (refusal: SessionRefusal): string => {
