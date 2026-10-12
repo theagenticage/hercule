@@ -38,7 +38,8 @@ const BODY_RADIUS = 0.26;
 
 /** What the overlay shows under a point of the page: a colleague's name tag, or a room label. */
 export type OverlayHit =
-  { readonly kind: "tag"; readonly colleagueId: string } | { readonly kind: "room" };
+  | { readonly kind: "tag"; readonly colleagueId: string }
+  | { readonly kind: "room" };
 
 /** A function that returns what the overlay shows under a point of the page, or null for nothing. */
 type OverlayHitTest = (clientX: number, clientY: number) => OverlayHit | null;

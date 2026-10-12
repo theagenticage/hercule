@@ -65,7 +65,12 @@ export const SETUP_LIFETIME_MS = 10 * 60 * 1000;
  * message cannot name the two accounts.
  */
 export type Outcome =
-  "ok" | "denied" | "expired" | "exchange-failed" | "rejected" | "other-account";
+  | "ok"
+  | "denied"
+  | "expired"
+  | "exchange-failed"
+  | "rejected"
+  | "other-account";
 
 /** The query string the browser brings to the callback. */
 const CallbackQuery = Schema.Struct({

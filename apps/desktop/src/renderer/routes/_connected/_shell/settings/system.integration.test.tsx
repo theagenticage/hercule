@@ -114,7 +114,8 @@ describe("Settings > System, text generation", () => {
    */
   const openSystem = async (
     status:
-      ControllerInfo["textGeneration"] | ((stored: unknown) => ControllerInfo["textGeneration"]),
+      | ControllerInfo["textGeneration"]
+      | ((stored: unknown) => ControllerInfo["textGeneration"]),
     setting?: unknown,
   ): Promise<readonly Call[]> => {
     // The stubbed controller keeps what a save stores, so the read after a save finds it.

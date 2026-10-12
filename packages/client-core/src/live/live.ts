@@ -132,7 +132,12 @@ export type LiveDeltaHandler = (delta: LiveDelta) => void;
  * leaves them.
  */
 export type LiveStatus =
-  "idle" | "connecting" | "connected" | "disconnected" | "unauthenticated" | "stopped";
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "unauthenticated"
+  | "stopped";
 
 export interface Live {
   /**
@@ -175,7 +180,13 @@ interface Subscription {
 
 /** The errors a subscription's stream can fail with: a controller error, or a transport error. */
 type LiveFailure =
-  Unauthenticated | Forbidden | Validation | NotFound | CapExceeded | Internal | RpcClientError;
+  | Unauthenticated
+  | Forbidden
+  | Validation
+  | NotFound
+  | CapExceeded
+  | Internal
+  | RpcClientError;
 
 /** The RPC client for the contract's live group, on one connection. */
 type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof liveGroup>, RpcClientError>;

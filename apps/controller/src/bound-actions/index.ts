@@ -64,7 +64,8 @@ export interface PluginAnswerOperation {
  * decoded input, or a plugin's action.
  */
 export type CheckedOperation<Place extends AnswerPlace = AnswerPlace> =
-  AnswerOperation<Place> | PluginAnswerOperation;
+  | AnswerOperation<Place>
+  | PluginAnswerOperation;
 
 /**
  * Checks whether a checked operation is a plugin's action. A plugin action's

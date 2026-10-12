@@ -141,7 +141,8 @@ const waitForDisposed = async (
     "reserved disposal before runner I/O",
     () =>
       listFramesTagged(wire, "workspaceDispose").find((item) => item["workspaceId"] === id) as
-        WorkspaceDispose | undefined,
+        | WorkspaceDispose
+        | undefined,
   );
   expect((await readWorkspace(arranged, id)).status).toBe("disposing");
   expect(frame.discardChanges ?? false).toBe(false);

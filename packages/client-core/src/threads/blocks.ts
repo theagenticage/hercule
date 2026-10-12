@@ -165,7 +165,13 @@ export interface WarningBlock {
 }
 
 export type ThreadBlock =
-  UserBlock | WorkBlock | AgentBlock | EndingBlock | PendingBlock | WaitingBlock | WarningBlock;
+  | UserBlock
+  | WorkBlock
+  | AgentBlock
+  | EndingBlock
+  | PendingBlock
+  | WaitingBlock
+  | WarningBlock;
 
 interface BuildingTurn {
   readonly turnId: string;
@@ -208,7 +214,12 @@ interface BuildingEnding {
 }
 
 type Slot =
-  UserBlock | BuildingStretch | BuildingAgent | BuildingEnding | WaitingBlock | WarningBlock;
+  | UserBlock
+  | BuildingStretch
+  | BuildingAgent
+  | BuildingEnding
+  | WaitingBlock
+  | WarningBlock;
 
 /**
  * Returns the files an item touched, as its detail names them, or `[]` for an

@@ -57,7 +57,8 @@ export const Route = createFileRoute("/_shell/settings/assistants")({
 
 /** What the user asked to do next that would throw away the form's unsaved edits. */
 type Leaving =
-  { readonly _tag: "select"; readonly assistantId: string } | { readonly _tag: "create" };
+  | { readonly _tag: "select"; readonly assistantId: string }
+  | { readonly _tag: "create" };
 
 /**
  * Renders the Assistants settings screen: the list of assistants, a button

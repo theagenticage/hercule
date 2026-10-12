@@ -177,7 +177,8 @@ const DEFAULT_WINDOW = { minute: 0, fromHour: 7, toHour: 23 };
 
 /** The outcome of an edit to a heartbeat window: the window to save, or why the edit is refused. */
 export type HeartbeatWindowEdit =
-  { readonly window: HeartbeatWindow; readonly error?: never } | { readonly error: string };
+  | { readonly window: HeartbeatWindow; readonly error?: never }
+  | { readonly error: string };
 
 /**
  * Returns `current` with the interval set to `intervalHours`, its end moved

@@ -95,7 +95,8 @@ describe("the HttpApi declaration", () => {
       readonly required?: ReadonlyArray<string>;
     }
     const create = OpenApi.fromApi(api).paths["/api/v1/workflows"]?.post as
-      { requestBody: { content: Record<string, { schema: SchemaPart }> } } | undefined;
+      | { requestBody: { content: Record<string, { schema: SchemaPart }> } }
+      | undefined;
     const definition =
       create?.requestBody.content["application/json"]?.schema.properties?.["definition"];
     expect(Object.keys(definition?.properties ?? {})).toEqual([

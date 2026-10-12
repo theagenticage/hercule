@@ -132,7 +132,13 @@ export function SkippedMark(props: MarkProps): JSX.Element {
  * ran.
  */
 export type WorkState =
-  "pending" | "running" | "completed" | "failed" | "cancelled" | "skipped" | "unreached";
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "skipped"
+  | "unreached";
 
 /**
  * The hue of the words beside a state mark: the live hue while the work runs,

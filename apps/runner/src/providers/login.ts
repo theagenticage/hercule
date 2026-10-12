@@ -55,7 +55,9 @@ export interface LoginCommand {
 
 /** The login frames minus the request id, which belongs to the connection. */
 export type LoginAnswer =
-  Omit<LoginUrl, "requestId"> | Omit<LoginFailed, "requestId"> | Omit<LoginResult, "requestId">;
+  | Omit<LoginUrl, "requestId">
+  | Omit<LoginFailed, "requestId">
+  | Omit<LoginResult, "requestId">;
 
 /**
  * How long a login may sit idle before it is killed. Without a limit, a

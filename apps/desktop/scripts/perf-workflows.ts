@@ -434,7 +434,13 @@ export const openWorkflowOnce = (userDataDir: string, workflowId: string): Promi
 
 /** What a read is for, by its URL. */
 type ReadKind =
-  "strip" | "liveRuns" | "workflowRuns" | "dayRuns" | "otherRuns" | "liveSessions" | "other";
+  | "strip"
+  | "liveRuns"
+  | "workflowRuns"
+  | "dayRuns"
+  | "otherRuns"
+  | "liveSessions"
+  | "other";
 
 /** The reads of the live runs in one round: the `running` runs and the `pending` ones. */
 const LIVE_RUN_READS = 2;
