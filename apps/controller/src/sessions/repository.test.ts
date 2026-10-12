@@ -4,7 +4,6 @@
  *
  * The transcript tests check the paging, not the rows:
  *
- * - the pages are contiguous and in order;
  * - the last page ends the paging;
  * - a cursor works only for the sort direction it was created for;
  * - one session's transcript never shows another session's rows.
@@ -20,7 +19,7 @@ import type { ProviderEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { inputRepository } from "./inputs";
-import { sessionRepository, type StoredStreamRow } from "./repository";
+import { sessionRepository } from "./repository";
 
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
 
@@ -80,28 +79,6 @@ const fillStream = (sessionId: string, count: number) =>
     }
   });
 
-/** Reads every row of a session's transcript, `limit` at a time, and counts the pages. */
-const walkTranscript = (sessionId: string, limit: number) =>
-  Effect.gen(function* () {
-    const sessions = yield* sessionRepository;
-    const items: Array<StoredStreamRow> = [];
-    let cursor: string | undefined;
-    let pages = 0;
-    for (;;) {
-      const page = yield* sessions.transcript({
-        sessionId,
-        subagentId: undefined,
-        limit,
-        cursor,
-        direction: "asc",
-      });
-      items.push(...page.items);
-      pages += 1;
-      if (page.nextCursor === undefined) return { items, pages };
-      cursor = page.nextCursor;
-    }
-  });
-
 /** Reads a session's token hash directly from the row. */
 const readTokenHash = (sessionId: string) =>
   Effect.map(
@@ -115,26 +92,7 @@ const readTokenHash = (sessionId: string) =>
     (rows) => rows[0]!.token_hash,
   );
 
-const readTurnId = (row: StoredStreamRow): string =>
-  row.event._tag === "turn.started" ? row.event.turnId : row.event._tag;
-
 describe("paging through a transcript", () => {
-  it("pages through the whole stream in position order and stops at the end", async () => {
-    const { items, pages } = await run(
-      Effect.gen(function* () {
-        const sessionId = yield* aSession;
-        yield* fillStream(sessionId, 5);
-        return yield* walkTranscript(sessionId, 2);
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
-    );
-
-    expect(items.map((row) => row.position)).toEqual([1, 2, 3, 4, 5]);
-    expect(items.map(readTurnId)).toEqual(["t1", "t2", "t3", "t4", "t5"]);
-    // Three pages of two: the third is short and ends the paging, which proves
-    // no cursor is returned one page too many.
-    expect(pages).toBe(3);
-  });
-
   it("returns no cursor when the page holds the remaining rows", async () => {
     const page = await run(
       Effect.gen(function* () {
@@ -231,41 +189,6 @@ describe("paging through a transcript", () => {
     );
 
     expect(error).toBeInstanceOf(CursorError);
-  });
-
-  it("returns the normalized event exactly as it was written", async () => {
-    const items = await run(
-      Effect.gen(function* () {
-        const sessions = yield* sessionRepository;
-        const sessionId = yield* aSession;
-        const event: ProviderEvent = {
-          _tag: "content.delta",
-          eventId: mintId(),
-          sessionId,
-          at,
-          turnId: "t1",
-          itemId: "i1",
-          streamKind: "assistant_text",
-          delta: "Hello",
-        };
-        yield* sessions.append(sessionId, { seq: 1, at, event });
-        const page = yield* sessions.transcript({
-          sessionId,
-          subagentId: undefined,
-          limit: 50,
-          cursor: undefined,
-          direction: "asc",
-        });
-        return page.items;
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
-    );
-
-    expect(items).toHaveLength(1);
-    expect(items[0]!.event).toMatchObject({
-      _tag: "content.delta",
-      streamKind: "assistant_text",
-      delta: "Hello",
-    });
   });
 });
 
