@@ -86,6 +86,16 @@ async function runElectron(
       // The CPU keeps each difference in its own cell, and draws the same
       // pixels on any machine, including CI's virtual Macs.
       "--disable-gpu-rasterization",
+      // Each change to a page redraws its tiles whole. By default Chromium
+      // redraws only the changed part of a tile, and an antialiased edge
+      // that crosses that part's border can come out different. A book page
+      // is drawn by the book's script and again after the reference module's
+      // edits, and whether the first drawing had reached the tiles depends
+      // on timing. So the same book page came out two ways, about one load
+      // in two, though its layout was the same to the sub-pixel: the graph's
+      // curved edges differed by up to 41 levels, and the Timeline button's
+      // corner by 1.
+      "--disable-partial-raster",
       // The app's scroll bars are the system's overlay scroll bars, which
       // macOS draws only while a page scrolls (spec 17). A captured window
       // draws its scroll bars all the time, and the book styles its own, so

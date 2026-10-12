@@ -1409,11 +1409,14 @@ describe("Intake's motion", () => {
 
 describe("Intake's Everything view", () => {
   // Intake loads Everything's screen lazily, and the first import compiles
-  // it with the React Compiler. On a busy CI runner that compile can outlast
-  // a test's one-second wait for the screen, so it happens once, here.
+  // it with the React Compiler. On a busy CI runner that compile outlasted a
+  // test's one-second wait for the screen, so it happens once, here, and the
+  // tests below only draw a module that is already loaded. The hook has no
+  // time limit: how long the compile takes depends on the machine, not on
+  // the code, and a compile always ends.
   beforeAll(async () => {
     await import("../../../screens/intake/everything-screen");
-  });
+  }, 0);
 
   it("switches to Everything, which reads Intake's events newest first and states the horizon", async () => {
     const events = [1, 2, 3].map((id) => buildListedEvent(id));

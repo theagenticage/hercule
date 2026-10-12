@@ -1480,39 +1480,46 @@ describe("refreshing a runner's facts on demand", () => {
   });
 
   it("answers two callers waiting at once with the same report", async () => {
-    await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
-      const joined = await enlist(harness);
-      const { wire } = await greet(harness.base, joined.credential);
-      try {
-        await waitForRunner(
-          harness.base,
-          token,
-          joined.runnerId,
-          (one) => one.connectivity === "online",
-        );
+    // The callers wait with no deadline. The test is about two callers sharing
+    // one report, not about the deadline, so the report is the only way for it
+    // to end. With the ten-second default, a CI runner busy enough to delay the
+    // report past the deadline failed the test with a 409.
+    await withServer(
+      async (harness) => {
+        const token = await completeSetupWithNoProviderInstance(harness);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        try {
+          await waitForRunner(
+            harness.base,
+            token,
+            joined.runnerId,
+            (one) => one.connectivity === "online",
+          );
 
-        // Two presses of the same button. Neither may be told the runner did
-        // not answer just because the other caller got the report.
-        const both = [
-          refreshFacts(harness.base, token, joined.runnerId),
-          refreshFacts(harness.base, token, joined.runnerId),
-        ];
-        // Each caller sends its own request after it starts waiting. Answering
-        // after both arrived makes sure both wait, however slowly the second
-        // call reaches the controller.
-        await expectFactsRequest(wire);
-        await expectFactsRequest(wire);
-        wire.send({ _tag: "factsReport", facts: GROWN });
+          // Two presses of the same button. Neither may be told the runner did
+          // not answer just because the other caller got the report.
+          const both = [
+            refreshFacts(harness.base, token, joined.runnerId),
+            refreshFacts(harness.base, token, joined.runnerId),
+          ];
+          // Each caller sends its own request after it starts waiting. Answering
+          // after both arrived makes sure both wait, however slowly the second
+          // call reaches the controller.
+          await expectFactsRequest(wire);
+          await expectFactsRequest(wire);
+          wire.send({ _tag: "factsReport", facts: GROWN });
 
-        for (const response of await Promise.all(both)) {
-          expect(response.status, await response.clone().text()).toBe(200);
-          expect(((await response.json()) as RunnerDetail).facts).toEqual(GROWN);
+          for (const response of await Promise.all(both)) {
+            expect(response.status, await response.clone().text()).toBe(200);
+            expect(((await response.json()) as RunnerDetail).facts).toEqual(GROWN);
+          }
+        } finally {
+          wire.close();
         }
-      } finally {
-        wire.close();
-      }
-    });
+      },
+      { factsDeadline: Duration.infinity },
+    );
   });
 
   it("sends a new request after one that was never answered, and the next report arrives", async () => {
