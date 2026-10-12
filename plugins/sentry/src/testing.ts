@@ -295,6 +295,9 @@ export const buildFakeWorld = (issues: Array<FakeIssue> = []): FakeWorld => ({
 /** Returns the numeric part of an id as a number, to sort ids the way Sentry does. */
 const toNumber = (id: string): number => Number(id);
 
+/** The fields of an issue that Sentry's list leaves out when it is asked for `collapse=stats`. */
+const SEEN_STATS: ReadonlyArray<string> = ["firstSeen", "lastSeen", "count", "userCount"];
+
 /** Renders an issue as the list and the detail endpoint do. */
 export const renderFakeIssue = (world: FakeWorld, issue: FakeIssue): Record<string, unknown> => {
   const project = world.projects.find((candidate) => candidate.id === issue.projectId);
@@ -550,9 +553,15 @@ const answerFromWorld = (world: FakeWorld, request: FakeRequest): StubResponse =
           Date.parse(second.firstSeen) - Date.parse(first.firstSeen) ||
           toNumber(second.id) - toNumber(first.id),
       );
+    // Like Sentry, `collapse=stats` drops the seen stats along with the graphs.
+    const dropped = request.params.getAll("collapse").includes("stats") ? SEEN_STATS : [];
     return buildPage(
       request,
-      matching.map((issue) => renderFakeIssue(world, issue)),
+      matching.map((issue) =>
+        Object.fromEntries(
+          Object.entries(renderFakeIssue(world, issue)).filter(([key]) => !dropped.includes(key)),
+        ),
+      ),
       Number(request.params.get("limit") ?? "25"),
     );
   }

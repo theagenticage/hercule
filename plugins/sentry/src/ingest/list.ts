@@ -17,13 +17,14 @@ const PAGE_SIZE = 100;
 export const MAX_WATCHED_ISSUES = PAGE_SIZE * MAX_LIST_PAGES;
 
 /**
- * Parameters every issue list asks for. `collapse=stats` leaves out the
- * graphs, which are large and unused. `collapse=lifetime` is never asked for,
- * because it makes the list slow and fails for a large organization.
+ * Parameters every issue list asks for. An empty `groupStatsPeriod` leaves out
+ * the graphs, which are large and unused. `collapse=stats` would leave them
+ * out too, but Sentry then also drops `firstSeen`, `lastSeen`, `count` and
+ * `userCount`, which every issue needs, so it is never sent.
  */
 const LIST_PARAMETERS: ReadonlyArray<readonly [string, string]> = [
   ["limit", String(PAGE_SIZE)],
-  ["collapse", "stats"],
+  ["groupStatsPeriod", ""],
 ];
 
 const issuesPath = (access: OrganizationAccess): string =>
