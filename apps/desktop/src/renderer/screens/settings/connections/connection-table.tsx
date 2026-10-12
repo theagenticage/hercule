@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import {
   describeConnectionHealth,
+  describeConnectionTypeName,
   showsAccountBesideLabel,
   type ConnectionType,
   type PluginIdentity,
@@ -28,7 +29,8 @@ import "./connections.css";
  *   `onDelete` with the Connection.
  *
  * With no Connection, a quiet note takes the table's place, as Settings >
- * Assistants draws one with no assistant.
+ * Assistants draws one with no assistant. It points to Add a Connection, or,
+ * when `types` is empty, says that no installed plugin offers a type.
  */
 export function ConnectionTable({
   connections,
@@ -53,9 +55,13 @@ export function ConnectionTable({
         <span>The accounts Hercule acts through</span>
       </div>
       {connections.length === 0 ? (
-        <div className="connection-list-empty">
+        <div className="set-empty">
           <b>No Connections yet</b>
-          <span>A Connection is an account Hercule acts through, and where work comes from.</span>
+          <span>
+            {types.length === 0
+              ? "No installed plugin offers a Connection type, so there is nothing to add yet."
+              : "Events come in through a Connection, and agents act through it. Add one with Add a Connection."}
+          </span>
         </div>
       ) : (
         <>
@@ -67,7 +73,7 @@ export function ConnectionTable({
           </div>
           {connections.map((connection) => {
             const type = types.find((each) => each.type === connection.type);
-            const name = `${type?.displayName ?? connection.type} · ${connection.label}`;
+            const name = `${describeConnectionTypeName(connection, type)} · ${connection.label}`;
             const health = describeConnectionHealth(connection);
             return (
               <div key={connection.id} className={health.failing ? "conn is-fail" : "conn"}>

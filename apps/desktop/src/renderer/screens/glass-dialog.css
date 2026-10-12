@@ -19,6 +19,12 @@
 .glass-dialog::backdrop {
   background: var(--scrim);
 }
+/* A title may name a record by a long value, such as a Connection's label of
+   up to 128 characters, so it wraps anywhere rather than overflow the
+   dialog. */
+.glass-dialog .pop-h b {
+  overflow-wrap: anywhere;
+}
 
 /* A dialog that asks before something changes or goes, such as a Delete in
    Settings: a title, a few lines of text, and Cancel and the action. Not in

@@ -19,7 +19,8 @@ import "./connections.css";
  *
  * With no type, there is nothing to add, so the button cannot open the menu,
  * and its tooltip says why. It is `aria-disabled` rather than `disabled`,
- * because the browser shows no tooltip on a disabled button.
+ * because the browser shows no tooltip on a disabled button, and it keeps
+ * its pointer events, unlike the shared dimmed button, for the same reason.
  */
 export function AddConnectionMenu({
   types,
@@ -35,9 +36,8 @@ export function AddConnectionMenu({
     return (
       <button
         type="button"
-        className="btn btn--sm"
+        className="btn btn--sm add-conn"
         aria-disabled="true"
-        data-unready=""
         title="No installed plugin offers a Connection type."
       >
         <PlusIcon size={14} />
@@ -56,7 +56,7 @@ export function AddConnectionMenu({
         popover="auto"
         role="menu"
         aria-label="Add a Connection"
-        className="pop conn-menu add-conn-menu"
+        className="pop popover-menu conn-menu add-conn-menu"
       >
         {types.map((type) => (
           <button

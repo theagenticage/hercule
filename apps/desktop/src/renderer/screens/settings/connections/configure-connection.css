@@ -14,13 +14,18 @@
 }
 /* `.pop-sec:first-child` drops the rule above a menu's first section. The
    fields are the form's first child, but the dialog's header sits above
-   them, so they keep the rule; the extra class outranks that rule. */
+   them, so they keep the rule; the extra class outranks that rule. The
+   fields sit in a fieldset, so the browser's margin, border and minimum
+   width for one are reset. */
 .configure-connection-form > .pop-sec.configure-connection-body {
   display: grid;
   gap: 18px;
+  min-width: 0;
   min-height: 0;
+  margin: 0;
   padding: 14px;
   overflow-y: auto;
+  border: 0;
   border-top: 1px solid var(--line-soft);
 }
 /* A group of fields: Name and Topic, the type's settings, and Polling. Each

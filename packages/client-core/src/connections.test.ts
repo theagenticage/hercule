@@ -16,11 +16,6 @@ import {
   DEVICE_CODE_EXPIRED,
   describeSignInEnding,
   describeSignInFailure,
-  describeConnectionHealth,
-  describeSetupFlow,
-  summarizeConnectionType,
-  buildFlowSwitchLabel,
-  findOAuthConnection,
   waitForDeviceFlow,
   describeFeedName,
   describeFeedInterval,
@@ -40,31 +35,6 @@ describe("connectionNeedsAttention", () => {
     for (const status of ConnectionStatus.literals) {
       expect(connectionNeedsAttention({ status }), status).toBe(needsAttention.includes(status));
     }
-  });
-});
-
-describe("describeConnectionHealth", () => {
-  it("words every status, drawing only an error as a failure", () => {
-    expect(describeConnectionHealth({ status: "connected" })).toEqual({
-      text: "healthy",
-      failing: false,
-    });
-    expect(describeConnectionHealth({ status: "needs-reauth" })).toEqual({
-      text: "needs sign-in",
-      failing: false,
-    });
-    expect(describeConnectionHealth({ status: "disabled" })).toEqual({
-      text: "disabled",
-      failing: false,
-    });
-    expect(
-      describeConnectionHealth({ status: "error", statusDetail: "rate limited by GitHub" }),
-    ).toEqual({ text: "rate limited by GitHub", failing: true });
-  });
-
-  it("says error when the controller gave no detail", () => {
-    expect(describeConnectionHealth({ status: "error" }).text).toBe("error");
-    expect(describeConnectionHealth({ status: "error", statusDetail: "  " }).text).toBe("error");
   });
 });
 
@@ -327,85 +297,6 @@ describe("listSetupFlows", () => {
     expect(listSetupFlows(withSetup([]))).toEqual([]);
     expect(listSetupFlows(withSetup([unknown]))).toEqual([]);
     expect(listSetupFlows(withSetup([unknown, { kind: "device" }]))).toEqual(["device"]);
-  });
-});
-
-describe("describeSetupFlow", () => {
-  it("names the provider for a sign-in, and says what to do for the others", () => {
-    const type = withSetup([]);
-    expect(describeSetupFlow("device", type)).toBe("sign in with T");
-    expect(describeSetupFlow("oauth", type)).toBe("sign in with T");
-    expect(describeSetupFlow("credentials", type)).toBe("paste a token");
-    expect(describeSetupFlow("pairing", type)).toBe("pair a chat account");
-  });
-});
-
-describe("summarizeConnectionType", () => {
-  it("leads with the plugin, then joins the flows, reading two sign-ins as one", () => {
-    const type = withSetup([
-      { kind: "device" },
-      { kind: "oauth" },
-      { kind: "credentials", fields: [{ name: "pat", label: "Token" }] },
-    ]);
-    expect(summarizeConnectionType(type)).toBe("P · sign in with T or paste a token");
-  });
-
-  it("leaves out a plugin named like its type", () => {
-    expect(summarizeConnectionType({ ...withSetup([{ kind: "device" }]), pluginName: "T" })).toBe(
-      "sign in with T",
-    );
-  });
-
-  it("shows the type's id for a setup this build cannot show", () => {
-    expect(summarizeConnectionType({ ...withSetup([]), pluginName: "T" })).toBe("p/t");
-  });
-});
-
-describe("buildFlowSwitchLabel", () => {
-  it("names the other flow as the way to switch to it", () => {
-    const type = withSetup([]);
-    expect(buildFlowSwitchLabel("device", type)).toBe("Sign in with T instead");
-    expect(buildFlowSwitchLabel("oauth", type)).toBe("Sign in with T instead");
-    expect(buildFlowSwitchLabel("credentials", type)).toBe("Paste a token instead");
-    expect(buildFlowSwitchLabel("pairing", type)).toBe("Pair a chat account instead");
-  });
-});
-
-describe("findOAuthConnection", () => {
-  const base = {
-    id: "0199c0ff-aaaa-7000-8000-000000000001",
-    type: "p/t",
-    label: "work",
-    displayName: "work",
-    status: "connected",
-    labels: [],
-    config: {},
-    feedIntervals: {},
-    credentials: [],
-    createdAt: "2026-10-02T08:15:00.000Z",
-    updatedAt: "2026-10-02T08:15:00.000Z",
-  } satisfies Connection;
-  const added = { ...base, id: "0199c0ff-aaaa-7000-8000-000000000002" };
-  const otherType = { ...added, type: "p/other" };
-
-  it("finds a new Connection of the type", () => {
-    expect(findOAuthConnection([base], [base, added], { type: "p/t" })).toBe(added);
-  });
-
-  it("finds nothing while no new Connection of the type is there", () => {
-    expect(findOAuthConnection([base], [base], { type: "p/t" })).toBeUndefined();
-    expect(findOAuthConnection([base], [base, otherType], { type: "p/t" })).toBeUndefined();
-  });
-
-  it("finds a reconnected Connection once it is connected again", () => {
-    const before = { ...base, status: "needs-reauth" as const };
-    const after = { ...base, updatedAt: "2026-10-02T09:00:00.000Z" };
-    const setup = { type: "p/t", connectionId: base.id };
-    expect(findOAuthConnection([before], [after], setup)).toBe(after);
-    expect(findOAuthConnection([before], [before], setup)).toBeUndefined();
-    expect(
-      findOAuthConnection([before], [{ ...before, updatedAt: after.updatedAt }], setup),
-    ).toBeUndefined();
   });
 });
 

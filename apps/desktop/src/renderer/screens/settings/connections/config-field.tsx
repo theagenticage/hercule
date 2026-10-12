@@ -1,20 +1,15 @@
 import type { JSX } from "react";
-import { buildChoiceOptions, type ConfigField, type ConfigValue } from "@hercule/client-core";
-import type { ConfigChoice } from "@hercule/contract";
+import {
+  buildChoiceOptions,
+  type ConfigField,
+  type ConfigValue,
+  type FieldChoices,
+} from "@hercule/client-core";
 import { CloseIcon } from "../../../icons/close";
 import { PlusIcon } from "../../../icons/plus";
+import { buildHintId, LabelledField } from "../../step";
 import { ChoicePicker } from "./choice-picker";
-import { describeHintId, LabelledField } from "./labelled-field";
 import "./config-field.css";
-
-/**
- * Where the choices of a setting that loads them from an account stand. The
- * caller reads them; a setting without `loadsChoices` takes none.
- */
-export type FieldChoices =
-  | { readonly status: "loading" }
-  | { readonly status: "loaded"; readonly choices: ReadonlyArray<ConfigChoice> }
-  | { readonly status: "failed"; readonly message: string };
 
 /**
  * Renders one setting of a plugin's config schema, as `buildConfigFields`
@@ -27,16 +22,13 @@ export type FieldChoices =
  *
  * A setting with `loadsChoices` is drawn from `choices` instead: a disabled
  * select while they load, and a `ChoicePicker` once they have loaded. When
- * they cannot be loaded, the reason sits above the plain widget, so the user
- * can still type the value.
+ * they cannot be loaded, the plain widget is drawn with the reason under it,
+ * so the user can still type the value.
  *
  * A number is typed into a text field, not a number field. For text the
  * browser cannot read as a number, a number field hands over an empty value,
  * so the form could not say what is wrong. The caller reads the text with
  * `buildConfigPayload` and passes its error back as `error`.
- *
- * Presentational and generic: it knows plugin settings, not what they belong
- * to, so a Connection's form and a plugin's form can both draw it.
  */
 export function ConfigFieldRow({
   inputId,
@@ -60,7 +52,7 @@ export function ConfigFieldRow({
   readonly onChange: (value: ConfigValue) => void;
 }): JSX.Element {
   const labelId = `${inputId}-label`;
-  const hintId = field.description === undefined ? undefined : describeHintId(labelId);
+  const hintId = field.description === undefined ? undefined : buildHintId(labelId);
 
   if (field.kind === "boolean") {
     return (
@@ -105,17 +97,13 @@ export function ConfigFieldRow({
       error={error}
     >
       {choices?.status === "loading" ? (
-        // Holds the place of the picker, so the dialog keeps its height when
-        // the choices arrive.
-        <span className="field field--select">
+        // Stands where the picker will be, and says the choices are on their
+        // way. A one-value picker is a select of the same height; a list
+        // setting's picker, a box of checkboxes, is taller.
+        <span className="field field--select config-field-loading">
           <select id={inputId} disabled value="">
             <option value="">Loading choices…</option>
           </select>
-        </span>
-      ) : null}
-      {choices?.status === "failed" ? (
-        <span className="fl-err" role="alert">
-          {`Could not load the choices: ${choices.message}`}
         </span>
       ) : null}
       {choices?.status === "loaded" ? (
@@ -128,6 +116,7 @@ export function ConfigFieldRow({
           value={value}
           multiple={field.kind === "stringList"}
           required={field.required}
+          invalid={error !== undefined}
           onChange={onChange}
         />
       ) : null}
@@ -142,6 +131,10 @@ export function ConfigFieldRow({
           entryErrors={entryErrors}
           onChange={onChange}
         />
+      ) : null}
+      {choices?.status === "failed" ? (
+        // A hint, not an error: the plain widget still takes the value.
+        <span className="fl-hint">{`Could not load the choices: ${choices.message}`}</span>
       ) : null}
     </LabelledField>
   );
@@ -194,6 +187,7 @@ function ConfigWidget({
           id={inputId}
           aria-describedby={hintId}
           aria-required={required}
+          aria-invalid={invalid ? true : undefined}
           value={typeof value === "string" ? value : ""}
           onChange={(event) => {
             onChange(event.target.value);
@@ -287,6 +281,7 @@ function StringListWidget({
                 type="button"
                 className="icon-btn"
                 aria-label={`Remove ${buildEntryName(index)}`}
+                title={`Remove ${buildEntryName(index)}`}
                 onClick={() => {
                   onChange(values.filter((_, at) => at !== index));
                 }}

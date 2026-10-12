@@ -101,74 +101,73 @@
   text-overflow: ellipsis;
 }
 
-/* Not in the book, which always draws Connections. The note that takes the
-   table's place, drawn as Settings > Assistants draws its own. */
-.connection-list-empty {
-  display: grid;
-  justify-items: center;
-  gap: 6px;
-  padding: 64px 24px;
-  color: var(--muted);
-  text-align: center;
-}
-.connection-list-empty b {
-  color: var(--ink);
-  font-size: var(--t-14);
-  font-weight: var(--w-bold);
-}
-.connection-list-empty span {
-  max-width: 380px;
-}
-
 /* A narrow window (spec 17 §Settings, The frame). While the body is narrower
-   than 520px, the Health column narrows so the name keeps its room. */
+   than 520px, a row drops to one column: the mark, then the name with the
+   account under it and the health under that, then ⋯. The column headings
+   no longer sit over anything, so they go. The name, the account and the
+   health wrap rather than end in an ellipsis, so nothing clips. */
 @container (width < 520px) {
-  .connection-list .tbl-h,
+  .connection-list .tbl-h {
+    display: none;
+  }
   .connection-list .conn {
-    grid-template-columns: 34px minmax(0, 1fr) 104px 28px;
+    grid-template-columns: 34px minmax(0, 1fr) 28px;
+    grid-template-areas:
+      "mk nm more"
+      "mk health more";
+    row-gap: 4px;
+    padding-block: 10px;
+  }
+  .connection-list .mk {
+    grid-area: mk;
+    align-self: start;
+  }
+  .connection-list .nm {
+    grid-area: nm;
+  }
+  .connection-list .health {
+    grid-area: health;
+    white-space: normal;
+  }
+  .connection-list .conn-more {
+    grid-area: more;
+    align-self: start;
+  }
+  .connection-list .nm b,
+  .connection-list .nm span,
+  .connection-list .health > span {
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
 }
 
 /* ---------- Menus ---------- */
 /* Not in the book, which draws neither menu. The row's ⋯ menu and Add a
-   Connection's menu are glass popovers (`.pop`), with their items drawn as
-   Intake's pane menu draws its own. Each opens 6px under its button, its
-   right edge on the button's. */
+   Connection's menu are popover menus (`.popover-menu`). Each opens 6px
+   under its button, its right edge on the button's, and scrolls when the
+   space below the button is short. */
 .conn-menu {
-  inset: auto;
   min-width: 180px;
-  margin: 6px 0 0;
-  padding: 6px;
-  border-radius: var(--r-lg);
+  max-height: calc(100% - 16px);
+  margin-top: 6px;
+  overflow-y: auto;
   position-area: block-end span-inline-start;
 }
-.conn-menu [role="menuitem"] {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  height: 32px;
-  padding: 0 8px;
-  border-radius: var(--r-sm);
-  color: var(--ink);
-  font-size: var(--t-13);
-  text-align: left;
-}
-.conn-menu [role="menuitem"].is-active {
-  background: var(--hover);
-}
-.conn-menu [role="menuitem"]:focus-visible {
-  outline: none;
-}
-.conn-menu [role="menuitem"][aria-disabled="true"] {
-  color: var(--faint);
+
+/* Add a Connection with no type to add. The shared rule for a button that
+   cannot act also takes its pointer events, which would hide the tooltip
+   that says why. This one keeps them, and is dimmed and still instead: it
+   neither brightens nor sinks. */
+.add-conn[aria-disabled="true"] {
+  opacity: 0.5;
+  pointer-events: auto;
   cursor: default;
 }
-/* A button reads as pressed while its menu is open. */
-.conn-more:has(+ :popover-open),
-.add-conn:has(+ :popover-open) {
-  background: var(--selected);
-  color: var(--ink);
+.add-conn[aria-disabled="true"]:hover {
+  background: var(--btn-fill);
+}
+.add-conn[aria-disabled="true"]:active {
+  transform: none;
 }
 
 /* Add a Connection's items have two lines: the type's name, and under it

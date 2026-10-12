@@ -1,7 +1,11 @@
 import { useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { listConnectionTypes, type ConnectionType } from "@hercule/client-core";
+import {
+  describeConnectionTypeName,
+  listConnectionTypes,
+  type ConnectionType,
+} from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
 import { connectionsQuery, pluginsQuery } from "../../../../app/queries";
@@ -14,19 +18,28 @@ import { DeleteConnectionDialog } from "./-delete-connection-dialog";
 /**
  * The dialog open over the Connections table, if any:
  *
- * - `setup`: sets up a new Connection of `type`, or, with `connection`,
+ * - `setup`: sets up a new Connection of `type`, or, with `connectionId`,
  *   gives that Connection a fresh credential (Reconnect).
  * - `configure`: edits the Connection's name, topic, settings and polling.
  * - `delete`: asks before the Connection is removed.
+ *
+ * A dialog holds its Connection's id, not the Connection, so it always
+ * shows the Connection as the live list holds it now. `connectionName` is
+ * the Connection's name as its row showed it when the dialog opened, kept
+ * to say which Connection went if it is removed while the dialog is open.
  */
 type ConnectionsDialog =
   | {
       readonly kind: "setup";
       readonly type: ConnectionType;
-      readonly connection?: Connection;
+      readonly connectionId?: string;
+      readonly connectionName?: string;
     }
-  | { readonly kind: "configure"; readonly connection: Connection }
-  | { readonly kind: "delete"; readonly connection: Connection };
+  | {
+      readonly kind: "configure" | "delete";
+      readonly connectionId: string;
+      readonly connectionName: string;
+    };
 
 /**
  * Settings > Connections: one table of every Connection, with its type, its
@@ -37,7 +50,9 @@ type ConnectionsDialog =
  *
  * The Connections and the plugins are the shell's reads, which the live
  * connection keeps current on the `connection` and `plugin` topics, so a
- * Connection added, changed or removed anywhere shows here at once.
+ * Connection added, changed or removed anywhere shows here at once. When
+ * the Connection a dialog is open for is removed elsewhere, the dialog
+ * closes and a line above the table says why.
  */
 export const Route = createFileRoute("/_connected/_shell/settings/connections")({
   staticData: { title: "Connections" },
@@ -64,6 +79,16 @@ function Connections(): JSX.Element {
   };
   const findType = (connection: Connection): ConnectionType | undefined =>
     types.find((type) => type.type === connection.type);
+  const nameConnection = (connection: Connection): string =>
+    `${describeConnectionTypeName(connection, findType(connection))} · ${connection.label}`;
+  const connection =
+    dialog?.connectionId === undefined
+      ? undefined
+      : connections.find(({ id }) => id === dialog.connectionId);
+  const removedName =
+    dialog?.connectionId !== undefined && connection === undefined
+      ? dialog.connectionName
+      : undefined;
 
   return (
     <>
@@ -76,38 +101,56 @@ function Connections(): JSX.Element {
           }}
         />
       </SettingsHeaderActions>
+      {removedName !== undefined && (
+        <p className="set-note" role="status">
+          {`${removedName} was deleted elsewhere, so its dialog closed.`}
+        </p>
+      )}
       <ConnectionTable
         connections={connections}
         types={types}
         plugins={plugins}
-        onReconnect={(connection, type) => {
-          setDialog({ kind: "setup", type, connection });
+        onReconnect={(picked, type) => {
+          setDialog({
+            kind: "setup",
+            type,
+            connectionId: picked.id,
+            connectionName: nameConnection(picked),
+          });
         }}
-        onConfigure={(connection) => {
-          setDialog({ kind: "configure", connection });
+        onConfigure={(picked) => {
+          setDialog({
+            kind: "configure",
+            connectionId: picked.id,
+            connectionName: nameConnection(picked),
+          });
         }}
-        onDelete={(connection) => {
-          setDialog({ kind: "delete", connection });
+        onDelete={(picked) => {
+          setDialog({
+            kind: "delete",
+            connectionId: picked.id,
+            connectionName: nameConnection(picked),
+          });
         }}
       />
-      {dialog?.kind === "setup" && (
+      {dialog?.kind === "setup" && removedName === undefined && (
         <ConnectionSetupDialog
           type={dialog.type}
-          {...(dialog.connection === undefined ? {} : { connection: dialog.connection })}
+          {...(connection === undefined ? {} : { connection })}
           onClose={closeDialog}
         />
       )}
-      {dialog?.kind === "configure" && (
+      {dialog?.kind === "configure" && connection !== undefined && (
         <ConfigureConnectionDialog
-          connection={dialog.connection}
-          type={findType(dialog.connection)}
+          connection={connection}
+          type={findType(connection)}
           onClose={closeDialog}
         />
       )}
-      {dialog?.kind === "delete" && (
+      {dialog?.kind === "delete" && connection !== undefined && (
         <DeleteConnectionDialog
-          connection={dialog.connection}
-          type={findType(dialog.connection)}
+          connection={connection}
+          type={findType(connection)}
           onClose={closeDialog}
         />
       )}

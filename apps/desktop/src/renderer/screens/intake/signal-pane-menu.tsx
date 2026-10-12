@@ -42,7 +42,7 @@ export function SignalPaneMenu({
         popover="auto"
         role="menu"
         aria-label="More"
-        className="pop intake-menu ad-menu"
+        className="pop popover-menu intake-menu ad-menu"
       >
         {sourceUrl !== null && (
           <a

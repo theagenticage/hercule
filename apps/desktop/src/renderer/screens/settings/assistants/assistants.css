@@ -91,24 +91,6 @@
   color: var(--ink);
 }
 
-/* Not in the book, which always has assistants: the section with none. */
-.empty-assistants {
-  display: grid;
-  justify-items: center;
-  gap: 6px;
-  padding: 64px 24px;
-  color: var(--muted);
-  text-align: center;
-}
-.empty-assistants b {
-  color: var(--ink);
-  font-size: var(--t-14);
-  font-weight: var(--w-bold);
-}
-.empty-assistants span {
-  max-width: 380px;
-}
-
 /* ---------- Memory ---------- */
 /* The Memory column: the core note against its cap, the start of the core
    note, and the topics. The book's `.rec-side` and `.side-sec`. */

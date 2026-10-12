@@ -2,26 +2,24 @@
  * The setup of a Connection in a glass dialog, which Settings > Connections
  * opens from Add a Connection and from a row's Reconnect. Presentational.
  */
-import type { FormEvent, JSX, RefObject } from "react";
+import type { FormEvent, JSX, ReactNode, RefObject } from "react";
 import {
-  buildFlowSwitchLabel,
   formatUrlWithoutScheme,
   listCredentialFields,
-  listSetupFlows,
-  parsePluginId,
   type ConnectionType,
+  type FlowSwitch,
   type PluginIdentity,
   type SetupFlow,
   type SignInEnding,
 } from "@hercule/client-core";
-import { ChatIcon } from "../../../icons/chat";
 import { ClockIcon } from "../../../icons/clock";
 import { CloseIcon } from "../../../icons/close";
+import { ExternalIcon } from "../../../icons/external";
 import { KeyIcon } from "../../../icons/key";
 import { QuestionIcon } from "../../../icons/question";
-import { PluginMark } from "../../../marks";
 import { GlassDialog } from "../../glass-dialog";
 import { DeviceCodeSteps, FormField, MarkedRow, MarkedRows, WaitLine, Warning } from "../../step";
+import { ConnectionTypeMark } from "./connection-type-mark";
 import "./connection-setup.css";
 
 /**
@@ -38,6 +36,9 @@ import "./connection-setup.css";
  *   `authorizationUrl`, and the setup waits for the Connection.
  * - `unsupported`: the setup takes a pairing, which is not built, or a step
  *   this version does not know (`flow` absent).
+ *
+ * In `code` and `browser`, `linkError` says why the sign-in page did not
+ * open, or is null.
  */
 export type ConnectionSetupState =
   | {
@@ -52,9 +53,14 @@ export type ConnectionSetupState =
       readonly code: string;
       readonly verificationUri: string;
       readonly wait: string;
+      readonly linkError: string | null;
     }
   | SignInEnding
-  | { readonly kind: "browser"; readonly authorizationUrl: string }
+  | {
+      readonly kind: "browser";
+      readonly authorizationUrl: string;
+      readonly linkError: string | null;
+    }
   | { readonly kind: "unsupported"; readonly flow?: "pairing" };
 
 /** What the setup's buttons and fields do. */
@@ -81,8 +87,10 @@ const ENDING_ICONS = {
 /**
  * Renders the setup of a Connection of `type` in `state`, in a glass dialog
  * headed `heading`, such as "Connect GitHub". The type's mark is drawn from
- * `plugins`, and `values` holds what the credential fields hold. `redirectUri` is the
- * address the OAuth provider must have registered.
+ * `plugins`, and `values` holds what the credential fields hold.
+ * `redirectUri` is the address the OAuth provider must have registered, and
+ * `flowSwitches` the links to the type's other flows, which the form and an
+ * ended sign-in show.
  *
  * Esc, a click on the scrim and Cancel close the dialog through `dialogRef`;
  * `onClose` is called whenever it closes, and the caller then unmounts it.
@@ -95,6 +103,7 @@ export function ConnectionSetup({
   state,
   values,
   redirectUri,
+  flowSwitches,
   actions,
   onClose,
 }: {
@@ -105,11 +114,12 @@ export function ConnectionSetup({
   readonly state: ConnectionSetupState;
   readonly values: Readonly<Record<string, string>>;
   readonly redirectUri: string;
+  readonly flowSwitches: ReadonlyArray<FlowSwitch>;
   readonly actions: ConnectionSetupActions;
   readonly onClose: () => void;
 }): JSX.Element {
   const renderMark = (size: number): JSX.Element => (
-    <PluginMark pluginId={parsePluginId(type.type) ?? type.type} plugins={plugins} size={size} />
+    <ConnectionTypeMark type={type.type} plugins={plugins} size={size} />
   );
   const close = (): void => dialogRef.current?.close();
   const cancelButton = (
@@ -126,12 +136,22 @@ export function ConnectionSetup({
         {state.kind === "form" ? (
           <SetupForm
             type={type}
-            switchMark={renderMark(14)}
             state={state}
             values={values}
             redirectUri={redirectUri}
             actions={actions}
             cancelButton={cancelButton}
+            switches={
+              <FlowSwitches
+                switches={flowSwitches}
+                switchMark={renderMark(14)}
+                // A save cannot be called back: the Connection is made even if the
+                // dialog moves on. A sign-in that is starting can be, so its form
+                // still offers the other flows.
+                disabled={state.flow === "credentials" && state.busy}
+                actions={actions}
+              />
+            }
           />
         ) : state.kind === "code" ? (
           <MarkedRows>
@@ -154,7 +174,12 @@ export function ConnectionSetup({
                 openText={`Open ${type.displayName}, enter the code and approve Hercule.`}
                 openLabel={`Open ${type.displayName}`}
                 onOpen={() => actions.onOpen(state.verificationUri)}
-                end={<WaitLine text={state.wait} />}
+                end={
+                  <>
+                    <WaitLine text={state.wait} />
+                    <LinkError text={state.linkError} />
+                  </>
+                }
               />
             </MarkedRow>
           </MarkedRows>
@@ -165,14 +190,19 @@ export function ConnectionSetup({
             </Warning>
             <div className="setup-acts">
               {cancelButton}
-              <button type="button" className="btn btn--accent" onClick={actions.onStartAgain}>
+              <button
+                type="button"
+                className="btn btn--accent"
+                onClick={actions.onStartAgain}
+                autoFocus
+              >
                 Start again
               </button>
             </div>
             <FlowSwitches
-              type={type}
-              current="device"
+              switches={flowSwitches}
               switchMark={renderMark(14)}
+              disabled={false}
               actions={actions}
             />
           </>
@@ -183,15 +213,30 @@ export function ConnectionSetup({
               name="Finish in your browser"
               detail={formatUrlWithoutScheme(state.authorizationUrl)}
               end={
-                <button type="button" className="btn btn--sm btn--quiet" onClick={close}>
-                  Cancel
-                </button>
+                <span className="setup-row-acts">
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    onClick={() => actions.onOpen(state.authorizationUrl)}
+                    // The button that started the sign-in is gone, and the focus with it.
+                    autoFocus
+                  >
+                    <ExternalIcon size={14} />
+                    Open again
+                  </button>
+                  <button type="button" className="btn btn--sm btn--quiet" onClick={close}>
+                    Cancel
+                  </button>
+                </span>
               }
             >
-              {/* A failed sign-in creates no Connection, so only the browser can show it. */}
-              <WaitLine
-                text={`Waiting for ${type.displayName}. If the sign-in fails, the browser says why.`}
-              />
+              {/* A failed sign-in creates no Connection, so only the browser can show it.
+                  The user may also give up in the browser, which then never answers, so
+                  the line has no spinner: a spinner promises a wait that ends. */}
+              <span className="wait" role="status">
+                Waiting for {type.displayName}. If the sign-in fails, the browser says why.
+              </span>
+              <LinkError text={state.linkError} />
             </MarkedRow>
           </MarkedRows>
         ) : (
@@ -202,7 +247,7 @@ export function ConnectionSetup({
                 : `Setting up ${type.displayName} takes a step this version of Hercule does not know.`}
             </p>
             <div className="setup-acts">
-              <button type="button" className="btn" onClick={close}>
+              <button type="button" className="btn btn--quiet" onClick={close}>
                 Close
               </button>
             </div>
@@ -216,30 +261,37 @@ export function ConnectionSetup({
 /**
  * Renders the form of one flow: the type's own instructions, then the
  * credential fields, or the redirect URI to register for OAuth, then Cancel
- * and the button that sends the form, and the links to the type's other flows.
+ * and the button that sends the form, and `switches`, the links to the
+ * type's other flows. While the credentials are being sent, the fields
+ * cannot be edited, so what was sent stays on screen.
  */
 function SetupForm({
   type,
-  switchMark,
   state,
   values,
   redirectUri,
   actions,
   cancelButton,
+  switches,
 }: {
   readonly type: ConnectionType;
-  readonly switchMark: JSX.Element;
   readonly state: Extract<ConnectionSetupState, { kind: "form" }>;
   readonly values: Readonly<Record<string, string>>;
   readonly redirectUri: string;
   readonly actions: ConnectionSetupActions;
   readonly cancelButton: JSX.Element;
+  readonly switches: ReactNode;
 }): JSX.Element {
   const submit = (event: FormEvent): void => {
     event.preventDefault();
     if (!state.busy) actions.onSubmit();
   };
-  const submitLabel = state.flow === "credentials" ? "Connect" : `Sign in with ${type.displayName}`;
+  const credentials = state.flow === "credentials";
+  const submitLabel = credentials
+    ? state.busy
+      ? "Connecting…"
+      : "Connect"
+    : `Sign in with ${type.displayName}`;
   return (
     <form onSubmit={submit}>
       {type.setup.map((step, index) =>
@@ -268,6 +320,7 @@ function SetupForm({
                 spellCheck={false}
                 autoComplete="off"
                 autoFocus={index === 0}
+                readOnly={state.busy}
               />
             </FormField>
           ))}
@@ -290,53 +343,63 @@ function SetupForm({
           className="btn btn--accent"
           aria-busy={state.busy ? true : undefined}
           aria-disabled={state.busy ? true : undefined}
+          // With no field to type in, the first button would be Cancel, and
+          // Enter would close the dialog instead of signing in.
+          autoFocus={!credentials}
         >
           {state.busy ? <span className="spin" /> : null}
           {submitLabel}
         </button>
       </div>
-      <FlowSwitches type={type} current={state.flow} switchMark={switchMark} actions={actions} />
+      {switches}
     </form>
   );
 }
 
 /**
- * Renders a link to each flow the type offers besides `current`, such as
- * "Paste a token instead", under a rule, as the first run's GitHub step
- * offers the token. A sign-in link carries `switchMark`, the type's mark.
- * Renders nothing for a type with one flow.
+ * Renders a link for each of `switches`, such as "Paste a token instead",
+ * under a rule, as the first run's GitHub step offers the token. A sign-in
+ * link carries `switchMark`, the type's mark. `disabled` while the form
+ * cannot be left. Renders nothing when there is no other flow.
  */
 function FlowSwitches({
-  type,
-  current,
+  switches,
   switchMark,
+  disabled,
   actions,
 }: {
-  readonly type: ConnectionType;
-  readonly current: SetupFlow;
+  readonly switches: ReadonlyArray<FlowSwitch>;
   readonly switchMark: JSX.Element;
+  readonly disabled: boolean;
   readonly actions: ConnectionSetupActions;
 }): JSX.Element | null {
-  const others = listSetupFlows(type).filter((flow) => flow !== current);
-  if (others.length === 0) return null;
+  if (switches.length === 0) return null;
   return (
     <div className="setup-switches">
-      {others.map((flow) => (
+      {switches.map(({ flow, label }) => (
         <p key={flow} className="st-note">
-          {flow === "credentials" ? (
-            <KeyIcon size={14} />
-          ) : flow === "pairing" ? (
-            <ChatIcon size={14} />
-          ) : (
-            switchMark
-          )}
+          {flow === "credentials" ? <KeyIcon size={14} /> : switchMark}
           <span>
-            <button type="button" className="link" onClick={() => actions.onSwitchFlow(flow)}>
-              {buildFlowSwitchLabel(flow, type)}
+            <button
+              type="button"
+              className="link"
+              disabled={disabled}
+              onClick={() => actions.onSwitchFlow(flow)}
+            >
+              {label}
             </button>
           </span>
         </p>
       ))}
     </div>
+  );
+}
+
+/** Renders `text`, why the sign-in page did not open, or nothing when `text` is null. */
+function LinkError({ text }: { readonly text: string | null }): JSX.Element | null {
+  return text === null ? null : (
+    <p className="fl-err setup-link-error" role="alert">
+      {text}
+    </p>
   );
 }

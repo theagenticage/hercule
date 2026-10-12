@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type FormEvent, type JSX } from "react";
+import { useId, useRef, useState, type JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -8,8 +8,8 @@ import {
   buildFeedIntervalsDraft,
   buildFeedIntervalsPayload,
   buildTopicsUpdate,
-  describeFeedInterval,
-  describeFeedName,
+  decideFieldChoices,
+  describeConnectionTypeName,
   queryKeys,
   readConfigHeading,
   readConnectionIssues,
@@ -25,19 +25,7 @@ import {
 import type { Connection } from "@hercule/contract";
 import { connectionChoicesQuery } from "../../../../app/queries";
 import { GlassDialog } from "../../../../screens/glass-dialog";
-import {
-  ConfigFieldRow,
-  describeHintId,
-  LabelledField,
-  type FieldChoices,
-} from "../../../../screens/settings/connections";
-import "../../../../screens/settings/connections/configure-connection.css";
-
-/**
- * Suggested topics for a Connection. They are suggestions, not a closed list:
- * a topic is an ordinary label, so the user can type any other topic.
- */
-const TOPICS = ["Code", "Business", "Personal", "Ops"];
+import { ConfigFieldRow, ConfigureConnection } from "../../../../screens/settings/connections";
 
 /** The message under Name when the user saves an empty name, which the controller refuses. */
 const NAME_REQUIRED = "Name the Connection.";
@@ -58,7 +46,9 @@ const NAME_REQUIRED = "Name the Connection.";
  *   number is refused under its field.
  *
  * The controller's errors about one setting or one feed show under that
- * field, and any other error at the foot of the dialog.
+ * field, and any other error at the foot of the dialog. While the save is on
+ * its way every field is disabled, so nothing typed after Save is lost when
+ * the dialog closes.
  *
  * `type` is `undefined` when the plugin that declared the type is no longer
  * in the binary. There is then no schema to read the settings against, so
@@ -133,16 +123,16 @@ export function ConfigureConnectionDialog({
   const failure = issues.rest && save.error !== null ? readErrorMessage(save.error) : null;
 
   // Clears the last save's errors on any edit, because those errors were
-  // about the values the fields held then.
+  // about the values the fields held then. Only a failed save is reset: a
+  // save on its way must still close the dialog when it lands.
   const edit = (): void => {
-    if (!save.isIdle) save.reset();
+    if (save.isError) save.reset();
     setNameError(undefined);
     setUnreadableConfig({});
     setUnreadableIntervals({});
   };
 
-  const send = (event: FormEvent): void => {
-    event.preventDefault();
+  const send = (): void => {
     if (save.isPending) return;
     const settings =
       type === undefined
@@ -159,7 +149,7 @@ export function ConfigureConnectionDialog({
     save.mutate({ config: settings.config, feedIntervals: polling.feedIntervals });
   };
 
-  const typeName = type?.displayName ?? connection.type;
+  const typeName = describeConnectionTypeName(connection, type);
   const title = `Configure ${typeName} · ${connection.label}`;
 
   return (
@@ -169,150 +159,61 @@ export function ConfigureConnectionDialog({
       label={title}
       onClose={onClose}
     >
-      <div className="pop-h">
-        <b>{title}</b>
-      </div>
-      <form className="configure-connection-form" noValidate onSubmit={send}>
-        <div className="pop-sec configure-connection-body">
-          <div className="configure-connection-group">
-            <LabelledField
-              labelId={`${id}-name-label`}
-              inputId={`${id}-name`}
-              label="Name"
-              error={nameError}
-            >
-              <span className={nameError === undefined ? "field" : "field is-bad"}>
-                <input
-                  id={`${id}-name`}
-                  aria-required
-                  spellCheck={false}
-                  autoComplete="off"
-                  value={label}
-                  onChange={(event) => {
-                    edit();
-                    setLabel(event.target.value);
-                  }}
-                />
-              </span>
-            </LabelledField>
-            <LabelledField labelId={`${id}-topic-label`} inputId={`${id}-topic`} label="Topic">
-              <span className="field">
-                <input
-                  id={`${id}-topic`}
-                  list={`${id}-topics`}
-                  autoComplete="off"
-                  value={topic}
-                  onChange={(event) => {
-                    edit();
-                    setTopic(event.target.value);
-                  }}
-                />
-                <datalist id={`${id}-topics`}>
-                  {TOPICS.map((suggestion) => (
-                    <option key={suggestion} value={suggestion} />
-                  ))}
-                </datalist>
-              </span>
-            </LabelledField>
-            {type === undefined ? (
-              <p className="configure-connection-note">
-                {`The plugin that declared ${connection.type} is not installed, so only the name and topic can be changed. Its settings and polling are kept as they are.`}
-              </p>
-            ) : null}
-          </div>
-
-          {fields.length === 0 ? null : (
-            <section className="configure-connection-group" aria-labelledby={`${id}-config`}>
-              <h3 id={`${id}-config`}>{readConfigHeading(type?.configSchema)}</h3>
-              {fields.map((field) => (
-                <ConnectionConfigField
-                  key={field.name}
-                  client={client}
-                  connectionId={connection.id}
-                  inputId={`${id}-config-${field.name}`}
-                  field={field}
-                  value={draft[field.name] ?? ""}
-                  error={unreadableConfig[field.name] ?? issues.config[field.name]}
-                  entryErrors={issues.configEntries[field.name]}
-                  onChange={(value) => {
-                    edit();
-                    setDraft((current) => ({ ...current, [field.name]: value }));
-                  }}
-                />
-              ))}
-            </section>
-          )}
-
-          {/* A type no longer in the binary polls no feeds, so it has no Polling group. */}
-          {type === undefined || feeds.length === 0 ? null : (
-            <section className="configure-connection-group" aria-labelledby={`${id}-polling`}>
-              <h3 id={`${id}-polling`}>Polling</h3>
-              {feeds.map((feed) => {
-                const inputId = `${id}-feed-${feed.name}`;
-                const error = unreadableIntervals[feed.name] ?? issues.feedIntervals[feed.name];
-                return (
-                  <LabelledField
-                    key={feed.name}
-                    labelId={`${inputId}-label`}
-                    inputId={inputId}
-                    label={describeFeedName(feed)}
-                    hint={describeFeedInterval(feed, type.displayName)}
-                    error={error}
-                  >
-                    <span
-                      className={
-                        error === undefined
-                          ? "field config-field-narrow"
-                          : "field config-field-narrow is-bad"
-                      }
-                    >
-                      {/* A text field, not a number field, so text such as
-                          "abc" reaches the form, which can say what is wrong. */}
-                      <input
-                        id={inputId}
-                        aria-describedby={describeHintId(`${inputId}-label`)}
-                        aria-invalid={error === undefined ? undefined : true}
-                        inputMode="numeric"
-                        autoComplete="off"
-                        placeholder={String(feed.defaultIntervalSeconds)}
-                        value={intervals[feed.name] ?? ""}
-                        onChange={(event) => {
-                          edit();
-                          setIntervals((current) => ({
-                            ...current,
-                            [feed.name]: event.target.value,
-                          }));
-                        }}
-                      />
-                      <span className="fine">seconds</span>
-                    </span>
-                  </LabelledField>
-                );
-              })}
-            </section>
-          )}
-        </div>
-
-        <div className="pop-sec configure-connection-foot">
-          {failure === null ? null : (
-            <p className="fl-err" role="alert">
-              {`Could not save: ${failure}`}
-            </p>
-          )}
-          <div className="configure-connection-acts">
-            <button
-              type="button"
-              className="btn btn--quiet"
-              onClick={() => dialogRef.current?.close()}
-            >
-              Cancel
-            </button>
-            <button type="submit" className="btn btn--accent" aria-disabled={save.isPending}>
-              {save.isPending ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </div>
-      </form>
+      <ConfigureConnection
+        title={title}
+        name={label}
+        nameError={nameError}
+        topic={topic}
+        missingType={type === undefined ? connection.type : undefined}
+        settings={
+          fields.length === 0
+            ? undefined
+            : {
+                heading: readConfigHeading(type?.configSchema),
+                rows: fields.map((field) => (
+                  <ConnectionConfigField
+                    key={field.name}
+                    client={client}
+                    connectionId={connection.id}
+                    inputId={`${id}-config-${field.name}`}
+                    field={field}
+                    value={draft[field.name] ?? ""}
+                    error={unreadableConfig[field.name] ?? issues.config[field.name]}
+                    entryErrors={issues.configEntries[field.name]}
+                    onChange={(value) => {
+                      edit();
+                      setDraft((current) => ({ ...current, [field.name]: value }));
+                    }}
+                  />
+                )),
+              }
+        }
+        feeds={feeds}
+        typeName={typeName}
+        intervals={intervals}
+        intervalErrors={Object.fromEntries(
+          feeds.map((feed) => [
+            feed.name,
+            unreadableIntervals[feed.name] ?? issues.feedIntervals[feed.name],
+          ]),
+        )}
+        failure={failure}
+        saving={save.isPending}
+        onNameChange={(text) => {
+          edit();
+          setLabel(text);
+        }}
+        onTopicChange={(text) => {
+          edit();
+          setTopic(text);
+        }}
+        onIntervalChange={(feedName, text) => {
+          edit();
+          setIntervals((current) => ({ ...current, [feedName]: text }));
+        }}
+        onSave={send}
+        onCancel={() => dialogRef.current?.close()}
+      />
     </GlassDialog>
   );
 }
@@ -344,12 +245,11 @@ function ConnectionConfigField({
     ...connectionChoicesQuery(client, connectionId, field.name),
     enabled: loadsChoices,
   });
-  const choices: FieldChoices | undefined = !loadsChoices
-    ? undefined
-    : read.isError
-      ? { status: "failed", message: readErrorMessage(read.error) }
-      : read.data === undefined
-        ? { status: "loading" }
-        : { status: "loaded", choices: read.data };
-  return <ConfigFieldRow field={field} choices={choices} {...row} />;
+  return (
+    <ConfigFieldRow
+      field={field}
+      choices={loadsChoices ? decideFieldChoices(read) : undefined}
+      {...row}
+    />
+  );
 }

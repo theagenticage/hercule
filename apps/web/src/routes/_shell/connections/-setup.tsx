@@ -7,7 +7,7 @@ import {
   queryKeys,
   buildRedirectUri,
   listSetupFlows,
-  buildFlowSwitchLabel,
+  listFlowSwitches,
   type ConnectionType,
   type HerculeClient,
   type SetupFlow,
@@ -235,20 +235,18 @@ export function ConnectionSetup({
         </Button>
       </div>
 
-      {flows
-        .filter((other) => other !== flow)
-        .map((other) => (
-          <Button
-            key={other}
-            type="button"
-            className="-mt-1.5 -ml-2 self-start"
-            onClick={() => {
-              switchFlow(other);
-            }}
-          >
-            {buildFlowSwitchLabel(other, type)}
-          </Button>
-        ))}
+      {listFlowSwitches(type, flow).map((flowSwitch) => (
+        <Button
+          key={flowSwitch.flow}
+          type="button"
+          className="-mt-1.5 -ml-2 self-start"
+          onClick={() => {
+            switchFlow(flowSwitch.flow);
+          }}
+        >
+          {flowSwitch.label}
+        </Button>
+      ))}
 
       {/* A successful setup closes the form and its row appears, so only a
           failure is shown here. */}

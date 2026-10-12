@@ -1,5 +1,5 @@
 /**
- * Tests how the arrow keys step through one of Intake's menus: down and up,
+ * Tests how the arrow keys step through a popover menu: down and up,
  * wrapping at both ends, and passing over a disabled item.
  */
 import { afterEach, describe, expect, it } from "vitest";

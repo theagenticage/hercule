@@ -1,8 +1,10 @@
 export {
+  buildHintId,
   CopyButton,
   DeviceCodeSteps,
   DoneMark,
   FormField,
+  LabelledField,
   MarkedCard,
   MarkedRow,
   MarkedRows,

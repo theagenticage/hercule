@@ -7,8 +7,8 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ConfigField, ConfigValue } from "@hercule/client-core";
-import { ConfigFieldRow, type FieldChoices } from "./config-field";
+import type { ConfigField, ConfigValue, FieldChoices } from "@hercule/client-core";
+import { ConfigFieldRow } from "./config-field";
 
 /**
  * Renders `field` holding `initial`, as a form would: each change is kept and
@@ -186,6 +186,16 @@ describe("ConfigFieldRow", () => {
       expect(onChange).toHaveBeenLastCalledWith("t-2");
     });
 
+    it("draws the picker's red edge when the setting has an error", () => {
+      renderField(team, "", {
+        error: "Pick a team.",
+        choices: { status: "loaded", choices: [{ value: "t-1", label: "Platform" }] },
+      });
+      const select = screen.getByRole("combobox", { name: "Team" });
+      expect(select.getAttribute("aria-invalid")).toBe("true");
+      expect(select.closest(".field")?.classList.contains("is-bad")).toBe(true);
+    });
+
     it("picks several values with checkboxes, and filters a long list", async () => {
       const choices = Array.from({ length: 12 }, (_, at) => ({
         value: `p-${String(at)}`,
@@ -207,14 +217,17 @@ describe("ConfigFieldRow", () => {
       expect(onChange).toHaveBeenLastCalledWith(["p-11", "p-2"]);
     });
 
-    it("says why the choices are missing and falls back to the plain widget", async () => {
+    it("falls back to the plain widget and says under it why the choices are missing", async () => {
       const onChange = renderField(team, "", {
         choices: { status: "failed", message: "The account refused the token." },
       });
-      expect(screen.getByRole("alert").textContent).toBe(
+      const input = screen.getByRole("textbox", { name: "Team" });
+      // A hint rather than an alert: the field still takes the value.
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(input.closest(".field")?.nextElementSibling?.textContent).toBe(
         "Could not load the choices: The account refused the token.",
       );
-      await userEvent.type(screen.getByRole("textbox", { name: "Team" }), "t-9");
+      await userEvent.type(input, "t-9");
       expect(onChange).toHaveBeenLastCalledWith("t-9");
     });
   });

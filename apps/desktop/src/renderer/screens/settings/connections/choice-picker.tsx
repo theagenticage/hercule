@@ -30,6 +30,7 @@ export function ChoicePicker({
   value,
   multiple,
   required,
+  invalid,
   onChange,
 }: {
   readonly inputId: string;
@@ -43,6 +44,8 @@ export function ChoicePicker({
   /** Whether the setting holds a list of values rather than one. */
   readonly multiple: boolean;
   readonly required: boolean;
+  /** Whether the setting has an error, which draws the picker's red edge. */
+  readonly invalid: boolean;
   readonly onChange: (value: ConfigValue) => void;
 }): JSX.Element {
   const [typed, setTyped] = useState("");
@@ -56,6 +59,8 @@ export function ChoicePicker({
           <input
             aria-label={`Filter ${label}`}
             placeholder="Filter choices…"
+            spellCheck={false}
+            autoComplete="off"
             value={typed}
             onChange={(event) => {
               setTyped(event.target.value);
@@ -68,16 +73,18 @@ export function ChoicePicker({
           labelId={labelId}
           hintId={hintId}
           shown={shown}
+          invalid={invalid}
           filtered={typed.trim() !== ""}
           selected={Array.isArray(value) ? value : []}
           onChange={onChange}
         />
       ) : (
-        <span className="field field--select">
+        <span className={invalid ? "field field--select is-bad" : "field field--select"}>
           <select
             id={inputId}
             aria-describedby={hintId}
             aria-required={required ? true : undefined}
+            aria-invalid={invalid ? true : undefined}
             value={typeof value === "string" ? value : ""}
             onChange={(event) => {
               onChange(event.target.value);
@@ -108,6 +115,7 @@ function ChoiceCheckboxes({
   labelId,
   hintId,
   shown,
+  invalid,
   filtered,
   selected,
   onChange,
@@ -115,6 +123,7 @@ function ChoiceCheckboxes({
   readonly labelId: string;
   readonly hintId: string | undefined;
   readonly shown: ReadonlyArray<ChoiceOption>;
+  readonly invalid: boolean;
   /** Whether the filter field holds text, which decides why an empty list is empty. */
   readonly filtered: boolean;
   readonly selected: ReadonlyArray<string>;
@@ -125,7 +134,8 @@ function ChoiceCheckboxes({
       role="group"
       aria-labelledby={labelId}
       aria-describedby={hintId}
-      className="options choice-list"
+      aria-invalid={invalid ? true : undefined}
+      className={invalid ? "options choice-list is-bad" : "options choice-list"}
     >
       {shown.length === 0 ? (
         <p className="fine choice-list-empty">

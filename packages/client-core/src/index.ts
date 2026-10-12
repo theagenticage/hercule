@@ -150,11 +150,6 @@ export {
   DEVICE_FLOW_ENDINGS,
   describeSignInEnding,
   describeSignInFailure,
-  describeConnectionHealth,
-  describeSetupFlow,
-  summarizeConnectionType,
-  buildFlowSwitchLabel,
-  findOAuthConnection,
   waitForDeviceFlow,
   connectionNeedsAttention,
   describeFeedName,
@@ -169,9 +164,20 @@ export {
   type DeviceFlowStep,
   type DeviceFlowWatcher,
   type SignInEnding,
-  type ConnectionHealth,
   type SetupFlow,
 } from "./connections";
+export {
+  SUGGESTED_TOPICS,
+  describeConnectionHealth,
+  describeConnectionTypeName,
+  summarizeConnectionType,
+  listFlowSwitches,
+  findOAuthConnection,
+  decideFieldChoices,
+  type ConnectionHealth,
+  type FlowSwitch,
+  type FieldChoices,
+} from "./connection-settings";
 export {
   ApiError,
   ConnectionError,

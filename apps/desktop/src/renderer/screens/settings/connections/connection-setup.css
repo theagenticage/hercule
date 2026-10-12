@@ -59,3 +59,19 @@
   padding-top: 6px;
   border-top: 0;
 }
+/* A switch to another flow while the credentials are being sent: the form
+   cannot be left, so the link reads as plain text. */
+.setup-switches .link:disabled {
+  color: var(--faint);
+  cursor: default;
+  text-decoration: none;
+}
+/* Open again and Cancel at the end of the browser's row. */
+.setup-row-acts {
+  display: flex;
+  gap: 6px;
+}
+/* Why the sign-in page did not open, under the wait line. */
+.setup-link-error {
+  margin: 8px 0 0;
+}

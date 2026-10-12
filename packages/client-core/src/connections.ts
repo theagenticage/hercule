@@ -41,36 +41,6 @@ export function connectionNeedsAttention(connection: Pick<Connection, "status">)
 }
 
 /**
- * How a screen shows a Connection's health: the words, and whether they are
- * drawn as a failure.
- */
-export interface ConnectionHealth {
-  readonly text: string;
-  readonly failing: boolean;
-}
-
-/**
- * Returns how a screen shows the Connection's health. Only an `error` is
- * drawn as a failure, and its words are the controller's `statusDetail`,
- * because that says what went wrong; "error" stands in when the controller
- * gave no detail.
- */
-export const describeConnectionHealth = (
-  connection: Pick<Connection, "status" | "statusDetail">,
-): ConnectionHealth => {
-  switch (connection.status) {
-    case "connected":
-      return { text: "healthy", failing: false };
-    case "needs-reauth":
-      return { text: "needs sign-in", failing: false };
-    case "disabled":
-      return { text: "disabled", failing: false };
-    case "error":
-      return { text: connection.statusDetail?.trim() || "error", failing: true };
-  }
-};
-
-/**
  * Checks whether a screen shows the connection's account beside its name.
  * The account is shown only when it adds something the name does not:
  *
@@ -268,85 +238,6 @@ export const listSetupFlows = (type: ConnectionType): ReadonlyArray<SetupFlow> =
   const kinds: ReadonlyArray<string> = type.setup.map((step) => step.kind);
   // Two credential steps are one flow: the user pastes all their fields at once.
   return [...new Set(kinds)].filter((kind): kind is SetupFlow => SETUP_FLOWS.includes(kind));
-};
-
-/**
- * Returns a short description of one setup flow, short enough for a row, such
- * as "sign in with GitHub".
- */
-export const describeSetupFlow = (flow: SetupFlow, type: ConnectionType): string => {
-  switch (flow) {
-    case "device":
-    case "oauth":
-      return `sign in with ${type.displayName}`;
-    case "credentials":
-      return "paste a token";
-    case "pairing":
-      return "pair a chat account";
-  }
-};
-
-/**
- * Returns the secondary line under a connection type's name: the plugin that
- * declares it, then what setting it up takes, such as "sign in with GitHub or
- * paste a token". The plugin comes first because two plugins may each declare
- * a type called Gmail, and the name above does not show which one this is.
- * A plugin named like its type is left out, because it would repeat the name.
- */
-export const summarizeConnectionType = (type: ConnectionType): string => {
-  // A device flow and a redirect flow read the same in a row, so one is enough.
-  const gists = new Set(listSetupFlows(type).map((flow) => describeSetupFlow(flow, type)));
-  // For a setup this build cannot show, the type's id stands in for a
-  // description that may be wrong.
-  const gist = gists.size === 0 ? type.type : [...gists].join(" or ");
-  return showsPluginName(type) ? `${type.pluginName} · ${gist}` : gist;
-};
-
-/**
- * Returns the label of the button that switches a setup to `flow`, for a type
- * that offers more than one flow, such as "Paste a token instead".
- */
-export const buildFlowSwitchLabel = (flow: SetupFlow, type: ConnectionType): string => {
-  switch (flow) {
-    case "device":
-    case "oauth":
-      return `Sign in with ${type.displayName} instead`;
-    case "credentials":
-      return "Paste a token instead";
-    case "pairing":
-      return "Pair a chat account instead";
-  }
-};
-
-/**
- * Finds the Connection an OAuth setup wrote, by comparing the Connections
- * read when the setup started (`before`) with the ones read now (`after`).
- * The setup finishes in the browser, so a client that did not open the
- * browser's page learns of it only from the list. Returns `undefined` while
- * the setup has written nothing yet.
- *
- * - A new Connection (`connectionId` absent) is one of the type whose id was
- *   not in `before`.
- * - A reconnect (`connectionId` given) is that Connection, `connected`, with
- *   an `updatedAt` other than the one in `before`.
- */
-export const findOAuthConnection = (
-  before: readonly Connection[],
-  after: readonly Connection[],
-  setup: { readonly type: string; readonly connectionId?: string },
-): Connection | undefined => {
-  const { connectionId } = setup;
-  if (connectionId === undefined) {
-    const known = new Set(before.map((connection) => connection.id));
-    return after.find((connection) => connection.type === setup.type && !known.has(connection.id));
-  }
-  const old = before.find((connection) => connection.id === connectionId);
-  return after.find(
-    (connection) =>
-      connection.id === connectionId &&
-      connection.status === "connected" &&
-      connection.updatedAt !== old?.updatedAt,
-  );
 };
 
 /**

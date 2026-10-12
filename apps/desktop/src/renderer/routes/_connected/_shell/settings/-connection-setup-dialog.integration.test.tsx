@@ -245,6 +245,58 @@ describe("the setup of a Connection with pasted credentials", () => {
     expect(view.getByLabelText("Access token").parentElement?.className).toBe("field");
   });
 
+  it("keeps the form as sent while the save is pending, and closes once it lands", async () => {
+    let answerCreate: (answer: { status: number; body: unknown }) => void = () => undefined;
+    const created = buildConnection(
+      "01a06d02-7700-7000-8000-000000000007",
+      "github/github",
+      "rogier",
+    );
+    const { calls, context } = await openConnections({
+      "POST /api/v1/connections": () =>
+        new Promise((resolve) => {
+          answerCreate = resolve;
+        }),
+    });
+    const view = within(await openSetup("GitHub"));
+    await userEvent.click(view.getByRole("button", { name: "Paste a token instead" }));
+    const token = view.getByLabelText<HTMLInputElement>("Personal access token");
+    await userEvent.type(token, "ghp-1{Enter}");
+    expect(view.getByRole("button", { name: "Connecting…" }).getAttribute("aria-busy")).toBe(
+      "true",
+    );
+
+    // Neither typing nor a switch of flow can drop the pending save.
+    await userEvent.type(token, "-more");
+    expect(token.value).toBe("ghp-1");
+    const toSignIn = view.getByRole<HTMLButtonElement>("button", {
+      name: "Sign in with GitHub instead",
+    });
+    expect(toSignIn.disabled).toBe(true);
+    await userEvent.click(view.getByRole("button", { name: "Connecting…" }));
+
+    answerCreate({ status: 201, body: created });
+    await waitForClosed();
+    expect(readCalls(calls, "POST", "/api/v1/connections").map((call) => call.body)).toEqual([
+      { type: "github/github", credentials: { pat: "ghp-1" } },
+    ]);
+    // The app drops a finished mutation, and the pasted secret with it, once
+    // the dialog is gone.
+    await waitFor(() => {
+      expect(context.queryClient.getMutationCache().getAll()).toHaveLength(0);
+    });
+  });
+
+  it("forgets what was typed when the user switches flow", async () => {
+    await openConnections();
+    const view = within(await openSetup("GitHub"));
+    await userEvent.click(view.getByRole("button", { name: "Paste a token instead" }));
+    await userEvent.type(view.getByLabelText("Personal access token"), "ghp-1");
+    await userEvent.click(view.getByRole("button", { name: "Sign in with GitHub instead" }));
+    await userEvent.click(view.getByRole("button", { name: "Paste a token instead" }));
+    expect(view.getByLabelText<HTMLInputElement>("Personal access token").value).toBe("");
+  });
+
   it("gives an existing Connection fresh credentials on Reconnect", async () => {
     const path = `/api/v1/connections/${OFFICE_PAPERS.id}/credentials`;
     const { calls } = await openConnections({
@@ -254,7 +306,9 @@ describe("the setup of a Connection with pasted credentials", () => {
       await screen.findByRole("button", { name: "More for Paper Trail · Office papers" }),
       "Reconnect…",
     );
-    const view = within(await screen.findByRole("dialog", { name: "Reconnect Office papers" }));
+    const view = within(
+      await screen.findByRole("dialog", { name: "Reconnect Paper Trail · Office papers" }),
+    );
 
     await userEvent.type(view.getByLabelText("Access token"), "k-789");
     await userEvent.type(view.getByLabelText("Signing secret"), "s-000");
@@ -344,6 +398,8 @@ describe("the setup of a Connection with a device code", () => {
       "Waiting for you to approve Hercule on GitHub. The code expires in 15 minutes.",
     );
     expect(view.getByText("github.com/login/device")).toBeTruthy();
+    // The button that started the sign-in is gone, so the focus moves to the next step.
+    expect(document.activeElement).toBe(view.getByRole("button", { name: "Open GitHub" }));
     fireEvent.click(view.getByRole("button", { name: "Open GitHub" }));
     expect(fake.openedLinks).toEqual(["https://github.com/login/device"]);
 
@@ -410,23 +466,25 @@ describe("the setup of a Connection with a device code", () => {
 
   it("drops a code that arrives after the user switched to pasting a token", async () => {
     let answerStart: (answer: { body: unknown }) => void = () => undefined;
-    const { calls } = await openConnections({
+    const { calls, context } = await openConnections({
       [`POST ${START_PATH}`]: () =>
         new Promise((resolve) => {
           answerStart = resolve;
         }),
     });
     const view = within(await openSetup("GitHub"));
+    // With no field to type in, Enter signs in rather than pressing Cancel.
+    expect(document.activeElement).toBe(view.getByRole("button", { name: "Sign in with GitHub" }));
     await userEvent.click(view.getByRole("button", { name: "Sign in with GitHub" }));
     await userEvent.click(view.getByRole("button", { name: "Sign in with GitHub" }));
     expect(readCalls(calls, "POST", START_PATH)).toHaveLength(1);
 
     await userEvent.click(view.getByRole("button", { name: "Paste a token instead" }));
-    // The answer passes through the client and the mutation before it can
-    // reach the screen, so the test waits a moment past it.
-    await act(async () => {
-      answerStart({ body: buildDeviceStart() });
-      await new Promise((resolve) => setTimeout(resolve, 50));
+    answerStart({ body: buildDeviceStart() });
+    // The answer has passed through the client and the mutation once no
+    // mutation is pending.
+    await waitFor(() => {
+      expect(context.queryClient.isMutating()).toBe(0);
     });
     expect(view.queryByText("WDJB-MJHT")).toBeNull();
     expect(view.getByLabelText("Personal access token")).toBeTruthy();
@@ -484,6 +542,57 @@ describe("the setup of a Connection with OAuth", () => {
     connections = [OFFICE_PAPERS, other, mail];
     live.pushInvalidation("connection", [mail.id]);
     await waitForClosed();
+  });
+
+  it("waits without a spinner, and opens the page again on Open again", async () => {
+    const authorizationUrl = "https://mail.example/authorize?state=abc";
+    const { fake } = await openConnections({
+      "POST /api/v1/oauth/start": { body: { authorizationUrl } },
+    });
+    const view = within(await openSetup("Mailbox"));
+    await userEvent.click(view.getByRole("button", { name: "Sign in with Mailbox" }));
+    await view.findByText("Finish in your browser");
+
+    // The user may give up in the browser, so the wait may never end.
+    expect(view.getByRole("status").querySelector(".spin")).toBeNull();
+    expect(document.activeElement).toBe(view.getByRole("button", { name: "Open again" }));
+    await userEvent.click(view.getByRole("button", { name: "Open again" }));
+    expect(fake.openedLinks).toEqual([authorizationUrl, authorizationUrl]);
+  });
+
+  it("says when the browser did not open the page", async () => {
+    const authorizationUrl = "https://mail.example/authorize?state=abc";
+    const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+    vi.spyOn(fake.bridge.link, "open").mockRejectedValueOnce(new Error("No browser is set."));
+    stubApi({
+      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, plugins: PLUGINS }),
+      "GET /api/v1/connections": { body: { items: [] } },
+      "POST /api/v1/oauth/start": { body: { authorizationUrl } },
+    });
+    await renderApp(fake, { path: "/settings/connections" });
+    const view = within(await openSetup("Mailbox"));
+    await userEvent.click(view.getByRole("button", { name: "Sign in with Mailbox" }));
+
+    expect((await view.findByRole("alert")).textContent).toBe(
+      "The browser did not open the sign-in page: No browser is set.",
+    );
+    // A second try that opens the page clears the error.
+    await userEvent.click(view.getByRole("button", { name: "Open again" }));
+    await waitFor(() => {
+      expect(view.queryByRole("alert")).toBeNull();
+    });
+  });
+
+  it("does not open a sign-in page that is not a web address", async () => {
+    const { fake } = await openConnections({
+      "POST /api/v1/oauth/start": { body: { authorizationUrl: "file:///etc/passwd" } },
+    });
+    const view = within(await openSetup("Mailbox"));
+    await userEvent.click(view.getByRole("button", { name: "Sign in with Mailbox" }));
+    expect((await view.findByRole("alert")).textContent).toBe(
+      "The sign-in page is not a web address, so it was not opened: file:///etc/passwd",
+    );
+    expect(fake.openedLinks).toEqual([]);
   });
 
   it("closes on Cancel while the sign-in finishes in the browser", async () => {

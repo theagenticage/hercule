@@ -1,7 +1,7 @@
 /**
  * Tests Configure of Settings > Connections, opened from a row's ⋯ menu:
- * what Save sends and that it closes the dialog, where the controller's
- * errors land, the refusals made before anything is sent, a type whose
+ * what Save sends and that it closes the dialog, the fields held still
+ * while the save is on its way, where the controller's errors land, the refusals made before anything is sent, a type whose
  * plugin is gone, and the settings whose choices load from the account.
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,6 +15,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_GITHUB_CONNECTION,
+  holdAnswer,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -141,8 +142,8 @@ const listUpdates = (calls: readonly Call[]): readonly Call[] =>
 
 /** Returns the error shown under the field labelled `label`, or `null` when it has none. */
 const readFieldError = (dialog: HTMLElement, label: string): string | null =>
-  within(dialog).getByText(label, { selector: "label" }).closest(".fl")?.querySelector(".fl-err")
-    ?.textContent ?? null;
+  within(dialog).getByLabelText(label).closest(".fl")?.querySelector(".fl-err")?.textContent ??
+  null;
 
 describe("Configure a Connection", () => {
   it("sends every field on Save, keeps the topics after the first, closes and reads the list again", async () => {
@@ -186,6 +187,31 @@ describe("Configure a Connection", () => {
         listsBefore + 1,
       );
     });
+  });
+
+  it("holds every field still while the save is on its way, so nothing typed after Save is lost", async () => {
+    const held = holdAnswer();
+    const { dialog, calls } = await openConfigure({ handlers: { [UPDATE_PATH]: held.handler } });
+    const team = await within(dialog).findByRole<HTMLSelectElement>("combobox", { name: "Team" });
+    const name = within(dialog).getByRole<HTMLInputElement>("textbox", { name: "Name" });
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    const saving = await within(dialog).findByRole("button", { name: "Saving…" });
+    expect(name.matches(":disabled")).toBe(true);
+    expect(team.matches(":disabled")).toBe(true);
+    await userEvent.type(name, " later");
+    expect(name.value).toBe("work");
+    // A second press while the first save is on its way sends nothing.
+    await userEvent.click(saving);
+    expect(listUpdates(calls)).toHaveLength(1);
+
+    held.answer({ body: { ...WORK, intake: { eventKinds: [], signalKinds: [] } } });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(listUpdates(calls).map((call) => (call.body as { label: string }).label)).toEqual([
+      "work",
+    ]);
   });
 
   it("shows the controller's error about a setting under that setting, and keeps the dialog open", async () => {

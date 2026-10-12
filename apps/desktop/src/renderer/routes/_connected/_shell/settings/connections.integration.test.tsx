@@ -1,9 +1,9 @@
 /**
  * Tests Settings > Connections' table: one row per Connection with its
  * health, the account line, the row's ⋯ menu, Delete with its
- * confirmation, Add a Connection's list of types, the note shown with no
- * Connection, and the rows that lead here from the Settings list and the
- * Hercule face.
+ * confirmation, a dialog whose Connection is removed elsewhere, Add a
+ * Connection's list of types, the note shown with no Connection, and the
+ * rows that lead here from the Settings list and the Hercule face.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
@@ -243,7 +243,7 @@ describe("Settings > Connections", () => {
     });
 
     await chooseItem(await openRowMenu("GitHub · work"), "Delete…");
-    const dialog = await screen.findByRole("dialog", { name: "Delete work?" });
+    const dialog = await screen.findByRole("dialog", { name: "Delete GitHub · work?" });
     expect(dialog.textContent).toContain(
       "Hercule forgets this Connection's credentials, but does not revoke them at GitHub.",
     );
@@ -259,6 +259,58 @@ describe("Settings > Connections", () => {
       expect(getRow("GitHub · work")).toBeUndefined();
     });
     expect(getRow("GitHub · rogier")).toBeDefined();
+    // The user's own delete is not reported as a removal elsewhere.
+    expect(document.querySelector(".set-note")).toBeNull();
+  });
+
+  it("counts a Connection already gone as deleted", async () => {
+    let stored: Connection[] = [HEALTHY, SIGN_IN];
+    await openConnections({
+      connections: stored,
+      handlers: {
+        "GET /api/v1/connections": () => ({ body: { items: stored } }),
+        // Removed elsewhere a moment before the user pressed Delete.
+        [`DELETE /api/v1/connections/${HEALTHY.id}`]: () => {
+          stored = [SIGN_IN];
+          return { status: 404, body: buildErrorBody("not_found", "No such Connection.") };
+        },
+      },
+    });
+
+    await chooseItem(await openRowMenu("GitHub · rogier"), "Delete…");
+    const dialog = await screen.findByRole("dialog", { name: "Delete GitHub · rogier?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(getRow("GitHub · rogier")).toBeUndefined();
+    expect(document.querySelector(".set-note")).toBeNull();
+  });
+
+  it("closes a dialog whose Connection is removed elsewhere, and says why", async () => {
+    let stored: Connection[] = [HEALTHY, SIGN_IN];
+    const { context } = await openConnections({
+      connections: stored,
+      handlers: { "GET /api/v1/connections": () => ({ body: { items: stored } }) },
+    });
+    await chooseItem(await openRowMenu("GitHub · work"), "Delete…");
+    await screen.findByRole("dialog", { name: "Delete GitHub · work?" });
+
+    stored = [HEALTHY];
+    await context.queryClient.invalidateQueries();
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(screen.getByRole("status").textContent).toBe(
+      "GitHub · work was deleted elsewhere, so its dialog closed.",
+    );
+
+    // The line goes once the user opens another dialog.
+    await chooseItem(await openRowMenu("GitHub · rogier"), "Delete…");
+    await screen.findByRole("dialog", { name: "Delete GitHub · rogier?" });
+    expect(document.querySelector(".set-note")).toBeNull();
   });
 
   it("names the type's id as the provider when the type is no longer installed", async () => {
@@ -266,7 +318,7 @@ describe("Settings > Connections", () => {
 
     await chooseItem(await openRowMenu("acme/widgets · widgets"), "Delete…");
 
-    const dialog = await screen.findByRole("dialog", { name: "Delete widgets?" });
+    const dialog = await screen.findByRole("dialog", { name: "Delete acme/widgets · widgets?" });
     expect(dialog.textContent).toContain("does not revoke them at acme/widgets.");
   });
 
@@ -281,7 +333,7 @@ describe("Settings > Connections", () => {
     });
 
     await chooseItem(await openRowMenu("GitHub · rogier"), "Delete…");
-    const dialog = await screen.findByRole("dialog", { name: "Delete rogier?" });
+    const dialog = await screen.findByRole("dialog", { name: "Delete GitHub · rogier?" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
     const error = await within(dialog).findByRole("alert");
@@ -320,8 +372,18 @@ describe("Settings > Connections", () => {
   it("shows a note in place of the table when there is no Connection", async () => {
     await openConnections({ connections: [] });
 
-    expect(screen.getByText("No Connections yet")).toBeTruthy();
+    const note = document.querySelector(".connection-list .set-empty")!;
+    expect(note.querySelector("b")!.textContent).toBe("No Connections yet");
+    expect(note.querySelector("span")!.textContent).toMatch(/Add one with Add a Connection\.$/);
     expect(document.querySelector(".connection-list .tbl-h")).toBeNull();
+  });
+
+  it("says no plugin offers a type when there is nothing to add", async () => {
+    await openConnections({ connections: [], plugins: [] });
+
+    expect(document.querySelector(".connection-list .set-empty span")!.textContent).toBe(
+      "No installed plugin offers a Connection type, so there is nothing to add yet.",
+    );
   });
 });
 

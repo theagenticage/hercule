@@ -41,7 +41,13 @@ export function ConnectionRowMenu({
       >
         <MoreIcon />
       </button>
-      <div {...menuProps} popover="auto" role="menu" aria-label={label} className="pop conn-menu">
+      <div
+        {...menuProps}
+        popover="auto"
+        role="menu"
+        aria-label={label}
+        className="pop popover-menu conn-menu"
+      >
         <button
           type="button"
           {...buildItemProps("reconnect", onReconnect === undefined)}
