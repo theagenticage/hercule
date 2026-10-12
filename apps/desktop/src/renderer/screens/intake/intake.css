@@ -68,6 +68,23 @@
 .asks[data-resizing] .asks-list {
   transition: none;
 }
+/* The list's rows and the layer their leaving copies fade in. The pointer
+   over this frame holds back the changes the user did not make. */
+.asks-frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Over the list and clipped to it, so a leaving copy fades where its row
+   was, and never over the view switcher above. It takes no pointer. */
+.asks-ghosts {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  pointer-events: none;
+}
 .asks-scroll {
   position: relative;
   flex: 1;
@@ -465,10 +482,12 @@
 
 /* The toast of the last move, above the bulk bar while rows are checked.
    Both stay in view at the bottom of the list, as wide as the list is in the
-   split. */
+   split. It stacks above the layer where leaving rows fade, so a copy of a
+   row under the dock fades behind it, as the row itself would. */
 .asks-dock {
   position: sticky;
   bottom: 0;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;

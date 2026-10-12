@@ -12,6 +12,7 @@
 import { DONE_ACTION_ID, type Signal, type SignalView } from "@hercule/contract";
 import { lowerFirst, nameSignalKind } from "./intake";
 import { formatNameList } from "./name-list";
+import { parsePluginId } from "./plugin-id";
 import {
   addCalendarDays,
   computeMinutesOfDay,
@@ -478,19 +479,62 @@ export const countClearedToday = (
   now: Date,
   timezone: string,
 ): ClearedToday => {
-  const today = done.flatMap((signal) =>
-    signal.resolution !== undefined &&
-    signal.replacedBy === undefined &&
-    isSameDay(new Date(signal.resolution.at), now, timezone)
-      ? [signal.resolution]
-      : [],
-  );
+  const today = listClearedToday(done, now, timezone).map((signal) => signal.resolution!);
   return {
     cleared: today.length,
     leftOnTheirOwn: today.filter(
       (resolution) => !(resolution.kind === "decided" && resolution.actor === "user"),
     ).length,
   };
+};
+
+/**
+ * Returns the signals among `done` resolved since midnight of `now` in
+ * `timezone`, leaving out replaced signals: the ones `countClearedToday`
+ * counts.
+ */
+const listClearedToday = (
+  done: ReadonlyArray<Signal>,
+  now: Date,
+  timezone: string,
+): ReadonlyArray<Signal> =>
+  done.filter(
+    (signal) =>
+      signal.resolution !== undefined &&
+      signal.replacedBy === undefined &&
+      isSameDay(new Date(signal.resolution.at), now, timezone),
+  );
+
+/** How many signals of one plugin were cleared today. */
+export interface PluginClearedToday {
+  readonly pluginId: string;
+  readonly cleared: number;
+}
+
+/**
+ * Counts the signals among `done` cleared today, as `countClearedToday`
+ * counts them, per plugin that raised them. Inbox zero shows one pill per
+ * plugin with these numbers (spec 17 §Motion).
+ *
+ * Returns only plugins with at least one signal cleared today, in the order
+ * `plugins` lists them, then any plugin `plugins` does not list, by id, as
+ * the tabs order them (see `buildIntakeTabs`). Core signals belong to no
+ * plugin, so they are counted in no entry.
+ */
+export const countClearedTodayByPlugin = (
+  done: ReadonlyArray<Signal>,
+  now: Date,
+  timezone: string,
+  plugins: ReadonlyArray<{ readonly id: string }>,
+): ReadonlyArray<PluginClearedToday> => {
+  const counts = new Map<string, number>();
+  for (const signal of listClearedToday(done, now, timezone)) {
+    const pluginId = parsePluginId(signal.kind);
+    if (pluginId !== null) counts.set(pluginId, (counts.get(pluginId) ?? 0) + 1);
+  }
+  const listed = plugins.map((plugin) => plugin.id).filter((id) => counts.has(id));
+  const unlisted = [...counts.keys()].filter((id) => !listed.includes(id)).sort();
+  return [...listed, ...unlisted].map((pluginId) => ({ pluginId, cleared: counts.get(pluginId)! }));
 };
 
 /**

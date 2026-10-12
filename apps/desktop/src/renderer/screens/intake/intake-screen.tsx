@@ -36,6 +36,7 @@ import {
   signalsToDoQuery,
 } from "../../app/queries";
 import { IntakeDock } from "./intake-dock";
+import { InboxZero } from "./inbox-zero";
 import { IntakeFoot } from "./intake-foot";
 import { IntakeBar, IntakeSplit, IntakeViewSwitcher } from "./intake-frame";
 import { IntakeList, type BulkHighlight, type SignalRowAction } from "./intake-list";
@@ -44,6 +45,7 @@ import { pickSelectionAfterMove } from "./pick-selection-after-move";
 import { SignalPane, type SignalPaneHandle } from "./signal-pane";
 import { SnoozeMenu } from "./snooze-menu";
 import { useIntakeSplit } from "./use-intake-split";
+import { useHeldToDo } from "./use-held-to-do";
 import { useIntakeTabs } from "./use-intake-tabs";
 import {
   IntakeMovesContext,
@@ -114,7 +116,11 @@ export function IntakeScreen({
   const { data: toDo } = useSuspenseQuery(signalsToDoQuery(client));
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const timezone = resolveDisplayTimezone(settings.user.timezone);
-  const moves = useSignalMoveRunner(client, timezone);
+  // Checks belong to one view and one tab: switching either clears them, as
+  // it closes the snooze menu and drops the bulk bar's preview.
+  const scope = `${view}:${pluginId ?? "all"}`;
+  const held = useHeldToDo(toDo, scope);
+  const moves = useSignalMoveRunner(client, timezone, held.registerOwnChanges);
   const [focusPaneFor, setFocusPaneFor] = useState<string | null>(null);
   const [focusSelectedRow, setFocusSelectedRow] = useState(false);
   const split = useIntakeSplit(selectedId, "data-signal-id");
@@ -136,7 +142,7 @@ export function IntakeScreen({
   });
   const sections: ReadonlyArray<IntakeSection> =
     view === "to-do"
-      ? groupSignalsIntoSections(toDo, pluginId)
+      ? groupSignalsIntoSections(held.shown, pluginId)
       : groupSignalsByDay(
           paged.data?.pages.flatMap((page) => page.items) ?? [],
           view,
@@ -147,9 +153,6 @@ export function IntakeScreen({
   const listedSignals = sections.flatMap((section) => section.signals);
   const selectedSignal = listedSignals.find((signal) => signal.id === selectedId);
 
-  // Checks belong to one view and one tab: switching either clears them, as
-  // it closes the snooze menu and drops the bulk bar's preview.
-  const scope = `${view}:${pluginId ?? "all"}`;
   const [checks, setChecks] = useState<Checks>({ scope, ids: new Set() });
   const [preview, setPreview] = useState<SignalMove | null>(null);
   const [menu, setMenu] = useState<OpenSnoozeMenu | null>(null);
@@ -418,7 +421,11 @@ export function IntakeScreen({
     toggleSnoozeMenu,
     snoozeMenuPlace: menu?.place ?? null,
     select: openSignal,
+    registerOwnChanges: held.registerOwnChanges,
   };
+  // Inbox zero takes the place of the empty To do list on the All tab, and
+  // shows the cleared count itself, so the foot goes with the rows.
+  const inboxZero = view === "to-do" && pluginId === null && listedSignals.length === 0;
 
   return (
     <>
@@ -453,6 +460,7 @@ export function IntakeScreen({
               </div>
               <IntakeList
                 view={view}
+                scope={scope}
                 sections={sections}
                 plugins={plugins}
                 selectedId={selectedId}
@@ -461,10 +469,24 @@ export function IntakeScreen({
                 menuRowId={menu?.place === "row" ? (menu.signals[0]?.id ?? null) : null}
                 timezone={timezone}
                 focusSelectedRow={focusSelectedRow}
-                empty={<EmptyView view={view} tabName={tabName} loading={paged.isPending} />}
+                empty={
+                  inboxZero ? (
+                    <InboxZero
+                      arriving={held.arriving}
+                      onShowDone={(id) => {
+                        onPluginChange(id);
+                        onViewChange("done");
+                      }}
+                    />
+                  ) : (
+                    <EmptyView view={view} tabName={tabName} loading={paged.isPending} />
+                  )
+                }
                 foot={
                   <>
-                    {view === "to-do" && pluginId === null && <IntakeFoot timezone={timezone} />}
+                    {view === "to-do" && pluginId === null && !inboxZero && (
+                      <IntakeFoot timezone={timezone} />
+                    )}
                     <IntakeDock
                       toast={moves.toast}
                       bulk={
@@ -493,6 +515,8 @@ export function IntakeScreen({
                 onSelect={openSignal}
                 onRowAction={runRowAction}
                 onNearEnd={readNextPage}
+                onPointerEnter={held.holdChanges}
+                onPointerLeave={held.releaseChanges}
                 onFocusedSelectedRow={() => {
                   setFocusSelectedRow(false);
                 }}

@@ -167,6 +167,7 @@ function SignalDetail({
     },
     onSuccess: (acted) => {
       setActedHere(true);
+      moves.registerOwnChanges([signal.id]);
       // The lists need no read here: the answer writes an audit entry on the
       // `signal` topic, and its live push reads every signal list again.
       queryClient.setQueryData(signalQuery(client, signal.id).queryKey, acted);

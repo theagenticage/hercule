@@ -240,6 +240,30 @@ export const useClockValue = <Value extends string | number | null>(
 };
 
 /**
+ * Returns `format(now)` for the age clock's current time, for a value that
+ * depends on the wall clock in `timezone`, such as what counts as "today",
+ * and draws the calling component again whenever that value changes.
+ * `findNextChange` returns the first moment after `now` at which the value
+ * may change in `timezone`, such as the next midnight there. It must be a
+ * stable function, defined once outside the component, as `useClockValue`
+ * needs.
+ *
+ * The clock also reads the time when the window is shown or gets focus,
+ * which covers a Mac that slept past such a moment.
+ */
+export const useZonedClockValue = <Value extends string | number | null>(
+  timezone: string,
+  findNextChange: (timezone: string, now: Date) => Date,
+  format: (now: Date) => Value,
+): Value => {
+  const subscribe = useCallback(
+    (onChange: () => void) => ageClock.watch((now) => findNextChange(timezone, now), onChange),
+    [timezone, findNextChange],
+  );
+  return useSyncExternalStore(subscribe, () => format(ageClock.readNow()));
+};
+
+/**
  * Returns the short age of `at` that a row shows, such as "now", "5m" or "3h"
  * (`formatAge`), and keeps it current while `onScreen` is true. Pass `true`
  * only while the label is inside the visible part of the list.

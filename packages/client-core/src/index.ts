@@ -348,6 +348,7 @@ export {
   applySignalMove,
   buildSnoozeChoices,
   countClearedToday,
+  countClearedTodayByPlugin,
   decideSignalPaneMoves,
   decideSignalRowControls,
   describeBulkDoneTitle,
@@ -363,10 +364,12 @@ export {
   reachesBeforeToday,
   SIGNAL_MOVE_LABELS,
   toggleSignalCheck,
+  type PluginClearedToday,
   type SignalMove,
   type SignalMovePlan,
   type SignalPaneMove,
 } from "./intake-moves";
+export { describeInboxZero, type InboxZeroLine } from "./inbox-zero";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
