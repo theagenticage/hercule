@@ -120,8 +120,8 @@ export function AgentPage({
   // than an Error.
   // oxlint-disable-next-line typescript/only-throw-error
   if (subagentId !== undefined && subagent === undefined) throw notFound();
-  // The messages on their way into the session, which the transcript does not
-  // hold yet, close the session's own transcript. A subagent takes no
+  // The messages on their way into the session, drawn from their queued
+  // inputs, close the session's own transcript. A subagent takes no
   // messages, so its page reads none. Not suspended: the composer below
   // reads the same inputs, and the drawer's loader does not load them.
   const queued = useQuery({

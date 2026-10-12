@@ -270,6 +270,7 @@ export function Transcript({
             timezone={timezone}
             today={today}
             steered={block.steered}
+            sending={block.sending === true}
           />
         );
       case "agent":

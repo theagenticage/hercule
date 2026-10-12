@@ -1172,6 +1172,15 @@ describe("appendSendingMessages", () => {
     ]);
   });
 
+  it("names the session whose agent sent the message", () => {
+    const sender = "01a12f36-0000-7000-8000-0000000000aa";
+    const fromAgent = { ...SENDING, actor: `session:${sender}` };
+    expect(appendSendingMessages([EARLIER], [fromAgent])).toEqual([
+      EARLIER,
+      { ...SENT_BLOCK, senderSessionId: sender },
+    ]);
+  });
+
   it("returns the same list when nothing is sending", () => {
     const blocks = [EARLIER];
     expect(appendSendingMessages(blocks, [])).toBe(blocks);

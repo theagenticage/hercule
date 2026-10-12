@@ -221,6 +221,32 @@ describe("the thread screen", () => {
     expect(document.querySelector(".queued")).toBeNull();
   });
 
+  it("names the agent that sent a message on its way into the session", async () => {
+    const { finished, queued } = THREAD_FIXTURES;
+    // "Write the retry runbook", a thread the user can read.
+    const sender = SIDEBAR_FIXTURE.threads[0]!;
+    await openThread(
+      {
+        ...finished,
+        session: { ...finished.session, status: "starting" },
+        inputs: [
+          {
+            ...queued.inputs[0]!,
+            sessionId: finished.session.id,
+            actor: `session:${sender.id}`,
+            text: "please rebase the pr on main",
+            sentAt: "2026-09-10T09:24:59.000Z",
+          },
+        ],
+      },
+      { [`GET /api/v1/sessions/${sender.id}`]: { body: sender } },
+    );
+
+    const message = await screen.findByRole("group", { name: `Message from ${sender.title}` });
+    expect(within(message).getByText("please rebase the pr on main")).toBeTruthy();
+    expect(within(message).getByText("Sending…")).toBeTruthy();
+  });
+
   it("expands a work divider into its rows, opens a group into its steps, and collapses it again", async () => {
     await openThread(THREAD_FIXTURES.finished);
     const divider = within(findTranscript()).getByRole("button", {

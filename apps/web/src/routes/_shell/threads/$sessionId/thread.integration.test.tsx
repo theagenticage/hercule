@@ -4027,6 +4027,29 @@ const countSessionReads = (calls: readonly Call[], id: string): number =>
   calls.filter((call) => call.method === "GET" && call.path === `/api/v1/sessions/${id}`).length;
 
 describe("Thread: a message another agent sent", () => {
+  it("names the sender of a message on its way into the session, under its bubble", async () => {
+    await openApp(buildSession({ status: "starting" }), buildTwoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: {
+        body: {
+          items: [
+            buildQueuedInput({
+              actor: `session:${SENDER.id}`,
+              sentAt: "2026-09-08T10:02:00.010Z",
+            }),
+          ],
+        },
+      },
+    });
+
+    const agentMessage = await screen.findByRole("group", {
+      name: "Message from Fix EU checkout",
+    });
+    expect(readPageText(agentMessage)).toBe(
+      "Also check the logsSent by Fix EU checkout · sending…",
+    );
+  });
+
   it("draws the owner's message and a steered agent message as two bubbles, the agent's naming its sender with a link to its thread", async () => {
     await openApp(buildSession({ status: "idle" }), buildTurnWithAgentMessage(), {
       [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },
