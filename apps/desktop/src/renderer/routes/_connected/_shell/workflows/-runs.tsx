@@ -84,6 +84,8 @@ export const useRunsNavigation = (): {
 
 /** The day the timeline shows, and the words the day stepper shows it with. */
 export interface ShownDay {
+  /** How many days before today the day is, as the user chose it: 0 for today. */
+  readonly daysBack: number;
   readonly day: TimelineDay;
   /** "Today", "Yesterday", "27 Sep", or "27 Sep 2025" in another year. */
   readonly dayText: string;
@@ -107,7 +109,7 @@ export const useShownDay = (daysBack: number, timezone: string, isShown: boolean
   );
   const today = new Date(todayStart);
   const day = computeTimelineDay(today, daysBack, timezone);
-  return { day, dayText: formatDayStamp(day.start, timezone, today) ?? "" };
+  return { daysBack, day, dayText: formatDayStamp(day.start, timezone, today) ?? "" };
 };
 
 /**
@@ -146,6 +148,10 @@ export function RunTimelineAxis({
  * timeline's lanes, with the next fires of its `triggers` later today.
  * `isEnabled` is whether the workflow is on: an off workflow fires nothing.
  * The lanes hold the minute clock for their now line, as the axis does.
+ * They are drawn afresh for each day the user steps to, so stepping plays
+ * their arrival again. When the day turns at midnight, the lanes stay, so
+ * the focus stays on a run that goes on into the new day, and only the bars
+ * that arrive or change pop their marks.
  */
 export function RunDayLanes({
   client,
@@ -171,6 +177,7 @@ export function RunDayLanes({
   const { bars, trackCount } = buildTimelineBars(runs, definition, waitingRunSessions, day);
   return (
     <TimelineLanes
+      key={shown.daysBack}
       label={`Runs, ${dayText}`}
       hours={buildTimelineHours(day, timezone)}
       now={now}

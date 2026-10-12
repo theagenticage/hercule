@@ -16,6 +16,7 @@ import {
   setVisibility,
   SIDEBAR_FIXTURE,
   stubApi,
+  stubCssAnimations,
   stubElementSize,
   type Call,
   type Handler,
@@ -173,6 +174,16 @@ const WAITING: Session = {
 };
 
 /**
+ * The runs `run.query` answers with: `RUNS`, until a test replaces them to
+ * stand for runs that changed while the page is open.
+ */
+let currentRuns: readonly RunSummary[] = RUNS;
+
+afterEach(() => {
+  currentRuns = RUNS;
+});
+
+/**
  * Answers `run.query`: each workflow's newest runs, at most `newestPerWorkflow`
  * of each, when the filter names it, else the runs with the status it names.
  */
@@ -180,12 +191,12 @@ const answerRunQuery = (call: Call) => {
   const params = new URLSearchParams(call.search);
   const newestPerWorkflow = params.get("newestPerWorkflow");
   if (newestPerWorkflow === null) {
-    return { body: { items: RUNS.filter((run) => run.status === params.get("status")) } };
+    return { body: { items: currentRuns.filter((run) => run.status === params.get("status")) } };
   }
   const kept = new Map<string | null, number>();
   return {
     body: {
-      items: RUNS.filter((run) => {
+      items: currentRuns.filter((run) => {
         const count = (kept.get(run.workflowId) ?? 0) + 1;
         kept.set(run.workflowId, count);
         return count <= Number(newestPerWorkflow);
@@ -323,10 +334,12 @@ describe("the workflow list", () => {
     });
     // The strip: the cancelled run as a dot named for it, then the completed
     // run's mark and the waiting run's, oldest first. A mark is hidden from
-    // assistive technology, so the strip is found from the named dot.
+    // assistive technology, so the strip is found from the named dot, which
+    // sits in its run's slot.
     const cancelled = within(ship).getByRole("img", { name: "Cancelled" });
-    expect(cancelled.parentElement?.children).toHaveLength(3);
-    expect(cancelled.parentElement?.firstElementChild).toBe(cancelled);
+    const strip = cancelled.closest(".strip");
+    expect(strip?.children).toHaveLength(3);
+    expect(strip?.firstElementChild?.firstElementChild).toBe(cancelled);
     // The status waiting on the user is drawn in marigold, and a workflow
     // that is off is drawn faint; only their classes show those colours.
     expect(
@@ -502,6 +515,8 @@ describe("the workflow list's widths", () => {
       WORKFLOWS,
       `/workflows/${SYNC.id}?runsView=timeline&daysBack=2`,
     );
+    const pane = document.querySelector(".open-pane");
+    expect(pane).not.toBeNull();
 
     await userEvent.click(within(getHeader()).getByRole("button", { name: "Hide the list" }));
 
@@ -523,6 +538,8 @@ describe("the workflow list's widths", () => {
     expect(
       within(getList()).getByRole("link", { name: "Nightly sync" }).getAttribute("aria-current"),
     ).toBe("page");
+    // The open workflow's pane stays mounted, so its settling does not play again.
+    expect(document.querySelector(".open-pane")).toBe(pane);
   });
 
   // Below 800px of pane the open workflow fills the pane and the header's
@@ -684,5 +701,132 @@ describe("the workflow list's live updates", () => {
     await waitFor(() =>
       expect(live.readTopics()).toEqual(expect.arrayContaining(["workflow", "run"])),
     );
+  });
+});
+
+describe("the workflow list's motion", () => {
+  /** Sets whether an animation is playing in each row; one is, until a test says not. */
+  let setPlaying: (isPlaying: boolean) => void;
+  beforeEach(() => {
+    setPlaying = stubCssAnimations();
+    setPlaying(true);
+  });
+
+  /** Returns `workflow`'s row in the list. */
+  const getRow = (workflow: WorkflowSummary) =>
+    within(getList()).getByRole("link", { name: workflow.name });
+
+  /** Replaces the runs with `runs`, sends a `run` push, and waits until the list reads them. */
+  const pushRuns = async (
+    app: Awaited<ReturnType<typeof openWorkflows>>,
+    runs: readonly RunSummary[],
+  ) => {
+    await waitFor(() =>
+      expect(app.live.readTopics()).toEqual(expect.arrayContaining(["workflow", "run"])),
+    );
+    currentRuns = runs;
+    const before = app.calls.length;
+    act(() => app.live.pushInvalidation("run", []));
+    // The strips' read is one of the reads the push starts; an open workflow
+    // reads its own runs too.
+    await waitFor(() =>
+      expect(
+        app.calls.slice(before).some((call) => call.search.includes("newestPerWorkflow")),
+      ).toBe(true),
+    );
+    await waitFor(() => expect(app.context.queryClient.isFetching()).toBe(0));
+  };
+
+  it("draws every mark still when the list opens", async () => {
+    await openWorkflows();
+
+    expect(getList().querySelectorAll(".is-new, .is-advanced")).toHaveLength(0);
+  });
+
+  /** The runs after Triage issues' live run failed. */
+  const TRIAGE_FAILED_RUNS = RUNS.map((run): RunSummary =>
+    run.id === TRIAGE_LIVE.id
+      ? {
+          ...buildRunFields(TRIAGE_LIVE.id, TRIAGE, TRIAGE_LIVE.createdAt),
+          status: "failed",
+          failureReason: "step-failed",
+          failedStepId: "fix",
+          startedAt: TRIAGE_LIVE.startedAt,
+          finishedAt: "2026-10-11T09:55:00.000Z",
+        }
+      : run,
+  );
+
+  it("pops in the lead mark and the strip's mark of a workflow whose run changed", async () => {
+    const app = await openWorkflows();
+
+    await pushRuns(app, TRIAGE_FAILED_RUNS);
+
+    await waitFor(() => expect(getRow(TRIAGE).querySelector(".table-mark.is-new")).not.toBeNull());
+    const strip = getRow(TRIAGE).querySelector(".strip")!;
+    expect(strip.querySelector(".strip-run.is-new > .mark--failed")).not.toBeNull();
+    expect(strip.classList.contains("is-advanced")).toBe(false);
+    // The workflows whose runs did not change stay still.
+    expect(getRow(REPORT).querySelectorAll(".is-new")).toHaveLength(0);
+  });
+
+  it("drops a row's motion once no animation is left playing in it", async () => {
+    const app = await openWorkflows();
+    await pushRuns(app, TRIAGE_FAILED_RUNS);
+    await waitFor(() => expect(getRow(TRIAGE).querySelector(".table-mark.is-new")).not.toBeNull());
+
+    fireEvent.animationEnd(getRow(TRIAGE).querySelector(".table-mark > .mark")!);
+    expect(getRow(TRIAGE).querySelectorAll(".is-new")).toHaveLength(2);
+
+    setPlaying(false);
+    fireEvent.animationEnd(getRow(TRIAGE).querySelector(".table-mark > .mark")!);
+    // A row the list then moves has no class left to play again.
+    expect(getRow(TRIAGE).querySelectorAll(".is-new, .is-advanced")).toHaveLength(0);
+  });
+
+  it("drops a change that starts no animation, as a strip hidden in a narrow pane does", async () => {
+    const app = await openWorkflows();
+    setPlaying(false);
+
+    await pushRuns(app, TRIAGE_FAILED_RUNS);
+
+    // The row was drawn with the change, found nothing playing, and dropped
+    // it, so a pane that widens later plays nothing stale.
+    await waitFor(() => expect(getRow(TRIAGE).querySelector(".mark--failed")).not.toBeNull());
+    expect(getRow(TRIAGE).querySelectorAll(".is-new, .is-advanced")).toHaveLength(0);
+  });
+
+  it("pops in the lead mark of a workflow whose run changed in the column", async () => {
+    const app = await openWorkflows(WORKFLOWS, `/workflows/${SYNC.id}`);
+
+    await pushRuns(app, TRIAGE_FAILED_RUNS);
+
+    await waitFor(() =>
+      expect(getRow(TRIAGE).querySelector(".column-mark.is-new > .mark--failed")).not.toBeNull(),
+    );
+    expect(getRow(REPORT).querySelectorAll(".is-new")).toHaveLength(0);
+  });
+
+  it("steps the older marks left when a run joins a strip, and pops the new one in", async () => {
+    const app = await openWorkflows();
+    const started: RunSummary = {
+      ...buildRunFields("01a06d02-7900-7000-8000-000000000008", REPORT, "2026-10-11T09:58:00.000Z"),
+      status: "running",
+      startedAt: "2026-10-11T09:58:00.000Z",
+      activeStepIds: ["write"],
+      awaitedSignalIds: [],
+    };
+
+    await pushRuns(app, [started, ...RUNS]);
+
+    await waitFor(() =>
+      expect(getRow(REPORT).querySelector(".strip")?.classList.contains("is-advanced")).toBe(true),
+    );
+    // One run joined, so the older marks step one slot.
+    expect(
+      getRow(REPORT).querySelector<HTMLElement>(".strip")?.style.getPropertyValue("--joined-runs"),
+    ).toBe("1");
+    const slots = [...getRow(REPORT).querySelectorAll(".strip-run")];
+    expect(slots.map((slot) => slot.classList.contains("is-new"))).toEqual([false, true]);
   });
 });

@@ -4,10 +4,10 @@
  * draws from the rows (spec 17 §Workflows, "The list").
  *
  * A row holds only strings, numbers, booleans and null, and arrays of
- * strings or booleans: the strip and the parts of Starts on. Building the
- * rows again after a push gives equal values for every workflow that did not
- * change, so a screen that compares a row field by field, and each array
- * element by element, redraws only the rows that changed.
+ * strings or booleans: the strip, its run ids and the parts of Starts on.
+ * Building the rows again after a push gives equal values for every workflow
+ * that did not change, so a screen that compares a row field by field, and
+ * each array element by element, redraws only the rows that changed.
  *
  * Times are kept as instants, so a row does not change as the day passes.
  * The screen formats them with `formatListTime` against the age clock, so
@@ -98,6 +98,8 @@ export interface WorkflowListRow {
   readonly startsOnIsCode: ReadonlyArray<boolean>;
   /** The newest runs, at most 20, oldest first, so the newest sits at the strip's right end. */
   readonly strip: ReadonlyArray<RunMarkState>;
+  /** The id of each run in `strip`, in the same order, so a screen can tell which run changed. */
+  readonly stripRunIds: ReadonlyArray<string>;
   /**
    * Completed runs out of completed and failed ones in the strip, as "85%".
    * Empty when there are none.
@@ -236,6 +238,7 @@ export const buildWorkflowRows = ({
     const active = starts.filter((trigger) => trigger.status !== "paused");
     const brokenStart = starts.find((trigger) => trigger.health?.state === "error");
     const strip = stripsByWorkflow.get(workflow.id) ?? [];
+    const stripOldestFirst = strip.toReversed();
     const live = liveRunsByWorkflow.get(workflow.id) ?? [];
     const waiting = waitingByWorkflow.get(workflow.id)?.at(-1);
     const newest = [...strip.slice(0, 1), ...live].reduce<RunSummary | undefined>(
@@ -302,7 +305,8 @@ export const buildWorkflowRows = ({
           : starts.map(
               ({ on }) => isSchedule(on) && describeCronInWords(on.schedule) === undefined,
             ),
-      strip: strip.toReversed().map((run) => decideRunMarkState(run, waitingRunIds.has(run.id))),
+      strip: stripOldestFirst.map((run) => decideRunMarkState(run, waitingRunIds.has(run.id))),
+      stripRunIds: stripOldestFirst.map((run) => run.id),
       successText: ended === 0 ? "" : `${String(Math.round((completed / ended) * 100))}%`,
       statusText,
       statusTone: group === "needsYou" ? "you" : group === "failing" ? "fail" : "muted",

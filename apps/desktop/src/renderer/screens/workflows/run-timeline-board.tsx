@@ -14,7 +14,7 @@
  * the day is drawn as a percentage of the lanes' width, so the axis and the
  * lanes line up, being as wide as the pane's content.
  */
-import { useRef, type JSX } from "react";
+import { useRef, useState, type AnimationEvent, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import type {
   TimelineBar,
@@ -31,6 +31,7 @@ import { isHourLabelCovered } from "@hercule/client-core/run-timeline";
 import { hasRunMark } from "@hercule/client-core/run-marks";
 import { formatPlace } from "./axis-place";
 import { useListTime } from "./list-time";
+import { isAnimationPlaying, isMotionReduced } from "./change-motion";
 import { ViewSwitch, type ViewChoice } from "./view-switch";
 import { useDurationText } from "../../app/age-clock";
 import { useIsOnScreen, useScreenWatcher, type ScreenWatcher } from "../../app/screen-watcher";
@@ -49,6 +50,8 @@ declare module "react" {
     "--track"?: number;
     /** How many tracks the lanes are tall. */
     "--tracks"?: number;
+    /** A bar's place in the order its lanes' arrival plays, 0 for the first. */
+    "--order"?: number | undefined;
   }
 }
 
@@ -190,6 +193,14 @@ export function TimelineAxis({
  *
  * The bars share one IntersectionObserver, so each bar keeps its times
  * current only while it is on screen.
+ *
+ * The lanes play their arrival once, when they mount (run-timeline.css):
+ * the first `ARRIVING_BAR_COUNT` bars of the first drawing arrive one by
+ * one, and the rest arrive with the lanes. A bar whose run arrives or
+ * changes later only pops its mark. Once no animation is left playing, the
+ * lanes drop the classes that started the motion, so a bar that a later
+ * drawing moves does not play it again. Mount the lanes again for each day,
+ * so stepping to a day plays the arrival again.
  */
 export function TimelineLanes({
   label,
@@ -211,12 +222,28 @@ export function TimelineLanes({
   readonly timezone: string;
 }): JSX.Element {
   const watchScreen = useScreenWatcher();
+  // With Reduce motion on, the lanes record no motion, so turning it off
+  // later plays nothing that is already over.
+  const [isArriving, setArriving] = useState(() => !isMotionReduced());
+  // The arrival order is frozen at the first drawing. A bar that a later
+  // drawing sorts into the first places must not start an arrival then.
+  const [arrivalOrders] = useState(
+    () =>
+      new Map(bars.slice(0, ARRIVING_BAR_COUNT).map((bar, order) => [bar.row.id, order] as const)),
+  );
+  const [changedRunIds, clearChangedRunIds] = useChangedRunIds(bars);
+  const endMotion = (event: AnimationEvent<Element>) => {
+    if (isAnimationPlaying(event.currentTarget)) return;
+    setArriving(false);
+    clearChangedRunIds();
+  };
   return (
     <div
-      className="lanes"
+      className={isArriving ? "lanes is-arriving" : "lanes"}
       role="group"
       aria-label={label}
       style={{ "--tracks": Math.max(trackCount, 1) }}
+      onAnimationEnd={endMotion}
     >
       {hours.map((hour) => (
         <span key={hour.startsAt} className="hour-line" style={{ "--at": formatPlace(hour.at) }} />
@@ -240,10 +267,48 @@ export function TimelineLanes({
           now={now}
           timezone={timezone}
           watchScreen={watchScreen}
+          arrivalOrder={isArriving ? arrivalOrders.get(bar.row.id) : undefined}
+          isChanged={changedRunIds.has(bar.row.id)}
         />
       ))}
     </div>
   );
+}
+
+/**
+ * How many bars of the lanes' first drawing arrive one by one. The rest
+ * arrive together with the lanes, so a day of hundreds of runs plays 17
+ * animations: the lanes' fade, and a line and a mark for each of the 8.
+ */
+const ARRIVING_BAR_COUNT = 8;
+
+/**
+ * Returns the ids of the runs whose bars changed since the lanes first drew
+ * them, and a function that clears those ids once their motion has ended. A
+ * bar changed when its run was not in the drawing before, or its state
+ * differs from the one drawn before. While Reduce motion is on, no bar is
+ * recorded as changed.
+ */
+function useChangedRunIds(
+  bars: ReadonlyArray<TimelineBar>,
+): readonly [ReadonlySet<string>, () => void] {
+  const [drawnStates, setDrawnStates] = useState<ReadonlyMap<string, RunRow["state"]>>(
+    () => new Map(bars.map((bar) => [bar.row.id, bar.row.state])),
+  );
+  const [changedRunIds, setChangedRunIds] = useState<ReadonlySet<string>>(new Set());
+  const newlyChanged = bars
+    .filter((bar) => drawnStates.get(bar.row.id) !== bar.row.state)
+    .map((bar) => bar.row.id);
+  // Setting state while rendering makes React render again at once, before
+  // anything is drawn, so a changed bar is never drawn without its class.
+  if (newlyChanged.length > 0) {
+    setDrawnStates(new Map(bars.map((bar) => [bar.row.id, bar.row.state])));
+    if (!isMotionReduced()) setChangedRunIds(new Set([...changedRunIds, ...newlyChanged]));
+  }
+  const clearChangedRunIds = () => {
+    setChangedRunIds(new Set());
+  };
+  return [changedRunIds, clearChangedRunIds];
 }
 
 /**
@@ -265,17 +330,27 @@ function BarMark({ state }: { readonly state: RunRow["state"] }): JSX.Element {
  * while the bar is on screen, as `watchScreen` reports it. Every bar is
  * watched, because even an ended run's start time changes, from "10:31" to
  * "Sun", once its day has passed.
+ *
+ * `arrivalOrder` is the bar's place in the lanes' arrival, while it plays,
+ * for one of the first bars of the first drawing, and `undefined` for any
+ * other bar. `isChanged` is whether the bar's run arrived or changed since
+ * the lanes first drew, which pops its mark in. The mark is keyed by the
+ * run's state, so it pops in again each time the run changes.
  */
 function RunBar({
   bar,
   now,
   timezone,
   watchScreen,
+  arrivalOrder,
+  isChanged,
 }: {
   readonly bar: TimelineBar;
   readonly now: TimelineNow | null;
   readonly timezone: string;
   readonly watchScreen: ScreenWatcher;
+  readonly arrivalOrder: number | undefined;
+  readonly isChanged: boolean;
 }): JSX.Element {
   const { row } = bar;
   const barRef = useRef<HTMLAnchorElement>(null);
@@ -295,6 +370,7 @@ function RunBar({
     row.statusTone === "muted" ? "" : `run-bar--${row.statusTone}`,
     bar.startsBefore ? "is-cut-start" : "",
     bar.endsAfter ? "is-cut-end" : "",
+    isChanged ? "is-new" : arrivalOrder === undefined ? "" : "is-arriving",
   ]
     .filter((name) => name !== "")
     .join(" ");
@@ -310,6 +386,7 @@ function RunBar({
         "--at": formatPlace(bar.from),
         "--span": formatPlace(Math.max(to - bar.from, 0)),
         "--track": bar.track,
+        "--order": arrivalOrder,
       }}
     >
       {bar.startsBefore ? (
@@ -323,7 +400,7 @@ function RunBar({
           <ChevronRightIcon size={12} />
         </span>
       ) : (
-        <BarMark state={row.state} />
+        <BarMark key={row.state} state={row.state} />
       )}
     </Link>
   );

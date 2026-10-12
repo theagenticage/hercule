@@ -202,3 +202,50 @@ a.run-bar:hover::before {
 .run-bar-cut--end {
   right: -18px;
 }
+
+/* The timeline's arrival (spec 17, "Workflows' motion", item 6). Opening
+   the timeline or stepping to a day is the user's action, so the day's bars
+   arrive in a chain:
+
+   - the lanes fade in once, carrying every bar from the ninth on, so a day
+     of hundreds of runs plays 17 animations, not hundreds;
+   - each of the first eight bars arrives 30ms after the one before: its
+     line sweeps from its start to its end, and its mark pops in over
+     --dur-2, starting --dur-2 after its line starts. The last mark ends
+     after 7 * 30ms + 2 * --dur-2 (200ms today), inside the 640ms the spec
+     allows.
+
+   A bar whose run arrives or changes later was not brought by the user's
+   action, so it draws its line at once and only pops its mark. Its mark is
+   drawn anew on each change (run-timeline-board.tsx), which plays the pop
+   again. The lanes drop these classes once the motion has ended. */
+@media (prefers-reduced-motion: no-preference) {
+  .lanes.is-arriving {
+    animation: lanes-in var(--dur-3) var(--ease-out);
+  }
+  .run-bar.is-arriving > .run-bar-line {
+    transform-origin: left;
+    animation: bar-line-sweep var(--dur-3) var(--ease-out) backwards;
+    animation-delay: calc(var(--order) * 30ms);
+  }
+  .run-bar.is-arriving > .mark,
+  .run-bar.is-arriving > .dot--mark {
+    animation: mark-in var(--dur-2) var(--ease-spring) backwards;
+    animation-delay: calc(var(--order) * 30ms + var(--dur-2));
+  }
+  .run-bar.is-new > .mark,
+  .run-bar.is-new > .dot--mark {
+    animation: mark-in var(--dur-3) var(--ease-spring);
+  }
+}
+@keyframes lanes-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes bar-line-sweep {
+  from {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+}

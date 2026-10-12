@@ -189,9 +189,38 @@ a.table-row:is(:hover, .is-on) + .table-row::before {
   justify-content: flex-end;
   gap: 1px;
 }
+/* Each run's slot, as wide as its mark, so a slot can move on its own. */
+.strip-run {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  line-height: 0;
+}
 /* A cancelled or starting run: a faint dot centred in a mark's 10px place. */
-.strip > .dot {
+.strip-run > .dot {
   margin: 1.5px;
+}
+
+/* A mark whose state changed while the list was open pops in, so the eye
+   finds the workflow that moved; so does a run's mark in the strip. When a
+   run joins a strip, the older marks step left one slot, a 10px mark and its
+   1px gap, so the strip shows a run arriving instead of jumping. When two
+   runs join in one push, the marks step two slots. A row drawn
+   when the list opens, or scrolled into view, stays still: the row decides
+   which marks are new (workflow-list-rows.tsx). */
+@media (prefers-reduced-motion: no-preference) {
+  :is(.table-mark, .column-mark).is-new > .mark,
+  .strip > .strip-run.is-new {
+    animation: mark-in var(--dur-3) var(--ease-spring);
+  }
+  .strip.is-advanced > .strip-run:not(.is-new) {
+    animation: strip-step var(--dur-3) var(--ease-out);
+  }
+}
+@keyframes strip-step {
+  from {
+    transform: translateX(calc(var(--joined-runs) * 11px));
+  }
 }
 
 /* ---------- The column ---------- */

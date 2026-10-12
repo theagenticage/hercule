@@ -1396,10 +1396,10 @@ Motion tells the user that something changed ([Rules](#rules), rule 2). Each mot
 
 1. **The pop, `mark-in`:** a mark whose state changed grows in from scale 0.6 and transparent, on `--ease-spring`. One keyframe, shared by every screen.
 2. **The open pane settles:** opening a workflow slides its pane in from 14px to the right and transparent, `--dur-3`, `--ease-out`. Opening another workflow plays it again; widening to full does not.
-3. **The list:** a mark whose state changed pops in, in the row's lead and in the strip. When a run joins a strip, the older marks slide left one slot (11px) on `--ease-out` while the new one pops in.
+3. **The list:** a mark whose state changed pops in, in the row's lead and in the strip. When a run joins a strip, the older marks slide left one slot (11px) on `--ease-out` while the new one pops in. Runs that join in one push slide the older marks one slot for each. *(Amended 2026-10-12, [#553](https://github.com/theagenticage/hercule/issues/553): two runs can join between two reads of the strips.)*
 4. **The graph, as the run moves** (a run's page): a card the run reaches brightens from half opacity; one it passes by dims to half; a ring fades in with its mark. These play together.
 5. **The ring's ping:** when the run comes to ask the user something, or fails, a copy of the ring grows about 3.5px past the card's edge and fades, once.
-6. **The timeline's arrival:** opening the timeline or stepping to a day is the user's action, so its bars arrive 30ms apart, each line sweeping from its start to its end (`scaleX`, `--dur-3`, `--ease-out`), and its mark pops in over `--dur-2`, starting `--dur-2` after its line starts. From the ninth bar on, the bars arrive as one layer: the lanes holding them fade in once, so a day of hundreds of runs animates nine layers, not hundreds, and the arrival takes 640ms at most, within the 800ms rule 2 allows. A bar that arrives or changes later only pops its mark.
+6. **The timeline's arrival:** opening the timeline or stepping to a day is the user's action, so its bars arrive 30ms apart, each line sweeping from its start to its end (`scaleX`, `--dur-3`, `--ease-out`), and its mark pops in over `--dur-2`, starting `--dur-2` after its line starts. From the ninth bar on, the bars arrive as one layer: the lanes holding them fade in once, so a day of hundreds of runs plays ~~nine layers~~ 17 animations, not hundreds: the lanes' fade and a line and a mark for each of the first eight bars *(amended 2026-10-12, [#553](https://github.com/theagenticage/hercule/issues/553): the count left out that each bar's line and mark animate apart)*, and the arrival takes 640ms at most, within the 800ms rule 2 allows. A bar that arrives or changes later only pops its mark.
 
 A row that changes group moves there in one frame. Making room for it with motion, as Intake does, is post-v1.
 
@@ -2810,6 +2810,39 @@ The perf script's rows were measured 2026-10-12 on the reference machine with `a
 - **The summed footprint is over its row, as in most entries above.** The GPU process holds 567 of the 680 MB, close to the 692 to 722 MB the #440 entry recorded with ticking durations. The renderer is within its row.
 - **Each push reads the open run once, and nothing else.** The run page draws no strips, no Running section, no Runs list and no day.
 - **Not measured:** opening a run against a remote controller.
+
+**Workflows: motion,** measured 2026-10-12 with `pnpm build:desktop`'s size checks, on the branch base 7b7271e0 (Before) and on this change (After), for [#553](https://github.com/theagenticage/hercule/issues/553). The first screen's size is the budget script's, 1,024 bytes to a kB; the other sizes are Vite's gzipped figures, 1,000 bytes to a kB.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| The first screen's JavaScript, gzipped | a guide of 250 kB | 322.4 kB across 22 chunks: over the guide | 322.5 kB across 22 chunks, of 81 built: over the guide, by 0.1 kB more |
+| The list's route chunk, gzipped | none | 7.26 kB of JavaScript, 1.38 kB of CSS | 8.22 kB of JavaScript, 1.54 kB of CSS |
+| The open workflow's chunk, gzipped | none | 46.34 kB | 46.92 kB |
+| The graph's CSS, which holds the timeline's, gzipped | none | 3.08 kB | 3.23 kB |
+| `change-motion`, a chunk the list and the timeline share, gzipped | none | - | 0.14 kB |
+| Main's startup file, minified | 160 kB | 150.2 kB | 150.2 kB |
+
+The perf script's rows were measured 2026-10-12 on the reference machine with `apps/desktop/scripts/perf.ts --workflows-only`, on this change and then on the branch base, one run each, back to back, with the one-minute load average at 3.7 (this change) and 4.1 (the branch base) before each launch. The pushes and the seed are the #552 entry's. The motion rows come from a Chromium trace of the `blink.animations` category: an animation's length there includes its delay.
+
+| Row of [What Workflows costs](#what-workflows-costs) | Expected | Before | After |
+|---|---|---|---|
+| Per push: renderer main thread, the list | within 16 ms | 13.6 ms | **23.8 ms: over** |
+| Per push: renderer main thread, the Runs list | within 16 ms | 10.6 ms | 10.9 ms |
+| Per push: renderer main thread, the timeline | within 16 ms | 14.6 ms | 15.0 ms |
+| Per push: renderer main thread, a run's page | within 16 ms | 6.2 ms | 5.8 ms |
+| Motion: a run joins a strip, its two pushes | at most each changed visible row's marks, 21 when a run joins a strip, on the compositor alone | - | 6 animations: `strip-step` 5, `mark-in` 1; the longest 333 ms; all on the compositor alone |
+| The timeline's arrival, the 300-run day | within 640 ms, on the compositor alone | - | 17: `bar-line-sweep` 8, `mark-in` 8, `lanes-in` 1; the arrival ends at 617 ms; all on the compositor alone |
+| Idle, hidden, the list | no work | 0 renderer wakeups | 0 renderer wakeups |
+
+- **The list's pushes miss their budget by 7.8 ms, because Chromium draws a main-thread frame on every vsync while an animation plays.** Each of the script's pushes changes one run's mark in a strip, so the mark pops in for 330 ms. The mark's layer paints once and the compositor animates it; even so, the renderer's main thread runs a frame on each vsync while the animation plays, about 33 frames on the reference machine's 120 Hz display, at about 0.6 ms each. No single frame takes more than about 1 ms. A trace of the ten pushes, Before and After, shows where the time goes:
+  - 113 main-thread frames After, against 20 Before;
+  - 40 forced style and layout updates (22 ms in all), from the checks that tell whether a row's motion is still playing, against none Before;
+  - 20 `animationstart` and `animationend` dispatches (18 ms in all).
+
+  With Reduce motion on, the list's trace has Before's 20 frames and no forced updates, so the rest of the change costs the list almost nothing. The push budget is the thread list's nudge limit, one push's handling in a frame. Here the metric sums every frame of a 330 ms animation as well. Whether this row should count the motion's frames, or the list's motion should change, is a decision this entry leaves open.
+- **The timeline stays within its budget, by 1.0 ms.** Its pushes pop only the marks of the bars that changed.
+- **The script's timings are noisy at this machine's load.** Earlier runs of this change measured the list at 19.5 and 20.8 ms a push, and the branch base between 7.0 and 9.0 ms. The pair above was measured back to back, at the lowest load of the session.
+- **Not measured:** the graph's motion on a run's page, which was on `main` before this change.
 
 **Text generation, desktop slice,** measured 2026-10-11 with `pnpm build:desktop`'s size checks, on the parent commit (Before) and the working tree of branch `agent/282-desktop` (After), for [#282](https://github.com/theagenticage/hercule/issues/282). This change adds no desktop process, timer, polling or live topic, and it changes nothing per streamed token. Runtime memory, CPU and wakeups were not remeasured, because nothing in them changes.
 

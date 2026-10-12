@@ -366,6 +366,27 @@ export const stubResizeObserver = (): ((target?: Element) => void) => {
 };
 
 /**
+ * Gives every element `getAnimations`, which jsdom lacks, and returns a
+ * function that sets whether a CSS animation is playing in each element.
+ * None is playing until the function is called.
+ *
+ * jsdom plays no animation, so a test ends a change's motion itself: it sets
+ * none playing and fires `animationend`.
+ */
+export const stubCssAnimations = (): ((isPlaying: boolean) => void) => {
+  class StubCssAnimation extends EventTarget {}
+  vi.stubGlobal("CSSAnimation", StubCssAnimation);
+  let playing: Animation[] = [];
+  Object.defineProperty(Element.prototype, "getAnimations", {
+    configurable: true,
+    value: () => playing,
+  });
+  return (isPlaying) => {
+    playing = isPlaying ? [new StubCssAnimation() as unknown as Animation] : [];
+  };
+};
+
+/**
  * Replaces `IntersectionObserver`, which jsdom lacks, with one that reports
  * each element on screen as soon as it is watched, as a browser does for a
  * row in view. Returns a function that reports `element` inside or outside

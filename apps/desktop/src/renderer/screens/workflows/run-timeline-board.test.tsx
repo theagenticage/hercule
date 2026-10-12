@@ -2,11 +2,13 @@
  * Tests the timeline's day stepper: its buttons never drop the focus, the
  * step on cannot act on today nor the step back on the oldest day, and
  * "Today" shows only away from today. Then tests that a bar keeps its times
- * current on the age clock only while it is on screen.
+ * current on the age clock only while it is on screen, which bars play
+ * the lanes' arrival and which only pop their mark, that the lanes record
+ * no motion with Reduce motion on, and that they drop it once it has ended.
  */
 import { useState, type JSX } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   createMemoryHistory,
@@ -15,7 +17,8 @@ import {
   RouterContextProvider,
 } from "@tanstack/react-router";
 import type { TimelineBar } from "@hercule/client-core/run-timeline";
-import { stubIntersectionObserver } from "../../app/testing";
+import type { RunRow } from "@hercule/client-core/workflow-detail-rows";
+import { stubCssAnimations, stubIntersectionObserver } from "../../app/testing";
 import { TimelineDayStepper, TimelineLanes } from "./run-timeline-board";
 
 /** The oldest day the test's stepper shows, in days back from today. */
@@ -186,5 +189,127 @@ describe("a bar on the timeline", () => {
       "At review, started by nightly, 09:58, running for 1m 22s",
     );
     expect(vi.getTimerCount()).toBe(1);
+  });
+});
+
+/** Builds the bar of the run `runId`, in `state`, otherwise as `LIVE_BAR`. */
+const buildBar = (runId: string, state: RunRow["state"]): TimelineBar => ({
+  ...LIVE_BAR,
+  row: { ...LIVE_BAR.row, id: runId, state },
+});
+
+/**
+ * Draws the lanes of a day with `bars` on them, and returns a function that
+ * draws the same lanes again with other bars, as a push does.
+ */
+const renderLanes = (
+  bars: ReadonlyArray<TimelineBar>,
+): ((bars: ReadonlyArray<TimelineBar>) => void) => {
+  stubIntersectionObserver();
+  const router = createRouter({
+    routeTree: createRootRoute(),
+    history: createMemoryHistory(),
+  });
+  const buildLanes = (shown: ReadonlyArray<TimelineBar>): JSX.Element => (
+    <RouterContextProvider router={router}>
+      <TimelineLanes
+        label="Runs, Today"
+        hours={[]}
+        now={null}
+        bars={shown}
+        trackCount={1}
+        fires={[]}
+        emptyText="No runs today"
+        timezone="UTC"
+      />
+    </RouterContextProvider>
+  );
+  const { rerender } = render(buildLanes(bars));
+  return (next) => {
+    rerender(buildLanes(next));
+  };
+};
+
+/** Returns, for each bar drawn, whether it carries the class `name`. */
+const readBarClass = (name: string): boolean[] =>
+  screen.getAllByRole("link").map((bar) => bar.classList.contains(name));
+
+describe("the lanes' arrival", () => {
+  it("plays the arrival for only the first eight bars of the first drawing, in order", () => {
+    const bars = Array.from({ length: 10 }, (_, index) => buildBar(`run-${String(index)}`, "done"));
+    renderLanes(bars);
+
+    expect(readBarClass("is-arriving")).toEqual([...Array<boolean>(8).fill(true), false, false]);
+    expect(screen.getAllByRole("link").map((bar) => bar.style.getPropertyValue("--order"))).toEqual(
+      ["0", "1", "2", "3", "4", "5", "6", "7", "", ""],
+    );
+  });
+
+  it("pops no bar's mark when the lanes first draw", () => {
+    renderLanes([buildBar("run-1", "working"), buildBar("run-2", "done")]);
+
+    expect(readBarClass("is-new")).toEqual([false, false]);
+  });
+
+  it("pops a bar's mark when its run arrives or changes after the first drawing", () => {
+    const redraw = renderLanes([buildBar("run-1", "working"), buildBar("run-2", "done")]);
+
+    redraw([buildBar("run-3", "working"), buildBar("run-1", "done"), buildBar("run-2", "done")]);
+
+    expect(readBarClass("is-new")).toEqual([true, true, false]);
+    // A bar a later drawing sorts into the first places never starts an arrival.
+    expect(readBarClass("is-arriving")).toEqual([false, false, true]);
+  });
+
+  it("draws a new mark each time a bar's run changes, so its pop plays again", () => {
+    const redraw = renderLanes([buildBar("run-1", "working")]);
+
+    redraw([buildBar("run-1", "waiting")]);
+    const waitingMark = screen.getByRole("link").querySelector(".mark");
+    redraw([buildBar("run-1", "done")]);
+    const doneMark = screen.getByRole("link").querySelector(".mark");
+
+    expect(doneMark?.classList.contains("mark--done")).toBe(true);
+    expect(doneMark).not.toBe(waitingMark);
+  });
+});
+
+describe("the lanes with Reduce motion on", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("records no arrival and no change, so turning Reduce motion off plays nothing", () => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query) => ({ matches: query === "(prefers-reduced-motion: reduce)" }) as MediaQueryList,
+    );
+    const redraw = renderLanes([buildBar("run-1", "working")]);
+
+    redraw([buildBar("run-1", "done"), buildBar("run-2", "working")]);
+
+    expect(screen.getByRole("group").classList.contains("is-arriving")).toBe(false);
+    expect(readBarClass("is-arriving")).toEqual([false, false]);
+    expect(readBarClass("is-new")).toEqual([false, false]);
+  });
+});
+
+describe("the end of the lanes' motion", () => {
+  it("keeps the motion while an animation still plays, and drops it once none does", () => {
+    const setPlaying = stubCssAnimations();
+    const redraw = renderLanes([buildBar("run-1", "working"), buildBar("run-2", "done")]);
+    redraw([buildBar("run-1", "done"), buildBar("run-2", "done")]);
+    const lanes = screen.getByRole("group");
+
+    setPlaying(true);
+    fireEvent.animationEnd(lanes);
+    expect(lanes.classList.contains("is-arriving")).toBe(true);
+    expect(readBarClass("is-new")).toEqual([true, false]);
+
+    setPlaying(false);
+    fireEvent.animationEnd(lanes);
+    // A bar the lanes then move in the page has no class left to play again.
+    expect(lanes.classList.contains("is-arriving")).toBe(false);
+    expect(readBarClass("is-arriving")).toEqual([false, false]);
+    expect(readBarClass("is-new")).toEqual([false, false]);
   });
 });
