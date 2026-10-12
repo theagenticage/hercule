@@ -227,7 +227,7 @@ describe("computeSubagentsAfter", () => {
   } as const;
 
   it("returns only the records the event changed", () => {
-    expect(computeSubagentsAfter(SESSION, delta, new Map([["a1", bare]]))).toEqual([]);
+    expect(computeSubagentsAfter(SESSION, delta, new Map([["a1", bare]]), {})).toEqual([]);
     const started = { ...base, _tag: "session.started" } as const;
     const counted = { ...bare, usageProcess: { inputTokens: 1, outputTokens: 1 } };
     const idle = { ...bare, id: "a2" };
@@ -239,6 +239,7 @@ describe("computeSubagentsAfter", () => {
           ["a1", counted],
           ["a2", idle],
         ]),
+        {},
       ),
     ).toEqual([{ ...counted, usageProcess: undefined }]);
   });
