@@ -996,13 +996,16 @@ describe("what a runner reports", () => {
       reportEvent(arranged.wire, ...events[1]!);
       await waitForSession(arranged, session.id, (one) => one.status === "busy");
 
-      for (const [seq, event] of events.slice(2, 6)) reportEvent(arranged.wire, seq, event);
-      // The same frame again, as a replay after a reconnect would send it. It
-      // is sent before the completion the test then waits for. Frames from one
-      // socket are handled in order, so once the session is idle the replay
-      // has already been handled. Sent after the completion, the wait would
-      // prove nothing.
+      for (const [seq, event] of events.slice(2, 4)) reportEvent(arranged.wire, seq, event);
+      // The latest frame applied, sent again as a replay after a reconnect
+      // would send it. It is a delta, so it is held in memory with no row
+      // yet, and only the sequence number check keeps its text from being
+      // merged twice. It is sent before the completion the test then waits
+      // for. Frames from one socket are handled in order, so once the session
+      // is idle the replay has already been handled. Sent after the
+      // completion, the wait would prove nothing.
       reportEvent(arranged.wire, ...events[3]!);
+      for (const [seq, event] of events.slice(4, 6)) reportEvent(arranged.wire, seq, event);
       reportEvent(arranged.wire, ...events[6]!);
       await waitForSession(arranged, session.id, (one) => one.status === "idle");
 
