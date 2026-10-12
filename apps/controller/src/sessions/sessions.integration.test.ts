@@ -746,33 +746,30 @@ describe("session.spawn with an explicit runner or profile", () => {
   it.each([
     ["draining", "retired"],
     ["retired", "draining"],
-  ])(
-    "rejects a named runner that is %s, and says why",
-    async (lifecycle, otherLifecycle) => {
-      await withFleet(async (arranged) => {
-        await Effect.runPromise(
-          Effect.orDie(
-            arranged.harness.sql`
+  ])("rejects a named runner that is %s, and says why", async (lifecycle, otherLifecycle) => {
+    await withFleet(async (arranged) => {
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
               UPDATE runners SET lifecycle = ${lifecycle}
               WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
-          ),
-        );
+        ),
+      );
 
-        const response = await spawnSession(arranged, {
-          prompt: "hello",
-          runnerId: arranged.runnerId,
-        });
-
-        expect(response.status, await response.clone().text()).toBe(409);
-        const text = await response.text();
-        expect(text).toContain(lifecycle);
-        expect(text).not.toContain(otherLifecycle);
-        const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
-        const page = (await listing.json()) as { items: ReadonlyArray<Session> };
-        expect(page.items).toEqual([]);
+      const response = await spawnSession(arranged, {
+        prompt: "hello",
+        runnerId: arranged.runnerId,
       });
-    },
-  );
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      const text = await response.text();
+      expect(text).toContain(lifecycle);
+      expect(text).not.toContain(otherLifecycle);
+      const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
+      const page = (await listing.json()) as { items: ReadonlyArray<Session> };
+      expect(page.items).toEqual([]);
+    });
+  });
 
   it("rejects a named runner that is online but not logged in to the instance, and says why", async () => {
     await withFleet(async (arranged) => {
@@ -1148,7 +1145,6 @@ describe("session.input", () => {
       expect(typeof row!.reason).toBe("string");
     });
   });
-
 });
 
 describe("session.input, queued by default", () => {
@@ -1688,7 +1684,6 @@ describe("the sender an input frame names", () => {
       expect(listInputFrames(arranged.wire)).toEqual([]);
     });
   });
-
 });
 
 describe("the sender of an input someone else changed", () => {
@@ -4343,13 +4338,10 @@ describe("session.input into an exited session", () => {
  * Approvals from the user's side: a runner reports a request the session is
  * waiting on, the request is stored on the session row the client already
  * refetches, and the user's decision is sent to the runner as one frame.
- * `session.respondToApprovalRequest` rejects every decision it cannot deliver:
- *
- * - an old request id;
- * - no open request at all;
- * - a decision the request does not offer;
- * - a session that has exited;
- * - a runner that is disconnected.
+ * The refusals it shares with `session.respondToQuestion` are tested once for
+ * both, under "answering a Request the session is not waiting on", and a
+ * decision the request does not offer is a row of the table that refuses a
+ * malformed answer by its field.
  */
 const REQUEST_ID = "req-1";
 
@@ -4448,137 +4440,6 @@ describe("session.respondToApprovalRequest", () => {
       });
     },
   );
-
-  it("closes the Request when the runner reports it resolved", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startParkedSession(arranged);
-      const response = await respondToApprovalRequest(arranged, session.id, {
-        requestId: REQUEST_ID,
-        decision: "allow",
-      });
-      expect(response.status, await response.clone().text()).toBe(200);
-      await waitForFrames<SessionRespondToApprovalRequest>(
-        arranged.wire,
-        "sessionRespondToApprovalRequest",
-        1,
-      );
-
-      reportEvent(arranged.wire, 4, {
-        eventId: crypto.randomUUID(),
-        sessionId: session.id,
-        at,
-        _tag: "request.resolved",
-        requestId: REQUEST_ID,
-        decision: "allow",
-      });
-
-      const cleared = await waitForSession(
-        arranged,
-        session.id,
-        (one) => one.openRequests.length === 0,
-      );
-      expect(cleared.openRequests).toEqual([]);
-    });
-  });
-
-  it("closes the Request when the runner reports it no longer has the session", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startParkedSession(arranged);
-      arranged.wire.close();
-      await waitForRunnerGone(arranged);
-      const again = await arranged.reconnect();
-      again.send({ _tag: "sessionsReport", sessions: [] });
-
-      const gone = await waitForSession(arranged, session.id, (one) => one.status === "exited");
-
-      // No harness is waiting on the request any more, so an answer to it
-      // could never be delivered. The request is cleared when its session
-      // ends.
-      expect(gone.openRequests).toEqual([]);
-    });
-  });
-
-  it("rejects a request id that is not the open one, and sends the runner nothing", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startParkedSession(arranged);
-
-      const response = await respondToApprovalRequest(arranged, session.id, {
-        requestId: "req-somebody-else",
-        decision: "allow",
-      });
-
-      expect(response.status, await response.clone().text()).toBe(409);
-      expect((await parseRefusal(response)).code).toBe("invalid_state");
-      await delay(250);
-      expect(listResponseFrames(arranged.wire)).toEqual([]);
-      // The request the session is really waiting on is untouched.
-      expect((await readSession(arranged, session.id)).openRequests).toMatchObject([
-        { requestId: REQUEST_ID },
-      ]);
-      expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
-    });
-  });
-
-  it("rejects an answer to a session with no open request", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startSession(arranged, "hello");
-      expect(session.openRequests).toEqual([]);
-
-      const response = await respondToApprovalRequest(arranged, session.id, {
-        requestId: REQUEST_ID,
-        decision: "allow",
-      });
-
-      expect(response.status, await response.clone().text()).toBe(409);
-      expect((await parseRefusal(response)).code).toBe("invalid_state");
-      await delay(250);
-      expect(listResponseFrames(arranged.wire)).toEqual([]);
-      expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
-    });
-  });
-
-  it("rejects a decision the Request does not offer, and sends nothing", async () => {
-    await withFleet(async (arranged) => {
-      // A request that cannot store a rule does not offer `allow_always`. An
-      // `allow_always` answer must not be silently turned into a plain allow.
-      const session = await startParkedSession(arranged, ["allow", "deny", "cancel"]);
-
-      const response = await respondToApprovalRequest(arranged, session.id, {
-        requestId: REQUEST_ID,
-        decision: "allow_always",
-      });
-
-      expect(response.status, await response.clone().text()).toBe(400);
-      expect((await parseRefusal(response)).code).toBe("validation");
-      await delay(250);
-      expect(listResponseFrames(arranged.wire)).toEqual([]);
-      expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
-      // The request stays open with its offered decisions, so the user can
-      // still answer it properly.
-      expect((await readSession(arranged, session.id)).openRequests).toMatchObject([
-        { decisions: ["allow", "deny", "cancel"] },
-      ]);
-    });
-  });
-
-  it("rejects a session that has exited, and sends the runner nothing", async () => {
-    await withFleet(async (arranged) => {
-      const session = await startParkedSession(arranged);
-      reportExited(arranged.wire, session.id, 4);
-      await waitForSession(arranged, session.id, (one) => one.status === "exited");
-
-      const response = await respondToApprovalRequest(arranged, session.id, {
-        requestId: REQUEST_ID,
-        decision: "deny",
-      });
-
-      expect(response.status, await response.clone().text()).toBe(409);
-      expect((await parseRefusal(response)).code).toBe("invalid_state");
-      await delay(250);
-      expect(listResponseFrames(arranged.wire)).toEqual([]);
-      expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
-    });
-  });
 
   it("rejects the answer when the session's runner is disconnected", async () => {
     await withFleet(async (arranged) => {
@@ -4704,43 +4565,6 @@ describe("session.respondToQuestion", () => {
     });
   });
 
-  it.each([
-    {
-      title: "a request id that is not the open one",
-      arrange: (arranged: Arranged) => startQuestionSession(arranged),
-      requestId: "req-somebody-else",
-    },
-    {
-      title: "a session with no open request",
-      arrange: (arranged: Arranged) => startSession(arranged, "hello"),
-      requestId: REQUEST_ID,
-    },
-    {
-      title: "a session that has exited",
-      arrange: async (arranged: Arranged) => {
-        const session = await startQuestionSession(arranged);
-        reportExited(arranged.wire, session.id, 4);
-        return await waitForSession(arranged, session.id, (one) => one.status === "exited");
-      },
-      requestId: REQUEST_ID,
-    },
-  ])("rejects answers for $title, and sends the runner nothing", async ({ arrange, requestId }) => {
-    await withFleet(async (arranged) => {
-      const session = await arrange(arranged);
-
-      const response = await respondToQuestion(arranged, session.id, {
-        requestId,
-        answers: ANSWERS,
-      });
-
-      expect(response.status, await response.clone().text()).toBe(409);
-      expect((await parseRefusal(response)).code).toBe("invalid_state");
-      await delay(250);
-      expect(listResponseFrames(arranged.wire)).toEqual([]);
-      expect(await arranged.harness.audit("session.answered")).toHaveLength(0);
-    });
-  });
-
   it("accepts the user's own text in place of an offered option", async () => {
     await withFleet(async (arranged) => {
       const session = await startQuestionSession(arranged);
@@ -4830,6 +4654,15 @@ describe("session.respondToQuestion", () => {
       path: ["answers", "Features"],
     },
     {
+      // A request that cannot store a rule does not offer `allow_always`. An
+      // `allow_always` answer must not be silently turned into a plain allow.
+      title: "a decision the approval does not offer",
+      parked: "approval without allow_always",
+      respond: respondToApprovalRequest,
+      body: { requestId: REQUEST_ID, decision: "allow_always" },
+      path: ["decision"],
+    },
+    {
       title: "two answers to a question that takes one",
       parked: "question",
       respond: respondToQuestion,
@@ -4844,7 +4677,9 @@ describe("session.respondToQuestion", () => {
       const session =
         refused.parked === "question"
           ? await startQuestionSession(arranged)
-          : await startParkedSession(arranged);
+          : refused.parked === "approval"
+            ? await startParkedSession(arranged)
+            : await startParkedSession(arranged, ["allow", "deny", "cancel"]);
 
       const response = await refused.respond(arranged, session.id, refused.body);
 
@@ -4857,6 +4692,11 @@ describe("session.respondToQuestion", () => {
       if ("message" in refused) expect(text).toContain(refused.message);
       await delay(250);
       expect(listResponseFrames(arranged.wire)).toEqual([]);
+      expect(await arranged.harness.audit("session.responded")).toHaveLength(0);
+      expect(await arranged.harness.audit("session.answered")).toHaveLength(0);
+      // The request stays open as it was, so the user can still answer it
+      // properly.
+      expect((await readSession(arranged, session.id)).openRequests).toEqual(session.openRequests);
     });
   });
 
@@ -4879,6 +4719,76 @@ describe("session.respondToQuestion", () => {
       for (const path of refusal.paths) expect(path[0]).toBe("answers");
       await delay(250);
       expect(listResponseFrames(arranged.wire)).toEqual([]);
+    });
+  });
+});
+
+/**
+ * A decision or answers sent when the session is not waiting on that Request.
+ * Both operations refuse it the same way: nothing reaches the runner, nothing
+ * is audited, and the session's open Requests stay as they were.
+ */
+describe("answering a Request the session is not waiting on", () => {
+  const operations = [
+    {
+      title: "a decision",
+      park: startParkedSession,
+      respond: respondToApprovalRequest,
+      body: { decision: "allow" },
+      audit: "session.responded",
+    },
+    {
+      title: "answers",
+      park: startQuestionSession,
+      respond: respondToQuestion,
+      body: { answers: ANSWERS },
+      audit: "session.answered",
+    },
+  ] as const;
+  const situations = [
+    {
+      title: "a request id that is not the open one",
+      arrange: (arranged: Arranged, park: (arranged: Arranged) => Promise<Session>) =>
+        park(arranged),
+      requestId: "req-somebody-else",
+    },
+    {
+      title: "a session with no open request",
+      arrange: (arranged: Arranged) => startSession(arranged, "hello"),
+      requestId: REQUEST_ID,
+    },
+    {
+      title: "a session that has exited",
+      arrange: async (arranged: Arranged, park: (arranged: Arranged) => Promise<Session>) => {
+        const session = await park(arranged);
+        reportExited(arranged.wire, session.id, 4);
+        return await waitForSession(arranged, session.id, (one) => one.status === "exited");
+      },
+      requestId: REQUEST_ID,
+    },
+  ] as const;
+
+  it.each(
+    operations.flatMap((operation) =>
+      situations.map(
+        (situation) => [`${operation.title} for ${situation.title}`, operation, situation] as const,
+      ),
+    ),
+  )("rejects %s, and sends the runner nothing", async (_title, operation, situation) => {
+    await withFleet(async (arranged) => {
+      const session = await situation.arrange(arranged, (one) => operation.park(one));
+
+      const response = await operation.respond(arranged, session.id, {
+        requestId: situation.requestId,
+        ...operation.body,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect((await parseRefusal(response)).code).toBe("invalid_state");
+      await delay(250);
+      expect(listResponseFrames(arranged.wire)).toEqual([]);
+      expect(await arranged.harness.audit(operation.audit)).toHaveLength(0);
+      expect((await readSession(arranged, session.id)).openRequests).toEqual(session.openRequests);
     });
   });
 });
@@ -5088,6 +4998,11 @@ describe("session approval notifications", () => {
         kind: "withdrawn",
         reason: "The session ended before the request was answered.",
       });
+      // No harness is waiting on the request any more, so an answer to it
+      // could never be delivered. The request is cleared when its session
+      // ends.
+      const gone = await waitForSession(arranged, session.id, (one) => one.status === "exited");
+      expect(gone.openRequests).toEqual([]);
     });
   });
 
