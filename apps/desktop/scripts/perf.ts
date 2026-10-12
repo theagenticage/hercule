@@ -1175,8 +1175,16 @@ const INTAKE_ONLY = process.argv.includes("--intake-only");
  * Writes the events of Intake, and measures Everything in a plain launch that
  * opens Intake again. The fixture gives the events their titles and arrival
  * times in `prepareLaunch`.
+ *
+ * The launch opens Intake on To do, waits for its list to draw a row, and
+ * reads the memory of Intake on To do to compare Everything with. So it first
+ * raises `INTAKE_SIGNALS` signals onto To do. Without them, the full run would
+ * find To do empty: Intake at work, measured just before, ends at inbox zero.
+ * The signals Intake at work marked done stay on Done, and the snoozed signal
+ * stays on Later, so neither changes To do.
  */
 async function measureEverything(fixture: ThreadFixture, userDataDir: string): Promise<void> {
+  await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
   await seedEvents(fixture);
   await fixture.prepareLaunch({ twoMinuteRow: false });
   await openIntakeOnce(userDataDir);
@@ -1277,7 +1285,7 @@ const launches = await runWithThreadFixture(async (fixture) => {
       return null;
     }
     if (EVERYTHING_ONLY) {
-      await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
+      // The full run reaches Everything with this snoozed signal on Later.
       await raiseSnoozedSignal(fixture);
       await measureEverything(fixture, userDataDir);
       return null;
